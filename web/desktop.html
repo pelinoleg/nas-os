@@ -854,6 +854,7 @@
   <div class="winbar" id="winbar"></div>
   <div class="tray" id="tray"></div>
   <button class="mb-theme" id="themeBtn" title="Тема"></button>
+  <button class="mb-theme" id="powerBtn" title="Питание и сессия"></button>
   <div class="clock" id="clock"></div>
 </div>
 
@@ -1086,14 +1087,13 @@ function applySettings(){
  setPanelFg("dock",elAlpha("dockOp"),lvlRgb(1));
  setPanelFg("wdg",wOp,/^#[0-9a-f]{6}$/i.test(wc||"")?hexRgb(wc):lvlRgb(1));
  // раздельное размытие под панелью/доком/виджетами (0 = выкл у элемента);
- // мастер-тумблер «Размытие фона (стекло)» в Прочее гасит всё разом
- const bfOn=!!SET.blur&&!SET.perf;
+ // «Производительный режим» гасит всё разом (html.perf в CSS дублирует страховкой)
+ const bfOn=!SET.perf;
  const bf=(key,def,sat)=>{const px=clampf(SET[key]??def,0,60);return bfOn&&px>0?`blur(${px}px) saturate(${sat})`:"none";};
  root.style.setProperty("--mb-bf",bf("mbBlur",26,1.6));
  root.style.setProperty("--dock-bf",bf("dockBlur",28,1.5));
  root.style.setProperty("--wdg-bf",bf("wdgBlur",22,1.3));
  root.classList.toggle("perf",!!SET.perf);
- root.classList.toggle("blur",!!SET.blur&&!SET.perf);
  document.body.classList.toggle("rail-off",!!SET.railHidden);
  document.body.classList.toggle("dock-left",SET.dockPos==="left");
  document.body.classList.toggle("dock-right",SET.dockPos==="right");
@@ -2915,7 +2915,7 @@ function lsBar(lb){lb.innerHTML=`
    ${pSlider("Размер иконок","mbIcon",.8,1.5,.05,"pct","Масштаб иконок в верхней панели.")}
    ${pSlider("Размер шрифта","mbFs",.8,1.4,.05,"pct","Масштаб текста (часы, метрики).")}
    ${opSlider("Прозрачность фона","mbOp","Своя плотность фона верхней панели. По умолчанию — общая, как у окон (вкладка «Материал»).")}
-   ${pSlider("Размытие под панелью","mbBlur",0,50,1,"px","Матовое размытие обоев под панелью. 0 — без размытия. Работает при включённом «Размытие фона (стекло)» в Прочее.")}
+   ${pSlider("Размытие под панелью","mbBlur",0,50,1,"px","Матовое размытие обоев под панелью. 0 — без размытия.")}
   </div>
   <div class="set-card"><div class="set-grp">Метрики справа</div>
    <div class="mon-note" style="margin:0 0 6px">Что показывать в панели:</div><div id="trayList"></div></div>`;
@@ -2927,7 +2927,7 @@ function lsWidgets(lb){const cl=/^#[0-9a-f]{6}$/i;lb.innerHTML=`
   </div>
   <div class="set-card"><div class="set-grp">Фон виджетов</div>
    ${opSlider("Прозрачность фона","wdgOp","Своя плотность подложек виджетов. По умолчанию — общая, как у окон (вкладка «Материал»).")}
-   ${pSlider("Размытие под виджетами","wdgBlur",0,50,1,"px","Матовое размытие обоев под виджетами. 0 — без размытия. Работает при включённом «Размытие фона (стекло)» в Прочее.")}
+   ${pSlider("Размытие под виджетами","wdgBlur",0,50,1,"px","Матовое размытие обоев под виджетами. 0 — без размытия.")}
    <div class="srow"><div class="srow-l"><div class="srow-t">Светлая тема${tipHTML("Свой цвет подложки виджетов для светлой темы.")}</div></div><div class="srow-c"><input type="color" id="wdgL" value="${cl.test(SET.wdgLight||"")?SET.wdgLight:"#ffffff"}" class="ccell"><button class="btn sm" data-wreset="wdgLight">Сброс</button></div></div>
    <div class="srow"><div class="srow-l"><div class="srow-t">Тёмная тема${tipHTML("Свой цвет подложки виджетов для тёмной темы.")}</div></div><div class="srow-c"><input type="color" id="wdgD" value="${cl.test(SET.wdgDark||"")?SET.wdgDark:"#161e2a"}" class="ccell"><button class="btn sm" data-wreset="wdgDark">Сброс</button></div></div>
   </div>
@@ -2946,7 +2946,7 @@ function lsDock(lb){lb.innerHTML=`
     <button data-d="right" class="${SET.dockPos==="right"?"on":""}">Справа</button></div></div>
    ${pSlider("Размер иконок","dockIcon",.7,1.5,.05,"pct","Размер иконок в доке.")}
    ${opSlider("Прозрачность фона","dockOp","Своя плотность подложки дока. По умолчанию — общая, как у окон (вкладка «Материал»).")}
-   ${pSlider("Размытие под доком","dockBlur",0,50,1,"px","Матовое размытие обоев под доком. 0 — без размытия. Работает при включённом «Размытие фона (стекло)» в Прочее.")}
+   ${pSlider("Размытие под доком","dockBlur",0,50,1,"px","Матовое размытие обоев под доком. 0 — без размытия.")}
    ${pToggle("Плитки под иконками","Цветная подложка под иконками. Выключи — чистые иконки.","dockTiles","цветной фон под каждой иконкой")}
    ${pToggle("Подписи у иконок","Названия под иконками. Выключи — компактный док только из иконок (уже, когда сбоку).","dockLabels","показывать названия приложений")}
    <div class="mon-note" style="margin-top:2px">Порядок иконок меняется перетаскиванием прямо в доке (и когда док сбоку).</div>
@@ -2966,8 +2966,7 @@ function lsIcons(lb){lb.innerHTML=`
  wireLook(lb);}
 function lsMisc(lb){lb.innerHTML=`
   <div class="set-card">
-   ${pToggle("Размытие фона (стекло)","Матовое размытие обоев под панелями, виджетами и доком. Красиво, но нагружает GPU — по умолчанию выключено.","blur","эффект матового стекла")}
-   ${pToggle("Производительный режим","Отключает всё размытие и анимации — плавнее на Pi и слабых устройствах.","perf","меньше нагрузки на GPU")}
+   ${pToggle("Производительный режим","Отключает всё размытие и анимации — плавнее на Pi и слабых устройствах. Сила размытия настраивается отдельно: Панель / Док / Виджеты / Материал (окна).","perf","меньше нагрузки на GPU")}
   </div>`;
  wireLook(lb);}
 function lsWindows(lb){const cl=/^#[0-9a-f]{6}$/i;lb.innerHTML=`
@@ -3160,9 +3159,8 @@ const WIDGET_DEFS={
  net:{name:"Сеть",ic:"net",body:'<canvas id="wg-net" width="300" height="40" style="width:100%;height:40px;display:block"></canvas><div id="wg-net2" style="margin-top:8px"></div>'},
  docker:{name:"Контейнеры",ic:"cube",extra:'<span class="more" id="more-docker">все →</span>',body:'<div id="wg-docker"></div>'},
  top:{name:"Топ процессов",ic:"activity",def:false,extra:'<span class="more" id="more-top">все →</span>',body:'<div id="wg-top"></div>'},
- qa:{name:"Быстрые действия",ic:"grid",def:false,body:'<div class="qa" id="wg-qa"></div>'},
 };
-const WIDGET_ORDER=["vols","sys","disk","net","docker","top","qa"];
+const WIDGET_ORDER=["vols","sys","disk","net","docker","top"];
 function railWidgets(){let cfg=(SET.widgets&&SET.widgets.length)?SET.widgets.slice():WIDGET_ORDER.map(id=>({id,on:WIDGET_DEFS[id].def!==false}));
  cfg=cfg.filter(w=>WIDGET_DEFS[w.id]);
  WIDGET_ORDER.forEach(id=>{if(!cfg.find(w=>w.id===id))cfg.push({id,on:WIDGET_DEFS[id].def!==false});});
@@ -3174,10 +3172,6 @@ function renderRail(){const rail=document.getElementById("rail");if(!rail)return
  const md=document.getElementById("more-disks");if(md)md.onclick=()=>winDisks();
  const mdk=document.getElementById("more-docker");if(mdk)mdk.onclick=()=>winServices();
  const mt=document.getElementById("more-top");if(mt)mt.onclick=()=>winMon();
- const qa=document.getElementById("wg-qa");
- if(qa)[["Cockpit","grid",()=>window.open(cockpitURL(),"_blank")],["Мастер","wand",()=>location.href="/setup.html"],
-  ["Настройки","cog",()=>winSettings()],["Перезагрузка","power",()=>reboot()]]
- .forEach(([l,ic,fn])=>{const b=el(`<button><span class="ic">${svg(ic,17)}</span>${l}</button>`);b.onclick=fn;qa.appendChild(b);});
  paintVols();if(LAST){paintSys(LAST);}pollDisks();pollStacks();pollTop();
 }
 function paintVols(){const box=document.getElementById("wg-vols");if(!box)return;box.innerHTML="";
@@ -3322,6 +3316,15 @@ function maybeOnboard(){let done=false;try{done=localStorage.getItem("nas_onboar
  // позиции/размеры окон — с сервера (переживают чистку localStorage и смену адреса pi5.local↔IP); локальные правки поверх
  try{const wp=await api("/api/winpos");if(wp&&wp.winpos&&Object.keys(wp.winpos).length)WINPOS=Object.assign({},wp.winpos,WINPOS);}catch(e){}
  const tb=document.getElementById("themeBtn");if(tb)tb.onclick=cycleTheme;
+ const pb=document.getElementById("powerBtn");
+ if(pb){pb.innerHTML=svg("power",17);pb.onclick=()=>{const r=pb.getBoundingClientRect();
+  showMenu(Math.round(r.right),Math.round(r.bottom+8),[
+   {label:"Настройки",ic:svg("cog",17),act:()=>winSettings()},
+   {label:"Мастер настройки",ic:svg("wand",17),act:()=>location.href="/setup.html"},
+   {label:"Открыть Cockpit",ic:svg("grid",17),act:()=>window.open(cockpitURL(),"_blank")},{sep:1},
+   {label:"Выйти из панели",ic:svg("key",17),act:logout},{sep:1},
+   {label:"Перезагрузить",ic:svg("power",17),act:reboot,dng:1},
+   {label:"Выключить",ic:svg("power",17),act:poweroff,dng:1}]);};}
  const xb=document.getElementById("expoBtn");if(xb){xb.innerHTML=svg("grid",17);xb.onclick=toggleExpo;}
  document.addEventListener("keydown",e=>{if(e.key==="F9"){e.preventDefault();toggleExpo();}else if(e.key==="Escape"&&EXPO){exitExpo();}});
  const dsk=document.querySelector(".desk");if(dsk)dsk.addEventListener("click",e=>{if((e.target===dsk||e.target.id==="apps")&&Object.keys(OPEN).some(id=>OPEN[id].style.display!=="none"))toggleExpo();});
