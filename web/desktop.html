@@ -132,7 +132,7 @@
   .ls-tabs button{display:inline-flex;align-items:center;gap:6px;padding:7px 11px;border-radius:var(--r-md);border:1px solid transparent;background:transparent;color:var(--dim);font-size:12.5px;font-weight:600;transition:.12s}
   .ls-tabs button svg{opacity:.85}
   .ls-tabs button:hover:not(.on){background:var(--sel);color:var(--text)}
-  .ls-tabs button.on{background:var(--sel);color:var(--accent);box-shadow:var(--sh-sm)}
+  .ls-tabs button.on{background:var(--sel);color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent-line),var(--sh-sm)}
   .set-card{background:var(--card);border-radius:var(--r-lg);padding:8px 18px 12px;margin-bottom:14px}
   .set-card>.set-grp:first-child{border:none;padding-top:14px;margin-top:0}
   .set-card>.field:first-child{margin-top:14px}
@@ -162,7 +162,7 @@
   .menubar{position:fixed;top:0;left:0;right:0;height:40px;z-index:300;display:flex;align-items:center;gap:12px;
     padding:0 16px;background:var(--mb-bg,var(--glass));
     --text:var(--mb-fg,#1A2431);--ink:var(--mb-fg,#1A2431);--dim:var(--mb-dim,rgba(0,0,0,.72));--mut:var(--mb-mut,rgba(0,0,0,.56));color:var(--text);
-    --accent:var(--mb-accent,#12B0A6);--accent-2:var(--mb-accent2,#4C8DF6);--accent-soft:var(--mb-accent-soft,rgba(18,176,166,.16));--accent-line:var(--mb-accent-line,rgba(18,176,166,.5));--accent-ink:var(--mb-accent-ink,#fff);--sel:var(--mb-sel,rgba(0,0,0,.07));
+    --accent:var(--mb-accent,#12B0A6);--accent-2:var(--mb-accent2,#4C8DF6);--accent-soft:var(--mb-accent-soft,rgba(18,176,166,.16));--accent-line:var(--mb-accent-line,rgba(18,176,166,.5));--accent-ink:var(--mb-accent-ink,#fff);--sel:var(--mb-sel,rgba(0,0,0,.07));--good:var(--mb-good,#1FA971);--warn:var(--mb-warn,#CF881B);--danger:var(--mb-danger,#DE4E48);
     backdrop-filter:var(--mb-bf,none);-webkit-backdrop-filter:var(--mb-bf,none)}
   .menubar .mb-brand svg{width:calc(22px*var(--mb-icon,1));height:calc(22px*var(--mb-icon,1))}
   .menubar .mb-theme svg{width:calc(17px*var(--mb-icon,1));height:calc(17px*var(--mb-icon,1))}
@@ -284,7 +284,7 @@
   /* widgets */
   .wdg{background:var(--wdg-bg,var(--glass));border-radius:var(--r-lg);padding:18px;
     --text:var(--wdg-fg,#1A2431);--ink:var(--wdg-fg,#1A2431);--dim:var(--wdg-dim,rgba(0,0,0,.66));--mut:var(--wdg-mut,rgba(0,0,0,.47));color:var(--text);
-    --accent:var(--wdg-accent,#12B0A6);--accent-2:var(--wdg-accent2,#4C8DF6);--accent-soft:var(--wdg-accent-soft,rgba(18,176,166,.16));--accent-line:var(--wdg-accent-line,rgba(18,176,166,.5));--accent-ink:var(--wdg-accent-ink,#fff);--track:var(--wdg-track,rgba(0,0,0,.14));--sel:var(--wdg-sel,rgba(0,0,0,.07));
+    --accent:var(--wdg-accent,#12B0A6);--accent-2:var(--wdg-accent2,#4C8DF6);--accent-soft:var(--wdg-accent-soft,rgba(18,176,166,.16));--accent-line:var(--wdg-accent-line,rgba(18,176,166,.5));--accent-ink:var(--wdg-accent-ink,#fff);--track:var(--wdg-track,rgba(0,0,0,.14));--sel:var(--wdg-sel,rgba(0,0,0,.07));--good:var(--wdg-good,#1FA971);--warn:var(--wdg-warn,#CF881B);--danger:var(--wdg-danger,#DE4E48);
     backdrop-filter:var(--wdg-bf,none);-webkit-backdrop-filter:var(--wdg-bf,none)}
   .wdg h4{margin:0 0 15px;font-size:10.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--mut);font-family:var(--mono);
     display:flex;align-items:center;gap:8px}
@@ -314,7 +314,7 @@
   .dock{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:90;display:flex;gap:3px;padding:8px 12px;max-width:calc(100% - 28px);overflow-x:auto;
     background:var(--dock-bg,var(--glass));border-radius:22px;box-shadow:var(--sh);
     --text:var(--dock-fg,#1A2431);--ink:var(--dock-fg,#1A2431);--dim:var(--dock-dim,rgba(0,0,0,.72));--mut:var(--dock-mut,rgba(0,0,0,.56));color:var(--text);
-    --accent:var(--dock-accent,#12B0A6);--accent-2:var(--dock-accent2,#4C8DF6);--accent-soft:var(--dock-accent-soft,rgba(18,176,166,.16));--accent-line:var(--dock-accent-line,rgba(18,176,166,.5));--accent-ink:var(--dock-accent-ink,#fff);--sel:var(--dock-sel,rgba(0,0,0,.07));
+    --accent:var(--dock-accent,#12B0A6);--accent-2:var(--dock-accent2,#4C8DF6);--accent-soft:var(--dock-accent-soft,rgba(18,176,166,.16));--accent-line:var(--dock-accent-line,rgba(18,176,166,.5));--accent-ink:var(--dock-accent-ink,#fff);--sel:var(--dock-sel,rgba(0,0,0,.07));--good:var(--dock-good,#1FA971);--warn:var(--dock-warn,#CF881B);--danger:var(--dock-danger,#DE4E48);
     backdrop-filter:var(--dock-bf,none);-webkit-backdrop-filter:var(--dock-bf,none)}
   .dock.pos-left,.dock.pos-right{top:50%;bottom:auto;transform:translateY(-50%);flex-direction:column;max-width:none;max-height:calc(100% - 100px);overflow-x:hidden;overflow-y:auto;border-radius:20px;padding:8px 6px;gap:4px}
   .dock.pos-left button,.dock.pos-right button{padding:4px 5px}
@@ -333,7 +333,7 @@
 
   /* windows */
   .win,.dialog,.menu,.toast,.ob-card{--text:var(--win-fg,#1A2431);--ink:var(--win-fg,#1A2431);--dim:var(--win-dim,rgba(0,0,0,.72));--mut:var(--win-mut,rgba(0,0,0,.56));color:var(--text);
-    --accent:var(--win-accent,#12B0A6);--accent-2:var(--win-accent2,#4C8DF6);--accent-soft:var(--win-accent-soft,rgba(18,176,166,.16));--accent-line:var(--win-accent-line,rgba(18,176,166,.5));--accent-ink:var(--win-accent-ink,#fff);--track:var(--win-track,rgba(0,0,0,.12));--sel:var(--win-sel,rgba(0,0,0,.07))}
+    --accent:var(--win-accent,#12B0A6);--accent-2:var(--win-accent2,#4C8DF6);--accent-soft:var(--win-accent-soft,rgba(18,176,166,.16));--accent-line:var(--win-accent-line,rgba(18,176,166,.5));--accent-ink:var(--win-accent-ink,#fff);--track:var(--win-track,rgba(0,0,0,.12));--sel:var(--win-sel,rgba(0,0,0,.07));--good:var(--win-good,#1FA971);--warn:var(--win-warn,#CF881B);--danger:var(--win-danger,#DE4E48)}
   .win{position:fixed;z-index:100;background:var(--win-bg,var(--glass-2));backdrop-filter:var(--win-bf,none);-webkit-backdrop-filter:var(--win-bf,none);
     border-radius:var(--r-win);box-shadow:var(--sh);display:flex;flex-direction:column;min-width:300px;overflow:hidden;animation:winin .2s cubic-bezier(.2,.8,.3,1)}
   .win::before{content:"";position:absolute;inset:0;pointer-events:none;border-radius:inherit;z-index:0;opacity:var(--win-noise,0);mix-blend-mode:overlay;background-size:180px 180px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
@@ -344,10 +344,10 @@
   .win:not(.wfocus) .lights i{filter:grayscale(1) opacity(.5)}
   .win:not(.wfocus) .ttl{opacity:.5}
   @keyframes winin{from{opacity:0;transform:scale(.97) translateY(8px)}}
-  .win .wbar{height:48px;display:flex;align-items:center;gap:10px;padding:0 16px;cursor:grab;
+  .win .wbar{height:36px;display:flex;align-items:center;gap:10px;padding:0 14px;cursor:grab;
     user-select:none;flex:none}
   .win .wbar.drag{cursor:grabbing}
-  .lights{display:flex;gap:8px}.lights i{width:12px;height:12px;border-radius:50%;display:block;transition:.12s}
+  .lights{display:flex;gap:7px}.lights i{width:11px;height:11px;border-radius:50%;display:block;transition:.12s}
   .lights .c{background:#ff5f57}.lights .m{background:#febc2e}.lights .z{background:#28c840}
   .lights i:hover{filter:brightness(1.12)}
   .win .ttl{font-size:13.5px;font-weight:650;flex:1;text-align:center;color:var(--dim);padding-right:44px;letter-spacing:-.01em}
@@ -435,7 +435,7 @@
   .seg2{display:inline-flex;background:var(--track,var(--line));border-radius:9px;padding:3px;gap:3px}
   .seg2 button{border:none;background:none;color:var(--dim);padding:6px 11px;border-radius:6px;font-size:11.5px;font-weight:600;transition:.12s}
   .seg2 button:hover{color:var(--text)}
-  .seg2 button.on{background:var(--sel);color:var(--accent);box-shadow:var(--sh-sm)}
+  .seg2 button.on{background:var(--sel);color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent-line),var(--sh-sm)}
   table.grid{width:100%;border-collapse:collapse;font-size:12.5px}
   table.grid th{text-align:left;color:var(--mut);font-family:var(--mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;padding:7px 9px;position:sticky;top:0;background:var(--glass-2);backdrop-filter:blur(8px);cursor:pointer;z-index:1}
   table.grid td{padding:7px 9px;border-top:1px solid var(--line);font-variant-numeric:tabular-nums}
@@ -787,7 +787,7 @@
   .seg{display:inline-flex;background:var(--track,var(--line-2));border-radius:var(--r-md);padding:3px;gap:3px}
   .seg button{border:none;background:transparent;color:var(--dim);padding:8px 15px;border-radius:9px;font-size:12.5px;font-weight:600;transition:.12s}
   .seg button:hover{color:var(--text)}
-  .seg button.on{background:var(--sel);color:var(--accent);box-shadow:var(--sh-sm)}
+  .seg button.on{background:var(--sel);color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent-line),var(--sh-sm)}
   .set-h{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);font-family:var(--mono);margin:18px 0 12px;padding-top:16px;border-top:1px solid var(--line)}
   .tgl{position:relative;display:inline-block;width:40px;height:22px;flex:none}
   .tgl input{opacity:0;width:0;height:0;position:absolute}
@@ -1161,9 +1161,13 @@ function applySettings(){
   root.style.setProperty("--"+prefix+"-mut",`rgba(${b},${clampf((lite?.64:.56)*tcf,.34,1).toFixed(2)})`);
   // дорожки баров/колец: видимы на любом фоне, но приглушены
   root.style.setProperty("--"+prefix+"-track",`rgba(${b},${lite?.20:.13})`);
+  // статусные цвета (good/warn/danger) — тон сохраняем, светлоту тянем до контраста с фоном
+  root.style.setProperty("--"+prefix+"-good",accentAdj("#1FA971",effL));
+  root.style.setProperty("--"+prefix+"-warn",accentAdj("#CF881B",effL));
+  root.style.setProperty("--"+prefix+"-danger",accentAdj("#DE4E48",effL));
   // фон активной «фишки» (табы/сегменты/сайдбар): лёгкая подложка от фактического фона,
   // не глухой белый — акцентный текст поверх остаётся читаемым
-  root.style.setProperty("--"+prefix+"-sel",`rgba(${b},${lite?.16:.08})`);
+  root.style.setProperty("--"+prefix+"-sel",`rgba(${b},${lite?.20:.11})`);
   // акцент под этот же фактический фон: не теряется ни на прозрачном, ни на плотном
   const ac=accentAdj(a[0],effL),ac2=accentAdj(a[1],effL);
   root.style.setProperty("--"+prefix+"-accent",ac);
@@ -3025,14 +3029,13 @@ function lsWidgets(lb){const cl=/^#[0-9a-f]{6}$/i;lb.innerHTML=`
    ${opSlider("Прозрачность фона","wdgOp","Своя плотность подложек виджетов. По умолчанию — общая, как у окон (вкладка «Материал»).")}
    ${pSlider("Размытие под виджетами","wdgBlur",0,50,1,"px","Матовое размытие обоев под виджетами. 0 — без размытия.")}
    ${pSlider("Насыщенность под виджетами","wdgSat",0,200,5,"pctn","Сочность фона под виджетами: 100% — без изменений, меньше — обесцвечивает, больше — сочнее.")}
-   <div class="srow"><div class="srow-l"><div class="srow-t">Светлая тема${tipHTML("Свой цвет подложки виджетов для светлой темы.")}</div></div><div class="srow-c"><input type="color" id="wdgL" value="${cl.test(SET.wdgLight||"")?SET.wdgLight:"#ffffff"}" class="ccell"><button class="btn sm" data-wreset="wdgLight">Сброс</button></div></div>
-   <div class="srow"><div class="srow-l"><div class="srow-t">Тёмная тема${tipHTML("Свой цвет подложки виджетов для тёмной темы.")}</div></div><div class="srow-c"><input type="color" id="wdgD" value="${cl.test(SET.wdgDark||"")?SET.wdgDark:"#161e2a"}" class="ccell"><button class="btn sm" data-wreset="wdgDark">Сброс</button></div></div>
+   ${(()=>{const k=isLight()?"wdgLight":"wdgDark",def=isLight()?"#ffffff":"#161e2a";
+     return `<div class="srow"><div class="srow-l"><div class="srow-t">Цвет фона${tipHTML("Свой цвет подложки виджетов для текущей темы. Правится отдельно в светлой и тёмной.")}</div></div><div class="srow-c"><input type="color" id="wdgC" value="${cl.test(SET[k]||"")?SET[k]:def}" class="ccell"><button class="btn sm" data-wreset="${k}">Сброс</button></div></div>`;})()}
   </div>
   <div class="set-card"><div class="set-grp">Виджеты панели</div><div id="wgList"></div></div>`;
  cfgList(lb.querySelector("#wgList"),railWidgets,c=>{SET.widgets=c;},WIDGET_DEFS,()=>{renderRail();poll();});
- const wl=lb.querySelector("#wdgL"),wd=lb.querySelector("#wdgD");
- wl.oninput=()=>{SET.wdgLight=wl.value;applySettings();};wl.onchange=()=>saveSettings();
- wd.oninput=()=>{SET.wdgDark=wd.value;applySettings();};wd.onchange=()=>saveSettings();
+ const wc2=lb.querySelector("#wdgC"),wk=isLight()?"wdgLight":"wdgDark";
+ wc2.oninput=()=>{SET[wk]=wc2.value;applySettings();};wc2.onchange=()=>saveSettings();
  lb.querySelectorAll("[data-wreset]").forEach(b=>b.onclick=()=>{SET[b.dataset.wreset]="";applySettings();saveSettings();lsWidgets(lb);});
  wireLook(lb);}
 function lsDock(lb){lb.innerHTML=`
@@ -3070,15 +3073,14 @@ function lsMisc(lb){lb.innerHTML=`
   </div>`;
  wireLook(lb);}
 function lsWindows(lb){const cl=/^#[0-9a-f]{6}$/i;lb.innerHTML=`
-  <div class="set-card"><div class="set-grp">Оттенок поверхностей — свой для каждой темы</div>
-   <div class="mon-note" style="margin:0 0 6px">Базовый цвет всех окон, панелей и меню. Прозрачность, размытие и зерно — ниже.</div>
-   <div class="srow"><div class="srow-l"><div class="srow-t">Оттенок · светлая тема${tipHTML("Тон материала для светлой темы. Сброс — белый.")}</div></div><div class="srow-c"><input type="color" id="tL" value="${cl.test(SET.tintLight||"")?SET.tintLight:"#ffffff"}" class="ccell"><button class="btn sm" data-treset="tintLight">Сброс</button></div></div>
-   <div class="srow"><div class="srow-l"><div class="srow-t">Оттенок · тёмная тема${tipHTML("Тон материала для тёмной темы. Сброс — стандартный тёмный.")}</div></div><div class="srow-c"><input type="color" id="tD" value="${cl.test(SET.tintDark||"")?SET.tintDark:"#161e2a"}" class="ccell"><button class="btn sm" data-treset="tintDark">Сброс</button></div></div>
+  <div class="set-card"><div class="set-grp">Оттенок поверхностей</div>
+   <div class="mon-note" style="margin:0 0 6px">Базовый цвет всех окон, панелей и меню текущей темы. Прозрачность, размытие и зерно — ниже.</div>
+   ${(()=>{const k=isLight()?"tintLight":"tintDark",def=isLight()?"#ffffff":"#161e2a";
+     return `<div class="srow"><div class="srow-l"><div class="srow-t">Оттенок материала${tipHTML("Тон материала текущей темы. Правится отдельно в светлой и тёмной. Сброс — стандартный.")}</div></div><div class="srow-c"><input type="color" id="tC" value="${cl.test(SET[k]||"")?SET[k]:def}" class="ccell"><button class="btn sm" data-treset="${k}">Сброс</button></div></div>`;})()}
   </div>
   <div class="set-card"><div class="set-grp">Слои по высоте (прозрачность)</div>
-   <div class="mon-note" style="margin:0 0 6px">Чем «выше» элемент (панели → окна → карточки → меню), тем плотнее и светлее фон. База — на каждую тему, шаг — насколько уровни отличаются.</div>
-   ${pSlider("Базовый фон · светлая тема","elevBaseLight",.1,.95,.02,"pct","Плотность самого нижнего слоя (панели/док) в светлой теме. Меньше — прозрачнее.")}
-   ${pSlider("Базовый фон · тёмная тема","elevBaseDark",.1,.95,.02,"pct","Плотность нижнего слоя в тёмной теме.")}
+   <div class="mon-note" style="margin:0 0 6px">Чем «выше» элемент (панели → окна → карточки → меню), тем плотнее и светлее фон. Настройки — текущей темы.</div>
+   ${pSlider("Базовый фон",isLight()?"elevBaseLight":"elevBaseDark",.1,.95,.02,"pct","Плотность самого нижнего слоя (панели/док) в текущей теме. Меньше — прозрачнее.")}
    ${pSlider("Шаг плотности между уровнями","elevStep",0,.28,.01,"pct","Насколько каждый следующий слой плотнее предыдущего. 0 — все слои одинаковы.")}
    ${pSlider("Осветление на уровень","elevLight",0,.22,.01,"pct","Насколько каждый слой выше светлее. Даёт ощущение глубины.")}
   </div>
@@ -3095,9 +3097,8 @@ function lsWindows(lb){const cl=/^#[0-9a-f]{6}$/i;lb.innerHTML=`
   <div class="set-card"><div class="set-grp">Положение окон</div>
    <div class="srow"><div class="srow-l"><div class="srow-t">Память окон${tipHTML("Окна запоминают размер и позицию. Если окно ушло за экран (другой монитор) — оно вернётся в видимую область автоматически.")}</div><div class="srow-d">размеры и позиции сохраняются автоматически</div></div><div class="srow-c"><button class="btn sm" id="winReset">Сбросить всё</button></div></div>
   </div>`;
- const tl=lb.querySelector("#tL"),td=lb.querySelector("#tD");
- tl.oninput=()=>{SET.tintLight=tl.value;applySettings();};tl.onchange=()=>saveSettings();
- td.oninput=()=>{SET.tintDark=td.value;applySettings();};td.onchange=()=>saveSettings();
+ const tc2=lb.querySelector("#tC"),tk=isLight()?"tintLight":"tintDark";
+ tc2.oninput=()=>{SET[tk]=tc2.value;applySettings();};tc2.onchange=()=>saveSettings();
  lb.querySelectorAll("[data-treset]").forEach(b=>b.onclick=()=>{SET[b.dataset.treset]="";applySettings();saveSettings();lsWindows(lb);});
  lb.querySelectorAll("#shLvl button").forEach(b=>b.onclick=()=>{SET.shadow=b.dataset.v;applySettings();saveSettings();lb.querySelectorAll("#shLvl button").forEach(x=>x.classList.toggle("on",x===b));});
  lb.querySelector("#winReset").onclick=()=>{WINPOS={};saveWinPos();toast("Позиции окон сброшены");};
@@ -3325,7 +3326,7 @@ async function pollTop(){const box=document.getElementById("wg-top");if(!box)ret
 }
 function drawNet(){const cv=document.getElementById("wg-net");if(!cv)return;const ctx=cv.getContext("2d"),W=cv.width,H=cv.height;
  ctx.clearRect(0,0,W,H);if(NETH.length<2)return;
- const cs=getComputedStyle(document.documentElement);
+ const cs=getComputedStyle(cv);   // с самого canvas — good/danger, адаптированные под фон виджета
  const cRx=cs.getPropertyValue("--good").trim()||"#1FA971",cTx=cs.getPropertyValue("--danger").trim()||"#DE4E48";
  const mx=Math.max(...NETH,...NETT,1);
  const line=(data,col,fill)=>{if(data.length<2)return;
