@@ -1259,6 +1259,7 @@ addEventListener("resize",()=>{for(const id in OPEN){const w=OPEN[id];if(!w||w.c
 
 /* apps */
 let APPS=[];   // ярлыки из docker-лейблов web-desktop.* (/api/desktop)
+let VOLS=[];   // тома вне пула (USB/свободные диски) — ярлыки на столе + сайдбар ФМ
 const INTERNAL=[
  {id:"__sys",name:"Система",color:"linear-gradient(135deg,#34C6BE,#2C9C9C)",ic:"gauge",fn:()=>winSystem()},
  {id:"__disks",name:"Диски",color:"linear-gradient(135deg,#e5544e,#c2403a)",ic:"disks",fn:()=>winDisks()},
@@ -1277,7 +1278,31 @@ function renderApps(){
  APPS.forEach(app=>{if(!app.url)return;
   const b=el(`<button class="app" title="${app.container||""}${app.running?"":" · остановлен"}"><div class="tile applbl" style="background:${tileColor(app.name)}">${appIconHTML(app)}</div><div class="lbl">${app.name}</div><span class="st ${app.running?"on":"off"}"></span></button>`);
   b.onclick=()=>window.open(app.url,"_blank");box.appendChild(b);});
- if(!APPS.filter(a=>a.url).length)box.appendChild(el(`<div class="apps-hint">Ярлыки приложений появятся здесь автоматически.<br>Добавьте контейнеру метки <b>web-desktop.*</b> в docker-compose, поднимите его в <b>Dockge</b> и нажмите <b>«Обновить ярлыки»</b> (правый клик по столу).<br><br>Системные инструменты — в панели снизу.</div>`));
+ VOLS.forEach(v=>{
+  const b=el(`<button class="app" title="${att(v.dev+" · "+(v.fstype||"")+" · "+(v.size||""))}${v.mounted?"":" · не смонтирован"}"><div class="tile" style="background:linear-gradient(135deg,#7b8ba3,#5a6a82)">${svg(volIcon(v),26)}</div><div class="lbl">${esc(v.label||"Диск")}</div><span class="st ${v.mounted?"on":"off"}"></span></button>`);
+  b.onclick=()=>openVolume(v);
+  b.oncontextmenu=e=>{e.preventDefault();e.stopPropagation();showMenu(e.clientX,e.clientY,[
+    {label:"Открыть",ic:svg("folder",17),act:()=>openVolume(v)},
+    ...(v.mounted?[{label:"Извлечь",ic:svg("eject",17),act:()=>ejectVolume(v),dng:1}]:[]),
+  ]);};
+  box.appendChild(b);});
+ if(!APPS.filter(a=>a.url).length&&!VOLS.length)box.appendChild(el(`<div class="apps-hint">Ярлыки приложений появятся здесь автоматически.<br>Добавьте контейнеру метки <b>web-desktop.*</b> в docker-compose, поднимите его в <b>Dockge</b> и нажмите <b>«Обновить ярлыки»</b> (правый клик по столу).<br><br>Системные инструменты — в панели снизу.</div>`));
+}
+function volIcon(v){return v.rotational?"hdd":(v.tran==="mmc"?"sd":"ssd");}
+async function openVolume(v){
+ if(v.mounted){winFiles(v.mount);return;}
+ toast("Монтирую "+(v.label||v.dev)+"…");
+ const r=await api("/api/disk/mount-dev",{method:"POST",body:JSON.stringify({dev:v.dev})});
+ if(r&&r.ok){await pollApps();
+  const nv=VOLS.find(x=>x.dev===v.dev);
+  if(nv&&nv.mount){winFiles(nv.mount);toast("Смонтировано: "+nv.mount);}
+  else toast("Смонтировано, обновляю…");}
+ else toast(r&&r.log?("Не смонтировалось: "+r.log.trim().split("\n").pop()):"Не удалось смонтировать");
+}
+async function ejectVolume(v){
+ const r=await api("/api/disk/mount",{method:"POST",body:JSON.stringify({target:v.mount,unmount:true})});
+ if(r&&r.ok){toast("Извлечено: "+(v.label||v.dev));pollApps();}
+ else toast(r&&r.log?("Не извлеклось: "+r.log.trim().split("\n").pop()):"Не удалось извлечь (диск занят?)");
 }
 
 /* dock */
@@ -2322,7 +2347,9 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
  let viewMode="list";try{viewMode=localStorage.getItem("fmview")||"list";}catch(e){}
  body.innerHTML=`<div class="fm"><div class="fm-fav">
    <div class="fm-fav-h"><span>Избранное</span><button class="iconbtn" id="fFavAdd" title="Добавить текущую папку в избранное">+</button></div>
-   <div class="fm-fav-list" id="fFav"></div></div>
+   <div class="fm-fav-list" id="fFav"></div>
+   <div id="fVolsWrap" style="display:none"><div class="fm-fav-h"><span>Диски</span></div>
+   <div class="fm-fav-list" id="fVols" style="flex:none;max-height:36%"></div></div></div>
    <div class="fm-side">
    <div class="fm-top">
      <div class="fm-tabs" id="fTabs"></div>
@@ -2371,6 +2398,22 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
  function addFav(){const nm=cwd.split("/").filter(Boolean).pop()||"Корень";
    if(favs.some(f=>f.path===cwd)){toast("Уже в избранном");return;}
    favs.push({name:nm,path:cwd});saveFav();renderFav();toast("Добавлено в избранное");}
+ function renderVols(){const wrap=body.querySelector("#fVolsWrap"),c=body.querySelector("#fVols");if(!c)return;
+   wrap.style.display=VOLS.length?"":"none";c.innerHTML="";
+   VOLS.forEach(v=>{const on=v.mounted&&(cwd===v.mount||cwd.startsWith(v.mount+"/"));
+     const it=el(`<div class="fm-fav-i${on?" on":""}" title="${att(v.dev+" · "+(v.fstype||"")+" · "+(v.size||"")+(v.mounted?"":" · не смонтирован"))}"><span class="fi" style="${v.mounted?"":"opacity:.45"}">${svg(volIcon(v),15)}</span><span class="fn">${esc(v.label||v.dev)}</span>${v.mounted?`<button class="fx" title="Извлечь">${svg("eject",13)}</button>`:""}</div>`);
+     const go=async()=>{if(v.mounted){load(v.mount);return;}
+       toast("Монтирую "+(v.label||v.dev)+"…");
+       const r=await api("/api/disk/mount-dev",{method:"POST",body:JSON.stringify({dev:v.dev})});
+       if(r&&r.ok){await pollApps();const nv=VOLS.find(x=>x.dev===v.dev);if(nv&&nv.mount)load(nv.mount);}
+       else toast(r&&r.log?("Не смонтировалось: "+r.log.trim().split("\n").pop()):"Не удалось смонтировать");};
+     it.querySelector(".fn").onclick=go;it.querySelector(".fi").onclick=go;
+     const fx=it.querySelector(".fx");
+     if(fx)fx.onclick=async ev=>{ev.stopPropagation();
+       if(cwd===v.mount||cwd.startsWith(v.mount+"/"))load("/home/oleg");
+       await ejectVolume(v);renderVols();};
+     c.appendChild(it);});}
+ win._vols=renderVols;
  async function loadFav(){const r=await api("/api/fm/favorites");favs=(r&&r.favorites)||[];
    if(!favs.length){favs=FM_CHIPS.map(([name,path])=>({name,path}));if(LIVE)saveFav();}
    renderFav();}
@@ -2427,7 +2470,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    if(!r||!r.ok){toast((r&&r.log)||"нет доступа");return;}
    cwd=r.path;tabs[tabI]=r.path;entries=r.entries||[];searchRes=null;sel.clear();filt="";lastIdx=-1;
    const si=body.querySelector("#fSearch");if(si)si.value="";
-   cursor=-1;renderTabs();renderCrumb();renderFav();renderList();selUpdate();listBox.focus();}
+   cursor=-1;renderTabs();renderCrumb();renderFav();renderVols();renderList();selUpdate();listBox.focus();}
  function renderTabs(){const tb=body.querySelector("#fTabs");if(!tb)return;tb.innerHTML="";
    tabs.forEach((p,i)=>{const nm=p.split("/").filter(Boolean).pop()||"/";
      const t=el(`<div class="fm-tab${i===tabI?" on":""}" title="${att(p)}"><span class="fm-tabn">${esc(nm)}</span>${tabs.length>1?`<span class="fm-tabx">${svg("x",11)}</span>`:""}</div>`);
@@ -2674,7 +2717,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
  const bandEnd=ev=>{if(!bandStart)return;bandStart=null;if(band){band.remove();band=null;try{listBox.releasePointerCapture(ev.pointerId);}catch(e){}}};
  listBox.addEventListener("pointerup",bandEnd);listBox.addEventListener("pointercancel",bandEnd);
  win._nav=p=>load(p);
- loadFav();load(cwd);
+ loadFav();renderVols();load(cwd);
 },{w:880,h:620});}
 /* Отдельное окно-редактор/просмотрщик файла (заголовок = имя, свои кнопки) */
 function openFileWin(e){openWin("ed:"+e.path,e.name,body=>{
@@ -3145,7 +3188,8 @@ function sparkSVG(data,color,max){const w=120,h=28,d=(data||[]).slice(-40);if(d.
 async function poll(){const s=await api("/api/stats");LAST=s;pushHist(s);paintTray(s);paintSys(s);
  const bn=document.getElementById("brandName");if(bn)bn.textContent=(s.host||location.hostname.split(".")[0]||"pi5")+".local";
  if(OPEN.__sys&&OPEN.__sys._sub)OPEN.__sys._sub(s);}
-async function pollApps(){const d=await api("/api/desktop");APPS=(d&&d.apps)||[];renderApps();}
+async function pollApps(){const d=await api("/api/desktop");APPS=(d&&d.apps)||[];VOLS=(d&&d.volumes)||[];renderApps();
+ if(OPEN.__files&&OPEN.__files._vols)OPEN.__files._vols();}
 async function pollDisks(){const d=await api("/api/disks");paintDiskWidget(d.disks||[]);}
 
 /* онбординг при первом запуске */

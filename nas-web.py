@@ -132,7 +132,7 @@ def lan_ip():
 def _lsblk():
     try:
         out = subprocess.run(["lsblk", "-J", "-o",
-              "NAME,PATH,TYPE,SIZE,MODEL,SERIAL,MOUNTPOINT,FSTYPE,LABEL,TRAN,RM,ROTA"],
+              "NAME,PATH,TYPE,SIZE,MODEL,SERIAL,MOUNTPOINT,FSTYPE,LABEL,TRAN,RM,ROTA,PARTTYPENAME"],
               capture_output=True, text=True, timeout=8).stdout
         return json.loads(out).get("blockdevices", [])
     except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
@@ -222,6 +222,7 @@ def disks():
                 "name": ch.get("name"), "path": ch.get("path"), "size": ch.get("size"),
                 "fstype": ch.get("fstype"), "label": ch.get("label"),
                 "mount": cmp, "mounted": bool(cmp),
+                "parttypename": ch.get("parttypename"),
             })
             if cmp:
                 fstype = ch.get("fstype") or fstype
@@ -245,6 +246,32 @@ def disks():
             "smart": smart_info(d.get("path")),
         })
     return res
+
+def external_volumes():
+    """Тома вне пула (USB-диски/флешки, свободные диски с ФС) — для ярлыков
+    на рабочем столе и секции «Диски» в сайдбаре файлового менеджера."""
+    vols = []
+    for d in disks():
+        if d.get("no_media") or d["role"] not in ("free", "removable"):
+            continue
+        parts = d["partitions"] or []
+        if not parts and d.get("fstype"):      # ФС прямо на диске, без таблицы разделов
+            parts = [{"name": d["name"], "path": d["path"], "size": d["size"],
+                      "fstype": d["fstype"], "label": d["label"],
+                      "mount": d["mount"], "mounted": d["mounted"]}]
+        for p in parts:
+            fs = p.get("fstype")
+            if not fs or fs in ("swap", "linux_raid_member", "LVM2_member", "crypto_LUKS"):
+                continue
+            if p.get("parttypename") == "EFI System" or (p.get("label") or "").upper() == "EFI":
+                continue
+            vols.append({
+                "dev": p["path"], "label": p.get("label") or (d.get("model") or "").strip() or p["name"],
+                "size": p["size"], "fstype": fs, "mount": p.get("mount"),
+                "mounted": bool(p.get("mount")), "disk": d["path"],
+                "rotational": d.get("rotational"), "tran": d.get("tran"),
+            })
+    return vols
 
 # --------------------------------------------------------------------------- #
 #  SMART detail + disk actions
@@ -2987,7 +3014,7 @@ class H(BaseHTTPRequestHandler):
             if p == "/api/stats":
                 self._json(stats())
             elif p == "/api/desktop":
-                self._json({"apps": discover_desktop_apps()})
+                self._json({"apps": discover_desktop_apps(), "volumes": external_volumes()})
             elif p == "/api/cron/jobs":
                 self._json(cron_jobs())
             elif p == "/api/cron/stats":
