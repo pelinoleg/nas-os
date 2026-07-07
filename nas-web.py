@@ -3223,11 +3223,17 @@ class H(BaseHTTPRequestHandler):
                     self._json(engine("format-disk", {"dev": dev, "role": b.get("role", "data"),
                         "fs": b.get("fs", "ext4"), "label": label}, dry=b.get("dry", False)))
             elif p == "/api/disk/mount-dev":
-                b = self._body(); dev = b.get("dev", "")
+                b = self._body(); dev = b.get("dev", ""); target = (b.get("target") or "").strip()
                 if not re.match(r"^/dev/[\w-]+$", dev or ""):
                     self._json({"ok": False, "log": "недопустимое устройство"}, 400)
+                elif target and (not re.match(r"^/[A-Za-z0-9._/ -]{1,120}$", target) or ".." in target
+                                 or target in ("/", "/etc", "/usr", "/bin", "/boot", "/home", "/var", "/root")):
+                    self._json({"ok": False, "log": "недопустимая точка монтирования"}, 400)
                 else:
-                    self._json(engine("mount-dev", {"dev": dev}))
+                    params = {"dev": dev}
+                    if target:
+                        params["target"] = target
+                    self._json(engine("mount-dev", params))
             elif p == "/api/automount":
                 b = self._body()
                 user = b.get("user", TARGET_USER); base = b.get("base", "/media/nas")

@@ -2080,7 +2080,7 @@ UNIT
 # Смонтировать съёмный носитель в базу автомонтирования (явное действие: формат/монтирование).
 # Монтирует напрямую, независимо от того, включён ли udev-автомаунт.
 automount_now() {
-    local dev="$1" fs label base target opts uid gid i=1
+    local dev="$1" want="${2:-}" fs label base target opts uid gid i=1
     base="/media/nas"
     [ -f /etc/nas-wizard/automount.conf ] && base="$(. /etc/nas-wizard/automount.conf 2>/dev/null; echo "${BASE:-/media/nas}")"
     if [ "$DRY_RUN" -eq 0 ]; then
@@ -2088,10 +2088,18 @@ automount_now() {
         label="$(blkid -s LABEL -o value "$dev" 2>/dev/null)"
     fi
     label="${label:-$(basename "$dev")}"; label="${label//[^A-Za-z0-9._-]/_}"
-    target="$base/$label"
-    # не затирать чужой каталог с данными
-    while findmnt -rn "$target" >/dev/null 2>&1 || { [ -e "$target" ] && [ -n "$(ls -A "$target" 2>/dev/null)" ]; }; do
-        target="$base/${label}_$i"; i=$((i+1)); done
+    if [ -n "$want" ]; then
+        # пользователь указал свою точку монтирования — создаём её (mkdir -p), не подбираем _N
+        case "$want" in /*) ;; *) echo "точка монтирования должна быть абсолютным путём"; return 2 ;; esac
+        case "$want" in *..*) echo "недопустимый путь"; return 2 ;; esac
+        target="$want"
+        if findmnt -rn "$target" >/dev/null 2>&1; then echo "в $target уже что-то смонтировано"; return 2; fi
+    else
+        target="$base/$label"
+        # не затирать чужой каталог с данными
+        while findmnt -rn "$target" >/dev/null 2>&1 || { [ -e "$target" ] && [ -n "$(ls -A "$target" 2>/dev/null)" ]; }; do
+            target="$base/${label}_$i"; i=$((i+1)); done
+    fi
     run mkdir -p "$target"
     uid="$(id -u "$TARGET_USER" 2>/dev/null || echo 1000)"; gid="$(id -g "$TARGET_USER" 2>/dev/null || echo 1000)"
     case "$fs" in
@@ -2131,7 +2139,7 @@ api_mount_dev() {
     is_protected "$dev" && { echo "ОТКАЗ: $dev — системный диск"; return 2; }
     disk_in_use "$dev" && { echo "$dev уже смонтирован"; return 0; }
     [ -n "$(blkid -s TYPE -o value "$dev" 2>/dev/null)" ] || { echo "на $dev нет файловой системы"; return 2; }
-    automount_now "$dev"
+    automount_now "$dev" "${NASW_TARGET:-}" || return $?
     echo "смонтирован $dev"
 }
 api_label_disk() {
