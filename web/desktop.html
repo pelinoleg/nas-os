@@ -1694,7 +1694,7 @@ function winDisks(){openWin("__disks","Хранилище",body=>{
   if(!DM_SEL||!disks.find(x=>x.path===DM_SEL))DM_SEL=((disks.find(x=>x.role!=="system"))||disks[0]||{}).path;
   body.innerHTML="";
   const root=el(`<div class="dmroot"></div>`);
-  root.appendChild(poolStrip(disks,am,load));
+  root.appendChild(poolStrip(disks,am,load,(d&&d.snapraid)||{}));
   const split=el(`<div class="dm2"></div>`);
   const side=el(`<aside class="dm2-side"></aside>`);
   side.appendChild(el(`<div class="dm2-side-h">Накопители · ${disks.length}</div>`));
@@ -1712,7 +1712,12 @@ function winDisks(){openWin("__disks","Хранилище",body=>{
  load();body._reload=load;
 },{w:740,h:640});}
 
-function poolStrip(disks,am,reload){
+function scrubLine(snap){
+ if(!snap||!snap.configured)return "";
+ const fmt=e=>e&&e.date?`<span style="color:${e.result==="ok"?"var(--good)":"var(--danger)"}">${e.result==="ok"?"✓":"✗"}</span> ${e.date.slice(5,16)}`:"—";
+ return ` · чётность: sync ${fmt(snap.last_sync)}, scrub ${fmt(snap.last_scrub)}`;
+}
+function poolStrip(disks,am,reload,snap){
  const cnt=r=>disks.filter(x=>x.role===r).length;
  const poolMount=disks.find(x=>x.role==="pool"),dataArr=disks.filter(x=>x.role==="data"||x.role==="pool");
  const hasPool=!!poolMount||cnt("data")>0;
@@ -1724,7 +1729,7 @@ function poolStrip(disks,am,reload){
   const pct=total?Math.max(used/total*100,.4):0;
   w.innerHTML=`<span class="dp-ic">${svg("layers",17)}</span>
    <div class="dp-txt"><div class="dp-t">Пул /mnt/storage <span class="hstat ${hcls}" style="margin-left:4px">${hlbl}</span></div>
-    <div class="dp-s">${cnt("data")} данных · ${cnt("parity")} чётности${cnt("removable")?` · ${cnt("removable")} внешних`:""}</div></div>
+    <div class="dp-s">${cnt("data")} данных · ${cnt("parity")} чётности${cnt("removable")?` · ${cnt("removable")} внешних`:""}${scrubLine(snap)}</div></div>
    <div class="dp-cap"><div class="capbar" style="width:150px"><span class="used" style="width:${pct}%"></span></div>
     <div class="dp-lbl">${fmtB(total-used)} своб · ${fmtB(total)}</div></div>`;
  }else{
@@ -1780,6 +1785,21 @@ function diskDetail(x,reload){
      if(x.mounted){const b=el(`<button class="btn sm">${svg("eject",13)} Отмонтировать</button>`);b.onclick=()=>diskCall("/api/disk/mount",{target:x.mount,unmount:true},reload,"отмонтировано");acts.appendChild(b);}
      else if(x.fstype){const b=el(`<button class="btn sm">${svg("play",13)} Смонтировать</button>`);b.onclick=()=>diskCall(x.in_fstab?"/api/disk/mount":"/api/disk/mount-dev",x.in_fstab?{target:x.mount}:{dev:x.path},reload,"смонтировано");acts.appendChild(b);}
      if(x.fstype){const b=el(`<button class="btn sm">${svg("save",13)} Переименовать</button>`);b.onclick=()=>renameDlg(x.path,x.label||"",reload);acts.appendChild(b);}
+   }
+   // тест скорости чтения (безопасно)
+   const spd=el(`<button class="btn sm">${svg("activity",13)} Тест скорости</button>`);
+   spd.onclick=async()=>{spd.disabled=true;spd.innerHTML="измеряю…";
+     const r=await api("/api/disk/speedtest",{method:"POST",body:JSON.stringify({dev:x.path})});
+     spd.disabled=false;spd.innerHTML=svg("activity",13)+" Тест скорости";
+     toast(LIVE?((r&&r.ok)?("Чтение: "+r.read_mbps+" МБ/с"):("Ошибка: "+((r&&r.log)||""))):"Демо");};
+   acts.appendChild(spd);
+   // безопасно извлечь — только для внешних/свободных смонтированных дисков
+   if(x.mounted&&(x.role==="removable"||x.role==="free")){
+     const ej=el(`<button class="btn sm">${svg("eject",13)} Извлечь</button>`);
+     ej.onclick=()=>confirmDlg("Безопасно извлечь диск?","Диск будет отмонтирован и обесточен — после этого можно физически отключить.",async()=>{
+       const r=await api("/api/disk/eject",{method:"POST",body:JSON.stringify({dev:x.path})});
+       toast(LIVE?((r&&r.ok)?r.log:("Ошибка: "+((r&&r.log)||""))):"Демо");if(r&&r.ok)reload();},false);
+     acts.appendChild(ej);
    }
    acts.appendChild(el(`<span class="grow"></span>`));
    const fb=el(`<button class="btn sm dng">${svg("trash",13)} Форматировать</button>`);fb.onclick=()=>formatDlg(x,reload);acts.appendChild(fb);

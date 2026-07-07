@@ -364,6 +364,66 @@ def smart_test(dev, kind):
     kind = kind if kind in ("short", "long") else "short"
     return _run(["smartctl", "-t", kind] + _smart_dtype(dev) + [dev], timeout=20)
 
+def _disk_mountpoints(dev):
+    out = _run(["lsblk", "-nrpo", "NAME,MOUNTPOINT", dev], timeout=8).get("log", "")
+    mps = []
+    for line in out.splitlines():
+        p = line.split(None, 1)
+        mp = (p[1].strip() if len(p) > 1 else "")
+        if mp:
+            mps.append(mp)
+    return mps
+
+_SYS_MPS = ("/", "/boot", "/boot/firmware", "/var", "/home", "/usr")
+
+def disk_speedtest(dev):
+    """Безопасный тест скорости последовательного ЧТЕНИЯ (мимо кэша, только чтение)."""
+    if not re.match(r"^/dev/[\w-]+$", dev or ""):
+        return {"ok": False, "log": "недопустимое устройство"}
+    if not os.path.exists(dev):
+        return {"ok": False, "log": "нет такого устройства"}
+    r = _run(["dd", "if=" + dev, "of=/dev/null", "bs=4M", "count=256", "iflag=direct"], timeout=90)
+    m = re.search(r"([\d.,]+)\s*([kMG]?B)/s", r.get("log", ""))
+    if not m:
+        return {"ok": False, "log": "не удалось измерить: " + (r.get("log", "")[-120:])}
+    val = float(m.group(1).replace(",", ".")); unit = m.group(2)
+    mbps = val * {"B": 1e-6, "kB": 1e-3, "MB": 1, "GB": 1e3}.get(unit, 1)
+    return {"ok": True, "read_mbps": round(mbps, 1), "log": "последовательное чтение: %.0f МБ/с" % mbps}
+
+def disk_eject(dev):
+    """Безопасно извлечь съёмный диск: отмонтировать все разделы + снять питание."""
+    if not re.match(r"^/dev/[\w-]+$", dev or ""):
+        return {"ok": False, "log": "недопустимое устройство"}
+    mps = _disk_mountpoints(dev)
+    for mp in mps:
+        if mp in _SYS_MPS or mp == STORAGE or mp.startswith("/mnt/disk") or mp.startswith("/mnt/parity"):
+            return {"ok": False, "log": "это системный или пуловый диск — извлечение запрещено"}
+    for mp in mps:
+        r = _run(["umount", mp], timeout=20)
+        if not r["ok"]:
+            return {"ok": False, "log": "диск занят (%s): %s" % (mp, r["log"][-80:])}
+    po = _run(["udisksctl", "power-off", "-b", dev], timeout=15)
+    return {"ok": True, "log": "можно отключать" + (" (питание снято)" if po["ok"] else " (отмонтировано)")}
+
+def snapraid_status():
+    """Последние sync/scrub из /var/log/snapraid.log (для защиты данных)."""
+    log = _read("/var/log/snapraid.log")
+    st = {"configured": os.path.isfile("/etc/snapraid.conf")}
+    if not log:
+        return st
+    lines = log.splitlines()[-400:]
+    date = None
+    for l in lines:
+        m = re.match(r"=+ (\d{4}-\d\d-\d\d \d\d:\d\d:\d\d) snapraid (sync|scrub)", l)
+        if m:
+            date = m.group(1)
+        r = re.search(r"NASRESULT (sync|scrub) (ok|err)", l)
+        if r:
+            st["last_" + r.group(1)] = {"result": r.group(2), "date": date}
+        if "ABORT: удалено файлов" in l:
+            st["blocked"] = l.strip()[-140:]
+    return st
+
 # --------------------------------------------------------------------------- #
 #  Процессы и службы systemd
 # --------------------------------------------------------------------------- #
@@ -3669,7 +3729,7 @@ class H(BaseHTTPRequestHandler):
             elif p == "/api/fs/zip":
                 self._send_zip(q.get("item") or [], (q.get("name") or ["archive.zip"])[0])
             elif p == "/api/disks":
-                self._json({"disks": disks(), "fs": fs_tools()})
+                self._json({"disks": disks(), "fs": fs_tools(), "snapraid": snapraid_status()})
             elif p == "/api/disk/smart":
                 self._json(smart_detail((q.get("dev") or [""])[0]))
             elif p == "/api/processes":
@@ -3811,6 +3871,10 @@ class H(BaseHTTPRequestHandler):
                 b = self._body(); self._json(disk_mount(b.get("target", ""), b.get("unmount", False)))
             elif p == "/api/disk/smart-test":
                 b = self._body(); self._json(smart_test(b.get("dev", ""), b.get("kind", "short")))
+            elif p == "/api/disk/speedtest":
+                b = self._body(); self._json(disk_speedtest(b.get("dev", "")))
+            elif p == "/api/disk/eject":
+                b = self._body(); self._json(disk_eject(b.get("dev", "")))
             elif p == "/api/disk/label":
                 b = self._body(); dev = b.get("dev", ""); label = b.get("label", "")
                 if not re.match(r"^/dev/[\w-]+$", dev or ""):
