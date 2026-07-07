@@ -2376,10 +2376,32 @@ def save_creds(data):
 #  Файл создаётся лениво самим сервером — установщику ничего делать не нужно.
 # --------------------------------------------------------------------------- #
 AUTH_FILE   = "/etc/nas-os/webauth.json"
+SESS_FILE   = "/etc/nas-os/sessions.json"   # сессии переживают перезапуск службы
 SESSION_TTL = 30 * 86400
-_sessions   = {}                        # token -> unix-время истечения
 _sess_lock  = threading.Lock()
 _login_fail = {"n": 0, "t": 0.0}        # антибрутфорс: пауза после серии неудач
+
+def _load_sessions():
+    try:
+        with open(SESS_FILE) as f:
+            d = json.load(f)
+        now = time.time()
+        return {t: e for t, e in d.items() if e > now}
+    except (OSError, ValueError):
+        return {}
+
+def _save_sessions():
+    try:
+        os.makedirs(os.path.dirname(SESS_FILE), exist_ok=True)
+        tmp = SESS_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(_sessions, f)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, SESS_FILE)
+    except OSError:
+        pass
+
+_sessions   = _load_sessions()          # token -> unix-время истечения
 
 def _pw_hash(password, salt):
     return hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 200_000).hex()
@@ -2416,6 +2438,7 @@ def session_new():
         for k in [k for k, e in _sessions.items() if e < now]:
             _sessions.pop(k, None)
         _sessions[tok] = now + SESSION_TTL
+        _save_sessions()
     return tok
 
 def session_valid(tok):
@@ -2425,14 +2448,19 @@ def session_valid(tok):
     with _sess_lock:
         exp = _sessions.get(tok)
         if not exp or exp < now:
-            _sessions.pop(tok, None)
+            if exp:
+                _sessions.pop(tok, None); _save_sessions()
             return False
-        _sessions[tok] = now + SESSION_TTL      # скользящее продление
+        # скользящее продление; на диск пишем только при заметном сдвиге (не чаще ~раз в сутки)
+        if exp - now < SESSION_TTL - 86400:
+            _sessions[tok] = now + SESSION_TTL
+            _save_sessions()
         return True
 
 def session_drop(tok):
     with _sess_lock:
-        _sessions.pop(tok, None)
+        if _sessions.pop(tok, None) is not None:
+            _save_sessions()
 
 # --------------------------------------------------------------------------- #
 #  Мост к движку nas-wizard.sh api
