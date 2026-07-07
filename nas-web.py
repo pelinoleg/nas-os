@@ -160,19 +160,36 @@ def automount_state():
     st["enabled"] = st["enabled"] and st["installed"]
     return st
 
+def _smart_has_data(j):
+    return bool(j.get("smart_status") or j.get("ata_smart_attributes")
+                or j.get("nvme_smart_health_information_log")
+                or (j.get("temperature") or {}).get("current") is not None)
+
+def _smartctl_json(extra, dev, timeout=12):
+    """smartctl -j с фолбэком типа устройства: голый → -d sat → -d scsi
+    (USB-мосты без -d sat отдают только баннер версии)."""
+    # для типа устройства подбираем варианты; NVMe работает напрямую
+    variants = [[]] if dev.startswith("/dev/nvme") else [[], ["-d", "sat"], ["-d", "scsi"]]
+    last = {}
+    for dt in variants:
+        try:
+            p = subprocess.run(["smartctl", "-j"] + extra + dt + [dev],
+                               capture_output=True, text=True, timeout=timeout)
+            j = json.loads(p.stdout or "{}")
+        except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+            continue
+        last = j
+        if _smart_has_data(j):
+            return j
+    return last
+
 def smart_info(dev):
-    try:
-        p = subprocess.run(["smartctl", "-j", "-H", "-A", dev],
-                          capture_output=True, text=True, timeout=8)
-        j = json.loads(p.stdout or "{}")
-        temp = (j.get("temperature") or {}).get("current")
-        passed = (j.get("smart_status") or {}).get("passed")
-        hours = (j.get("power_on_time") or {}).get("hours")
-        if temp is None and passed is None and hours is None:
-            return None
-        return {"temp": temp, "healthy": passed, "hours": hours}
-    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+    j = _smartctl_json(["-H", "-A"], dev, timeout=8)
+    if not _smart_has_data(j):
         return None
+    return {"temp": (j.get("temperature") or {}).get("current"),
+            "healthy": (j.get("smart_status") or {}).get("passed"),
+            "hours": (j.get("power_on_time") or {}).get("hours")}
 
 def fs_tools():
     """Файловые системы, для которых есть mkfs (что реально можно создать)."""
@@ -278,11 +295,9 @@ def external_volumes():
 #  SMART detail + disk actions
 # --------------------------------------------------------------------------- #
 def smart_detail(dev):
-    try:
-        p = subprocess.run(["smartctl", "-a", "-j", dev], capture_output=True, text=True, timeout=12)
-        j = json.loads(p.stdout or "{}")
-    except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
-        return {"ok": False, "log": "smartctl недоступен (нужен root) или диск не поддерживает SMART"}
+    j = _smartctl_json(["-a"], dev, timeout=12)
+    if not _smart_has_data(j):
+        return {"ok": False, "log": "SMART недоступен: диск/USB-мост не отдаёт данные (или нужен root)"}
     attrs = []
     ata = (j.get("ata_smart_attributes") or {}).get("table")
     if ata:
@@ -326,11 +341,25 @@ def disk_mount(target, unmount=False):
         r["log"] = "размонтировано" if unmount else "смонтировано"
     return r
 
+def _smart_dtype(dev):
+    """Определить рабочий -d тип для устройства (для команд, не читающих JSON)."""
+    if dev.startswith("/dev/nvme"):
+        return []
+    for dt in ([], ["-d", "sat"], ["-d", "scsi"]):
+        try:
+            p = subprocess.run(["smartctl", "-j", "-H"] + dt + [dev],
+                               capture_output=True, text=True, timeout=8)
+            if _smart_has_data(json.loads(p.stdout or "{}")):
+                return dt
+        except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
+            continue
+    return []
+
 def smart_test(dev, kind):
     if not re.match(r"^/dev/[\w-]+$", dev or ""):
         return {"ok": False, "log": "недопустимое устройство"}
     kind = kind if kind in ("short", "long") else "short"
-    return _run(["smartctl", "-t", kind, dev], timeout=20)
+    return _run(["smartctl", "-t", kind] + _smart_dtype(dev) + [dev], timeout=20)
 
 # --------------------------------------------------------------------------- #
 #  Процессы и службы systemd
@@ -767,10 +796,8 @@ def _smart_scan():
     """Один проход smartctl по всем физическим дискам → dict со здоровьем/износом/темп."""
     res = {}
     for dev in _phys_devs():
-        r = _run(["smartctl", "-H", "-A", "-j", dev], timeout=15)
-        try:
-            j = json.loads(r.get("log") or "{}")
-        except ValueError:
+        j = _smartctl_json(["-H", "-A"], dev, timeout=15)
+        if not _smart_has_data(j):
             continue
         passed = (j.get("smart_status") or {}).get("passed")
         realloc = pending = temp = None

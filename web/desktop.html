@@ -303,7 +303,10 @@
   .bar i{display:block;height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent-2));transition:width .6s}
   .krow{display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:9px;gap:12px}.krow:last-child{margin-bottom:0}
   .krow span{color:var(--dim)}.krow b{font-family:var(--mono);font-variant-numeric:tabular-nums}
-  .dline{display:flex;align-items:center;gap:10px;font-size:12.5px;padding:6px 0}
+  .dline{display:flex;align-items:center;gap:9px;font-size:12.5px;padding:6px 0}
+  .dline.sys{opacity:.62}
+  .dline .ddot{width:7px;height:7px;border-radius:50%;flex:none}
+  .dline .dtemp{font-family:var(--mono);font-size:11px;font-weight:650;flex:none}
   .dline:first-of-type{border-top:none}
   .dbadge{font-family:var(--mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;padding:2px 7px;border-radius:6px;background:none;border:1px solid var(--line-2);color:var(--dim);flex:none;font-weight:600;min-width:58px;text-align:center}
   .dbadge.free{color:var(--warn);border-color:var(--warn)}
@@ -489,11 +492,13 @@
   .pe-title{font-weight:680;font-size:15.5px;letter-spacing:-.01em}
   .pe-sub{font-size:12px;color:var(--mut);font-family:var(--mono)}
   .pe-desc{font-size:12.5px;color:var(--dim);line-height:1.5;max-width:44ch;margin:4px 0 12px}
-  /* карточка накопителя */
-  .drv{background:var(--card);border:1px solid transparent;border-radius:var(--r-lg);padding:15px 16px;margin-bottom:11px;box-shadow:var(--sh-sm);transition:border-color .15s}
-  .drv:last-child{margin-bottom:0}.drv:hover{border-color:var(--line-2)}
-  .drv-top{display:flex;align-items:center;gap:14px}
-  .drv-ic{width:46px;height:46px;border-radius:13px;display:grid;place-items:center;color:#fff;flex:none;box-shadow:inset 0 1px 0 rgba(255,255,255,.22)}
+  /* карточки накопителей — сетка, не на всю ширину */
+  .dm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(288px,1fr));gap:11px;align-items:start}
+  .drv{background:var(--card);border:1px solid transparent;border-radius:var(--r-lg);padding:14px 15px;box-shadow:var(--sh-sm);transition:border-color .15s}
+  .drv:hover{border-color:var(--line-2)}
+  .drv.system{opacity:.82}.drv.system:hover{opacity:1}
+  .drv-top{display:flex;align-items:center;gap:12px}
+  .drv-ic{width:40px;height:40px;border-radius:11px;display:grid;place-items:center;color:#fff;flex:none;box-shadow:inset 0 1px 0 rgba(255,255,255,.22)}
   .drv-main{flex:1;min-width:0}
   .drv-name{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-weight:650;font-size:14px}
   .drv-meta{font-size:12px;color:var(--mut);margin-top:3px;font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -1595,7 +1600,7 @@ async function runStream(action,params,con,onDone){
  for(;;){const {done,value}=await rd.read();if(done)break;buf+=dec.decode(value,{stream:true});const ps=buf.split("\n");buf=ps.pop();ps.forEach(push);}
  if(buf)push(buf);if(code===0&&onDone)onDone();
 }
-const ROLE_ORDER={data:0,pool:1,parity:2,removable:3,free:4,system:5};
+const ROLE_ORDER={system:0,data:1,pool:2,parity:3,removable:4,free:5};
 const roleRank=r=>ROLE_ORDER[r]==null?9:ROLE_ORDER[r];
 function driveType(x){
  if(x.tran==="nvme")return{ic:"ssd",label:"NVMe SSD"};
@@ -1645,12 +1650,13 @@ function winDisks(){openWin("__disks","Хранилище",body=>{
   s1.appendChild(pool);body.appendChild(s1);
   const cta=pool.querySelector("#poolcta");if(cta)cta.onclick=()=>location.href="/setup.html";
 
-  /* ── СЕКЦИЯ 2: накопители ── */
+  /* ── СЕКЦИЯ 2: накопители (сетка; системный — первым, приглушённый) ── */
   const s2=el(`<div class="dm-sec"></div>`);
   s2.appendChild(el(`<div class="dm-sectop"><span class="dm-eyebrow">Накопители · ${disks.length}</span></div>`));
-  disks.forEach(x=>s2.appendChild(drvCard(x,load)));
-  if(!disks.length)s2.appendChild(el(`<div class="dempty">${svg("disks",16)} Накопители не обнаружены.</div>`));
-  body.appendChild(s2);
+  const grid=el(`<div class="dm-grid"></div>`);
+  disks.forEach(x=>grid.appendChild(drvCard(x,load)));
+  if(!disks.length)grid.appendChild(el(`<div class="dempty">${svg("disks",16)} Накопители не обнаружены.</div>`));
+  s2.appendChild(grid);body.appendChild(s2);
 
   /* ── пустые слоты картридера ── */
   if(empty.length)body.appendChild(el(`<div class="dm-sec"><div class="dempty">${svg("sd",16)} <span>Пустые слоты картридера (нет карты): <b class="mono">${empty.map(x=>x.name).join(", ")}</b> — вставьте карту, и она появится в списке выше.</span></div></div>`));
@@ -1660,7 +1666,7 @@ function winDisks(){openWin("__disks","Хранилище",body=>{
 },{w:680,h:620});}
 function drvCard(x,reload){
  const u=x.usage,sm=x.smart,hasParts=x.partitions&&x.partitions.length,dt=driveType(x);
- const card=el(`<div class="drv"></div>`);
+ const card=el(`<div class="drv${x.role==="system"?" system":""}"></div>`);
  const top=el(`<div class="drv-top"></div>`);
  top.appendChild(el(`<div class="drv-ic" style="background:${roleColor(x.role)}">${I[dt.ic]||I.disks}</div>`));
  const name=(x.model||dt.label||x.name).replace(/</g,"&lt;");
@@ -1762,7 +1768,7 @@ async function toggleSmart(dev,card,btn){
   box.innerHTML=`<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px">
     <span>Здоровье: <b style="color:${d.healthy?"var(--good)":"var(--danger)"}">${d.healthy?"OK":d.healthy===false?"СБОЙ":"?"}</b></span>
     ${d.temp!=null?`<span>Темп: <b style="color:${tcol(d.temp)}">${d.temp}°C</b></span>`:""}
-    ${d.power_on_hours!=null?`<span>Наработка: <b>${d.power_on_hours} ч</b></span>`:""}
+    ${d.power_on_hours!=null?`<span>Наработка: <b>${d.power_on_hours} ч</b> <span style="color:var(--mut)">≈ ${(d.power_on_hours/24).toFixed(0)} дн${d.power_on_hours>=8760?" · "+(d.power_on_hours/8760).toFixed(1)+" г":""}</span></span>`:""}
     ${d.power_cycles!=null?`<span>Вкл: <b>${d.power_cycles}</b></span>`:""}</div>`;
   if(d.attrs&&d.attrs.length){const rows=d.attrs.slice(0,14).map(a=>`<tr><td>${a.name||a.id||""}</td><td>${a.value!=null?a.value:""}</td><td>${a.raw!=null?a.raw:""}</td></tr>`).join("");
    box.appendChild(el(`<table><tr><th>Атрибут</th><th>Значение</th><th>Raw</th></tr>${rows}</table>`));}
@@ -3468,18 +3474,23 @@ function drawNet(){const cv=document.getElementById("wg-net");if(!cv)return;cons
  line(NETH,cRx,true);   // download — зелёный, с заливкой
  line(NETT,cTx,false);  // upload — красный, только линия
 }
-function paintDiskWidget(disks){const box=document.getElementById("wg-disk");if(!box)return;box.innerHTML="";
- const arr=disks||[];
+const DROLE_COL={system:"var(--mut)",data:"var(--accent)",pool:"var(--good)",parity:"var(--accent-2)",removable:"#8a7dff",free:"var(--warn)"};
+const diskTcol=t=>t==null?"":t>=60?"var(--danger)":t>=50?"var(--warn)":"var(--good)";
+function dRow(role,name,pct,free,temp,sys){
  const barCol=p=>p>=90?"var(--danger)":p>=75?"var(--warn)":"var(--good)";
+ return `<div class="dline${sys?" sys":""}" title="${att((roleName[role]||role)+(temp!=null?" · "+temp+"°C":""))}">
+   <span class="ddot" style="background:${DROLE_COL[role]||"var(--mut)"}"></span>
+   <span class="nm">${esc(name)}${pct!=null?`<div class="dbar"><i style="width:${Math.max(pct,.4)}%;background:${barCol(pct)}"></i></div>`:""}</span>
+   ${temp!=null?`<span class="dtemp" style="color:${diskTcol(temp)}">${temp}°</span>`:""}
+   <span class="pc">${free}</span></div>`;}
+function paintDiskWidget(disks){const box=document.getElementById("wg-disk");if(!box)return;
+ const arr=(disks||[]).slice().sort((a,b)=>roleRank(a.role)-roleRank(b.role));
+ let h="";
  if(LAST&&LAST.disk_pool&&LAST.disk_pool.path==="/mnt/storage"){const u=LAST.disk_pool;
-  box.appendChild(el(`<div class="dline"><span class="dbadge data">пул</span>
-   <span class="nm">storage<div class="dbar"><i style="width:${u.pct}%;background:${barCol(u.pct)}"></i></div></span>
-   <span class="pc">${fmtB(u.total-u.used)} своб.</span></div>`));}
- arr.slice(0,6).forEach(d=>{const u=d.usage,pct=u?u.pct:null;
-  box.appendChild(el(`<div class="dline"><span class="dbadge ${d.role}">${roleName[d.role]||d.role}</span>
-   <span class="nm">${esc(d.label||d.name)}${pct!=null?`<div class="dbar"><i style="width:${pct}%;background:${barCol(pct)}"></i></div>`:""}</span>
-   <span class="pc">${u?fmtB(u.total-u.used)+" своб.":d.size}</span></div>`));});
- if(!arr.length)box.innerHTML=`<div style="color:var(--mut);font-size:12px">Диски не найдены</div>`;
+  h+=dRow("pool","storage",u.pct,fmtB(u.total-u.used)+" своб.",null,false);}
+ arr.slice(0,6).forEach(d=>{const u=d.usage,pct=u?u.pct:null,tmp=d.smart&&d.smart.temp!=null?d.smart.temp:null;
+  h+=dRow(d.role,d.label||d.name,pct,u?fmtB(u.total-u.used)+" своб.":(d.size||""),tmp,d.role==="system");});
+ box.innerHTML=h||`<div style="color:var(--mut);font-size:12px">Диски не найдены</div>`;
 }
 
 /* tray + clock + power */
