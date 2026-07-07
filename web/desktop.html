@@ -78,9 +78,9 @@
   /* таскбар открытых окон в верхней панели */
   .winbar{flex:1;min-width:0;display:flex;align-items:center;gap:6px;overflow-x:auto;padding:0 6px;height:100%;scrollbar-width:none}
   .winbar::-webkit-scrollbar{height:0}
-  .wb-pill{display:inline-flex;align-items:center;gap:7px;max-width:170px;padding:5px 12px;border:none;border-radius:999px;background:transparent;color:var(--mut);font-size:12px;font-weight:550;cursor:pointer;transition:.13s;flex:none}
+  .wb-pill{display:inline-flex;align-items:center;gap:7px;max-width:170px;padding:5px 12px 6px;border:none;border-bottom:2px solid transparent;border-radius:8px 8px 0 0;background:transparent;color:var(--mut);font-size:12px;font-weight:550;cursor:pointer;transition:.13s;flex:none}
   .wb-pill:hover{background:var(--sel);color:var(--text)}
-  .wb-pill.on{background:var(--sel);color:var(--accent);font-weight:660;box-shadow:var(--sh-sm)}
+  .wb-pill.on{background:var(--sel);color:var(--accent);font-weight:660;border-bottom-color:var(--accent)}
   .wb-pill.min{opacity:.5}
   .wb-pill.min .wb-t{font-style:italic}
   .wb-pill .wb-ic{display:flex;flex:none;opacity:.65}
@@ -200,8 +200,10 @@
   .apps{position:absolute;inset:0 398px 0 0;padding:32px 34px;overflow:auto;
     display:grid;grid-template-columns:repeat(auto-fill,96px);gap:18px 8px;align-content:start}
   .rail{position:absolute;top:0;right:0;bottom:0;width:398px;padding:26px 26px 26px 26px;overflow-y:auto;
-    display:flex;flex-direction:column;gap:16px}
+    display:flex;flex-direction:column;gap:14px}
   .rail::-webkit-scrollbar{width:0}
+  /* тонкая линия-разделитель между виджетами (модулями) */
+  .wdg-sep{height:1px;flex:none;margin:0 6px;background:linear-gradient(90deg,transparent,var(--line-2) 15%,var(--line-2) 85%,transparent)}
   /* виджет «Носители» — компактный список томов вне пула */
   .vline{display:flex;align-items:center;gap:9px;padding:7px 0;border-top:1px solid var(--line);cursor:pointer;font-size:12.5px}
   .vline:first-child{border-top:none}
@@ -211,8 +213,8 @@
   .vline.off .vn{color:var(--dim)}
   .vline .vs{font-family:var(--mono);font-size:11.5px;color:var(--mut);flex:none}
   .vline .vm{font-size:10.5px;color:var(--accent);border:1px solid var(--accent-line);border-radius:999px;padding:1px 8px;flex:none}
-  .vline .vx{border:none;background:none;color:var(--mut);display:flex;visibility:hidden;padding:2px;cursor:pointer;flex:none}
-  .vline:hover .vx{visibility:visible}.vline .vx:hover{color:var(--danger)}
+  .vline .vx{border:none;background:none;color:var(--mut);display:flex;padding:2px;cursor:pointer;flex:none}
+  .vline .vx:hover{color:var(--danger)}
   .vline:hover .vn{color:var(--accent)}
   /* мини-бар заполнения в виджете дисков */
   .dbar{height:4px;border-radius:999px;background:var(--track,var(--line-2));margin-top:4px;overflow:hidden}
@@ -328,7 +330,9 @@
   .dock .di{position:relative;width:calc(40px*var(--dock-icon,1));height:calc(40px*var(--dock-icon,1));border-radius:13px;display:grid;place-items:center;box-shadow:0 2px 6px rgba(0,0,0,.18)}
   .dock .di svg{filter:drop-shadow(0 1px 2px rgba(0,0,0,.2));width:calc(22px*var(--dock-icon,1));height:calc(22px*var(--dock-icon,1))}
   .dock .dl{font-size:10px;font-weight:560;color:var(--dim);white-space:nowrap;letter-spacing:-.01em;max-width:66px;overflow:hidden;text-overflow:ellipsis}
-  .dock .run{position:absolute;top:-3px;right:-3px;width:9px;height:9px;border-radius:50%;background:var(--accent);border:2px solid var(--glass-2)}
+  /* индикатор запущенного приложения — снизу по центру, читаем на любом фоне дока */
+  .dock .run{position:absolute;left:50%;bottom:-3px;transform:translateX(-50%);width:5px;height:5px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 1.5px var(--dock-bg,var(--glass-2))}
+  .dock.pos-left .run,.dock.pos-right .run{left:auto;bottom:auto;top:50%;right:-3px;transform:translateY(-50%)}
   .dock .sep{width:1px;background:var(--line-2);margin:6px 4px;align-self:stretch;flex:none}
 
   /* windows */
@@ -613,6 +617,7 @@
   .fm-fav-i .fn{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .fm-fav-i .fx{border:none;background:none;color:var(--mut);display:flex;visibility:hidden;padding:2px;cursor:pointer}
   .fm-fav-i:hover .fx{visibility:visible}.fm-fav-i .fx:hover{color:var(--danger)}
+  .fm-fav-i .fx.fx-eject{visibility:visible;color:var(--accent)}
   /* плитки */
   .fm-list.fm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:6px;align-content:start;padding:6px 2px}
   .fm-tile{position:relative;display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 6px 10px;border-radius:var(--r-md);cursor:pointer;border:1px solid transparent}
@@ -1362,11 +1367,23 @@ function focusTop(){let top=null,tz=-1;for(const k in OPEN){const el=OPEN[k];if(
 function closeW(id){const w=OPEN[id];if(w){persistWin(w);try{w._term&&w._term.dispose&&w._term.dispose();}catch(e){}try{w._term&&w._term.ws&&w._term.ws.close();}catch(e){}try{clearInterval(w._pi);}catch(e){}w.remove();delete OPEN[id];focusTop();renderDock();renderWinbar();}}
 /* таскбар открытых окон (верхняя панель) + Exposé */
 function winMeta(){const m={};INTERNAL.forEach(a=>m[a.id]={ic:a.ic,name:a.name});m["__cockpit"]={ic:"grid",name:"Cockpit"};return m;}
+function closeOthers(keepId){Object.keys(OPEN).forEach(id=>{if(id!==keepId)closeW(id);});}
+function winCtxMenu(id,x,y){const w=OPEN[id];if(!w)return;const min=w.style.display==="none";
+ const others=Object.keys(OPEN).length>1;
+ showMenu(x,y,[
+  {label:min?"Показать":"На передний план",ic:svg(min?"eye":"grid",16),act:()=>{if(min)w.style.display="flex";focus(w);}},
+  ...(min?[]:[{label:"Свернуть",ic:svg("shrink",16),act:()=>{w.style.display="none";w.classList.remove("wfocus");focusTop();renderWinbar();}}]),
+  {sep:1},
+  ...(others?[{label:"Закрыть все, кроме этого",ic:svg("x",16),act:()=>closeOthers(id)},
+              {label:"Закрыть все окна",ic:svg("x",16),dng:1,act:()=>Object.keys(OPEN).forEach(closeW)}]:[]),
+  {label:"Закрыть окно",ic:svg("x",16),dng:1,act:()=>closeW(id)},
+ ]);}
 function renderWinbar(){const wb=document.getElementById("winbar");if(!wb)return;const meta=winMeta();wb.innerHTML="";
  Object.keys(OPEN).forEach(id=>{const w=OPEN[id];const min=w.style.display==="none";const act=w.classList.contains("wfocus")&&!min;
   const title=w._title||(meta[id]&&meta[id].name)||id;const ic=meta[id]&&meta[id].ic;
   const p=el(`<button class="wb-pill${act?" on":""}${min?" min":""}" title="${att(title)}">${ic?`<span class="wb-ic">${svg(ic,14)}</span>`:""}<span class="wb-t">${esc(title)}</span></button>`);
   p.onclick=()=>{if(min)w.style.display="flex";focus(w);};
+  p.oncontextmenu=e=>{e.preventDefault();winCtxMenu(id,e.clientX,e.clientY);};
   wb.appendChild(p);});}
 let EXPO=false,EXPO_ELS=[];
 function toggleExpo(){EXPO?exitExpo():enterExpo();}
@@ -1458,6 +1475,7 @@ function renderDock(){
  const d=document.getElementById("dock");if(!d)return;d.innerHTML="";
  dockItems().forEach(a=>{const b=el(`<button title="${esc(a.name)}" draggable="true" data-did="${a.id}"><span class="di" style="background:${a.color}">${I[a.ic]}${OPEN[a.id]?'<span class="run"></span>':''}</span><span class="dl">${esc(a.name)}</span></button>`);
   b.onclick=a.fn;
+  if(OPEN[a.id])b.oncontextmenu=e=>{e.preventDefault();winCtxMenu(a.id,e.clientX,e.clientY);};
   b.ondragstart=()=>b.classList.add("dragging");
   b.ondragend=()=>{b.classList.remove("dragging");SET.dockOrder=[...d.querySelectorAll("button[data-did]")].map(x=>x.dataset.did);saveSettings();};
   d.appendChild(b);});
@@ -2535,7 +2553,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
  function renderVols(){const wrap=body.querySelector("#fVolsWrap"),c=body.querySelector("#fVols");if(!c)return;
    wrap.style.display=VOLS.length?"":"none";c.innerHTML="";
    VOLS.forEach(v=>{const on=v.mounted&&(cwd===v.mount||cwd.startsWith(v.mount+"/"));
-     const it=el(`<div class="fm-fav-i${on?" on":""}" title="${att(v.dev+" · "+(v.fstype||"")+" · "+(v.size||"")+(v.mounted?"":" · не смонтирован"))}"><span class="fi" style="${v.mounted?"":"opacity:.45"}">${svg(volIcon(v),15)}</span><span class="fn">${esc(v.label||v.dev)}</span>${v.mounted?`<button class="fx" title="Извлечь">${svg("eject",13)}</button>`:""}</div>`);
+     const it=el(`<div class="fm-fav-i${on?" on":""}" title="${att(v.dev+" · "+(v.fstype||"")+" · "+(v.size||"")+(v.mounted?"":" · не смонтирован"))}"><span class="fi" style="${v.mounted?"":"opacity:.45"}">${svg(volIcon(v),15)}</span><span class="fn">${esc(v.label||v.dev)}</span>${v.mounted?`<button class="fx fx-eject" title="Извлечь">${svg("eject",13)}</button>`:""}</div>`);
      const go=async()=>{if(v.mounted){load(v.mount);return;}
        toast("Монтирую "+(v.label||v.dev)+"…");
        const r=await api("/api/disk/mount-dev",{method:"POST",body:JSON.stringify({dev:v.dev})});
@@ -3272,7 +3290,7 @@ function railWidgets(){let cfg=(SET.widgets&&SET.widgets.length)?SET.widgets.sli
  return cfg;}
 function renderRail(){const rail=document.getElementById("rail");if(!rail)return;
  const list=railWidgets().filter(w=>w.on);
- rail.innerHTML=list.map(w=>{const d=WIDGET_DEFS[w.id];return `<div class="wdg"><h4>${svg(d.ic,15)} ${d.name} ${d.extra||""}</h4>${d.body}</div>`;}).join("")
+ rail.innerHTML=list.map(w=>{const d=WIDGET_DEFS[w.id];return `<div class="wdg"><h4>${svg(d.ic,15)} ${d.name} ${d.extra||""}</h4>${d.body}</div>`;}).join('<div class="wdg-sep"></div>')
    ||`<div style="color:var(--mut);font-size:12px;padding:10px 4px">Виджеты выключены — включите в Настройках → Оформление.</div>`;
  const md=document.getElementById("more-disks");if(md)md.onclick=()=>winDisks();
  const mdk=document.getElementById("more-docker");if(mdk)mdk.onclick=()=>winServices();
