@@ -546,6 +546,10 @@
   .dd-spd .dd-spd-ic{display:flex;color:var(--accent)}
   .dd-spd b{color:var(--text)}
   .dd-spd .dd-spd-d{color:var(--mut);font-size:11.5px}
+  .dd-coll{display:flex;align-items:center;gap:6px;width:100%;border:none;background:transparent;cursor:pointer;padding:4px 0;border-radius:7px}
+  .dd-coll:hover{color:var(--dim)}
+  .dd-coll .dd-chev{font-size:9px}
+  .dd-coll .dd-coll-hint{margin-left:auto;font-size:9.5px;letter-spacing:0;text-transform:none;color:var(--mut)}
   .dd-grp{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--mut);font-family:var(--mono);margin:20px 0 8px}
   .dd-smk{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden;margin-bottom:12px}
   .dd-smk>div{background:var(--card);padding:9px 12px;display:flex;flex-direction:column;gap:2px}
@@ -2027,11 +2031,16 @@ function diskDetail(x,reload){
  box.appendChild(acts);
  // разделы
  if(hasParts){box.appendChild(el(`<div class="dd-grp">Разделы</div>`));const pw=el(`<div class="dparts"></div>`);const ro=x.role==="system";x.partitions.forEach(pt=>pw.appendChild(partRow(pt,reload,ro)));box.appendChild(pw);}
- // SMART — грузим лениво
- box.appendChild(el(`<div class="dd-grp">SMART</div>`));
- const sbox=el(`<div class="dd-smart"><div style="color:var(--mut);font-size:12px">загрузка SMART…</div></div>`);
+ // SMART — по умолчанию свёрнут; данные грузим только при развороте
+ const sg=el(`<button class="dd-grp dd-coll">${svg("heart",12)} SMART и наработка <span class="dd-chev">▸</span><span class="dd-coll-hint">${sm&&sm.healthy===false?"сбой!":"развернуть"}</span></button>`);
+ box.appendChild(sg);
+ const sbox=el(`<div class="dd-smart" style="display:none"><div style="color:var(--mut);font-size:12px">загрузка SMART…</div></div>`);
  box.appendChild(sbox);
- api("/api/disk/smart?dev="+encodeURIComponent(x.path)).then(d=>{
+ let smLoaded=false;
+ sg.onclick=()=>{const open=sbox.style.display==="none";
+  sbox.style.display=open?"":"none";sg.querySelector(".dd-chev").textContent=open?"▾":"▸";
+  if(open&&!smLoaded){smLoaded=true;loadSmart();}};
+ const loadSmart=()=>api("/api/disk/smart?dev="+encodeURIComponent(x.path)).then(d=>{
    if(!d||!d.ok){sbox.innerHTML=`<div style="color:var(--mut);font-size:12px">${esc((d&&d.log)||"SMART недоступен")}</div>`;return;}
    const poh=d.power_on_hours;
    sbox.innerHTML=`<div class="dd-smk">
@@ -3441,6 +3450,48 @@ function winTrash(){openWin("__trash","Корзина",body=>{
    const ta=body.querySelector("#trAuto");if(ta)ta.onchange=async()=>{await api("/api/maintenance",{method:"POST",body:JSON.stringify({maintenance:{trash_days:+ta.value}})});toast(+ta.value?("Авто-очистка: старше "+ta.value+" дн"):"Авто-очистка выключена");};};
  draw();
 },{w:640,h:540});}
+/* --- settings: Бэкап настроек --- */
+function backupTab(tc){
+ tc.innerHTML=`<h3 class="set-title">Бэкап настроек</h3>
+  <p class="set-sub">Полный слепок настроек NAS-OS: панель и оформление, уведомления с токенами, веб-пароль, шары Samba, конфиги визарда и USB-импорта, compose-файлы docker-стеков. fstab и snapraid.conf кладутся справочно и при восстановлении не трогаются.</p>
+  <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+    <button class="btn sm pri" id="bkMake">${svg("save",13)} Создать бэкап сейчас</button>
+    <button class="btn sm" id="bkUp">${svg("upload",13)} Восстановить из файла…</button>
+    <input type="file" id="bkFile" accept=".gz,application/gzip" style="display:none"></div>
+  <div class="mon-note" id="bkNote">загрузка…</div>
+  <div id="bkList"></div>`;
+ const list=tc.querySelector("#bkList"),note=tc.querySelector("#bkNote");
+ const load=async()=>{const r=await api("/api/settings-backup");if(!r||!r.ok)return;
+  note.textContent=`Папка: ${r.dir} · автоматически раз в неделю · хранится ${r.keep} последних`;
+  list.innerHTML=(r.list&&r.list.length)?"":`<div class="dempty">${svg("save",16)} Бэкапов ещё нет — нажмите «Создать»</div>`;
+  (r.list||[]).forEach(b=>{
+   const row=el(`<div class="stk-cont" style="margin-bottom:6px"><span class="nico">${svg("save",14)}</span><span class="cn">${esc(b.name)}</span><span class="cstat">${ruWhen(b.t)} · ${fmtB(b.size)}</span>
+     <span style="flex:none;display:flex;gap:4px">
+       <button class="iconbtn" data-a="dl" title="Скачать на компьютер">${svg("download",14)}</button>
+       <button class="iconbtn" data-a="rs" title="Восстановить из этого бэкапа">${svg("arrowup",14)}</button>
+       <button class="iconbtn dng" data-a="del" title="Удалить">${svg("trash",14)}</button></span></div>`);
+   row.querySelector('[data-a="dl"]').onclick=()=>{location.href="/api/settings-backup/get?name="+encodeURIComponent(b.name);};
+   row.querySelector('[data-a="rs"]').onclick=()=>confirmDlg("Восстановить настройки?",`Текущие настройки будут перезаписаны бэкапом от ${ruWhen(b.t)}. После восстановления страница перезагрузится.`,async()=>{
+     const w=await api("/api/settings-backup/restore",{method:"POST",body:JSON.stringify({name:b.name})});
+     toast(LIVE?((w&&w.ok)?w.log:("Ошибка: "+((w&&w.log)||""))):"Демо");
+     if(w&&w.ok)setTimeout(()=>location.reload(),1400);},true);
+   row.querySelector('[data-a="del"]').onclick=()=>confirmDlg("Удалить бэкап?",esc(b.name),async()=>{
+     await api("/api/settings-backup/delete",{method:"POST",body:JSON.stringify({name:b.name})});load();},true);
+   list.appendChild(row);});};
+ tc.querySelector("#bkMake").onclick=async function(){this.disabled=true;this.textContent="создаю…";
+  const r=await api("/api/settings-backup/make",{method:"POST",body:"{}"});
+  this.disabled=false;this.innerHTML=svg("save",13)+" Создать бэкап сейчас";
+  toast(LIVE?((r&&r.ok)?`Бэкап создан (${r.files} файлов)`:("Ошибка: "+((r&&r.log)||""))):"Демо");load();};
+ const fi=tc.querySelector("#bkFile");
+ tc.querySelector("#bkUp").onclick=()=>fi.click();
+ fi.onchange=()=>{const f=fi.files&&fi.files[0];if(!f)return;
+  confirmDlg("Восстановить из файла?",`«${esc(f.name)}» перезапишет текущие настройки. После восстановления страница перезагрузится.`,async()=>{
+   let w=null;try{w=await(await fetch("/api/settings-backup/upload",{method:"POST",body:f})).json();}catch(e){}
+   toast(w&&w.ok?w.log:("Ошибка: "+((w&&w.log)||"не удалось загрузить")));
+   if(w&&w.ok)setTimeout(()=>location.reload(),1400);},true);
+  fi.value="";};
+ load();
+}
 let SYSC=null, PENDING_REBOOT=false;
 function winSettings(initTab){openWin("__set","Настройки",body=>{
  body.style.display="flex";body.style.padding="0";
@@ -3452,9 +3503,10 @@ function winSettings(initTab){openWin("__set","Настройки",body=>{
   {id:"network",name:"Сеть",ic:"net"},
   {id:"security",name:"Безопасность",ic:"shield"},
   {id:"usb",name:"USB-импорт",ic:"usb"},
+  {id:"backup",name:"Бэкап настроек",ic:"save"},
   {id:"pi",name:"Raspberry Pi",ic:"cpu"},
  ];
- const FN={look:lookTab,notify:notifyTab,system:systemTab,network:networkTab,security:securityTab,usb:usbTab,pi:piTab};
+ const FN={look:lookTab,notify:notifyTab,system:systemTab,network:networkTab,security:securityTab,usb:usbTab,backup:backupTab,pi:piTab};
  const render=()=>{
   body.innerHTML=`<div class="set-nav">${CATS.map(c=>`<button data-t="${c.id}" class="${tab===c.id?"on":""}">${svg(c.ic,17)}<span>${c.name}</span></button>`).join("")}</div><div class="set-pane" id="tc"></div>`;
   body.querySelectorAll(".set-nav button").forEach(b=>b.onclick=()=>{tab=b.dataset.t;render();});

@@ -1999,7 +1999,7 @@ def _trash_autoclean(days):
     return removed
 
 def maintenance_daily():
-    """Раз в сутки: авто-очистка корзины старше N дней."""
+    """Раз в сутки: авто-очистка корзины + еженедельный авто-бэкап настроек."""
     global _maint_last
     now = time.time()
     if now - _maint_last < 86400:
@@ -2009,6 +2009,188 @@ def maintenance_daily():
         _trash_autoclean(load_maintenance().get("trash_days", 0))
     except Exception:
         pass
+    try:
+        _settings_backup_auto()
+    except Exception:
+        pass
+
+# --------------------------------------------------------------------------- #
+#  Бэкап ВСЕХ настроек: nas-config (без журналов/истории), конфиги визарда,
+#  веб-пароль, samba, compose-файлы стеков; fstab/snapraid — справочно
+#  (не восстанавливаются автоматически: железо может отличаться).
+# --------------------------------------------------------------------------- #
+import tarfile, io
+
+BACKUP_KEEP = 10
+_BK_NAME_RE = re.compile(r"^nas-settings-[\w.-]+\.tar\.gz$")
+# archive-префикс → (источник, восстанавливать ли автоматически)
+_BK_EXCLUDE = ("events.json", "history.json", "history-long.json", "sessions.json")
+
+def settings_backup_dir():
+    d = os.path.join(STORAGE, "backups", "settings") if os.path.ismount(STORAGE) \
+        else "/var/backups/nas-os"
+    try:
+        os.makedirs(d, exist_ok=True)
+    except OSError:
+        pass
+    return d
+
+def _bk_add_file(tar, src, arc):
+    try:
+        if os.path.isfile(src) and os.path.getsize(src) <= 8 * 1024 * 1024:
+            tar.add(src, arcname=arc, recursive=False)
+            return arc
+    except OSError:
+        pass
+    return None
+
+def _bk_sources():
+    """(src, arcname) всех файлов бэкапа. Каталоги обходим целиком —
+    будущие настройки попадут в бэкап автоматически."""
+    out = []
+    for base, arcroot in ((NAS_CONFIG, "nas-config"), ("/etc/nas-wizard", "etc/nas-wizard")):
+        if os.path.isdir(base):
+            for root, _, files in os.walk(base):
+                for fn in files:
+                    if fn in _BK_EXCLUDE or fn.endswith(".tmp"):
+                        continue
+                    p = os.path.join(root, fn)
+                    out.append((p, arcroot + "/" + os.path.relpath(p, base)))
+    for p, arc in (("/etc/nas-os/webauth.json", "etc/nas-os/webauth.json"),
+                   ("/etc/samba/smb.conf", "etc/samba/smb.conf"),
+                   ("/var/lib/samba/private/passdb.tdb", "var/lib/samba/private/passdb.tdb"),
+                   ("/etc/fstab", "reference/etc/fstab"),
+                   ("/etc/snapraid.conf", "reference/etc/snapraid.conf"),
+                   ("/etc/exports", "reference/etc/exports")):
+        out.append((p, arc))
+    if os.path.isdir(STACKS_DIR):            # compose/env стеков (не данные томов)
+        for root, _, files in os.walk(STACKS_DIR):
+            for fn in files:
+                if re.match(r"^(compose|docker-compose)\.ya?ml$|^\.env$|\.(yml|yaml|env|txt|md)$", fn):
+                    p = os.path.join(root, fn)
+                    out.append((p, "opt/stacks/" + os.path.relpath(p, STACKS_DIR)))
+    return out
+
+def settings_backup_make(auto=False):
+    d = settings_backup_dir()
+    name = "nas-settings-%s.tar.gz" % time.strftime("%Y%m%d-%H%M%S")
+    path = os.path.join(d, name)
+    added = []
+    try:
+        with tarfile.open(path, "w:gz") as tar:
+            for src, arc in _bk_sources():
+                if _bk_add_file(tar, src, arc):
+                    added.append(arc)
+            mf = json.dumps({"version": 1, "ts": int(time.time()),
+                             "host": socket.gethostname(), "files": added},
+                            ensure_ascii=False).encode()
+            ti = tarfile.TarInfo("manifest.json"); ti.size = len(mf); ti.mtime = int(time.time())
+            tar.addfile(ti, io.BytesIO(mf))
+    except OSError as e:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        return {"ok": False, "log": str(e)}
+    # ротация
+    try:
+        old = sorted(f for f in os.listdir(d) if _BK_NAME_RE.match(f))
+        for f in old[:-BACKUP_KEEP]:
+            os.remove(os.path.join(d, f))
+    except OSError:
+        pass
+    try:
+        log_event("action", "Бэкап настроек создан" + (" (по расписанию)" if auto else ""),
+                  "%s · файлов: %d" % (path, len(added)), "ok", kind="action", desk=False)
+    except Exception:
+        pass
+    return {"ok": True, "name": name, "files": len(added), "dir": d}
+
+def settings_backup_list():
+    d = settings_backup_dir()
+    out = []
+    try:
+        for f in sorted(os.listdir(d), reverse=True):
+            if _BK_NAME_RE.match(f):
+                st = os.stat(os.path.join(d, f))
+                out.append({"name": f, "size": st.st_size, "t": int(st.st_mtime)})
+    except OSError:
+        pass
+    return {"ok": True, "dir": d, "auto": "weekly", "keep": BACKUP_KEEP, "list": out}
+
+def settings_backup_restore(path):
+    """Восстановить из архива. Проверяем каждого члена: только обычные файлы,
+    без ../, только известные префиксы, разумный размер. reference/* не трогаем."""
+    global _events, _history, _history_long
+    # префиксы архива → куда восстанавливать (STACKS_DIR определяется ниже по файлу)
+    restore_map = [("etc/nas-wizard/", "/etc/nas-wizard"),
+                   ("etc/nas-os/webauth.json", "/etc/nas-os/webauth.json"),
+                   ("etc/samba/smb.conf", "/etc/samba/smb.conf"),
+                   ("var/lib/samba/private/passdb.tdb", "/var/lib/samba/private/passdb.tdb"),
+                   ("opt/stacks/", STACKS_DIR)]
+    restored, skipped = [], []
+    try:
+        with tarfile.open(path, "r:gz") as tar:
+            for m in tar:
+                nm = m.name.lstrip("./")
+                if not m.isreg() or ".." in nm.split("/") or nm.startswith("/"):
+                    continue
+                if m.size > 16 * 1024 * 1024:
+                    skipped.append(nm); continue
+                dest = None
+                if nm.startswith("nas-config/"):
+                    dest = os.path.join(NAS_CONFIG, nm[len("nas-config/"):])
+                else:
+                    for pref, root in restore_map:
+                        if nm == pref:
+                            dest = root; break
+                        if pref.endswith("/") and nm.startswith(pref):
+                            dest = os.path.join(root, nm[len(pref):]); break
+                if not dest:
+                    if nm != "manifest.json":
+                        skipped.append(nm)
+                    continue
+                src = tar.extractfile(m)
+                if not src:
+                    continue
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                with open(dest, "wb") as f:
+                    shutil.copyfileobj(src, f)
+                if "webauth" in dest or "notify.conf" in dest:
+                    os.chmod(dest, 0o600)
+                restored.append(nm)
+    except (OSError, tarfile.TarError) as e:
+        return {"ok": False, "log": "плохой архив: %s" % e}
+    if not restored:
+        return {"ok": False, "log": "в архиве нет файлов настроек NAS-OS"}
+    # сбросить кэши в памяти, применить сон дисков
+    with _events_lock:
+        _events = None
+    with _hist_lock:
+        _history = None; _history_long = None
+    try:
+        apply_spindown_all()
+    except Exception:
+        pass
+    try:
+        log_event("action", "Настройки восстановлены из бэкапа",
+                  "файлов: %d%s" % (len(restored), (" · пропущено: %d" % len(skipped)) if skipped else ""),
+                  "warn", kind="action", desk=False)
+    except Exception:
+        pass
+    return {"ok": True, "restored": len(restored), "skipped": len(skipped),
+            "log": "восстановлено файлов: %d — обновите страницу" % len(restored)}
+
+def _settings_backup_auto():
+    """Раз в неделю: свежий авто-бэкап (зовётся из maintenance_daily)."""
+    d = settings_backup_dir()
+    try:
+        latest = max((os.path.getmtime(os.path.join(d, f)) for f in os.listdir(d)
+                      if _BK_NAME_RE.match(f)), default=0)
+    except OSError:
+        latest = 0
+    if time.time() - latest >= 7 * 86400:
+        settings_backup_make(auto=True)
 
 def monitor_loop():
     while True:
@@ -4410,6 +4592,15 @@ class H(BaseHTTPRequestHandler):
             elif p == "/api/events":
                 self._json(events_list((q.get("after") or ["0"])[0],
                                        (q.get("limit") or ["400"])[0]))
+            elif p == "/api/settings-backup":
+                self._json(settings_backup_list())
+            elif p == "/api/settings-backup/get":
+                nm = (q.get("name") or [""])[0]
+                fp = os.path.join(settings_backup_dir(), nm)
+                if not _BK_NAME_RE.match(nm) or not os.path.isfile(fp):
+                    self._json({"ok": False, "log": "нет такого бэкапа"}, 404)
+                else:
+                    self._sendraw(fp, True)
             elif p == "/api/health":
                 self._json(health_report())
             elif p == "/api/desktop":
@@ -4604,6 +4795,42 @@ class H(BaseHTTPRequestHandler):
                 self._json({"ok": True, "id": eid})
             elif p == "/api/fs/fetch/cancel":
                 b = self._body(); self._json(fs_fetch_cancel(b.get("id", "")))
+            elif p == "/api/settings-backup/make":
+                self._json(settings_backup_make())
+            elif p == "/api/settings-backup/restore":
+                b = self._body(); nm = b.get("name", "")
+                fp = os.path.join(settings_backup_dir(), nm)
+                if not _BK_NAME_RE.match(nm) or not os.path.isfile(fp):
+                    self._json({"ok": False, "log": "нет такого бэкапа"}, 404)
+                else:
+                    self._json(settings_backup_restore(fp))
+            elif p == "/api/settings-backup/delete":
+                b = self._body(); nm = b.get("name", "")
+                fp = os.path.join(settings_backup_dir(), nm)
+                if not _BK_NAME_RE.match(nm) or not os.path.isfile(fp):
+                    self._json({"ok": False, "log": "нет такого бэкапа"}, 404)
+                else:
+                    os.remove(fp); self._json({"ok": True})
+            elif p == "/api/settings-backup/upload":
+                # восстановление из файла с компьютера: тело запроса = tar.gz
+                n = int(self.headers.get("Content-Length", 0) or 0)
+                if n <= 0 or n > 64 * 1024 * 1024:
+                    self._json({"ok": False, "log": "плохой размер архива"}, 400)
+                else:
+                    tmp = os.path.join(settings_backup_dir(), ".upload.tmp")
+                    with open(tmp, "wb") as f:
+                        remaining = n
+                        while remaining > 0:
+                            chunk = self.rfile.read(min(262144, remaining))
+                            if not chunk:
+                                break
+                            f.write(chunk); remaining -= len(chunk)
+                    r = settings_backup_restore(tmp) if remaining == 0 else {"ok": False, "log": "обрыв загрузки"}
+                    try:
+                        os.remove(tmp)
+                    except OSError:
+                        pass
+                    self._json(r)
             elif p == "/api/unit/save":
                 b = self._body(); self._json(unit_write(b.get("name", ""), b.get("content", "")))
             elif p == "/api/unit/create":
