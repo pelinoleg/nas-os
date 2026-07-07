@@ -385,6 +385,7 @@ def _disk_mountpoints(dev):
 _SYS_MPS = ("/", "/boot", "/boot/firmware", "/var", "/home", "/usr")
 
 SPEEDTEST_FILE = os.path.join(NAS_CONFIG, "speedtest.json")
+_speed_lock = threading.Lock()
 
 def _speedtest_load():
     try:
@@ -452,12 +453,13 @@ def disk_speedtest(dev):
            "t": int(time.time())}
     try:
         os.makedirs(NAS_CONFIG, exist_ok=True)
-        saved = _speedtest_load()
-        saved[_speedtest_key(dev)] = res
-        tmp = SPEEDTEST_FILE + ".tmp"
-        with open(tmp, "w") as f:
-            json.dump(saved, f)
-        os.replace(tmp, SPEEDTEST_FILE)
+        with _speed_lock:                 # два одновременных теста не должны терять записи
+            saved = _speedtest_load()
+            saved[_speedtest_key(dev)] = res
+            tmp = SPEEDTEST_FILE + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(saved, f)
+            os.replace(tmp, SPEEDTEST_FILE)
     except OSError:
         pass
     log = "чтение: %.0f МБ/с" % read_mbps
@@ -1132,11 +1134,14 @@ def log_event(event, title, msg="", lvl=None, kind=None, desk=None):
     with _events_lock:
         ev = _events_load()
         items = ev["items"]
-        # дедуп: то же некритичное событие с тем же заголовком за 4 ч → счётчик ×N
-        # (критичные всегда добавляются заново — это и есть периодическое напоминание)
+        # дедуп: то же некритичное событие с тем же заголовком за 4 ч → счётчик ×N.
+        # Склеиваем ТОЛЬКО непрочитанные записи: если пользователь уже прочитал
+        # старую, повтор должен создать новую (иначе бейдж/плашка не оживут).
+        # Критичные всегда добавляются заново — это и есть периодическое напоминание.
         if lvl != "crit":
             for it in reversed(items[-40:]):
                 if it.get("event") == event and it.get("title") == title \
+                        and it.get("id", 0) > ev.get("seen", 0) \
                         and now - it.get("t", 0) <= 4 * 3600:
                     it["n"] = it.get("n", 1) + 1
                     it["t2"] = now

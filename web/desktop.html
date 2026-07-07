@@ -1742,8 +1742,9 @@ async function historyTab(tc,win){win._sub=null;clearInterval(win._pi);
  const rng=localStorage.getItem("nashistrange")||"24h";
  tc.innerHTML=`<div class="hist-bar"><div class="seg" id="histSeg">${HIST_RANGES.map(([k,t])=>`<button data-r="${k}" class="${k===rng?"on":""}">${t}</button>`).join("")}</div><span class="hist-note" id="histNote" style="margin:0"></span></div><div id="histBody" style="margin-top:10px"><div style="color:var(--mut);font-size:12px">загрузка истории…</div></div>`;
  tc.querySelectorAll("#histSeg button").forEach(b=>b.onclick=()=>{localStorage.setItem("nashistrange",b.dataset.r);historyTab(tc,win);});
+ const my=win._histReq=(win._histReq||0)+1;   // защита от гонки при быстром переключении периодов
  const r=await api("/api/history?range="+rng),h=(r&&r.history)||[],body=tc.querySelector("#histBody");
- if(!body)return;
+ if(!body||my!==win._histReq)return;
  if(h.length<2){body.innerHTML=`<div class="dempty">${svg("activity",16)} ${rng==="7d"||rng==="30d"?"Длинная история ещё копится — точка снимается раз в 10 минут, недельный график появится со временем.":"История ещё копится — точка снимается раз в минуту, загляните позже."}</div>`;return;}
  const step=(r&&r.step)||60,longRng=step>=600;
  const note=tc.querySelector("#histNote");
@@ -2830,7 +2831,7 @@ async function runBatch(title,items,fn){
  for(;i<items.length;i++){if(o&&o.cancelled)break;
   if(o)opSet(o,i/items.length,`${i} / ${items.length}`);
   try{if(await fn(items[i],i))ok++;}catch(e){}}
- if(o)opEnd(o,!o.cancelled&&ok===i?true:!o.cancelled,o.cancelled?`отменено · сделано ${ok} из ${items.length}`:`${ok} / ${items.length}`);
+ if(o)opEnd(o,!o.cancelled&&ok===i,o.cancelled?`отменено · сделано ${ok} из ${items.length}`:`${ok} / ${items.length}`);
  if(LIVE)logAct(`${title.replace(/…$/,"")}: ${ok} из ${items.length}`+(o&&o.cancelled?" (отменено)":""),"",(o&&o.cancelled)||ok<items.length?"warn":"ok");
  return ok;}
 function fileIcon(name,type){if(type==="dir")return "folder";const e=(name.split(".").pop()||"").toLowerCase();
@@ -3900,6 +3901,9 @@ function healthPop(){const b=document.getElementById("healthBtn");
 const EVQ={seq:0,seen:0,unseen:0,cache:[],toasted:0,remind:0,init:false};
 const NKIND={disk:"Диски",space:"Место",power:"Питание",svc:"Службы",access:"Доступ",net:"Сеть",protect:"Защита",files:"Файлы",action:"Действия",system:"Система"};
 async function pollEvents(){
+ if(pollEvents._busy)return;pollEvents._busy=true;   // без перекрытия опросов (медленный ответ → дубли)
+ try{await _pollEvents();}finally{pollEvents._busy=false;}}
+async function _pollEvents(){
  const r=await api("/api/events?after="+EVQ.seq);if(!r||!Array.isArray(r.events))return;
  const first=!EVQ.init;EVQ.init=true;
  r.events.forEach(e=>EVQ.cache.push(e));
@@ -3909,8 +3913,8 @@ async function pollEvents(){
  else{const fresh=r.events.filter(e=>e.id>EVQ.toasted&&e.desk);
   fresh.slice(-4).forEach(e=>ntoast(e));
   if(r.events.length)EVQ.toasted=Math.max(EVQ.toasted,...r.events.map(e=>e.id));}
- // непрочитанное критичное (свежее суток) — напоминать плашкой раз в 10 минут
- const crit=EVQ.cache.filter(e=>e.lvl==="crit"&&e.id>EVQ.seen&&(Date.now()/1e3-(e.t2||e.t))<86400);
+ // непрочитанное критичное (свежее суток, с включённой плашкой) — напоминать раз в 10 минут
+ const crit=EVQ.cache.filter(e=>e.lvl==="crit"&&e.desk&&e.id>EVQ.seen&&(Date.now()/1e3-(e.t2||e.t))<86400);
  if(crit.length&&Date.now()-EVQ.remind>600000){EVQ.remind=Date.now();ntoast(crit[crit.length-1],true);}
  paintBell();}
 function paintBell(){const b=document.getElementById("bellBtn");if(!b)return;
