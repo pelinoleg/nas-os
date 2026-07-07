@@ -1187,7 +1187,8 @@ function sampleWallLum(){
 }
 function applyFx(){
  const b=+SET.fxBlur||0,d=+SET.fxDim||0,n=+SET.fxNoise||0,wall=document.getElementById("wall");
- wall.style.filter=b?`blur(${b}px)`:"";wall.style.transform=b?"scale(1.06)":"";
+ // масштаб растёт вместе с блюром — иначе размытые края обнажают фон (белый ореол по краям)
+ wall.style.filter=b?`blur(${b}px)`:"";wall.style.transform=b?`scale(${(1+b*0.009).toFixed(3)})`:"";
  const dim=document.getElementById("wallDim"),nz=document.getElementById("wallNoise");
  if(dim)dim.style.opacity=d/100;if(nz)nz.style.opacity=n/100;
 }
