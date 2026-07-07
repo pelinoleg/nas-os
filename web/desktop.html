@@ -215,7 +215,7 @@
   .vline:hover .vx{visibility:visible}.vline .vx:hover{color:var(--danger)}
   .vline:hover .vn{color:var(--accent)}
   /* мини-бар заполнения в виджете дисков */
-  .dbar{height:4px;border-radius:999px;background:var(--line-2);margin-top:4px;overflow:hidden}
+  .dbar{height:4px;border-radius:999px;background:var(--track,var(--line-2));margin-top:4px;overflow:hidden}
   .dbar i{display:block;height:100%;border-radius:999px}
   @media(max-width:960px){.apps{inset:0}.rail{display:none}}
   /* телефон: окна-шиты на весь экран, компактный хром */
@@ -271,7 +271,7 @@
   /* widgets */
   .wdg{background:var(--wdg-bg,var(--glass));border-radius:var(--r-lg);padding:18px;
     --text:var(--wdg-fg,#1A2431);--dim:var(--wdg-dim,rgba(0,0,0,.66));--mut:var(--wdg-mut,rgba(0,0,0,.47));color:var(--text);
-    --accent:var(--wdg-accent,#12B0A6);--accent-2:var(--wdg-accent2,#4C8DF6);--accent-soft:var(--wdg-accent-soft,rgba(18,176,166,.16));--accent-line:var(--wdg-accent-line,rgba(18,176,166,.5));--accent-ink:var(--wdg-accent-ink,#fff);
+    --accent:var(--wdg-accent,#12B0A6);--accent-2:var(--wdg-accent2,#4C8DF6);--accent-soft:var(--wdg-accent-soft,rgba(18,176,166,.16));--accent-line:var(--wdg-accent-line,rgba(18,176,166,.5));--accent-ink:var(--wdg-accent-ink,#fff);--track:var(--wdg-track,rgba(0,0,0,.14));
     backdrop-filter:var(--wdg-bf,none);-webkit-backdrop-filter:var(--wdg-bf,none)}
   .wdg h4{margin:0 0 15px;font-size:10.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--mut);font-family:var(--mono);
     display:flex;align-items:center;gap:8px}
@@ -319,7 +319,7 @@
   .dock .sep{width:1px;background:var(--line-2);margin:6px 4px;align-self:stretch;flex:none}
 
   /* windows */
-  .win,.dialog,.menu{--accent:var(--win-accent,#12B0A6);--accent-2:var(--win-accent2,#4C8DF6);--accent-soft:var(--win-accent-soft,rgba(18,176,166,.16));--accent-line:var(--win-accent-line,rgba(18,176,166,.5));--accent-ink:var(--win-accent-ink,#fff)}
+  .win,.dialog,.menu{--accent:var(--win-accent,#12B0A6);--accent-2:var(--win-accent2,#4C8DF6);--accent-soft:var(--win-accent-soft,rgba(18,176,166,.16));--accent-line:var(--win-accent-line,rgba(18,176,166,.5));--accent-ink:var(--win-accent-ink,#fff);--track:var(--win-track,rgba(0,0,0,.12))}
   .win{position:fixed;z-index:100;background:var(--win-bg,var(--glass-2));backdrop-filter:var(--win-bf,none);-webkit-backdrop-filter:var(--win-bf,none);
     border-radius:var(--r-win);box-shadow:var(--sh);display:flex;flex-direction:column;min-width:300px;overflow:hidden;animation:winin .2s cubic-bezier(.2,.8,.3,1)}
   .win::before{content:"";position:absolute;inset:0;pointer-events:none;border-radius:inherit;z-index:0;opacity:var(--win-noise,0);mix-blend-mode:overlay;background-size:180px 180px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
@@ -1133,6 +1133,8 @@ function applySettings(){
   root.style.setProperty("--"+prefix+"-fg",lite?"#EFF4FB":"#1A2431");
   root.style.setProperty("--"+prefix+"-dim",`rgba(${b},${clampf((lite?.76:.66)*tcf,.35,1).toFixed(2)})`);
   root.style.setProperty("--"+prefix+"-mut",`rgba(${b},${clampf((lite?.55:.47)*tcf,.25,1).toFixed(2)})`);
+  // дорожки баров/колец: видимы на любом фоне, но приглушены
+  root.style.setProperty("--"+prefix+"-track",`rgba(${b},${lite?.20:.13})`);
   // акцент под этот же фактический фон: не теряется ни на прозрачном, ни на плотном
   const ac=accentAdj(a[0],effL),ac2=accentAdj(a[1],effL);
   root.style.setProperty("--"+prefix+"-accent",ac);
@@ -1257,7 +1259,7 @@ const fmtR=n=>fmtB(n)+"/с";
 const fmtUp=s=>{const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);return(d?d+"д ":"")+(h?h+"ч ":"")+m+"м";};
 function toast(m){const t=document.getElementById("toast");t.textContent=m;t.classList.add("show");clearTimeout(toast._);toast._=setTimeout(()=>t.classList.remove("show"),2300);}
 function ring(pct,color,size=64){const r=size/2-5,c=2*Math.PI*r,off=c*(1-Math.min(pct,100)/100);
- return `<svg class="ring" viewBox="0 0 ${size} ${size}"><circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="var(--line)" stroke-width="6"/><circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="${color}" stroke-width="6" stroke-linecap="round" stroke-dasharray="${c}" stroke-dashoffset="${off}" transform="rotate(-90 ${size/2} ${size/2})"/></svg>`;}
+ return `<svg class="ring" viewBox="0 0 ${size} ${size}"><circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="var(--track,var(--line))" stroke-width="6"/><circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="${color}" stroke-width="6" stroke-linecap="round" stroke-dasharray="${c}" stroke-dashoffset="${off}" transform="rotate(-90 ${size/2} ${size/2})"/></svg>`;}
 const tcol=t=>t==null?"var(--mut)":t>=75?"var(--danger)":t>=65?"var(--warn)":"var(--good)";
 const roleName={data:"данные",parity:"чётность",system:"система",pool:"пул",free:"свободен",removable:"съёмный"};
 
