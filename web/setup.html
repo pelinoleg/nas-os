@@ -120,6 +120,7 @@
   <div class="brand"><img class="brand-ico" src="/icon-flat.svg" alt="Raspberry Pi" draggable="false">Мастер настройки</div>
   <span class="sub" id="hostlbl"></span>
   <span class="spacer"></span>
+  <button class="back" id="langBtn" style="cursor:pointer;border:none;background:transparent;font:inherit;color:inherit" title="Switch language / Переключить язык">EN / RU</button>
   <label class="dry">Предпросмотр<button class="sw" id="dry" role="switch" aria-checked="false"></button></label>
   <a class="back" href="/">← Рабочий стол</a>
 </div>
@@ -128,6 +129,19 @@
   <main class="panel" id="panel"></main>
 </div>
 <div class="scrim" id="scrim"></div>
+<script src="/i18n.js"></script>
+<script>
+// переключатель языка мастера: localStorage-зеркало + перезагрузка
+// статичная шапка мастера не проходит через innerHTML — переводим текстовые узлы на старте
+addEventListener("DOMContentLoaded",()=>{document.querySelectorAll(".brand,.dry,.back,.sub").forEach(n=>{
+ n.childNodes.forEach(c=>{if(c.nodeType===3)c.textContent=nasTr(c.textContent);});
+ if(n.title)n.title=nasTr(n.title);});});
+document.getElementById("langBtn").onclick=()=>{try{
+ const v=(localStorage.getItem("naslang")||"en")==="en"?"ru":"en";
+ localStorage.setItem("naslang",v);
+ fetch("/api/settings",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({settings:{lang:v}})}).catch(()=>{});
+}catch(e){}location.reload();};
+</script>
 <script>
 "use strict";
 const P={

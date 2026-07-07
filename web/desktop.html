@@ -1120,6 +1120,7 @@
 <div class="toast" id="toast"></div>
 <div class="ntoasts" id="ntoasts"></div>
 
+<script src="/i18n.js"></script>
 <script>
 (function(){
 "use strict";
@@ -1537,11 +1538,11 @@ const el=h=>{const t=document.createElement("template");t.innerHTML=h.trim();ret
 const fmtB=n=>{if(n==null)return"—";const u=["B","KB","MB","GB","TB"];let i=0;n=+n;while(n>=1024&&i<4){n/=1024;i++;}return n.toFixed(n<10&&i>0?1:0)+" "+u[i];};
 const fmtR=n=>fmtB(n)+"/с";
 const fmtUp=s=>{const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);return(d?d+"д ":"")+(h?h+"ч ":"")+m+"м";};
-function toast(m){const t=document.getElementById("toast");t.textContent=m;t.classList.add("show");clearTimeout(toast._);toast._=setTimeout(()=>t.classList.remove("show"),2300);}
+function toast(m){const t=document.getElementById("toast");t.textContent=nasTr(m);t.classList.add("show");clearTimeout(toast._);toast._=setTimeout(()=>t.classList.remove("show"),2300);}
 // уведомление о завершении длинной операции: тост + системное уведомление, если вкладка не в фокусе
 function notifyDone(title,body){toast(body?title+": "+body:title);
  try{if("Notification"in window){
-   if(Notification.permission==="granted"){if(document.hidden)new Notification(title,{body:body||"",icon:"/icon.svg"});}
+   if(Notification.permission==="granted"){if(document.hidden)new Notification(nasTr(title),{body:nasTr(body||""),icon:"/icon.svg"});}
    else if(Notification.permission!=="denied")Notification.requestPermission();
  }}catch(e){}}
 function ring(pct,color,size=64){const r=size/2-5,c=2*Math.PI*r,off=c*(1-Math.min(pct,100)/100);
@@ -1812,7 +1813,7 @@ async function historyTab(tc,win){win._sub=null;clearInterval(win._pi);
  if(h.length<2){body.innerHTML=`<div class="dempty">${svg("activity",16)} ${rng==="7d"||rng==="30d"?"Длинная история ещё копится — точка снимается раз в 10 минут, недельный график появится со временем.":"История ещё копится — точка снимается раз в минуту, загляните позже."}</div>`;return;}
  const step=(r&&r.step)||60,longRng=step>=600;
  const note=tc.querySelector("#histNote");
- if(note)note.textContent=`точка раз в ${longRng?"10 минут":"минуту"} · ${h.length} точек`;
+ if(note)note.textContent=nasTr(`точка раз в ${longRng?"10 минут":"минуту"} · ${h.length} точек`);
  const pf=v=>Math.round(v)+"%",tf=v=>Math.round(v)+"°";
  body.innerHTML=histChart("Загрузка CPU",h,[{key:"cpu",color:"var(--accent)",fill:1}],pf,100)
   +histChart("Температура CPU",h,[{key:"temp",color:"var(--warn)",fill:1}],tf,null)
@@ -3573,6 +3574,9 @@ function wireLook(lb){
 }
 function lsTheme(lb){lb.innerHTML=`
   <div class="set-card">
+   <div class="field"><label>Язык · Language</label><div class="seg" id="lang">
+    <button data-l="en" class="${(SET.lang||"en")==="en"?"on":""}">English</button>
+    <button data-l="ru" class="${SET.lang==="ru"?"on":""}">Русский</button></div></div>
    <div class="field"><label>Тема</label><div class="seg" id="th">
     <button data-t="auto" class="${SET.theme==="auto"?"on":""}">Авто</button>
     <button data-t="light" class="${SET.theme==="light"?"on":""}">Светлая</button>
@@ -3580,6 +3584,8 @@ function lsTheme(lb){lb.innerHTML=`
    <div class="field"><label>Акцент</label><div class="dots" id="ac"></div></div>
   </div>
   <div class="set-card">${pSlider("Контраст вторичного текста","textContrast",.6,1.4,.05,"pct","Яркость подписей и значений (белые на тёмной теме, чёрные на светлой, с прозрачностью). Больше — чётче на пёстрых обоях. Влияет на виджеты и верхнюю панель.")}</div>`;
+ lb.querySelectorAll("#lang button").forEach(b=>b.onclick=()=>{SET.lang=b.dataset.l;saveSettings();
+   try{localStorage.setItem("naslang",SET.lang);}catch(e){}setTimeout(()=>location.reload(),300);});
  lb.querySelectorAll("#th button").forEach(b=>b.onclick=()=>{SET.theme=b.dataset.t;applySettings();saveSettings();lsTheme(lb);});
  const a0=(SET.accentHex||(ACCENTS[SET.accent]||ACCENTS.teal)[0]);
  Object.keys(ACCENTS).forEach(k=>{const c=ACCENTS[k];const d=el(`<div class="dot ${!SET.accentHex&&SET.accent===k?"sel":""}" style="background:linear-gradient(135deg,${c[0]},${c[1]})"></div>`);d.onclick=()=>{SET.accent=k;SET.accentHex="";applySettings();saveSettings();lsTheme(lb);};lb.querySelector("#ac").appendChild(d);});
@@ -3838,18 +3844,27 @@ function systemTab(tc){withSysc(tc,()=>{const s=SYSC.system||{};
    <div class="srow"><div class="srow-l"><div class="srow-t">Фоновая проверка SMART${tipHTML("Как часто монитор опрашивает SMART-статус всех дисков (здоровье, износ, температура). Спящие диски не будятся. По результатам работают уведомления «Здоровье дисков».")}</div><div class="srow-d">статус/износ/температура, минут</div></div><div class="srow-c"><input class="mono" id="stSmScan" style="max-width:90px"></div></div>
    <div class="srow"><div class="srow-l"><div class="srow-t">Короткий SMART-самотест${tipHTML("Диск сам прогоняет быструю самодиагностику (~2 мин). Запускается ночью (03–06), раз в N дней. 0 — не запускать.")}</div><div class="srow-d">раз в N дней · 0 = выкл</div></div><div class="srow-c"><input class="mono" id="stSmShort" style="max-width:90px"></div></div>
    <div class="srow"><div class="srow-l"><div class="srow-t">Длинный SMART-самотест${tipHTML("Полная поверхностная проверка диска (часы, но работе не мешает). Запускается ночью, раз в N дней; в одну ночь — только один вид теста. 0 — не запускать.")}</div><div class="srow-d">раз в N дней · 0 = выкл</div></div><div class="srow-c"><input class="mono" id="stSmLong" style="max-width:90px"></div></div>
+   <div class="set-h">Защита данных · SnapRAID</div>
+   <div class="srow"><div class="srow-l"><div class="srow-t">Sync — ежедневно${tipHTML("Синхронизация чётности: фиксирует изменения дня. Выберите время, когда NAS не занят.")}</div><div class="srow-d">время запуска</div></div><div class="srow-c"><input class="mono" id="stSnSync" style="max-width:90px" placeholder="03:00"></div></div>
+   <div class="srow"><div class="srow-l"><div class="srow-t">Scrub — еженедельно${tipHTML("Проверка данных на скрытые повреждения (bit rot). Раз в неделю в выбранный день и время.")}</div><div class="srow-d">день и время</div></div><div class="srow-c"><select id="stSnDow" class="ev-prio">${[["Mon","пн"],["Tue","вт"],["Wed","ср"],["Thu","чт"],["Fri","пт"],["Sat","сб"],["Sun","вс"]].map(([v,l])=>`<option value="${v}">${l}</option>`).join("")}</select><input class="mono" id="stSnScrub" style="max-width:90px" placeholder="05:00"></div></div>
    <div class="set-h">Поведение панели</div>
    <div class="mon-row"><span>Автооткрывать центр операций${tipHTML("При старте загрузки/копирования поповер операций открывается сам. Выключите, если хотите открывать его только вручную с иконки в баре.")}</span><label class="tgl"><input type="checkbox" id="stOpsAuto"><span class="sl"></span></label></div>
   </div>`);
   anchor.after(sec);
   const sc=sec.querySelector("#stSmScan"),ss=sec.querySelector("#stSmShort"),sl=sec.querySelector("#stSmLong");
+  const sy=sec.querySelector("#stSnSync"),sd=sec.querySelector("#stSnDow"),sr=sec.querySelector("#stSnScrub");
   api("/api/maintenance").then(m=>{const md=(m&&m.maintenance)||{};
     sc.value=md.smart_scan_min!=null?md.smart_scan_min:10;
     ss.value=md.smart_short_days!=null?md.smart_short_days:7;
-    sl.value=md.smart_long_days!=null?md.smart_long_days:30;});
-  const saveSm=async()=>{const r=await api("/api/maintenance",{method:"POST",body:JSON.stringify({maintenance:{smart_scan_min:+sc.value||10,smart_short_days:+ss.value||0,smart_long_days:+sl.value||0}})});
-    const md=(r&&r.maintenance)||{};sc.value=md.smart_scan_min;ss.value=md.smart_short_days;sl.value=md.smart_long_days;toast("Сохранено");};
-  sc.onchange=saveSm;ss.onchange=saveSm;sl.onchange=saveSm;
+    sl.value=md.smart_long_days!=null?md.smart_long_days:30;
+    sy.value=md.snap_sync_time||"03:00";sd.value=md.snap_scrub_dow||"Sun";sr.value=md.snap_scrub_time||"05:00";});
+  const saveSm=async()=>{const r=await api("/api/maintenance",{method:"POST",body:JSON.stringify({maintenance:{
+     smart_scan_min:+sc.value||10,smart_short_days:+ss.value||0,smart_long_days:+sl.value||0,
+     snap_sync_time:sy.value.trim(),snap_scrub_dow:sd.value,snap_scrub_time:sr.value.trim()}})});
+    const md=(r&&r.maintenance)||{};sc.value=md.smart_scan_min;ss.value=md.smart_short_days;sl.value=md.smart_long_days;
+    sy.value=md.snap_sync_time;sd.value=md.snap_scrub_dow;sr.value=md.snap_scrub_time;
+    toast(md.error?("Ошибка: "+md.error):"Сохранено");};
+  [sc,ss,sl,sy,sd,sr].forEach(x=>x.onchange=saveSm);
   const oa=sec.querySelector("#stOpsAuto");oa.checked=SET.opsAuto!==false;
   oa.onchange=()=>{SET.opsAuto=oa.checked;saveSettings();};}
  // псевдоним пула (симлинк): показать текущий и применить новый
@@ -4115,7 +4130,7 @@ async function pollHealth(){const r=await api("/api/health");if(r&&r.checks){HEA
 function paintHealthBtn(){const b=document.getElementById("healthBtn");if(!b)return;
  const ov=HEALTH?HEALTH.overall:"na";
  b.innerHTML=svg("heart",16)+`<span class="mbh-dot ${ov}"></span>`;
- b.title="Здоровье системы: "+((HLVL[ov]||["проверяю…"])[0]);}
+ b.title=nasTr("Здоровье системы: "+((HLVL[ov]||["проверяю…"])[0]));}
 function healthPop(){const b=document.getElementById("healthBtn");
  const p=mbPop(b,pp=>{pp.innerHTML=`<div class="mbp-h"><span>Здоровье системы</span><span id="mbhBadge"></span><span class="grow"></span><button class="mbp-hb" id="mbhSys" title="Открыть Систему">${svg("gauge",15)}</button></div><div id="mbhBody"><div class="mbp-empty">Собираю сводку…</div></div>`;
   pp.querySelector("#mbhSys").onclick=()=>{closeMenu();winMon();};});
@@ -4151,7 +4166,7 @@ async function _pollEvents(){
 function paintBell(){const b=document.getElementById("bellBtn");if(!b)return;
  const hasCrit=EVQ.cache.some(e=>e.lvl==="crit"&&e.id>EVQ.seen);
  b.innerHTML=svg("bell",16)+(EVQ.unseen?`<span class="mb-badge${hasCrit?" crit":""}">${EVQ.unseen>99?"99+":EVQ.unseen}</span>`:"");
- b.title=EVQ.unseen?`Уведомления: ${EVQ.unseen} новых`:"Уведомления";}
+ b.title=nasTr(EVQ.unseen?`Уведомления: ${EVQ.unseen} новых`:"Уведомления");}
 function markSeen(){if(EVQ.seen>=EVQ.seq)return;EVQ.seen=EVQ.seq;EVQ.unseen=0;paintBell();
  api("/api/events/seen",{method:"POST",body:JSON.stringify({id:EVQ.seq})});}
 function ntoast(e,remind){const c=document.getElementById("ntoasts");if(!c)return;
@@ -4162,7 +4177,7 @@ function ntoast(e,remind){const c=document.getElementById("ntoasts");if(!c)retur
  n.querySelector(".nt-x").onclick=ev=>{ev.stopPropagation();close();};
  n.onclick=()=>{close();winNotif();};
  setTimeout(close,e.lvl==="crit"?15000:7000);
- try{if("Notification"in window&&Notification.permission==="granted"&&document.hidden)new Notification(e.title,{body:e.msg||"",icon:"/icon.svg"});}catch(x){}}
+ try{if("Notification"in window&&Notification.permission==="granted"&&document.hidden)new Notification(nasTr(e.title),{body:nasTr(e.msg||""),icon:"/icon.svg"});}catch(x){}}
 function evRow(e,isNew){return `<div class="mbp-row${isNew?" new":""}" data-eid="${e.id}">${nico(e)}<div class="mbp-m"><div class="mbp-t">${esc(e.title)}${e.n>1?` <span class="nmul">×${e.n}</span>`:""}</div>${e.msg?`<div class="mbp-s">${esc(e.msg)}</div>`:""}</div><span class="mbp-w">${ruWhen(e.t2||e.t)}</span></div>`;}
 function bellPop(){const b=document.getElementById("bellBtn");
  const seenAt=EVQ.seen;   // водораздел ДО markSeen — новые подсвечиваем
@@ -4225,7 +4240,7 @@ function paintOps(force){
  const run=OPS.list.filter(o=>o.state==="run").length;
  b.style.display=OPS.list.length?"":"none";
  b.innerHTML=svg(run?"sync":"list",16)+(run?`<span class="mb-badge">${run}</span>`:"");
- b.title=run?`Операции: ${run} выполняется`:"Операции";
+ b.title=nasTr(run?`Операции: ${run} выполняется`:"Операции");
  const p=document.querySelector(".mbpop[data-ops]");if(p)renderOpsList(p);}
 function renderOpsList(p){
  // инкрементально: если состав/состояния не менялись — обновляем только прогресс и подписи
@@ -4233,8 +4248,8 @@ function renderOpsList(p){
  if(p._sig===sig){
   OPS.list.forEach(o=>{const row=p.querySelector(`[data-op="${o.id}"]`);if(!row)return;
    const bf=row.querySelector(".op-bf");if(bf&&o.p!=null)bf.style.width=Math.round(Math.min(o.p,1)*100)+"%";
-   const s2=row.querySelector(".op-s2");if(s2)s2.textContent=o.label;
-   const t2=row.querySelector(".op-t2");if(t2&&t2.textContent!==o.title)t2.textContent=o.title;});
+   const s2=row.querySelector(".op-s2");if(s2)s2.textContent=nasTr(o.label);
+   const t2=row.querySelector(".op-t2"),tt=nasTr(o.title);if(t2&&t2.textContent!==tt)t2.textContent=tt;});
   return;}
  p._sig=sig;
  const items=OPS.list.slice().reverse();
@@ -4301,6 +4316,11 @@ function maybeOnboard(){let done=false;try{done=!!SET.onboarded||localStorage.ge
  try{const l=localStorage.getItem("nasdesk");if(l)SET=Object.assign(SET,JSON.parse(l));}catch(e){}
  applySettings();
  const sv=await api("/api/settings");if(sv.settings&&Object.keys(sv.settings).length){SET=Object.assign(SET,sv.settings);CUR_THEME=null;applySettings();}
+ // язык: сервер — источник истины; localStorage — быстрый кэш до логина (один reload при рассинхроне)
+ try{const want=SET.lang||"en";
+  if(want!==window.NAS_LANG&&!sessionStorage.getItem("naslangflip")){
+   sessionStorage.setItem("naslangflip","1");localStorage.setItem("naslang",want);location.reload();return;}
+  sessionStorage.removeItem("naslangflip");}catch(e){}
  // позиции/размеры окон — с сервера (переживают чистку localStorage и смену адреса pi5.local↔IP); локальные правки поверх
  try{const wp=await api("/api/winpos");if(wp&&wp.winpos&&Object.keys(wp.winpos).length)WINPOS=Object.assign({},wp.winpos,WINPOS);}catch(e){}
  const tb=document.getElementById("themeBtn");if(tb)tb.onclick=cycleTheme;
@@ -4325,6 +4345,7 @@ function maybeOnboard(){let done=false;try{done=!!SET.onboarded||localStorage.ge
  const sn=await api("/api/snippets");if(sn&&sn.snippets&&sn.snippets.length)SNIPS=sn.snippets;
  let snInit=false;try{snInit=localStorage.getItem("nassnipinit")==="1";}catch(e){}
  if(!snInit){seedSnips();try{localStorage.setItem("nassnipinit","1");}catch(e){}saveSnips();}
+ document.querySelectorAll("[title]").forEach(n=>{if(n.title)n.title=nasTr(n.title);});   // статические title из HTML
  renderRail();renderApps();renderDock();renderWinbar();tickClock();
  poll();pollApps();pollDisks();maybeOnboard();
  pollStacks();pollTop();

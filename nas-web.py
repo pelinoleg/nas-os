@@ -843,9 +843,16 @@ def load_settings():
     except (OSError, json.JSONDecodeError):
         return {}
 def save_settings(d):
+    # MERGE, не перезапись: частичное обновление (например {lang} из мастера)
+    # не должно стирать остальные настройки
+    cur = load_settings()
+    if isinstance(d, dict):
+        cur.update(d)
     os.makedirs(NAS_CONFIG, exist_ok=True)
-    with open(SETTINGS_FILE, "w") as f:
-        json.dump(d, f, ensure_ascii=False, indent=2)
+    tmp = SETTINGS_FILE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(cur, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, SETTINGS_FILE)
 
 WINPOS_FILE = os.path.join(NAS_CONFIG, "winpos.json")
 def load_winpos():
@@ -1963,7 +1970,10 @@ def load_maintenance():
          "smart_short_days": 7,     # короткий самотест дисков, раз в N дней (ночью)
          "smart_long_days": 30,     # длинный самотест, раз в N дней (ночью)
          "backup_days": 7,          # авто-бэкап настроек, раз в N дней
-         "backup_keep": 10}         # сколько бэкапов хранить
+         "backup_keep": 10,         # сколько бэкапов хранить
+         "snap_sync_time": "03:00",   # SnapRAID: ежедневный sync
+         "snap_scrub_dow": "Sun",     # SnapRAID: день недели scrub
+         "snap_scrub_time": "05:00"}  # SnapRAID: время scrub
     try:
         with open(MAINT_FILE) as f:
             d.update(json.load(f))
@@ -1973,6 +1983,29 @@ def load_maintenance():
 
 _ALIAS_RESERVED = ("/bin", "/boot", "/dev", "/etc", "/home", "/lib", "/media", "/mnt",
                    "/opt", "/proc", "/root", "/run", "/sbin", "/srv", "/sys", "/tmp", "/usr", "/var")
+
+_DOW = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
+
+def _snap_sched_apply(cfg):
+    """Расписание SnapRAID: drop-in override для таймеров визарда.
+    Если таймеров ещё нет (SnapRAID не настроен) — тихо выходим; применится
+    при старте службы после настройки."""
+    if not os.path.isfile("/etc/systemd/system/snapraid-sync.timer"):
+        return ""
+    try:
+        for unit, cal in (("snapraid-sync", "*-*-* %s:00" % cfg.get("snap_sync_time", "03:00")),
+                          ("snapraid-scrub", "%s *-*-* %s:00" % (cfg.get("snap_scrub_dow", "Sun"),
+                                                                 cfg.get("snap_scrub_time", "05:00")))):
+            d = "/etc/systemd/system/%s.timer.d" % unit
+            os.makedirs(d, exist_ok=True)
+            with open(os.path.join(d, "override.conf"), "w") as f:
+                f.write("[Timer]\nOnCalendar=\nOnCalendar=%s\n" % cal)
+        _run(["systemctl", "daemon-reload"], timeout=20)
+        for unit in ("snapraid-sync.timer", "snapraid-scrub.timer"):
+            _run(["systemctl", "try-restart", unit], timeout=15)
+        return ""
+    except OSError as e:
+        return str(e)
 
 def _pool_alias_apply(alias, old=""):
     """Симлинк-псевдоним пула (напр. /volume2 → /mnt/storage). Возвращает ''/ошибку.
@@ -2008,6 +2041,23 @@ def save_maintenance(d):
             try:
                 cur[k] = max(lo, min(hi, int(d[k])))
             except (ValueError, TypeError):
+                pass
+    # расписание SnapRAID
+    snap_changed = False
+    for k in ("snap_sync_time", "snap_scrub_time"):
+        if k in d and re.match(r"^([01]\d|2[0-3]):[0-5]\d$", str(d[k] or "")):
+            snap_changed |= cur.get(k) != d[k]; cur[k] = d[k]
+    if "snap_scrub_dow" in d and d["snap_scrub_dow"] in _DOW:
+        snap_changed |= cur.get("snap_scrub_dow") != d["snap_scrub_dow"]
+        cur["snap_scrub_dow"] = d["snap_scrub_dow"]
+    if snap_changed:
+        err = _snap_sched_apply(cur) or err
+        if not err:
+            try:
+                log_event("action", "Расписание SnapRAID изменено",
+                          "sync %s · scrub %s %s" % (cur["snap_sync_time"], cur["snap_scrub_dow"], cur["snap_scrub_time"]),
+                          "ok", kind="protect", desk=False)
+            except Exception:
                 pass
     if "pool_alias" in d:
         v = str(d["pool_alias"] or "").strip().rstrip("/")
@@ -5088,6 +5138,10 @@ def main():
         pass
     try:
         _pool_alias_apply(load_maintenance().get("pool_alias", ""))   # симлинк пула (напр. /volume2)
+    except Exception:
+        pass
+    try:
+        _snap_sched_apply(load_maintenance())    # расписание SnapRAID из настроек
     except Exception:
         pass
     threading.Thread(target=monitor_loop, daemon=True).start()
