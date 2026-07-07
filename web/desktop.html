@@ -1419,6 +1419,12 @@ const fmtB=n=>{if(n==null)return"—";const u=["B","KB","MB","GB","TB"];let i=0;
 const fmtR=n=>fmtB(n)+"/с";
 const fmtUp=s=>{const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);return(d?d+"д ":"")+(h?h+"ч ":"")+m+"м";};
 function toast(m){const t=document.getElementById("toast");t.textContent=m;t.classList.add("show");clearTimeout(toast._);toast._=setTimeout(()=>t.classList.remove("show"),2300);}
+// уведомление о завершении длинной операции: тост + системное уведомление, если вкладка не в фокусе
+function notifyDone(title,body){toast(body?title+": "+body:title);
+ try{if("Notification"in window){
+   if(Notification.permission==="granted"){if(document.hidden)new Notification(title,{body:body||"",icon:"/icon.svg"});}
+   else if(Notification.permission!=="denied")Notification.requestPermission();
+ }}catch(e){}}
 function ring(pct,color,size=64){const r=size/2-5,c=2*Math.PI*r,off=c*(1-Math.min(pct,100)/100);
  return `<svg class="ring" viewBox="0 0 ${size} ${size}"><circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="var(--track,var(--line))" stroke-width="6"/><circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="${color}" stroke-width="6" stroke-linecap="round" stroke-dasharray="${c}" stroke-dashoffset="${off}" transform="rotate(-90 ${size/2} ${size/2})"/></svg>`;}
 const tcol=t=>t==null?"var(--mut)":t>=75?"var(--danger)":t>=65?"var(--warn)":"var(--good)";
@@ -2924,7 +2930,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
  function doArchive(paths){if(!paths.length)return;const sc=document.getElementById("scrim");
    sc.innerHTML=`<div class="dialog"><h3>Создать архив</h3><p>${paths.length} объ. → zip в текущей папке.</p><div class="field"><label>Имя архива</label><input id="az" value="archive.zip"></div><div class="r"><button class="btn" id="ax">Отмена</button><button class="btn pri" id="ao">Создать</button></div></div>`;
    sc.classList.add("show");sc.querySelector("#ax").onclick=()=>sc.classList.remove("show");
-   sc.querySelector("#ao").onclick=async()=>{const r=await api("/api/fs/archive",{method:"POST",body:JSON.stringify({items:paths,dest:cwd,name:sc.querySelector("#az").value.trim()})});toast(LIVE?(r&&r.ok?"Архив создан":("Ошибка: "+((r&&r.log)||""))):"Демо");if(r&&r.ok){sc.classList.remove("show");load(cwd);}};}
+   sc.querySelector("#ao").onclick=async()=>{const an=sc.querySelector("#az").value.trim();sc.classList.remove("show");toast("Создаю архив "+an+"…");const r=await api("/api/fs/archive",{method:"POST",body:JSON.stringify({items:paths,dest:cwd,name:an})});if(LIVE)notifyDone(r&&r.ok?"Архив создан":"Ошибка архива",r&&r.ok?an:((r&&r.log)||""));else toast("Демо");if(r&&r.ok)load(cwd);};}
  function doBulkRename(items){if(!items||items.length<2)return;const s=document.getElementById("scrim");
    const splitExt=n=>{const d=n.lastIndexOf(".");return(d>0)?[n.slice(0,d),n.slice(d)]:[n,""];};
    const calc=()=>{const find=s.querySelector("#brFind").value,repl=s.querySelector("#brRepl").value,
@@ -3005,7 +3011,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
      if(mode&&mode!==(d.mode||e.mode)){const w=await api("/api/fs/chmod",{method:"POST",body:JSON.stringify({path:e.path,mode,recursive:rec})});msgs.push(w&&w.ok?"права ✓":"права: "+((w&&w.log)||"ошибка"));}
      if((own&&own!==d.owner)||(grp&&grp!==d.group)){const w=await api("/api/fs/chown",{method:"POST",body:JSON.stringify({path:e.path,owner:own,group:grp,recursive:rec})});msgs.push(w&&w.ok?"владелец ✓":"владелец: "+((w&&w.log)||"ошибка"));}
      toast(LIVE?(msgs.join(" · ")||"без изменений"):"Демо");s.classList.remove("show");load(cwd);};}
- async function doUnzip(e){const r=await api("/api/fs/unzip",{method:"POST",body:JSON.stringify({path:e.path,dest:cwd})});toast(LIVE?(r&&r.ok?"Распаковано":("Ошибка: "+((r&&r.log)||""))):"Демо");if(r&&r.ok)load(cwd);}
+ async function doUnzip(e){toast("Распаковка "+e.name+"…");const r=await api("/api/fs/unzip",{method:"POST",body:JSON.stringify({path:e.path,dest:cwd})});if(LIVE)notifyDone(r&&r.ok?"Распаковано":"Ошибка распаковки",r&&r.ok?e.name:((r&&r.log)||""));else toast("Демо");if(r&&r.ok)load(cwd);}
  function doMkdir(){const s=document.getElementById("scrim");
    s.innerHTML=`<div class="dialog"><h3>Новая папка</h3><div class="field"><label>Имя</label><input id="mk" placeholder="new-folder"></div><div class="r"><button class="btn" id="mx">Отмена</button><button class="btn pri" id="mo">Создать</button></div></div>`;
    s.classList.add("show");s.querySelector("#mk").focus();s.querySelector("#mx").onclick=()=>s.classList.remove("show");
@@ -3042,7 +3048,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
      if(!j){p.done();toast("Задача потеряна");return;}
      p.set(0,0,j.name);p.box.querySelector(".op-fill").style.width=(j.total?Math.round(j.got/j.total*100):40)+"%";
      nEl.textContent=fmtB(j.got)+(j.total?" / "+fmtB(j.total):"");
-     if(j.done){p.done();toast(j.ok?("Скачано: "+j.name):("Ошибка: "+(j.log||"?")));if(j.ok)load(cwd);return;}
+     if(j.done){p.done();notifyDone(j.ok?"Скачано":"Ошибка загрузки",j.ok?j.name:(j.name+" · "+(j.log||"?")));if(j.ok)load(cwd);return;}
      await new Promise(res=>setTimeout(res,700));}}
  function rowMenu(e,x,y){const it=[{label:"Открыть",ic:svg(e.type==="dir"?"folder":"file",16),act:()=>openEntry(e)}];
    if(e.type==="file")it.push({label:"Скачать",ic:svg("download",16),act:()=>dl(e)});
