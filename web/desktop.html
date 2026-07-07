@@ -161,7 +161,7 @@
   /* menubar */
   .menubar{position:fixed;top:0;left:0;right:0;height:40px;z-index:300;display:flex;align-items:center;gap:12px;
     padding:0 16px;background:var(--mb-bg,var(--glass));
-    --text:var(--mb-fg,#1A2431);--dim:var(--mb-dim,rgba(0,0,0,.66));--mut:var(--mb-mut,rgba(0,0,0,.47));color:var(--text);
+    --text:var(--mb-fg,#1A2431);--ink:var(--mb-fg,#1A2431);--dim:var(--mb-dim,rgba(0,0,0,.66));--mut:var(--mb-mut,rgba(0,0,0,.47));color:var(--text);
     --accent:var(--mb-accent,#12B0A6);--accent-2:var(--mb-accent2,#4C8DF6);--accent-soft:var(--mb-accent-soft,rgba(18,176,166,.16));--accent-line:var(--mb-accent-line,rgba(18,176,166,.5));--accent-ink:var(--mb-accent-ink,#fff);
     backdrop-filter:var(--mb-bf,none);-webkit-backdrop-filter:var(--mb-bf,none)}
   .menubar .mb-brand svg{width:calc(22px*var(--mb-icon,1));height:calc(22px*var(--mb-icon,1))}
@@ -270,7 +270,7 @@
 
   /* widgets */
   .wdg{background:var(--wdg-bg,var(--glass));border-radius:var(--r-lg);padding:18px;
-    --text:var(--wdg-fg,#1A2431);--dim:var(--wdg-dim,rgba(0,0,0,.66));--mut:var(--wdg-mut,rgba(0,0,0,.47));color:var(--text);
+    --text:var(--wdg-fg,#1A2431);--ink:var(--wdg-fg,#1A2431);--dim:var(--wdg-dim,rgba(0,0,0,.66));--mut:var(--wdg-mut,rgba(0,0,0,.47));color:var(--text);
     --accent:var(--wdg-accent,#12B0A6);--accent-2:var(--wdg-accent2,#4C8DF6);--accent-soft:var(--wdg-accent-soft,rgba(18,176,166,.16));--accent-line:var(--wdg-accent-line,rgba(18,176,166,.5));--accent-ink:var(--wdg-accent-ink,#fff);--track:var(--wdg-track,rgba(0,0,0,.14));
     backdrop-filter:var(--wdg-bf,none);-webkit-backdrop-filter:var(--wdg-bf,none)}
   .wdg h4{margin:0 0 15px;font-size:10.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--mut);font-family:var(--mono);
@@ -300,7 +300,7 @@
   /* dock */
   .dock{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:90;display:flex;gap:3px;padding:8px 12px;max-width:calc(100% - 28px);overflow-x:auto;
     background:var(--dock-bg,var(--glass));border-radius:22px;box-shadow:var(--sh);
-    --text:var(--dock-fg,#1A2431);--dim:var(--dock-dim,rgba(0,0,0,.66));--mut:var(--dock-mut,rgba(0,0,0,.47));color:var(--text);
+    --text:var(--dock-fg,#1A2431);--ink:var(--dock-fg,#1A2431);--dim:var(--dock-dim,rgba(0,0,0,.66));--mut:var(--dock-mut,rgba(0,0,0,.47));color:var(--text);
     --accent:var(--dock-accent,#12B0A6);--accent-2:var(--dock-accent2,#4C8DF6);--accent-soft:var(--dock-accent-soft,rgba(18,176,166,.16));--accent-line:var(--dock-accent-line,rgba(18,176,166,.5));--accent-ink:var(--dock-accent-ink,#fff);
     backdrop-filter:var(--dock-bf,none);-webkit-backdrop-filter:var(--dock-bf,none)}
   .dock.pos-left,.dock.pos-right{top:50%;bottom:auto;transform:translateY(-50%);flex-direction:column;max-width:none;max-height:calc(100% - 100px);overflow-x:hidden;overflow-y:auto;border-radius:20px;padding:8px 6px;gap:4px}
@@ -319,7 +319,8 @@
   .dock .sep{width:1px;background:var(--line-2);margin:6px 4px;align-self:stretch;flex:none}
 
   /* windows */
-  .win,.dialog,.menu{--accent:var(--win-accent,#12B0A6);--accent-2:var(--win-accent2,#4C8DF6);--accent-soft:var(--win-accent-soft,rgba(18,176,166,.16));--accent-line:var(--win-accent-line,rgba(18,176,166,.5));--accent-ink:var(--win-accent-ink,#fff);--track:var(--win-track,rgba(0,0,0,.12))}
+  .win,.dialog,.menu,.toast,.ob-card{--text:var(--win-fg,#1A2431);--ink:var(--win-fg,#1A2431);--dim:var(--win-dim,rgba(0,0,0,.66));--mut:var(--win-mut,rgba(0,0,0,.47));color:var(--text);
+    --accent:var(--win-accent,#12B0A6);--accent-2:var(--win-accent2,#4C8DF6);--accent-soft:var(--win-accent-soft,rgba(18,176,166,.16));--accent-line:var(--win-accent-line,rgba(18,176,166,.5));--accent-ink:var(--win-accent-ink,#fff);--track:var(--win-track,rgba(0,0,0,.12))}
   .win{position:fixed;z-index:100;background:var(--win-bg,var(--glass-2));backdrop-filter:var(--win-bf,none);-webkit-backdrop-filter:var(--win-bf,none);
     border-radius:var(--r-win);box-shadow:var(--sh);display:flex;flex-direction:column;min-width:300px;overflow:hidden;animation:winin .2s cubic-bezier(.2,.8,.3,1)}
   .win::before{content:"";position:absolute;inset:0;pointer-events:none;border-radius:inherit;z-index:0;opacity:var(--win-noise,0);mix-blend-mode:overlay;background-size:180px 180px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
