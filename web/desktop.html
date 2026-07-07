@@ -190,11 +190,18 @@
 
   /* desktop layout — apps left, widgets pinned right */
   .desk{position:fixed;inset:46px 0 96px 0}
-  .apps{position:absolute;inset:0 398px 0 0;padding:32px 34px;overflow:auto;
+  .apps{position:absolute;inset:0 398px 0 0;padding:32px 34px 140px;overflow:auto;
     display:grid;grid-template-columns:repeat(auto-fill,96px);gap:18px 8px;align-content:start}
   .rail{position:absolute;top:0;right:0;bottom:0;width:398px;padding:26px 26px 26px 26px;overflow-y:auto;
     display:flex;flex-direction:column;gap:16px}
   .rail::-webkit-scrollbar{width:0}
+  /* диски вне пула — полоса внизу рабочего стола */
+  .vols{position:absolute;left:0;right:398px;bottom:0;padding:8px 34px 10px;display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;pointer-events:none}
+  .vols .app{pointer-events:auto}
+  body.rail-off .vols{right:0}
+  body.dock-left .vols{left:var(--dockw)}
+  body.dock-right .vols{right:calc(398px + var(--dockw))}
+  @media(max-width:960px){.vols{right:0}}
   @media(max-width:960px){.apps{inset:0}.rail{display:none}}
   /* телефон: окна-шиты на весь экран, компактный хром */
   @media(max-width:640px){
@@ -841,6 +848,7 @@
 
 <div class="desk">
   <div class="apps" id="apps"></div>
+  <div class="vols" id="vols"></div>
   <div class="rail" id="rail"></div>
 </div>
 
@@ -1278,15 +1286,16 @@ function renderApps(){
  APPS.forEach(app=>{if(!app.url)return;
   const b=el(`<button class="app" title="${app.container||""}${app.running?"":" · остановлен"}"><div class="tile applbl" style="background:${tileColor(app.name)}">${appIconHTML(app)}</div><div class="lbl">${app.name}</div><span class="st ${app.running?"on":"off"}"></span></button>`);
   b.onclick=()=>window.open(app.url,"_blank");box.appendChild(b);});
- VOLS.forEach(v=>{
-  const b=el(`<button class="app" title="${att(v.dev+" · "+(v.fstype||"")+" · "+(v.size||""))}${v.mounted?"":" · не смонтирован"}"><div class="tile" style="background:linear-gradient(135deg,#7b8ba3,#5a6a82)">${svg(volIcon(v),26)}</div><div class="lbl">${esc(v.label||"Диск")}</div><span class="st ${v.mounted?"on":"off"}"></span></button>`);
-  b.onclick=()=>openVolume(v);
-  b.oncontextmenu=e=>{e.preventDefault();e.stopPropagation();showMenu(e.clientX,e.clientY,[
-    {label:"Открыть",ic:svg("folder",17),act:()=>openVolume(v)},
-    ...(v.mounted?[{label:"Извлечь",ic:svg("eject",17),act:()=>ejectVolume(v),dng:1}]:[]),
-  ]);};
-  box.appendChild(b);});
- if(!APPS.filter(a=>a.url).length&&!VOLS.length)box.appendChild(el(`<div class="apps-hint">Ярлыки приложений появятся здесь автоматически.<br>Добавьте контейнеру метки <b>web-desktop.*</b> в docker-compose, поднимите его в <b>Dockge</b> и нажмите <b>«Обновить ярлыки»</b> (правый клик по столу).<br><br>Системные инструменты — в панели снизу.</div>`));
+ const vbox=document.getElementById("vols");if(vbox){vbox.innerHTML="";
+  VOLS.forEach(v=>{
+   const b=el(`<button class="app" title="${att(v.dev+" · "+(v.fstype||"")+" · "+(v.size||""))}${v.mounted?"":" · не смонтирован"}"><div class="tile" style="background:linear-gradient(135deg,#7b8ba3,#5a6a82)">${svg(volIcon(v),26)}</div><div class="lbl">${esc(v.label||"Диск")}</div><span class="st ${v.mounted?"on":"off"}"></span></button>`);
+   b.onclick=()=>openVolume(v);
+   b.oncontextmenu=e=>{e.preventDefault();e.stopPropagation();showMenu(e.clientX,e.clientY,[
+     {label:"Открыть",ic:svg("folder",17),act:()=>openVolume(v)},
+     ...(v.mounted?[{label:"Извлечь",ic:svg("eject",17),act:()=>ejectVolume(v),dng:1}]:[]),
+   ]);};
+   vbox.appendChild(b);});}
+ if(!APPS.filter(a=>a.url).length)box.appendChild(el(`<div class="apps-hint">Ярлыки приложений появятся здесь автоматически.<br>Добавьте контейнеру метки <b>web-desktop.*</b> в docker-compose, поднимите его в <b>Dockge</b> и нажмите <b>«Обновить ярлыки»</b> (правый клик по столу).<br><br>Системные инструменты — в панели снизу.</div>`));
 }
 function volIcon(v){return v.rotational?"hdd":(v.tran==="mmc"?"sd":"ssd");}
 async function openVolume(v){
@@ -2348,8 +2357,8 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
  body.innerHTML=`<div class="fm"><div class="fm-fav">
    <div class="fm-fav-h"><span>Избранное</span><button class="iconbtn" id="fFavAdd" title="Добавить текущую папку в избранное">+</button></div>
    <div class="fm-fav-list" id="fFav"></div>
-   <div id="fVolsWrap" style="display:none"><div class="fm-fav-h"><span>Диски</span></div>
-   <div class="fm-fav-list" id="fVols" style="flex:none;max-height:36%"></div></div></div>
+   <div id="fVolsWrap" style="display:none;flex:none"><div class="fm-fav-h"><span>Диски</span></div>
+   <div id="fVols" style="margin:0 -4px"></div></div></div>
    <div class="fm-side">
    <div class="fm-top">
      <div class="fm-tabs" id="fTabs"></div>
