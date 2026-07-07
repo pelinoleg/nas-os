@@ -343,7 +343,7 @@
   .dock .sep{width:1px;background:var(--line-2);margin:6px 4px;align-self:stretch;flex:none}
 
   /* windows */
-  .win,.dialog,.menu,.toast,.ob-card{--text:var(--win-fg,#1A2431);--ink:var(--win-fg,#1A2431);--dim:var(--win-dim,rgba(0,0,0,.72));--mut:var(--win-mut,rgba(0,0,0,.56));color:var(--text);
+  .win,.dialog,.menu,.toast,.ntoast,.ob-card{--text:var(--win-fg,#1A2431);--ink:var(--win-fg,#1A2431);--dim:var(--win-dim,rgba(0,0,0,.72));--mut:var(--win-mut,rgba(0,0,0,.56));color:var(--text);
     --accent:var(--win-accent,#12B0A6);--accent-2:var(--win-accent2,#4C8DF6);--accent-soft:var(--win-accent-soft,rgba(18,176,166,.16));--accent-line:var(--win-accent-line,rgba(18,176,166,.5));--accent-ink:var(--win-accent-ink,#fff);--accent-fill:var(--win-accent-fill,#12B0A6);--track:var(--win-track,rgba(0,0,0,.12));--sel:var(--win-sel,rgba(0,0,0,.07));--good:var(--win-good,#1FA971);--warn:var(--win-warn,#CF881B);--danger:var(--win-danger,#DE4E48)}
   .win{position:fixed;z-index:100;background:var(--win-bg,var(--glass-2));backdrop-filter:var(--win-bf,none);-webkit-backdrop-filter:var(--win-bf,none);
     border-radius:var(--r-win);box-shadow:var(--sh);display:flex;flex-direction:column;min-width:300px;overflow:hidden;animation:winin .2s cubic-bezier(.2,.8,.3,1)}
@@ -530,6 +530,10 @@
   .dd-note{font-size:12px;color:var(--mut);display:flex;align-items:center;gap:6px}
   .dd-spin{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12.5px;color:var(--dim);margin-bottom:16px;padding:2px}
   .dd-spin select{width:auto!important;padding:6px 9px!important;font-size:12px}
+  .dd-spd{display:flex;align-items:center;gap:9px;margin-top:12px;padding:10px 12px;background:var(--card);border:1px solid var(--line);border-radius:var(--r-md);font-size:12.5px;color:var(--dim)}
+  .dd-spd .dd-spd-ic{display:flex;color:var(--accent)}
+  .dd-spd b{color:var(--text)}
+  .dd-spd .dd-spd-d{color:var(--mut);font-size:11.5px}
   .dd-grp{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--mut);font-family:var(--mono);margin:20px 0 8px}
   .dd-smk{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden;margin-bottom:12px}
   .dd-smk>div{background:var(--card);padding:9px 12px;display:flex;flex-direction:column;gap:2px}
@@ -538,7 +542,10 @@
   .dd-attrs th{text-align:left;color:var(--mut);font-weight:500;padding:5px 8px;border-bottom:1px solid var(--line);font-family:var(--font)}
   .dd-attrs td{padding:5px 8px;border-bottom:1px solid var(--line);overflow-wrap:anywhere}
   /* история метрик */
+  .grow{flex:1;min-width:8px}
   .hist-note{font-size:11.5px;color:var(--mut);margin-bottom:12px}
+  .hist-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .hist-bar .seg button{padding:5px 11px;font-size:12px}
   .hist-card{background:var(--card);border:1px solid var(--line);border-radius:var(--r-md);padding:10px 13px 8px;margin-bottom:12px}
   .hist-h{display:flex;justify-content:space-between;align-items:baseline;font-size:12px;font-weight:600;margin-bottom:6px}
   .hist-cur{font-family:var(--mono);font-weight:700;font-size:12.5px}
@@ -980,6 +987,62 @@
   .toast{position:fixed;left:50%;bottom:96px;transform:translateX(-50%) translateY(14px);z-index:600;background:var(--glass-2);backdrop-filter:blur(20px) saturate(1.4);-webkit-backdrop-filter:blur(20px) saturate(1.4);
     border:1px solid var(--line-2);border-radius:var(--r-md);padding:12px 18px;font-size:13px;font-weight:500;box-shadow:var(--sh);opacity:0;pointer-events:none;transition:.26s cubic-bezier(.2,.8,.3,1)}
   .toast.show{opacity:1;transform:translateX(-50%)}
+  /* ---- верхний бар: здоровье / операции / уведомления ---- */
+  .mbi{position:relative}
+  .mb-badge{position:absolute;top:1px;right:-1px;min-width:15px;height:15px;padding:0 4px;border-radius:999px;background:var(--accent);color:var(--accent-ink,#fff);font-size:9.5px;font-weight:700;display:flex;align-items:center;justify-content:center;pointer-events:none;box-shadow:0 1px 4px rgba(0,0,0,.25)}
+  .mb-badge.crit{background:var(--danger);color:#fff}
+  .mbh-dot{position:absolute;top:3px;right:3px;width:8px;height:8px;border-radius:50%;pointer-events:none}
+  .mbh-dot.ok{background:var(--good)}.mbh-dot.warn{background:var(--warn)}.mbh-dot.bad{background:var(--danger);box-shadow:0 0 6px var(--danger)}.mbh-dot.na{background:var(--mut)}
+  .mbpop{min-width:324px;max-width:384px;padding:7px}
+  .mbp-h{font-size:12.5px;font-weight:700;padding:7px 10px 6px;display:flex;align-items:center;gap:8px}
+  .mbp-cnt{font-size:10.5px;font-weight:700;color:var(--accent);background:var(--accent-soft);padding:2px 8px;border-radius:999px}
+  .mbp-row{display:flex;gap:9px;padding:7px 10px;border-radius:9px;align-items:flex-start;cursor:pointer}
+  .mbp-row:hover{background:var(--sel)}
+  .ndot{width:8px;height:8px;border-radius:50%;margin-top:4px;flex:none}
+  .ndot.crit{background:var(--danger);box-shadow:0 0 0 3px var(--danger-soft)}
+  .ndot.warn{background:var(--warn)}.ndot.ok{background:var(--good)}.ndot.info{background:var(--mut)}
+  .mbp-m{min-width:0;flex:1}
+  .mbp-t{font-size:12.3px;font-weight:600;line-height:1.35}
+  .mbp-s{font-size:11.3px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .mbp-w{font-size:10.5px;color:var(--mut);white-space:nowrap;margin-top:3px}
+  .mbp-empty{padding:20px 12px;font-size:12px;color:var(--mut);text-align:center}
+  .mbp-f{display:flex;gap:8px;padding:9px 4px 3px;border-top:1px solid var(--line);margin-top:5px;align-items:center}
+  .nmul{font-size:10px;color:var(--mut);font-weight:700}
+  /* плашки-уведомления сверху справа */
+  .ntoasts{position:fixed;top:48px;right:12px;z-index:640;display:flex;flex-direction:column;gap:8px;width:min(344px,calc(100vw - 24px));pointer-events:none}
+  .ntoast{display:flex;gap:9px;align-items:flex-start;background:var(--menu-bg,var(--glass-2));backdrop-filter:blur(24px) saturate(1.4);-webkit-backdrop-filter:blur(24px) saturate(1.4);border:1px solid var(--line);border-radius:14px;box-shadow:var(--sh);padding:11px 12px;opacity:0;transform:translateX(16px);transition:.22s;pointer-events:auto;cursor:pointer}
+  .ntoast.show{opacity:1;transform:none}
+  .ntoast .nt-m{flex:1;min-width:0}
+  .ntoast .nt-t{font-size:12.5px;font-weight:650}
+  .ntoast .nt-s{font-size:11.5px;color:var(--dim);margin-top:2px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical}
+  .ntoast .nt-x{border:none;background:transparent;color:var(--mut);cursor:pointer;padding:2px;border-radius:6px;display:flex;flex:none}
+  .ntoast .nt-x:hover{color:var(--text);background:var(--card-2)}
+  .ntoast.crit{border-color:var(--danger)}
+  /* строки операций в поповере */
+  .op-row{display:flex;gap:9px;padding:8px 10px;align-items:center;border-radius:9px}
+  .op-row .op-m{flex:1;min-width:0}
+  .op-row .op-t2{font-size:12.3px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .op-row .op-s2{font-size:11px;color:var(--mut);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .op-row .op-bar{height:4px;border-radius:99px;background:var(--track,var(--card-2));overflow:hidden;margin-top:6px}
+  .op-row .op-bf{height:100%;background:var(--accent);transition:width .2s;border-radius:99px}
+  .op-row.ind .op-bf{width:40%!important;animation:opind 1.1s ease-in-out infinite alternate}
+  @keyframes opind{from{margin-left:0}to{margin-left:60%}}
+  .op-st{flex:none;display:flex;width:18px;color:var(--mut)}
+  .op-st.done{color:var(--good)}.op-st.err{color:var(--danger)}
+  .op-x{border:none;background:transparent;color:var(--mut);cursor:pointer;padding:3px;border-radius:7px;display:flex;flex:none}
+  .op-x:hover{color:var(--danger);background:var(--danger-soft)}
+  /* окно «Уведомления» */
+  .nt-bar{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-bottom:10px}
+  .nt-bar .seg button{padding:5px 10px;font-size:12px}
+  .nt-bar input,.nt-bar select{background:var(--card);border:1px solid var(--line);border-radius:9px;color:var(--text);padding:7px 10px;font-size:12.3px}
+  .nt-bar input{width:140px}
+  .nt-row{display:flex;gap:10px;padding:9px 10px;border-radius:10px;align-items:flex-start}
+  .nt-row:hover{background:var(--card)}
+  .nt-row .nt-w{width:110px;flex:none;font-size:11px;color:var(--mut);margin-top:2.5px}
+  .nt-row .nt-k{flex:none;font-size:10px;font-weight:700;color:var(--dim);background:var(--card-2);border-radius:6px;padding:2.5px 7px;margin-top:1px}
+  .nt-row .nt-mm{flex:1;min-width:0}
+  .nt-row .nt-tt{font-size:12.6px;font-weight:600}
+  .nt-row .nt-ms{font-size:11.6px;color:var(--dim);margin-top:2px;white-space:pre-wrap;word-break:break-word}
   @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style></head><body>
 <div class="wall" id="wall"></div>
@@ -995,6 +1058,10 @@
   <span class="mb-sep"></span>
   <div class="tray" id="tray"></div>
   <span class="mb-sep"></span>
+  <button class="mb-theme mbi" id="healthBtn" title="Здоровье системы"></button>
+  <button class="mb-theme mbi" id="opsBtn" title="Операции" style="display:none"></button>
+  <button class="mb-theme mbi" id="bellBtn" title="Уведомления"></button>
+  <span class="mb-sep"></span>
   <button class="mb-theme" id="themeBtn" title="Тема"></button>
   <button class="mb-theme" id="powerBtn" title="Питание и сессия"></button>
   <span class="mb-sep"></span>
@@ -1009,6 +1076,7 @@
 <div class="dock" id="dock"></div>
 <div class="scrim" id="scrim"></div>
 <div class="toast" id="toast"></div>
+<div class="ntoasts" id="ntoasts"></div>
 
 <script>
 (function(){
@@ -1669,18 +1737,24 @@ function histChart(title,h,series,fmt,maxOverride){
  return `<div class="hist-card"><div class="hist-h"><span>${title}</span><span class="hist-cur">${cur}</span></div>
    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:${H}px;display:block">${grid}${paths}</svg></div>`;
 }
+const HIST_RANGES=[["1h","1 час"],["6h","6 часов"],["24h","24 часа"],["7d","7 дней"],["30d","30 дней"]];
 async function historyTab(tc,win){win._sub=null;clearInterval(win._pi);
- tc.innerHTML=`<div style="color:var(--mut);font-size:12px">загрузка истории…</div>`;
- const r=await api("/api/history"),h=(r&&r.history)||[];
- if(h.length<2){tc.innerHTML=`<div class="dempty">${svg("activity",16)} История ещё копится — точка снимается раз в минуту, загляните позже.</div>`;return;}
- const span=h[h.length-1].t-h[0].t,hrs=span/3600;
+ const rng=localStorage.getItem("nashistrange")||"24h";
+ tc.innerHTML=`<div class="hist-bar"><div class="seg" id="histSeg">${HIST_RANGES.map(([k,t])=>`<button data-r="${k}" class="${k===rng?"on":""}">${t}</button>`).join("")}</div><span class="hist-note" id="histNote" style="margin:0"></span></div><div id="histBody" style="margin-top:10px"><div style="color:var(--mut);font-size:12px">загрузка истории…</div></div>`;
+ tc.querySelectorAll("#histSeg button").forEach(b=>b.onclick=()=>{localStorage.setItem("nashistrange",b.dataset.r);historyTab(tc,win);});
+ const r=await api("/api/history?range="+rng),h=(r&&r.history)||[],body=tc.querySelector("#histBody");
+ if(!body)return;
+ if(h.length<2){body.innerHTML=`<div class="dempty">${svg("activity",16)} ${rng==="7d"||rng==="30d"?"Длинная история ещё копится — точка снимается раз в 10 минут, недельный график появится со временем.":"История ещё копится — точка снимается раз в минуту, загляните позже."}</div>`;return;}
+ const step=(r&&r.step)||60,longRng=step>=600;
+ const note=tc.querySelector("#histNote");
+ if(note)note.textContent=`точка раз в ${longRng?"10 минут":"минуту"} · ${h.length} точек`;
  const pf=v=>Math.round(v)+"%",tf=v=>Math.round(v)+"°";
- tc.innerHTML=`<div class="hist-note">За последние ${hrs>=1?hrs.toFixed(hrs<3?1:0)+" ч":Math.round(span/60)+" мин"} · точка раз в минуту · ${h.length} точек</div>`
-  +histChart("Загрузка CPU",h,[{key:"cpu",color:"var(--accent)",fill:1}],pf,100)
+ body.innerHTML=histChart("Загрузка CPU",h,[{key:"cpu",color:"var(--accent)",fill:1}],pf,100)
   +histChart("Температура CPU",h,[{key:"temp",color:"var(--warn)",fill:1}],tf,null)
-  +histChart("Память",h,[{key:"mem",color:"var(--accent-2)",fill:1}],pf,100)
+  +histChart("RAM (оперативная память)",h,[{key:"mem",color:"var(--accent-2)",fill:1}],pf,100)
   +histChart("Сеть · ↓ приём / ↑ отдача",h,[{key:"rx",color:"var(--good)",fill:1},{key:"tx",color:"var(--danger)"}],fmtR,null)
-  +histChart("Заполнение пула",h,[{key:"pool",color:"var(--good)",fill:1}],pf,100);
+  // заполнение пула меняется медленно — на коротких периодах график бесполезен
+  +(longRng?histChart("Заполнение пула",h,[{key:"pool",color:"var(--good)",fill:1}],pf,100):"");
 }
 function overviewTab(tc,win){
  tc.innerHTML=`<div class="ov-health" id="ovHealth"></div><div class="ov-cards" id="ovCards"></div><div id="ovThr"></div>
@@ -1800,7 +1874,7 @@ function poolStrip(disks,am,reload,snap){
     <div class="dp-s">${cnt("free")} не в пуле · ${cnt("removable")} внешних — объедините диски данных в /mnt/storage</div></div>
    <button class="btn sm pri" id="poolcta">${svg("wand",13)} Собрать</button>`;
  }
- const amb=el(`<button class="btn sm${am.enabled?" pri":""}" title="Автомонтирование съёмных дисков при подключении">${svg("usb",13)} Авто: ${am.enabled?"вкл":"выкл"}</button>`);
+ const amb=el(`<button class="btn sm${am.enabled?" pri":""}" title="Автоподключение: вставленные USB-диски и флешки монтируются сами (в ${esc(am.base||"/media/nas")}) и появляются на рабочем столе. Сейчас ${am.enabled?"включено":"выключено"} — нажмите, чтобы настроить.">${svg("usb",13)} Автоподключение USB: ${am.enabled?"вкл":"выкл"}</button>`);
  amb.onclick=()=>automountDlg(am,reload);w.appendChild(amb);
  const cta=w.querySelector("#poolcta");if(cta)cta.onclick=()=>location.href="/setup.html";
  return w;
@@ -1856,13 +1930,6 @@ function diskDetail(x,reload){
      else if(x.fstype){const b=el(`<button class="btn sm">${svg("play",13)} Смонтировать</button>`);b.onclick=()=>diskCall(x.in_fstab?"/api/disk/mount":"/api/disk/mount-dev",x.in_fstab?{target:x.mount}:{dev:x.path},reload,"смонтировано");acts.appendChild(b);}
      if(x.fstype){const b=el(`<button class="btn sm">${svg("save",13)} Переименовать</button>`);b.onclick=()=>renameDlg(x.path,x.label||"",reload);acts.appendChild(b);}
    }
-   // тест скорости чтения (безопасно)
-   const spd=el(`<button class="btn sm">${svg("activity",13)} Тест скорости</button>`);
-   spd.onclick=async()=>{spd.disabled=true;spd.innerHTML="измеряю…";
-     const r=await api("/api/disk/speedtest",{method:"POST",body:JSON.stringify({dev:x.path})});
-     spd.disabled=false;spd.innerHTML=svg("activity",13)+" Тест скорости";
-     toast(LIVE?((r&&r.ok)?("Чтение: "+r.read_mbps+" МБ/с"):("Ошибка: "+((r&&r.log)||""))):"Демо");};
-   acts.appendChild(spd);
    // безопасно извлечь — только для внешних/свободных смонтированных дисков
    if(x.mounted&&(x.role==="removable"||x.role==="free")){
      const ej=el(`<button class="btn sm">${svg("eject",13)} Извлечь</button>`);
@@ -1875,6 +1942,27 @@ function diskDetail(x,reload){
    const fb=el(`<button class="btn sm dng">${svg("trash",13)} Форматировать</button>`);fb.onclick=()=>formatDlg(x,reload);acts.appendChild(fb);
  }else acts.appendChild(el(`<span class="dd-note">${svg("shield",13)} Системный диск — операции недоступны</span>`));
  box.appendChild(acts);
+ // скорость диска: последний замер всегда виден, тест — рядом
+ if(x.role!=="system"){
+   const sp=el(`<div class="dd-spd"></div>`);
+   let cur=x.speedtest;
+   const paintSpd=busy=>{
+     sp.innerHTML=`<span class="dd-spd-ic">${svg("activity",14)}</span>`
+      +(busy?`<span class="dd-spd-t">Измеряю скорость — до минуты, диск будет занят…</span>`
+        :cur?`<span class="dd-spd-t"><b>${Math.round(cur.read)} МБ/с</b> чтение${cur.write!=null?` · <b>${Math.round(cur.write)} МБ/с</b> запись`:""}</span><span class="dd-spd-d">замер: ${ruWhen(cur.t)}</span>`
+        :`<span class="dd-spd-t" style="color:var(--mut)">Скорость этого диска ещё не измерялась</span>`)
+      +`<span class="grow"></span>`;
+     const b=el(`<button class="btn sm"${busy?" disabled":""}>${busy?"измеряю…":svg("gauge",13)+" "+(cur?"Измерить заново":"Тест скорости")}</button>`);
+     b.title="Последовательное чтение с устройства + запись временного файла на диск (файл сразу удаляется)";
+     b.onclick=async()=>{paintSpd(true);
+       const r=await api("/api/disk/speedtest",{method:"POST",body:JSON.stringify({dev:x.path})});
+       if(LIVE&&r&&r.ok){cur={read:r.read_mbps,write:r.write_mbps,t:r.t};}
+       else toast(LIVE?("Ошибка: "+((r&&r.log)||"")):"Демо");
+       paintSpd(false);};
+     sp.appendChild(b);};
+   paintSpd(false);
+   box.appendChild(sp);
+ }
  // разделы
  if(hasParts){box.appendChild(el(`<div class="dd-grp">Разделы</div>`));const pw=el(`<div class="dparts"></div>`);const ro=x.role==="system";x.partitions.forEach(pt=>pw.appendChild(partRow(pt,reload,ro)));box.appendChild(pw);}
  // SMART — грузим лениво
@@ -2731,11 +2819,20 @@ document.addEventListener("keydown",ev=>{const w=OPEN.__viewer;if(!w||!w.classLi
    else if(ev.key.toLowerCase()==="m"){V.vidApi.mute();}
  }});
 /* ---- прогресс пакетных операций ---- */
-function opProgress(title){const box=el(`<div class="op-prog"><div class="op-t"><span class="op-l">${esc(title)}</span><span class="op-n">0 / 0</span></div><div class="op-track"><div class="op-fill"></div></div></div>`);document.body.appendChild(box);
- return {box,set:(i,t,label)=>{box.querySelector(".op-n").textContent=i+" / "+t;box.querySelector(".op-fill").style.width=(t?Math.round(i/t*100):0)+"%";if(label)box.querySelector(".op-l").textContent=label;},done:()=>setTimeout(()=>box.remove(),450)};}
-async function runBatch(title,items,fn){const many=items.length>=3,p=many?opProgress(title):null;let ok=0;
- for(let i=0;i<items.length;i++){if(p)p.set(i,items.length);try{if(await fn(items[i],i))ok++;}catch(e){}}
- if(p){p.set(items.length,items.length);p.done();}return ok;}
+// прогресс операции — теперь через центр операций в верхнем баре (см. opAdd/opSet/opEnd)
+function opProgress(title){const o=opAdd(title);
+ return {op:o,set:(i,t,label)=>opSet(o,t?i/t:null,label!=null?label:(t?i+" / "+t:"")),
+         done:ok=>opEnd(o,ok!==false),fail:m=>opEnd(o,false,m)};}
+// запись действия в журнал уведомлений (клиентская сторона — итоги пакетных операций)
+function logAct(title,msg,lvl,kind){api("/api/events/log",{method:"POST",body:JSON.stringify({title,msg:msg||"",lvl:lvl||"ok",kind:kind||"files"})});}
+async function runBatch(title,items,fn){
+ const o=items.length>=3?opAdd(title,{cancel:()=>{}}):null;let ok=0,i=0;
+ for(;i<items.length;i++){if(o&&o.cancelled)break;
+  if(o)opSet(o,i/items.length,`${i} / ${items.length}`);
+  try{if(await fn(items[i],i))ok++;}catch(e){}}
+ if(o)opEnd(o,!o.cancelled&&ok===i?true:!o.cancelled,o.cancelled?`отменено · сделано ${ok} из ${items.length}`:`${ok} / ${items.length}`);
+ if(LIVE)logAct(`${title.replace(/…$/,"")}: ${ok} из ${items.length}`+(o&&o.cancelled?" (отменено)":""),"",(o&&o.cancelled)||ok<items.length?"warn":"ok");
+ return ok;}
 function fileIcon(name,type){if(type==="dir")return "folder";const e=(name.split(".").pop()||"").toLowerCase();
  if(isImgName(name))return "image";
  if(/^(zip|tar|gz|tgz|bz2|xz|7z|rar)$/.test(e))return "archive";
@@ -2943,7 +3040,12 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
  function doArchive(paths){if(!paths.length)return;const sc=document.getElementById("scrim");
    sc.innerHTML=`<div class="dialog"><h3>Создать архив</h3><p>${paths.length} объ. → zip в текущей папке.</p><div class="field"><label>Имя архива</label><input id="az" value="archive.zip"></div><div class="r"><button class="btn" id="ax">Отмена</button><button class="btn pri" id="ao">Создать</button></div></div>`;
    sc.classList.add("show");sc.querySelector("#ax").onclick=()=>sc.classList.remove("show");
-   sc.querySelector("#ao").onclick=async()=>{const an=sc.querySelector("#az").value.trim();sc.classList.remove("show");toast("Создаю архив "+an+"…");const r=await api("/api/fs/archive",{method:"POST",body:JSON.stringify({items:paths,dest:cwd,name:an})});if(LIVE)notifyDone(r&&r.ok?"Архив создан":"Ошибка архива",r&&r.ok?an:((r&&r.log)||""));else toast("Демо");if(r&&r.ok)load(cwd);};}
+   sc.querySelector("#ao").onclick=async()=>{const an=sc.querySelector("#az").value.trim();sc.classList.remove("show");
+     const o=opAdd("Архив: "+an);opSet(o,null,paths.length+" элементов");
+     const r=await api("/api/fs/archive",{method:"POST",body:JSON.stringify({items:paths,dest:cwd,name:an})});
+     opEnd(o,!!(r&&r.ok),r&&r.ok?"":((r&&r.log)||"ошибка"));
+     if(LIVE){notifyDone(r&&r.ok?"Архив создан":"Ошибка архива",r&&r.ok?an:((r&&r.log)||""));logAct(r&&r.ok?`Создан архив ${an}`:`Архив ${an} — ошибка`,cwd,r&&r.ok?"ok":"warn");}else toast("Демо");
+     if(r&&r.ok)load(cwd);};}
  function doBulkRename(items){if(!items||items.length<2)return;const s=document.getElementById("scrim");
    const splitExt=n=>{const d=n.lastIndexOf(".");return(d>0)?[n.slice(0,d),n.slice(d)]:[n,""];};
    const calc=()=>{const find=s.querySelector("#brFind").value,repl=s.querySelector("#brRepl").value,
@@ -3024,7 +3126,11 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
      if(mode&&mode!==(d.mode||e.mode)){const w=await api("/api/fs/chmod",{method:"POST",body:JSON.stringify({path:e.path,mode,recursive:rec})});msgs.push(w&&w.ok?"права ✓":"права: "+((w&&w.log)||"ошибка"));}
      if((own&&own!==d.owner)||(grp&&grp!==d.group)){const w=await api("/api/fs/chown",{method:"POST",body:JSON.stringify({path:e.path,owner:own,group:grp,recursive:rec})});msgs.push(w&&w.ok?"владелец ✓":"владелец: "+((w&&w.log)||"ошибка"));}
      toast(LIVE?(msgs.join(" · ")||"без изменений"):"Демо");s.classList.remove("show");load(cwd);};}
- async function doUnzip(e){toast("Распаковка "+e.name+"…");const r=await api("/api/fs/unzip",{method:"POST",body:JSON.stringify({path:e.path,dest:cwd})});if(LIVE)notifyDone(r&&r.ok?"Распаковано":"Ошибка распаковки",r&&r.ok?e.name:((r&&r.log)||""));else toast("Демо");if(r&&r.ok)load(cwd);}
+ async function doUnzip(e){const o=opAdd("Распаковка: "+e.name);
+   const r=await api("/api/fs/unzip",{method:"POST",body:JSON.stringify({path:e.path,dest:cwd})});
+   opEnd(o,!!(r&&r.ok),r&&r.ok?"":((r&&r.log)||"ошибка"));
+   if(LIVE){notifyDone(r&&r.ok?"Распаковано":"Ошибка распаковки",r&&r.ok?e.name:((r&&r.log)||""));logAct(r&&r.ok?`Распакован архив ${e.name}`:`Распаковка ${e.name} — ошибка`,cwd,r&&r.ok?"ok":"warn");}else toast("Демо");
+   if(r&&r.ok)load(cwd);}
  function doMkdir(){const s=document.getElementById("scrim");
    s.innerHTML=`<div class="dialog"><h3>Новая папка</h3><div class="field"><label>Имя</label><input id="mk" placeholder="new-folder"></div><div class="r"><button class="btn" id="mx">Отмена</button><button class="btn pri" id="mo">Создать</button></div></div>`;
    s.classList.add("show");s.querySelector("#mk").focus();s.querySelector("#mx").onclick=()=>s.classList.remove("show");
@@ -3033,16 +3139,30 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    s.innerHTML=`<div class="dialog"><h3>Новый файл</h3><div class="field"><label>Имя файла</label><input id="nf" placeholder="notes.txt"></div><div class="r"><button class="btn" id="nx">Отмена</button><button class="btn pri" id="no">Создать</button></div></div>`;
    s.classList.add("show");s.querySelector("#nf").focus();s.querySelector("#nx").onclick=()=>s.classList.remove("show");
    s.querySelector("#no").onclick=async()=>{const r=await api("/api/fs/newfile",{method:"POST",body:JSON.stringify({path:cwd,name:s.querySelector("#nf").value.trim()})});toast(LIVE?(r&&r.ok?"Создано":("Ошибка: "+((r&&r.log)||""))):"Демо");if(r&&r.ok){s.classList.remove("show");await load(cwd);const e=entries.find(x=>x.path===r.path);if(e)openFileWin(e);}};}
- function uploadFile(f,onprog){return new Promise(res=>{const xhr=new XMLHttpRequest();
-   xhr.open("POST","/api/fs/upload-raw?path="+encodeURIComponent(cwd)+"&name="+encodeURIComponent(f.name));
-   if(xhr.upload&&onprog)xhr.upload.onprogress=e=>{if(e.lengthComputable)onprog(e.loaded,e.total);};
-   xhr.onload=()=>res(true);xhr.onerror=()=>res(false);xhr.send(f);});}
- async function doUpload(files){if(!files.length)return;const p=opProgress("Загрузка…"),many=files.length>1;
-   for(let i=0;i<files.length;i++){const f=files[i];
-     p.box.querySelector(".op-l").textContent=(many?`(${i+1}/${files.length}) `:"")+f.name;
-     await uploadFile(f,(loaded,total)=>{p.box.querySelector(".op-fill").style.width=Math.round((i+loaded/total)/files.length*100)+"%";p.box.querySelector(".op-n").textContent=fmtB(loaded)+" / "+fmtB(total);});}
-   p.box.querySelector(".op-fill").style.width="100%";p.done();
-   toast(LIVE?"Загружено: "+files.length:"Демо");load(cwd);}
+ // очередь загрузок: до 2 параллельных, сотни файлов, отмена через центр операций
+ async function doUpload(files){files=[...files];if(!files.length)return;
+   const dir=cwd,total=files.reduce((a,f)=>a+(f.size||0),0);
+   let sent=0,done=0,fail=0,idx=0;const active=new Map(); // xhr → загружено байт
+   const o=opAdd(files.length>1?`Загрузка ${files.length} файлов`:`Загрузка: ${files[0].name}`,
+     {cancel:()=>{active.forEach((v,x)=>{try{x.abort();}catch(e){}});}});
+   const upd=()=>{let cur=0;active.forEach(v=>cur+=v);
+     opSet(o,total?Math.min((sent+cur)/total,1):(done+fail)/files.length,
+       `${done+fail} / ${files.length}${fail?` · ошибок: ${fail}`:""} · ${fmtB(sent+cur)} из ${fmtB(total)}`);};
+   const one=f=>new Promise(res=>{const xhr=new XMLHttpRequest();active.set(xhr,0);
+     xhr.open("POST","/api/fs/upload-raw?path="+encodeURIComponent(dir)+"&name="+encodeURIComponent(f.name));
+     if(xhr.upload)xhr.upload.onprogress=e=>{if(e.lengthComputable){active.set(xhr,e.loaded);upd();}};
+     const fin=ok=>{active.delete(xhr);sent+=f.size||0;ok?done++:fail++;upd();res(ok);};
+     xhr.onload=()=>{let ok=xhr.status===200;try{ok=ok&&JSON.parse(xhr.responseText).ok!==false;}catch(e){}fin(ok);};
+     xhr.onerror=()=>fin(false);xhr.onabort=()=>fin(false);
+     xhr.send(f);});
+   const worker=async()=>{while(idx<files.length&&!o.cancelled)await one(files[idx++]);};
+   await Promise.all([worker(),worker()]);
+   const okAll=!o.cancelled&&!fail;
+   opEnd(o,okAll,o.cancelled?`отменено · загружено ${done} из ${files.length}`:`${done} / ${files.length}${fail?` · ошибок: ${fail}`:""}`);
+   if(LIVE){notifyDone(o.cancelled?"Загрузка отменена":okAll?"Загрузка завершена":"Загрузка с ошибками",`${done} из ${files.length} · ${dir}`);
+     logAct(files.length>1?`Загружено ${done} из ${files.length} файлов`+(o.cancelled?" (отменено)":""):`Загружен файл ${files[0].name}`,dir,okAll?"ok":"warn");}
+   else toast("Демо");
+   load(cwd);}
  function doFetchUrl(){const s=document.getElementById("scrim");
    s.innerHTML=`<div class="dialog"><h3>Загрузить по ссылке</h3>
      <div class="mon-note" style="margin:0 0 10px">Сервер сам скачает файл в текущую папку <span class="mono">${esc(cwd)}</span>.</div>
@@ -3056,12 +3176,16 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
      if(!r||!r.ok){toast("Ошибка: "+((r&&r.log)||"?"));return;}
      s.classList.remove("show");pollFetch(r.id);};
    s.querySelector("#fuO").onclick=go;u.onkeydown=ev=>{if(ev.key==="Enter")go();};}
- async function pollFetch(id){const p=opProgress("Загрузка по ссылке…"),nEl=p.box.querySelector(".op-n");
+ async function pollFetch(id){
+   const o=opAdd("Скачивание по ссылке…",{cancel:()=>api("/api/fs/fetch/cancel",{method:"POST",body:JSON.stringify({id})})});
    while(true){const r=await api("/api/fs/fetch/status?id="+encodeURIComponent(id)),j=r&&r.job;
-     if(!j){p.done();toast("Задача потеряна");return;}
-     p.set(0,0,j.name);p.box.querySelector(".op-fill").style.width=(j.total?Math.round(j.got/j.total*100):40)+"%";
-     nEl.textContent=fmtB(j.got)+(j.total?" / "+fmtB(j.total):"");
-     if(j.done){p.done();notifyDone(j.ok?"Скачано":"Ошибка загрузки",j.ok?j.name:(j.name+" · "+(j.log||"?")));if(j.ok)load(cwd);return;}
+     if(!j){opEnd(o,false,"задача потеряна");return;}
+     o.title="Скачиваю: "+(j.name||"…");
+     opSet(o,j.total?j.got/j.total:null,fmtB(j.got)+(j.total?" из "+fmtB(j.total):""));
+     if(j.done){opEnd(o,j.ok,j.ok?"":(j.log||"ошибка"));
+       notifyDone(j.ok?"Скачано":"Ошибка загрузки",j.ok?j.name:(j.name+" · "+(j.log||"?")));
+       logAct(j.ok?`Скачан файл ${j.name}`:`Скачивание ${j.name} не удалось`,j.ok?(j.path||""):(j.log||""),j.ok?"ok":"warn");
+       if(j.ok)load(cwd);return;}
      await new Promise(res=>setTimeout(res,700));}}
  function rowMenu(e,x,y){const it=[{label:"Открыть",ic:svg(e.type==="dir"?"folder":"file",16),act:()=>openEntry(e)}];
    if(e.type==="file")it.push({label:"Скачать",ic:svg("download",16),act:()=>dl(e)});
@@ -3409,6 +3533,7 @@ const EVMETA=[
  {k:"readonly",t:"Диск только для чтения",d:"ФС перемонтирована ro — прямой риск для данных",dp:2},
  {k:"fserror",t:"Ошибки диска в логе ядра",d:"EXT4/XFS/I-O ошибки в journalctl -k",dp:1},
  {k:"mergerfs",t:"Диск выпал из пула",d:"ветка /mnt/diskN из fstab не смонтирована",dp:1},
+ {k:"usb_import",t:"USB-импорт (автокопирование)",d:"вставленная SD/флешка скопирована: начало и итог",dp:0},
  {grp:"Здоровье дисков (SMART, проверка раз в 10 мин)"},
  {k:"smart",t:"SMART-сбой",d:"диск не прошёл самооценку — под замену",dp:2},
  {k:"smart_wear",t:"Износ диска",d:"растут переназначенные/ожидающие секторы",thr:"сект",dp:1},
@@ -3468,24 +3593,26 @@ function notifyTab(tc){tc.innerHTML=`<div style="color:var(--mut);font-size:12px
    <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px"><button class="btn sm pri" id="nfSave">${svg("save",13)} Сохранить ключи</button><button class="btn sm" id="nfTest">${svg("bell",13)} Тест</button><span id="nfStat" style="font-size:11px;color:${NTF.configured?'var(--good)':'var(--mut)'}">${NTF.configured?'✓ ключи заданы':'не настроено'}</span></div>
    <div class="mon-note">Ключи хранятся на устройстве и защищены от чужого доступа. User key — в профиле pushover.net, token — создав «Application/API Token».</div>
    <div class="set-h">Оповещения</div>
-   <div class="mon-row"><span>Присылать оповещения</span><label class="tgl"><input type="checkbox" id="nfEn"><span class="sl"></span></label></div>
+   <div class="mon-row"><span>Слать push-уведомления на телефон (Pushover)</span><label class="tgl"><input type="checkbox" id="nfEn"><span class="sl"></span></label></div>
    <div class="field" style="margin:8px 0 4px"><label>Не повторять одно событие чаще, мин</label><input id="nfCd" class="mono" style="max-width:120px"></div>
+   <div class="mon-note">Все события всегда записываются в журнал (колокольчик в верхнем баре). У каждого события два тумблера: <b>первый</b> — плашка на рабочем столе и счётчик на колокольчике, <b>второй</b> — push в Pushover (работает при включённом переключателе выше). Список «Уровень» — приоритет Pushover.</div>
    <div id="nfEvents"></div>`;
   const en=tc.querySelector("#nfEn");en.checked=!!MON.enabled;
-  const evbox=tc.querySelector("#nfEvents"),dimAll=()=>evbox.classList.toggle("mon-dim",!en.checked);
+  const evbox=tc.querySelector("#nfEvents");
   EVMETA.forEach(m=>{
    if(m.grp){evbox.appendChild(el(`<div class="set-h">${esc(m.grp)}</div>`));return;}
    const e=ev[m.k]||{},pv=e.priority!=null?e.priority:m.dp;
    const hasThr=m.thr!==undefined;
    const prioSel=`<select class="ev-prio" id="evp_${m.k}" title="Уровень Pushover">${PRIO.map(([v,l])=>`<option value="${v}"${v===pv?" selected":""}>${l}</option>`).join("")}</select>`;
-   const row=el(`<div class="ev-row"><div class="ev-txt"><div class="ev-t">${esc(m.t)}</div><div class="ev-d">${esc(m.d)}</div></div>${hasThr?`<input class="ev-thr mono" id="ev_${m.k}" value="${e.threshold!=null?e.threshold:''}">${m.thr?`<span class="ev-u">${m.thr}</span>`:""}`:""}${prioSel}<label class="tgl"><input type="checkbox" id="evon_${m.k}"${e.on?" checked":""}><span class="sl"></span></label></div>`);
+   const dsk=e.desk!=null?e.desk:(pv>=1);
+   const row=el(`<div class="ev-row"><div class="ev-txt"><div class="ev-t">${esc(m.t)}</div><div class="ev-d">${esc(m.d)}</div></div>${hasThr?`<input class="ev-thr mono" id="ev_${m.k}" value="${e.threshold!=null?e.threshold:''}">${m.thr?`<span class="ev-u">${m.thr}</span>`:""}`:""}${prioSel}<label class="tgl" title="Плашка на рабочем столе + счётчик на колокольчике"><input type="checkbox" id="evd_${m.k}"${dsk?" checked":""}><span class="sl"></span></label><label class="tgl" title="Push-уведомление в Pushover"><input type="checkbox" id="evon_${m.k}"${e.on?" checked":""}><span class="sl"></span></label></div>`);
    evbox.appendChild(row);});
-  const cd=tc.querySelector("#nfCd");cd.value=Math.round((MON.cooldown||1800)/60);dimAll();
+  const cd=tc.querySelector("#nfCd");cd.value=Math.round((MON.cooldown||1800)/60);
   const items=EVMETA.filter(m=>m.k);
-  const collect=()=>{const events={};items.forEach(m=>{const o={on:tc.querySelector("#evon_"+m.k).checked,priority:+tc.querySelector("#evp_"+m.k).value};if(m.thr!==undefined)o.threshold=+tc.querySelector("#ev_"+m.k).value||0;events[m.k]=o;});return {enabled:en.checked,cooldown:Math.max(1,+cd.value||30)*60,events};};
+  const collect=()=>{const events={};items.forEach(m=>{const o={on:tc.querySelector("#evon_"+m.k).checked,desk:tc.querySelector("#evd_"+m.k).checked,priority:+tc.querySelector("#evp_"+m.k).value};if(m.thr!==undefined)o.threshold=+tc.querySelector("#ev_"+m.k).value||0;events[m.k]=o;});return {enabled:en.checked,cooldown:Math.max(1,+cd.value||30)*60,events};};
   const saveMon=()=>api("/api/monitor",{method:"POST",body:JSON.stringify({monitor:collect()})});
-  en.onchange=()=>{dimAll();saveMon();};cd.onchange=saveMon;
-  items.forEach(m=>{tc.querySelector("#evon_"+m.k).onchange=saveMon;tc.querySelector("#evp_"+m.k).onchange=saveMon;if(m.thr!==undefined)tc.querySelector("#ev_"+m.k).onchange=saveMon;});
+  en.onchange=saveMon;cd.onchange=saveMon;
+  items.forEach(m=>{tc.querySelector("#evon_"+m.k).onchange=saveMon;tc.querySelector("#evd_"+m.k).onchange=saveMon;tc.querySelector("#evp_"+m.k).onchange=saveMon;if(m.thr!==undefined)tc.querySelector("#ev_"+m.k).onchange=saveMon;});
   tc.querySelector("#nfSave").onclick=async()=>{const rr=await api("/api/monitor",{method:"POST",body:JSON.stringify({notify:{user:tc.querySelector("#nfU").value.trim(),token:tc.querySelector("#nfT").value.trim()}})});const st=tc.querySelector("#nfStat");if(rr&&rr.notify){st.textContent=rr.notify.configured?"✓ ключи заданы":"не настроено";st.style.color=rr.notify.configured?"var(--good)":"var(--mut)";}toast(LIVE?"Ключи сохранены":"Демо");};
   tc.querySelector("#nfTest").onclick=async()=>{const rr=await api("/api/monitor",{method:"POST",body:JSON.stringify({test:true})});toast(LIVE?(rr&&rr.ok?"Тест отправлен в Pushover ✓":"Не отправлено: "+((rr&&rr.log)||"")):"Демо");};
  });}
@@ -3729,12 +3856,142 @@ function paintTray(s){const t=document.getElementById("tray");if(!t)return;s=s||
  t.innerHTML=trayCfg().filter(x=>x.on).map(x=>{const d=TRAY_DEFS[x.id],w=d.warn&&d.warn(s)?"warn":"";return `<button class="pill ${w}"><span class="ic">${svg(d.ic,15)}</span><b>${d.html?d.html(s):esc(String(d.val(s)))}</b></button>`;}).join("");
  t.querySelectorAll(".pill").forEach(p=>p.onclick=()=>winMon());}
 const MONTHS=["янв","фев","мар","апр","мая","июн","июл","авг","сен","окт","ноя","дек"];
+function ruWhen(ts){ // человеческая дата из unix-секунд: «сегодня 14:32», «7 мая 09:10»
+ const d=new Date(ts*1000),now=new Date();
+ const hm=String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0");
+ if(d.toDateString()===now.toDateString())return "сегодня "+hm;
+ if(d.toDateString()===new Date(now.getTime()-864e5).toDateString())return "вчера "+hm;
+ return d.getDate()+" "+MONTHS[d.getMonth()]+(d.getFullYear()!==now.getFullYear()?" "+d.getFullYear():"")+" "+hm;}
 function tickClock(){const d=new Date(),dd=["вс","пн","вт","ср","чт","пт","сб"];
  const c=document.getElementById("clock");if(c)c.innerHTML=`${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}<small>${dd[d.getDay()]}, ${d.getDate()} ${MONTHS[d.getMonth()]}</small>`;}
 function reboot(){confirmDlg("Перезагрузить NAS?","Все сервисы будут остановлены и Pi перезагрузится.",async()=>{
   const r=await api("/api/power",{method:"POST",body:JSON.stringify({action:"reboot"})});toast(LIVE&&r.ok?"Перезагрузка…":"Демо: недоступно");},true);}
 function poweroff(){confirmDlg("Выключить NAS?","Pi будет выключен. Включить обратно можно только физически.",async()=>{
   const r=await api("/api/power",{method:"POST",body:JSON.stringify({action:"poweroff"})});toast(LIVE&&r.ok?"Выключение…":"Демо: недоступно");},true);}
+
+/* ===================== верхний бар: здоровье · операции · уведомления ===================== */
+// поповер под кнопкой menubar: класс .menu → те же стекло/адаптивные цвета, что у меню
+function mbPop(anchor,build){
+ closeMenu();const p=el(`<div class="menu mbpop"></div>`);build(p);document.body.appendChild(p);
+ const r=anchor.getBoundingClientRect(),w=p.getBoundingClientRect().width;
+ p.style.top=Math.round(r.bottom+8)+"px";
+ p.style.left=Math.max(8,Math.min(Math.round(r.right-w),innerWidth-w-8))+"px";
+ const off=ev=>{if(!p.contains(ev.target)&&ev.target!==anchor&&!anchor.contains(ev.target)){document.removeEventListener("pointerdown",off,true);p.remove();}};
+ p._off=off;setTimeout(()=>document.addEventListener("pointerdown",off,true),0);return p;}
+
+/* ---- здоровье системы в баре ---- */
+let HEALTH=null;
+const HLVL={ok:["Всё в порядке","var(--good)"],warn:["Есть замечания","var(--warn)"],bad:["Есть проблемы","var(--danger)"]};
+async function pollHealth(){const r=await api("/api/health");if(r&&r.checks){HEALTH=r;paintHealthBtn();}}
+function paintHealthBtn(){const b=document.getElementById("healthBtn");if(!b)return;
+ const ov=HEALTH?HEALTH.overall:"na";
+ b.innerHTML=svg("heart",16)+`<span class="mbh-dot ${ov}"></span>`;
+ b.title="Здоровье системы: "+((HLVL[ov]||["проверяю…"])[0]);}
+function healthPop(){const b=document.getElementById("healthBtn");
+ mbPop(b,p=>{const h=HEALTH;
+  const head=`<div class="mbp-h">Здоровье системы${h?`<span class="mbp-cnt" style="color:${(HLVL[h.overall]||[])[1]};background:transparent;border:1px solid var(--line)">${(HLVL[h.overall]||["…"])[0]}</span>`:""}</div>`;
+  const rows=h?h.checks.map(c=>`<div class="mbp-row" style="cursor:default"><span class="ndot ${c.lvl==="bad"?"crit":c.lvl==="warn"?"warn":"ok"}"></span><div class="mbp-m"><div class="mbp-t">${esc(c.name)}</div><div class="mbp-s">${esc(c.value)}${c.hint?" · "+esc(c.hint):""}</div></div></div>`).join("")
+   :`<div class="mbp-empty">Собираю сводку…</div>`;
+  p.innerHTML=head+rows+`<div class="mbp-f"><button class="btn sm" id="mbhSys">${svg("gauge",13)} Открыть Систему</button><span class="grow"></span><button class="btn sm" id="mbhR">${svg("refresh",13)}</button></div>`;
+  p.querySelector("#mbhSys").onclick=()=>{closeMenu();winMon();};
+  p.querySelector("#mbhR").onclick=async ev=>{ev.stopPropagation();await pollHealth();closeMenu();healthPop();};});}
+
+/* ---- центр уведомлений ---- */
+const EVQ={seq:0,seen:0,unseen:0,cache:[],toasted:0,remind:0,init:false};
+const NKIND={disk:"Диски",space:"Место",power:"Питание",svc:"Службы",access:"Доступ",net:"Сеть",protect:"Защита",files:"Файлы",action:"Действия",system:"Система"};
+async function pollEvents(){
+ const r=await api("/api/events?after="+EVQ.seq);if(!r||!Array.isArray(r.events))return;
+ const first=!EVQ.init;EVQ.init=true;
+ r.events.forEach(e=>EVQ.cache.push(e));
+ if(EVQ.cache.length>800)EVQ.cache.splice(0,EVQ.cache.length-800);
+ EVQ.seq=r.seq||EVQ.seq;EVQ.seen=r.seen||0;EVQ.unseen=r.unseen||0;
+ if(first)EVQ.toasted=EVQ.seq;      // старое при загрузке страницы не тостим
+ else{const fresh=r.events.filter(e=>e.id>EVQ.toasted&&e.desk);
+  fresh.slice(-4).forEach(e=>ntoast(e));
+  if(r.events.length)EVQ.toasted=Math.max(EVQ.toasted,...r.events.map(e=>e.id));}
+ // непрочитанное критичное (свежее суток) — напоминать плашкой раз в 10 минут
+ const crit=EVQ.cache.filter(e=>e.lvl==="crit"&&e.id>EVQ.seen&&(Date.now()/1e3-(e.t2||e.t))<86400);
+ if(crit.length&&Date.now()-EVQ.remind>600000){EVQ.remind=Date.now();ntoast(crit[crit.length-1],true);}
+ paintBell();}
+function paintBell(){const b=document.getElementById("bellBtn");if(!b)return;
+ const hasCrit=EVQ.cache.some(e=>e.lvl==="crit"&&e.id>EVQ.seen);
+ b.innerHTML=svg("bell",16)+(EVQ.unseen?`<span class="mb-badge${hasCrit?" crit":""}">${EVQ.unseen>99?"99+":EVQ.unseen}</span>`:"");
+ b.title=EVQ.unseen?`Уведомления: ${EVQ.unseen} новых`:"Уведомления";}
+function markSeen(){if(EVQ.seen>=EVQ.seq)return;EVQ.seen=EVQ.seq;EVQ.unseen=0;paintBell();
+ api("/api/events/seen",{method:"POST",body:JSON.stringify({id:EVQ.seq})});}
+function ntoast(e,remind){const c=document.getElementById("ntoasts");if(!c)return;
+ while(c.children.length>=4)c.firstChild.remove();
+ const n=el(`<div class="ntoast ${e.lvl}"><span class="ndot ${e.lvl}"></span><div class="nt-m"><div class="nt-t">${esc(e.title)}${e.n>1?` <span class="nmul">×${e.n}</span>`:""}${remind?` <span class="nmul">· напоминание</span>`:""}</div>${e.msg?`<div class="nt-s">${esc(e.msg)}</div>`:""}</div><button class="nt-x">${svg("x",12)}</button></div>`);
+ c.appendChild(n);requestAnimationFrame(()=>n.classList.add("show"));
+ const close=()=>{n.classList.remove("show");setTimeout(()=>n.remove(),260);};
+ n.querySelector(".nt-x").onclick=ev=>{ev.stopPropagation();close();};
+ n.onclick=()=>{close();winNotif();};
+ setTimeout(close,e.lvl==="crit"?15000:7000);
+ try{if("Notification"in window&&Notification.permission==="granted"&&document.hidden)new Notification(e.title,{body:e.msg||"",icon:"/icon.svg"});}catch(x){}}
+function evRow(e){return `<div class="mbp-row" data-eid="${e.id}"><span class="ndot ${e.lvl}"></span><div class="mbp-m"><div class="mbp-t">${esc(e.title)}${e.n>1?` <span class="nmul">×${e.n}</span>`:""}</div>${e.msg?`<div class="mbp-s">${esc(e.msg)}</div>`:""}</div><span class="mbp-w">${ruWhen(e.t2||e.t)}</span></div>`;}
+function bellPop(){const b=document.getElementById("bellBtn");
+ mbPop(b,p=>{const items=EVQ.cache.slice(-12).reverse();
+  p.innerHTML=`<div class="mbp-h">Уведомления${EVQ.unseen?`<span class="mbp-cnt">${EVQ.unseen} новых</span>`:""}</div>`
+   +(items.length?items.map(evRow).join(""):`<div class="mbp-empty">Пока пусто — здесь появятся события и действия системы</div>`)
+   +`<div class="mbp-f"><button class="btn sm" id="mbAll">${svg("list",13)} Показать все</button><span class="grow"></span><button class="btn sm" id="mbCfg" title="Настройки уведомлений">${svg("cog",13)}</button></div>`;
+  p.querySelectorAll(".mbp-row").forEach(rw=>rw.onclick=()=>{closeMenu();winNotif();});
+  p.querySelector("#mbAll").onclick=()=>{closeMenu();winNotif();};
+  p.querySelector("#mbCfg").onclick=()=>{closeMenu();winSettings("notify");};});
+ markSeen();}
+/* окно «все уведомления» с фильтрами */
+function winNotif(){openWin("__notif","Уведомления",async body=>{
+ const LVLS=[["","Все"],["crit","Критичные"],["warn","Предупреждения"],["ok","Успешные"],["info","Инфо"]];
+ body.innerHTML=`<div class="nt-bar"><div class="seg" id="ntLvl">${LVLS.map(([k,t],i)=>`<button data-l="${k}" class="${i?"":"on"}">${t}</button>`).join("")}</div>
+   <select id="ntKind"><option value="">Все разделы</option>${Object.entries(NKIND).map(([k,t])=>`<option value="${k}">${t}</option>`).join("")}</select>
+   <input id="ntQ" placeholder="Поиск…"><span class="grow"></span>
+   <button class="btn sm" id="ntClr" title="Стереть весь журнал">${svg("trash",13)} Очистить</button></div>
+   <div id="ntList" style="min-height:120px"><div style="color:var(--mut);font-size:12px">загрузка…</div></div>`;
+ let lvl="",kind="",q="",items=[];
+ const list=body.querySelector("#ntList");
+ const paint=()=>{const f=items.filter(e=>(!lvl||e.lvl===lvl)&&(!kind||e.kind===kind)&&(!q||(e.title+" "+(e.msg||"")).toLowerCase().includes(q)));
+  list.innerHTML=f.length?f.map(e=>`<div class="nt-row"><span class="nt-w">${ruWhen(e.t2||e.t)}</span><span class="ndot ${e.lvl}" style="margin-top:6px"></span><div class="nt-mm"><div class="nt-tt">${esc(e.title)}${e.n>1?` <span class="nmul">×${e.n}</span>`:""}</div>${e.msg?`<div class="nt-ms">${esc(e.msg)}</div>`:""}</div><span class="nt-k">${NKIND[e.kind]||e.kind||""}</span></div>`).join("")
+   :`<div class="dempty">${svg("bell",16)} ${items.length?"Ничего не найдено по фильтру":"Журнал пуст — события системы и ваши действия будут собираться здесь"}</div>`;};
+ const loadEv=async()=>{const r=await api("/api/events?limit=1000");items=((r&&r.events)||[]).slice().reverse();paint();markSeen();};
+ body.querySelectorAll("#ntLvl button").forEach(bt=>bt.onclick=()=>{body.querySelectorAll("#ntLvl button").forEach(x=>x.classList.toggle("on",x===bt));lvl=bt.dataset.l;paint();});
+ body.querySelector("#ntKind").onchange=e=>{kind=e.target.value;paint();};
+ body.querySelector("#ntQ").oninput=e=>{q=e.target.value.trim().toLowerCase();paint();};
+ body.querySelector("#ntClr").onclick=()=>confirmDlg("Очистить журнал уведомлений?","Все записи журнала будут стёрты безвозвратно.",async()=>{await api("/api/events/clear",{method:"POST",body:"{}"});EVQ.cache=[];loadEv();},true);
+ loadEv();
+},{w:680,h:560});}
+
+/* ---- центр операций (очереди, прогресс, отмена) ---- */
+const OPS={list:[],seq:0,paintT:0};
+function opAdd(title,opts){opts=opts||{};
+ const o={id:++OPS.seq,title,state:"run",p:null,label:"",cancel:opts.cancel||null,cancelled:false,t:Date.now()};
+ OPS.list.push(o);if(OPS.list.length>40)OPS.list=OPS.list.slice(-40);
+ paintOps(true);return o;}
+function opSet(o,p,label){o.p=p;if(label!=null)o.label=label;paintOps();}
+function opEnd(o,ok,label){if(o.state!=="run")return;o.state=o.cancelled?"cancel":ok?"done":"err";
+ if(label!=null&&label!=="")o.label=label;if(o.state==="done")o.p=1;o.cancel=null;paintOps(true);}
+function opCancel(o){if(o.state!=="run")return;o.cancelled=true;
+ try{if(o.cancel)o.cancel(o);}catch(e){}paintOps(true);}
+function paintOps(force){
+ const now=Date.now();if(!force&&now-OPS.paintT<250)return;OPS.paintT=now;
+ const b=document.getElementById("opsBtn");if(!b)return;
+ const run=OPS.list.filter(o=>o.state==="run").length;
+ b.style.display=OPS.list.length?"":"none";
+ b.innerHTML=svg(run?"sync":"list",16)+(run?`<span class="mb-badge">${run}</span>`:"");
+ b.title=run?`Операции: ${run} выполняется`:"Операции";
+ const p=document.querySelector(".mbpop[data-ops]");if(p)renderOpsList(p);}
+function renderOpsList(p){
+ const items=OPS.list.slice().reverse();
+ p.innerHTML=`<div class="mbp-h">Операции${OPS.list.some(o=>o.state==="run")?`<span class="mbp-cnt">${OPS.list.filter(o=>o.state==="run").length} активных</span>`:""}</div>`
+  +(items.length?items.map(o=>{
+    const st=o.state==="run"?"":o.state==="done"?`<span class="op-st done" style="font-weight:800">✓</span>`:o.state==="cancel"?`<span class="op-st">⊘</span>`:`<span class="op-st err" style="font-weight:800">!</span>`;
+    const bar=o.state==="run"?`<div class="op-bar"><div class="op-bf" style="width:${o.p==null?40:Math.round(Math.min(o.p,1)*100)}%"></div></div>`:"";
+    return `<div class="op-row${o.state==="run"&&o.p==null?" ind":""}" data-op="${o.id}"><div class="op-m"><div class="op-t2">${esc(o.title)}</div>${o.label?`<div class="op-s2">${esc(o.label)}</div>`:""}${bar}</div>${st}${o.state==="run"?`<button class="op-x" title="Отменить">${svg("x",14)}</button>`:""}</div>`;
+  }).join(""):`<div class="mbp-empty">Нет операций</div>`)
+  +`<div class="mbp-f"><span class="mbp-s" style="font-size:11px">Загрузки, копирование и другие длинные задачи</span><span class="grow"></span><button class="btn sm" id="opsClr">Убрать завершённые</button></div>`;
+ p.querySelectorAll(".op-x").forEach(x=>x.onclick=ev=>{ev.stopPropagation();
+  const o=OPS.list.find(y=>y.id===+x.closest(".op-row").dataset.op);if(o)opCancel(o);});
+ const clr=p.querySelector("#opsClr");if(clr)clr.onclick=()=>{OPS.list=OPS.list.filter(o=>o.state==="run");paintOps(true);const q=document.querySelector(".mbpop[data-ops]");if(q&&!OPS.list.length){closeMenu();}else if(q)renderOpsList(q);};}
+function opsPop(){const b=document.getElementById("opsBtn");
+ mbPop(b,p=>{p.setAttribute("data-ops","1");renderOpsList(p);});}
 
 /* context menu */
 document.querySelector(".desk").addEventListener("contextmenu",e=>{e.preventDefault();
@@ -3799,6 +4056,9 @@ function maybeOnboard(){let done=false;try{done=localStorage.getItem("nas_onboar
    {label:"Перезагрузить",ic:svg("power",17),act:reboot,dng:1},
    {label:"Выключить",ic:svg("power",17),act:poweroff,dng:1}]);};}
  const xb=document.getElementById("expoBtn");if(xb){xb.innerHTML=svg("grid",17);xb.onclick=toggleExpo;}
+ const hb=document.getElementById("healthBtn");if(hb){paintHealthBtn();hb.onclick=healthPop;}
+ const blb=document.getElementById("bellBtn");if(blb){paintBell();blb.onclick=bellPop;}
+ const opb=document.getElementById("opsBtn");if(opb)opb.onclick=opsPop;
  document.addEventListener("keydown",e=>{if(e.key==="F9"){e.preventDefault();toggleExpo();}else if(e.key==="Escape"&&EXPO){exitExpo();}});
  const dsk=document.querySelector(".desk");if(dsk)dsk.addEventListener("click",e=>{if((e.target===dsk||e.target.id==="apps")&&Object.keys(OPEN).some(id=>OPEN[id].style.display!=="none"))toggleExpo();});
  if(!SET.wpVer&&SET.wpType==="url"&&SET.wpUrl)setWallUrl();  // первый запуск: подтянуть обои по умолчанию
@@ -3810,8 +4070,10 @@ function maybeOnboard(){let done=false;try{done=localStorage.getItem("nas_onboar
  renderRail();renderApps();renderDock();renderWinbar();tickClock();
  poll();pollApps();pollDisks();maybeOnboard();
  pollStacks();pollTop();
+ pollEvents();setTimeout(pollHealth,2500);
  setInterval(poll,3000);setInterval(pollApps,8000);setInterval(pollDisks,15000);setInterval(tickClock,10000);
  setInterval(pollStacks,15000);setInterval(pollTop,10000);
+ setInterval(pollEvents,15000);setInterval(pollHealth,120000);
  if("serviceWorker" in navigator&&window.isSecureContext)navigator.serviceWorker.register("/sw.js").catch(()=>{});
  matchMedia("(prefers-color-scheme:light)").addEventListener("change",()=>{if(SET.theme==="auto")applySettings();});
 })();

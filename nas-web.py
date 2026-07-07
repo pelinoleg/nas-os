@@ -202,6 +202,7 @@ def disks():
     res = []
     am_base = automount_state().get("base", "/media/nas")
     spin = _load_spindown()
+    spd = _speedtest_load()
     for d in _lsblk():
         if d.get("type") != "disk":
             continue
@@ -269,6 +270,7 @@ def disks():
             "usage": disk_info(primary) if primary else None,
             "smart": smart_info(d.get("path")),
             "spindown": spin.get(d.get("path")),
+            "speedtest": spd.get((d.get("serial") or "").strip() or "\0") or spd.get(d.get("path")),
         })
     return res
 
@@ -382,19 +384,86 @@ def _disk_mountpoints(dev):
 
 _SYS_MPS = ("/", "/boot", "/boot/firmware", "/var", "/home", "/usr")
 
+SPEEDTEST_FILE = os.path.join(NAS_CONFIG, "speedtest.json")
+
+def _speedtest_load():
+    try:
+        with open(SPEEDTEST_FILE) as f:
+            d = json.load(f)
+            return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+def _speedtest_key(dev):
+    """Ключ сохранённого замера: серийник (не меняется при переименовании sdX) или сам dev."""
+    r = _run(["lsblk", "-dno", "SERIAL", dev], timeout=8)
+    ser = (r.get("log") or "").strip()
+    return ser if r.get("ok") and ser else dev
+
+def _dd_mbps(log):
+    m = re.search(r"([\d.,]+)\s*([kMG]?B)/s", log or "")
+    if not m:
+        return None
+    val = float(m.group(1).replace(",", ".")); unit = m.group(2)
+    return val * {"B": 1e-6, "kB": 1e-3, "MB": 1, "GB": 1e3}.get(unit, 1)
+
 def disk_speedtest(dev):
-    """Безопасный тест скорости последовательного ЧТЕНИЯ (мимо кэша, только чтение)."""
+    """Тест скорости: последовательное чтение с устройства (мимо кэша) +
+    последовательная запись временного файла на смонтированный раздел этого диска
+    (файл удаляется). Результат сохраняется и показывается в карточке диска."""
     if not re.match(r"^/dev/[\w-]+$", dev or ""):
         return {"ok": False, "log": "недопустимое устройство"}
     if not os.path.exists(dev):
         return {"ok": False, "log": "нет такого устройства"}
-    r = _run(["dd", "if=" + dev, "of=/dev/null", "bs=4M", "count=256", "iflag=direct"], timeout=90)
-    m = re.search(r"([\d.,]+)\s*([kMG]?B)/s", r.get("log", ""))
-    if not m:
+    r = _run(["dd", "if=" + dev, "of=/dev/null", "bs=4M", "count=256", "iflag=direct"], timeout=120)
+    read_mbps = _dd_mbps(r.get("log", ""))
+    if read_mbps is None:
         return {"ok": False, "log": "не удалось измерить: " + (r.get("log", "")[-120:])}
-    val = float(m.group(1).replace(",", ".")); unit = m.group(2)
-    mbps = val * {"B": 1e-6, "kB": 1e-3, "MB": 1, "GB": 1e3}.get(unit, 1)
-    return {"ok": True, "read_mbps": round(mbps, 1), "log": "последовательное чтение: %.0f МБ/с" % mbps}
+    # запись: только на несистемную смонтированную rw-точку с запасом места
+    write_mbps = None
+    wnote = "запись: нет смонтированного раздела для теста"
+    for mp in _disk_mountpoints(dev):
+        if mp in _SYS_MPS:
+            continue
+        try:
+            st = os.statvfs(mp)
+            if st.f_bavail * st.f_frsize < (1 << 30):
+                wnote = "запись: мало свободного места для теста"
+                continue
+        except OSError:
+            continue
+        tmp = os.path.join(mp, ".nas-speedtest.tmp")
+        try:
+            w = _run(["dd", "if=/dev/zero", "of=" + tmp, "bs=4M", "count=64",
+                      "oflag=direct", "conv=fsync"], timeout=90)
+            if not w["ok"]:      # ФС без O_DIRECT (exFAT/NTFS) — повторить через fsync
+                w = _run(["dd", "if=/dev/zero", "of=" + tmp, "bs=4M", "count=64",
+                          "conv=fsync"], timeout=90)
+            write_mbps = _dd_mbps(w.get("log", ""))
+            wnote = "" if write_mbps is not None else "запись: не удалось измерить"
+        finally:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+        break
+    res = {"read": round(read_mbps, 1),
+           "write": round(write_mbps, 1) if write_mbps is not None else None,
+           "t": int(time.time())}
+    try:
+        os.makedirs(NAS_CONFIG, exist_ok=True)
+        saved = _speedtest_load()
+        saved[_speedtest_key(dev)] = res
+        tmp = SPEEDTEST_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(saved, f)
+        os.replace(tmp, SPEEDTEST_FILE)
+    except OSError:
+        pass
+    log = "чтение: %.0f МБ/с" % read_mbps
+    log += (" · запись: %.0f МБ/с" % write_mbps) if write_mbps is not None else (" · " + wnote)
+    return {"ok": True, "read_mbps": res["read"], "write_mbps": res["write"],
+            "t": res["t"], "log": log}
 
 def disk_eject(dev):
     """Безопасно извлечь съёмный диск: отмонтировать все разделы + снять питание."""
@@ -818,9 +887,10 @@ _MON_IP = None        # последний известный локальный
 _MON_IFACE = None     # активный интерфейс по умолчанию (для link_changed)
 _MON_HEAT = 0         # счётчик подряд «горячих» тиков (для sustained_heat)
 _MON_HOURLY = {}      # ключ → время последней «часовой» проверки (updates, docker_space, …)
-_MON_WEEKLY = 0       # время последнего еженедельного отчёта
+_MON_WEEKLY = time.time()   # время последнего еженедельного отчёта (не слать сразу после рестарта)
 _MON_DISKSTAT = None  # предыдущий снимок /proc/diskstats (для slow_disk)
 _MON_HOG = {}         # pid → сколько тиков подряд процесс жрёт ресурсы
+_MON_USBIMP = time.time()   # старые записи журнала импорта не переигрываем
 _KNOWN_IPS_FILE = os.path.join(NAS_CONFIG, "known-ips.json")
 
 # Каталог событий: on (по умолчанию), priority (Pushover: -2 тихо … 2 экстренно), threshold.
@@ -883,7 +953,16 @@ def _def_monitor():
         "proc_hog":    {"on": False, "priority": 0, "threshold": 80},
         "inodes":      {"on": True,  "priority": 1, "threshold": 90},
         "boot":        {"on": False, "priority": -1},
+        # --- USB авто-импорт (итог копирования SD/флешки; Pushover off — скрипт
+        #     импорта умеет слать сам, чтобы не дублировать) ---
+        "usb_import":  {"on": False, "priority": 0, "desk": True},
     }}
+
+def _monitor_defaults_desk(d):
+    """desk = показывать плашкой на рабочем столе; по умолчанию — всё важное (priority>=1)."""
+    for k, v in d.get("events", {}).items():
+        v.setdefault("desk", v.get("priority", 0) >= 1)
+    return d
 
 def load_monitor():
     d = _def_monitor()
@@ -899,7 +978,7 @@ def load_monitor():
                 d[k] = v
     except (OSError, ValueError):
         pass
-    return d
+    return _monitor_defaults_desk(d)
 
 def save_monitor(d):
     cur = load_monitor()
@@ -915,6 +994,9 @@ def save_monitor(d):
         for ek, evv in ev.items():
             if ek in cur["events"] and isinstance(evv, dict):
                 cur["events"][ek].update(evv)
+                for bk in ("on", "desk"):
+                    if bk in cur["events"][ek]:
+                        cur["events"][ek][bk] = bool(cur["events"][ek][bk])
     os.makedirs(NAS_CONFIG, exist_ok=True)
     with open(MONITOR_FILE, "w") as f:
         json.dump(cur, f)
@@ -980,6 +1062,184 @@ def push_notify(title, msg, priority=0):
     if os.path.exists("/usr/local/bin/nas-notify.sh"):
         return _run(["/usr/local/bin/nas-notify.sh", title, msg, str(priority)], timeout=15)["ok"]
     return False
+
+# --------------------------------------------------------------------------- #
+#  Журнал событий (центр уведомлений): всё важное — события монитора, действия
+#  пользователя, ошибки — пишется сюда и хранится ~месяц. Pushover/рабочий стол —
+#  лишь способы доставки, журнал ведётся всегда.
+# --------------------------------------------------------------------------- #
+EVENTS_FILE = os.path.join(NAS_CONFIG, "events.json")
+EVENTS_CAP  = 3000
+EVENTS_DAYS = 31
+_events = None
+_events_lock = threading.Lock()
+
+def _events_load():
+    global _events
+    if _events is None:
+        try:
+            with open(EVENTS_FILE) as f:
+                _events = json.load(f)
+        except (OSError, ValueError):
+            _events = None
+        if not isinstance(_events, dict) or not isinstance(_events.get("items"), list):
+            _events = {"seq": 0, "seen": 0, "items": []}
+        _events.setdefault("seq", 0); _events.setdefault("seen", 0)
+    return _events
+
+def _events_save(ev):
+    try:
+        os.makedirs(NAS_CONFIG, exist_ok=True)
+        tmp = EVENTS_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(ev, f, ensure_ascii=False)
+        os.replace(tmp, EVENTS_FILE)
+    except OSError:
+        pass
+
+# категория события каталога → раздел журнала (для фильтров в окне уведомлений)
+_EVENT_KIND = {}
+for _k in ("disk_add", "disk_remove", "readonly", "fserror", "smart", "smart_wear",
+           "disktemp", "slow_disk", "sd_degrade", "usb_import"):
+    _EVENT_KIND[_k] = "disk"
+for _k in ("pool", "diskfull", "root_full", "inodes", "docker_space"):
+    _EVENT_KIND[_k] = "space"
+for _k in ("temp", "throttle", "mem", "swap", "load", "sustained_heat", "fan_stall", "proc_hog"):
+    _EVENT_KIND[_k] = "power"
+for _k in ("svcfail", "container", "container_loop", "cron_failed", "boot",
+           "reboot_req", "updates", "sec_updates", "time_drift", "weekly"):
+    _EVENT_KIND[_k] = "svc"
+for _k in ("panel_new", "panel_fail", "ssh_login"):
+    _EVENT_KIND[_k] = "access"
+for _k in ("ip_changed", "link_changed", "vpn_offline", "traffic"):
+    _EVENT_KIND[_k] = "net"
+for _k in ("snap_ok", "snap_err", "scrub_err", "delete_block", "backup", "mergerfs"):
+    _EVENT_KIND[_k] = "protect"
+
+def log_event(event, title, msg="", lvl=None, kind=None, desk=None):
+    """Записать событие в журнал. lvl: info|ok|warn|crit. desk=None → из настроек
+    события (показывать ли плашкой на рабочем столе)."""
+    evc = load_monitor().get("events", {}).get(event) or {}
+    if lvl is None:
+        p = evc.get("priority", 0)
+        lvl = "crit" if p >= 2 else "warn" if p >= 1 else "info"
+    if lvl not in ("info", "ok", "warn", "crit"):
+        lvl = "info"
+    if desk is None:
+        desk = bool(evc.get("desk", evc.get("priority", 0) >= 1))
+    now = int(time.time())
+    title = str(title or "")[:160]; msg = str(msg or "")[:500]
+    with _events_lock:
+        ev = _events_load()
+        items = ev["items"]
+        # дедуп: то же некритичное событие с тем же заголовком за 4 ч → счётчик ×N
+        # (критичные всегда добавляются заново — это и есть периодическое напоминание)
+        if lvl != "crit":
+            for it in reversed(items[-40:]):
+                if it.get("event") == event and it.get("title") == title \
+                        and now - it.get("t", 0) <= 4 * 3600:
+                    it["n"] = it.get("n", 1) + 1
+                    it["t2"] = now
+                    if msg:
+                        it["msg"] = msg
+                    _events_save(ev)
+                    return it["id"]
+        ev["seq"] += 1
+        items.append({"id": ev["seq"], "t": now, "event": event, "title": title,
+                      "msg": msg, "lvl": lvl,
+                      "kind": kind or _EVENT_KIND.get(event, "system"),
+                      "desk": bool(desk)})
+        cutoff = now - EVENTS_DAYS * 86400
+        if len(items) > EVENTS_CAP or (items and items[0].get("t", 0) < cutoff):
+            ev["items"] = [it for it in items if it.get("t", 0) >= cutoff][-EVENTS_CAP:]
+        _events_save(ev)
+        return ev["seq"]
+
+def events_list(after=0, limit=400):
+    try:
+        after = int(after or 0); limit = max(1, min(3000, int(limit or 400)))
+    except (ValueError, TypeError):
+        after, limit = 0, 400
+    with _events_lock:
+        ev = _events_load()
+        items = ev["items"]
+        out = [it for it in items if it["id"] > after] if after else list(items)
+        unseen = sum(1 for it in items if it["id"] > ev["seen"])
+        return {"events": out[-limit:], "seen": ev["seen"], "seq": ev["seq"], "unseen": unseen}
+
+def events_seen(eid):
+    try:
+        eid = int(eid)
+    except (ValueError, TypeError):
+        return {"ok": False, "log": "плохой id"}
+    with _events_lock:
+        ev = _events_load()
+        ev["seen"] = max(ev["seen"], min(eid, ev["seq"]))
+        _events_save(ev)
+        return {"ok": True, "seen": ev["seen"]}
+
+def events_clear():
+    with _events_lock:
+        ev = _events_load()
+        ev["items"] = []
+        ev["seen"] = ev["seq"]
+        _events_save(ev)
+    return {"ok": True}
+
+# --- журналирование действий пользователя (вызывается из do_POST) ------------
+_SYSD_RU = {"start": "запуск", "stop": "остановка", "restart": "перезапуск",
+            "enable": "автозапуск вкл", "disable": "автозапуск выкл", "reload": "reload"}
+
+def _act_title(p, b):
+    """Заголовок записи журнала для действия, или None если действие не журналируем."""
+    g = lambda k: str(b.get(k) or "")
+    if p == "/api/power":
+        return {"reboot": "Перезагрузка по команде с панели",
+                "poweroff": "Выключение по команде с панели"}.get(g("action"))
+    if p == "/api/systemd":
+        return "Служба %s: %s" % (g("unit"), _SYSD_RU.get(g("action"), g("action")))
+    if p == "/api/stack/action":
+        return "Стек %s: %s" % (g("name"), g("action"))
+    if p == "/api/container/action":
+        return "Контейнер %s: %s" % (g("id")[:12], g("action"))
+    if p == "/api/docker/prune":
+        return "Docker: очистка (%s)" % g("what")
+    if p == "/api/disk/format":
+        return None if b.get("dry") else "Форматирование %s → %s (%s)" % (g("dev"), g("fs") or "ext4", g("role") or "data")
+    if p == "/api/disk/eject":
+        return "Извлечён диск %s" % g("dev")
+    if p == "/api/disk/mount":
+        return ("Отмонтировано: %s" if b.get("unmount") else "Смонтировано: %s") % g("target")
+    if p == "/api/disk/mount-dev":
+        return "Подключение диска %s" % g("dev")
+    if p == "/api/disk/label":
+        return "Метка диска %s → %s" % (g("dev"), g("label"))
+    if p == "/api/disk/spindown":
+        m = b.get("minutes") or 0
+        return "Сон диска %s: %s" % (g("dev"), ("%s мин" % m) if m else "выкл")
+    if p == "/api/disk/smart-test":
+        return "SMART-тест %s (%s)" % (g("dev"), g("kind") or "short")
+    if p == "/api/fs/trash/empty":
+        return "Корзина очищена"
+    if p == "/api/usb-import/run":
+        return "USB-импорт запущен вручную (%s)" % g("dev")
+    if p == "/api/usb-import":
+        return "Настройки USB-импорта изменены"
+    return None
+
+_ACT_KIND = {"/api/disk/": "disk", "/api/fs/": "files", "/api/power": "svc",
+             "/api/systemd": "svc", "/api/stack": "svc", "/api/container": "svc",
+             "/api/docker": "svc", "/api/usb-import": "disk"}
+
+def log_action(p, body, result):
+    title = _act_title(p, body if isinstance(body, dict) else {})
+    if not title:
+        return
+    ok = not (isinstance(result, dict) and result.get("ok") is False)
+    kind = next((v for k, v in _ACT_KIND.items() if p.startswith(k)), "action")
+    msg = "" if ok else str((result or {}).get("log") or "")[:300]
+    log_event("action", title + ("" if ok else " — ошибка"), msg,
+              "ok" if ok else "warn", kind=kind, desk=False)
 
 def _phys_devs():
     try:
@@ -1086,17 +1346,18 @@ def _safe(fn, default=None):
 
 def mon_notify(dedup_key, title, msg, event=None):
     cfg = load_monitor()
-    if not cfg.get("enabled"):
-        return False
-    ev = cfg.get("events", {}).get(event or dedup_key.split(":")[0], {})
-    if not ev.get("on"):
-        return False
+    ev_name = event or dedup_key.split(":")[0]
+    ev = cfg.get("events", {}).get(ev_name, {})
     now = time.time()
     if now - _MON_LAST.get(dedup_key, 0) < cfg.get("cooldown", 1800):
         return False
-    if push_notify(title, msg, ev.get("priority", 0)):
-        _MON_LAST[dedup_key] = now
-        return True
+    _MON_LAST[dedup_key] = now
+    try:
+        log_event(ev_name, title, msg)      # журнал — всегда
+    except Exception:
+        pass
+    if cfg.get("enabled") and ev.get("on"):
+        return push_notify(title, msg, ev.get("priority", 0))
     return False
 
 def _known_ips():
@@ -1157,6 +1418,31 @@ def _snapraid_events():
         if "NASRESULT sync err" in l:
             ev.setdefault("sync_err", l.replace("NASRESULT ", "").strip()); break
     return ev or None
+
+def _usb_import_events(since):
+    """Новые записи журнала USB-импорта (/var/log/nas-usb-import.log) после метки since.
+    → ([(lvl, title, msg, ts), ...], новая метка)."""
+    log = _read("/var/log/nas-usb-import.log")
+    out, latest = [], since
+    for l in log.splitlines()[-30:] if log else []:
+        m = re.match(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}) (.*)$", l)
+        if not m:
+            continue
+        try:
+            ts = time.mktime(time.strptime(m.group(1), "%Y-%m-%d %H:%M:%S"))
+        except (ValueError, OverflowError):
+            continue
+        if ts <= since:
+            continue
+        latest = max(latest, ts)
+        rest = m.group(2).strip()
+        if rest.startswith("import OK ->"):
+            out.append(("ok", "USB-импорт завершён", "Скопировано в " + rest.split("->", 1)[1].strip(), ts))
+        elif rest.startswith("import FAIL"):
+            out.append(("warn", "USB-импорт: ошибка", "Не удалось скопировать (" + rest[len("import FAIL"):].strip() + ") — подробности в /var/log/nas-usb-import.log", ts))
+        elif rest.startswith("import ") and "->" in rest:
+            out.append(("info", "USB-импорт начат", rest[len("import "):], ts))
+    return out, latest
 
 def _mergerfs_missing():
     """Диски данных из fstab, которые сейчас НЕ смонтированы (ветка выпала из пула)."""
@@ -1277,12 +1563,13 @@ def _inodes_full(thr):
     return out
 
 def monitor_tick():
-    global _MON_BOOT_SENT, _MON_SMART_LAST, _MON_DEVS, _MON_IP, _MON_IFACE, _MON_HEAT, _MON_WEEKLY
+    global _MON_BOOT_SENT, _MON_SMART_LAST, _MON_DEVS, _MON_IP, _MON_IFACE, _MON_HEAT, _MON_WEEKLY, _MON_USBIMP
     cfg = load_monitor()
-    if not cfg.get("enabled"):
-        return
     ev = cfg.get("events", {})
-    on  = lambda k: ev.get(k, {}).get("on")
+    # Детекция и ЖУРНАЛ работают всегда. Настройки события управляют только
+    # доставкой: Pushover = cfg.enabled + ev.on (проверяется в fire),
+    # плашка на рабочем столе = ev.desk (проверяется клиентом по журналу).
+    on  = lambda k: True
     pri = lambda k: ev.get(k, {}).get("priority", 0)
     thr = lambda k, dv: ev.get(k, {}).get("threshold", dv)
     now = time.time()
@@ -1290,10 +1577,17 @@ def monitor_tick():
     if len(_MON_LAST) > 400:            # не копить ключи вечно (ssh:/panel_new: по IP)
         for k in [k for k, v in list(_MON_LAST.items()) if now - v > max(cd * 2, 7200)]:
             _MON_LAST.pop(k, None)
-    def fire(key, title, msg, priority=0):
-        if now - _MON_LAST.get(key, 0) >= cd:
-            if push_notify(title, msg, priority):
-                _MON_LAST[key] = now
+    def fire(key, title, msg, priority=0, ev_name=None, lvl=None):
+        if now - _MON_LAST.get(key, 0) < cd:
+            return
+        _MON_LAST[key] = now
+        name = ev_name or key.split(":")[0]
+        try:
+            log_event(name, title, msg, lvl)
+        except Exception:
+            pass
+        if cfg.get("enabled") and ev.get(name, {}).get("on"):
+            push_notify(title, msg, priority)
     s = _safe(stats)
     if not s:                       # без базовых метрик тик пропускаем (следующий повторит)
         return
@@ -1301,9 +1595,21 @@ def monitor_tick():
 
     # --- запуск системы ---
     if not _MON_BOOT_SENT:
-        if on("boot"):
+        try:
+            log_event("boot", "Система запущена", "%s снова в сети" % host, "ok")
+        except Exception:
+            pass
+        if cfg.get("enabled") and ev.get("boot", {}).get("on"):
             push_notify("NAS: система запущена", "%s снова в сети" % host, pri("boot"))
         _MON_BOOT_SENT = True
+
+    # --- USB авто-импорт: итоги копирования из журнала импорта ---
+    imp = _safe(lambda: _usb_import_events(_MON_USBIMP))
+    if imp:
+        evs, _MON_USBIMP = imp
+        for lvl_, title_, msg_, ts_ in evs:
+            fire("usbimp:%d" % int(ts_), title_, msg_, pri("usb_import"),
+                 ev_name="usb_import", lvl=lvl_)
 
     # --- подключение / отключение дисков (по изменению набора томов) ---
     vols = _safe(_block_volumes)
@@ -1389,25 +1695,25 @@ def monitor_tick():
                 if isinstance(d.get("pending"), int) and d["pending"] >= thr("smart_wear", 1):
                     bad.append("ожидают: %d" % d["pending"])
                 if bad:
-                    fire("wear:" + dev, "NAS: износ диска", "%s — %s" % (dev, ", ".join(bad)), pri("smart_wear"))
+                    fire("wear:" + dev, "NAS: износ диска", "%s — %s" % (dev, ", ".join(bad)), pri("smart_wear"), ev_name="smart_wear")
             if on("disktemp") and isinstance(d.get("temp"), int) and d["temp"] >= thr("disktemp", 60):
-                fire("dtemp:" + dev, "NAS: диск перегрет", "%s — %s°C" % (dev, d["temp"]), pri("disktemp"))
+                fire("dtemp:" + dev, "NAS: диск перегрет", "%s — %s°C" % (dev, d["temp"]), pri("disktemp"), ev_name="disktemp")
 
     # --- контейнеры: restart-loop + распухший docker ---
     if shutil.which("docker"):
         if on("container_loop"):
             loops = _safe(_restart_loops, [])
             if loops:
-                fire("cloop", "NAS: контейнер не поднимается", "Перезапускается по кругу: " + ", ".join(loops[:8]), pri("container_loop"))
+                fire("cloop", "NAS: контейнер не поднимается", "Перезапускается по кругу: " + ", ".join(loops[:8]), pri("container_loop"), ev_name="container_loop")
         if on("docker_space") and _hourly("docker_space"):
             gb = _safe(_docker_reclaimable_gb, 0) or 0
             if gb >= thr("docker_space", 20):
-                fire("dspace", "NAS: docker распух", "Можно освободить ~%s ГБ (prune)" % gb, pri("docker_space"))
+                fire("dspace", "NAS: docker распух", "Можно освободить ~%s ГБ (prune)" % gb, pri("docker_space"), ev_name="docker_space")
 
     # --- SSH-вход ---
     if on("ssh_login"):
         for user, ip in _safe(_ssh_logins, []):
-            fire("ssh:" + ip, "NAS: вход по SSH", "%s с %s" % (user, ip), pri("ssh_login"))
+            fire("ssh:" + ip, "NAS: вход по SSH", "%s с %s" % (user, ip), pri("ssh_login"), ev_name="ssh_login")
 
     # --- сеть: смена IP / линка / VPN (через fire → cooldown, не спамим при мерцании) ---
     ip = s.get("ip")
@@ -1420,7 +1726,7 @@ def monitor_tick():
         fire("link_changed", "NAS: смена сети", "Активный интерфейс: %s → %s" % (_MON_IFACE, iface), pri("link_changed"))
     _MON_IFACE = iface or _MON_IFACE
     if on("vpn_offline") and _safe(_tailscale_offline):
-        fire("vpn", "NAS: VPN offline", "Tailscale не в сети — удалённый доступ недоступен", pri("vpn_offline"))
+        fire("vpn", "NAS: VPN offline", "Tailscale не в сети — удалённый доступ недоступен", pri("vpn_offline"), ev_name="vpn_offline")
 
     # --- защита данных: SnapRAID + mergerfs + бэкап ---
     # берём последние sync/scrub с датой (snapraid_status) и включаем дату в ключ дедупа —
@@ -1428,57 +1734,57 @@ def monitor_tick():
     sn = _safe(snapraid_status, {}) or {}
     ls, lsc = sn.get("last_sync") or {}, sn.get("last_scrub") or {}
     if on("snap_ok") and ls.get("result") == "ok":
-        fire("snapok:" + str(ls.get("date")), "NAS: SnapRAID sync ок", "Синхронизация чётности прошла (%s)" % (ls.get("date") or ""), pri("snap_ok"))
+        fire("snapok:" + str(ls.get("date")), "NAS: SnapRAID sync ок", "Синхронизация чётности прошла (%s)" % (ls.get("date") or ""), pri("snap_ok"), ev_name="snap_ok", lvl="ok")
     if on("snap_err") and ls.get("result") == "err":
-        fire("snaperr:" + str(ls.get("date")), "NAS: SnapRAID sync ошибка", "Синхронизация чётности не удалась (%s)" % (ls.get("date") or ""), pri("snap_err"))
+        fire("snaperr:" + str(ls.get("date")), "NAS: SnapRAID sync ошибка", "Синхронизация чётности не удалась (%s)" % (ls.get("date") or ""), pri("snap_err"), ev_name="snap_err")
     if on("scrub_err") and lsc.get("result") == "err":
-        fire("scruberr:" + str(lsc.get("date")), "NAS: SnapRAID scrub ошибка", "Проверка нашла проблему (%s)" % (lsc.get("date") or ""), pri("scrub_err"))
+        fire("scruberr:" + str(lsc.get("date")), "NAS: SnapRAID scrub ошибка", "Проверка нашла проблему (%s)" % (lsc.get("date") or ""), pri("scrub_err"), ev_name="scrub_err")
     if on("delete_block") and sn.get("blocked"):
-        fire("delblk", "NAS: sync остановлен защитой", sn["blocked"], pri("delete_block"))
+        fire("delblk", "NAS: sync остановлен защитой", sn["blocked"], pri("delete_block"), ev_name="delete_block")
     if on("mergerfs"):
         miss = _safe(_mergerfs_missing, [])
         if miss:
-            fire("mfs", "NAS: диск выпал из пула", "Не смонтированы: " + ", ".join(miss), pri("mergerfs"))
+            fire("mfs", "NAS: диск выпал из пула", "Не смонтированы: " + ", ".join(miss), pri("mergerfs"), ev_name="mergerfs")
     if on("backup"):
         blog = _read("/var/log/nas-backup.log")
         if blog:
             last = blog.splitlines()[-1]
             if re.search(r"\b(FAIL|ошибка|error)\b", last, re.I):
-                fire("bkp", "NAS: бэкап не удался", last[-160:], pri("backup"))
+                fire("bkp", "NAS: бэкап не удался", last[-160:], pri("backup"), ev_name="backup", lvl="warn")
             elif re.search(r"\b(OK|успешно|done)\b", last, re.I):
-                fire("bkp", "NAS: бэкап выполнен", last[-160:], pri("backup"))
+                fire("bkp", "NAS: бэкап выполнен", last[-160:], pri("backup"), ev_name="backup", lvl="ok")
 
     # --- обслуживание ---
     root = _safe(lambda: disk_info("/")) or {}
     if on("root_full") and root.get("pct", 0) >= thr("root_full", 90):
-        fire("rootfull", "NAS: мало места на системной карте", "Раздел / занят на %s%%" % root.get("pct"), pri("root_full"))
+        fire("rootfull", "NAS: мало места на системной карте", "Раздел / занят на %s%%" % root.get("pct"), pri("root_full"), ev_name="root_full")
     if on("sd_degrade"):
         sd = _safe(_sd_errors, [])
         if sd:
-            fire("sderr", "NAS: сбои SD-карты", "\n".join(sd), pri("sd_degrade"))
+            fire("sderr", "NAS: сбои SD-карты", "\n".join(sd), pri("sd_degrade"), ev_name="sd_degrade")
     if on("sustained_heat"):
         hot = (t and t >= thr("temp", 75)) or not tr.get("ok", True)
         _MON_HEAT = _MON_HEAT + 1 if hot else 0
         if _MON_HEAT >= thr("sustained_heat", 10):
-            fire("heat", "NAS: держится перегрев/троттлинг", "Уже %d мин подряд — проверьте охлаждение/питание" % _MON_HEAT, pri("sustained_heat"))
+            fire("heat", "NAS: держится перегрев/троттлинг", "Уже %d мин подряд — проверьте охлаждение/питание" % _MON_HEAT, pri("sustained_heat"), ev_name="sustained_heat")
     if on("fan_stall"):
         rpm = _safe(_fan_rpm)
         if rpm == 0 and t and t >= thr("temp", 75):
-            fire("fan", "NAS: вентилятор стоит", "0 об/мин при %s°C — проверьте кулер" % t, pri("fan_stall"))
+            fire("fan", "NAS: вентилятор стоит", "0 об/мин при %s°C — проверьте кулер" % t, pri("fan_stall"), ev_name="fan_stall")
     if on("cron_failed"):
         cf = _safe(_cron_failures, [])
         if cf:
-            fire("cron", "NAS: задача по расписанию упала", "Ошибка: " + ", ".join(map(str, cf)), pri("cron_failed"))
+            fire("cron", "NAS: задача по расписанию упала", "Ошибка: " + ", ".join(map(str, cf)), pri("cron_failed"), ev_name="cron_failed")
     if on("time_drift") and _safe(_ntp_unsynced):
-        fire("ntp", "NAS: время не синхронизировано", "Часы могут уплыть — проверьте chrony/timesyncd", pri("time_drift"))
+        fire("ntp", "NAS: время не синхронизировано", "Часы могут уплыть — проверьте chrony/timesyncd", pri("time_drift"), ev_name="time_drift")
     if on("updates") and _hourly("updates"):
         n = _safe(_apt_upgradable, 0) or 0
         if n > 0:
-            fire("upd", "NAS: доступны обновления", "Можно обновить пакетов: %d" % n, pri("updates"))
+            fire("upd", "NAS: доступны обновления", "Можно обновить пакетов: %d" % n, pri("updates"), ev_name="updates")
     if on("sec_updates") and _hourly("sec_updates"):
         su = _safe(_sec_updates_recent, [])
         if su:
-            fire("secupd", "NAS: накатились security-обновления", su[-1], pri("sec_updates"))
+            fire("secupd", "NAS: накатились security-обновления", su[-1], pri("sec_updates"), ev_name="sec_updates")
 
     # --- поведенческие ---
     tx = (s.get("net") or {}).get("tx", 0)
@@ -1487,24 +1793,28 @@ def monitor_tick():
     if on("slow_disk"):
         for dev, aw in (_safe(_diskstat_await, {}) or {}).items():
             if aw >= thr("slow_disk", 100):
-                fire("slow:" + dev, "NAS: диск отвечает медленно", "%s — задержка %d мс/операцию" % (dev, round(aw)), pri("slow_disk"))
+                fire("slow:" + dev, "NAS: диск отвечает медленно", "%s — задержка %d мс/операцию" % (dev, round(aw)), pri("slow_disk"), ev_name="slow_disk")
     if on("proc_hog"):
         hog = _safe(lambda: _proc_hog(thr("proc_hog", 80)))
         if hog:
-            fire("hog", "NAS: процесс грузит систему", hog, pri("proc_hog"))
+            fire("hog", "NAS: процесс грузит систему", hog, pri("proc_hog"), ev_name="proc_hog")
     if on("inodes"):
         ino = _safe(lambda: _inodes_full(thr("inodes", 90)), [])
         if ino:
             fire("inodes", "NAS: заканчиваются inode", "; ".join(ino), pri("inodes"))
 
     # --- еженедельный отчёт «жив» ---
-    if on("weekly") and now - _MON_WEEKLY >= 7 * 86400:
+    if now - _MON_WEEKLY >= 7 * 86400:
         _MON_WEEKLY = now
-        push_notify("NAS: недельный отчёт",
-                    "%s · аптайм %s · CPU %s%% · темп %s°C · пул %s%%"
-                    % (host, fmt_uptime(s.get("uptime", 0)), s.get("cpu"),
-                       s.get("temp") or "—", (pool.get("pct") if pool else "—")),
-                    pri("weekly"))
+        wmsg = ("%s · аптайм %s · CPU %s%% · темп %s°C · пул %s%%"
+                % (host, fmt_uptime(s.get("uptime", 0)), s.get("cpu"),
+                   s.get("temp") or "—", (pool.get("pct") if pool else "—")))
+        try:
+            log_event("weekly", "Недельный отчёт", wmsg, "info")
+        except Exception:
+            pass
+        if cfg.get("enabled") and ev.get("weekly", {}).get("on"):
+            push_notify("NAS: недельный отчёт", wmsg, pri("weekly"))
 
 def _hourly(key):
     """True не чаще раза в час (для тяжёлых проверок)."""
@@ -1531,7 +1841,10 @@ def fmt_uptime(sec):
 # --------------------------------------------------------------------------- #
 HISTORY_FILE = os.path.join(NAS_CONFIG, "history.json")
 HISTORY_CAP  = 1500          # ~25 часов при шаге 60 с
+HISTORY_LONG_FILE = os.path.join(NAS_CONFIG, "history-long.json")
+HISTORY_LONG_CAP  = 4600     # шаг 10 мин → ~32 дня
 _history = None
+_history_long = None
 _hist_dirty = 0
 _hist_lock = threading.Lock()
 
@@ -1546,10 +1859,29 @@ def _load_history():
         _history = []
     return _history
 
-def history_snapshot():
-    """Копия истории под локом — безопасно сериализовать в HTTP-потоке."""
+def _load_history_long():
+    global _history_long
+    if _history_long is not None:
+        return _history_long
+    try:
+        with open(HISTORY_LONG_FILE) as f:
+            _history_long = json.load(f)[-HISTORY_LONG_CAP:]
+    except (OSError, ValueError):
+        _history_long = []
+    return _history_long
+
+# период → (какая серия, срез в секундах, шаг точки)
+_HIST_RANGES = {"1h": ("fine", 3600, 60), "6h": ("fine", 6 * 3600, 60),
+                "24h": ("fine", 25 * 3600, 60), "7d": ("long", 7 * 86400, 600),
+                "30d": ("long", 31 * 86400, 600)}
+
+def history_snapshot(rng="24h"):
+    """Копия истории за период под локом — безопасно сериализовать в HTTP-потоке."""
+    series, span, step = _HIST_RANGES.get(rng, _HIST_RANGES["24h"])
+    cutoff = time.time() - span
     with _hist_lock:
-        return list(_load_history())
+        h = _load_history() if series == "fine" else _load_history_long()
+        return {"history": [p for p in h if p.get("t", 0) >= cutoff], "step": step, "range": rng}
 
 def history_sample():
     """Снять одну точку метрик и добавить в историю (зовётся раз в минуту)."""
@@ -1562,6 +1894,7 @@ def history_sample():
           "mem": (s.get("mem") or {}).get("pct"),
           "rx": (s.get("net") or {}).get("rx"), "tx": (s.get("net") or {}).get("tx"),
           "pool": (s.get("disk_pool") or {}).get("pct")}
+    snap_long = None
     with _hist_lock:
         h = _load_history()
         h.append(pt)
@@ -1572,6 +1905,23 @@ def history_sample():
         if write:
             _hist_dirty = 0
             snap = list(h)
+        # длинная серия: раз в 10 минут — агрегат минутных точек (avg, для temp — max)
+        hl = _load_history_long()
+        last_t = hl[-1]["t"] if hl else 0
+        if pt["t"] - last_t >= 600:
+            win = [p for p in h if p.get("t", 0) > last_t][-15:]
+            def avg(k):
+                vs = [p[k] for p in win if isinstance(p.get(k), (int, float))]
+                return round(sum(vs) / len(vs), 1) if vs else None
+            def mx(k):
+                vs = [p[k] for p in win if isinstance(p.get(k), (int, float))]
+                return max(vs) if vs else None
+            hl.append({"t": pt["t"], "cpu": avg("cpu"), "temp": mx("temp"),
+                       "mem": avg("mem"), "rx": avg("rx"), "tx": avg("tx"),
+                       "pool": pt.get("pool")})
+            if len(hl) > HISTORY_LONG_CAP:
+                del hl[:len(hl) - HISTORY_LONG_CAP]
+            snap_long = list(hl)
     if write:                            # запись на диск вне лока (не держим мониторинг)
         try:
             os.makedirs(NAS_CONFIG, exist_ok=True)
@@ -1579,6 +1929,15 @@ def history_sample():
             with open(tmp, "w") as f:
                 json.dump(snap, f)
             os.replace(tmp, HISTORY_FILE)
+        except OSError:
+            pass
+    if snap_long is not None:
+        try:
+            os.makedirs(NAS_CONFIG, exist_ok=True)
+            tmp = HISTORY_LONG_FILE + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(snap_long, f)
+            os.replace(tmp, HISTORY_LONG_FILE)
         except OSError:
             pass
 
@@ -2248,7 +2607,7 @@ def fs_fetch_start(path, url, name=""):
     fname = os.path.basename((name or "").strip()) or os.path.basename(unquote(_up(url).path)) or ""
     jid = hashlib.md5((url + str(time.time())).encode()).hexdigest()[:12]
     job = {"id": jid, "name": fname or "…", "total": 0, "got": 0,
-           "done": False, "ok": False, "log": "", "path": ""}
+           "done": False, "ok": False, "log": "", "path": "", "cancel": False}
     with _FETCH_LOCK:
         # лёгкая уборка старых завершённых задач
         for k in [k for k, v in _FETCH_JOBS.items() if v.get("done")][:-20]:
@@ -2279,6 +2638,8 @@ def fs_fetch_start(path, url, name=""):
                             break
                         f.write(chunk)
                         job["got"] += len(chunk)
+                        if job["cancel"]:
+                            raise IOError("отменено пользователем")
                         if job["got"] > limit:
                             raise IOError("файл больше 40 ГБ — прервано")
             job["ok"] = True
@@ -2307,6 +2668,14 @@ def fs_fetch_status(jid):
     if not job:
         return {"ok": False, "log": "задача не найдена"}
     return {"ok": True, "job": dict(job)}
+
+def fs_fetch_cancel(jid):
+    with _FETCH_LOCK:
+        job = _FETCH_JOBS.get(jid)
+    if not job:
+        return {"ok": False, "log": "задача не найдена"}
+    job["cancel"] = True
+    return {"ok": True}
 
 def fs_mkdir(path, name):
     d = _child(path, name)
@@ -3687,6 +4056,13 @@ class H(BaseHTTPRequestHandler):
             self.wfile.write(("__EXIT__%d\n" % (p.returncode if p.returncode is not None else -1)).encode()); self.wfile.flush()
         except OSError:
             pass
+        if not dry:
+            try:
+                ok = p.returncode == 0
+                log_event("action", "Мастер: %s%s" % (action, "" if ok else " — ошибка"),
+                          "", "ok" if ok else "warn", kind="action", desk=False)
+            except Exception:
+                pass
 
     def _body(self):
         n = int(self.headers.get("Content-Length", 0) or 0)
@@ -3859,7 +4235,17 @@ class H(BaseHTTPRequestHandler):
                     remaining -= len(chunk)
                     got += len(chunk)
         except OSError as e:
+            try:
+                os.remove(dest)
+            except OSError:
+                pass
             return {"ok": False, "log": str(e)}
+        if got < n:                      # обрыв/отмена — не оставлять обрезанный файл
+            try:
+                os.remove(dest)
+            except OSError:
+                pass
+            return {"ok": False, "log": "загрузка прервана"}
         if thumb_kind(name):
             threading.Thread(target=gen_thumb, args=(dest,), daemon=True).start()
         return {"ok": True, "path": dest, "size": got}
@@ -3988,7 +4374,10 @@ class H(BaseHTTPRequestHandler):
             if p == "/api/stats":
                 self._json(stats())
             elif p == "/api/history":
-                self._json({"history": history_snapshot()})
+                self._json(history_snapshot((q.get("range") or ["24h"])[0]))
+            elif p == "/api/events":
+                self._json(events_list((q.get("after") or ["0"])[0],
+                                       (q.get("limit") or ["400"])[0]))
             elif p == "/api/health":
                 self._json(health_report())
             elif p == "/api/desktop":
@@ -4107,6 +4496,20 @@ class H(BaseHTTPRequestHandler):
             return
         if not self._authed():
             self._json({"error": "auth", "configured": auth_configured()}, 401); return
+        # журналирование действий: кэшируем тело и перехватываем ответ; в finally
+        # обязательно снимаем инстанс-атрибуты (keep-alive переиспользует handler)
+        _oj, _ob, _bc = self._json, self._body, {}
+        def _body_cached():
+            if "b" not in _bc:
+                _bc["b"] = _ob()
+            return _bc["b"]
+        def _json_logged(data, code=200):
+            _oj(data, code)
+            try:
+                log_action(p, _bc.get("b") or {}, data if isinstance(data, dict) else {})
+            except Exception:
+                pass
+        self._body, self._json = _body_cached, _json_logged
         try:
             if p == "/api/creds":
                 b = self._body(); save_creds(b.get("creds", []))
@@ -4154,6 +4557,19 @@ class H(BaseHTTPRequestHandler):
                     if isinstance(b.get("monitor"), dict):
                         out["monitor"] = save_monitor(b["monitor"])
                     self._json(out or {"ok": True})
+            elif p == "/api/events/seen":
+                b = self._body(); self._json(events_seen(b.get("id")))
+            elif p == "/api/events/clear":
+                self._json(events_clear())
+            elif p == "/api/events/log":
+                b = self._body()
+                lvl = b.get("lvl") if b.get("lvl") in ("info", "ok", "warn", "crit") else "info"
+                kind = b.get("kind") if b.get("kind") in ("files", "action", "disk", "svc") else "files"
+                eid = log_event("user_action", b.get("title") or "", b.get("msg") or "",
+                                lvl, kind=kind, desk=False)
+                self._json({"ok": True, "id": eid})
+            elif p == "/api/fs/fetch/cancel":
+                b = self._body(); self._json(fs_fetch_cancel(b.get("id", "")))
             elif p == "/api/unit/save":
                 b = self._body(); self._json(unit_write(b.get("name", ""), b.get("content", "")))
             elif p == "/api/unit/create":
@@ -4294,6 +4710,12 @@ class H(BaseHTTPRequestHandler):
             self._json({"error": str(e)}, 400)
         except Exception as e:
             self._json({"error": repr(e)}, 500)
+        finally:
+            for attr in ("_json", "_body"):
+                try:
+                    delattr(self, attr)
+                except AttributeError:
+                    pass
 
 
 def main():
