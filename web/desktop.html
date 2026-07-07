@@ -167,7 +167,7 @@
     --accent:var(--mb-accent,#12B0A6);--accent-2:var(--mb-accent2,#4C8DF6);--accent-soft:var(--mb-accent-soft,rgba(18,176,166,.16));--accent-line:var(--mb-accent-line,rgba(18,176,166,.5));--accent-ink:var(--mb-accent-ink,#fff);--accent-fill:var(--mb-accent-fill,#12B0A6);--sel:var(--mb-sel,rgba(0,0,0,.07));--line:var(--mb-line,rgba(0,0,0,.14));--good:var(--mb-good,#1FA971);--warn:var(--mb-warn,#CF881B);--danger:var(--mb-danger,#DE4E48);
     backdrop-filter:var(--mb-bf,none);-webkit-backdrop-filter:var(--mb-bf,none)}
   .menubar .mb-brand svg{width:calc(22px*var(--mb-icon,1));height:calc(22px*var(--mb-icon,1))}
-  .mb-logo{width:calc(22px*var(--mb-icon,1));height:calc(22px*var(--mb-icon,1));border-radius:5px;display:block;flex:none;box-shadow:0 1px 2px rgba(0,0,0,.18)}
+  .mb-logo{width:calc(22px*var(--mb-icon,1));height:calc(22px*var(--mb-icon,1));display:block;flex:none}
   .menubar .mb-theme svg{width:calc(17px*var(--mb-icon,1));height:calc(17px*var(--mb-icon,1))}
   .tray .pill .ic svg{width:calc(15px*var(--mb-icon,1));height:calc(15px*var(--mb-icon,1))}
   .mb-brand{font-size:calc(14px*var(--mb-fs,1))!important}
@@ -261,7 +261,7 @@
   .authbox button:hover{filter:brightness(1.06)}
   .onboard.show{opacity:1;pointer-events:auto}
   .ob-card{background:var(--glass-2);backdrop-filter:blur(30px) saturate(1.4);-webkit-backdrop-filter:blur(30px) saturate(1.4);border:1px solid var(--line-2);border-radius:var(--r-win);max-width:480px;width:100%;box-shadow:var(--sh);padding:30px 30px 24px;animation:winin .22s ease;text-align:center}
-  .ob-logo{width:64px;height:64px;border-radius:16px;margin:0 auto 14px;display:grid;place-items:center;overflow:hidden;box-shadow:var(--sh-sm)}
+  .ob-logo{width:66px;height:66px;margin:0 auto 14px;display:grid;place-items:center}
   .ob-logo img{width:100%;height:100%;display:block}
   .ob-card h2{margin:0 0 6px;font-size:21px;letter-spacing:-.02em}
   .ob-card .sub{color:var(--dim);font-size:13.5px;line-height:1.5;margin-bottom:18px}
@@ -484,6 +484,11 @@
   .caplbls{display:flex;justify-content:space-between;font-size:12px;color:var(--mut);margin-top:10px}
   .caplbls b{color:var(--text);font-weight:650;font-family:var(--mono)}
   .pool-empty{font-size:13px;color:var(--dim);line-height:1.5;margin-bottom:14px}
+  .pool-empty-card{background:var(--card);text-align:center;display:flex;flex-direction:column;align-items:center;gap:6px;padding:26px 22px}
+  .pe-icon{width:52px;height:52px;border-radius:15px;display:grid;place-items:center;color:var(--accent);background:var(--accent-soft);margin-bottom:6px}
+  .pe-title{font-weight:680;font-size:15.5px;letter-spacing:-.01em}
+  .pe-sub{font-size:12px;color:var(--mut);font-family:var(--mono)}
+  .pe-desc{font-size:12.5px;color:var(--dim);line-height:1.5;max-width:44ch;margin:4px 0 12px}
   /* карточка накопителя */
   .drv{background:var(--card);border:1px solid transparent;border-radius:var(--r-lg);padding:15px 16px;margin-bottom:11px;box-shadow:var(--sh-sm);transition:border-color .15s}
   .drv:last-child{margin-bottom:0}.drv:hover{border-color:var(--line-2)}
@@ -854,12 +859,17 @@
   .pill-rb{margin-left:auto;font-size:9.5px;font-weight:700;letter-spacing:.03em;padding:2px 7px;border-radius:6px;background:var(--warn-soft);color:var(--warn)}
   .reboot-ban{display:flex;align-items:center;gap:12px;background:var(--warn-soft);color:var(--warn);border-radius:var(--r-md);padding:11px 14px;margin-bottom:16px;font-size:12.5px;font-weight:550}
   .reboot-ban .btn{margin-left:auto}
-  .pi-card{background:linear-gradient(135deg,var(--accent-soft),var(--surface));border:1px solid var(--line);border-radius:var(--r-md);padding:15px 16px;margin-bottom:18px}
-  .pi-card h4{margin:0 0 10px;font-size:13.5px;font-weight:650;display:flex;align-items:center;gap:8px}
-  .pi-grid{display:grid;grid-template-columns:auto 1fr;gap:6px 14px;font-size:12px}
-  .pi-grid dt{color:var(--mut)}
-  .pi-grid dd{margin:0;font-family:var(--mono);font-size:11.5px;color:var(--text);overflow-wrap:anywhere}
-  .thr-chips{display:flex;flex-wrap:wrap;gap:5px;margin-top:3px}
+  .pi-card{background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);padding:16px 18px;margin-bottom:18px}
+  .pi-head{display:flex;align-items:center;gap:13px;margin-bottom:14px}
+  .pi-head img{width:40px;height:40px;flex:none}
+  .pi-model{font-weight:660;font-size:14px;letter-spacing:-.01em}
+  .pi-temp{font-family:var(--mono);font-size:12px;color:var(--mut);margin-top:2px}
+  .pi-temp b{font-size:20px;font-weight:700;letter-spacing:-.02em}
+  .pi-kv{display:flex;flex-direction:column;gap:0}
+  .pi-kv .row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0;border-top:1px solid var(--line);font-size:12.5px}
+  .pi-kv .row span{color:var(--mut)}
+  .pi-kv .row b{font-family:var(--mono);font-size:11.5px;font-weight:500;color:var(--text);text-align:right;overflow-wrap:anywhere}
+  .thr-chips{display:flex;flex-wrap:wrap;gap:5px;justify-content:flex-end}
   .set-grp{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);font-family:var(--mono);margin:22px 0 4px}
   .set-grp:first-child{margin-top:4px}
   .portlink{font-size:10.5px;color:var(--accent);text-decoration:none;font-family:var(--mono)}
@@ -883,7 +893,7 @@
 <button class="wall-refresh" id="wallRefresh" title="Обновить обои" style="display:none"></button>
 
 <div class="menubar">
-  <div class="mb-brand"><img class="mb-logo" src="/icon.svg" alt="Raspberry Pi" draggable="false"><span id="brandName">pi5.local</span></div>
+  <div class="mb-brand"><img class="mb-logo" src="/icon-flat.svg" alt="Raspberry Pi" draggable="false"><span id="brandName">pi5.local</span></div>
   <span class="mb-sep"></span>
   <button class="mb-theme" id="expoBtn" title="Все окна (F9)"></button>
   <div class="winbar" id="winbar"></div>
@@ -1625,9 +1635,11 @@ function winDisks(){openWin("__disks","Хранилище",body=>{
       <div class="capbar"><span class="used" style="width:${pct}%"></span></div>
       <div class="caplbls"><span><b>${fmtB(used)}</b> занято</span><span><b>${fmtB(total-used)}</b> свободно · ${fmtB(total)} всего</span></div>`;
   }else{
-    pool.innerHTML=`<div class="pool-top"><div><div class="pool-title">Пул ещё не собран</div>
-       <div class="pool-sub">${cnt("free")} свободных · ${cnt("removable")} съёмных</div></div><div class="hstat na">Не настроен</div></div>
-      <div class="pool-empty">Объедините диски данных и чётности в один том <b>/mnt/storage</b> — файлы видны как одно целое, а чётность защищает от сбоя диска.</div>
+    pool.classList.add("pool-empty-card");
+    pool.innerHTML=`<div class="pe-icon">${svg("layers",26)}</div>
+      <div class="pe-title">Пул ещё не собран</div>
+      <div class="pe-sub">${cnt("free")} свободных · ${cnt("removable")} съёмных</div>
+      <div class="pe-desc">Объедините диски данных и чётности в один том <b>/mnt/storage</b> — файлы видны как одно целое, а чётность защищает от сбоя диска.</div>
       <button class="btn pri sm" id="poolcta">${svg("wand",14)} Настроить в Мастере</button>`;
   }
   s1.appendChild(pool);body.appendChild(s1);
@@ -3342,14 +3354,16 @@ function piTab(tc){withSysc(tc,()=>{const p=SYSC.pi||{};const g=p.governor||{};c
  const govBtns=(g.available||[]).map(x=>`<button data-g="${x}" class="${g.current===x?"on":""}">${esc(x)}</button>`).join("")||"—";
  tc.innerHTML=`${rebootBan()}
   <h3 class="set-title">Raspberry Pi</h3><p class="set-sub">Аппаратные параметры платы. Многое применяется только после перезагрузки.</p>
-  <div class="pi-card"><h4>${svg("cpu",16)} ${esc(p.model||"Raspberry Pi")}</h4>
-   <dl class="pi-grid">
-    <dt>Температура</dt><dd style="color:${p.temp>=70?'var(--danger)':p.temp>=60?'var(--warn)':'var(--good)'}">${p.temp!=null?p.temp+" °C":"—"}</dd>
-    <dt>Прошивка</dt><dd>${esc(p.firmware||"—")}</dd>
-    <dt>EEPROM</dt><dd>${esc(p.eeprom||"—")}</dd>
-    <dt>Троттлинг сейчас</dt><dd><div class="thr-chips">${chips(thr.now,"bad")}</div></dd>
-    <dt>Троттлинг был</dt><dd><div class="thr-chips">${chips(thr.ever,"warn")}</div></dd>
-   </dl></div>
+  <div class="pi-card">
+   <div class="pi-head"><img src="/icon-flat.svg" alt="">
+    <div><div class="pi-model">${esc(p.model||"Raspberry Pi")}</div>
+     <div class="pi-temp"><b style="color:${p.temp>=70?'var(--danger)':p.temp>=60?'var(--warn)':'var(--good)'}">${p.temp!=null?p.temp+"°":"—"}</b> темп. CPU</div></div></div>
+   <div class="pi-kv">
+    <div class="row"><span>Прошивка</span><b>${esc(p.firmware||"—")}</b></div>
+    <div class="row"><span>EEPROM</span><b>${esc(p.eeprom||"—")}</b></div>
+    <div class="row"><span>Троттлинг сейчас</span><div class="thr-chips">${chips(thr.now,"bad")}</div></div>
+    <div class="row"><span>Троттлинг был</span><div class="thr-chips">${chips(thr.ever,"warn")}</div></div>
+   </div></div>
   <div class="set-grp">Питание и шина <span class="pill-rb">после ребута</span></div>
   ${tglRow("Полный ток на USB","Разрешает USB-портам Pi 5 отдавать полный ток (1.6 А вместо 600 мА). Нужно для USB-SSD/HDD без внешнего питания — иначе просадки и отвалы дисков. usb_max_current_enable.","usbpower",p.usbpower,"питание USB-дисков без просадок")}
   ${tglRow("PCIe Gen 3 для NVMe","Разгоняет слот NVMe с Gen2 до Gen3 — заметно быстрее диск. Формально вне спецификации Pi 5: на большинстве плат стабильно, но с некоторыми SSD возможны сбои.","pcie3",p.pcie3,"ускоряет NVMe (вне спеки)")}
@@ -3523,7 +3537,7 @@ async function pollDisks(){const d=await api("/api/disks");paintDiskWidget(d.dis
 function maybeOnboard(){let done=false;try{done=localStorage.getItem("nas_onboarded")==="1";}catch(e){}
  if(done)return;
  const ob=el(`<div class="onboard"><div class="ob-card">
-   <div class="ob-logo"><img src="/icon.svg" alt="Raspberry Pi"></div>
+   <div class="ob-logo"><img src="/icon-flat.svg" alt="Raspberry Pi"></div>
    <h2>Добро пожаловать в NAS</h2>
    <div class="sub">Это панель управления вашим хранилищем. Пройдите Мастер, чтобы настроить диски, приложения и доступ — или осмотритесь сами.</div>
    <div class="ob-steps">
