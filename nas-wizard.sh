@@ -1076,7 +1076,7 @@ ping_hc(){ [ -n "$HEALTHCHECK_URL" ] && curl -fsS -m 12 --retry 2 "$HEALTHCHECK_
         echo "diff: removed=$removed threshold=$DELETE_THRESHOLD"
         if [ "$removed" -gt "$DELETE_THRESHOLD" ]; then
             echo "ABORT: удалено файлов $removed > порога $DELETE_THRESHOLD — sync ПРОПУЩЕН (защита данных)."
-            notify "SnapRAID: sync прерван" "Удалено $removed файлов (> $DELETE_THRESHOLD). Проверьте вручную." 1
+            ping_hc "/fail"
             exit 1
         fi
         snapraid sync
@@ -1085,13 +1085,9 @@ ping_hc(){ [ -n "$HEALTHCHECK_URL" ] && curl -fsS -m 12 --retry 2 "$HEALTHCHECK_
     fi
 } >>"$LOG" 2>&1
 rc=$?
-if [ "$rc" -eq 0 ]; then
-    notify "SnapRAID: $ACTION ок" "Завершено успешно $(date '+%F %T')"
-    ping_hc ""
-else
-    notify "SnapRAID: $ACTION ошибка" "Код $rc — см. /var/log/snapraid.log" 1
-    ping_hc "/fail"
-fi
+# NASRESULT-маркеры читает nas-web (единые уведомления с приоритетами Pushover)
+if [ "$rc" -eq 0 ]; then echo "NASRESULT $ACTION ok $(date '+%F %T')" >>"$LOG"; ping_hc ""
+else echo "NASRESULT $ACTION err rc=$rc" >>"$LOG"; ping_hc "/fail"; fi
 exit "$rc"
 WRAP
     run chmod +x /usr/local/bin/nas-snapraid.sh
