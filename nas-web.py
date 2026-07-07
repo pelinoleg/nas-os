@@ -1956,7 +1956,7 @@ MAINT_FILE = os.path.join(NAS_CONFIG, "maintenance.json")
 _maint_last = 0
 
 def load_maintenance():
-    d = {"trash_days": 30}     # 0 = не чистить автоматически
+    d = {"trash_days": 30, "pool_alias": ""}     # trash_days 0 = не чистить; pool_alias "" = без симлинка
     try:
         with open(MAINT_FILE) as f:
             d.update(json.load(f))
@@ -1964,20 +1964,64 @@ def load_maintenance():
         pass
     return d
 
+_ALIAS_RESERVED = ("/bin", "/boot", "/dev", "/etc", "/home", "/lib", "/media", "/mnt",
+                   "/opt", "/proc", "/root", "/run", "/sbin", "/srv", "/sys", "/tmp", "/usr", "/var")
+
+def _pool_alias_apply(alias, old=""):
+    """Симлинк-псевдоним пула (напр. /volume2 → /mnt/storage). Возвращает ''/ошибку.
+    Старый псевдоним убираем, только если это НАШ симлинк на пул."""
+    if old and old != alias and os.path.islink(old):
+        try:
+            if os.readlink(old) == STORAGE:
+                os.remove(old)
+        except OSError:
+            pass
+    if not alias:
+        return ""
+    try:
+        if os.path.islink(alias):
+            if os.readlink(alias) == STORAGE:
+                return ""
+            os.remove(alias)
+        elif os.path.exists(alias):
+            return "путь %s уже существует и не является псевдонимом пула" % alias
+        os.symlink(STORAGE, alias)
+        return ""
+    except OSError as e:
+        return str(e)
+
 def save_maintenance(d):
     cur = load_maintenance()
+    err = ""
     if "trash_days" in d:
         try:
             cur["trash_days"] = max(0, min(365, int(d["trash_days"])))
         except (ValueError, TypeError):
             pass
+    if "pool_alias" in d:
+        v = str(d["pool_alias"] or "").strip().rstrip("/")
+        if v and (not re.match(r"^/[A-Za-z0-9._-]{1,32}$", v) or v.lower() in _ALIAS_RESERVED):
+            err = "недопустимое имя: одно слово в корне, латиница/цифры (например /volume2)"
+        else:
+            err = _pool_alias_apply(v, cur.get("pool_alias", ""))
+            if not err:
+                if v != cur.get("pool_alias", ""):
+                    try:
+                        log_event("action", ("Псевдоним пула: %s → /mnt/storage" % v) if v
+                                  else "Псевдоним пула отключён", "", "ok", kind="disk", desk=False)
+                    except Exception:
+                        pass
+                cur["pool_alias"] = v
     try:
         os.makedirs(NAS_CONFIG, exist_ok=True)
         with open(MAINT_FILE, "w") as f:
             json.dump(cur, f)
     except OSError:
         pass
-    return cur
+    out = dict(cur)
+    if err:
+        out["error"] = err
+    return out
 
 def _trash_autoclean(days):
     if days <= 0:
@@ -4984,6 +5028,10 @@ def main():
     ensure_web_assets()
     try:
         apply_spindown_all()          # восстановить настройки сна дисков после старта/ребута
+    except Exception:
+        pass
+    try:
+        _pool_alias_apply(load_maintenance().get("pool_alias", ""))   # симлинк пула (напр. /volume2)
     except Exception:
         pass
     threading.Thread(target=monitor_loop, daemon=True).start()

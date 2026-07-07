@@ -3806,6 +3806,7 @@ function systemTab(tc){withSysc(tc,()=>{const s=SYSC.system||{};
   <h3 class="set-title">Система</h3><p class="set-sub">Идентификация сервера, время и обслуживание.</p>
   <div class="srow"><div class="srow-l"><div class="srow-t">Имя хоста${tipHTML("Сетевое имя NAS. По нему сервер виден как <имя>.local (mDNS) и в Samba. Меняет /etc/hostname.")}</div><div class="srow-d">сейчас: ${esc(s.hostname||"?")}</div></div><div class="srow-c"><input class="mono" id="stHost" value="${att(s.hostname||"")}"><button class="btn sm" id="stHostA">Применить</button></div></div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Часовой пояс${tipHTML("Локальное время в логах, cron и таймерах. Формат Area/City, напр. Europe/Madrid.")}</div><div class="srow-d">сейчас: ${esc(s.timezone||"?")}</div></div><div class="srow-c"><input class="mono" id="stTz" value="${att(s.timezone||"")}" placeholder="Europe/Madrid"><button class="btn sm" id="stTzA">Применить</button></div></div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Псевдоним пула${tipHTML("Дополнительное имя для пула /mnt/storage в корне системы — симлинк, оба пути работают одновременно. Удобно, если на другом NAS пул называется /volume2: скрипты и пути совпадут. Пустое поле — псевдоним отключён.")}</div><div class="srow-d" id="stAliasCur">…</div></div><div class="srow-c"><input class="mono" id="stAlias" placeholder="/volume2 (пусто = выкл)"><button class="btn sm" id="stAliasA">Применить</button></div></div>
   ${svcRow("Синхронизация времени (chrony)","Держит часы Pi точными по интернету; заменяет systemd-timesyncd. Важно для таймстампов бэкапов, логов и TLS.","chrony",s.chrony,"NTP-клиент точного времени"+(s.time_synced?" · синхронизировано":""))}
   ${tglRow("TRIM по расписанию","Еженедельно освобождает неиспользуемые блоки SSD/NVMe — держит скорость записи и ресурс. Для SSD/NVMe, не для HDD.","fstrim",s.fstrim&&s.fstrim.active,"fstrim.timer, еженедельный TRIM")}
   ${tglRow("Автообновления безопасности","unattended-upgrades ставит security-патчи сам. Меньше ручной работы и дыр; минус — редкие неожиданные обновления.","unattended",s.unattended,"unattended-upgrades (только security)")}
@@ -3817,6 +3818,17 @@ function systemTab(tc){withSysc(tc,()=>{const s=SYSC.system||{};
  const H=tc.querySelector("#stHost"),Tz=tc.querySelector("#stTz"),J=tc.querySelector("#stJ");
  tc.querySelector("#stHostA").onclick=async()=>{await sconf("hostname",H.value.trim());refreshSysc(rerSet);};
  tc.querySelector("#stTzA").onclick=async()=>{await sconf("timezone",Tz.value.trim());refreshSysc(rerSet);};
+ // псевдоним пула (симлинк): показать текущий и применить новый
+ {const cur=tc.querySelector("#stAliasCur"),inp=tc.querySelector("#stAlias");
+  api("/api/maintenance").then(m=>{const a=(m&&m.maintenance&&m.maintenance.pool_alias)||"";
+    if(cur)cur.textContent=a?`сейчас: ${a} → /mnt/storage`:"сейчас: отключён";if(inp)inp.value=a;});
+  tc.querySelector("#stAliasA").onclick=async()=>{
+    const r=await api("/api/maintenance",{method:"POST",body:JSON.stringify({maintenance:{pool_alias:inp.value.trim()}})});
+    const md=(r&&r.maintenance)||{};
+    if(md.error){toast("Ошибка: "+md.error);return;}
+    const a=md.pool_alias||"";
+    if(cur)cur.textContent=a?`сейчас: ${a} → /mnt/storage`:"сейчас: отключён";
+    toast(a?`Псевдоним ${a} создан`:"Псевдоним отключён");};}
  tc.querySelector("#stJA").onclick=async()=>{await sconf("journald_max",J.value.trim());refreshSysc(rerSet);};
  tc.querySelector("#mChk").onclick=async()=>{toast("Проверяю обновления…");const r=await sconf("check_updates",1);};
  tc.querySelector("#mWeb").onclick=()=>confirmDlg("Перезапуск","Перезапустить веб-панель? Соединение ненадолго прервётся.",()=>sconf("restart_web",1));
