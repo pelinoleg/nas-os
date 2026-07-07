@@ -1766,7 +1766,7 @@ function diskDetail(x,reload){
    <div class="dd-hmain"><div class="dd-name">${headName} ${lbl}</div>
      <div class="dd-sub"><span class="rbadge ${x.role}">${roleName[x.role]||x.role}</span> ${dt.label} · <span class="mono">${x.path}</span></div></div>
    <div class="dd-health">${sm&&sm.healthy!=null?`<div class="hstat ${sm.healthy?"ok":"bad"}">${sm.healthy?"Исправно":"Сбой"}</div>`:`<div class="hstat na">SMART —</div>`}
-     ${sm&&sm.temp!=null?`<div class="htemp" style="color:${tcol(sm.temp)}">${sm.temp}°C</div>`:""}</div></div>`));
+     ${sm&&sm.temp!=null?`<div class="htemp" style="color:${diskTcol(sm.temp)}">${sm.temp}°C</div>`:""}</div></div>`));
  if(u)box.appendChild(el(`<div class="dd-usage"><div class="capbar"><span class="used" style="width:${Math.max(u.pct,.4)}%"></span></div>
    <div class="lbls"><span>${fmtB(u.used)} занято · ${u.pct}%</span><span>${fmtB(u.total-u.used)} свободно · ${fmtB(u.total)}</span></div></div>`));
  // краткие факты
@@ -1796,7 +1796,7 @@ function diskDetail(x,reload){
    const poh=d.power_on_hours;
    sbox.innerHTML=`<div class="dd-smk">
      <div><span>Здоровье</span><b style="color:${d.healthy?"var(--good)":d.healthy===false?"var(--danger)":"var(--mut)"}">${d.healthy?"OK":d.healthy===false?"СБОЙ":"?"}</b></div>
-     ${d.temp!=null?`<div><span>Температура</span><b style="color:${tcol(d.temp)}">${d.temp}°C</b></div>`:""}
+     ${d.temp!=null?`<div><span>Температура</span><b style="color:${diskTcol(d.temp)}">${d.temp}°C</b></div>`:""}
      ${poh!=null?`<div><span>Наработка</span><b>${poh} ч <span style="color:var(--mut);font-weight:500">≈ ${(poh/24).toFixed(0)} дн${poh>=8760?" · "+(poh/8760).toFixed(1)+" г":""}</span></b></div>`:""}
      ${d.power_cycles!=null?`<div><span>Включений</span><b>${d.power_cycles}</b></div>`:""}</div>`;
    if(d.attrs&&d.attrs.length){const rows=d.attrs.slice(0,14).map(a=>`<tr><td>${esc(a.name||a.id||"")}</td><td>${a.value!=null?a.value:""}</td><td>${esc(""+(a.raw!=null?a.raw:""))}</td></tr>`).join("");
@@ -1880,7 +1880,7 @@ async function toggleSmart(dev,card,btn){
  else{
   box.innerHTML=`<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px">
     <span>Здоровье: <b style="color:${d.healthy?"var(--good)":"var(--danger)"}">${d.healthy?"OK":d.healthy===false?"СБОЙ":"?"}</b></span>
-    ${d.temp!=null?`<span>Темп: <b style="color:${tcol(d.temp)}">${d.temp}°C</b></span>`:""}
+    ${d.temp!=null?`<span>Темп: <b style="color:${diskTcol(d.temp)}">${d.temp}°C</b></span>`:""}
     ${d.power_on_hours!=null?`<span>Наработка: <b>${d.power_on_hours} ч</b> <span style="color:var(--mut)">≈ ${(d.power_on_hours/24).toFixed(0)} дн${d.power_on_hours>=8760?" · "+(d.power_on_hours/8760).toFixed(1)+" г":""}</span></span>`:""}
     ${d.power_cycles!=null?`<span>Вкл: <b>${d.power_cycles}</b></span>`:""}</div>`;
   if(d.attrs&&d.attrs.length){const rows=d.attrs.slice(0,14).map(a=>`<tr><td>${a.name||a.id||""}</td><td>${a.value!=null?a.value:""}</td><td>${a.raw!=null?a.raw:""}</td></tr>`).join("");
