@@ -405,6 +405,66 @@ def disk_eject(dev):
     po = _run(["udisksctl", "power-off", "-b", dev], timeout=15)
     return {"ok": True, "log": "можно отключать" + (" (питание снято)" if po["ok"] else " (отмонтировано)")}
 
+def health_report():
+    """Одностраничная сводка здоровья: список проверок с уровнем ok/warn/bad."""
+    checks = []
+    def add(name, value, lvl, hint=""):
+        checks.append({"name": name, "value": value, "lvl": lvl, "hint": hint})
+    s = stats()
+    t = s.get("temp")
+    add("Температура CPU", ("%s °C" % t) if t is not None else "—",
+        "bad" if t and t >= 75 else "warn" if t and t >= 65 else "ok")
+    thr = s.get("throttled") or {}
+    add("Питание и троттлинг", "просадка/троттлинг" if not thr.get("ok", True) else "в норме",
+        "bad" if not thr.get("ok", True) else "ok",
+        "Нехватка тока БП или перегрев" if not thr.get("ok", True) else "")
+    m = (s.get("mem") or {}).get("pct", 0)
+    add("Оперативная память", "%s%% занято" % m, "warn" if m >= 90 else "ok")
+    root = disk_info("/") or {}
+    rp = root.get("pct", 0)
+    add("Системная карта /", "%s%% занято" % rp, "bad" if rp >= 95 else "warn" if rp >= 90 else "ok",
+        "Свободно %s" % _fmt_b(root.get("total", 0) - root.get("used", 0)) if root else "")
+    pool = s.get("disk_pool") or {}
+    if pool.get("path") == "/mnt/storage":
+        pp = pool.get("pct", 0)
+        add("Хранилище (пул)", "%s%% занято" % pp, "bad" if pp >= 95 else "warn" if pp >= 90 else "ok",
+            "Свободно %s" % _fmt_b(pool.get("total", 0) - pool.get("used", 0)))
+    # диски: SMART здоровье и температура
+    ds = disks()
+    bad = [d["name"] for d in ds if (d.get("smart") or {}).get("healthy") is False]
+    hot = [d["name"] for d in ds if isinstance((d.get("smart") or {}).get("temp"), int) and d["smart"]["temp"] >= 60]
+    add("Здоровье дисков (SMART)",
+        ("сбой: " + ", ".join(bad)) if bad else ("перегрев: " + ", ".join(hot)) if hot else "все исправны",
+        "bad" if bad else "warn" if hot else "ok")
+    # защита данных SnapRAID
+    sn = snapraid_status()
+    if sn.get("configured"):
+        for kind, ru in (("sync", "синхронизация"), ("scrub", "проверка")):
+            e = sn.get("last_" + kind)
+            if e:
+                add("SnapRAID · " + ru, "%s (%s)" % ("успешно" if e["result"] == "ok" else "ошибка", (e.get("date") or "")[:10]),
+                    "ok" if e["result"] == "ok" else "bad")
+        if sn.get("blocked"):
+            add("SnapRAID · защита", "sync остановлен (массовое удаление)", "warn")
+    # упавшие службы
+    r = _run(["systemctl", "list-units", "--failed", "--no-legend", "--plain", "--no-pager"], timeout=8)
+    failed = [l.split()[0] for l in (r.get("log") or "").splitlines() if l.strip()]
+    add("Службы systemd", (", ".join(failed[:5])) if failed else "все работают", "bad" if failed else "ok")
+    # перезагрузка/обновления
+    if os.path.exists("/var/run/reboot-required"):
+        add("Обновления", "нужна перезагрузка", "warn", "Обновления ядра/libc применятся после ребута")
+    order = {"bad": 2, "warn": 1, "ok": 0}
+    overall = max((order[c["lvl"]] for c in checks), default=0)
+    return {"checks": checks, "overall": ["ok", "warn", "bad"][overall], "ts": int(time.time())}
+
+def _fmt_b(n):
+    n = float(n or 0)
+    for u in ("Б", "КБ", "МБ", "ГБ", "ТБ"):
+        if n < 1024:
+            return "%.0f %s" % (n, u)
+        n /= 1024
+    return "%.1f ПБ" % n
+
 def snapraid_status():
     """Последние sync/scrub из /var/log/snapraid.log (для защиты данных)."""
     log = _read("/var/log/snapraid.log")
@@ -3736,6 +3796,8 @@ class H(BaseHTTPRequestHandler):
                 self._json(stats())
             elif p == "/api/history":
                 self._json({"history": _load_history()})
+            elif p == "/api/health":
+                self._json(health_report())
             elif p == "/api/desktop":
                 self._json({"apps": discover_desktop_apps(), "volumes": external_volumes()})
             elif p == "/api/cron/jobs":

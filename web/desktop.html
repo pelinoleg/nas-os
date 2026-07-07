@@ -540,6 +540,15 @@
   .hist-card{background:var(--card);border:1px solid var(--line);border-radius:var(--r-md);padding:10px 13px 8px;margin-bottom:12px}
   .hist-h{display:flex;justify-content:space-between;align-items:baseline;font-size:12px;font-weight:600;margin-bottom:6px}
   .hist-cur{font-family:var(--mono);font-weight:700;font-size:12.5px}
+  /* сводка здоровья */
+  .ov-health{margin-bottom:14px}
+  .ovh-top{display:flex;align-items:center;gap:10px;margin-bottom:8px;font-size:13.5px}
+  .ovh-badge{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;color:#fff;font-weight:800;font-size:12px;flex:none}
+  .ovh-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden}
+  .ovh-row{display:flex;align-items:center;gap:8px;background:var(--card);padding:8px 12px;font-size:12px}
+  .ovh-dot{width:7px;height:7px;border-radius:50%;flex:none}
+  .ovh-n{flex:1;min-width:0;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ovh-v{font-family:var(--mono);font-size:11px;font-weight:600;flex:none;max-width:52%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .caplbls{display:flex;justify-content:space-between;font-size:12px;color:var(--mut);margin-top:10px}
   .caplbls b{color:var(--text);font-weight:650;font-family:var(--mono)}
   .pool-empty{font-size:13px;color:var(--dim);line-height:1.5;margin-bottom:14px}
@@ -1663,7 +1672,7 @@ async function historyTab(tc,win){win._sub=null;clearInterval(win._pi);
   +histChart("Заполнение пула",h,[{key:"pool",color:"var(--good)",fill:1}],pf,100);
 }
 function overviewTab(tc,win){
- tc.innerHTML=`<div class="ov-cards" id="ovCards"></div><div id="ovThr"></div>
+ tc.innerHTML=`<div class="ov-health" id="ovHealth"></div><div class="ov-cards" id="ovCards"></div><div id="ovThr"></div>
   <div class="ov-sec"><div class="ov-sec-h">Память и сеть</div><div class="krow" id="ovMem"></div><div class="bar" style="margin:5px 0 10px"><i id="ovMemBar"></i></div><div class="krow" id="ovNet"></div><div class="krow" id="ovUp"></div></div>
   <div class="ov-sec"><div class="ov-sec-h">Хранилище</div><div class="ov-disks" id="ovDisks"><div style="color:var(--mut);font-size:12px">загрузка…</div></div></div>
   <div class="ov-sec"><div class="ov-sec-h">Топ процессов <span style="color:var(--mut);text-transform:none;letter-spacing:0">— клик откроет вкладку</span></div><div class="ov-top" id="ovTop"></div></div>`;
@@ -1692,7 +1701,16 @@ function overviewTab(tc,win){
    const row=(p,k)=>`<div class="ov-trow"><span class="nm" title="${att(p.cmd||p.name)}">${esc(p.name)}</span><span class="pc${(k==="cpu"?p.cpu>50:p.mem>50)?" hot":""}">${k==="cpu"?p.cpu+"% cpu":p.mem+"% ram"}</span></div>`;
    box.innerHTML=`<div><div class="ov-sec-h" style="margin-bottom:4px">CPU</div>${byCpu.map(p=>row(p,"cpu")).join("")}</div><div><div class="ov-sec-h" style="margin-bottom:4px">RAM</div>${byMem.map(p=>row(p,"mem")).join("")}</div>`;
    box.onclick=()=>{win._goTab&&win._goTab("proc");};}
- draw(LAST||MOCK.stats);thrClick();paintDisks();paintTop();
+ async function paintHealth(){const box=tc.querySelector("#ovHealth");if(!box)return;
+   const r=await api("/api/health"),ch=(r&&r.checks)||[];if(!ch.length){box.innerHTML="";return;}
+   const ic={ok:"✓",warn:"!",bad:"✕"},lc={ok:"var(--good)",warn:"var(--warn)",bad:"var(--danger)"};
+   const ov=r.overall||"ok";
+   box.innerHTML=`<div class="ovh-top ${ov}"><span class="ovh-badge" style="background:${lc[ov]}">${ic[ov]}</span>
+     <b>${ov==="ok"?"Система в порядке":ov==="warn"?"Есть предупреждения":"Требует внимания"}</b>
+     <button class="btn sm" id="ovhR" style="margin-left:auto">${svg("refresh",12)}</button></div>
+     <div class="ovh-list">${ch.map(c=>`<div class="ovh-row"><span class="ovh-dot" style="background:${lc[c.lvl]}"></span><span class="ovh-n">${esc(c.name)}</span><span class="ovh-v" style="color:${c.lvl==="ok"?"var(--dim)":lc[c.lvl]}" title="${att(c.hint||"")}">${esc(c.value)}</span></div>`).join("")}</div>`;
+   const rb=box.querySelector("#ovhR");if(rb)rb.onclick=()=>{box.querySelector(".ovh-list").style.opacity=".5";paintHealth();};}
+ draw(LAST||MOCK.stats);thrClick();paintDisks();paintTop();paintHealth();
  win._sub=s=>{draw(s);thrClick();};
  const iv=win._refresh();if(iv){win._pi=setInterval(()=>{if(!document.body.contains(tc)){clearInterval(win._pi);return;}paintDisks();paintTop();},Math.max(iv,5000));}}
 
