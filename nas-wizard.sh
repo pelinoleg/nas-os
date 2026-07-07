@@ -43,7 +43,9 @@ SERVICES_SRC="$SCRIPT_DIR/services"
 
 # --- Пакеты (whiptail не ставим — он нужен, чтобы этот скрипт вообще работал) ---
 # NAS-стек
-STACK_PACKAGES=(cockpit cockpit-storaged cockpit-networkmanager docker.io docker-compose-plugin mergerfs snapraid smartmontools)
+# docker-ce/compose-plugin ставятся отдельно из официального репо Docker (см. ensure_docker_repo) —
+# в репах Debian/RPi OS их нет. Здесь только пакеты, доступные в штатных репозиториях.
+STACK_PACKAGES=(cockpit cockpit-storaged cockpit-networkmanager mergerfs snapraid smartmontools)
 # Утилиты общего назначения — то, что почти всегда нужно на сервере/NAS
 UTIL_PACKAGES=(
   dialog
@@ -244,6 +246,53 @@ install_packages() {
     fi
     info "$label: устанавливаю (${#to_install[@]}): ${to_install[*]}"
     run apt-get install -y "${to_install[@]}"
+}
+
+# ---------------------------------------------------------------------------
+# ensure_docker_repo — подключить официальный репозиторий Docker CE и поставить движок.
+# Зачем: docker-compose-plugin (v2, «docker compose») и docker-ce НЕ входят в репозитории
+# Debian/Raspberry Pi OS — они живут только на download.docker.com. Без этого репо
+# docker_compose_cmd пуст → Stage 4, Dockge, deploy.sh, nas-stacks.service — no-op на
+# чистой машине. Идемпотентно: повторный запуск лишь досоздаёт недостающее.
+# ---------------------------------------------------------------------------
+ensure_docker_repo() {
+    local keyring=/etc/apt/keyrings/docker.asc
+    local list=/etc/apt/sources.list.d/docker.list
+    local arch codename
+    arch="$(dpkg --print-architecture)"
+    codename="$(. /etc/os-release && echo "${VERSION_CODENAME:-bookworm}")"
+
+    # curl + ca-certificates нужны для загрузки GPG-ключа (на RPi OS обычно уже есть)
+    install_packages "Docker: зависимости" ca-certificates curl
+
+    # Docker публикует не каждый релиз Debian сразу. Если для нашего codename
+    # репозитория ещё нет — откатываемся на bookworm (совместимый бинарь).
+    if ! curl -fsS --max-time 10 -o /dev/null "https://download.docker.com/linux/debian/dists/${codename}/Release" 2>/dev/null; then
+        warn "Docker: репозиторий для '$codename' пока недоступен, использую bookworm"
+        codename="bookworm"
+    fi
+
+    run install -m 0755 -d /etc/apt/keyrings
+    if [ ! -s "$keyring" ]; then
+        run curl -fsSL https://download.docker.com/linux/debian/gpg -o "$keyring"
+        run chmod a+r "$keyring"
+    fi
+
+    # источник переписываем только если изменился (напр. сменился codename)
+    local want="deb [arch=${arch} signed-by=${keyring}] https://download.docker.com/linux/debian ${codename} stable"
+    if [ "$(cat "$list" 2>/dev/null)" != "$want" ]; then
+        printf '%s\n' "$want" | write_file "$list"
+        run apt-get update
+    fi
+
+    # убрать конфликтующие distro-пакеты (на чистой машине их нет — no-op)
+    local p present=()
+    for p in docker.io docker-compose docker-doc podman-docker containerd runc; do
+        dpkg -s "$p" >/dev/null 2>&1 && present+=("$p")
+    done
+    [ "${#present[@]}" -gt 0 ] && run apt-get remove -y "${present[@]}"
+
+    install_packages "Docker CE" docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 }
 
 # ---------------------------------------------------------------------------
@@ -471,6 +520,7 @@ stage_system() {
     install_packages "NAS-стек"   "${STACK_PACKAGES[@]}"
     install_packages "утилиты"    "${UTIL_PACKAGES[@]}"
     install_packages "Pi-пакеты"  "${PI_PACKAGES[@]}"
+    ensure_docker_repo   # docker-ce + compose-plugin из официального репо Docker
 
     # 0.3 включить/запустить сервисы (идемпотентно)
     local svc
@@ -1232,7 +1282,7 @@ stage_docker() {
 
     DC="$(docker_compose_cmd)"
     if [ -z "$DC" ]; then
-        ui_msg "Docker" "Docker Compose не найден. Сначала прогоните этап 0 (подготовка системы), он ставит docker.io + docker-compose-plugin."
+        ui_msg "Docker" "Docker Compose не найден. Сначала прогоните этап 0 (подготовка системы), он ставит docker-ce + docker-compose-plugin из официального репо Docker."
         info "docker compose недоступен"
         return 0
     fi
@@ -1944,6 +1994,7 @@ stage_system_apply() {
     install_packages "NAS-стек"  "${STACK_PACKAGES[@]}"
     install_packages "утилиты"   "${UTIL_PACKAGES[@]}"
     install_packages "Pi-пакеты" "${PI_PACKAGES[@]}"
+    ensure_docker_repo   # docker-ce + compose-plugin из официального репо Docker
     local svc
     for svc in cockpit.socket docker; do enable_service "$svc"; done
     systemctl list-unit-files fstrim.timer >/dev/null 2>&1 && enable_service fstrim.timer
