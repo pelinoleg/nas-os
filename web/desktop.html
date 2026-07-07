@@ -167,6 +167,7 @@
     --accent:var(--mb-accent,#12B0A6);--accent-2:var(--mb-accent2,#4C8DF6);--accent-soft:var(--mb-accent-soft,rgba(18,176,166,.16));--accent-line:var(--mb-accent-line,rgba(18,176,166,.5));--accent-ink:var(--mb-accent-ink,#fff);--accent-fill:var(--mb-accent-fill,#12B0A6);--sel:var(--mb-sel,rgba(0,0,0,.07));--line:var(--mb-line,rgba(0,0,0,.14));--good:var(--mb-good,#1FA971);--warn:var(--mb-warn,#CF881B);--danger:var(--mb-danger,#DE4E48);
     backdrop-filter:var(--mb-bf,none);-webkit-backdrop-filter:var(--mb-bf,none)}
   .menubar .mb-brand svg{width:calc(22px*var(--mb-icon,1));height:calc(22px*var(--mb-icon,1))}
+  .mb-logo{width:calc(22px*var(--mb-icon,1));height:calc(22px*var(--mb-icon,1));border-radius:5px;display:block;flex:none;box-shadow:0 1px 2px rgba(0,0,0,.18)}
   .menubar .mb-theme svg{width:calc(17px*var(--mb-icon,1));height:calc(17px*var(--mb-icon,1))}
   .tray .pill .ic svg{width:calc(15px*var(--mb-icon,1));height:calc(15px*var(--mb-icon,1))}
   .mb-brand{font-size:calc(14px*var(--mb-fs,1))!important}
@@ -260,7 +261,8 @@
   .authbox button:hover{filter:brightness(1.06)}
   .onboard.show{opacity:1;pointer-events:auto}
   .ob-card{background:var(--glass-2);backdrop-filter:blur(30px) saturate(1.4);-webkit-backdrop-filter:blur(30px) saturate(1.4);border:1px solid var(--line-2);border-radius:var(--r-win);max-width:480px;width:100%;box-shadow:var(--sh);padding:30px 30px 24px;animation:winin .22s ease;text-align:center}
-  .ob-logo{width:60px;height:60px;border-radius:18px;margin:0 auto 14px;display:grid;place-items:center;color:#fff;background:linear-gradient(135deg,var(--accent),var(--accent-2))}
+  .ob-logo{width:64px;height:64px;border-radius:16px;margin:0 auto 14px;display:grid;place-items:center;overflow:hidden;box-shadow:var(--sh-sm)}
+  .ob-logo img{width:100%;height:100%;display:block}
   .ob-card h2{margin:0 0 6px;font-size:21px;letter-spacing:-.02em}
   .ob-card .sub{color:var(--dim);font-size:13.5px;line-height:1.5;margin-bottom:18px}
   .ob-steps{display:grid;gap:10px;text-align:left;margin-bottom:22px}
@@ -881,7 +883,7 @@
 <button class="wall-refresh" id="wallRefresh" title="Обновить обои" style="display:none"></button>
 
 <div class="menubar">
-  <div class="mb-brand"><svg viewBox="0 0 40 40" fill="none" style="color:var(--dim)"><ellipse cx="20" cy="12" rx="11" ry="4.2" stroke="currentColor" stroke-width="2.4"/><path d="M9 12v7c0 2.3 4.9 4.2 11 4.2s11-1.9 11-4.2v-7" stroke="currentColor" stroke-width="2.4"/><path d="M9 19v6c0 2.3 4.9 4.2 11 4.2s11-1.9 11-4.2v-6" stroke="currentColor" stroke-width="2.4"/></svg><span id="brandName">pi5.local</span></div>
+  <div class="mb-brand"><img class="mb-logo" src="/icon.svg" alt="Raspberry Pi" draggable="false"><span id="brandName">pi5.local</span></div>
   <span class="mb-sep"></span>
   <button class="mb-theme" id="expoBtn" title="Все окна (F9)"></button>
   <div class="winbar" id="winbar"></div>
@@ -3521,7 +3523,7 @@ async function pollDisks(){const d=await api("/api/disks");paintDiskWidget(d.dis
 function maybeOnboard(){let done=false;try{done=localStorage.getItem("nas_onboarded")==="1";}catch(e){}
  if(done)return;
  const ob=el(`<div class="onboard"><div class="ob-card">
-   <div class="ob-logo">${svg("cube",30)}</div>
+   <div class="ob-logo"><img src="/icon.svg" alt="Raspberry Pi"></div>
    <h2>Добро пожаловать в NAS</h2>
    <div class="sub">Это панель управления вашим хранилищем. Пройдите Мастер, чтобы настроить диски, приложения и доступ — или осмотритесь сами.</div>
    <div class="ob-steps">
