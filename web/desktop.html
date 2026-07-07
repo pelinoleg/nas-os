@@ -154,9 +154,10 @@
   ::-webkit-scrollbar-thumb:hover{background:var(--mut);background-clip:padding-box;border:3px solid transparent}
 
   /* menubar */
-  .menubar{position:fixed;top:0;left:0;right:0;height:46px;z-index:300;display:flex;align-items:center;gap:12px;
-    padding:0 16px;background:var(--mb-bg,var(--glass))}
-  html.blur .menubar{backdrop-filter:blur(26px) saturate(1.6);-webkit-backdrop-filter:blur(26px) saturate(1.6)}
+  .menubar{position:fixed;top:0;left:0;right:0;height:40px;z-index:300;display:flex;align-items:center;gap:12px;
+    padding:0 16px;background:var(--mb-bg,var(--glass));
+    --text:var(--mb-fg,#1A2431);--dim:var(--mb-dim,rgba(0,0,0,.66));--mut:var(--mb-mut,rgba(0,0,0,.47));color:var(--text);
+    backdrop-filter:var(--mb-bf,none);-webkit-backdrop-filter:var(--mb-bf,none)}
   .menubar .mb-brand svg{width:calc(22px*var(--mb-icon,1));height:calc(22px*var(--mb-icon,1))}
   .menubar .mb-theme svg{width:calc(17px*var(--mb-icon,1));height:calc(17px*var(--mb-icon,1))}
   .tray .pill .ic svg{width:calc(15px*var(--mb-icon,1));height:calc(15px*var(--mb-icon,1))}
@@ -172,7 +173,7 @@
   .pill{display:flex;align-items:center;gap:7px;padding:6px 10px;border-radius:10px;font-family:var(--mono);font-size:12px;
     color:var(--dim);background:transparent;border:1px solid transparent;transition:.14s}
   .pill:hover{background:var(--glass-2);border-color:var(--line)}
-  .pill b{color:var(--text);font-weight:600}.pill .ic{color:var(--accent);display:flex}
+  .pill b{color:var(--text);font-weight:600}.pill .ic{color:var(--dim);display:flex}
   .pill.warn .ic,.pill.warn b{color:var(--warn)}
   .clock{font-family:var(--mono);font-size:13px;color:var(--text);padding:3px 10px;text-align:right;line-height:1.25;font-weight:600}
   .clock small{display:block;color:var(--dim);font-size:11px;font-weight:500;letter-spacing:.01em}
@@ -189,7 +190,7 @@
   .menu .ic{color:var(--dim);display:flex;width:18px}.menu button:hover .ic{color:inherit}
 
   /* desktop layout — apps left, widgets pinned right */
-  .desk{position:fixed;inset:46px 0 96px 0}
+  .desk{position:fixed;inset:40px 0 96px 0}
   .apps{position:absolute;inset:0 398px 0 0;padding:32px 34px;overflow:auto;
     display:grid;grid-template-columns:repeat(auto-fill,96px);gap:18px 8px;align-content:start}
   .rail{position:absolute;top:0;right:0;bottom:0;width:398px;padding:26px 26px 26px 26px;overflow-y:auto;
@@ -213,14 +214,14 @@
   @media(max-width:960px){.apps{inset:0}.rail{display:none}}
   /* телефон: окна-шиты на весь экран, компактный хром */
   @media(max-width:640px){
-    .menubar{gap:7px;padding:0 10px;height:44px}
+    .menubar{gap:7px;padding:0 10px;height:40px}
     .mb-brand #brandName{max-width:96px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .clock small{display:none}
     .tray .pill:nth-child(3){display:none}
-    .desk{inset:44px 0 86px 0}
+    .desk{inset:40px 0 86px 0}
     .apps{padding:18px 16px;grid-template-columns:repeat(auto-fill,78px);gap:14px 4px}
-    .win{inset:50px 0 82px 0!important;width:auto!important;height:auto!important;border-radius:16px 16px 0 0;max-width:100%}
-    .win.max{inset:50px 0 82px 0!important}
+    .win{inset:46px 0 82px 0!important;width:auto!important;height:auto!important;border-radius:16px 16px 0 0;max-width:100%}
+    .win.max{inset:46px 0 82px 0!important}
     .win .wgrip{display:none}
     .win .wbar{cursor:default}
     .dock{bottom:10px;gap:1px;padding:6px 8px;max-width:calc(100% - 12px);justify-content:flex-start}
@@ -262,8 +263,9 @@
   .apps-hint b{color:var(--text);font-weight:600}
 
   /* widgets */
-  .wdg{background:var(--wdg-bg,var(--glass));border-radius:var(--r-lg);padding:18px}
-  html.blur .wdg{backdrop-filter:blur(22px) saturate(1.3);-webkit-backdrop-filter:blur(22px) saturate(1.3)}
+  .wdg{background:var(--wdg-bg,var(--glass));border-radius:var(--r-lg);padding:18px;
+    --text:var(--wdg-fg,#1A2431);--dim:var(--wdg-dim,rgba(0,0,0,.66));--mut:var(--wdg-mut,rgba(0,0,0,.47));color:var(--text);
+    backdrop-filter:var(--wdg-bf,none);-webkit-backdrop-filter:var(--wdg-bf,none)}
   .wdg h4{margin:0 0 15px;font-size:10.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--mut);font-family:var(--mono);
     display:flex;align-items:center;gap:8px}
   .wdg h4 .more{margin-left:auto;color:var(--accent);cursor:pointer;font-size:11px;letter-spacing:0;text-transform:none;font-family:var(--font);font-weight:600}
@@ -292,8 +294,9 @@
 
   /* dock */
   .dock{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:90;display:flex;gap:3px;padding:8px 12px;max-width:calc(100% - 28px);overflow-x:auto;
-    background:var(--dock-bg,var(--glass));border-radius:22px;box-shadow:var(--sh)}
-  html.blur .dock{backdrop-filter:blur(28px) saturate(1.5);-webkit-backdrop-filter:blur(28px) saturate(1.5)}
+    background:var(--dock-bg,var(--glass));border-radius:22px;box-shadow:var(--sh);
+    --text:var(--dock-fg,#1A2431);--dim:var(--dock-dim,rgba(0,0,0,.66));--mut:var(--dock-mut,rgba(0,0,0,.47));color:var(--text);
+    backdrop-filter:var(--dock-bf,none);-webkit-backdrop-filter:var(--dock-bf,none)}
   .dock.pos-left,.dock.pos-right{top:50%;bottom:auto;transform:translateY(-50%);flex-direction:column;max-width:none;max-height:calc(100% - 100px);overflow-x:hidden;overflow-y:auto;border-radius:20px;padding:8px 6px;gap:4px}
   .dock.pos-left button,.dock.pos-right button{padding:4px 5px}
   .dock.pos-left .dl,.dock.pos-right .dl{max-width:72px;text-align:center}
@@ -846,7 +849,7 @@
 <button class="wall-refresh" id="wallRefresh" title="Обновить обои" style="display:none"></button>
 
 <div class="menubar">
-  <div class="mb-brand"><svg viewBox="0 0 40 40" fill="none"><ellipse cx="20" cy="12" rx="11" ry="4.2" stroke="var(--accent)" stroke-width="2.4"/><path d="M9 12v7c0 2.3 4.9 4.2 11 4.2s11-1.9 11-4.2v-7" stroke="var(--accent)" stroke-width="2.4"/><path d="M9 19v6c0 2.3 4.9 4.2 11 4.2s11-1.9 11-4.2v-6" stroke="var(--accent-2)" stroke-width="2.4"/></svg><span id="brandName">pi5.local</span></div>
+  <div class="mb-brand"><svg viewBox="0 0 40 40" fill="none" style="color:var(--dim)"><ellipse cx="20" cy="12" rx="11" ry="4.2" stroke="currentColor" stroke-width="2.4"/><path d="M9 12v7c0 2.3 4.9 4.2 11 4.2s11-1.9 11-4.2v-7" stroke="currentColor" stroke-width="2.4"/><path d="M9 19v6c0 2.3 4.9 4.2 11 4.2s11-1.9 11-4.2v-6" stroke="currentColor" stroke-width="2.4"/></svg><span id="brandName">pi5.local</span></div>
   <button class="mb-theme" id="expoBtn" title="Все окна (F9)"></button>
   <div class="winbar" id="winbar"></div>
   <div class="tray" id="tray"></div>
@@ -964,7 +967,7 @@ const WP_DEFAULT="https://wall.pelin.top/random/desktop/optimized";
 let SET={accent:"teal",accentHex:"",theme:"light",wpType:"url",wpUrl:WP_DEFAULT,wpVer:0,fxDim:0,fxBlur:0,fxNoise:0,
  perf:false,blur:false,wpSlide:false,wpSlideMin:30,mbAlpha:1,wdgAlpha:1,mbIcon:1,mbFs:1,
  deskIcon:1,deskFs:1,deskLc:"",deskShadow:true,widgets:null,railHidden:false,
- mbOp:null,dockOp:null,wdgOp:null,
+ mbOp:null,dockOp:null,wdgOp:null,mbBlur:26,dockBlur:28,wdgBlur:22,
  tray:null,dockPos:"bottom",dockIcon:1,dockAlpha:1,textContrast:1,dockTiles:true,dockLabels:true,dockOrder:null,
  wdgLight:"",wdgDark:"",winAlpha:.9,menuAlpha:.92,radius:1.1,tintLight:"",tintDark:"",
  winBlur:30,winNoise:12,shadow:"md",
@@ -1027,7 +1030,8 @@ function applySettings(){
  const lvlA=n=>clampf(eBase+(n-1)*alphaStep,.1,1);
  const lvl=n=>`rgba(${lvlRgb(n)},${lvlA(n).toFixed(3)})`;
  // отдельная прозрачность панели/дока/виджетов (mbOp/dockOp/wdgOp, %); null = как у окон (общая база)
- const ovrOp=(key,n)=>{const v=SET[key];return (v==null||v==="")?lvl(n):`rgba(${lvlRgb(n)},${clampf(+v/100,0,1).toFixed(3)})`;};
+ const elAlpha=key=>{const v=SET[key];return (v==null||v==="")?lvlA(1):clampf(+v/100,0,1);};
+ const ovrOp=(key,n)=>`rgba(${lvlRgb(n)},${elAlpha(key).toFixed(3)})`;
  root.style.setProperty("--mb-bg",ovrOp("mbOp",1));root.style.setProperty("--dock-bg",ovrOp("dockOp",1));
  root.style.setProperty("--win-bg",lvl(2));
  // Поверхности ВНУТРИ окон (карточки, инпуты): в тёмной теме — еле заметный ЧИСТО БЕЛЫЙ
@@ -1068,6 +1072,26 @@ function applySettings(){
  const sec=isLight()?"0,0,0":"255,255,255",tcf=clampf(SET.textContrast??1,.6,1.6);
  root.style.setProperty("--dim",`rgba(${sec},${clampf(.66*tcf,.32,1).toFixed(2)})`);
  root.style.setProperty("--mut",`rgba(${sec},${clampf(.47*tcf,.25,1).toFixed(2)})`);
+ // авто-контраст текста панели/дока/виджетов: цвет по ФАКТИЧЕСКОМУ фону
+ // (прозрачность подложки × материал × яркость обоев с учётом затемнения), не по теме
+ const relLum=rgb=>{const p=rgb.split(",").map(Number);return (0.2126*p[0]+0.7152*p[1]+0.0722*p[2])/255;};
+ const wallL=(WALL_LUM!=null?WALL_LUM:(isLight()?.85:.12))*(1-clampf(+SET.fxDim||0,0,80)/100);
+ const setPanelFg=(prefix,alpha,rgb)=>{
+  const lite=alpha*relLum(rgb)+(1-alpha)*wallL<.5,b=lite?"255,255,255":"8,14,24";
+  root.style.setProperty("--"+prefix+"-fg",lite?"#EFF4FB":"#1A2431");
+  root.style.setProperty("--"+prefix+"-dim",`rgba(${b},${clampf((lite?.76:.66)*tcf,.35,1).toFixed(2)})`);
+  root.style.setProperty("--"+prefix+"-mut",`rgba(${b},${clampf((lite?.55:.47)*tcf,.25,1).toFixed(2)})`);
+ };
+ setPanelFg("mb",elAlpha("mbOp"),lvlRgb(1));
+ setPanelFg("dock",elAlpha("dockOp"),lvlRgb(1));
+ setPanelFg("wdg",wOp,/^#[0-9a-f]{6}$/i.test(wc||"")?hexRgb(wc):lvlRgb(1));
+ // раздельное размытие под панелью/доком/виджетами (0 = выкл у элемента);
+ // мастер-тумблер «Размытие фона (стекло)» в Прочее гасит всё разом
+ const bfOn=!!SET.blur&&!SET.perf;
+ const bf=(key,def,sat)=>{const px=clampf(SET[key]??def,0,60);return bfOn&&px>0?`blur(${px}px) saturate(${sat})`:"none";};
+ root.style.setProperty("--mb-bf",bf("mbBlur",26,1.6));
+ root.style.setProperty("--dock-bf",bf("dockBlur",28,1.5));
+ root.style.setProperty("--wdg-bf",bf("wdgBlur",22,1.3));
  root.classList.toggle("perf",!!SET.perf);
  root.classList.toggle("blur",!!SET.blur&&!SET.perf);
  document.body.classList.toggle("rail-off",!!SET.railHidden);
@@ -2891,6 +2915,7 @@ function lsBar(lb){lb.innerHTML=`
    ${pSlider("Размер иконок","mbIcon",.8,1.5,.05,"pct","Масштаб иконок в верхней панели.")}
    ${pSlider("Размер шрифта","mbFs",.8,1.4,.05,"pct","Масштаб текста (часы, метрики).")}
    ${opSlider("Прозрачность фона","mbOp","Своя плотность фона верхней панели. По умолчанию — общая, как у окон (вкладка «Материал»).")}
+   ${pSlider("Размытие под панелью","mbBlur",0,50,1,"px","Матовое размытие обоев под панелью. 0 — без размытия. Работает при включённом «Размытие фона (стекло)» в Прочее.")}
   </div>
   <div class="set-card"><div class="set-grp">Метрики справа</div>
    <div class="mon-note" style="margin:0 0 6px">Что показывать в панели:</div><div id="trayList"></div></div>`;
@@ -2902,6 +2927,7 @@ function lsWidgets(lb){const cl=/^#[0-9a-f]{6}$/i;lb.innerHTML=`
   </div>
   <div class="set-card"><div class="set-grp">Фон виджетов</div>
    ${opSlider("Прозрачность фона","wdgOp","Своя плотность подложек виджетов. По умолчанию — общая, как у окон (вкладка «Материал»).")}
+   ${pSlider("Размытие под виджетами","wdgBlur",0,50,1,"px","Матовое размытие обоев под виджетами. 0 — без размытия. Работает при включённом «Размытие фона (стекло)» в Прочее.")}
    <div class="srow"><div class="srow-l"><div class="srow-t">Светлая тема${tipHTML("Свой цвет подложки виджетов для светлой темы.")}</div></div><div class="srow-c"><input type="color" id="wdgL" value="${cl.test(SET.wdgLight||"")?SET.wdgLight:"#ffffff"}" class="ccell"><button class="btn sm" data-wreset="wdgLight">Сброс</button></div></div>
    <div class="srow"><div class="srow-l"><div class="srow-t">Тёмная тема${tipHTML("Свой цвет подложки виджетов для тёмной темы.")}</div></div><div class="srow-c"><input type="color" id="wdgD" value="${cl.test(SET.wdgDark||"")?SET.wdgDark:"#161e2a"}" class="ccell"><button class="btn sm" data-wreset="wdgDark">Сброс</button></div></div>
   </div>
@@ -2920,6 +2946,7 @@ function lsDock(lb){lb.innerHTML=`
     <button data-d="right" class="${SET.dockPos==="right"?"on":""}">Справа</button></div></div>
    ${pSlider("Размер иконок","dockIcon",.7,1.5,.05,"pct","Размер иконок в доке.")}
    ${opSlider("Прозрачность фона","dockOp","Своя плотность подложки дока. По умолчанию — общая, как у окон (вкладка «Материал»).")}
+   ${pSlider("Размытие под доком","dockBlur",0,50,1,"px","Матовое размытие обоев под доком. 0 — без размытия. Работает при включённом «Размытие фона (стекло)» в Прочее.")}
    ${pToggle("Плитки под иконками","Цветная подложка под иконками. Выключи — чистые иконки.","dockTiles","цветной фон под каждой иконкой")}
    ${pToggle("Подписи у иконок","Названия под иконками. Выключи — компактный док только из иконок (уже, когда сбоку).","dockLabels","показывать названия приложений")}
    <div class="mon-note" style="margin-top:2px">Порядок иконок меняется перетаскиванием прямо в доке (и когда док сбоку).</div>
