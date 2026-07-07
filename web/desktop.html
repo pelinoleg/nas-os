@@ -528,6 +528,8 @@
   .dd-facts b{font-size:12.5px;font-weight:600;font-family:var(--mono);overflow-wrap:anywhere}
   .dd-acts{display:flex;gap:7px;flex-wrap:wrap;align-items:center;padding-top:14px;border-top:1px solid var(--line)}
   .dd-note{font-size:12px;color:var(--mut);display:flex;align-items:center;gap:6px}
+  .dd-spin{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12.5px;color:var(--dim);margin-bottom:16px;padding:2px}
+  .dd-spin select{width:auto!important;padding:6px 9px!important;font-size:12px}
   .dd-grp{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--mut);font-family:var(--mono);margin:20px 0 8px}
   .dd-smk{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden;margin-bottom:12px}
   .dd-smk>div{background:var(--card);padding:9px 12px;display:flex;flex-direction:column;gap:2px}
@@ -1835,6 +1837,14 @@ function diskDetail(x,reload){
  const facts=[["Размер",x.size||"—"],["Файловая система",x.fstype?(""+x.fstype).toUpperCase():(hasParts?"таблица разделов":"не отформатирован")],
    ["Точка монтирования",x.mount||"не смонтирован"],["В fstab",x.in_fstab?"да":"нет"]];
  box.appendChild(el(`<div class="dd-facts">${facts.map(([k,v])=>`<div><span>${k}</span><b>${esc(""+v)}</b></div>`).join("")}</div>`));
+ // спящий режим (только для механических дисков, не системный)
+ if(x.rotational&&x.role!=="system"){
+   const cur=x.spindown!=null?x.spindown:0;
+   const opts=[[0,"Выкл"],[5,"5 мин"],[10,"10 мин"],[20,"20 мин"],[30,"30 мин"]];
+   const sd=el(`<div class="dd-spin"><span>Сон при простое${tipHTML("Диск паркует головки после N минут без обращений — тише и меньше износ. Некоторые USB-мосты это не поддерживают.")}</span><select class="ev-prio" id="ddSpin">${opts.map(([v,l])=>`<option value="${v}"${v===cur?" selected":""}>${l}</option>`).join("")}</select></div>`);
+   sd.querySelector("#ddSpin").onchange=async e=>{const r=await api("/api/disk/spindown",{method:"POST",body:JSON.stringify({dev:x.path,minutes:+e.target.value})});toast(LIVE?((r&&r.ok)?r.log:("Ошибка: "+((r&&r.log)||""))):"Демо");};
+   box.appendChild(sd);
+ }
  // действия
  const acts=el(`<div class="dd-acts"></div>`);
  if(x.role!=="system"){

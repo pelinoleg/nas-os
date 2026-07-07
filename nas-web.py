@@ -199,6 +199,7 @@ def fs_tools():
 def disks():
     res = []
     am_base = automount_state().get("base", "/media/nas")
+    spin = _load_spindown()
     for d in _lsblk():
         if d.get("type") != "disk":
             continue
@@ -265,6 +266,7 @@ def disks():
             "mounted": bool(mounts),
             "usage": disk_info(primary) if primary else None,
             "smart": smart_info(d.get("path")),
+            "spindown": spin.get(d.get("path")),
         })
     return res
 
@@ -464,6 +466,51 @@ def _fmt_b(n):
             return "%.0f %s" % (n, u)
         n /= 1024
     return "%.1f ПБ" % n
+
+SPINDOWN_FILE = os.path.join(NAS_CONFIG, "spindown.json")
+
+def _load_spindown():
+    try:
+        with open(SPINDOWN_FILE) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+def _hdparm_s_value(minutes):
+    if minutes <= 0:
+        return 0
+    if minutes <= 20:               # 1..240 → шаг 5 с
+        return max(1, min(240, int(round(minutes * 60 / 5))))
+    return min(251, 240 + int(round(minutes / 30.0)))   # 241.. → шаг 30 мин
+
+def disk_spindown(dev, minutes):
+    """Таймаут ухода диска в сон при простое (hdparm -S). minutes=0 — выключить."""
+    if not re.match(r"^/dev/[\w-]+$", dev or ""):
+        return {"ok": False, "log": "недопустимое устройство"}
+    try:
+        minutes = max(0, min(240, int(minutes)))
+    except (ValueError, TypeError):
+        return {"ok": False, "log": "неверное значение"}
+    r = _run(["hdparm", "-S", str(_hdparm_s_value(minutes)), dev], timeout=20)
+    cfg = _load_spindown()
+    cfg[dev] = minutes
+    try:
+        os.makedirs(NAS_CONFIG, exist_ok=True)
+        with open(SPINDOWN_FILE, "w") as f:
+            json.dump(cfg, f)
+    except OSError:
+        pass
+    if not r["ok"]:
+        return {"ok": False, "log": "диск/USB-мост не поддерживает управление сном: " + r["log"][-80:]}
+    return {"ok": True, "log": ("диск засыпает через %d мин простоя" % minutes) if minutes else "сон отключён (диск всегда активен)"}
+
+def apply_spindown_all():
+    for dev, minutes in _load_spindown().items():
+        if os.path.exists(dev):
+            try:
+                _run(["hdparm", "-S", str(_hdparm_s_value(int(minutes))), dev], timeout=20)
+            except Exception:
+                pass
 
 def snapraid_status():
     """Последние sync/scrub из /var/log/snapraid.log (для защиты данных)."""
@@ -3989,6 +4036,8 @@ class H(BaseHTTPRequestHandler):
                 b = self._body(); self._json(disk_speedtest(b.get("dev", "")))
             elif p == "/api/disk/eject":
                 b = self._body(); self._json(disk_eject(b.get("dev", "")))
+            elif p == "/api/disk/spindown":
+                b = self._body(); self._json(disk_spindown(b.get("dev", ""), b.get("minutes", 0)))
             elif p == "/api/disk/label":
                 b = self._body(); dev = b.get("dev", ""); label = b.get("label", "")
                 if not re.match(r"^/dev/[\w-]+$", dev or ""):
@@ -4096,6 +4145,10 @@ class H(BaseHTTPRequestHandler):
 def main():
     os.makedirs(WEB_DIR, exist_ok=True)
     ensure_web_assets()
+    try:
+        apply_spindown_all()          # восстановить настройки сна дисков после старта/ребута
+    except Exception:
+        pass
     threading.Thread(target=monitor_loop, daemon=True).start()
     srv = ThreadingHTTPServer(("0.0.0.0", PORT), H)
     ip = lan_ip()
