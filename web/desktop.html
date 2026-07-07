@@ -210,8 +210,8 @@
   .vline.off .vn{color:var(--dim)}
   .vline .vs{font-family:var(--mono);font-size:11.5px;color:var(--mut);flex:none}
   .vline .vm{font-size:10.5px;color:var(--accent);border:1px solid var(--accent-line);border-radius:999px;padding:1px 8px;flex:none}
-  .vline .vx{border:none;background:none;color:var(--mut);display:none;padding:2px;cursor:pointer;flex:none}
-  .vline:hover .vx{display:flex}.vline .vx:hover{color:var(--danger)}
+  .vline .vx{border:none;background:none;color:var(--mut);display:flex;visibility:hidden;padding:2px;cursor:pointer;flex:none}
+  .vline:hover .vx{visibility:visible}.vline .vx:hover{color:var(--danger)}
   .vline:hover .vn{color:var(--accent)}
   /* мини-бар заполнения в виджете дисков */
   .dbar{height:4px;border-radius:999px;background:var(--line-2);margin-top:4px;overflow:hidden}
@@ -593,8 +593,8 @@
   .fm-fav-i.on{background:var(--sel);color:var(--accent);box-shadow:var(--sh-sm)}
   .fm-fav-i .fi{flex:none;color:var(--accent-2);display:flex}
   .fm-fav-i .fn{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .fm-fav-i .fx{border:none;background:none;color:var(--mut);display:none;padding:2px;cursor:pointer}
-  .fm-fav-i:hover .fx{display:flex}.fm-fav-i .fx:hover{color:var(--danger)}
+  .fm-fav-i .fx{border:none;background:none;color:var(--mut);display:flex;visibility:hidden;padding:2px;cursor:pointer}
+  .fm-fav-i:hover .fx{visibility:visible}.fm-fav-i .fx:hover{color:var(--danger)}
   /* плитки */
   .fm-list.fm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:6px;align-content:start;padding:6px 2px}
   .fm-tile{position:relative;display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 6px 10px;border-radius:var(--r-md);cursor:pointer;border:1px solid transparent}
@@ -978,6 +978,22 @@ let SET={accent:"teal",accentHex:"",theme:"light",wpType:"url",wpUrl:WP_DEFAULT,
  winBlur:30,winNoise:12,shadow:"md",
  elevBaseLight:.55,elevBaseDark:.5,elevStep:.13,elevLight:.05,autoContrast:true};
 const hexRgb=h=>{const n=parseInt(h.slice(1),16);return `${n>>16&255},${n>>8&255},${n&255}`;};
+
+/* Раздельные профили оформления для светлой/тёмной темы. SET — рабочая копия
+   АКТИВНОЙ темы: правишь настройки — правишь текущую тему. При переключении
+   значения складываются в SET.themeProfiles[тема] и подгружаются из профиля
+   новой. Размеры иконок/текста, обои, расположение и списки — общие. */
+const THEMED_KEYS=["accent","accentHex","radius","shadow","winShadow","dockShadow","tileShadow",
+ "textContrast","elevStep","elevLight","mbOp","dockOp","wdgOp","mbBlur","dockBlur","wdgBlur","winBlur",
+ "mbSat","dockSat","wdgSat","winSat","winNoise","deskLc","deskShadow","autoContrast",
+ "dockTiles","dockLabels","fxDim","fxBlur","fxNoise"];
+let CUR_THEME=null;
+function themeSnapshot(theme){
+ if(!theme)return;
+ SET.themeProfiles=SET.themeProfiles||{};
+ const p={};THEMED_KEYS.forEach(k=>{p[k]=SET[k];});
+ SET.themeProfiles[theme]=p;
+}
 // шкала теней в духе Tailwind: [--sh (окна/док/диалоги), --sh-sm (кнопки/карточки)]
 const SHADOWS={
  sm:["0 2px 8px -2px rgba(0,0,0,.14)","0 1px 2px rgba(0,0,0,.08)"],
@@ -1014,6 +1030,16 @@ function paintWallRefresh(){const wr=document.getElementById("wallRefresh");if(!
 function applySettings(){
  const root=document.documentElement;
  if(SET.theme==="auto")root.removeAttribute("data-theme");else root.setAttribute("data-theme",SET.theme);
+ // смена активной темы → снять текущие значения в профиль старой, поднять профиль новой
+ const th=isLight()?"light":"dark";
+ if(th!==CUR_THEME){
+  themeSnapshot(CUR_THEME);
+  const p=(SET.themeProfiles||{})[th];
+  if(p)THEMED_KEYS.forEach(k=>{if(p[k]!==undefined)SET[k]=p[k];});
+  CUR_THEME=th;
+  applyFx();
+  if(lookTab._re)lookTab._re();
+ }
  const a=SET.accentHex?[SET.accentHex,lighten(SET.accentHex,.20)]:(ACCENTS[SET.accent]||ACCENTS.teal);
  root.style.setProperty("--accent",a[0]);root.style.setProperty("--accent-2",a[1]);
  root.style.setProperty("--accent-soft",/^#[0-9a-f]{6}$/i.test(a[0])?hexA(a[0],.16):a[0]);
@@ -1119,7 +1145,8 @@ let wallTimer=null;
 function startSlideshow(){if(wallTimer){clearInterval(wallTimer);wallTimer=null;}
  if(SET.wpSlide&&SET.wpType==="url"&&SET.wpUrl){const min=clampf(SET.wpSlideMin,1,1440)||30;wallTimer=setInterval(()=>refreshWall(true),min*60000);}}
 async function uploadWallFile(f){if(!f)return;const rd=new FileReader();rd.onload=async()=>{toast("Загрузка обоев…");const r=await api("/api/wallpaper/upload",{method:"POST",body:JSON.stringify({data:rd.result})});if(r&&r.ok){SET.wpType="upload";SET.wpVer=Date.now();applySettings();saveSettings();sampleWallLum();toast("Обои установлены");if(winSettings._render)winSettings._render();}else toast("Ошибка: "+((r&&r.log)||"?"));};rd.readAsDataURL(f);}
-function saveSettings(){try{localStorage.setItem("nasdesk",JSON.stringify(SET));}catch(e){}
+function saveSettings(){themeSnapshot(CUR_THEME);
+ try{localStorage.setItem("nasdesk",JSON.stringify(SET));}catch(e){}
  api("/api/settings",{method:"POST",body:JSON.stringify({settings:SET})});}
 
 /* api with mock */
@@ -3023,6 +3050,8 @@ function lookTab(tc){const SUBS=[["theme","Тема","sun"],["wall","Обои","
  const render=()=>{tc.innerHTML=`<div class="ls-tabs">${SUBS.map(([id,nm,ic])=>`<button data-ls="${id}" class="${sub===id?"on":""}">${svg(ic,14)}<span>${nm}</span></button>`).join("")}</div><div id="lb"></div>`;
   tc.querySelectorAll(".ls-tabs button").forEach(b=>b.onclick=()=>{sub=b.dataset.ls;lookTab._sub=sub;render();});
   (FN[sub]||lsTheme)(tc.querySelector("#lb"));};
+ // при смене темы перерисовать открытую вкладку — в ней уже значения новой темы
+ lookTab._re=()=>{if(document.body.contains(tc))render();else lookTab._re=null;};
  render();}
 const EVMETA=[
  {k:"temp",t:"Перегрев CPU",d:"температура выше порога",thr:"°C"},
@@ -3338,7 +3367,7 @@ function maybeOnboard(){let done=false;try{done=localStorage.getItem("nas_onboar
  try{const a=await(await fetch("/api/auth/state")).json();if(!a.authed)authGate();}catch(e){}
  try{const l=localStorage.getItem("nasdesk");if(l)SET=Object.assign(SET,JSON.parse(l));}catch(e){}
  applySettings();
- const sv=await api("/api/settings");if(sv.settings&&Object.keys(sv.settings).length){SET=Object.assign(SET,sv.settings);applySettings();}
+ const sv=await api("/api/settings");if(sv.settings&&Object.keys(sv.settings).length){SET=Object.assign(SET,sv.settings);CUR_THEME=null;applySettings();}
  // позиции/размеры окон — с сервера (переживают чистку localStorage и смену адреса pi5.local↔IP); локальные правки поверх
  try{const wp=await api("/api/winpos");if(wp&&wp.winpos&&Object.keys(wp.winpos).length)WINPOS=Object.assign({},wp.winpos,WINPOS);}catch(e){}
  const tb=document.getElementById("themeBtn");if(tb)tb.onclick=cycleTheme;
