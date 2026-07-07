@@ -535,6 +535,11 @@
   .dd-attrs{width:100%;border-collapse:collapse;font-size:11.5px;font-family:var(--mono)}
   .dd-attrs th{text-align:left;color:var(--mut);font-weight:500;padding:5px 8px;border-bottom:1px solid var(--line);font-family:var(--font)}
   .dd-attrs td{padding:5px 8px;border-bottom:1px solid var(--line);overflow-wrap:anywhere}
+  /* история метрик */
+  .hist-note{font-size:11.5px;color:var(--mut);margin-bottom:12px}
+  .hist-card{background:var(--card);border:1px solid var(--line);border-radius:var(--r-md);padding:10px 13px 8px;margin-bottom:12px}
+  .hist-h{display:flex;justify-content:space-between;align-items:baseline;font-size:12px;font-weight:600;margin-bottom:6px}
+  .hist-cur{font-family:var(--mono);font-weight:700;font-size:12.5px}
   .caplbls{display:flex;justify-content:space-between;font-size:12px;color:var(--mut);margin-top:10px}
   .caplbls b{color:var(--text);font-weight:650;font-family:var(--mono)}
   .pool-empty{font-size:13px;color:var(--dim);line-height:1.5;margin-bottom:14px}
@@ -1615,20 +1620,48 @@ function winSystem(initTab){openWin("__sys","Система",(body,win)=>{
   const opt=(v,l)=>`<option value="${v}"${refresh===v?" selected":""}>${l}</option>`;
   body.innerHTML=`<div class="tabs" style="padding:14px 16px 0">
     <button data-t="overview" class="${tab==="overview"?"on":""}">${svg("gauge",14)} Обзор</button>
-    <button data-t="proc" class="${tab==="proc"?"on":""}">${svg("activity",14)} Процессы</button>
+    <button data-t="history" class="${tab==="history"?"on":""}">${svg("activity",14)} История</button>
+    <button data-t="proc" class="${tab==="proc"?"on":""}">${svg("cpu",14)} Процессы</button>
     <button data-t="svc" class="${tab==="svc"?"on":""}">${svg("cog",14)} Службы</button>
     <select class="rsel" id="sysR" title="Автообновление">${opt(0,"Пауза")}${opt(1000,"1 с")}${opt(3000,"3 с")}${opt(5000,"5 с")}${opt(10000,"10 с")}</select></div>
    <div id="tc" style="flex:1;min-height:0;overflow:auto;padding:16px 18px"></div>`;
   body.querySelectorAll(".tabs button").forEach(b=>b.onclick=()=>{tab=b.dataset.t;render();});
   body.querySelector("#sysR").onchange=e=>{refresh=+e.target.value;try{localStorage.setItem("nassysrefresh",refresh);}catch(x){}render();};
   const tc=body.querySelector("#tc");
-  if(tab==="overview")overviewTab(tc,win);else if(tab==="proc")procTab(tc,win);else svcTab(tc,win);};
+  if(tab==="overview")overviewTab(tc,win);else if(tab==="history")historyTab(tc,win);else if(tab==="proc")procTab(tc,win);else svcTab(tc,win);};
  win._goTab=t=>{tab=t;render();};
  render();
 },{w:680,h:640});}
 function winMon(){winSystem("overview");}
 function winProc(){winSystem("proc");}
 const THR_HINT="Флаги пониженного напряжения/троттлинга Raspberry Pi. Если горит — блоку питания не хватает тока или CPU перегрелся и снизил частоту.";
+function histChart(title,h,series,fmt,maxOverride){
+ const W=560,H=104,pad=6,n=h.length;
+ const vals=[];series.forEach(s=>h.forEach(p=>{if(p[s.key]!=null)vals.push(p[s.key]);}));
+ const mx=maxOverride||Math.max(1,...vals)*1.15;
+ const X=i=>pad+(n>1?i/(n-1):0)*(W-2*pad);
+ const Y=v=>H-pad-(Math.min(Math.max(v||0,0),mx)/mx)*(H-2*pad);
+ const grid=[0.5,1].map(f=>`<line x1="${pad}" y1="${(H-pad-f*(H-2*pad)).toFixed(1)}" x2="${W-pad}" y2="${(H-pad-f*(H-2*pad)).toFixed(1)}" stroke="var(--track,rgba(128,128,128,.15))" stroke-width="1"/>`).join("");
+ const paths=series.map(s=>{let d="";h.forEach((p,i)=>{if(p[s.key]==null)return;d+=(d?"L":"M")+X(i).toFixed(1)+" "+Y(p[s.key]).toFixed(1);});
+   if(!d)return"";const area=s.fill?`<path d="${d} L${X(n-1).toFixed(1)} ${H-pad} L${X(0).toFixed(1)} ${H-pad} Z" fill="${s.color}" opacity=".13"/>`:"";
+   return area+`<path d="${d}" fill="none" stroke="${s.color}" stroke-width="1.6" stroke-linejoin="round"/>`;}).join("");
+ const cur=series.map(s=>{const last=[...h].reverse().find(p=>p[s.key]!=null);return `<b style="color:${s.color}">${last?fmt(last[s.key]):"—"}</b>`;}).join(" ");
+ return `<div class="hist-card"><div class="hist-h"><span>${title}</span><span class="hist-cur">${cur}</span></div>
+   <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:${H}px;display:block">${grid}${paths}</svg></div>`;
+}
+async function historyTab(tc,win){win._sub=null;clearInterval(win._pi);
+ tc.innerHTML=`<div style="color:var(--mut);font-size:12px">загрузка истории…</div>`;
+ const r=await api("/api/history"),h=(r&&r.history)||[];
+ if(h.length<2){tc.innerHTML=`<div class="dempty">${svg("activity",16)} История ещё копится — точка снимается раз в минуту, загляните позже.</div>`;return;}
+ const span=h[h.length-1].t-h[0].t,hrs=span/3600;
+ const pf=v=>Math.round(v)+"%",tf=v=>Math.round(v)+"°";
+ tc.innerHTML=`<div class="hist-note">За последние ${hrs>=1?hrs.toFixed(hrs<3?1:0)+" ч":Math.round(span/60)+" мин"} · точка раз в минуту · ${h.length} точек</div>`
+  +histChart("Загрузка CPU",h,[{key:"cpu",color:"var(--accent)",fill:1}],pf,100)
+  +histChart("Температура CPU",h,[{key:"temp",color:"var(--warn)",fill:1}],tf,null)
+  +histChart("Память",h,[{key:"mem",color:"var(--accent-2)",fill:1}],pf,100)
+  +histChart("Сеть · ↓ приём / ↑ отдача",h,[{key:"rx",color:"var(--good)",fill:1},{key:"tx",color:"var(--danger)"}],fmtR,null)
+  +histChart("Заполнение пула",h,[{key:"pool",color:"var(--good)",fill:1}],pf,100);
+}
 function overviewTab(tc,win){
  tc.innerHTML=`<div class="ov-cards" id="ovCards"></div><div id="ovThr"></div>
   <div class="ov-sec"><div class="ov-sec-h">Память и сеть</div><div class="krow" id="ovMem"></div><div class="bar" style="margin:5px 0 10px"><i id="ovMemBar"></i></div><div class="krow" id="ovNet"></div><div class="krow" id="ovUp"></div></div>

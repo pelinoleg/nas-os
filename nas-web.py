@@ -1368,9 +1368,59 @@ def fmt_uptime(sec):
     sec = int(sec or 0); d, h = sec // 86400, (sec % 86400) // 3600
     return ("%dд %dч" % (d, h)) if d else ("%dч %dм" % (h, (sec % 3600) // 60))
 
+# --------------------------------------------------------------------------- #
+#  История метрик (лёгкий тайм-серия для графиков за сутки)
+# --------------------------------------------------------------------------- #
+HISTORY_FILE = os.path.join(NAS_CONFIG, "history.json")
+HISTORY_CAP  = 1500          # ~25 часов при шаге 60 с
+_history = None
+_hist_dirty = 0
+
+def _load_history():
+    global _history
+    if _history is not None:
+        return _history
+    try:
+        with open(HISTORY_FILE) as f:
+            _history = json.load(f)[-HISTORY_CAP:]
+    except (OSError, ValueError):
+        _history = []
+    return _history
+
+def history_sample():
+    """Снять одну точку метрик и добавить в историю (зовётся раз в минуту)."""
+    global _hist_dirty
+    h = _load_history()
+    try:
+        s = stats()
+    except Exception:
+        return
+    pt = {"t": int(time.time()), "cpu": s.get("cpu"), "temp": s.get("temp"),
+          "mem": (s.get("mem") or {}).get("pct"),
+          "rx": (s.get("net") or {}).get("rx"), "tx": (s.get("net") or {}).get("tx"),
+          "pool": (s.get("disk_pool") or {}).get("pct")}
+    h.append(pt)
+    if len(h) > HISTORY_CAP:
+        del h[:len(h) - HISTORY_CAP]
+    _hist_dirty += 1
+    if _hist_dirty >= 5:                 # писать на диск не чаще ~раз в 5 мин
+        _hist_dirty = 0
+        try:
+            os.makedirs(NAS_CONFIG, exist_ok=True)
+            tmp = HISTORY_FILE + ".tmp"
+            with open(tmp, "w") as f:
+                json.dump(h, f)
+            os.replace(tmp, HISTORY_FILE)
+        except OSError:
+            pass
+
 def monitor_loop():
     while True:
         time.sleep(60)
+        try:
+            history_sample()
+        except Exception:
+            pass
         try:
             monitor_tick()
         except Exception:
@@ -3684,6 +3734,8 @@ class H(BaseHTTPRequestHandler):
         try:
             if p == "/api/stats":
                 self._json(stats())
+            elif p == "/api/history":
+                self._json({"history": _load_history()})
             elif p == "/api/desktop":
                 self._json({"apps": discover_desktop_apps(), "volumes": external_volumes()})
             elif p == "/api/cron/jobs":
