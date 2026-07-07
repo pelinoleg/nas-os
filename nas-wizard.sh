@@ -1250,17 +1250,19 @@ DEPLOY
 # Порядок загрузки: docker ждёт mergerfs-пул, стеки поднимаются после монтирования.
 # Защищает от записи контейнеров в ПУСТУЮ точку /mnt/storage, если пул ещё не смонтирован.
 install_stacks_autostart() {
-    local pool_ready=0
-    if findmnt -no TARGET "$STORAGE_MNT" >/dev/null 2>&1 || grep -qsE "[[:space:]]${STORAGE_MNT}[[:space:]]" /etc/fstab; then
-        pool_ready=1
-        run mkdir -p /etc/systemd/system/docker.service.d
-        write_file /etc/systemd/system/docker.service.d/wait-storage.conf <<EOF
-[Unit]
-RequiresMountsFor=$STORAGE_MNT
-EOF
+    # НАМЕРЕННО не вешаем RequiresMountsFor на сам docker.service: это делало бы
+    # запуск демона (а значит и ВСЕХ контейнеров) зависимым от пула — один
+    # пропавший/переименованный диск ронял бы весь Docker. Ждём пул только на
+    # уровне nas-stacks.service (bring-up стеков), не демона.
+    # Подчищаем drop-in, если его оставил старый запуск wizard'а:
+    if [ -f /etc/systemd/system/docker.service.d/wait-storage.conf ]; then
+        run rm -f /etc/systemd/system/docker.service.d/wait-storage.conf
+        rmdir /etc/systemd/system/docker.service.d 2>/dev/null || true
     fi
     local reqmount=""
-    [ "$pool_ready" -eq 1 ] && reqmount="RequiresMountsFor=$STORAGE_MNT"
+    if findmnt -no TARGET "$STORAGE_MNT" >/dev/null 2>&1 || grep -qsE "[[:space:]]${STORAGE_MNT}[[:space:]]" /etc/fstab; then
+        reqmount="RequiresMountsFor=$STORAGE_MNT"
+    fi
     write_file /etc/systemd/system/nas-stacks.service <<EOF
 [Unit]
 Description=Bring up NAS docker stacks (nas-wizard)
