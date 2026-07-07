@@ -617,6 +617,8 @@
   .tr-top{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line);flex:none}
   .tr-title{display:flex;align-items:center;gap:9px;font-weight:650;font-size:14px}
   .tr-title .tr-cnt{font-family:var(--mono);font-size:11px;color:var(--mut);background:var(--card-2);padding:1px 9px;border-radius:999px}
+  .tr-auto{margin-left:auto;display:flex;align-items:center;gap:6px;font-size:12px;color:var(--dim)}
+  .tr-auto select{width:auto!important;padding:5px 8px!important;font-size:12px}
   .tr-cols{display:flex;align-items:center;gap:10px;padding:9px 18px 8px;border-bottom:1px solid var(--line);font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);font-family:var(--mono);flex:none}
   .tr-list{flex:1;overflow-y:auto;padding:6px 10px}
   .tr-row{display:flex;align-items:center;gap:10px;padding:8px 8px;border-radius:var(--r-sm);font-size:12.5px;transition:.1s}
@@ -3159,8 +3161,11 @@ function openFileWin(e){openWin("ed:"+e.path,e.name,body=>{
 function winTrash(){openWin("__trash","Корзина",body=>{
  body.style.padding="0";
  const draw=async()=>{const r=await api("/api/fs/trash"),items=(r&&r.items)||[];
+   const mr=await api("/api/maintenance"),md=(mr&&mr.maintenance)||{trash_days:30};
+   const dopts=[[0,"никогда"],[7,"7 дней"],[14,"14 дней"],[30,"30 дней"],[90,"90 дней"]];
    body.innerHTML=`<div class="trwrap">
      <div class="tr-top"><div class="tr-title">${svg("trash",16)} Корзина <span class="tr-cnt">${items.length}</span></div>
+       <label class="tr-auto" title="Автоматически удалять из корзины объекты старше выбранного срока">${svg("clock",13)} авто-очистка: <select id="trAuto">${dopts.map(([v,l])=>`<option value="${v}"${v===(md.trash_days||0)?" selected":""}>${l}</option>`).join("")}</select></label>
        ${items.length?`<button class="btn sm dng" id="trEmpty">${svg("trash",13)} Очистить</button>`:""}</div>
      ${items.length?`<div class="tr-cols"><span class="tc-n">Имя</span><span class="tc-s">Откуда</span><span class="tc-w">Удалён</span><span class="tc-z">Размер</span><span class="tc-a"></span></div>`:""}
      <div class="tr-list"></div></div>`;
@@ -3178,7 +3183,8 @@ function winTrash(){openWin("__trash","Корзина",body=>{
      row.querySelector('[data-a="restore"]').onclick=async e=>{e.stopPropagation();const w=await api("/api/fs/trash/restore",{method:"POST",body:JSON.stringify({id:it.id})});toast(LIVE?(w&&w.ok?"Восстановлено в "+dir:("Ошибка: "+((w&&w.log)||""))):"Демо");draw();};
      row.querySelector('[data-a="del"]').onclick=e=>{e.stopPropagation();confirmDlg("Удалить навсегда?",esc(it.name)+" будет удалён безвозвратно.",async()=>{const w=await api("/api/fs/trash/delete",{method:"POST",body:JSON.stringify({id:it.id})});toast(LIVE?(w&&w.ok?"Удалено":"Ошибка"):"Демо");draw();},true);};
      list.appendChild(row);});
-   const eb=body.querySelector("#trEmpty");if(eb)eb.onclick=()=>confirmDlg("Очистить корзину?",`${items.length} объектов будут удалены безвозвратно.`,async()=>{const w=await api("/api/fs/trash/empty",{method:"POST",body:JSON.stringify({})});toast(LIVE?`Очищено: ${(w&&w.count)||0}`:"Демо");draw();},true);};
+   const eb=body.querySelector("#trEmpty");if(eb)eb.onclick=()=>confirmDlg("Очистить корзину?",`${items.length} объектов будут удалены безвозвратно.`,async()=>{const w=await api("/api/fs/trash/empty",{method:"POST",body:JSON.stringify({})});toast(LIVE?`Очищено: ${(w&&w.count)||0}`:"Демо");draw();},true);
+   const ta=body.querySelector("#trAuto");if(ta)ta.onchange=async()=>{await api("/api/maintenance",{method:"POST",body:JSON.stringify({maintenance:{trash_days:+ta.value}})});toast(+ta.value?("Авто-очистка: старше "+ta.value+" дн"):"Авто-очистка выключена");};};
  draw();
 },{w:640,h:540});}
 let SYSC=null, PENDING_REBOOT=false;

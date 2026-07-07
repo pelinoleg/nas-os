@@ -1521,17 +1521,75 @@ def history_sample():
         except OSError:
             pass
 
+# --------------------------------------------------------------------------- #
+#  Автообслуживание: ежедневные фоновые задачи (авто-очистка корзины и т.п.)
+# --------------------------------------------------------------------------- #
+MAINT_FILE = os.path.join(NAS_CONFIG, "maintenance.json")
+_maint_last = 0
+
+def load_maintenance():
+    d = {"trash_days": 30}     # 0 = не чистить автоматически
+    try:
+        with open(MAINT_FILE) as f:
+            d.update(json.load(f))
+    except (OSError, ValueError):
+        pass
+    return d
+
+def save_maintenance(d):
+    cur = load_maintenance()
+    if "trash_days" in d:
+        try:
+            cur["trash_days"] = max(0, min(365, int(d["trash_days"])))
+        except (ValueError, TypeError):
+            pass
+    try:
+        os.makedirs(NAS_CONFIG, exist_ok=True)
+        with open(MAINT_FILE, "w") as f:
+            json.dump(cur, f)
+    except OSError:
+        pass
+    return cur
+
+def _trash_autoclean(days):
+    if days <= 0:
+        return 0
+    cutoff = time.time() - days * 86400
+    items = _trash_load()
+    keep, removed = [], 0
+    for it in items:
+        if it.get("deleted", 0) < cutoff:
+            try:
+                _trash_rm(it.get("store"))
+            except OSError:
+                pass
+            removed += 1
+        else:
+            keep.append(it)
+    if removed:
+        _trash_save(keep)
+    return removed
+
+def maintenance_daily():
+    """Раз в сутки: авто-очистка корзины старше N дней."""
+    global _maint_last
+    now = time.time()
+    if now - _maint_last < 86400:
+        return
+    _maint_last = now
+    try:
+        _trash_autoclean(load_maintenance().get("trash_days", 0))
+    except Exception:
+        pass
+
 def monitor_loop():
     while True:
         time.sleep(60)
-        try:
-            history_sample()
-        except Exception:
-            pass
-        try:
-            monitor_tick()
-        except Exception:
-            pass
+        for fn in (history_sample, monitor_tick, maintenance_daily):
+            try:
+                fn()
+            except Exception:
+                pass
 
 # --------------------------------------------------------------------------- #
 #  Docker-сервисы / стеки (GUI-менеджер)
@@ -3931,6 +3989,8 @@ class H(BaseHTTPRequestHandler):
                     self.send_error(404)
             elif p == "/api/settings":
                 self._json({"settings": load_settings()})
+            elif p == "/api/maintenance":
+                self._json({"maintenance": load_maintenance()})
             elif p == "/api/winpos":
                 self._json({"winpos": load_winpos()})
             elif p == "/api/snippets":
@@ -3966,6 +4026,8 @@ class H(BaseHTTPRequestHandler):
             elif p == "/api/settings":
                 b = self._body(); save_settings(b.get("settings", {}))
                 self._json({"ok": True})
+            elif p == "/api/maintenance":
+                b = self._body(); self._json({"maintenance": save_maintenance(b.get("maintenance", {}))})
             elif p == "/api/winpos":
                 b = self._body(); save_winpos(b.get("winpos", {}))
                 self._json({"ok": True})
