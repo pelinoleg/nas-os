@@ -113,6 +113,11 @@
   html{--mb-icon:1;--mb-fs:1;--desk-icon:60px;--desk-fs:12px;--desk-lc:var(--text);--desk-shadow:0 1px 4px rgba(0,0,0,.4)}
   html.perf *{backdrop-filter:none!important;-webkit-backdrop-filter:none!important;transition:none!important;animation:none!important}
   html.no-shadow *{box-shadow:none!important}
+  html.nosh-win .win{box-shadow:none!important}
+  html.nosh-dock .dock{box-shadow:none!important}
+  html.nosh-dock .dock .di svg{filter:none!important}
+  html.nosh-icons .app .tile{box-shadow:none!important}
+  html.nosh-icons .app .tile svg{filter:none!important}
   html{--dockw:84px}
   body.rail-off .rail{display:none}
   body.rail-off .apps{right:0}
@@ -969,6 +974,7 @@ let SET={accent:"teal",accentHex:"",theme:"light",wpType:"url",wpUrl:WP_DEFAULT,
  perf:false,blur:false,wpSlide:false,wpSlideMin:30,mbAlpha:1,wdgAlpha:1,mbIcon:1,mbFs:1,
  deskIcon:1,deskFs:1,deskLc:"",deskShadow:true,widgets:null,railHidden:false,
  mbOp:null,dockOp:null,wdgOp:null,mbBlur:26,dockBlur:28,wdgBlur:22,
+ winShadow:true,dockShadow:true,tileShadow:true,
  tray:null,dockPos:"bottom",dockIcon:1,dockAlpha:1,textContrast:1,dockTiles:true,dockLabels:true,dockOrder:null,
  wdgLight:"",wdgDark:"",winAlpha:.9,menuAlpha:.92,radius:1.1,tintLight:"",tintDark:"",
  winBlur:30,winNoise:12,shadow:"md",
@@ -1057,6 +1063,10 @@ function applySettings(){
  const shl=SET.shadow||(SET.shadows===false?"none":"md");
  if(shl==="none"){root.classList.add("no-shadow");}
  else{root.classList.remove("no-shadow");const S=SHADOWS[shl]||SHADOWS.md;root.style.setProperty("--sh",S[0]);root.style.setProperty("--sh-sm",S[1]);}
+ // точечное отключение теней по элементам (поверх общей шкалы «Тени»)
+ root.classList.toggle("nosh-win",SET.winShadow===false);
+ root.classList.toggle("nosh-dock",SET.dockShadow===false);
+ root.classList.toggle("nosh-icons",SET.tileShadow===false);
  root.style.setProperty("--mb-icon",(SET.mbIcon??1));
  root.style.setProperty("--mb-fs",(SET.mbFs??1));
  root.style.setProperty("--desk-icon",((SET.deskIcon??1)*60).toFixed(0)+"px");
@@ -2947,6 +2957,7 @@ function lsDock(lb){lb.innerHTML=`
    ${pSlider("Размер иконок","dockIcon",.7,1.5,.05,"pct","Размер иконок в доке.")}
    ${opSlider("Прозрачность фона","dockOp","Своя плотность подложки дока. По умолчанию — общая, как у окон (вкладка «Материал»).")}
    ${pSlider("Размытие под доком","dockBlur",0,50,1,"px","Матовое размытие обоев под доком. 0 — без размытия.")}
+   ${pToggle("Тень дока","Мягкая тень под доком и иконками в нём.","dockShadow","глубина у панели дока")}
    ${pToggle("Плитки под иконками","Цветная подложка под иконками. Выключи — чистые иконки.","dockTiles","цветной фон под каждой иконкой")}
    ${pToggle("Подписи у иконок","Названия под иконками. Выключи — компактный док только из иконок (уже, когда сбоку).","dockLabels","показывать названия приложений")}
    <div class="mon-note" style="margin-top:2px">Порядок иконок меняется перетаскиванием прямо в доке (и когда док сбоку).</div>
@@ -2960,6 +2971,7 @@ function lsIcons(lb){lb.innerHTML=`
    ${pToggle("Авто-контраст по обоям","Определяет яркость обоев и сам делает подписи светлыми на тёмном фоне и тёмными на светлом — чтобы всегда читались. Переопределяет ручной «Цвет подписей».","autoContrast","подстраивать цвет под фон")}
    <div class="srow"><div class="srow-l"><div class="srow-t">Цвет подписей${tipHTML("Ручной цвет текста под иконками (когда авто-контраст выключен). По умолчанию — по теме.")}</div></div><div class="srow-c"><input type="color" id="deskLcInp" value="${/^#[0-9a-f]{6}$/i.test(SET.deskLc)?SET.deskLc:(isLight()?"#1a2431":"#e9eff7")}" class="ccell"><button class="btn sm" id="deskLcReset">Сброс</button></div></div>
    ${pToggle("Тень подписей","Тёмная/светлая тень под текстом — читается на любых обоях.","deskShadow","обводка-тень для читаемости")}
+   ${pToggle("Тень плиток","Объёмная тень под плитками приложений и носителей на столе.","tileShadow","глубина у иконок стола")}
   </div>`;
  const lc=lb.querySelector("#deskLcInp");lc.oninput=()=>{SET.deskLc=lc.value;applySettings();};lc.onchange=()=>saveSettings();
  lb.querySelector("#deskLcReset").onclick=()=>{SET.deskLc="";applySettings();saveSettings();lsIcons(lb);};
@@ -2988,7 +3000,8 @@ function lsWindows(lb){const cl=/^#[0-9a-f]{6}$/i;lb.innerHTML=`
   </div>
   <div class="set-card"><div class="set-grp">Форма и глубина</div>
    ${pSlider("Скругление углов","radius",.4,1.6,.05,"pct","Радиус скругления окон, карточек, кнопок и сегментов.")}
-   <div class="srow"><div class="srow-l"><div class="srow-t">Тени${tipHTML("Глубина мягких теней под окнами, доком, кнопками — шкала как в Tailwind (S/M/L/XL). «Нет» — плоский вид.")}</div><div class="srow-d">объём и глубина интерфейса</div></div><div class="srow-c"><div class="seg" id="shLvl">${SHADOW_LVL.map(k=>`<button data-v="${k}" class="${(SET.shadow||"md")===k?"on":""}">${SHADOW_NM[k]}</button>`).join("")}</div></div></div>
+   <div class="srow"><div class="srow-l"><div class="srow-t">Тени${tipHTML("Глубина мягких теней под окнами, доком, кнопками — шкала как в Tailwind (S/M/L/XL). «Нет» — плоский вид везде.")}</div><div class="srow-d">объём и глубина интерфейса</div></div><div class="srow-c"><div class="seg" id="shLvl">${SHADOW_LVL.map(k=>`<button data-v="${k}" class="${(SET.shadow||"md")===k?"on":""}">${SHADOW_NM[k]}</button>`).join("")}</div></div></div>
+   ${pToggle("Тень под окнами","Мягкая тень под окнами. Выключи для плоского вида — остальные тени не тронет.","winShadow","глубина у окон")}
   </div>
   <div class="set-card"><div class="set-grp">Положение окон</div>
    <div class="srow"><div class="srow-l"><div class="srow-t">Память окон${tipHTML("Окна запоминают размер и позицию. Если окно ушло за экран (другой монитор) — оно вернётся в видимую область автоматически.")}</div><div class="srow-d">размеры и позиции сохраняются автоматически</div></div><div class="srow-c"><button class="btn sm" id="winReset">Сбросить всё</button></div></div>
