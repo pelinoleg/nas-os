@@ -255,7 +255,7 @@
 
   .app{position:relative;display:flex;flex-direction:column;align-items:center;gap:9px;width:calc(var(--desk-icon,60px) + 36px);padding:10px 4px;
     border-radius:18px;border:1px solid transparent;background:transparent;transition:.16s}
-  .app:hover{background:var(--glass);border-color:var(--line);transform:translateY(-2px)}
+  .app:hover{transform:translateY(-2px)}
   .app .tile{position:relative;overflow:hidden;width:var(--desk-icon,60px);height:var(--desk-icon,60px);border-radius:18px;display:grid;place-items:center;color:#fff;
     box-shadow:0 8px 20px -8px rgba(20,40,70,.45),inset 0 1px 0 rgba(255,255,255,.22)}
   .app .tile svg{filter:drop-shadow(0 1px 2px rgba(0,0,0,.18))}
@@ -2501,7 +2501,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
      const op=ev=>{if(ev&&ev.target.classList.contains("fm-ck"))return;cursor=i;openEntry(e);};
      (node.querySelector(".fn")||node.querySelector(".tn")).onclick=op;
      (node.querySelector(".fi")||node.querySelector(".ti")).onclick=op;
-     node.oncontextmenu=ev=>{ev.preventDefault();cursor=i;rowMenu(e,ev.clientX,ev.clientY);};
+     node.oncontextmenu=ev=>{ev.preventDefault();ev.stopPropagation();cursor=i;rowMenu(e,ev.clientX,ev.clientY);};
      node.draggable=true;
      node.addEventListener("dragstart",ev=>{dragPaths=(sel.has(e.path)&&sel.size>1)?[...sel]:[e.path];ev.dataTransfer.effectAllowed="move";ev.dataTransfer.setData("text/plain",e.path);});
      node.addEventListener("dragend",()=>{dragPaths=null;listBox.querySelectorAll(".dragover").forEach(n=>n.classList.remove("dragover"));renderFav();});
@@ -2739,7 +2739,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
  body.querySelectorAll("#fCols [data-k]").forEach(h=>h.onclick=()=>{const k=h.dataset.k;
    if(sortKey===k)sortDir=-sortDir;else{sortKey=k;sortDir=1;}
    body.querySelectorAll("#fCols [data-k]").forEach(x=>x.classList.toggle("on",x===h));renderList();});
- listBox.addEventListener("contextmenu",ev=>{if(ev.target.closest(".fm-row"))return;ev.preventDefault();
+ listBox.addEventListener("contextmenu",ev=>{if(ev.target.closest(".fm-row,.fm-tile"))return;ev.preventDefault();
    const it=[];if(clip&&clip.items.length)it.push({label:"Вставить ("+clip.items.length+")",ic:svg("download",16),act:doPaste});
    it.push({label:"Новый файл",ic:svg("file",16),act:doNewFile},{label:"Новая папка",ic:svg("folder",16),act:doMkdir},{label:"Загрузить…",ic:svg("upload",16),act:()=>inp.click()},{sep:1},{label:"Терминал здесь",ic:svg("term",16),act:()=>terminalHere(cwd)},{label:"Корзина",ic:svg("trash",16),act:()=>winTrash()},{label:"Обновить",ic:svg("refresh",16),act:()=>load(cwd)});
    showMenu(ev.clientX,ev.clientY,it);});
