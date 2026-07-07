@@ -435,7 +435,7 @@
   .stk-meta{font-size:11px;color:var(--mut);font-family:var(--mono);margin-top:1px}
   .stk-acts{display:flex;gap:5px;flex-wrap:wrap;margin-top:11px;padding-top:11px;border-top:1px solid var(--line);align-items:center}
   .stk-conts{margin-top:9px;display:flex;flex-direction:column;gap:5px}
-  .stk-cont{display:flex;align-items:center;gap:9px;font-size:12px;padding:6px 9px;background:var(--bg);border-radius:var(--r-sm)}
+  .stk-cont{display:flex;align-items:center;gap:9px;font-size:12px;padding:7px 9px;background:var(--card);border:1px solid var(--line);border-radius:var(--r-sm)}
   .stk-cont .cn{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--mono);font-size:11.5px}
   .svc-edit{display:flex;flex-direction:column;height:100%}
   .svc-edit .ed-tabs{display:flex;gap:4px;margin-bottom:10px}
@@ -543,6 +543,11 @@
   .dd-attrs td{padding:5px 8px;border-bottom:1px solid var(--line);overflow-wrap:anywhere}
   /* история метрик */
   .grow{flex:1;min-width:8px}
+  .dk-tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-top:14px}
+  .dk-tile{background:var(--card);border:1px solid var(--line);border-radius:var(--r-md);padding:12px 13px;display:flex;flex-direction:column;gap:2px}
+  .dk-tile b{font-size:19px;font-weight:750;line-height:1.15}
+  .dk-tile span{font-size:11.5px;color:var(--dim)}
+  .dk-tile small{font-size:10.5px;color:var(--mut)}
   .hist-note{font-size:11.5px;color:var(--mut);margin-bottom:12px}
   .hist-bar{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
   .hist-bar .seg button{padding:5px 11px;font-size:12px}
@@ -926,6 +931,9 @@
   .ev-d{font-size:11px;color:var(--mut);margin-top:1px}
   .ev-thr{width:56px;flex:none;text-align:center;padding:6px 4px!important}
   .ev-u{font-size:11px;color:var(--mut);flex:none;margin-left:-4px}
+  .ev-c{width:52px;flex:none;display:flex;justify-content:center}
+  .ev-cols{position:sticky;top:-14px;z-index:3;display:flex;align-items:center;gap:10px;padding:8px 0 8px;background:var(--menu-bg,var(--glass-2));backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid var(--line);margin-bottom:2px}
+  .ev-col{width:52px;flex:none;display:flex;align-items:center;justify-content:center;gap:4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--dim)}
   .ev-prio{width:auto!important;flex:none;padding:6px 8px!important;font-size:11.5px;font-weight:600}
   .ev-row .set-h:first-child{margin-top:0}
   #nfEvents .set-h{margin:16px 0 8px}#nfEvents .set-h:first-child{margin-top:6px}
@@ -994,8 +1002,13 @@
   .mbh-dot{position:absolute;top:3px;right:3px;width:8px;height:8px;border-radius:50%;pointer-events:none}
   .mbh-dot.ok{background:var(--good)}.mbh-dot.warn{background:var(--warn)}.mbh-dot.bad{background:var(--danger);box-shadow:0 0 6px var(--danger)}.mbh-dot.na{background:var(--mut)}
   .mbpop{min-width:324px;max-width:384px;padding:7px}
-  .mbp-h{font-size:12.5px;font-weight:700;padding:7px 10px 6px;display:flex;align-items:center;gap:8px}
+  .mbp-h{font-size:12.5px;font-weight:700;padding:5px 6px 6px 10px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--line);margin-bottom:5px}
+  .mbp-hb{border:none;background:transparent;color:var(--dim);cursor:pointer;padding:5px;border-radius:8px;display:flex;flex:none;transition:.12s}
+  .mbp-hb:hover{color:var(--text);background:var(--sel);box-shadow:var(--sh-sm)}
   .mbp-cnt{font-size:10.5px;font-weight:700;color:var(--accent);background:var(--accent-soft);padding:2px 8px;border-radius:999px}
+  .nico{position:relative;width:27px;height:27px;border-radius:8px;background:var(--card-2);display:flex;align-items:center;justify-content:center;color:var(--dim);flex:none}
+  .nico .ndot{position:absolute;top:-2px;right:-2px;margin:0;width:7px;height:7px}
+  .nico .ndot.crit{box-shadow:0 0 0 2px var(--danger-soft)}
   .mbp-row{display:flex;gap:9px;padding:7px 10px;border-radius:9px;align-items:flex-start;cursor:pointer}
   .mbp-row:hover{background:var(--sel)}
   .ndot{width:8px;height:8px;border-radius:50%;margin-top:4px;flex:none}
@@ -1915,7 +1928,7 @@ function diskDetail(x,reload){
  const facts=[["Размер",x.size||"—"],["Файловая система",x.fstype?(""+x.fstype).toUpperCase():(hasParts?"таблица разделов":"не отформатирован")],
    ["Точка монтирования",x.mount||"не смонтирован"],["В fstab",x.in_fstab?"да":"нет"]];
  box.appendChild(el(`<div class="dd-facts">${facts.map(([k,v])=>`<div><span>${k}</span><b>${esc(""+v)}</b></div>`).join("")}</div>`));
- // спящий режим (только для механических дисков, не системный)
+ // обслуживание: сон при простое (механические, не системный)
  if(x.rotational&&x.role!=="system"){
    const cur=x.spindown!=null?x.spindown:0;
    const opts=[[0,"Выкл"],[5,"5 мин"],[10,"10 мин"],[20,"20 мин"],[30,"30 мин"]];
@@ -1923,38 +1936,18 @@ function diskDetail(x,reload){
    sd.querySelector("#ddSpin").onchange=async e=>{const r=await api("/api/disk/spindown",{method:"POST",body:JSON.stringify({dev:x.path,minutes:+e.target.value})});toast(LIVE?((r&&r.ok)?r.log:("Ошибка: "+((r&&r.log)||""))):"Демо");};
    box.appendChild(sd);
  }
- // действия
- const acts=el(`<div class="dd-acts"></div>`);
- if(x.role!=="system"){
-   if(!hasParts){
-     if(x.mounted){const b=el(`<button class="btn sm">${svg("eject",13)} Отмонтировать</button>`);b.onclick=()=>diskCall("/api/disk/mount",{target:x.mount,unmount:true},reload,"отмонтировано");acts.appendChild(b);}
-     else if(x.fstype){const b=el(`<button class="btn sm">${svg("play",13)} Смонтировать</button>`);b.onclick=()=>diskCall(x.in_fstab?"/api/disk/mount":"/api/disk/mount-dev",x.in_fstab?{target:x.mount}:{dev:x.path},reload,"смонтировано");acts.appendChild(b);}
-     if(x.fstype){const b=el(`<button class="btn sm">${svg("save",13)} Переименовать</button>`);b.onclick=()=>renameDlg(x.path,x.label||"",reload);acts.appendChild(b);}
-   }
-   // безопасно извлечь — только для внешних/свободных смонтированных дисков
-   if(x.mounted&&(x.role==="removable"||x.role==="free")){
-     const ej=el(`<button class="btn sm">${svg("eject",13)} Извлечь</button>`);
-     ej.onclick=()=>confirmDlg("Безопасно извлечь диск?","Диск будет отмонтирован и обесточен — после этого можно физически отключить.",async()=>{
-       const r=await api("/api/disk/eject",{method:"POST",body:JSON.stringify({dev:x.path})});
-       toast(LIVE?((r&&r.ok)?r.log:("Ошибка: "+((r&&r.log)||""))):"Демо");if(r&&r.ok)reload();},false);
-     acts.appendChild(ej);
-   }
-   acts.appendChild(el(`<span class="grow"></span>`));
-   const fb=el(`<button class="btn sm dng">${svg("trash",13)} Форматировать</button>`);fb.onclick=()=>formatDlg(x,reload);acts.appendChild(fb);
- }else acts.appendChild(el(`<span class="dd-note">${svg("shield",13)} Системный диск — операции недоступны</span>`));
- box.appendChild(acts);
- // скорость диска: последний замер всегда виден, тест — рядом
- if(x.role!=="system"){
+ // скорость: последний замер всегда виден; можно мерить и системную SD-карту
+ {
    const sp=el(`<div class="dd-spd"></div>`);
    let cur=x.speedtest;
    const paintSpd=busy=>{
-     sp.innerHTML=`<span class="dd-spd-ic">${svg("activity",14)}</span>`
+     sp.innerHTML=`<span class="dd-spd-ic">${svg("gauge",14)}</span>`
       +(busy?`<span class="dd-spd-t">Измеряю скорость — до минуты, диск будет занят…</span>`
         :cur?`<span class="dd-spd-t"><b>${Math.round(cur.read)} МБ/с</b> чтение${cur.write!=null?` · <b>${Math.round(cur.write)} МБ/с</b> запись`:""}</span><span class="dd-spd-d">замер: ${ruWhen(cur.t)}</span>`
         :`<span class="dd-spd-t" style="color:var(--mut)">Скорость этого диска ещё не измерялась</span>`)
       +`<span class="grow"></span>`;
      const b=el(`<button class="btn sm"${busy?" disabled":""}>${busy?"измеряю…":svg("gauge",13)+" "+(cur?"Измерить заново":"Тест скорости")}</button>`);
-     b.title="Последовательное чтение с устройства + запись временного файла на диск (файл сразу удаляется)";
+     b.title="Последовательное чтение с устройства + запись временного файла (сразу удаляется)"+(x.role==="system"?". Для системной карты запись идёт во временный каталог /var/tmp":"");
      b.onclick=async()=>{paintSpd(true);
        const r=await api("/api/disk/speedtest",{method:"POST",body:JSON.stringify({dev:x.path})});
        if(LIVE&&r&&r.ok){cur={read:r.read_mbps,write:r.write_mbps,t:r.t};}
@@ -1964,6 +1957,27 @@ function diskDetail(x,reload){
    paintSpd(false);
    box.appendChild(sp);
  }
+ // действия
+ const acts=el(`<div class="dd-acts"></div>`);
+ if(x.role!=="system"){
+   if(!hasParts){
+     if(x.mounted){const b=el(`<button class="btn sm">${svg("eject",15)} Отмонтировать</button>`);b.title="Отключить файловую систему, диск остаётся с питанием";b.onclick=()=>diskCall("/api/disk/mount",{target:x.mount,unmount:true},reload,"отмонтировано");acts.appendChild(b);}
+     else if(x.fstype){const b=el(`<button class="btn sm">${svg("play",13)} Смонтировать</button>`);b.onclick=()=>diskCall(x.in_fstab?"/api/disk/mount":"/api/disk/mount-dev",x.in_fstab?{target:x.mount}:{dev:x.path},reload,"смонтировано");acts.appendChild(b);}
+     if(x.fstype){const b=el(`<button class="btn sm">${svg("edit",13)} Переименовать</button>`);b.onclick=()=>renameDlg(x.path,x.label||"",reload);acts.appendChild(b);}
+   }
+   // безопасно извлечь — отмонтировать И снять питание перед физическим отключением
+   if(x.mounted&&(x.role==="removable"||x.role==="free")){
+     const ej=el(`<button class="btn sm pri">${svg("power",13)} Извлечь безопасно</button>`);
+     ej.title="Отмонтировать и обесточить — после этого диск можно физически отключить";
+     ej.onclick=()=>confirmDlg("Безопасно извлечь диск?","Диск будет отмонтирован и обесточен — после этого можно физически отключить.",async()=>{
+       const r=await api("/api/disk/eject",{method:"POST",body:JSON.stringify({dev:x.path})});
+       toast(LIVE?((r&&r.ok)?r.log:("Ошибка: "+((r&&r.log)||""))):"Демо");if(r&&r.ok)reload();},false);
+     acts.appendChild(ej);
+   }
+   acts.appendChild(el(`<span class="grow"></span>`));
+   const fb=el(`<button class="btn sm dng">${svg("trash",13)} Форматировать</button>`);fb.onclick=()=>formatDlg(x,reload);acts.appendChild(fb);
+ }else acts.appendChild(el(`<span class="dd-note">${svg("shield",13)} Системный диск — размонтирование и форматирование недоступны</span>`));
+ box.appendChild(acts);
  // разделы
  if(hasParts){box.appendChild(el(`<div class="dd-grp">Разделы</div>`));const pw=el(`<div class="dparts"></div>`);const ro=x.role==="system";x.partitions.forEach(pt=>pw.appendChild(partRow(pt,reload,ro)));box.appendChild(pw);}
  // SMART — грузим лениво
@@ -1995,9 +2009,9 @@ function partRow(pt,reload,readOnly){
  const a=el(`<div style="display:flex;gap:5px;flex:none"></div>`);
  // системные разделы (корень/boot) — только для чтения, без опасных действий
  if(pt.fstype&&!readOnly&&!sysMount){
-   if(pt.mounted){const b=el(`<button class="iconbtn" title="Отмонтировать">${svg("eject",13)}</button>`);b.onclick=()=>diskCall("/api/disk/mount",{target:pt.mount,unmount:true},reload,"отмонтировано");a.appendChild(b);}
-   else{const b=el(`<button class="iconbtn" title="Смонтировать">${svg("play",13)}</button>`);b.onclick=()=>diskCall("/api/disk/mount-dev",{dev:pt.path},reload,"смонтировано");a.appendChild(b);}
-   const rn=el(`<button class="iconbtn" title="Переименовать">${svg("save",13)}</button>`);rn.onclick=()=>renameDlg(pt.path,pt.label||"",reload);a.appendChild(rn);
+   if(pt.mounted){const b=el(`<button class="btn sm ghost">${svg("eject",14)} Отмонт.</button>`);b.title="Отмонтировать раздел";b.onclick=()=>diskCall("/api/disk/mount",{target:pt.mount,unmount:true},reload,"отмонтировано");a.appendChild(b);}
+   else{const b=el(`<button class="btn sm ghost">${svg("play",13)} Смонт.</button>`);b.title="Смонтировать раздел";b.onclick=()=>diskCall("/api/disk/mount-dev",{dev:pt.path},reload,"смонтировано");a.appendChild(b);}
+   const rn=el(`<button class="iconbtn" title="Переименовать метку">${svg("edit",14)}</button>`);rn.onclick=()=>renameDlg(pt.path,pt.label||"",reload);a.appendChild(rn);
  }else if(sysMount)a.appendChild(el(`<span class="rbadge system" title="Системный раздел — защищён">системный</span>`));
  r.appendChild(a);return r;
 }
@@ -2389,34 +2403,94 @@ function editUnit(name,after){openWin("unit:"+name,"Юнит · "+name,body=>{
 },{w:720,h:600});}
 /* ===== Менеджер docker-стеков (создание/редактирование/управление через GUI) ===== */
 const STACK_SKELETON="services:\n  app:\n    image: \n    container_name: app\n    restart: unless-stopped\n    ports:\n      - \"8080:80\"\n    labels:\n      web-desktop.name: \"App\"\n      web-desktop.url: \"http://pi5.local:8080\"\n";
+let DK_SEL="overview";   // выбранный пункт: overview | stack:<имя> | images | volumes
 function winServices(initTab){openWin("__services","Docker",(body,win)=>{
- body.style.display="flex";body.style.flexDirection="column";body.style.padding="0";
- let tab=initTab||"stacks";
- const render=()=>{clearInterval(win._pi);
-  body.innerHTML=`<div class="tabs" style="padding:14px 16px 0">
-    <button data-t="stacks" class="${tab==="stacks"?"on":""}">${svg("cube",14)} Стеки</button>
-    <button data-t="images" class="${tab==="images"?"on":""}">${svg("hdd",14)} Образы</button>
-    <button data-t="volumes" class="${tab==="volumes"?"on":""}">${svg("disks",14)} Тома</button>
-    <a href="http://${host()}:5001" target="_blank" rel="noopener" class="portlink" style="margin-left:auto;align-self:center;font-size:11px;opacity:.75">${svg("cube",11)} Dockge ↗</a></div>
-   <div id="tc" style="flex:1;min-height:0;overflow:auto;padding:14px 16px"></div>`;
-  body.querySelectorAll(".tabs button").forEach(b=>b.onclick=()=>{tab=b.dataset.t;render();});
-  const tc=body.querySelector("#tc");
-  if(tab==="stacks")stacksTab(tc,win);else if(tab==="images")imagesTab(tc);else volumesTab(tc);};
- render();
-},{w:700,h:660});}
-function stacksTab(tc,win){
- tc.innerHTML=`<div style="display:flex;gap:8px;margin-bottom:12px"><button class="btn sm pri" id="svNew">${svg("plus",14)} Новый стек</button><button class="btn sm" id="svRef">${svg("refresh",14)} Обновить</button></div><div id="svBody"></div>`;
- const box=tc.querySelector("#svBody");
- const load=async()=>{const d=await api("/api/stacks");
-   if(!d||!d.ok){box.innerHTML=`<div class="dempty">${svg("cube",16)} Docker не установлен или недоступен.<br>Пройдите этап «Система» в Мастере.</div>`;return;}
-   const st=d.stacks||[];if(!st.length){box.innerHTML=`<div class="dempty">${svg("cube",16)} Стеков нет — нажмите «Новый стек».</div>`;return;}
-   box.innerHTML=`<div class="svc-list"></div>`;const list=box.querySelector(".svc-list");st.forEach(s=>list.appendChild(stackCard(s,load)));
-   const sd=await api("/api/docker/stats");applyStats(box,(sd&&sd.stats)||{});};
- tc.querySelector("#svRef").onclick=load;
- tc.querySelector("#svNew").onclick=()=>editStack(null,load);
- load();
- clearInterval(win._pi);win._pi=setInterval(()=>{if(!document.body.contains(tc)){clearInterval(win._pi);return;}
-   if(document.activeElement&&tc.contains(document.activeElement))return;load();},5000);
+ body.style.padding="0";
+ if(initTab==="images"||initTab==="volumes")DK_SEL=initTab;
+ body.innerHTML="";
+ const root=el(`<div class="dmroot"><div class="dm2"><aside class="dm2-side" id="dkSide"></aside><section class="dm2-detail" id="dkDetail"></section></div></div>`);
+ body.appendChild(root);
+ const side=root.querySelector("#dkSide"),detail=root.querySelector("#dkDetail");
+ let stacks=[],ok=true,sig="";
+ const load=async force=>{
+  const d=await api("/api/stacks");if(!document.body.contains(body))return;
+  ok=!!(d&&d.ok);stacks=(d&&d.stacks)||[];
+  if(DK_SEL.startsWith("stack:")&&!stacks.find(y=>"stack:"+y.name===DK_SEL))DK_SEL="overview";
+  const ns=JSON.stringify([ok,DK_SEL,stacks.map(s=>[s.name,s.running,s.total,s.note,(s.containers||[]).map(c=>[c.name,c.state,c.health])])]);
+  if(force||ns!==sig){sig=ns;paintSide();paintDetail();}
+  else if(DK_SEL.startsWith("stack:")){const sd=await api("/api/docker/stats");applyStats(detail,(sd&&sd.stats)||{});}
+ };
+ const reload=()=>load(true);
+ const item=(id,ic,name,sub,dot)=>{
+  const mark=dot!==undefined?`<span class="dot" style="background:${dot};${dot==="transparent"?"box-shadow:inset 0 0 0 1.5px var(--mut)":""}"></span>`:`<span style="display:flex;color:var(--dim);flex:none">${svg(ic,15)}</span>`;
+  const it=el(`<button class="dm2-item${DK_SEL===id?" on":""}">${mark}<span class="li-main"><span class="li-name">${esc(name)}</span>${sub?`<span class="li-sub">${esc(sub)}</span>`:""}</span></button>`);
+  it.onclick=()=>{DK_SEL=id;paintSide();paintDetail();};return it;};
+ function paintSide(){
+  side.innerHTML="";
+  side.appendChild(item("overview","gauge","Обзор","статистика и очистка"));
+  const h=el(`<div class="dm2-side-h" style="display:flex;align-items:center;gap:6px">Стеки · ${stacks.length}<span class="grow"></span><button class="mbp-hb" title="Новый стек" style="padding:2px 4px">${svg("plus",13)}</button></div>`);
+  h.querySelector("button").onclick=()=>editStack(null,reload);
+  side.appendChild(h);
+  stacks.forEach(s=>{
+   const full=s.total>0&&s.running===s.total,part=s.running>0&&!full;
+   const dot=s.total?(full?"var(--good)":part?"var(--warn)":"var(--mut)"):"transparent";
+   side.appendChild(item("stack:"+s.name,null,s.name,s.total?`${s.running} из ${s.total} запущено`:"нет контейнеров",dot));});
+  if(!stacks.length&&ok)side.appendChild(el(`<div class="dm2-slots">${svg("cube",13)} Пока пусто — нажмите «+»</div>`));
+  side.appendChild(el(`<div class="dm2-side-h">Ресурсы</div>`));
+  side.appendChild(item("images","hdd","Образы","хранилище образов"));
+  side.appendChild(item("volumes","disks","Тома","данные контейнеров"));
+ }
+ function paintDetail(){
+  detail.innerHTML="";
+  if(!ok){detail.innerHTML=`<div class="dempty">${svg("cube",16)} Docker не установлен или недоступен.<br>Пройдите этап «Система» в Мастере.</div>`;return;}
+  if(DK_SEL==="overview")dkOverview(detail,reload);
+  else if(DK_SEL==="images")imagesTab(detail);
+  else if(DK_SEL==="volumes")volumesTab(detail);
+  else{const s=stacks.find(y=>"stack:"+y.name===DK_SEL);
+   if(s)dkStackPane(detail,s,reload);}
+ }
+ load(true);
+ clearInterval(win._pi);win._pi=setInterval(()=>{
+  if(!document.body.contains(body)){clearInterval(win._pi);return;}
+  // не дёргаем интерфейс, пока открыто меню или пользователь печатает
+  if(document.querySelector(".menu:not(.mbpop)"))return;
+  const ae=document.activeElement;
+  if(ae&&body.contains(ae)&&/INPUT|TEXTAREA|SELECT/.test(ae.tagName))return;
+  load();},5000);
+},{w:840,h:640});}
+/* дашборд Docker: сводка + очистка */
+async function dkOverview(tc,reload){
+ tc.innerHTML=`<div class="dd">
+  <div class="dd-head"><div class="dd-ic" style="background:linear-gradient(135deg,#4C8DF6,#2563eb)">${svg("cube",20)}</div>
+   <div class="dd-hmain"><div class="dd-name">Docker</div><div class="dd-sub" id="dkVer">собираю сводку…</div></div>
+   <a href="http://${host()}:5001" target="_blank" rel="noopener" class="portlink" style="flex:none">Dockge ↗</a></div>
+  <div class="dk-tiles" id="dkTiles"></div>
+  <div class="dd-grp">Очистка</div>
+  <div class="dd-acts" style="border:none;padding-top:2px;flex-wrap:wrap" id="dkPrune"></div>
+  <div class="mon-note">Очистка удаляет только неиспользуемое: работающие контейнеры и их данные не затрагиваются. «Неиспользуемые образы» — все образы без контейнеров (скачаются заново при следующем запуске).</div></div>`;
+ const pbox=tc.querySelector("#dkPrune");
+ const pr=(label,what,q,dng)=>{const b=el(`<button class="btn sm ${dng?"dng":""}">${svg(dng?"trash":"eraser",13)} ${label}</button>`);
+  b.onclick=()=>confirmDlg(label+"?",q,async()=>{const o=opAdd("Docker: "+label.toLowerCase());
+   const r=await api("/api/docker/prune",{method:"POST",body:JSON.stringify({what})});
+   opEnd(o,!!(r&&r.ok),r&&r.ok?"":((r&&r.log)||"ошибка"));toast(LIVE?(r&&r.ok?"Готово":"Ошибка"):"Демо");
+   if(document.body.contains(tc))dkOverview(tc,reload);},dng);
+  pbox.appendChild(b);};
+ pr("Висячие образы","images","Удалятся только dangling-образы (без тега) — безопасно.");
+ pr("Неиспользуемые образы","images-all","Удалятся все образы, к которым не привязан ни один контейнер.",true);
+ pr("Неиспользуемые тома","volumes","Удалятся тома без контейнеров — данные в них будут потеряны.",true);
+ pr("Кэш сборки","builder","Удалится кэш docker build — безопасно, сборка станет дольше.");
+ const d=await api("/api/docker/overview");
+ if(!document.body.contains(tc))return;
+ const tiles=tc.querySelector("#dkTiles"),ver=tc.querySelector("#dkVer");
+ if(!d||!d.ok){tiles.innerHTML=`<div class="dempty">${svg("cube",16)} ${esc((d&&d.log)||"Docker недоступен")}</div>`;if(ver)ver.textContent="—";return;}
+ if(ver)ver.textContent="версия "+(d.version||"?");
+ const c=d.containers||{},df=d.df||{},im=df.images||{},vo=df.volumes||{},ca=df.cache||{};
+ const tile=(v,l,sub,col)=>`<div class="dk-tile"><b style="color:${col||"var(--text)"}">${v}</b><span>${l}</span>${sub?`<small>${sub}</small>`:""}</div>`;
+ tiles.innerHTML=
+  tile(`${c.running||0} <span style="font-size:12px;font-weight:600;color:var(--mut)">из ${c.total||0}</span>`,"контейнеров запущено",(c.exited?`${c.exited} остановлено`:"")+(c.restarting?` · ${c.restarting} в цикле рестарта`:""),c.restarting?"var(--danger)":c.running?"var(--good)":"var(--mut)")
+  +tile(im.count||"0","образов",im.size?`занимают ${im.size}`:"")
+  +tile(vo.count||"0","томов",vo.size?`занимают ${vo.size}`:"")
+  +tile(im.reclaim&&im.reclaim!=="0B"?im.reclaim:"0","можно освободить",ca.size&&ca.size!=="0B"?`+ кэш сборки ${ca.size}`:"", (im.reclaim||"").startsWith("0")?"var(--mut)":"var(--warn)");
 }
 function applyStats(box,stats){box.querySelectorAll("[data-cname]").forEach(n=>{const st=stats[n.dataset.cname];if(st)n.textContent=`${st.cpu} · ${st.mem}`;});}
 function imagesTab(tc){
@@ -2446,31 +2520,24 @@ function portLinks(ports){const set=[...new Set([...String(ports||"").matchAll(/
  if(!set.length)return `<span style="color:var(--mut);font-size:10px">${esc(String(ports||"").split(",")[0]||"")}</span>`;
  return set.map(p=>`<a href="http://${host()}:${p}" target="_blank" rel="noopener" class="portlink" onclick="event.stopPropagation()">:${p}↗</a>`).join(" ");}
 const STK_ACT_LABEL={up:"запуск",down:"остановка",stop:"остановка",start:"запуск",restart:"перезапуск",pull:"обновление образов",build:"сборка",rebuild:"пересборка",recreate:"пересоздание","rebuild-nocache":"пересборка без кэша"};
-function stackCard(s,reload){const running=s.running>0,partial=running&&s.running<s.total;
+/* детали стека в правой панели Docker-окна */
+function dkStackPane(tc,s,reload){
+ const running=s.running>0,partial=running&&s.running<s.total;
  const col=running?"linear-gradient(135deg,#46B98A,#2f9d70)":"linear-gradient(135deg,#7183a0,#55647d)";
  const health=s.total?(partial?`<span class="stbadge dead">частично ${s.running}/${s.total}</span>`:running?`<span class="stbadge run">работает</span>`:`<span class="stbadge dead">остановлен</span>`):`<span class="stbadge dead">нет контейнеров</span>`;
- const metaTxt=`${s.total} контейнер(ов) · ${s.running} запущено${s.has_compose?"":" · нет compose"}`;
- const card=el(`<div class="stk"><div class="stk-top"><div class="stk-ic" style="background:${col}">${svg("cube",19)}</div>
-   <div style="flex:1;min-width:0"><div class="stk-nm">${esc(s.name)} ${health}</div><div class="stk-meta" id="stkMeta">${metaTxt}</div></div>
-   ${running&&s.url?`<button class="btn sm" data-a="open">${svg("grid",13)} Открыть</button>`:""}</div>
-   <div class="stk-conts"></div><div class="stk-acts"></div></div>`);
- const meta=card.querySelector("#stkMeta");
- const busy=a=>{card.style.opacity=".6";card.style.pointerEvents="none";if(meta)meta.innerHTML=`<span style="color:var(--accent)">${svg("refresh",11)} ${esc(STK_ACT_LABEL[a]||a)}…</span>`;};
- const A=a=>async()=>{busy(a);await stackAct(s.name,a,null);reload();};
- const cbox=card.querySelector(".stk-conts");
- (s.containers||[]).forEach(c=>{const run=c.state==="running";let cls=run?"run":"dead",txt=run?"работает":esc(c.state||"—");
-   if(c.health==="unhealthy"){cls="fail";txt="нездоров";}else if(c.health==="starting"){txt="запуск…";}else if((c.health||"").indexOf("exit:")===0){txt="вышел ("+c.health.slice(5)+")";}
-   const row=el(`<div class="stk-cont"><span class="stbadge ${cls}" title="${att(c.status||'')}">${txt}</span><span class="cn" title="${att(c.image)}">${esc(c.name)}</span><span class="cstat" data-cname="${att(c.name)}"></span><span style="flex:none;display:flex;gap:6px">${portLinks(c.ports)}</span><button class="iconbtn" data-c="menu">${svg("cog",13)}</button></div>`);
-   const menu=[{label:run?"Остановить":"Запустить",ic:svg(run?"stop":"play",16),act:()=>contAct(c.name,run?"stop":"start",reload)},
-     {label:"Перезапустить",ic:svg("refresh",16),act:()=>contAct(c.name,"restart",reload)}];
-   if(run)menu.push({label:"Терминал в контейнере",ic:svg("term",16),act:()=>execContainer(c.name)});
-   menu.push({sep:1},{label:"Удалить контейнер",ic:svg("trash",16),dng:1,act:()=>contAct(c.name,"rm",reload)});
-   row.querySelector('[data-c="menu"]').onclick=ev=>showMenu(ev.clientX,ev.clientY,menu);
-   cbox.appendChild(row);});
- const acts=card.querySelector(".stk-acts");
+ const box=el(`<div class="dd"></div>`);
+ const hasNote=!!(s.note&&s.note.trim());
+ box.appendChild(el(`<div class="dd-head"><div class="dd-ic" style="background:${col}">${svg("cube",19)}</div>
+   <div class="dd-hmain"><div class="dd-name">${esc(s.name)} ${health}</div><div class="dd-sub"><span class="mono">${esc(s.path||"/opt/stacks/"+s.name)}</span>${s.has_compose?"":" · нет compose"}</div></div>
+   ${running&&s.url?`<button class="btn sm" data-a="open" style="flex:none">${svg("globe",13)} Открыть</button>`:""}
+   <button class="mbp-hb" data-a="note" title="${hasNote?att(s.note):"Добавить заметку"}"${hasNote?' style="color:var(--accent)"':""}>${svg("file",15)}</button></div>`));
+ const busy=()=>{box.style.opacity=".55";box.style.pointerEvents="none";};
+ const A=a=>async()=>{busy();await stackAct(s.name,a,null);reload();};
+ // действия стека
+ const acts=el(`<div class="dd-acts" style="border:none;padding-top:0"></div>`);
  const mk=(l,ic,fn,cls)=>{const b=el(`<button class="btn sm ${cls||""}">${svg(ic,13)} ${l}</button>`);b.onclick=fn;acts.appendChild(b);};
  if(running){mk("Стоп","stop",A("down"),"warn");mk("Рестарт","refresh",A("restart"));}
- else mk("Запустить","play",A("up"),"ok");
+ else if(s.has_compose)mk("Запустить","play",A("up"),"ok");
  const more=el(`<button class="btn sm">${svg("cog",13)} Ещё ▾</button>`);
  more.onclick=ev=>showMenu(ev.clientX,ev.clientY,[
    {label:"Обновить образы (pull)",ic:svg("download",16),act:A("pull")},
@@ -2485,14 +2552,28 @@ function stackCard(s,reload){const running=s.running>0,partial=running&&s.runnin
  mk("Логи","logs",()=>stackLogs(s.name));
  mk("Изменить","edit",()=>editStack(s.name,reload));
  mk("Папка","folder",()=>winFiles(s.path||("/opt/stacks/"+s.name)));
- acts.appendChild(el(`<span style="flex:1"></span>`));
+ acts.appendChild(el(`<span class="grow"></span>`));
  mk("Удалить","trash",()=>confirmDlg("Удалить стек?",`«${esc(s.name)}» будет остановлен и удалён из /opt/stacks.`,()=>stackDelete(s.name,reload),true),"dng");
- const ob=card.querySelector('[data-a="open"]');if(ob)ob.onclick=()=>window.open(s.url,"_blank");
- const hasNote=!!(s.note&&s.note.trim());
- const nb=el(`<button class="iconbtn note-btn${hasNote?" has-note":""}" title="${hasNote?att(s.note):"Добавить заметку"}">${svg("file",15)}</button>`);
- nb.onclick=()=>stackNoteDlg(s,reload);
- card.querySelector(".stk-top").appendChild(nb);
- return card;}
+ box.appendChild(acts);
+ if(hasNote)box.appendChild(el(`<div class="stk-note">${esc(s.note)}</div>`));
+ // контейнеры
+ box.appendChild(el(`<div class="dd-grp">Контейнеры${s.total?` · ${s.total}`:""}</div>`));
+ const cbox=el(`<div class="stk-conts" style="margin:0;border:none;padding:0"></div>`);
+ if(!(s.containers||[]).length)cbox.appendChild(el(`<div class="dempty">${svg("cube",16)} Контейнеров нет — стек не запущен</div>`));
+ (s.containers||[]).forEach(c=>{const run=c.state==="running";let cls=run?"run":"dead",txt=run?"работает":esc(c.state||"—");
+   if(c.health==="unhealthy"){cls="fail";txt="нездоров";}else if(c.health==="starting"){txt="запуск…";}else if((c.health||"").indexOf("exit:")===0){txt="вышел ("+c.health.slice(5)+")";}
+   const row=el(`<div class="stk-cont"><span class="stbadge ${cls}" title="${att(c.status||'')}">${txt}</span><span class="cn" title="${att(c.image)}">${esc(c.name)}</span><span class="cstat" data-cname="${att(c.name)}"></span><span style="flex:none;display:flex;gap:6px">${portLinks(c.ports)}</span><button class="iconbtn" data-c="menu" title="Действия с контейнером">${svg("cog",14)}</button></div>`);
+   const menu=[{label:run?"Остановить":"Запустить",ic:svg(run?"stop":"play",16),act:()=>contAct(c.name,run?"stop":"start",reload)},
+     {label:"Перезапустить",ic:svg("refresh",16),act:()=>contAct(c.name,"restart",reload)}];
+   if(run)menu.push({label:"Терминал в контейнере",ic:svg("term",16),act:()=>execContainer(c.name)});
+   menu.push({sep:1},{label:"Удалить контейнер",ic:svg("trash",16),dng:1,act:()=>contAct(c.name,"rm",reload)});
+   row.querySelector('[data-c="menu"]').onclick=ev=>showMenu(ev.clientX,ev.clientY,menu);
+   cbox.appendChild(row);});
+ box.appendChild(cbox);
+ const ob=box.querySelector('[data-a="open"]');if(ob)ob.onclick=()=>window.open(s.url,"_blank");
+ box.querySelector('[data-a="note"]').onclick=()=>stackNoteDlg(s,reload);
+ tc.appendChild(box);
+ api("/api/docker/stats").then(sd=>{if(document.body.contains(box))applyStats(box,(sd&&sd.stats)||{});});}
 function stackNoteDlg(s,reload){const sc=document.getElementById("scrim");
  sc.innerHTML=`<div class="dialog"><h3>Заметка · ${esc(s.name)}</h3>
    <textarea id="snote" rows="6" placeholder="Заметка об этом стеке… (назначение, пароли, TODO)">${esc(s.note||"")}</textarea>
@@ -2827,7 +2908,7 @@ function opProgress(title){const o=opAdd(title);
 // запись действия в журнал уведомлений (клиентская сторона — итоги пакетных операций)
 function logAct(title,msg,lvl,kind){api("/api/events/log",{method:"POST",body:JSON.stringify({title,msg:msg||"",lvl:lvl||"ok",kind:kind||"files"})});}
 async function runBatch(title,items,fn){
- const o=items.length>=3?opAdd(title,{cancel:()=>{}}):null;let ok=0,i=0;
+ const o=items.length?opAdd(title,{cancel:()=>{}}):null;let ok=0,i=0;
  for(;i<items.length;i++){if(o&&o.cancelled)break;
   if(o)opSet(o,i/items.length,`${i} / ${items.length}`);
   try{if(await fn(items[i],i))ok++;}catch(e){}}
@@ -3596,7 +3677,8 @@ function notifyTab(tc){tc.innerHTML=`<div style="color:var(--mut);font-size:12px
    <div class="set-h">Оповещения</div>
    <div class="mon-row"><span>Слать push-уведомления на телефон (Pushover)</span><label class="tgl"><input type="checkbox" id="nfEn"><span class="sl"></span></label></div>
    <div class="field" style="margin:8px 0 4px"><label>Не повторять одно событие чаще, мин</label><input id="nfCd" class="mono" style="max-width:120px"></div>
-   <div class="mon-note">Все события всегда записываются в журнал (колокольчик в верхнем баре). У каждого события два тумблера: <b>первый</b> — плашка на рабочем столе и счётчик на колокольчике, <b>второй</b> — push в Pushover (работает при включённом переключателе выше). Список «Уровень» — приоритет Pushover.</div>
+   <div class="mon-note">Все события всегда записываются в журнал (колокольчик в верхнем баре). Колонка «Стол» — плашка на рабочем столе и счётчик на колокольчике, «Push» — уведомление в Pushover на телефон (при включённом переключателе выше). Выпадающий список — приоритет Pushover.</div>
+   <div class="ev-cols"><span style="font-size:11px;color:var(--mut)">Событие</span><span class="grow"></span><span class="ev-col" title="Плашка на рабочем столе + колокольчик">${svg("grid",12)} Стол</span><span class="ev-col" title="Push в Pushover на телефон">${svg("bell",12)} Push</span></div>
    <div id="nfEvents"></div>`;
   const en=tc.querySelector("#nfEn");en.checked=!!MON.enabled;
   const evbox=tc.querySelector("#nfEvents");
@@ -3606,7 +3688,7 @@ function notifyTab(tc){tc.innerHTML=`<div style="color:var(--mut);font-size:12px
    const hasThr=m.thr!==undefined;
    const prioSel=`<select class="ev-prio" id="evp_${m.k}" title="Уровень Pushover">${PRIO.map(([v,l])=>`<option value="${v}"${v===pv?" selected":""}>${l}</option>`).join("")}</select>`;
    const dsk=e.desk!=null?e.desk:(pv>=1);
-   const row=el(`<div class="ev-row"><div class="ev-txt"><div class="ev-t">${esc(m.t)}</div><div class="ev-d">${esc(m.d)}</div></div>${hasThr?`<input class="ev-thr mono" id="ev_${m.k}" value="${e.threshold!=null?e.threshold:''}">${m.thr?`<span class="ev-u">${m.thr}</span>`:""}`:""}${prioSel}<label class="tgl" title="Плашка на рабочем столе + счётчик на колокольчике"><input type="checkbox" id="evd_${m.k}"${dsk?" checked":""}><span class="sl"></span></label><label class="tgl" title="Push-уведомление в Pushover"><input type="checkbox" id="evon_${m.k}"${e.on?" checked":""}><span class="sl"></span></label></div>`);
+   const row=el(`<div class="ev-row"><div class="ev-txt"><div class="ev-t">${esc(m.t)}</div><div class="ev-d">${esc(m.d)}</div></div>${hasThr?`<input class="ev-thr mono" id="ev_${m.k}" value="${e.threshold!=null?e.threshold:''}">${m.thr?`<span class="ev-u">${m.thr}</span>`:""}`:""}${prioSel}<span class="ev-c"><label class="tgl" title="Плашка на рабочем столе + счётчик на колокольчике"><input type="checkbox" id="evd_${m.k}"${dsk?" checked":""}><span class="sl"></span></label></span><span class="ev-c"><label class="tgl" title="Push-уведомление в Pushover"><input type="checkbox" id="evon_${m.k}"${e.on?" checked":""}><span class="sl"></span></label></span></div>`);
    evbox.appendChild(row);});
   const cd=tc.querySelector("#nfCd");cd.value=Math.round((MON.cooldown||1800)/60);
   const items=EVMETA.filter(m=>m.k);
@@ -3872,12 +3954,12 @@ function poweroff(){confirmDlg("Выключить NAS?","Pi будет выкл
 
 /* ===================== верхний бар: здоровье · операции · уведомления ===================== */
 // поповер под кнопкой menubar: класс .menu → те же стекло/адаптивные цвета, что у меню
-function mbPop(anchor,build){
+function mbPop(anchor,build,onClose){
  closeMenu();const p=el(`<div class="menu mbpop"></div>`);build(p);document.body.appendChild(p);
  const r=anchor.getBoundingClientRect(),w=p.getBoundingClientRect().width;
  p.style.top=Math.round(r.bottom+8)+"px";
  p.style.left=Math.max(8,Math.min(Math.round(r.right-w),innerWidth-w-8))+"px";
- const off=ev=>{if(!p.contains(ev.target)&&ev.target!==anchor&&!anchor.contains(ev.target)){document.removeEventListener("pointerdown",off,true);p.remove();}};
+ const off=ev=>{if(!p.contains(ev.target)&&ev.target!==anchor&&!anchor.contains(ev.target)){document.removeEventListener("pointerdown",off,true);p.remove();if(onClose)onClose();}};
  p._off=off;setTimeout(()=>document.addEventListener("pointerdown",off,true),0);return p;}
 
 /* ---- здоровье системы в баре ---- */
@@ -3889,17 +3971,19 @@ function paintHealthBtn(){const b=document.getElementById("healthBtn");if(!b)ret
  b.innerHTML=svg("heart",16)+`<span class="mbh-dot ${ov}"></span>`;
  b.title="Здоровье системы: "+((HLVL[ov]||["проверяю…"])[0]);}
 function healthPop(){const b=document.getElementById("healthBtn");
- mbPop(b,p=>{const h=HEALTH;
-  const head=`<div class="mbp-h">Здоровье системы${h?`<span class="mbp-cnt" style="color:${(HLVL[h.overall]||[])[1]};background:transparent;border:1px solid var(--line)">${(HLVL[h.overall]||["…"])[0]}</span>`:""}</div>`;
-  const rows=h?h.checks.map(c=>`<div class="mbp-row" style="cursor:default"><span class="ndot ${c.lvl==="bad"?"crit":c.lvl==="warn"?"warn":"ok"}"></span><div class="mbp-m"><div class="mbp-t">${esc(c.name)}</div><div class="mbp-s">${esc(c.value)}${c.hint?" · "+esc(c.hint):""}</div></div></div>`).join("")
-   :`<div class="mbp-empty">Собираю сводку…</div>`;
-  p.innerHTML=head+rows+`<div class="mbp-f"><button class="btn sm" id="mbhSys">${svg("gauge",13)} Открыть Систему</button><span class="grow"></span><button class="btn sm" id="mbhR">${svg("refresh",13)}</button></div>`;
-  p.querySelector("#mbhSys").onclick=()=>{closeMenu();winMon();};
-  p.querySelector("#mbhR").onclick=async ev=>{ev.stopPropagation();await pollHealth();closeMenu();healthPop();};});}
+ const p=mbPop(b,pp=>{pp.innerHTML=`<div class="mbp-h"><span>Здоровье системы</span><span id="mbhBadge"></span><span class="grow"></span><button class="mbp-hb" id="mbhSys" title="Открыть Систему">${svg("gauge",15)}</button></div><div id="mbhBody"><div class="mbp-empty">Собираю сводку…</div></div>`;
+  pp.querySelector("#mbhSys").onclick=()=>{closeMenu();winMon();};});
+ const fill=()=>{if(!document.body.contains(p)||!HEALTH)return;const h=HEALTH;
+  const bd=p.querySelector("#mbhBadge");if(bd)bd.outerHTML=`<span class="mbp-cnt" style="color:${(HLVL[h.overall]||[])[1]};background:transparent;border:1px solid var(--line)">${(HLVL[h.overall]||["…"])[0]}</span>`;
+  p.querySelector("#mbhBody").innerHTML=h.checks.map(c=>`<div class="mbp-row" style="cursor:default"><span class="ndot ${c.lvl==="bad"?"crit":c.lvl==="warn"?"warn":"ok"}"></span><div class="mbp-m"><div class="mbp-t">${esc(c.name)}</div><div class="mbp-s">${esc(c.value)}${c.hint?" · "+esc(c.hint):""}</div></div></div>`).join("");};
+ fill();pollHealth().then(fill);   // всегда свежее при открытии — без кнопки обновления
+}
 
 /* ---- центр уведомлений ---- */
 const EVQ={seq:0,seen:0,unseen:0,cache:[],toasted:0,remind:0,init:false};
 const NKIND={disk:"Диски",space:"Место",power:"Питание",svc:"Службы",access:"Доступ",net:"Сеть",protect:"Защита",files:"Файлы",action:"Действия",system:"Система"};
+const NKICON={disk:"disks",space:"hdd",power:"cpu",svc:"cog",access:"key",net:"wifi",protect:"shield",files:"folder",action:"wand",system:"info"};
+const nico=e=>`<span class="nico"><span class="ndot ${e.lvl}"></span>${svg(NKICON[e.kind]||"info",14)}</span>`;
 async function pollEvents(){
  if(pollEvents._busy)return;pollEvents._busy=true;   // без перекрытия опросов (медленный ответ → дубли)
  try{await _pollEvents();}finally{pollEvents._busy=false;}}
@@ -3925,19 +4009,18 @@ function markSeen(){if(EVQ.seen>=EVQ.seq)return;EVQ.seen=EVQ.seq;EVQ.unseen=0;pa
  api("/api/events/seen",{method:"POST",body:JSON.stringify({id:EVQ.seq})});}
 function ntoast(e,remind){const c=document.getElementById("ntoasts");if(!c)return;
  while(c.children.length>=4)c.firstChild.remove();
- const n=el(`<div class="ntoast ${e.lvl}"><span class="ndot ${e.lvl}"></span><div class="nt-m"><div class="nt-t">${esc(e.title)}${e.n>1?` <span class="nmul">×${e.n}</span>`:""}${remind?` <span class="nmul">· напоминание</span>`:""}</div>${e.msg?`<div class="nt-s">${esc(e.msg)}</div>`:""}</div><button class="nt-x">${svg("x",12)}</button></div>`);
+ const n=el(`<div class="ntoast ${e.lvl}">${nico(e)}<div class="nt-m"><div class="nt-t">${esc(e.title)}${e.n>1?` <span class="nmul">×${e.n}</span>`:""}${remind?` <span class="nmul">· напоминание</span>`:""}</div>${e.msg?`<div class="nt-s">${esc(e.msg)}</div>`:""}</div><button class="nt-x">${svg("x",12)}</button></div>`);
  c.appendChild(n);requestAnimationFrame(()=>n.classList.add("show"));
  const close=()=>{n.classList.remove("show");setTimeout(()=>n.remove(),260);};
  n.querySelector(".nt-x").onclick=ev=>{ev.stopPropagation();close();};
  n.onclick=()=>{close();winNotif();};
  setTimeout(close,e.lvl==="crit"?15000:7000);
  try{if("Notification"in window&&Notification.permission==="granted"&&document.hidden)new Notification(e.title,{body:e.msg||"",icon:"/icon.svg"});}catch(x){}}
-function evRow(e){return `<div class="mbp-row" data-eid="${e.id}"><span class="ndot ${e.lvl}"></span><div class="mbp-m"><div class="mbp-t">${esc(e.title)}${e.n>1?` <span class="nmul">×${e.n}</span>`:""}</div>${e.msg?`<div class="mbp-s">${esc(e.msg)}</div>`:""}</div><span class="mbp-w">${ruWhen(e.t2||e.t)}</span></div>`;}
+function evRow(e){return `<div class="mbp-row" data-eid="${e.id}">${nico(e)}<div class="mbp-m"><div class="mbp-t">${esc(e.title)}${e.n>1?` <span class="nmul">×${e.n}</span>`:""}</div>${e.msg?`<div class="mbp-s">${esc(e.msg)}</div>`:""}</div><span class="mbp-w">${ruWhen(e.t2||e.t)}</span></div>`;}
 function bellPop(){const b=document.getElementById("bellBtn");
  mbPop(b,p=>{const items=EVQ.cache.slice(-12).reverse();
-  p.innerHTML=`<div class="mbp-h">Уведомления${EVQ.unseen?`<span class="mbp-cnt">${EVQ.unseen} новых</span>`:""}</div>`
-   +(items.length?items.map(evRow).join(""):`<div class="mbp-empty">Пока пусто — здесь появятся события и действия системы</div>`)
-   +`<div class="mbp-f"><button class="btn sm" id="mbAll">${svg("list",13)} Показать все</button><span class="grow"></span><button class="btn sm" id="mbCfg" title="Настройки уведомлений">${svg("cog",13)}</button></div>`;
+  p.innerHTML=`<div class="mbp-h"><span>Уведомления</span>${EVQ.unseen?`<span class="mbp-cnt">${EVQ.unseen} новых</span>`:""}<span class="grow"></span><button class="mbp-hb" id="mbAll" title="Показать все">${svg("list",15)}</button><button class="mbp-hb" id="mbCfg" title="Настройки уведомлений">${svg("cog",15)}</button></div>`
+   +(items.length?items.map(evRow).join(""):`<div class="mbp-empty">Пока пусто — здесь появятся события и действия системы</div>`);
   p.querySelectorAll(".mbp-row").forEach(rw=>rw.onclick=()=>{closeMenu();winNotif();});
   p.querySelector("#mbAll").onclick=()=>{closeMenu();winNotif();};
   p.querySelector("#mbCfg").onclick=()=>{closeMenu();winSettings("notify");};});
@@ -3946,36 +4029,49 @@ function bellPop(){const b=document.getElementById("bellBtn");
 function winNotif(){openWin("__notif","Уведомления",async body=>{
  const LVLS=[["","Все"],["crit","Критичные"],["warn","Предупреждения"],["ok","Успешные"],["info","Инфо"]];
  body.innerHTML=`<div class="nt-bar"><div class="seg" id="ntLvl">${LVLS.map(([k,t],i)=>`<button data-l="${k}" class="${i?"":"on"}">${t}</button>`).join("")}</div>
-   <select id="ntKind"><option value="">Все разделы</option>${Object.entries(NKIND).map(([k,t])=>`<option value="${k}">${t}</option>`).join("")}</select>
+   <button class="btn sm" id="ntKindBtn">${svg("layers",13)} <span id="ntKindLbl">Все разделы</span> <span style="opacity:.6">▾</span></button>
    <input id="ntQ" placeholder="Поиск…"><span class="grow"></span>
-   <button class="btn sm" id="ntClr" title="Стереть весь журнал">${svg("trash",13)} Очистить</button></div>
+   <button class="mbp-hb" id="ntClr" title="Стереть весь журнал">${svg("trash",15)}</button></div>
    <div id="ntList" style="min-height:120px"><div style="color:var(--mut);font-size:12px">загрузка…</div></div>`;
  let lvl="",kind="",q="",items=[];
  const list=body.querySelector("#ntList");
  const paint=()=>{const f=items.filter(e=>(!lvl||e.lvl===lvl)&&(!kind||e.kind===kind)&&(!q||(e.title+" "+(e.msg||"")).toLowerCase().includes(q)));
-  list.innerHTML=f.length?f.map(e=>`<div class="nt-row"><span class="nt-w">${ruWhen(e.t2||e.t)}</span><span class="ndot ${e.lvl}" style="margin-top:6px"></span><div class="nt-mm"><div class="nt-tt">${esc(e.title)}${e.n>1?` <span class="nmul">×${e.n}</span>`:""}</div>${e.msg?`<div class="nt-ms">${esc(e.msg)}</div>`:""}</div><span class="nt-k">${NKIND[e.kind]||e.kind||""}</span></div>`).join("")
+  list.innerHTML=f.length?f.map(e=>`<div class="nt-row"><span class="nt-w">${ruWhen(e.t2||e.t)}</span><span title="${att(NKIND[e.kind]||e.kind||"")}">${nico(e)}</span><div class="nt-mm"><div class="nt-tt">${esc(e.title)}${e.n>1?` <span class="nmul">×${e.n}</span>`:""}</div>${e.msg?`<div class="nt-ms">${esc(e.msg)}</div>`:""}</div></div>`).join("")
    :`<div class="dempty">${svg("bell",16)} ${items.length?"Ничего не найдено по фильтру":"Журнал пуст — события системы и ваши действия будут собираться здесь"}</div>`;};
  const loadEv=async()=>{const r=await api("/api/events?limit=1000");items=((r&&r.events)||[]).slice().reverse();paint();markSeen();};
  body.querySelectorAll("#ntLvl button").forEach(bt=>bt.onclick=()=>{body.querySelectorAll("#ntLvl button").forEach(x=>x.classList.toggle("on",x===bt));lvl=bt.dataset.l;paint();});
- body.querySelector("#ntKind").onchange=e=>{kind=e.target.value;paint();};
+ const kb=body.querySelector("#ntKindBtn");
+ kb.onclick=()=>{const r=kb.getBoundingClientRect();
+  const setKind=(k,t,ic)=>{kind=k;body.querySelector("#ntKindLbl").textContent=t;kb.firstElementChild.outerHTML=svg(ic,13);paint();};
+  showMenu(Math.round(r.left),Math.round(r.bottom+6),[
+   {label:"Все разделы",ic:svg("layers",16),act:()=>setKind("","Все разделы","layers")},
+   ...Object.entries(NKIND).map(([k,t])=>({label:t,ic:svg(NKICON[k]||"info",16),act:()=>setKind(k,t,NKICON[k]||"info")}))]);};
  body.querySelector("#ntQ").oninput=e=>{q=e.target.value.trim().toLowerCase();paint();};
  body.querySelector("#ntClr").onclick=()=>confirmDlg("Очистить журнал уведомлений?","Все записи журнала будут стёрты безвозвратно.",async()=>{await api("/api/events/clear",{method:"POST",body:"{}"});EVQ.cache=[];loadEv();},true);
  loadEv();
-},{w:680,h:560});}
+},{w:700,h:560});}
 
 /* ---- центр операций (очереди, прогресс, отмена) ---- */
-const OPS={list:[],seq:0,paintT:0};
+const OPS={list:[],seq:0,paintT:0,autoClosed:false,autoOpened:false};
 function opAdd(title,opts){opts=opts||{};
  const o={id:++OPS.seq,title,state:"run",p:null,label:"",cancel:opts.cancel||null,cancelled:false,t:Date.now()};
  OPS.list.push(o);if(OPS.list.length>40)OPS.list=OPS.list.slice(-40);
- paintOps(true);return o;}
+ paintOps(true);
+ // сам открывается при старте операции; если пользователь закрыл во время работы —
+ // не навязываемся до конца текущей пачки
+ if(!document.querySelector(".mbpop[data-ops]")&&!OPS.autoClosed){OPS.autoOpened=true;opsPop();}
+ return o;}
 function opSet(o,p,label){o.p=p;if(label!=null)o.label=label;paintOps();}
 function opEnd(o,ok,label){if(o.state!=="run")return;o.state=o.cancelled?"cancel":ok?"done":"err";
- if(label!=null&&label!=="")o.label=label;if(o.state==="done")o.p=1;o.cancel=null;paintOps(true);}
+ if(label!=null&&label!=="")o.label=label;if(o.state==="done")o.p=1;o.cancel=null;paintOps(true);
+ if(!OPS.list.some(x=>x.state==="run")){OPS.autoClosed=false;
+  // авто-открытый поповер сам прячется чуть после завершения всего
+  if(OPS.autoOpened)setTimeout(()=>{const q=document.querySelector(".mbpop[data-ops]");
+   if(q&&OPS.autoOpened&&!OPS.list.some(x=>x.state==="run")){q.remove();OPS.autoOpened=false;}},1800);}}
 function opCancel(o){if(o.state!=="run")return;o.cancelled=true;
  try{if(o.cancel)o.cancel(o);}catch(e){}paintOps(true);}
 function paintOps(force){
- const now=Date.now();if(!force&&now-OPS.paintT<250)return;OPS.paintT=now;
+ const now=Date.now();if(!force&&now-OPS.paintT<200)return;OPS.paintT=now;
  const b=document.getElementById("opsBtn");if(!b)return;
  const run=OPS.list.filter(o=>o.state==="run").length;
  b.style.display=OPS.list.length?"":"none";
@@ -3983,19 +4079,28 @@ function paintOps(force){
  b.title=run?`Операции: ${run} выполняется`:"Операции";
  const p=document.querySelector(".mbpop[data-ops]");if(p)renderOpsList(p);}
 function renderOpsList(p){
+ // инкрементально: если состав/состояния не менялись — обновляем только прогресс и подписи
+ const sig=OPS.list.map(o=>o.id+":"+o.state).join(",");
+ if(p._sig===sig){
+  OPS.list.forEach(o=>{const row=p.querySelector(`[data-op="${o.id}"]`);if(!row)return;
+   const bf=row.querySelector(".op-bf");if(bf&&o.p!=null)bf.style.width=Math.round(Math.min(o.p,1)*100)+"%";
+   const s2=row.querySelector(".op-s2");if(s2)s2.textContent=o.label;
+   const t2=row.querySelector(".op-t2");if(t2&&t2.textContent!==o.title)t2.textContent=o.title;});
+  return;}
+ p._sig=sig;
  const items=OPS.list.slice().reverse();
- p.innerHTML=`<div class="mbp-h">Операции${OPS.list.some(o=>o.state==="run")?`<span class="mbp-cnt">${OPS.list.filter(o=>o.state==="run").length} активных</span>`:""}</div>`
+ p.innerHTML=`<div class="mbp-h"><span>Операции</span>${OPS.list.some(o=>o.state==="run")?`<span class="mbp-cnt">${OPS.list.filter(o=>o.state==="run").length} активных</span>`:""}<span class="grow"></span><button class="mbp-hb" id="opsClr" title="Убрать завершённые">${svg("eraser",15)}</button></div>`
   +(items.length?items.map(o=>{
     const st=o.state==="run"?"":o.state==="done"?`<span class="op-st done" style="font-weight:800">✓</span>`:o.state==="cancel"?`<span class="op-st">⊘</span>`:`<span class="op-st err" style="font-weight:800">!</span>`;
     const bar=o.state==="run"?`<div class="op-bar"><div class="op-bf" style="width:${o.p==null?40:Math.round(Math.min(o.p,1)*100)}%"></div></div>`:"";
-    return `<div class="op-row${o.state==="run"&&o.p==null?" ind":""}" data-op="${o.id}"><div class="op-m"><div class="op-t2">${esc(o.title)}</div>${o.label?`<div class="op-s2">${esc(o.label)}</div>`:""}${bar}</div>${st}${o.state==="run"?`<button class="op-x" title="Отменить">${svg("x",14)}</button>`:""}</div>`;
-  }).join(""):`<div class="mbp-empty">Нет операций</div>`)
-  +`<div class="mbp-f"><span class="mbp-s" style="font-size:11px">Загрузки, копирование и другие длинные задачи</span><span class="grow"></span><button class="btn sm" id="opsClr">Убрать завершённые</button></div>`;
+    return `<div class="op-row${o.state==="run"&&o.p==null?" ind":""}" data-op="${o.id}"><div class="op-m"><div class="op-t2">${esc(o.title)}</div><div class="op-s2">${esc(o.label||"")}</div>${bar}</div>${st}${o.state==="run"?`<button class="op-x" title="Отменить">${svg("x",14)}</button>`:""}</div>`;
+  }).join(""):`<div class="mbp-empty">Нет операций</div>`);
  p.querySelectorAll(".op-x").forEach(x=>x.onclick=ev=>{ev.stopPropagation();
   const o=OPS.list.find(y=>y.id===+x.closest(".op-row").dataset.op);if(o)opCancel(o);});
- const clr=p.querySelector("#opsClr");if(clr)clr.onclick=()=>{OPS.list=OPS.list.filter(o=>o.state==="run");paintOps(true);const q=document.querySelector(".mbpop[data-ops]");if(q&&!OPS.list.length){closeMenu();}else if(q)renderOpsList(q);};}
-function opsPop(){const b=document.getElementById("opsBtn");
- mbPop(b,p=>{p.setAttribute("data-ops","1");renderOpsList(p);});}
+ const clr=p.querySelector("#opsClr");if(clr)clr.onclick=()=>{OPS.list=OPS.list.filter(o=>o.state==="run");paintOps(true);const q=document.querySelector(".mbpop[data-ops]");if(q&&!OPS.list.length)closeMenu();else if(q){q._sig=null;renderOpsList(q);}};}
+function opsPop(){const b=document.getElementById("opsBtn");if(!b||b.style.display==="none")return;
+ mbPop(b,p=>{p.setAttribute("data-ops","1");renderOpsList(p);},
+  ()=>{OPS.autoOpened=false;if(OPS.list.some(x=>x.state==="run"))OPS.autoClosed=true;});}
 
 /* context menu */
 document.querySelector(".desk").addEventListener("contextmenu",e=>{e.preventDefault();
@@ -4062,7 +4167,7 @@ function maybeOnboard(){let done=false;try{done=localStorage.getItem("nas_onboar
  const xb=document.getElementById("expoBtn");if(xb){xb.innerHTML=svg("grid",17);xb.onclick=toggleExpo;}
  const hb=document.getElementById("healthBtn");if(hb){paintHealthBtn();hb.onclick=healthPop;}
  const blb=document.getElementById("bellBtn");if(blb){paintBell();blb.onclick=bellPop;}
- const opb=document.getElementById("opsBtn");if(opb)opb.onclick=opsPop;
+ const opb=document.getElementById("opsBtn");if(opb)opb.onclick=()=>{OPS.autoOpened=false;opsPop();};
  document.addEventListener("keydown",e=>{if(e.key==="F9"){e.preventDefault();toggleExpo();}else if(e.key==="Escape"&&EXPO){exitExpo();}});
  const dsk=document.querySelector(".desk");if(dsk)dsk.addEventListener("click",e=>{if((e.target===dsk||e.target.id==="apps")&&Object.keys(OPEN).some(id=>OPEN[id].style.display!=="none"))toggleExpo();});
  if(!SET.wpVer&&SET.wpType==="url"&&SET.wpUrl)setWallUrl();  // первый запуск: подтянуть обои по умолчанию

@@ -420,12 +420,13 @@ def disk_speedtest(dev):
     read_mbps = _dd_mbps(r.get("log", ""))
     if read_mbps is None:
         return {"ok": False, "log": "не удалось измерить: " + (r.get("log", "")[-120:])}
-    # запись: только на несистемную смонтированную rw-точку с запасом места
+    # запись: на смонтированную rw-точку с запасом места; для системного диска
+    # (нет «своих» точек кроме / и /boot) пишем во временный каталог /var/tmp
     write_mbps = None
     wnote = "запись: нет смонтированного раздела для теста"
-    for mp in _disk_mountpoints(dev):
-        if mp in _SYS_MPS:
-            continue
+    mps = _disk_mountpoints(dev)
+    cands = [mp for mp in mps if mp not in _SYS_MPS] or (["/var/tmp"] if "/" in mps else [])
+    for mp in cands:
         try:
             st = os.statvfs(mp)
             if st.f_bavail * st.f_frsize < (1 << 30):
@@ -2140,6 +2141,30 @@ def docker_volumes():
         except ValueError:
             pass
     return {"ok": True, "volumes": out}
+
+def docker_overview():
+    """Сводка для дашборда Docker: контейнеры, место (system df), версия."""
+    if not shutil.which("docker"):
+        return {"ok": False, "log": "docker не установлен"}
+    out = {"ok": True}
+    r = _run(["docker", "ps", "-a", "--format", "{{.State}}"], timeout=15)
+    states = [l.strip() for l in (r.get("log") or "").splitlines() if l.strip()]
+    out["containers"] = {"total": len(states), "running": states.count("running"),
+                         "exited": sum(1 for s in states if s.startswith("exited")),
+                         "restarting": states.count("restarting"),
+                         "paused": states.count("paused")}
+    r = _run(["docker", "system", "df", "--format",
+              "{{.Type}}\t{{.TotalCount}}\t{{.Active}}\t{{.Size}}\t{{.Reclaimable}}"], timeout=25)
+    df = {}
+    ru = {"Images": "images", "Containers": "containers", "Local Volumes": "volumes", "Build Cache": "cache"}
+    for l in (r.get("log") or "").splitlines():
+        f = l.split("\t")
+        if len(f) >= 5 and f[0] in ru:
+            df[ru[f[0]]] = {"count": f[1], "active": f[2], "size": f[3], "reclaim": f[4]}
+    out["df"] = df
+    r = _run(["docker", "--version"], timeout=10)
+    out["version"] = (r.get("log") or "").strip().replace("Docker version ", "").split(",")[0]
+    return out
 
 def docker_prune(what):
     cmds = {"images": ["docker", "image", "prune", "-f"],
@@ -4451,6 +4476,8 @@ class H(BaseHTTPRequestHandler):
                 self._json(stack_logs((q.get("name") or [""])[0], (q.get("tail") or ["200"])[0]))
             elif p == "/api/stack/validate":
                 self._json(stack_validate((q.get("name") or [""])[0]))
+            elif p == "/api/docker/overview":
+                self._json(docker_overview())
             elif p == "/api/docker/stats":
                 self._json(docker_stats())
             elif p == "/api/docker/images":
