@@ -13,7 +13,7 @@ nas-web.py — веб-бэкенд мастера настройки NAS и ра
 сервер нужно запускать от root (launcher nas-setup.sh это делает).
 """
 import json, os, re, subprocess, time, shutil, socket, threading, pwd, mimetypes, glob
-import pty, select, struct, hashlib, base64, signal, fcntl, termios
+import pty, select, struct, hashlib, base64, signal, fcntl, termios, secrets, hmac
 import urllib.request, urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs, quote, urlencode
@@ -1494,6 +1494,8 @@ def fs_search(path, query, limit=400):
 
 def fs_chmod(path, mode, recursive=False):
     path = os.path.realpath(path)
+    if path == "/" or path.count("/") < 2:
+        return {"ok": False, "log": "слишком опасный путь: " + path}
     try:
         m = int(str(mode).strip(), 8)
     except ValueError:
@@ -1809,13 +1811,94 @@ def save_creds(data):
         pass
 
 # --------------------------------------------------------------------------- #
+#  Аутентификация веб-UI: пароль (PBKDF2 на диске) + сессии в памяти.
+#  Файл создаётся лениво самим сервером — установщику ничего делать не нужно.
+# --------------------------------------------------------------------------- #
+AUTH_FILE   = "/etc/nas-os/webauth.json"
+SESSION_TTL = 30 * 86400
+_sessions   = {}                        # token -> unix-время истечения
+_sess_lock  = threading.Lock()
+_login_fail = {"n": 0, "t": 0.0}        # антибрутфорс: пауза после серии неудач
+
+def _pw_hash(password, salt):
+    return hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 200_000).hex()
+
+def auth_configured():
+    return os.path.isfile(AUTH_FILE)
+
+def auth_set_password(password):
+    if len(password or "") < 4:
+        return {"ok": False, "log": "пароль слишком короткий (минимум 4 символа)"}
+    salt = secrets.token_bytes(16)
+    os.makedirs(os.path.dirname(AUTH_FILE), exist_ok=True)
+    tmp = AUTH_FILE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump({"kdf": "pbkdf2-sha256-200k", "salt": salt.hex(),
+                   "hash": _pw_hash(password, salt)}, f)
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, AUTH_FILE)
+    return {"ok": True}
+
+def auth_check_password(password):
+    try:
+        with open(AUTH_FILE) as f:
+            d = json.load(f)
+        return hmac.compare_digest(_pw_hash(password or "", bytes.fromhex(d["salt"])),
+                                   d["hash"])
+    except (OSError, ValueError, KeyError):
+        return False
+
+def session_new():
+    tok = secrets.token_urlsafe(32)
+    now = time.time()
+    with _sess_lock:
+        for k in [k for k, e in _sessions.items() if e < now]:
+            _sessions.pop(k, None)
+        _sessions[tok] = now + SESSION_TTL
+    return tok
+
+def session_valid(tok):
+    if not tok:
+        return False
+    now = time.time()
+    with _sess_lock:
+        exp = _sessions.get(tok)
+        if not exp or exp < now:
+            _sessions.pop(tok, None)
+            return False
+        _sessions[tok] = now + SESSION_TTL      # скользящее продление
+        return True
+
+def session_drop(tok):
+    with _sess_lock:
+        _sessions.pop(tok, None)
+
+# --------------------------------------------------------------------------- #
 #  Мост к движку nas-wizard.sh api
 # --------------------------------------------------------------------------- #
-def engine(action, params=None, dry=False):
+ENGINE_ACTION_RE = re.compile(r"^[a-z0-9-]{1,40}$")
+
+def _engine_env(params, dry):
+    """Собрать NASW_* окружение, отфильтровав опасный ввод: имена параметров —
+    только [A-Za-z0-9_], значения — без управляющих символов и разумной длины."""
     env = dict(os.environ)
     env["NASW_DRYRUN"] = "1" if dry else "0"
     for k, v in (params or {}).items():
-        env["NASW_" + k.upper()] = str(v)
+        if not re.match(r"^[A-Za-z0-9_]{1,32}$", str(k)):
+            raise ValueError("недопустимое имя параметра: %r" % k)
+        v = str(v)
+        if len(v) > 4096 or re.search(r"[\x00-\x1f]", v):
+            raise ValueError("недопустимое значение параметра %s" % k)
+        env["NASW_" + k.upper()] = v
+    return env
+
+def engine(action, params=None, dry=False):
+    if not ENGINE_ACTION_RE.match(action or ""):
+        return {"ok": False, "code": -1, "log": "недопустимое действие: %r" % action}
+    try:
+        env = _engine_env(params, dry)
+    except ValueError as e:
+        return {"ok": False, "code": -1, "log": str(e)}
     try:
         p = subprocess.run(["bash", ENGINE, "api", action], env=env,
                            capture_output=True, text=True, timeout=1800)
@@ -2509,21 +2592,79 @@ class H(BaseHTTPRequestHandler):
     def log_message(self, *a):  # тихо
         pass
 
-    def _json(self, obj, code=200):
+    def _json(self, obj, code=200, cookie=None):
         body = json.dumps(obj, ensure_ascii=False).encode()
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        if cookie:
+            self.send_header("Set-Cookie", cookie)
         self.end_headers()
         self.wfile.write(body)
 
+    # ---- аутентификация ----
+    def _cookie_token(self):
+        for part in (self.headers.get("Cookie") or "").split(";"):
+            k, _, v = part.strip().partition("=")
+            if k == "nasauth":
+                return v
+        return ""
+
+    def _authed(self):
+        return session_valid(self._cookie_token())
+
+    def _origin_ok(self):
+        """Защита от CSRF и cross-site WebSocket: Origin (если прислан) должен
+        совпадать с Host. Запросы без Origin (curl) пропускаем — сессия всё равно нужна."""
+        origin = self.headers.get("Origin")
+        if not origin:
+            return True
+        return urlparse(origin).netloc == (self.headers.get("Host") or "").strip()
+
+    def _session_cookie(self, tok=None):
+        if tok is None:
+            return "nasauth=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax"
+        return "nasauth=%s; Max-Age=%d; Path=/; HttpOnly; SameSite=Lax" % (tok, SESSION_TTL)
+
+    def _auth_endpoints(self, p):
+        """Открытые ручки /api/auth/*. Возвращает True, если запрос обработан."""
+        if p == "/api/auth/state":
+            self._json({"configured": auth_configured(), "authed": self._authed()})
+        elif p == "/api/auth/login":
+            b = self._body()
+            if _login_fail["n"] >= 5 and time.time() - _login_fail["t"] < 3.0:
+                self._json({"ok": False, "log": "слишком много попыток, подождите"}, 429)
+            elif auth_configured() and auth_check_password(b.get("password", "")):
+                _login_fail["n"] = 0
+                self._json({"ok": True}, cookie=self._session_cookie(session_new()))
+            else:
+                _login_fail["n"] += 1
+                _login_fail["t"] = time.time()
+                time.sleep(0.5)     # притормозить перебор
+                self._json({"ok": False, "log": "неверный пароль"}, 403)
+        elif p == "/api/auth/setup":
+            # первичная установка пароля; со активной сессией — смена пароля
+            if auth_configured() and not self._authed():
+                self._json({"error": "auth"}, 401)
+            else:
+                r = auth_set_password(self._body().get("password", ""))
+                if r.get("ok"):
+                    self._json(r, cookie=self._session_cookie(session_new()))
+                else:
+                    self._json(r, 400)
+        elif p == "/api/auth/logout":
+            session_drop(self._cookie_token())
+            self._json({"ok": True}, cookie=self._session_cookie(None))
+        else:
+            return False
+        return True
+
     def _stream_engine(self, action, params, dry):
         """Запустить движок и стримить stdout построчно (для живого лога в мастере)."""
-        env = dict(os.environ)
-        env["NASW_DRYRUN"] = "1" if dry else "0"
-        for k, v in (params or {}).items():
-            env["NASW_" + k.upper()] = str(v)
+        if not ENGINE_ACTION_RE.match(action or ""):
+            self._json({"error": "недопустимое действие"}, 400); return
+        env = _engine_env(params, dry)   # ValueError уйдёт наружу -> 400
         self.send_response(200)
         self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
@@ -2831,11 +2972,17 @@ class H(BaseHTTPRequestHandler):
         u = urlparse(self.path); q = parse_qs(u.query)
         p = u.path
         if p == "/ws/term" and self.headers.get("Upgrade", "").lower() == "websocket":
+            if not (self._origin_ok() and self._authed()):
+                self.send_error(403); return
             try:
                 self._ws_terminal()
             except (OSError, BrokenPipeError):
                 pass
             return
+        if p == "/api/auth/state":
+            self._auth_endpoints(p); return
+        if p.startswith("/api/") and not self._authed():
+            self._json({"error": "auth", "configured": auth_configured()}, 401); return
         try:
             if p == "/api/stats":
                 self._json(stats())
@@ -2945,6 +3092,14 @@ class H(BaseHTTPRequestHandler):
     # ---- POST ----
     def do_POST(self):
         p = urlparse(self.path).path
+        if not self._origin_ok():
+            self._json({"error": "origin mismatch"}, 403); return
+        if p.startswith("/api/auth/"):
+            if not self._auth_endpoints(p):
+                self._json({"error": "unknown endpoint"}, 404)
+            return
+        if not self._authed():
+            self._json({"error": "auth", "configured": auth_configured()}, 401); return
         try:
             if p == "/api/creds":
                 b = self._body(); save_creds(b.get("creds", []))
@@ -3019,18 +3174,26 @@ class H(BaseHTTPRequestHandler):
             elif p == "/api/disk/smart-test":
                 b = self._body(); self._json(smart_test(b.get("dev", ""), b.get("kind", "short")))
             elif p == "/api/disk/label":
-                b = self._body(); dev = b.get("dev", "")
+                b = self._body(); dev = b.get("dev", ""); label = b.get("label", "")
                 if not re.match(r"^/dev/[\w-]+$", dev or ""):
                     self._json({"ok": False, "log": "недопустимое устройство"}, 400)
+                elif not re.match(r"^[A-Za-z0-9._-]{1,16}$", label or ""):
+                    self._json({"ok": False, "log": "недопустимая метка (латиница/цифры/._-, до 16)"}, 400)
                 else:
-                    self._json(engine("label-disk", {"dev": dev, "label": b.get("label", "")}))
+                    self._json(engine("label-disk", {"dev": dev, "label": label}))
             elif p == "/api/disk/format":
-                b = self._body(); dev = b.get("dev", "")
+                b = self._body(); dev = b.get("dev", ""); label = b.get("label", "")
                 if not re.match(r"^/dev/[\w-]+$", dev or ""):
                     self._json({"ok": False, "log": "недопустимое устройство"}, 400)
+                elif b.get("role", "data") not in ("data", "parity", "usb"):
+                    self._json({"ok": False, "log": "недопустимая роль"}, 400)
+                elif b.get("fs", "ext4") not in ("ext4", "xfs", "btrfs", "exfat", "ntfs", "vfat"):
+                    self._json({"ok": False, "log": "недопустимая ФС"}, 400)
+                elif label and not re.match(r"^[A-Za-z0-9._-]{1,16}$", label):
+                    self._json({"ok": False, "log": "недопустимая метка (латиница/цифры/._-, до 16)"}, 400)
                 else:
                     self._json(engine("format-disk", {"dev": dev, "role": b.get("role", "data"),
-                        "fs": b.get("fs", "ext4"), "label": b.get("label", "")}, dry=b.get("dry", False)))
+                        "fs": b.get("fs", "ext4"), "label": label}, dry=b.get("dry", False)))
             elif p == "/api/disk/mount-dev":
                 b = self._body(); dev = b.get("dev", "")
                 if not re.match(r"^/dev/[\w-]+$", dev or ""):
@@ -3039,8 +3202,14 @@ class H(BaseHTTPRequestHandler):
                     self._json(engine("mount-dev", {"dev": dev}))
             elif p == "/api/automount":
                 b = self._body()
-                self._json(engine("automount", {"enable": "1" if b.get("enable", True) else "0",
-                    "user": b.get("user", TARGET_USER), "base": b.get("base", "/media/nas")}))
+                user = b.get("user", TARGET_USER); base = b.get("base", "/media/nas")
+                if not re.match(r"^[a-z_][a-z0-9_-]{0,31}$", user or ""):
+                    self._json({"ok": False, "log": "недопустимое имя пользователя"}, 400)
+                elif not re.match(r"^/[A-Za-z0-9._/-]{1,120}$", base or "") or ".." in base:
+                    self._json({"ok": False, "log": "недопустимый базовый каталог"}, 400)
+                else:
+                    self._json(engine("automount", {"enable": "1" if b.get("enable", True) else "0",
+                        "user": user, "base": base}))
             elif p == "/api/homepage/config":
                 self._json(write_homepage_config(self._body().get("host")))
             elif p == "/api/fs/write":
