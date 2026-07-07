@@ -17,7 +17,7 @@
     --glass:rgba(255,255,255,.74); --glass-2:rgba(255,255,255,.92);
     --ink:#1A2431; --text:#1A2431; --dim:#53637B; --mut:#8493AA;
     --line:rgba(24,42,70,.045); --line-2:rgba(24,42,70,.08); --card:rgba(24,42,70,.05); --card-2:rgba(24,42,70,.09);
-    --accent:#12B0A6; --accent-2:#4C8DF6; --accent-ink:#FFFFFF; --accent-soft:rgba(18,176,166,.12); --accent-line:rgba(18,176,166,.5); --sel:rgba(255,255,255,.92);
+    --accent:#12B0A6; --accent-2:#4C8DF6; --accent-ink:#FFFFFF; --accent-soft:rgba(18,176,166,.12); --accent-line:rgba(18,176,166,.5); --sel:rgba(0,0,0,.06);
     --good:#1FA971; --good-soft:rgba(31,169,113,.14); --warn:#CF881B; --warn-soft:rgba(207,136,27,.15);
     --danger:#DE4E48; --danger-soft:rgba(222,78,72,.13);
     --code-bg:#0F1620; --code-fg:#C9D6EA;
@@ -55,7 +55,7 @@
     --glass:rgba(255,255,255,.74); --glass-2:rgba(255,255,255,.92);
     --ink:#1A2431; --text:#1A2431; --dim:#53637B; --mut:#8493AA;
     --line:rgba(24,42,70,.045); --line-2:rgba(24,42,70,.08); --card:rgba(24,42,70,.05); --card-2:rgba(24,42,70,.09);
-    --accent:#12B0A6; --accent-2:#4C8DF6; --accent-ink:#FFFFFF; --accent-soft:rgba(18,176,166,.12); --accent-line:rgba(18,176,166,.5); --sel:rgba(255,255,255,.92);
+    --accent:#12B0A6; --accent-2:#4C8DF6; --accent-ink:#FFFFFF; --accent-soft:rgba(18,176,166,.12); --accent-line:rgba(18,176,166,.5); --sel:rgba(0,0,0,.06);
     --good:#1FA971; --good-soft:rgba(31,169,113,.14); --warn:#CF881B; --warn-soft:rgba(207,136,27,.15);
     --danger:#DE4E48; --danger-soft:rgba(222,78,72,.13);
     --code-bg:#0F1620; --code-fg:#C9D6EA;
@@ -161,8 +161,8 @@
   /* menubar */
   .menubar{position:fixed;top:0;left:0;right:0;height:40px;z-index:300;display:flex;align-items:center;gap:12px;
     padding:0 16px;background:var(--mb-bg,var(--glass));
-    --text:var(--mb-fg,#1A2431);--ink:var(--mb-fg,#1A2431);--dim:var(--mb-dim,rgba(0,0,0,.66));--mut:var(--mb-mut,rgba(0,0,0,.47));color:var(--text);
-    --accent:var(--mb-accent,#12B0A6);--accent-2:var(--mb-accent2,#4C8DF6);--accent-soft:var(--mb-accent-soft,rgba(18,176,166,.16));--accent-line:var(--mb-accent-line,rgba(18,176,166,.5));--accent-ink:var(--mb-accent-ink,#fff);
+    --text:var(--mb-fg,#1A2431);--ink:var(--mb-fg,#1A2431);--dim:var(--mb-dim,rgba(0,0,0,.72));--mut:var(--mb-mut,rgba(0,0,0,.56));color:var(--text);
+    --accent:var(--mb-accent,#12B0A6);--accent-2:var(--mb-accent2,#4C8DF6);--accent-soft:var(--mb-accent-soft,rgba(18,176,166,.16));--accent-line:var(--mb-accent-line,rgba(18,176,166,.5));--accent-ink:var(--mb-accent-ink,#fff);--sel:var(--mb-sel,rgba(0,0,0,.07));
     backdrop-filter:var(--mb-bf,none);-webkit-backdrop-filter:var(--mb-bf,none)}
   .menubar .mb-brand svg{width:calc(22px*var(--mb-icon,1));height:calc(22px*var(--mb-icon,1))}
   .menubar .mb-theme svg{width:calc(17px*var(--mb-icon,1));height:calc(17px*var(--mb-icon,1))}
@@ -271,7 +271,7 @@
   /* widgets */
   .wdg{background:var(--wdg-bg,var(--glass));border-radius:var(--r-lg);padding:18px;
     --text:var(--wdg-fg,#1A2431);--ink:var(--wdg-fg,#1A2431);--dim:var(--wdg-dim,rgba(0,0,0,.66));--mut:var(--wdg-mut,rgba(0,0,0,.47));color:var(--text);
-    --accent:var(--wdg-accent,#12B0A6);--accent-2:var(--wdg-accent2,#4C8DF6);--accent-soft:var(--wdg-accent-soft,rgba(18,176,166,.16));--accent-line:var(--wdg-accent-line,rgba(18,176,166,.5));--accent-ink:var(--wdg-accent-ink,#fff);--track:var(--wdg-track,rgba(0,0,0,.14));
+    --accent:var(--wdg-accent,#12B0A6);--accent-2:var(--wdg-accent2,#4C8DF6);--accent-soft:var(--wdg-accent-soft,rgba(18,176,166,.16));--accent-line:var(--wdg-accent-line,rgba(18,176,166,.5));--accent-ink:var(--wdg-accent-ink,#fff);--track:var(--wdg-track,rgba(0,0,0,.14));--sel:var(--wdg-sel,rgba(0,0,0,.07));
     backdrop-filter:var(--wdg-bf,none);-webkit-backdrop-filter:var(--wdg-bf,none)}
   .wdg h4{margin:0 0 15px;font-size:10.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--mut);font-family:var(--mono);
     display:flex;align-items:center;gap:8px}
@@ -300,8 +300,8 @@
   /* dock */
   .dock{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:90;display:flex;gap:3px;padding:8px 12px;max-width:calc(100% - 28px);overflow-x:auto;
     background:var(--dock-bg,var(--glass));border-radius:22px;box-shadow:var(--sh);
-    --text:var(--dock-fg,#1A2431);--ink:var(--dock-fg,#1A2431);--dim:var(--dock-dim,rgba(0,0,0,.66));--mut:var(--dock-mut,rgba(0,0,0,.47));color:var(--text);
-    --accent:var(--dock-accent,#12B0A6);--accent-2:var(--dock-accent2,#4C8DF6);--accent-soft:var(--dock-accent-soft,rgba(18,176,166,.16));--accent-line:var(--dock-accent-line,rgba(18,176,166,.5));--accent-ink:var(--dock-accent-ink,#fff);
+    --text:var(--dock-fg,#1A2431);--ink:var(--dock-fg,#1A2431);--dim:var(--dock-dim,rgba(0,0,0,.72));--mut:var(--dock-mut,rgba(0,0,0,.56));color:var(--text);
+    --accent:var(--dock-accent,#12B0A6);--accent-2:var(--dock-accent2,#4C8DF6);--accent-soft:var(--dock-accent-soft,rgba(18,176,166,.16));--accent-line:var(--dock-accent-line,rgba(18,176,166,.5));--accent-ink:var(--dock-accent-ink,#fff);--sel:var(--dock-sel,rgba(0,0,0,.07));
     backdrop-filter:var(--dock-bf,none);-webkit-backdrop-filter:var(--dock-bf,none)}
   .dock.pos-left,.dock.pos-right{top:50%;bottom:auto;transform:translateY(-50%);flex-direction:column;max-width:none;max-height:calc(100% - 100px);overflow-x:hidden;overflow-y:auto;border-radius:20px;padding:8px 6px;gap:4px}
   .dock.pos-left button,.dock.pos-right button{padding:4px 5px}
@@ -319,8 +319,8 @@
   .dock .sep{width:1px;background:var(--line-2);margin:6px 4px;align-self:stretch;flex:none}
 
   /* windows */
-  .win,.dialog,.menu,.toast,.ob-card{--text:var(--win-fg,#1A2431);--ink:var(--win-fg,#1A2431);--dim:var(--win-dim,rgba(0,0,0,.66));--mut:var(--win-mut,rgba(0,0,0,.47));color:var(--text);
-    --accent:var(--win-accent,#12B0A6);--accent-2:var(--win-accent2,#4C8DF6);--accent-soft:var(--win-accent-soft,rgba(18,176,166,.16));--accent-line:var(--win-accent-line,rgba(18,176,166,.5));--accent-ink:var(--win-accent-ink,#fff);--track:var(--win-track,rgba(0,0,0,.12))}
+  .win,.dialog,.menu,.toast,.ob-card{--text:var(--win-fg,#1A2431);--ink:var(--win-fg,#1A2431);--dim:var(--win-dim,rgba(0,0,0,.72));--mut:var(--win-mut,rgba(0,0,0,.56));color:var(--text);
+    --accent:var(--win-accent,#12B0A6);--accent-2:var(--win-accent2,#4C8DF6);--accent-soft:var(--win-accent-soft,rgba(18,176,166,.16));--accent-line:var(--win-accent-line,rgba(18,176,166,.5));--accent-ink:var(--win-accent-ink,#fff);--track:var(--win-track,rgba(0,0,0,.12));--sel:var(--win-sel,rgba(0,0,0,.07))}
   .win{position:fixed;z-index:100;background:var(--win-bg,var(--glass-2));backdrop-filter:var(--win-bf,none);-webkit-backdrop-filter:var(--win-bf,none);
     border-radius:var(--r-win);box-shadow:var(--sh);display:flex;flex-direction:column;min-width:300px;overflow:hidden;animation:winin .2s cubic-bezier(.2,.8,.3,1)}
   .win::before{content:"";position:absolute;inset:0;pointer-events:none;border-radius:inherit;z-index:0;opacity:var(--win-noise,0);mix-blend-mode:overlay;background-size:180px 180px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
@@ -1133,19 +1133,22 @@ function applySettings(){
  root.style.setProperty("--dockw",Math.round((SET.dockLabels===false?66:98)*(SET.dockIcon??1))+"px");
  // вторичный текст: белый (тёмная) / чёрный (светлая) с прозрачностью — читаем на любом фоне; контраст регулируется
  const sec=isLight()?"0,0,0":"255,255,255",tcf=clampf(SET.textContrast??1,.6,1.6);
- root.style.setProperty("--dim",`rgba(${sec},${clampf(.66*tcf,.32,1).toFixed(2)})`);
- root.style.setProperty("--mut",`rgba(${sec},${clampf(.47*tcf,.25,1).toFixed(2)})`);
+ root.style.setProperty("--dim",`rgba(${sec},${clampf(.72*tcf,.4,1).toFixed(2)})`);
+ root.style.setProperty("--mut",`rgba(${sec},${clampf(.56*tcf,.32,1).toFixed(2)})`);
  // авто-контраст текста панели/дока/виджетов: цвет по ФАКТИЧЕСКОМУ фону
  // (прозрачность подложки × материал × яркость обоев с учётом затемнения), не по теме
  const relLum=rgb=>{const p=rgb.split(",").map(Number);return (0.2126*p[0]+0.7152*p[1]+0.0722*p[2])/255;};
  const wallL=(WALL_LUM!=null?WALL_LUM:(isLight()?.85:.12))*(1-clampf(+SET.fxDim||0,0,80)/100);
  const setPanelFg=(prefix,alpha,rgb)=>{
   const effL=alpha*relLum(rgb)+(1-alpha)*wallL,lite=effL<.5,b=lite?"255,255,255":"8,14,24";
-  root.style.setProperty("--"+prefix+"-fg",lite?"#EFF4FB":"#1A2431");
-  root.style.setProperty("--"+prefix+"-dim",`rgba(${b},${clampf((lite?.76:.66)*tcf,.35,1).toFixed(2)})`);
-  root.style.setProperty("--"+prefix+"-mut",`rgba(${b},${clampf((lite?.55:.47)*tcf,.25,1).toFixed(2)})`);
+  root.style.setProperty("--"+prefix+"-fg",lite?"#EFF4FB":"#161E28");
+  root.style.setProperty("--"+prefix+"-dim",`rgba(${b},${clampf((lite?.82:.72)*tcf,.42,1).toFixed(2)})`);
+  root.style.setProperty("--"+prefix+"-mut",`rgba(${b},${clampf((lite?.64:.56)*tcf,.34,1).toFixed(2)})`);
   // дорожки баров/колец: видимы на любом фоне, но приглушены
   root.style.setProperty("--"+prefix+"-track",`rgba(${b},${lite?.20:.13})`);
+  // фон активной «фишки» (табы/сегменты/сайдбар): лёгкая подложка от фактического фона,
+  // не глухой белый — акцентный текст поверх остаётся читаемым
+  root.style.setProperty("--"+prefix+"-sel",`rgba(${b},${lite?.16:.08})`);
   // акцент под этот же фактический фон: не теряется ни на прозрачном, ни на плотном
   const ac=accentAdj(a[0],effL),ac2=accentAdj(a[1],effL);
   root.style.setProperty("--"+prefix+"-accent",ac);
