@@ -868,7 +868,9 @@ def stats():
         "temp": temp_c(),
         "throttled": throttled(),
         "mem": mem_info(),
-        "disk_pool": disk_info(STORAGE) or disk_info("/"),
+        # пула нет — значит нет и его статистики (раньше молча подставлялась
+        # системная карта, и «заполнение пула» показывало ерунду)
+        "disk_pool": disk_info(STORAGE) if os.path.ismount(STORAGE) else None,
         "disk_root": disk_info("/"),
         "net": net_rate(iface),
         "iface": iface,

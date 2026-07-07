@@ -491,7 +491,7 @@
   .hstat.bad{color:var(--danger);background:var(--danger-soft)}
   .hstat.na{color:var(--mut);background:var(--line)}
   /* пул-хиро */
-  .pool{background:linear-gradient(152deg,var(--accent-soft),transparent 62%),var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);padding:19px;box-shadow:var(--sh-sm)}
+  .pool{background:linear-gradient(152deg,var(--accent-soft),transparent 62%),var(--card);border:1px solid var(--line);border-radius:var(--r-lg);padding:19px;box-shadow:var(--sh-sm)}
   .pool-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:16px}
   .pool-title{font-weight:680;font-size:15.5px;letter-spacing:-.01em}
   .pool-sub{font-size:12px;color:var(--dim);margin-top:4px;font-family:var(--mono)}
@@ -716,7 +716,7 @@
   .fm-crumb a:last-child{color:var(--text)}.fm-crumb a:hover{background:var(--sel);color:var(--accent)}
   .fm-crumb .sepc{color:var(--mut);flex:none}
   .fm-chips{display:flex;gap:5px;flex-wrap:wrap}
-  .fm-chip{font-size:11px;padding:5px 11px;border-radius:999px;border:none;background:var(--surface);color:var(--dim);cursor:pointer;font-family:var(--mono)}
+  .fm-chip{font-size:11px;padding:5px 11px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--dim);cursor:pointer;font-family:var(--mono)}
   .fm-chip:hover{border-color:var(--accent-line);color:var(--accent)}
   .fm-search{flex:1;min-width:110px;padding:7px 10px;font-size:12px}
   .fm-selbar{display:flex;align-items:center;gap:6px;padding:7px 9px;background:var(--accent-soft);border:1px solid var(--accent-line);border-radius:var(--r-md);flex-wrap:wrap}
@@ -895,7 +895,7 @@
   .csel-opt.new{color:var(--accent);border-top:1px solid var(--line);margin-top:4px;padding-top:9px}
   .csel-new{display:flex;gap:6px;align-items:center}
   .csel-new input{flex:1}
-  .csel-new button{flex:none;padding:8px 11px;border:1px solid transparent;border-radius:var(--r-sm);background:var(--surface);color:var(--dim);cursor:pointer;display:flex}
+  .csel-new button{flex:none;padding:8px 11px;border:1px solid var(--line);border-radius:var(--r-sm);background:var(--card);color:var(--dim);cursor:pointer;display:flex}
   .csel-new button:hover{color:var(--accent);border-color:var(--accent-line)}
   .field{display:flex;flex-direction:column;gap:7px;margin-bottom:14px}.field label{font-size:12px;font-weight:600;color:var(--dim)}
   input,textarea,select{font-family:var(--font);background:var(--card-2);border:1px solid transparent;border-radius:var(--r-sm);color:var(--text);padding:10px 13px;font-size:13px;width:100%;transition:.13s}
@@ -943,9 +943,9 @@
   .ev-d{font-size:11px;color:var(--mut);margin-top:1px}
   .ev-thr{width:56px;flex:none;text-align:center;padding:6px 4px!important}
   .ev-u{font-size:11px;color:var(--mut);flex:none;margin-left:-4px}
-  .ev-c{width:52px;flex:none;display:flex;justify-content:center}
+  .ev-c{width:74px;flex:none;display:flex;justify-content:center}
   .ev-cols{position:sticky;top:-14px;z-index:3;display:flex;align-items:center;gap:10px;padding:8px 0 8px;background:var(--glass);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid var(--line-2);margin-bottom:2px}
-  .ev-col{width:52px;flex:none;display:flex;align-items:center;justify-content:center;gap:4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--dim)}
+  .ev-col{width:74px;flex:none;display:flex;align-items:center;justify-content:center;gap:4px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--dim);text-align:center;line-height:1.25}
   .ev-colp{width:112px;flex:none;text-align:center;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--dim)}
   .ev-row .ev-prio{width:112px!important}
   .ev-prio{width:auto!important;flex:none;padding:6px 8px!important;font-size:11.5px;font-weight:600}
@@ -1025,11 +1025,17 @@
   .menu .op-x{width:auto;padding:3px}
   .menu .op-x:hover{background:var(--danger-soft);color:var(--danger)}
   .mbp-cnt{font-size:10.5px;font-weight:700;color:var(--accent);background:var(--accent-soft);padding:2px 8px;border-radius:999px}
+  /* иконка события: приглушённая, уровень читается по мягкой цветной подложке */
   .nico{position:relative;width:27px;height:27px;border-radius:8px;background:var(--card-2);display:flex;align-items:center;justify-content:center;color:var(--dim);flex:none}
-  .nico .ndot{position:absolute;top:-3px;right:-3px;margin:0;width:9px;height:9px;box-shadow:0 0 0 2px var(--glass-2)}
-  .nico .ndot.crit{box-shadow:0 0 0 2px var(--glass-2),0 0 6px var(--danger)}
+  .nico.info{background:var(--card-2);color:var(--dim)}
+  .nico.ok{background:var(--good-soft);color:var(--good)}
+  .nico.warn{background:var(--warn-soft);color:var(--warn)}
+  .nico.crit{background:var(--danger-soft);color:var(--danger);box-shadow:0 0 0 1px var(--danger)}
   .mbp-row{display:flex;gap:9px;padding:7px 10px;border-radius:9px;align-items:flex-start;cursor:pointer}
   .mbp-row:hover{background:var(--sel)}
+  .mbp-row.new{background:var(--accent-soft)}
+  .mbp-row.new:hover{background:var(--sel)}
+  .nt-row.new{background:var(--accent-soft)}
   .ndot{width:8px;height:8px;border-radius:50%;margin-top:4px;flex:none}
   .ndot.crit{background:var(--danger);box-shadow:0 0 0 3px var(--danger-soft)}
   .ndot.warn{background:var(--warn)}.ndot.ok{background:var(--good)}.ndot.info{background:var(--accent-2)}
@@ -1424,6 +1430,10 @@ function applySettings(){
  root.style.setProperty("--dock-bf",bf("dockBlur","dockSat"));
  root.style.setProperty("--wdg-bf",bf("wdgBlur","wdgSat"));
  root.style.setProperty("--win-bf",bf("winBlur","winSat"));
+ // меню и поповеры — стекло как у окон (чуть плотнее), а не солид lvl(4);
+ // если блюр окон выключен, держим плотность выше ради читаемости
+ const menuGlass=bfOn&&clampf(SET.winBlur??0,0,60)>0;
+ root.style.setProperty("--menu-bg",`rgba(${lvlRgb(4)},${(menuGlass?clampf(lvlA(2)+.08,.55,.92):Math.max(lvlA(4),.9)).toFixed(3)})`);
  root.classList.toggle("perf",!!SET.perf);
  document.body.classList.toggle("rail-off",!!SET.railHidden);
  document.body.classList.toggle("dock-left",SET.dockPos==="left");
@@ -1752,7 +1762,7 @@ function renderDock(){
 function winSystem(initTab){openWin("__sys","Система",(body,win)=>{
  body.style.display="flex";body.style.flexDirection="column";body.style.padding="0";
  let tab=initTab||"overview";
- let refresh=3000;try{refresh=+localStorage.getItem("nassysrefresh");if(isNaN(refresh))refresh=3000;}catch(e){}
+ let refresh=3000;try{refresh=+(SET.sysRefresh??localStorage.getItem("nassysrefresh"));if(isNaN(refresh))refresh=3000;}catch(e){}
  win._refresh=()=>refresh;
  const render=()=>{win._sub=null;clearInterval(win._pi);
   const opt=(v,l)=>`<option value="${v}"${refresh===v?" selected":""}>${l}</option>`;
@@ -1764,7 +1774,7 @@ function winSystem(initTab){openWin("__sys","Система",(body,win)=>{
     <select class="rsel" id="sysR" title="Автообновление">${opt(0,"Пауза")}${opt(1000,"1 с")}${opt(3000,"3 с")}${opt(5000,"5 с")}${opt(10000,"10 с")}</select></div>
    <div id="tc" style="flex:1;min-height:0;overflow:auto;padding:16px 18px"></div>`;
   body.querySelectorAll(".tabs button").forEach(b=>b.onclick=()=>{tab=b.dataset.t;render();});
-  body.querySelector("#sysR").onchange=e=>{refresh=+e.target.value;try{localStorage.setItem("nassysrefresh",refresh);}catch(x){}render();};
+  body.querySelector("#sysR").onchange=e=>{refresh=+e.target.value;SET.sysRefresh=refresh;saveSettings();render();};
   const tc=body.querySelector("#tc");
   if(tab==="overview")overviewTab(tc,win);else if(tab==="history")historyTab(tc,win);else if(tab==="proc")procTab(tc,win);else svcTab(tc,win);};
  win._goTab=t=>{tab=t;render();};
@@ -1789,9 +1799,9 @@ function histChart(title,h,series,fmt,maxOverride){
 }
 const HIST_RANGES=[["1h","1 час"],["6h","6 часов"],["24h","24 часа"],["7d","7 дней"],["30d","30 дней"]];
 async function historyTab(tc,win){win._sub=null;clearInterval(win._pi);
- const rng=localStorage.getItem("nashistrange")||"24h";
+ const rng=SET.histRange||localStorage.getItem("nashistrange")||"24h";
  tc.innerHTML=`<div class="hist-bar"><div class="seg" id="histSeg">${HIST_RANGES.map(([k,t])=>`<button data-r="${k}" class="${k===rng?"on":""}">${t}</button>`).join("")}</div><span class="hist-note" id="histNote" style="margin:0"></span></div><div id="histBody" style="margin-top:10px"><div style="color:var(--mut);font-size:12px">загрузка истории…</div></div>`;
- tc.querySelectorAll("#histSeg button").forEach(b=>b.onclick=()=>{localStorage.setItem("nashistrange",b.dataset.r);historyTab(tc,win);});
+ tc.querySelectorAll("#histSeg button").forEach(b=>b.onclick=()=>{SET.histRange=b.dataset.r;saveSettings();historyTab(tc,win);});
  const my=win._histReq=(win._histReq||0)+1;   // защита от гонки при быстром переключении периодов
  const r=await api("/api/history?range="+rng),h=(r&&r.history)||[],body=tc.querySelector("#histBody");
  if(!body||my!==win._histReq)return;
@@ -1804,8 +1814,8 @@ async function historyTab(tc,win){win._sub=null;clearInterval(win._pi);
   +histChart("Температура CPU",h,[{key:"temp",color:"var(--warn)",fill:1}],tf,null)
   +histChart("RAM (оперативная память)",h,[{key:"mem",color:"var(--accent-2)",fill:1}],pf,100)
   +histChart("Сеть · ↓ приём / ↑ отдача",h,[{key:"rx",color:"var(--good)",fill:1},{key:"tx",color:"var(--danger)"}],fmtR,null)
-  // заполнение пула меняется медленно — на коротких периодах график бесполезен
-  +(longRng?histChart("Заполнение пула",h,[{key:"pool",color:"var(--good)",fill:1}],pf,100):"");
+  // заполнение пула меняется медленно — только на длинных периодах и только когда пул есть
+  +(longRng&&h.some(p=>p.pool!=null)?histChart("Заполнение пула",h,[{key:"pool",color:"var(--good)",fill:1}],pf,100):"");
 }
 function overviewTab(tc,win){
  tc.innerHTML=`<div class="ov-health" id="ovHealth"></div><div class="ov-cards" id="ovCards"></div><div id="ovThr"></div>
@@ -2139,8 +2149,8 @@ const DEFAULT_SNIPS=[
  ["Пул",[["Размеры папок","du -sh /mnt/storage/* 2>/dev/null | sort -h"]]],
 ];
 let SNIPS=[],SNIPCOL={};
-try{SNIPCOL=JSON.parse(localStorage.getItem("nassnipcol")||"{}");}catch(e){}
-function saveCol(){try{localStorage.setItem("nassnipcol",JSON.stringify(SNIPCOL));}catch(e){}}
+try{SNIPCOL=SET.snipCol||JSON.parse(localStorage.getItem("nassnipcol")||"{}");}catch(e){}
+function saveCol(){SET.snipCol=SNIPCOL;saveSettings();}
 async function saveSnips(){try{localStorage.setItem("nassnips",JSON.stringify(SNIPS));}catch(e){}await api("/api/snippets",{method:"POST",body:JSON.stringify({snippets:SNIPS})});}
 function seedSnips(){const have=new Set(SNIPS.map(s=>(s.cat||"")+"|"+s.label+"|"+s.cmd));
  DEFAULT_SNIPS.forEach(([cat,items])=>items.forEach(([label,cmd])=>{if(!have.has(cat+"|"+label+"|"+cmd))SNIPS.push({label,cmd,cat});}));}
@@ -2226,8 +2236,8 @@ const TERM_THEME={background:"#0a0f17",foreground:"#c7d3e6",cursor:"#34C6BE",cur
  black:"#0a0f17",red:"#e5544e",green:"#46b98a",yellow:"#e0a23b",blue:"#5aa9ff",magenta:"#8a7dff",cyan:"#34c6be",white:"#c7d3e6",brightBlack:"#5a6a84"};
 function winTerminal(initCmd,execC){openWin("__term","Терминал",(body,win)=>{
  body.style.padding="0";body.style.background="#0a0f17";body.style.overflow="hidden";
- let fs=13;try{fs=+localStorage.getItem("nastermfs")||13;}catch(e){}
- let sideHidden=false;try{sideHidden=localStorage.getItem("nastermside")==="1";}catch(e){}
+ let fs=13;try{fs=+(SET.termFs??localStorage.getItem("nastermfs"))||13;}catch(e){}
+ let sideHidden=false;try{sideHidden=SET.termSide!=null?!!SET.termSide:localStorage.getItem("nastermside")==="1";}catch(e){}
  let pasteMode=false;
  body.innerHTML=`<div class="term-wrap${sideHidden?" nosd":""}">
    <div class="term-main">
@@ -2289,11 +2299,11 @@ function winTerminal(initCmd,execC){openWin("__term","Терминал",(body,wi
    else if(ev.key==="Escape"){toggleFind(false);}};
  body.querySelector("#tsearch").onclick=()=>toggleFind(findInp.style.display==="none");
  body.querySelector("#tclr").onclick=()=>{const s=cur();if(s){s.term.clear();s.term.focus();}};
- const setFs=v=>{fs=Math.max(9,Math.min(22,v));try{localStorage.setItem("nastermfs",fs);}catch(e){}sessions.forEach(s=>{s.term.options.fontSize=fs;setTimeout(()=>refit(s),20);});};
+ const setFs=v=>{fs=Math.max(9,Math.min(22,v));SET.termFs=fs;saveSettings();sessions.forEach(s=>{s.term.options.fontSize=fs;setTimeout(()=>refit(s),20);});};
  body.querySelector("#tfm").onclick=()=>setFs(fs-1);body.querySelector("#tfp").onclick=()=>setFs(fs+1);
  const pBtn=body.querySelector("#tpaste");pBtn.onclick=()=>{pasteMode=!pasteMode;pBtn.classList.toggle("pri",pasteMode);toast(pasteMode?"Сниппеты вставляются без Enter":"Сниппеты запускаются сразу");};
  const sideBtn=body.querySelector("#tside");const applySide=()=>{wrap.classList.toggle("nosd",sideHidden);sideBtn.classList.toggle("pri",!sideHidden);setTimeout(()=>refit(cur()),30);};
- sideBtn.onclick=()=>{sideHidden=!sideHidden;try{localStorage.setItem("nastermside",sideHidden?"1":"0");}catch(e){}applySide();};
+ sideBtn.onclick=()=>{sideHidden=!sideHidden;SET.termSide=sideHidden;saveSettings();applySide();};
  const fullBtn=body.querySelector("#tfull");
  fullBtn.onclick=()=>{if(document.fullscreenElement)document.exitFullscreen();else win.requestFullscreen&&win.requestFullscreen();};
  const fsHandler=()=>{if(!document.body.contains(win))return;fullBtn.innerHTML=svg(document.fullscreenElement?"shrink":"expand",14);setTimeout(()=>refit(cur()),80);};
@@ -2963,10 +2973,11 @@ const FM_CHIPS=[["Home","/home/oleg"],["Хранилище","/mnt/storage"],["С
 const fmDate=ts=>{if(!ts)return"";const d=new Date(ts*1000),p=n=>String(n).padStart(2,"0");return `${p(d.getDate())}.${p(d.getMonth()+1)}.${String(d.getFullYear()).slice(2)} ${p(d.getHours())}:${p(d.getMinutes())}`;};
 function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focus(ex);ex._nav(initPath);return;}
  openWin("__files","Файлы",(body,win)=>{
+ body.style.padding="4px 16px 12px";   // файлменеджеру большой верхний отступ ни к чему
  let cwd=initPath||"/home/oleg",entries=[],searchRes=null;
  let tabs=[cwd],tabI=0;
  const sel=new Set();let clip=null,showHidden=false,filt="",sortKey="name",sortDir=1,lastIdx=-1,favs=[],dragPaths=null,searchMode="name";
- let viewMode="list";try{viewMode=localStorage.getItem("fmview")||"list";}catch(e){}
+ let viewMode="list";try{viewMode=SET.fmView||localStorage.getItem("fmview")||"list";}catch(e){}
  body.innerHTML=`<div class="fm"><div class="fm-fav">
    <div class="fm-fav-h"><span>Избранное</span><button class="iconbtn" id="fFavAdd" title="Добавить текущую папку в избранное">+</button></div>
    <div class="fm-fav-list" id="fFav"></div>
@@ -3331,7 +3342,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
  body.querySelector("#fHid").onclick=function(){showHidden=!showHidden;this.classList.toggle("pri",showHidden);renderList();};
  body.querySelector("#fFavAdd").onclick=addFav;
  const vbtn=body.querySelector("#fView");vbtn.classList.toggle("pri",viewMode==="grid");
- vbtn.onclick=function(){viewMode=viewMode==="grid"?"list":"grid";try{localStorage.setItem("fmview",viewMode);}catch(e){}this.classList.toggle("pri",viewMode==="grid");renderList();};
+ vbtn.onclick=function(){viewMode=viewMode==="grid"?"list":"grid";SET.fmView=viewMode;saveSettings();this.classList.toggle("pri",viewMode==="grid");renderList();};
  body.querySelector("#fNewF").onclick=doNewFile;
  body.querySelector("#fNewD").onclick=doMkdir;
  body.querySelector("#fUpl").onclick=()=>inp.click();
@@ -3715,7 +3726,7 @@ function notifyTab(tc){tc.innerHTML=`<div style="color:var(--mut);font-size:12px
    <div class="mon-row"><span>Слать push-уведомления на телефон (Pushover)</span><label class="tgl"><input type="checkbox" id="nfEn"><span class="sl"></span></label></div>
    <div class="field" style="margin:8px 0 4px"><label>Не повторять одно событие чаще, мин</label><input id="nfCd" class="mono" style="max-width:120px"></div>
    <div class="mon-note">Все события всегда записываются в журнал (колокольчик в верхнем баре). Колонка «Стол» — плашка на рабочем столе и счётчик на колокольчике, «Push» — уведомление в Pushover на телефон (при включённом переключателе выше). Выпадающий список — приоритет Pushover.</div>
-   <div class="ev-cols"><span style="font-size:11px;color:var(--mut)">Событие</span><span class="grow"></span><span class="ev-colp" title="Приоритет уведомления в Pushover (не влияет на рабочий стол)">Приоритет push</span><span class="ev-col" title="Плашка на рабочем столе + колокольчик">${svg("grid",12)} Стол</span><span class="ev-col" title="Push в Pushover на телефон">${svg("bell",12)} Push</span></div>
+   <div class="ev-cols"><span style="font-size:11px;color:var(--mut)">Событие</span><span class="grow"></span><span class="ev-colp" title="Приоритет уведомления в Pushover (не влияет на рабочий стол)">Приоритет Pushover</span><span class="ev-col" title="Push-уведомление в Pushover на телефон">Pushover</span><span class="ev-col" title="Плашка на рабочем столе + счётчик на колокольчике">Рабочий стол</span></div>
    <div id="nfEvents"></div>`;
   const en=tc.querySelector("#nfEn");en.checked=!!MON.enabled;
   const evbox=tc.querySelector("#nfEvents");
@@ -3725,7 +3736,7 @@ function notifyTab(tc){tc.innerHTML=`<div style="color:var(--mut);font-size:12px
    const hasThr=m.thr!==undefined;
    const prioSel=`<select class="ev-prio" id="evp_${m.k}" title="Уровень Pushover">${PRIO.map(([v,l])=>`<option value="${v}"${v===pv?" selected":""}>${l}</option>`).join("")}</select>`;
    const dsk=e.desk!=null?e.desk:(pv>=1);
-   const row=el(`<div class="ev-row"><div class="ev-txt"><div class="ev-t">${esc(m.t)}</div><div class="ev-d">${esc(m.d)}</div></div>${hasThr?`<input class="ev-thr mono" id="ev_${m.k}" value="${e.threshold!=null?e.threshold:''}">${m.thr?`<span class="ev-u">${m.thr}</span>`:""}`:""}${prioSel}<span class="ev-c"><label class="tgl" title="Плашка на рабочем столе + счётчик на колокольчике"><input type="checkbox" id="evd_${m.k}"${dsk?" checked":""}><span class="sl"></span></label></span><span class="ev-c"><label class="tgl" title="Push-уведомление в Pushover"><input type="checkbox" id="evon_${m.k}"${e.on?" checked":""}><span class="sl"></span></label></span></div>`);
+   const row=el(`<div class="ev-row"><div class="ev-txt"><div class="ev-t">${esc(m.t)}</div><div class="ev-d">${esc(m.d)}</div></div>${hasThr?`<input class="ev-thr mono" id="ev_${m.k}" value="${e.threshold!=null?e.threshold:''}">${m.thr?`<span class="ev-u">${m.thr}</span>`:""}`:""}${prioSel}<span class="ev-c"><label class="tgl" title="Push-уведомление в Pushover"><input type="checkbox" id="evon_${m.k}"${e.on?" checked":""}><span class="sl"></span></label></span><span class="ev-c"><label class="tgl" title="Плашка на рабочем столе + счётчик на колокольчике"><input type="checkbox" id="evd_${m.k}"${dsk?" checked":""}><span class="sl"></span></label></span></div>`);
    evbox.appendChild(row);});
   const cd=tc.querySelector("#nfCd");cd.value=Math.round((MON.cooldown||1800)/60);
   const items=EVMETA.filter(m=>m.k);
@@ -4020,7 +4031,7 @@ function healthPop(){const b=document.getElementById("healthBtn");
 const EVQ={seq:0,seen:0,unseen:0,cache:[],toasted:0,remind:0,init:false};
 const NKIND={disk:"Диски",space:"Место",power:"Питание",svc:"Службы",access:"Доступ",net:"Сеть",protect:"Защита",files:"Файлы",action:"Действия",system:"Система"};
 const NKICON={disk:"disks",space:"hdd",power:"cpu",svc:"cog",access:"key",net:"wifi",protect:"shield",files:"folder",action:"wand",system:"info"};
-const nico=e=>`<span class="nico"><span class="ndot ${e.lvl}"></span>${svg(NKICON[e.kind]||"info",14)}</span>`;
+const nico=e=>`<span class="nico ${e.lvl}">${svg(NKICON[e.kind]||"info",14)}</span>`;
 async function pollEvents(){
  if(pollEvents._busy)return;pollEvents._busy=true;   // без перекрытия опросов (медленный ответ → дубли)
  try{await _pollEvents();}finally{pollEvents._busy=false;}}
@@ -4053,11 +4064,12 @@ function ntoast(e,remind){const c=document.getElementById("ntoasts");if(!c)retur
  n.onclick=()=>{close();winNotif();};
  setTimeout(close,e.lvl==="crit"?15000:7000);
  try{if("Notification"in window&&Notification.permission==="granted"&&document.hidden)new Notification(e.title,{body:e.msg||"",icon:"/icon.svg"});}catch(x){}}
-function evRow(e){return `<div class="mbp-row" data-eid="${e.id}">${nico(e)}<div class="mbp-m"><div class="mbp-t">${esc(e.title)}${e.n>1?` <span class="nmul">×${e.n}</span>`:""}</div>${e.msg?`<div class="mbp-s">${esc(e.msg)}</div>`:""}</div><span class="mbp-w">${ruWhen(e.t2||e.t)}</span></div>`;}
+function evRow(e,isNew){return `<div class="mbp-row${isNew?" new":""}" data-eid="${e.id}">${nico(e)}<div class="mbp-m"><div class="mbp-t">${esc(e.title)}${e.n>1?` <span class="nmul">×${e.n}</span>`:""}</div>${e.msg?`<div class="mbp-s">${esc(e.msg)}</div>`:""}</div><span class="mbp-w">${ruWhen(e.t2||e.t)}</span></div>`;}
 function bellPop(){const b=document.getElementById("bellBtn");
+ const seenAt=EVQ.seen;   // водораздел ДО markSeen — новые подсвечиваем
  mbPop(b,p=>{const items=EVQ.cache.slice(-12).reverse();
   p.innerHTML=`<div class="mbp-h"><span>Уведомления</span>${EVQ.unseen?`<span class="mbp-cnt">${EVQ.unseen} новых</span>`:""}<span class="grow"></span><button class="mbp-hb" id="mbAll" title="Показать все">${svg("list",15)}</button><button class="mbp-hb" id="mbCfg" title="Настройки уведомлений">${svg("cog",15)}</button></div>`
-   +(items.length?items.map(evRow).join(""):`<div class="mbp-empty">Пока пусто — здесь появятся события и действия системы</div>`);
+   +(items.length?items.map(e=>evRow(e,e.id>seenAt)).join(""):`<div class="mbp-empty">Пока пусто — здесь появятся события и действия системы</div>`);
   p.querySelectorAll(".mbp-row").forEach(rw=>rw.onclick=()=>{closeMenu();winNotif();});
   p.querySelector("#mbAll").onclick=()=>{closeMenu();winNotif();};
   p.querySelector("#mbCfg").onclick=()=>{closeMenu();winSettings("notify");};});
@@ -4072,10 +4084,11 @@ function winNotif(){openWin("__notif","Уведомления",async body=>{
    <div id="ntList" style="min-height:120px"><div style="color:var(--mut);font-size:12px">загрузка…</div></div>`;
  let lvl="",kind="",q="",items=[];
  const list=body.querySelector("#ntList");
+ let seenAt=EVQ.seen;    // водораздел на момент открытия — новые подсвечиваем
  const paint=()=>{const f=items.filter(e=>(!lvl||e.lvl===lvl)&&(!kind||e.kind===kind)&&(!q||(e.title+" "+(e.msg||"")).toLowerCase().includes(q)));
-  list.innerHTML=f.length?f.map(e=>`<div class="nt-row"><span class="nt-w">${ruWhen(e.t2||e.t)}</span><span title="${att(NKIND[e.kind]||e.kind||"")}">${nico(e)}</span><div class="nt-mm"><div class="nt-tt">${esc(e.title)}${e.n>1?` <span class="nmul">×${e.n}</span>`:""}</div>${e.msg?`<div class="nt-ms">${esc(e.msg)}</div>`:""}</div></div>`).join("")
+  list.innerHTML=f.length?f.map(e=>`<div class="nt-row${e.id>seenAt?" new":""}"><span class="nt-w">${ruWhen(e.t2||e.t)}</span><span title="${att(NKIND[e.kind]||e.kind||"")}">${nico(e)}</span><div class="nt-mm"><div class="nt-tt">${esc(e.title)}${e.n>1?` <span class="nmul">×${e.n}</span>`:""}</div>${e.msg?`<div class="nt-ms">${esc(e.msg)}</div>`:""}</div></div>`).join("")
    :`<div class="dempty">${svg("bell",16)} ${items.length?"Ничего не найдено по фильтру":"Журнал пуст — события системы и ваши действия будут собираться здесь"}</div>`;};
- const loadEv=async()=>{const r=await api("/api/events?limit=1000");items=((r&&r.events)||[]).slice().reverse();paint();markSeen();};
+ const loadEv=async()=>{seenAt=EVQ.seen;const r=await api("/api/events?limit=1000");items=((r&&r.events)||[]).slice().reverse();paint();markSeen();};
  body.querySelectorAll("#ntLvl button").forEach(bt=>bt.onclick=()=>{body.querySelectorAll("#ntLvl button").forEach(x=>x.classList.toggle("on",x===bt));lvl=bt.dataset.l;paint();});
  const kb=body.querySelector("#ntKindBtn");
  kb.onclick=()=>{const r=kb.getBoundingClientRect();
@@ -4165,7 +4178,7 @@ async function pollApps(){const d=await api("/api/desktop");APPS=(d&&d.apps)||[]
 async function pollDisks(){const d=await api("/api/disks");paintDiskWidget(d.disks||[]);}
 
 /* онбординг при первом запуске */
-function maybeOnboard(){let done=false;try{done=localStorage.getItem("nas_onboarded")==="1";}catch(e){}
+function maybeOnboard(){let done=false;try{done=!!SET.onboarded||localStorage.getItem("nas_onboarded")==="1";}catch(e){}
  if(done)return;
  const ob=el(`<div class="onboard"><div class="ob-card">
    <div class="ob-logo"><img src="/icon-flat.svg" alt="Raspberry Pi"></div>
@@ -4179,7 +4192,7 @@ function maybeOnboard(){let done=false;try{done=localStorage.getItem("nas_onboar
    <div class="ob-btns"><button class="btn" id="obSkip">Осмотреться</button><button class="btn pri" id="obGo">${svg("wand",14)} Запустить Мастер</button></div>
  </div></div>`);
  document.body.appendChild(ob);requestAnimationFrame(()=>ob.classList.add("show"));
- const fin=()=>{try{localStorage.setItem("nas_onboarded","1");}catch(e){}ob.classList.remove("show");setTimeout(()=>ob.remove(),320);};
+ const fin=()=>{SET.onboarded=true;saveSettings();try{localStorage.setItem("nas_onboarded","1");}catch(e){}ob.classList.remove("show");setTimeout(()=>ob.remove(),320);};
  ob.querySelector("#obSkip").onclick=fin;
  ob.querySelector("#obGo").onclick=()=>{fin();location.href="/setup.html";};
  ob.addEventListener("click",e=>{if(e.target===ob)fin();});}

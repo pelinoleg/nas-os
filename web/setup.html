@@ -225,8 +225,21 @@ const R={
    <div class="actions"><button class="btn pri" id="go">Установить</button></div><div class="console" id="con"></div>`;
   p.querySelector("#go").onclick=()=>run("system");},
  disks(p){p.innerHTML=head("Шаг 2","Диски","Выберите свободный диск, роль и файловую систему. Форматирование требует ввода пути вручную. Системный диск исключён.")+`<div id="dl"></div><div class="console" id="con"></div>`;
-  api("/api/disks").then(d=>{const dl=p.querySelector("#dl");const free=(d?d.disks:[]).filter(x=>x.role==="free"&&x.size&&x.size!=="0B");
-   if(!free.length){dl.innerHTML=`<div class="note">Свободных дисков не найдено (или нет связи с бэкендом).</div>`;return;}
+  api("/api/disks").then(d=>{const dl=p.querySelector("#dl");const all=(d&&d.disks)||[];
+   const free=all.filter(x=>x.role==="free"&&x.size&&x.size!=="0B");
+   // смонтированные внешние — тоже кандидаты в пул, но сначала их нужно отмонтировать
+   const busy=all.filter(x=>x.role==="removable"&&!x.no_media);
+   if(!free.length&&!busy.length){
+     dl.innerHTML=`<div class="note">${all.length?"Все диски уже заняты системой или пулом — подключите новый диск.":"Нет связи с бэкендом или диски не обнаружены."}</div>`;return;}
+   dl.innerHTML="";
+   busy.forEach(x=>{const row=el(`<div class="disk"><span class="ic">${svg("disks",26)}</span><div class="info"><div class="p">${x.path}</div><div class="mo">${(x.model||"").slice(0,34)} · ${x.size} · смонтирован как внешний: ${(x.mounts||[]).join(", ")}</div></div></div>`);
+     const ub=el(`<button class="btn sm">Отмонтировать</button>`);
+     ub.title="Отключит диск от /media — после этого его можно отформатировать в пул";
+     ub.onclick=async()=>{ub.disabled=true;ub.textContent="отмонтирую…";
+       for(const mp of (x.mounts||[]))await api("/api/disk/mount",{method:"POST",body:JSON.stringify({target:mp,unmount:true})});
+       R.disks(p);};
+     row.appendChild(ub);dl.appendChild(row);});
+   if(!free.length){dl.appendChild(el(`<div class="note">Свободных дисков нет — отмонтируйте внешний диск выше, чтобы использовать его в пуле (форматирование сотрёт его данные).</div>`));return;}
    free.forEach(x=>{const row=el(`<div class="disk"><span class="ic">${svg("disks",26)}</span><div class="info"><div class="p">${x.path}</div><div class="mo">${(x.model||"").slice(0,34)} · ${x.size} · ${x.tran||""}</div></div></div>`);
     const ctl=el(`<div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end"></div>`);
     let role="data",fs="ext4";
