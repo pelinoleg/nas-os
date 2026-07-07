@@ -482,8 +482,56 @@
   .pool-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:16px}
   .pool-title{font-weight:680;font-size:15.5px;letter-spacing:-.01em}
   .pool-sub{font-size:12px;color:var(--dim);margin-top:4px;font-family:var(--mono)}
-  .capbar{height:15px;border-radius:8px;background:var(--line);overflow:hidden;display:flex}
+  .capbar{height:15px;border-radius:8px;background:var(--track,var(--line));overflow:hidden;display:flex}
   .capbar .used{height:100%;display:block;background:linear-gradient(90deg,var(--accent),var(--accent-2));min-width:3px;transition:width .6s}
+  /* ===== Хранилище: master-detail ===== */
+  .dmroot{display:flex;flex-direction:column;height:100%}
+  .dm-pool{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line);flex:none}
+  .dm-pool .dp-ic{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;color:var(--accent);background:var(--accent-soft);flex:none}
+  .dm-pool.np .dp-ic{color:var(--mut);background:var(--card-2)}
+  .dp-txt{flex:1;min-width:0}
+  .dp-t{font-weight:660;font-size:13.5px;display:flex;align-items:center}
+  .dp-t .hstat{font-size:10px;padding:2px 8px}
+  .dp-s{font-size:11.5px;color:var(--mut);margin-top:1px}
+  .dp-cap{flex:none;text-align:right}
+  .dp-cap .capbar{height:8px;border-radius:999px}
+  .dp-lbl{font-size:11px;color:var(--dim);font-family:var(--mono);margin-top:4px}
+  .dm2{display:flex;flex:1;min-height:0}
+  .dm2-side{width:210px;flex:none;border-right:1px solid var(--line);padding:8px 8px 12px;overflow-y:auto}
+  .dm2-side-h{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--mut);font-family:var(--mono);padding:6px 8px 8px}
+  .dm2-item{display:flex;align-items:center;gap:9px;width:100%;padding:8px 9px;border-radius:var(--r-sm);border:1px solid transparent;background:transparent;text-align:left;margin-bottom:2px;transition:.12s}
+  .dm2-item:hover{background:var(--sel)}
+  .dm2-item.on{background:var(--sel);border-color:var(--accent-line)}
+  .dm2-item.sys{opacity:.62}.dm2-item.sys.on,.dm2-item.sys:hover{opacity:1}
+  .dm2-item .dot{width:8px;height:8px;border-radius:50%;flex:none}
+  .dm2-item .li-main{flex:1;min-width:0}
+  .dm2-item .li-name{display:block;font-weight:600;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .dm2-item .li-sub{display:block;font-size:11px;color:var(--mut);font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .dm2-item .li-temp{font-family:var(--mono);font-size:11px;font-weight:650;flex:none}
+  .dm2-slots{font-size:11px;color:var(--mut);padding:10px 9px;line-height:1.5}
+  .dm2-detail{flex:1;min-width:0;overflow-y:auto;padding:18px 20px}
+  .dd-head{display:flex;align-items:center;gap:13px;margin-bottom:16px}
+  .dd-ic{width:44px;height:44px;border-radius:12px;display:grid;place-items:center;color:#fff;flex:none;box-shadow:inset 0 1px 0 rgba(255,255,255,.22)}
+  .dd-hmain{flex:1;min-width:0}
+  .dd-name{font-weight:660;font-size:15px;letter-spacing:-.01em}
+  .dd-lbl{color:var(--dim);font-weight:500;font-size:13px}
+  .dd-sub{font-size:12px;color:var(--mut);margin-top:3px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .dd-health{flex:none;display:flex;flex-direction:column;align-items:flex-end;gap:6px}
+  .dd-usage{margin-bottom:16px}
+  .dd-usage .lbls{display:flex;justify-content:space-between;font-size:11.5px;color:var(--dim);margin-top:6px}
+  .dd-facts{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line);border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden;margin-bottom:16px}
+  .dd-facts>div{background:var(--card);padding:9px 12px;display:flex;flex-direction:column;gap:2px}
+  .dd-facts span{font-size:11px;color:var(--mut)}
+  .dd-facts b{font-size:12.5px;font-weight:600;font-family:var(--mono);overflow-wrap:anywhere}
+  .dd-acts{display:flex;gap:7px;flex-wrap:wrap;align-items:center;padding-top:14px;border-top:1px solid var(--line)}
+  .dd-note{font-size:12px;color:var(--mut);display:flex;align-items:center;gap:6px}
+  .dd-grp{font-size:10px;text-transform:uppercase;letter-spacing:.07em;color:var(--mut);font-family:var(--mono);margin:20px 0 8px}
+  .dd-smk{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden;margin-bottom:12px}
+  .dd-smk>div{background:var(--card);padding:9px 12px;display:flex;flex-direction:column;gap:2px}
+  .dd-smk span{font-size:11px;color:var(--mut)}.dd-smk b{font-size:13px;font-weight:650}
+  .dd-attrs{width:100%;border-collapse:collapse;font-size:11.5px;font-family:var(--mono)}
+  .dd-attrs th{text-align:left;color:var(--mut);font-weight:500;padding:5px 8px;border-bottom:1px solid var(--line);font-family:var(--font)}
+  .dd-attrs td{padding:5px 8px;border-bottom:1px solid var(--line);overflow-wrap:anywhere}
   .caplbls{display:flex;justify-content:space-between;font-size:12px;color:var(--mut);margin-top:10px}
   .caplbls b{color:var(--text);font-weight:650;font-family:var(--mono)}
   .pool-empty{font-size:13px;color:var(--dim);line-height:1.5;margin-bottom:14px}
@@ -1609,79 +1657,93 @@ function driveType(x){
  if(x.rotational)return{ic:"hdd",label:"Жёсткий диск"};
  return{ic:"ssd",label:"SSD"};
 }
+let DM_SEL=null;   // выбранный диск (dev), переживает перезагрузку списка
 function winDisks(){openWin("__disks","Хранилище",body=>{
+ body.style.padding="0";
  const load=()=>Promise.all([api("/api/disks"),api("/api/automount")]).then(([d,am])=>{
-  am=am||{};let disks=(d&&d.disks)||[];if(d&&d.fs)FS_AVAIL=d.fs;body.innerHTML="";
-  // пустой слот/нет носителя: флаг бэкенда ИЛИ (0B без ФС и без разделов) — работает и до рестарта службы
+  am=am||{};let disks=(d&&d.disks)||[];if(d&&d.fs)FS_AVAIL=d.fs;
   const isEmpty=x=>x.no_media||((!x.size||["0B","0","0 B"].includes(""+x.size))&&!x.fstype&&!(x.partitions&&x.partitions.length));
   const empty=disks.filter(isEmpty);
   disks=disks.filter(x=>!isEmpty(x)).sort((a,b)=>roleRank(a.role)-roleRank(b.role));
-  const cnt=r=>disks.filter(x=>x.role===r).length;
-
-  /* ── СЕКЦИЯ 1: пул-хиро ── */
-  const s1=el(`<div class="dm-sec"></div>`);
-  const s1top=el(`<div class="dm-sectop"><span class="dm-eyebrow">Хранилище</span></div>`);
-  const amb=el(`<button class="btn sm ${am.enabled?"pri":""}">${svg("plug",13)} Автомонтирование: ${am.enabled?"вкл":"выкл"}</button>`);
-  amb.onclick=()=>automountDlg(am,load);s1top.appendChild(amb);s1.appendChild(s1top);
-  const poolMount=disks.find(x=>x.role==="pool");
-  const dataArr=disks.filter(x=>x.role==="data"||x.role==="pool");
-  const hasPool=!!poolMount||cnt("data")>0;
-  // здоровье пула по SMART несистемных дисков
-  const sm=disks.filter(x=>x.role!=="system"&&x.smart&&x.smart.healthy!=null);
-  const hbad=sm.some(x=>!x.smart.healthy);
-  const hcls=hbad?"bad":(sm.length?"ok":"na"),hlbl=hbad?"Внимание":(sm.length?"Исправно":"SMART нет");
-  const pool=el(`<div class="pool"></div>`);
-  if(hasPool){
-    let total=0,used=0;(poolMount?[poolMount]:dataArr).forEach(x=>{if(x.usage){total+=x.usage.total;used+=x.usage.used;}});
-    const pct=total?Math.max(used/total*100,.4):0;
-    pool.innerHTML=`<div class="pool-top"><div><div class="pool-title">Пул /mnt/storage</div>
-       <div class="pool-sub">${cnt("data")} дисков данных · ${cnt("parity")} чётности${cnt("removable")?` · ${cnt("removable")} съёмных`:""}</div></div>
-       <div class="hstat ${hcls}">${hlbl}</div></div>
-      <div class="capbar"><span class="used" style="width:${pct}%"></span></div>
-      <div class="caplbls"><span><b>${fmtB(used)}</b> занято</span><span><b>${fmtB(total-used)}</b> свободно · ${fmtB(total)} всего</span></div>`;
-  }else{
-    pool.classList.add("pool-empty-card");
-    pool.innerHTML=`<div class="pe-icon">${svg("layers",26)}</div>
-      <div class="pe-title">Пул ещё не собран</div>
-      <div class="pe-sub">${cnt("free")} свободных · ${cnt("removable")} съёмных</div>
-      <div class="pe-desc">Объедините диски данных и чётности в один том <b>/mnt/storage</b> — файлы видны как одно целое, а чётность защищает от сбоя диска.</div>
-      <button class="btn pri sm" id="poolcta">${svg("wand",14)} Настроить в Мастере</button>`;
+  if(!DM_SEL||!disks.find(x=>x.path===DM_SEL))DM_SEL=((disks.find(x=>x.role!=="system"))||disks[0]||{}).path;
+  body.innerHTML="";
+  const root=el(`<div class="dmroot"></div>`);
+  root.appendChild(poolStrip(disks,am,load));
+  const split=el(`<div class="dm2"></div>`);
+  const side=el(`<aside class="dm2-side"></aside>`);
+  side.appendChild(el(`<div class="dm2-side-h">Накопители · ${disks.length}</div>`));
+  disks.forEach(x=>{const it=diskListItem(x);it.onclick=()=>{DM_SEL=x.path;paint();};side.appendChild(it);});
+  if(empty.length)side.appendChild(el(`<div class="dm2-slots">${svg("sd",13)} Пустые слоты: <b class="mono">${empty.map(x=>x.name).join(", ")}</b></div>`));
+  const detail=el(`<section class="dm2-detail"></section>`);
+  split.appendChild(side);split.appendChild(detail);root.appendChild(split);body.appendChild(root);
+  function paint(){
+   [...side.querySelectorAll(".dm2-item")].forEach((n,i)=>n.classList.toggle("on",disks[i]&&disks[i].path===DM_SEL));
+   const x=disks.find(y=>y.path===DM_SEL);detail.innerHTML="";
+   detail.appendChild(x?diskDetail(x,load):el(`<div class="dempty">${svg("disks",16)} Накопитель не выбран</div>`));
   }
-  s1.appendChild(pool);body.appendChild(s1);
-  const cta=pool.querySelector("#poolcta");if(cta)cta.onclick=()=>location.href="/setup.html";
-
-  /* ── СЕКЦИЯ 2: накопители (сетка; системный — первым, приглушённый) ── */
-  const s2=el(`<div class="dm-sec"></div>`);
-  s2.appendChild(el(`<div class="dm-sectop"><span class="dm-eyebrow">Накопители · ${disks.length}</span></div>`));
-  const grid=el(`<div class="dm-grid"></div>`);
-  disks.forEach(x=>grid.appendChild(drvCard(x,load)));
-  if(!disks.length)grid.appendChild(el(`<div class="dempty">${svg("disks",16)} Накопители не обнаружены.</div>`));
-  s2.appendChild(grid);body.appendChild(s2);
-
-  /* ── пустые слоты картридера ── */
-  if(empty.length)body.appendChild(el(`<div class="dm-sec"><div class="dempty">${svg("sd",16)} <span>Пустые слоты картридера (нет карты): <b class="mono">${empty.map(x=>x.name).join(", ")}</b> — вставьте карту, и она появится в списке выше.</span></div></div>`));
-  if(!LIVE)body.appendChild(el(`<div style="color:var(--mut);font-size:12px;text-align:center">демо-данные · реальные операции доступны от root (служба)</div>`));
+  paint();
  });
  load();body._reload=load;
-},{w:680,h:620});}
-function drvCard(x,reload){
- const u=x.usage,sm=x.smart,hasParts=x.partitions&&x.partitions.length,dt=driveType(x);
- const card=el(`<div class="drv${x.role==="system"?" system":""}"></div>`);
- const top=el(`<div class="drv-top"></div>`);
- top.appendChild(el(`<div class="drv-ic" style="background:${roleColor(x.role)}">${I[dt.ic]||I.disks}</div>`));
+},{w:740,h:640});}
+
+function poolStrip(disks,am,reload){
+ const cnt=r=>disks.filter(x=>x.role===r).length;
+ const poolMount=disks.find(x=>x.role==="pool"),dataArr=disks.filter(x=>x.role==="data"||x.role==="pool");
+ const hasPool=!!poolMount||cnt("data")>0;
+ const sm=disks.filter(x=>x.role!=="system"&&x.smart&&x.smart.healthy!=null),hbad=sm.some(x=>!x.smart.healthy);
+ const hcls=hbad?"bad":(sm.length?"ok":"na"),hlbl=hbad?"Внимание":(sm.length?"Исправно":"—");
+ const w=el(`<div class="dm-pool${hasPool?"":" np"}"></div>`);
+ if(hasPool){
+  let total=0,used=0;(poolMount?[poolMount]:dataArr).forEach(x=>{if(x.usage){total+=x.usage.total;used+=x.usage.used;}});
+  const pct=total?Math.max(used/total*100,.4):0;
+  w.innerHTML=`<span class="dp-ic">${svg("layers",17)}</span>
+   <div class="dp-txt"><div class="dp-t">Пул /mnt/storage <span class="hstat ${hcls}" style="margin-left:4px">${hlbl}</span></div>
+    <div class="dp-s">${cnt("data")} данных · ${cnt("parity")} чётности${cnt("removable")?` · ${cnt("removable")} съёмных`:""}</div></div>
+   <div class="dp-cap"><div class="capbar" style="width:150px"><span class="used" style="width:${pct}%"></span></div>
+    <div class="dp-lbl">${fmtB(total-used)} своб · ${fmtB(total)}</div></div>`;
+ }else{
+  w.innerHTML=`<span class="dp-ic">${svg("layers",17)}</span>
+   <div class="dp-txt"><div class="dp-t">Пул не собран</div>
+    <div class="dp-s">${cnt("free")} свободных · ${cnt("removable")} съёмных — объедините диски в /mnt/storage</div></div>
+   <button class="btn sm pri" id="poolcta">${svg("wand",13)} Собрать</button>`;
+ }
+ const amb=el(`<button class="btn sm ${am.enabled?"":""}" title="Автомонтирование съёмных: ${am.enabled?"вкл":"выкл"}">${svg("plug",13)}</button>`);
+ amb.onclick=()=>automountDlg(am,reload);w.appendChild(amb);
+ const cta=w.querySelector("#poolcta");if(cta)cta.onclick=()=>location.href="/setup.html";
+ return w;
+}
+
+function diskListItem(x){
+ const dt=driveType(x),temp=x.smart&&x.smart.temp!=null?x.smart.temp:null;
+ const nm=(x.label||x.model||x.name).replace(/</g,"&lt;");
+ const it=el(`<button class="dm2-item${x.role==="system"?" sys":""}">
+   <span class="dot" style="background:${roleColor(x.role)}"></span>
+   <span class="li-main"><span class="li-name">${nm}</span><span class="li-sub">${roleName[x.role]||x.role} · ${x.size||"—"}</span></span>
+   ${temp!=null?`<span class="li-temp" style="color:${diskTcol(temp)||"var(--mut)"}">${temp}°</span>`
+     :(x.smart&&x.smart.healthy===false?`<span class="li-temp" style="color:var(--danger)">!</span>`:"")}
+ </button>`);
+ return it;
+}
+
+function diskDetail(x,reload){
+ const u=x.usage,hasParts=x.partitions&&x.partitions.length,dt=driveType(x),sm=x.smart;
+ const box=el(`<div class="dd"></div>`);
  const name=(x.model||dt.label||x.name).replace(/</g,"&lt;");
- const lbl=x.label?` <span style="color:var(--dim);font-weight:500">«${(""+x.label).replace(/</g,"&lt;")}»</span>`:"";
- const fsTxt=x.fstype?(""+x.fstype).toUpperCase():(hasParts?"разделы":"не отформатирован");
- top.appendChild(el(`<div class="drv-main">
-    <div class="drv-name">${name} <span class="rbadge ${x.role}">${roleName[x.role]||x.role}</span>${lbl}</div>
-    <div class="drv-meta">${x.size||"—"} · ${dt.label} · ${x.path}${x.mount?` · ${x.mount}`:` · ${fsTxt}`}</div></div>`));
- const hc=el(`<div class="drv-health"></div>`);
- hc.appendChild(el(sm&&sm.healthy!=null?`<div class="hstat ${sm.healthy?"ok":"bad"}">${sm.healthy?"Исправно":"Сбой"}</div>`:`<div class="hstat na">SMART нет</div>`));
- if(sm&&sm.temp!=null)hc.appendChild(el(`<div class="htemp" style="color:${tcol(sm.temp)}">${sm.temp}°C</div>`));
- top.appendChild(hc);card.appendChild(top);
- if(u)card.appendChild(el(`<div class="drv-usage"><div class="capbar"><span class="used" style="width:${Math.max(u.pct,.4)}%"></span></div><div class="lbls"><span>${fmtB(u.used)} занято</span><span>${u.pct}% · ${fmtB(u.total)}</span></div></div>`));
- const acts=el(`<div class="drv-acts"></div>`);
- const sb=el(`<button class="btn sm">${svg("activity",13)} Подробнее</button>`);sb.onclick=()=>toggleSmart(x.path,card,sb);acts.appendChild(sb);
+ const lbl=x.label?`<span class="dd-lbl">«${(""+x.label).replace(/</g,"&lt;")}»</span>`:"";
+ box.appendChild(el(`<div class="dd-head">
+   <div class="dd-ic" style="background:${roleColor(x.role)}">${I[dt.ic]||I.disks}</div>
+   <div class="dd-hmain"><div class="dd-name">${name} ${lbl}</div>
+     <div class="dd-sub"><span class="rbadge ${x.role}">${roleName[x.role]||x.role}</span> ${dt.label} · <span class="mono">${x.path}</span></div></div>
+   <div class="dd-health">${sm&&sm.healthy!=null?`<div class="hstat ${sm.healthy?"ok":"bad"}">${sm.healthy?"Исправно":"Сбой"}</div>`:`<div class="hstat na">SMART —</div>`}
+     ${sm&&sm.temp!=null?`<div class="htemp" style="color:${tcol(sm.temp)}">${sm.temp}°C</div>`:""}</div></div>`));
+ if(u)box.appendChild(el(`<div class="dd-usage"><div class="capbar"><span class="used" style="width:${Math.max(u.pct,.4)}%"></span></div>
+   <div class="lbls"><span>${fmtB(u.used)} занято · ${u.pct}%</span><span>${fmtB(u.total-u.used)} свободно · ${fmtB(u.total)}</span></div></div>`));
+ // краткие факты
+ const facts=[["Размер",x.size||"—"],["Файловая система",x.fstype?(""+x.fstype).toUpperCase():(hasParts?"таблица разделов":"не отформатирован")],
+   ["Точка монтирования",x.mount||"не смонтирован"],["В fstab",x.in_fstab?"да":"нет"]];
+ box.appendChild(el(`<div class="dd-facts">${facts.map(([k,v])=>`<div><span>${k}</span><b>${esc(""+v)}</b></div>`).join("")}</div>`));
+ // действия
+ const acts=el(`<div class="dd-acts"></div>`);
  if(x.role!=="system"){
    if(!hasParts){
      if(x.mounted){const b=el(`<button class="btn sm">${svg("eject",13)} Отмонтировать</button>`);b.onclick=()=>diskCall("/api/disk/mount",{target:x.mount,unmount:true},reload,"отмонтировано");acts.appendChild(b);}
@@ -1690,10 +1752,30 @@ function drvCard(x,reload){
    }
    acts.appendChild(el(`<span class="grow"></span>`));
    const fb=el(`<button class="btn sm dng">${svg("trash",13)} Форматировать</button>`);fb.onclick=()=>formatDlg(x,reload);acts.appendChild(fb);
- }
- card.appendChild(acts);
- if(hasParts){const pw=el(`<div class="dparts"></div>`);const ro=x.role==="system";x.partitions.forEach(pt=>pw.appendChild(partRow(pt,reload,ro)));card.appendChild(pw);}
- return card;
+ }else acts.appendChild(el(`<span class="dd-note">${svg("shield",13)} Системный диск — операции недоступны</span>`));
+ box.appendChild(acts);
+ // разделы
+ if(hasParts){box.appendChild(el(`<div class="dd-grp">Разделы</div>`));const pw=el(`<div class="dparts"></div>`);const ro=x.role==="system";x.partitions.forEach(pt=>pw.appendChild(partRow(pt,reload,ro)));box.appendChild(pw);}
+ // SMART — грузим лениво
+ box.appendChild(el(`<div class="dd-grp">SMART</div>`));
+ const sbox=el(`<div class="dd-smart"><div style="color:var(--mut);font-size:12px">загрузка SMART…</div></div>`);
+ box.appendChild(sbox);
+ api("/api/disk/smart?dev="+encodeURIComponent(x.path)).then(d=>{
+   if(!d||!d.ok){sbox.innerHTML=`<div style="color:var(--mut);font-size:12px">${esc((d&&d.log)||"SMART недоступен")}</div>`;return;}
+   const poh=d.power_on_hours;
+   sbox.innerHTML=`<div class="dd-smk">
+     <div><span>Здоровье</span><b style="color:${d.healthy?"var(--good)":d.healthy===false?"var(--danger)":"var(--mut)"}">${d.healthy?"OK":d.healthy===false?"СБОЙ":"?"}</b></div>
+     ${d.temp!=null?`<div><span>Температура</span><b style="color:${tcol(d.temp)}">${d.temp}°C</b></div>`:""}
+     ${poh!=null?`<div><span>Наработка</span><b>${poh} ч <span style="color:var(--mut);font-weight:500">≈ ${(poh/24).toFixed(0)} дн${poh>=8760?" · "+(poh/8760).toFixed(1)+" г":""}</span></b></div>`:""}
+     ${d.power_cycles!=null?`<div><span>Включений</span><b>${d.power_cycles}</b></div>`:""}</div>`;
+   if(d.attrs&&d.attrs.length){const rows=d.attrs.slice(0,14).map(a=>`<tr><td>${esc(a.name||a.id||"")}</td><td>${a.value!=null?a.value:""}</td><td>${esc(""+(a.raw!=null?a.raw:""))}</td></tr>`).join("");
+     sbox.appendChild(el(`<table class="dd-attrs"><tr><th>Атрибут</th><th>Знач.</th><th>Raw</th></tr>${rows}</table>`));}
+   const t=el(`<div class="dd-acts" style="border:none;padding:0;margin-top:10px"><button class="btn sm">Тест: короткий</button><button class="btn sm">Тест: полный</button></div>`);
+   t.children[0].onclick=()=>diskCall("/api/disk/smart-test",{dev:x.path,kind:"short"},null,"тест запущен");
+   t.children[1].onclick=()=>diskCall("/api/disk/smart-test",{dev:x.path,kind:"long"},null,"тест запущен");
+   sbox.appendChild(t);
+ });
+ return box;
 }
 function partRow(pt,reload,readOnly){
  const r=el(`<div class="dpart"></div>`);
