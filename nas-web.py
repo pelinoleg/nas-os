@@ -227,7 +227,10 @@ def disks():
                     role = "pool"; break
                 if mp == am_base or mp.startswith(am_base + "/") or mp.startswith("/media/"):
                     role = "removable"; break
-        primary = (next((mp for mp in mounts if mp.startswith("/mnt/")), None)
+        # для системного диска показываем корень «/», а не /boot/firmware (иначе «свободно»
+        # берётся с крошечного boot-раздела); для остальных — точку в /mnt, затем /media
+        primary = (("/" if "/" in mounts else None)
+                   or next((mp for mp in mounts if mp.startswith("/mnt/")), None)
                    or next((mp for mp in mounts if mp.startswith("/media/")), None)
                    or (mounts[0] if mounts else None))
         # ФС и метка смонтированного/первого раздела

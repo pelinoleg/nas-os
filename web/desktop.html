@@ -304,8 +304,9 @@
   .krow{display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:9px;gap:12px}.krow:last-child{margin-bottom:0}
   .krow span{color:var(--dim)}.krow b{font-family:var(--mono);font-variant-numeric:tabular-nums}
   .dline{display:flex;align-items:center;gap:9px;font-size:12.5px;padding:6px 0}
-  .dline.sys{opacity:.62}
+  .dline.sys{opacity:.8}
   .dline .ddot{width:7px;height:7px;border-radius:50%;flex:none}
+  .dline .ddot-pi{width:15px;height:15px;flex:none;margin:0 -4px 0 -4px}
   .dline .dtemp{font-family:var(--mono);font-size:11px;font-weight:650;flex:none}
   .dline:first-of-type{border-top:none}
   .dbadge{font-family:var(--mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;padding:2px 7px;border-radius:6px;background:none;border:1px solid var(--line-2);color:var(--dim);flex:none;font-weight:600;min-width:58px;text-align:center}
@@ -508,6 +509,8 @@
   .dm2-item .li-name{display:block;font-weight:600;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .dm2-item .li-sub{display:block;font-size:11px;color:var(--mut);font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .dm2-item .li-temp{font-family:var(--mono);font-size:11px;font-weight:650;flex:none}
+  .dm2-item .li-pi{width:16px;height:16px;flex:none;margin:0 -4px}
+  .dd-ic-pi{background:transparent!important;box-shadow:none!important}.dd-ic-pi img{width:100%;height:100%}
   .dm2-slots{font-size:11px;color:var(--mut);padding:10px 9px;line-height:1.5}
   .dm2-detail{flex:1;min-width:0;overflow-y:auto;padding:18px 20px}
   .dd-head{display:flex;align-items:center;gap:13px;margin-bottom:16px}
@@ -976,6 +979,8 @@ const host=()=>(location.hostname&&location.hostname!=="null")?location.hostname
 
 /* icons — Lucide (ISC), чистые и консистентные */
 const P={
+ layers:'<path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 12.18-9.17 4.16a2 2 0 0 1-1.66 0L2 12.18"/><path d="m22 17.18-9.17 4.16a2 2 0 0 1-1.66 0L2 17.18"/>',
+ save:'<path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7"/><path d="M7 3v4a1 1 0 0 0 1 1h7"/>',
  search:'<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
  edit:'<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
  x:'<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
@@ -1382,7 +1387,7 @@ function toast(m){const t=document.getElementById("toast");t.textContent=m;t.cla
 function ring(pct,color,size=64){const r=size/2-5,c=2*Math.PI*r,off=c*(1-Math.min(pct,100)/100);
  return `<svg class="ring" viewBox="0 0 ${size} ${size}"><circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="var(--track,var(--line))" stroke-width="6"/><circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="${color}" stroke-width="6" stroke-linecap="round" stroke-dasharray="${c}" stroke-dashoffset="${off}" transform="rotate(-90 ${size/2} ${size/2})"/></svg>`;}
 const tcol=t=>t==null?"var(--mut)":t>=75?"var(--danger)":t>=65?"var(--warn)":"var(--good)";
-const roleName={data:"данные",parity:"чётность",system:"система",pool:"пул",free:"свободен",removable:"съёмный"};
+const roleName={data:"данные",parity:"чётность",system:"система",pool:"пул",free:"не в пуле",removable:"внешний"};
 
 /* menus */
 function showMenu(x,y,items){
@@ -1698,27 +1703,28 @@ function poolStrip(disks,am,reload){
   const pct=total?Math.max(used/total*100,.4):0;
   w.innerHTML=`<span class="dp-ic">${svg("layers",17)}</span>
    <div class="dp-txt"><div class="dp-t">Пул /mnt/storage <span class="hstat ${hcls}" style="margin-left:4px">${hlbl}</span></div>
-    <div class="dp-s">${cnt("data")} данных · ${cnt("parity")} чётности${cnt("removable")?` · ${cnt("removable")} съёмных`:""}</div></div>
+    <div class="dp-s">${cnt("data")} данных · ${cnt("parity")} чётности${cnt("removable")?` · ${cnt("removable")} внешних`:""}</div></div>
    <div class="dp-cap"><div class="capbar" style="width:150px"><span class="used" style="width:${pct}%"></span></div>
     <div class="dp-lbl">${fmtB(total-used)} своб · ${fmtB(total)}</div></div>`;
  }else{
   w.innerHTML=`<span class="dp-ic">${svg("layers",17)}</span>
    <div class="dp-txt"><div class="dp-t">Пул не собран</div>
-    <div class="dp-s">${cnt("free")} свободных · ${cnt("removable")} съёмных — объедините диски в /mnt/storage</div></div>
+    <div class="dp-s">${cnt("free")} не в пуле · ${cnt("removable")} внешних — объедините диски данных в /mnt/storage</div></div>
    <button class="btn sm pri" id="poolcta">${svg("wand",13)} Собрать</button>`;
  }
- const amb=el(`<button class="btn sm ${am.enabled?"":""}" title="Автомонтирование съёмных: ${am.enabled?"вкл":"выкл"}">${svg("plug",13)}</button>`);
+ const amb=el(`<button class="btn sm${am.enabled?" pri":""}" title="Автомонтирование съёмных дисков при подключении">${svg("usb",13)} Авто: ${am.enabled?"вкл":"выкл"}</button>`);
  amb.onclick=()=>automountDlg(am,reload);w.appendChild(amb);
  const cta=w.querySelector("#poolcta");if(cta)cta.onclick=()=>location.href="/setup.html";
  return w;
 }
 
 function diskListItem(x){
- const dt=driveType(x),temp=x.smart&&x.smart.temp!=null?x.smart.temp:null;
- const nm=(x.label||x.model||x.name).replace(/</g,"&lt;");
- const it=el(`<button class="dm2-item${x.role==="system"?" sys":""}">
-   <span class="dot" style="background:${roleColor(x.role)}"></span>
-   <span class="li-main"><span class="li-name">${nm}</span><span class="li-sub">${roleName[x.role]||x.role} · ${x.size||"—"}</span></span>
+ const sys=x.role==="system",temp=x.smart&&x.smart.temp!=null?x.smart.temp:null;
+ const nm=(sys?"Система · SD-карта":(x.label||x.model||x.name)).replace(/</g,"&lt;");
+ const mark=sys?`<img class="li-pi" src="/icon-flat.svg" alt="">`:`<span class="dot" style="background:${roleColor(x.role)}"></span>`;
+ const it=el(`<button class="dm2-item${sys?" sys":""}">
+   ${mark}
+   <span class="li-main"><span class="li-name">${nm}</span><span class="li-sub">${roleName[x.role]||x.role} · ${x.size||"—"}${sys?"":(x.mounted?"":" · не смонт.")}</span></span>
    ${temp!=null?`<span class="li-temp" style="color:${diskTcol(temp)||"var(--mut)"}">${temp}°</span>`
      :(x.smart&&x.smart.healthy===false?`<span class="li-temp" style="color:var(--danger)">!</span>`:"")}
  </button>`);
@@ -1730,9 +1736,13 @@ function diskDetail(x,reload){
  const box=el(`<div class="dd"></div>`);
  const name=(x.model||dt.label||x.name).replace(/</g,"&lt;");
  const lbl=x.label?`<span class="dd-lbl">«${(""+x.label).replace(/</g,"&lt;")}»</span>`:"";
+ const sysHead=x.role==="system"
+   ?`<div class="dd-ic dd-ic-pi"><img src="/icon-flat.svg" alt=""></div>`
+   :`<div class="dd-ic" style="background:${roleColor(x.role)}">${I[dt.ic]||I.disks}</div>`;
+ const headName=x.role==="system"?"Система · SD-карта":name;
  box.appendChild(el(`<div class="dd-head">
-   <div class="dd-ic" style="background:${roleColor(x.role)}">${I[dt.ic]||I.disks}</div>
-   <div class="dd-hmain"><div class="dd-name">${name} ${lbl}</div>
+   ${sysHead}
+   <div class="dd-hmain"><div class="dd-name">${headName} ${lbl}</div>
      <div class="dd-sub"><span class="rbadge ${x.role}">${roleName[x.role]||x.role}</span> ${dt.label} · <span class="mono">${x.path}</span></div></div>
    <div class="dd-health">${sm&&sm.healthy!=null?`<div class="hstat ${sm.healthy?"ok":"bad"}">${sm.healthy?"Исправно":"Сбой"}</div>`:`<div class="hstat na">SMART —</div>`}
      ${sm&&sm.temp!=null?`<div class="htemp" style="color:${tcol(sm.temp)}">${sm.temp}°C</div>`:""}</div></div>`));
@@ -2441,7 +2451,7 @@ function winVault(){openWin("__vault","Хранилище доступов",body
  let creds=[];
  const save=async()=>{const r=await api("/api/creds",{method:"POST",body:JSON.stringify({creds})});toast(LIVE?(r&&r.ok?"Сохранено":"Ошибка"):"Демо: сохранение недоступно");};
  const addForm=()=>{const s=document.getElementById("scrim");
-  s.innerHTML=`<div class="dialog"><h3>Новый доступ</h3><p>Логин и пароль сервиса. Хранится локально в ~/nas-config (0600).</p>
+  s.innerHTML=`<div class="dialog"><h3>Новый доступ</h3><p>Логин и пароль сервиса. Хранится локально и защищено от чужого доступа.</p>
    <div class="field"><label>Сервис</label><input id="av-s" placeholder="Immich"></div>
    <div class="field"><label>Адрес</label><input id="av-u" class="mono" placeholder="http://pi5.local:2283"></div>
    <div class="field"><label>Логин</label><input id="av-l"></div>
@@ -2455,7 +2465,7 @@ function winVault(){openWin("__vault","Хранилище доступов",body
    s.classList.remove("show");await save();render();};};
  const render=()=>{
   body.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-    <div style="color:var(--mut);font-size:11.5px;font-family:var(--mono)">${creds.length} записей · 0600</div>
+    <div style="color:var(--mut);font-size:11.5px">${creds.length} ${creds.length===1?"запись":creds.length>=2&&creds.length<=4?"записи":"записей"}</div>
     <button class="btn sm pri" id="add">+ Добавить</button></div>
    <div class="vrow" style="color:var(--mut);font-family:var(--mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.06em"><span>Сервис</span><span>Логин</span><span>Пароль</span><span></span></div><div id="vl"></div>`;
   const list=body.querySelector("#vl");
@@ -3334,7 +3344,7 @@ function notifyTab(tc){tc.innerHTML=`<div style="color:var(--mut);font-size:12px
    <div class="field"><label>User key</label><input id="nfU" class="mono" value="${att(NTF.user||'')}" placeholder="u..."></div>
    <div class="field"><label>API token приложения</label><input id="nfT" class="mono" value="${att(NTF.token||'')}" placeholder="a..."></div>
    <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px"><button class="btn sm pri" id="nfSave">${svg("save",13)} Сохранить ключи</button><button class="btn sm" id="nfTest">${svg("bell",13)} Тест</button><span id="nfStat" style="font-size:11px;color:${NTF.configured?'var(--good)':'var(--mut)'}">${NTF.configured?'✓ ключи заданы':'не настроено'}</span></div>
-   <div class="mon-note">Ключи в <span class="mono">/etc/nas-wizard/notify.conf</span> (0600). User key — в профиле pushover.net, token — создав «Application/API Token».</div>
+   <div class="mon-note">Ключи хранятся на устройстве и защищены от чужого доступа. User key — в профиле pushover.net, token — создав «Application/API Token».</div>
    <div class="set-h">Оповещения</div>
    <div class="mon-row"><span>Присылать оповещения</span><label class="tgl"><input type="checkbox" id="nfEn"><span class="sl"></span></label></div>
    <div class="field" style="margin:8px 0 4px"><label>Не повторять одно событие чаще, мин</label><input id="nfCd" class="mono" style="max-width:120px"></div>
@@ -3560,8 +3570,9 @@ const DROLE_COL={system:"var(--mut)",data:"var(--accent)",pool:"var(--good)",par
 const diskTcol=t=>t==null?"":t>=60?"var(--danger)":t>=50?"var(--warn)":"var(--good)";
 function dRow(role,name,pct,free,temp,sys){
  const barCol=p=>p>=90?"var(--danger)":p>=75?"var(--warn)":"var(--good)";
+ const mark=sys?`<img class="ddot-pi" src="/icon-flat.svg" alt="">`:`<span class="ddot" style="background:${DROLE_COL[role]||"var(--mut)"}"></span>`;
  return `<div class="dline${sys?" sys":""}" title="${att((roleName[role]||role)+(temp!=null?" · "+temp+"°C":""))}">
-   <span class="ddot" style="background:${DROLE_COL[role]||"var(--mut)"}"></span>
+   ${mark}
    <span class="nm">${esc(name)}${pct!=null?`<div class="dbar"><i style="width:${Math.max(pct,.4)}%;background:${barCol(pct)}"></i></div>`:""}</span>
    ${temp!=null?`<span class="dtemp" style="color:${diskTcol(temp)}">${temp}°</span>`:""}
    <span class="pc">${free}</span></div>`;}
@@ -3570,8 +3581,10 @@ function paintDiskWidget(disks){const box=document.getElementById("wg-disk");if(
  let h="";
  if(LAST&&LAST.disk_pool&&LAST.disk_pool.path==="/mnt/storage"){const u=LAST.disk_pool;
   h+=dRow("pool","storage",u.pct,fmtB(u.total-u.used)+" своб.",null,false);}
- arr.slice(0,6).forEach(d=>{const u=d.usage,pct=u?u.pct:null,tmp=d.smart&&d.smart.temp!=null?d.smart.temp:null;
-  h+=dRow(d.role,d.label||d.name,pct,u?fmtB(u.total-u.used)+" своб.":(d.size||""),tmp,d.role==="system");});
+ arr.slice(0,6).forEach(d=>{const u=d.usage,pct=u?u.pct:null,tmp=d.smart&&d.smart.temp!=null?d.smart.temp:null,sys=d.role==="system";
+  const nm=sys?"Система · SD-карта":(d.label||d.name);
+  const free=u?fmtB(u.total-u.used)+" своб.":(d.mounted?(d.size||""):"не смонт.");
+  h+=dRow(d.role,nm,pct,free,tmp,sys);});
  box.innerHTML=h||`<div style="color:var(--mut);font-size:12px">Диски не найдены</div>`;
 }
 
