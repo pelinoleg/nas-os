@@ -3458,11 +3458,21 @@ function backupTab(tc){
     <button class="btn sm pri" id="bkMake">${svg("save",13)} Создать бэкап сейчас</button>
     <button class="btn sm" id="bkUp">${svg("upload",13)} Восстановить из файла…</button>
     <input type="file" id="bkFile" accept=".gz,application/gzip" style="display:none"></div>
+  <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:6px">
+    <div class="field" style="margin:0"><label>Автобэкап, раз в N дней (0 — выкл)</label><input class="mono" id="bkDays" style="max-width:110px"></div>
+    <div class="field" style="margin:0"><label>Хранить бэкапов, шт</label><input class="mono" id="bkKeep" style="max-width:110px"></div></div>
   <div class="mon-note" id="bkNote">загрузка…</div>
   <div id="bkList"></div>`;
  const list=tc.querySelector("#bkList"),note=tc.querySelector("#bkNote");
+ const days=tc.querySelector("#bkDays"),keep=tc.querySelector("#bkKeep");
+ const saveCfg=async()=>{const r=await api("/api/maintenance",{method:"POST",body:JSON.stringify({maintenance:{backup_days:+days.value||0,backup_keep:+keep.value||10}})});
+  const md=(r&&r.maintenance)||{};days.value=md.backup_days;keep.value=md.backup_keep;
+  toast(+md.backup_days?`Автобэкап: раз в ${md.backup_days} дн`: "Автобэкап выключен");load();};
+ days.onchange=saveCfg;keep.onchange=saveCfg;
  const load=async()=>{const r=await api("/api/settings-backup");if(!r||!r.ok)return;
-  note.textContent=`Папка: ${r.dir} · автоматически раз в неделю · хранится ${r.keep} последних`;
+  if(document.activeElement!==days)days.value=r.days;
+  if(document.activeElement!==keep)keep.value=r.keep;
+  note.textContent=`Папка: ${r.dir} · ${r.days?`автоматически раз в ${r.days} дн`:"автобэкап выключен"} · хранится ${r.keep} последних`;
   list.innerHTML=(r.list&&r.list.length)?"":`<div class="dempty">${svg("save",16)} Бэкапов ещё нет — нажмите «Создать»</div>`;
   (r.list||[]).forEach(b=>{
    const row=el(`<div class="stk-cont" style="margin-bottom:6px"><span class="nico">${svg("save",14)}</span><span class="cn">${esc(b.name)}</span><span class="cstat">${ruWhen(b.t)} · ${fmtB(b.size)}</span>
@@ -3776,7 +3786,8 @@ function notifyTab(tc){tc.innerHTML=`<div style="color:var(--mut);font-size:12px
    <div class="mon-note">Ключи хранятся на устройстве и защищены от чужого доступа. User key — в профиле pushover.net, token — создав «Application/API Token».</div>
    <div class="set-h">Оповещения</div>
    <div class="mon-row"><span>Слать push-уведомления на телефон (Pushover)</span><label class="tgl"><input type="checkbox" id="nfEn"><span class="sl"></span></label></div>
-   <div class="field" style="margin:8px 0 4px"><label>Не повторять одно событие чаще, мин</label><input id="nfCd" class="mono" style="max-width:120px"></div>
+   <div style="display:flex;gap:16px;flex-wrap:wrap"><div class="field" style="margin:8px 0 4px"><label>Не повторять одно событие чаще, мин</label><input id="nfCd" class="mono" style="max-width:120px"></div>
+   <div class="field" style="margin:8px 0 4px"><label>Напоминать о непрочитанном критичном, мин (0 — выкл)</label><input id="nfCr" class="mono" style="max-width:120px"></div></div>
    <div class="mon-note">Все события всегда записываются в журнал (колокольчик в верхнем баре). Колонка «Стол» — плашка на рабочем столе и счётчик на колокольчике, «Push» — уведомление в Pushover на телефон (при включённом переключателе выше). Выпадающий список — приоритет Pushover.</div>
    <div class="ev-cols"><span style="font-size:11px;color:var(--mut)">Событие</span><span class="grow"></span><span class="ev-colp" title="Приоритет уведомления в Pushover (не влияет на рабочий стол)">Приоритет Pushover</span><span class="ev-col" title="Push-уведомление в Pushover на телефон">Pushover</span><span class="ev-col" title="Плашка на рабочем столе + счётчик на колокольчике">Рабочий стол</span></div>
    <div id="nfEvents"></div>`;
@@ -3791,6 +3802,8 @@ function notifyTab(tc){tc.innerHTML=`<div style="color:var(--mut);font-size:12px
    const row=el(`<div class="ev-row"><div class="ev-txt"><div class="ev-t">${esc(m.t)}</div><div class="ev-d">${esc(m.d)}</div></div>${hasThr?`<input class="ev-thr mono" id="ev_${m.k}" value="${e.threshold!=null?e.threshold:''}">${m.thr?`<span class="ev-u">${m.thr}</span>`:""}`:""}${prioSel}<span class="ev-c"><label class="tgl" title="Push-уведомление в Pushover"><input type="checkbox" id="evon_${m.k}"${e.on?" checked":""}><span class="sl"></span></label></span><span class="ev-c"><label class="tgl" title="Плашка на рабочем столе + счётчик на колокольчике"><input type="checkbox" id="evd_${m.k}"${dsk?" checked":""}><span class="sl"></span></label></span></div>`);
    evbox.appendChild(row);});
   const cd=tc.querySelector("#nfCd");cd.value=Math.round((MON.cooldown||1800)/60);
+  const cr=tc.querySelector("#nfCr");cr.value=SET.critRemind!=null?SET.critRemind:10;
+  cr.onchange=()=>{SET.critRemind=Math.max(0,Math.min(240,+cr.value||0));cr.value=SET.critRemind;saveSettings();};
   const items=EVMETA.filter(m=>m.k);
   const collect=()=>{const events={};items.forEach(m=>{const o={on:tc.querySelector("#evon_"+m.k).checked,desk:tc.querySelector("#evd_"+m.k).checked,priority:+tc.querySelector("#evp_"+m.k).value};if(m.thr!==undefined)o.threshold=+tc.querySelector("#ev_"+m.k).value||0;events[m.k]=o;});return {enabled:en.checked,cooldown:Math.max(1,+cd.value||30)*60,events};};
   const saveMon=()=>api("/api/monitor",{method:"POST",body:JSON.stringify({monitor:collect()})});
@@ -3818,6 +3831,27 @@ function systemTab(tc){withSysc(tc,()=>{const s=SYSC.system||{};
  const H=tc.querySelector("#stHost"),Tz=tc.querySelector("#stTz"),J=tc.querySelector("#stJ");
  tc.querySelector("#stHostA").onclick=async()=>{await sconf("hostname",H.value.trim());refreshSysc(rerSet);};
  tc.querySelector("#stTzA").onclick=async()=>{await sconf("timezone",Tz.value.trim());refreshSysc(rerSet);};
+ // Диски и SMART + поведение панели (хранится в maintenance.json / SET)
+ {const anchor=tc.querySelector("#stAliasCur").closest(".srow");
+  const sec=el(`<div>
+   <div class="set-h">Диски и SMART</div>
+   <div class="srow"><div class="srow-l"><div class="srow-t">Фоновая проверка SMART${tipHTML("Как часто монитор опрашивает SMART-статус всех дисков (здоровье, износ, температура). Спящие диски не будятся. По результатам работают уведомления «Здоровье дисков».")}</div><div class="srow-d">статус/износ/температура, минут</div></div><div class="srow-c"><input class="mono" id="stSmScan" style="max-width:90px"></div></div>
+   <div class="srow"><div class="srow-l"><div class="srow-t">Короткий SMART-самотест${tipHTML("Диск сам прогоняет быструю самодиагностику (~2 мин). Запускается ночью (03–06), раз в N дней. 0 — не запускать.")}</div><div class="srow-d">раз в N дней · 0 = выкл</div></div><div class="srow-c"><input class="mono" id="stSmShort" style="max-width:90px"></div></div>
+   <div class="srow"><div class="srow-l"><div class="srow-t">Длинный SMART-самотест${tipHTML("Полная поверхностная проверка диска (часы, но работе не мешает). Запускается ночью, раз в N дней; в одну ночь — только один вид теста. 0 — не запускать.")}</div><div class="srow-d">раз в N дней · 0 = выкл</div></div><div class="srow-c"><input class="mono" id="stSmLong" style="max-width:90px"></div></div>
+   <div class="set-h">Поведение панели</div>
+   <div class="mon-row"><span>Автооткрывать центр операций${tipHTML("При старте загрузки/копирования поповер операций открывается сам. Выключите, если хотите открывать его только вручную с иконки в баре.")}</span><label class="tgl"><input type="checkbox" id="stOpsAuto"><span class="sl"></span></label></div>
+  </div>`);
+  anchor.after(sec);
+  const sc=sec.querySelector("#stSmScan"),ss=sec.querySelector("#stSmShort"),sl=sec.querySelector("#stSmLong");
+  api("/api/maintenance").then(m=>{const md=(m&&m.maintenance)||{};
+    sc.value=md.smart_scan_min!=null?md.smart_scan_min:10;
+    ss.value=md.smart_short_days!=null?md.smart_short_days:7;
+    sl.value=md.smart_long_days!=null?md.smart_long_days:30;});
+  const saveSm=async()=>{const r=await api("/api/maintenance",{method:"POST",body:JSON.stringify({maintenance:{smart_scan_min:+sc.value||10,smart_short_days:+ss.value||0,smart_long_days:+sl.value||0}})});
+    const md=(r&&r.maintenance)||{};sc.value=md.smart_scan_min;ss.value=md.smart_short_days;sl.value=md.smart_long_days;toast("Сохранено");};
+  sc.onchange=saveSm;ss.onchange=saveSm;sl.onchange=saveSm;
+  const oa=sec.querySelector("#stOpsAuto");oa.checked=SET.opsAuto!==false;
+  oa.onchange=()=>{SET.opsAuto=oa.checked;saveSettings();};}
  // псевдоним пула (симлинк): показать текущий и применить новый
  {const cur=tc.querySelector("#stAliasCur"),inp=tc.querySelector("#stAlias");
   api("/api/maintenance").then(m=>{const a=(m&&m.maintenance&&m.maintenance.pool_alias)||"";
@@ -4109,9 +4143,10 @@ async function _pollEvents(){
  else{const fresh=r.events.filter(e=>e.id>EVQ.toasted&&e.desk);
   fresh.slice(-4).forEach(e=>ntoast(e));
   if(r.events.length)EVQ.toasted=Math.max(EVQ.toasted,...r.events.map(e=>e.id));}
- // непрочитанное критичное (свежее суток, с включённой плашкой) — напоминать раз в 10 минут
+ // непрочитанное критичное (свежее суток, с включённой плашкой) — напоминать раз в N минут (SET.critRemind)
+ const remMin=SET.critRemind!=null?+SET.critRemind:10;
  const crit=EVQ.cache.filter(e=>e.lvl==="crit"&&e.desk&&e.id>EVQ.seen&&(Date.now()/1e3-(e.t2||e.t))<86400);
- if(crit.length&&Date.now()-EVQ.remind>600000){EVQ.remind=Date.now();ntoast(crit[crit.length-1],true);}
+ if(remMin>0&&crit.length&&Date.now()-EVQ.remind>remMin*60000){EVQ.remind=Date.now();ntoast(crit[crit.length-1],true);}
  paintBell();}
 function paintBell(){const b=document.getElementById("bellBtn");if(!b)return;
  const hasCrit=EVQ.cache.some(e=>e.lvl==="crit"&&e.id>EVQ.seen);
@@ -4171,9 +4206,9 @@ function opAdd(title,opts){opts=opts||{};
  const o={id:++OPS.seq,title,state:"run",p:null,label:"",cancel:opts.cancel||null,cancelled:false,t:Date.now()};
  OPS.list.push(o);if(OPS.list.length>40)OPS.list=OPS.list.slice(-40);
  paintOps(true);
- // сам открывается при старте операции; если пользователь закрыл во время работы —
- // не навязываемся до конца текущей пачки
- if(!document.querySelector(".mbpop[data-ops]")&&!OPS.autoClosed){OPS.autoOpened=true;opsPop();}
+ // сам открывается при старте операции (настройка SET.opsAuto); если пользователь
+ // закрыл во время работы — не навязываемся до конца текущей пачки
+ if(SET.opsAuto!==false&&!document.querySelector(".mbpop[data-ops]")&&!OPS.autoClosed){OPS.autoOpened=true;opsPop();}
  return o;}
 function opSet(o,p,label){o.p=p;if(label!=null)o.label=label;paintOps();}
 function opEnd(o,ok,label){if(o.state!=="run")return;o.state=o.cancelled?"cancel":ok?"done":"err";

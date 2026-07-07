@@ -1689,8 +1689,9 @@ def monitor_tick():
     if on("reboot_req") and os.path.exists("/var/run/reboot-required"):
         fire("reboot_req", "NAS: нужна перезагрузка", "Обновления применятся после ребута", pri("reboot_req"))
 
-    # --- SMART: раз в 10 минут единым проходом (здоровье / износ / температура) ---
-    if (on("smart") or on("smart_wear") or on("disktemp")) and now - _MON_SMART_LAST >= 600:
+    # --- SMART: единым проходом раз в N минут (настройка smart_scan_min) ---
+    _scan_s = max(300, (_safe(load_maintenance, {}) or {}).get("smart_scan_min", 10) * 60)
+    if (on("smart") or on("smart_wear") or on("disktemp")) and now - _MON_SMART_LAST >= _scan_s:
         _MON_SMART_LAST = now
         scan = _safe(_smart_scan, {})
         for dev, d in scan.items():
@@ -1956,7 +1957,13 @@ MAINT_FILE = os.path.join(NAS_CONFIG, "maintenance.json")
 _maint_last = 0
 
 def load_maintenance():
-    d = {"trash_days": 30, "pool_alias": ""}     # trash_days 0 = не чистить; pool_alias "" = без симлинка
+    # 0 = выключено (для *_days); все значения попадают в бэкап настроек вместе с файлом
+    d = {"trash_days": 30, "pool_alias": "",
+         "smart_scan_min": 10,      # фоновый опрос SMART-статуса, минут
+         "smart_short_days": 7,     # короткий самотест дисков, раз в N дней (ночью)
+         "smart_long_days": 30,     # длинный самотест, раз в N дней (ночью)
+         "backup_days": 7,          # авто-бэкап настроек, раз в N дней
+         "backup_keep": 10}         # сколько бэкапов хранить
     try:
         with open(MAINT_FILE) as f:
             d.update(json.load(f))
@@ -1993,11 +2000,15 @@ def _pool_alias_apply(alias, old=""):
 def save_maintenance(d):
     cur = load_maintenance()
     err = ""
-    if "trash_days" in d:
-        try:
-            cur["trash_days"] = max(0, min(365, int(d["trash_days"])))
-        except (ValueError, TypeError):
-            pass
+    # числовые настройки: ключ → (мин, макс)
+    for k, (lo, hi) in {"trash_days": (0, 365), "smart_scan_min": (5, 120),
+                        "smart_short_days": (0, 90), "smart_long_days": (0, 365),
+                        "backup_days": (0, 30), "backup_keep": (2, 50)}.items():
+        if k in d:
+            try:
+                cur[k] = max(lo, min(hi, int(d[k])))
+            except (ValueError, TypeError):
+                pass
     if "pool_alias" in d:
         v = str(d["pool_alias"] or "").strip().rstrip("/")
         if v and (not re.match(r"^/[A-Za-z0-9._-]{1,32}$", v) or v.lower() in _ALIAS_RESERVED):
@@ -2136,10 +2147,11 @@ def settings_backup_make(auto=False):
         except OSError:
             pass
         return {"ok": False, "log": str(e)}
-    # ротация
+    # ротация (сколько хранить — настройка backup_keep)
     try:
+        keep = load_maintenance().get("backup_keep", BACKUP_KEEP)
         old = sorted(f for f in os.listdir(d) if _BK_NAME_RE.match(f))
-        for f in old[:-BACKUP_KEEP]:
+        for f in old[:-keep]:
             os.remove(os.path.join(d, f))
     except OSError:
         pass
@@ -2160,7 +2172,9 @@ def settings_backup_list():
                 out.append({"name": f, "size": st.st_size, "t": int(st.st_mtime)})
     except OSError:
         pass
-    return {"ok": True, "dir": d, "auto": "weekly", "keep": BACKUP_KEEP, "list": out}
+    cfg = load_maintenance()
+    return {"ok": True, "dir": d, "days": cfg.get("backup_days", 7),
+            "keep": cfg.get("backup_keep", BACKUP_KEEP), "list": out}
 
 def settings_backup_restore(path):
     """Восстановить из архива. Проверяем каждого члена: только обычные файлы,
@@ -2226,20 +2240,62 @@ def settings_backup_restore(path):
             "log": "восстановлено файлов: %d — обновите страницу" % len(restored)}
 
 def _settings_backup_auto():
-    """Раз в неделю: свежий авто-бэкап (зовётся из maintenance_daily)."""
+    """Авто-бэкап раз в backup_days дней (0 = выключен); зовётся из maintenance_daily."""
+    days = load_maintenance().get("backup_days", 7)
+    if days <= 0:
+        return
     d = settings_backup_dir()
     try:
         latest = max((os.path.getmtime(os.path.join(d, f)) for f in os.listdir(d)
                       if _BK_NAME_RE.match(f)), default=0)
     except OSError:
         latest = 0
-    if time.time() - latest >= 7 * 86400:
+    if time.time() - latest >= days * 86400:
         settings_backup_make(auto=True)
+
+# --- периодические SMART-самотесты (короткий/длинный) ночью ------------------
+SMARTTEST_FILE = os.path.join(NAS_CONFIG, "smart-selftest.json")
+
+def _smart_selftest_tick():
+    """Раз в N дней запускать самотест дисков (в 03–06 ночи, один вид за ночь;
+    длинный приоритетнее). Сам тест идёт внутри диска и не мешает работе."""
+    if not (3 <= time.localtime().tm_hour < 6):
+        return
+    cfg = load_maintenance()
+    try:
+        with open(SMARTTEST_FILE) as f:
+            st = json.load(f)
+    except (OSError, ValueError):
+        st = {}
+    now = time.time()
+    for kind, key in (("long", "smart_long_days"), ("short", "smart_short_days")):
+        days = cfg.get(key, 0)
+        if days <= 0 or now - st.get(kind, 0) < days * 86400:
+            continue
+        devs = []
+        for dev in _phys_devs():
+            r = _run(["smartctl", "-t", kind, dev], timeout=30)
+            if r["ok"] or "has begun" in (r.get("log") or ""):
+                devs.append(os.path.basename(dev))
+        st[kind] = now
+        try:
+            os.makedirs(NAS_CONFIG, exist_ok=True)
+            with open(SMARTTEST_FILE, "w") as f:
+                json.dump(st, f)
+        except OSError:
+            pass
+        if devs:
+            try:
+                log_event("action", "SMART-самотест (%s) запущен" % ("длинный" if kind == "long" else "короткий"),
+                          "Диски: " + ", ".join(devs), "info", kind="disk", desk=False)
+            except Exception:
+                pass
+        break                      # один вид тестов за ночь
 
 def monitor_loop():
     while True:
         time.sleep(60)
-        for fn in (history_sample, monitor_tick, maintenance_daily):
+        for fn in (history_sample, monitor_tick, maintenance_daily, _smart_selftest_tick):
             try:
                 fn()
             except Exception:
