@@ -143,7 +143,37 @@ const P={
 const svg=(n,s)=>`<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${P[n]||""}</svg>`;
 const el=h=>{const t=document.createElement("template");t.innerHTML=h.trim();return t.content.firstChild;};
 let DRY=false,LIVE=false,STATE={};
-async function api(path,opts){try{const r=await fetch(path,Object.assign({headers:{"Content-Type":"application/json"}},opts));if(!r.ok)throw 0;LIVE=true;return await r.json();}catch(e){return null;}}
+async function api(path,opts){try{const r=await fetch(path,Object.assign({headers:{"Content-Type":"application/json"}},opts));if(r.status===401){authGate();throw 0;}if(!r.ok)throw 0;LIVE=true;return await r.json();}catch(e){return null;}}
+
+/* вход: бэкенд отдаёт 401 без сессии; при первом запуске пароль ещё не задан */
+let AUTHUI=false;
+async function authGate(){
+ if(AUTHUI)return;AUTHUI=true;
+ let st={configured:true};
+ try{st=await (await fetch("/api/auth/state")).json();}catch(e){}
+ const setup=!st.configured;
+ const ov=el(`<div class="scrim show" style="z-index:90"><div class="modal">
+  <h3>${setup?"Пароль администратора":"Вход в NAS"}</h3>
+  <p>${setup?"Первый запуск: придумайте пароль для входа в панель управления.":"Введите пароль администратора панели."}</p>
+  <form id="authF" style="display:flex;flex-direction:column;gap:10px">
+   <input type="password" id="authPw" placeholder="Пароль" autocomplete="${setup?"new-password":"current-password"}" required>
+   ${setup?'<input type="password" id="authPw2" placeholder="Пароль ещё раз" autocomplete="new-password" required>':""}
+   <div id="authErr" style="color:var(--danger);font-size:12.5px;min-height:16px"></div>
+   <div class="r"><button class="btn pri" type="submit">${setup?"Сохранить и войти":"Войти"}</button></div>
+  </form></div></div>`);
+ document.body.appendChild(ov);
+ setTimeout(()=>ov.querySelector("#authPw").focus(),80);
+ ov.querySelector("#authF").onsubmit=async e=>{
+  e.preventDefault();
+  const err=ov.querySelector("#authErr");err.textContent="";
+  const pw=ov.querySelector("#authPw").value;
+  if(setup&&pw!==ov.querySelector("#authPw2").value){err.textContent="Пароли не совпадают";return;}
+  let r=null;
+  try{r=await(await fetch(setup?"/api/auth/setup":"/api/auth/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({password:pw})})).json();}catch(ex){}
+  if(r&&r.ok)location.reload();
+  else err.textContent=(r&&r.log)||"Не удалось войти";
+ };
+}
 
 const STEPS=[
  {id:"system",nm:"Система",ic:"cpu"},
@@ -170,6 +200,7 @@ async function run(action,params,after){
  let resp;
  try{resp=await fetch("/api/setup/"+action,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({dry:DRY,params:params||{}})});}
  catch(e){con.innerHTML=`<div class="er">Нет связи с бэкендом. Установите службу: sudo ./nas-web-install.sh</div>`;return;}
+ if(resp.status===401){authGate();con.innerHTML=`<div class="er">Нужен вход: введите пароль администратора</div>`;return;}
  if(!resp.ok||!resp.body){con.innerHTML=`<div class="er">Ошибка ${resp.status}</div>`;return;}
  con.innerHTML="";
  const reader=resp.body.getReader(),dec=new TextDecoder();let buf="",code=null;
@@ -267,6 +298,7 @@ function applyDeskTheme(S){const root=document.documentElement,t=(S&&S.theme)||"
  root.style.setProperty("--accent-soft",hexA(a[0],.16));root.style.setProperty("--accent-ink",isLight?"#fff":"#04141A");}
 try{applyDeskTheme(JSON.parse(localStorage.getItem("nasdesk")||"{}"));}catch(e){}
 (async function(){
+ try{const a=await(await fetch("/api/auth/state")).json();if(!a.authed)authGate();}catch(e){}
  const sv=await api("/api/settings");if(sv&&sv.settings&&Object.keys(sv.settings).length)applyDeskTheme(sv.settings);
  const raw=await api("/api/setup/state");let st=null;
  try{st=raw&&typeof raw.log==="string"?JSON.parse(raw.log):raw;}catch(e){st=null;}

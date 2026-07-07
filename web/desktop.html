@@ -1104,9 +1104,44 @@ const MOCK={
 };
 let LIVE=false;
 async function api(path,opts){
- try{const r=await fetch(path,Object.assign({headers:{"Content-Type":"application/json"}},opts));if(!r.ok)throw 0;LIVE=true;return await r.json();}
+ try{const r=await fetch(path,Object.assign({headers:{"Content-Type":"application/json"}},opts));
+  if(r.status===401){authGate();throw 0;}
+  if(!r.ok)throw 0;LIVE=true;return await r.json();}
  catch(e){const k=path.split("?")[0].replace("/api/","").split("/")[0];return MOCK[k]||{};}
 }
+
+/* вход: бэкенд отдаёт 401 без сессии; при первом запуске пароль ещё не задан */
+let AUTHUI=false;
+async function authGate(){
+ if(AUTHUI)return;AUTHUI=true;
+ let st={configured:true};
+ try{st=await (await fetch("/api/auth/state")).json();}catch(e){}
+ const setup=!st.configured;
+ const ov=el(`<div class="onboard"><div class="ob-card">
+   <div class="ob-logo">${svg("shield",28)}</div>
+   <h2>${setup?"Пароль администратора":"Вход в NAS"}</h2>
+   <div class="sub">${setup?"Первый запуск: придумайте пароль для входа в панель управления. Он будет запрашиваться у всех, кто откроет этот адрес.":"Введите пароль администратора панели."}</div>
+   <form id="authF" style="display:flex;flex-direction:column;gap:10px">
+     <input type="password" id="authPw" placeholder="Пароль" autocomplete="${setup?"new-password":"current-password"}" required>
+     ${setup?'<input type="password" id="authPw2" placeholder="Пароль ещё раз" autocomplete="new-password" required>':""}
+     <div id="authErr" style="color:var(--danger);font-size:12.5px;min-height:16px;text-align:left"></div>
+     <div class="ob-btns"><button class="btn pri" type="submit">${setup?"Сохранить и войти":"Войти"}</button></div>
+   </form>
+ </div></div>`);
+ document.body.appendChild(ov);requestAnimationFrame(()=>ov.classList.add("show"));
+ setTimeout(()=>{const i=ov.querySelector("#authPw");if(i)i.focus();},280);
+ ov.querySelector("#authF").onsubmit=async e=>{
+  e.preventDefault();
+  const err=ov.querySelector("#authErr");err.textContent="";
+  const pw=ov.querySelector("#authPw").value;
+  if(setup&&pw!==ov.querySelector("#authPw2").value){err.textContent="Пароли не совпадают";return;}
+  let r=null;
+  try{r=await(await fetch(setup?"/api/auth/setup":"/api/auth/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({password:pw})})).json();}catch(ex){}
+  if(r&&r.ok)location.reload();
+  else err.textContent=(r&&r.log)||"Не удалось войти";
+ };
+}
+async function logout(){try{await fetch("/api/auth/logout",{method:"POST"});}catch(e){}location.reload();}
 
 /* helpers */
 const el=h=>{const t=document.createElement("template");t.innerHTML=h.trim();return t.content.firstChild;};
@@ -3096,6 +3131,7 @@ document.querySelector(".desk").addEventListener("contextmenu",e=>{e.preventDefa
   {label:"Персонализация",ic:svg("cog",17),act:winSettings},{sep:1},
   {label:"Обновить ярлыки",ic:svg("refresh",17),act:()=>{pollApps();toast("Ярлыки обновлены");}},
   {label:"Обновить всё",ic:svg("refresh",17),act:()=>{poll();pollApps();pollDisks();}},{label:"Открыть Cockpit",ic:svg("grid",17),act:()=>window.open(cockpitURL(),"_blank")},{sep:1},
+  {label:"Выйти из панели",ic:svg("key",17),act:logout},{sep:1},
   {label:"Перезагрузить",ic:svg("power",17),act:reboot,dng:1},{label:"Выключить",ic:svg("power",17),act:poweroff,dng:1}]);});
 
 /* poll */
@@ -3133,6 +3169,7 @@ function maybeOnboard(){let done=false;try{done=localStorage.getItem("nas_onboar
  ob.addEventListener("click",e=>{if(e.target===ob)fin();});}
 /* boot */
 (async function(){
+ try{const a=await(await fetch("/api/auth/state")).json();if(!a.authed)authGate();}catch(e){}
  try{const l=localStorage.getItem("nasdesk");if(l)SET=Object.assign(SET,JSON.parse(l));}catch(e){}
  applySettings();
  const sv=await api("/api/settings");if(sv.settings&&Object.keys(sv.settings).length){SET=Object.assign(SET,sv.settings);applySettings();}
@@ -3153,7 +3190,7 @@ function maybeOnboard(){let done=false;try{done=localStorage.getItem("nas_onboar
  setInterval(poll,3000);setInterval(pollApps,8000);setInterval(pollDisks,15000);setInterval(tickClock,10000);
  if("serviceWorker" in navigator&&window.isSecureContext)navigator.serviceWorker.register("/sw.js").catch(()=>{});
  matchMedia("(prefers-color-scheme:light)").addEventListener("change",()=>{if(SET.theme==="auto")applySettings();});
- setTimeout(()=>{if(!LIVE)toast("Демо-режим: примерные данные (нет связи с бэкендом)");},1400);
+ setTimeout(()=>{if(!LIVE&&!AUTHUI)toast("Демо-режим: примерные данные (нет связи с бэкендом)");},1400);
 })();
 })();
 </script></body></html>
