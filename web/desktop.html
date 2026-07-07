@@ -76,7 +76,9 @@
   .mb-theme{display:flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:9px;border:none;background:transparent;color:var(--dim);cursor:pointer;transition:.13s;flex:none}
   .mb-theme:hover{background:var(--glass-2);color:var(--text)}
   /* таскбар открытых окон в верхней панели */
+  .mb-sep{width:1px;height:16px;flex:none;background:var(--line,rgba(0,0,0,.14))}
   .winbar{flex:1;min-width:0;display:flex;align-items:center;gap:6px;overflow-x:auto;padding:0 6px;height:100%;scrollbar-width:none}
+  .winbar:empty+.mb-sep{display:none}
   .winbar::-webkit-scrollbar{height:0}
   .wb-pill{display:inline-flex;align-items:center;gap:7px;max-width:170px;padding:5px 12px 6px;border:none;border-bottom:2px solid transparent;border-radius:8px 8px 0 0;background:transparent;color:var(--mut);font-size:12px;font-weight:550;cursor:pointer;transition:.13s;flex:none}
   .wb-pill:hover{background:var(--sel);color:var(--text)}
@@ -160,9 +162,9 @@
 
   /* menubar */
   .menubar{position:fixed;top:0;left:0;right:0;height:40px;z-index:300;display:flex;align-items:center;gap:12px;
-    padding:0 16px;background:var(--mb-bg,var(--glass));
+    padding:0 16px;background:var(--mb-bg,transparent);
     --text:var(--mb-fg,#1A2431);--ink:var(--mb-fg,#1A2431);--dim:var(--mb-dim,rgba(0,0,0,.72));--mut:var(--mb-mut,rgba(0,0,0,.56));color:var(--text);
-    --accent:var(--mb-accent,#12B0A6);--accent-2:var(--mb-accent2,#4C8DF6);--accent-soft:var(--mb-accent-soft,rgba(18,176,166,.16));--accent-line:var(--mb-accent-line,rgba(18,176,166,.5));--accent-ink:var(--mb-accent-ink,#fff);--accent-fill:var(--mb-accent-fill,#12B0A6);--sel:var(--mb-sel,rgba(0,0,0,.07));--good:var(--mb-good,#1FA971);--warn:var(--mb-warn,#CF881B);--danger:var(--mb-danger,#DE4E48);
+    --accent:var(--mb-accent,#12B0A6);--accent-2:var(--mb-accent2,#4C8DF6);--accent-soft:var(--mb-accent-soft,rgba(18,176,166,.16));--accent-line:var(--mb-accent-line,rgba(18,176,166,.5));--accent-ink:var(--mb-accent-ink,#fff);--accent-fill:var(--mb-accent-fill,#12B0A6);--sel:var(--mb-sel,rgba(0,0,0,.07));--line:var(--mb-line,rgba(0,0,0,.14));--good:var(--mb-good,#1FA971);--warn:var(--mb-warn,#CF881B);--danger:var(--mb-danger,#DE4E48);
     backdrop-filter:var(--mb-bf,none);-webkit-backdrop-filter:var(--mb-bf,none)}
   .menubar .mb-brand svg{width:calc(22px*var(--mb-icon,1));height:calc(22px*var(--mb-icon,1))}
   .menubar .mb-theme svg{width:calc(17px*var(--mb-icon,1));height:calc(17px*var(--mb-icon,1))}
@@ -203,7 +205,6 @@
     display:flex;flex-direction:column;gap:14px}
   .rail::-webkit-scrollbar{width:0}
   /* тонкая линия-разделитель между виджетами (модулями) */
-  .wdg-sep{height:1px;flex:none;margin:0 6px;background:linear-gradient(90deg,transparent,var(--line-2) 15%,var(--line-2) 85%,transparent)}
   /* виджет «Носители» — компактный список томов вне пула */
   .vline{display:flex;align-items:center;gap:9px;padding:7px 0;border-top:1px solid var(--line);cursor:pointer;font-size:12.5px}
   .vline:first-child{border-top:none}
@@ -284,7 +285,7 @@
   .apps-hint b{color:var(--text);font-weight:600}
 
   /* widgets */
-  .wdg{background:var(--wdg-bg,var(--glass));border-radius:var(--r-lg);padding:18px;
+  .wdg{background:var(--wdg-bg,transparent);border-radius:var(--r-lg);padding:18px;
     --text:var(--wdg-fg,#1A2431);--ink:var(--wdg-fg,#1A2431);--dim:var(--wdg-dim,rgba(0,0,0,.66));--mut:var(--wdg-mut,rgba(0,0,0,.47));color:var(--text);
     --accent:var(--wdg-accent,#12B0A6);--accent-2:var(--wdg-accent2,#4C8DF6);--accent-soft:var(--wdg-accent-soft,rgba(18,176,166,.16));--accent-line:var(--wdg-accent-line,rgba(18,176,166,.5));--accent-ink:var(--wdg-accent-ink,#fff);--track:var(--wdg-track,rgba(0,0,0,.14));--sel:var(--wdg-sel,rgba(0,0,0,.07));--good:var(--wdg-good,#1FA971);--warn:var(--wdg-warn,#CF881B);--danger:var(--wdg-danger,#DE4E48);
     backdrop-filter:var(--wdg-bf,none);-webkit-backdrop-filter:var(--wdg-bf,none)}
@@ -314,7 +315,7 @@
 
   /* dock */
   .dock{position:fixed;bottom:16px;left:50%;transform:translateX(-50%);z-index:90;display:flex;gap:3px;padding:8px 12px;max-width:calc(100% - 28px);overflow-x:auto;
-    background:var(--dock-bg,var(--glass));border-radius:22px;box-shadow:var(--sh);
+    background:var(--dock-bg,transparent);border-radius:22px;box-shadow:var(--sh);
     --text:var(--dock-fg,#1A2431);--ink:var(--dock-fg,#1A2431);--dim:var(--dock-dim,rgba(0,0,0,.72));--mut:var(--dock-mut,rgba(0,0,0,.56));color:var(--text);
     --accent:var(--dock-accent,#12B0A6);--accent-2:var(--dock-accent2,#4C8DF6);--accent-soft:var(--dock-accent-soft,rgba(18,176,166,.16));--accent-line:var(--dock-accent-line,rgba(18,176,166,.5));--accent-ink:var(--dock-accent-ink,#fff);--accent-fill:var(--dock-accent-fill,#12B0A6);--sel:var(--dock-sel,rgba(0,0,0,.07));--good:var(--dock-good,#1FA971);--warn:var(--dock-warn,#CF881B);--danger:var(--dock-danger,#DE4E48);
     backdrop-filter:var(--dock-bf,none);-webkit-backdrop-filter:var(--dock-bf,none)}
@@ -327,8 +328,8 @@
   .dock button{border:none;background:transparent;display:flex;flex-direction:column;align-items:center;gap:5px;padding:5px 8px 4px;border-radius:14px;color:#fff;transition:transform .18s cubic-bezier(.2,.8,.3,1.4);flex:none}
   .dock button:hover{transform:translateY(-4px)}
   .dock button:hover .dl{color:var(--text)}
-  .dock .di{position:relative;width:calc(40px*var(--dock-icon,1));height:calc(40px*var(--dock-icon,1));border-radius:13px;display:grid;place-items:center;box-shadow:0 2px 6px rgba(0,0,0,.18)}
-  .dock .di svg{filter:drop-shadow(0 1px 2px rgba(0,0,0,.2));width:calc(22px*var(--dock-icon,1));height:calc(22px*var(--dock-icon,1))}
+  .dock .di{position:relative;width:calc(40px*var(--dock-icon,1));height:calc(40px*var(--dock-icon,1));border-radius:13px;display:grid;place-items:center}
+  .dock .di svg{width:calc(22px*var(--dock-icon,1));height:calc(22px*var(--dock-icon,1))}
   .dock .dl{font-size:10px;font-weight:560;color:var(--dim);white-space:nowrap;letter-spacing:-.01em;max-width:66px;overflow:hidden;text-overflow:ellipsis}
   /* индикатор запущенного приложения — снизу по центру, читаем на любом фоне дока */
   .dock .run{position:absolute;left:50%;bottom:-3px;transform:translateX(-50%);width:5px;height:5px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 1.5px var(--dock-bg,var(--glass-2))}
@@ -878,11 +879,15 @@
 
 <div class="menubar">
   <div class="mb-brand"><svg viewBox="0 0 40 40" fill="none" style="color:var(--dim)"><ellipse cx="20" cy="12" rx="11" ry="4.2" stroke="currentColor" stroke-width="2.4"/><path d="M9 12v7c0 2.3 4.9 4.2 11 4.2s11-1.9 11-4.2v-7" stroke="currentColor" stroke-width="2.4"/><path d="M9 19v6c0 2.3 4.9 4.2 11 4.2s11-1.9 11-4.2v-6" stroke="currentColor" stroke-width="2.4"/></svg><span id="brandName">pi5.local</span></div>
+  <span class="mb-sep"></span>
   <button class="mb-theme" id="expoBtn" title="Все окна (F9)"></button>
   <div class="winbar" id="winbar"></div>
+  <span class="mb-sep"></span>
   <div class="tray" id="tray"></div>
+  <span class="mb-sep"></span>
   <button class="mb-theme" id="themeBtn" title="Тема"></button>
   <button class="mb-theme" id="powerBtn" title="Питание и сессия"></button>
+  <span class="mb-sep"></span>
   <div class="clock" id="clock"></div>
 </div>
 
@@ -1176,6 +1181,8 @@ function applySettings(){
   // фон активной «фишки» (табы/сегменты/сайдбар): лёгкая подложка от фактического фона,
   // не глухой белый — акцентный текст поверх остаётся читаемым
   root.style.setProperty("--"+prefix+"-sel",`rgba(${b},${lite?.20:.11})`);
+  // разделители на поверхности: заметнее фона, но заметно тусклее текста
+  root.style.setProperty("--"+prefix+"-line",`rgba(${b},${lite?.22:.16})`);
   // Два применения акцента:
   //  1) foreground (текст/иконки/тонкие линии) — тянем светлоту до контраста ≥3:1 с фоном (--accent)
   //  2) fill (заливка кнопок/свитчей/ползунков) — оставляем сочный акцент темы, а поверх кладём
@@ -1425,7 +1432,7 @@ addEventListener("resize",()=>{for(const id in OPEN){const w=OPEN[id];if(!w||w.c
   w.style.left=g.x+"px";w.style.top=g.y+"px";w.style.width=g.w+"px";w.style.height=g.h+"px";}});
 
 /* apps */
-let APPS=[];   // ярлыки из docker-лейблов web-desktop.* (/api/desktop)
+let APPS=[],APPS_LOADED=false;   // ярлыки из docker-лейблов web-desktop.* (/api/desktop)
 let VOLS=[];   // тома вне пула (USB/свободные диски) — ярлыки на столе + сайдбар ФМ
 const INTERNAL=[
  {id:"__sys",name:"Система",color:"linear-gradient(135deg,#34C6BE,#2C9C9C)",ic:"gauge",fn:()=>winSystem()},
@@ -1445,7 +1452,7 @@ function renderApps(){
  APPS.forEach(app=>{if(!app.url)return;
   const b=el(`<button class="app" title="${app.container||""}${app.running?"":" · остановлен"}"><div class="tile applbl" style="background:${tileColor(app.name)}">${appIconHTML(app)}</div><div class="lbl">${app.name}</div><span class="st ${app.running?"on":"off"}"></span></button>`);
   b.onclick=()=>window.open(app.url,"_blank");box.appendChild(b);});
- if(!APPS.filter(a=>a.url).length)box.appendChild(el(`<div class="apps-hint">Ярлыки приложений появятся здесь автоматически.<br>Добавьте контейнеру метки <b>web-desktop.*</b> в docker-compose, поднимите его в <b>Dockge</b> и нажмите <b>«Обновить ярлыки»</b> (правый клик по столу).<br><br>Системные инструменты — в панели снизу.</div>`));
+ if(APPS_LOADED&&!APPS.filter(a=>a.url).length)box.appendChild(el(`<div class="apps-hint">Ярлыки приложений появятся здесь автоматически.<br>Добавьте контейнеру метки <b>web-desktop.*</b> в docker-compose, поднимите его в <b>Dockge</b> и нажмите <b>«Обновить ярлыки»</b> (правый клик по столу).<br><br>Системные инструменты — в панели снизу.</div>`));
 }
 function volIcon(v){return v.rotational?"hdd":(v.tran==="mmc"?"sd":"ssd");}
 async function openVolume(v){
@@ -3298,7 +3305,7 @@ function railWidgets(){let cfg=(SET.widgets&&SET.widgets.length)?SET.widgets.sli
  return cfg;}
 function renderRail(){const rail=document.getElementById("rail");if(!rail)return;
  const list=railWidgets().filter(w=>w.on);
- rail.innerHTML=list.map(w=>{const d=WIDGET_DEFS[w.id];return `<div class="wdg"><h4>${svg(d.ic,15)} ${d.name} ${d.extra||""}</h4>${d.body}</div>`;}).join('<div class="wdg-sep"></div>')
+ rail.innerHTML=list.map(w=>{const d=WIDGET_DEFS[w.id];return `<div class="wdg"><h4>${svg(d.ic,15)} ${d.name} ${d.extra||""}</h4>${d.body}</div>`;}).join('')
    ||`<div style="color:var(--mut);font-size:12px;padding:10px 4px">Виджеты выключены — включите в Настройках → Оформление.</div>`;
  const md=document.getElementById("more-disks");if(md)md.onclick=()=>winDisks();
  const mdk=document.getElementById("more-docker");if(mdk)mdk.onclick=()=>winServices();
@@ -3423,7 +3430,7 @@ function sparkSVG(data,color,max){const w=120,h=28,d=(data||[]).slice(-40);if(d.
 async function poll(){const s=await api("/api/stats");LAST=s;pushHist(s);paintTray(s);paintSys(s);
  const bn=document.getElementById("brandName");if(bn)bn.textContent=(s.host||location.hostname.split(".")[0]||"pi5")+".local";
  if(OPEN.__sys&&OPEN.__sys._sub)OPEN.__sys._sub(s);}
-async function pollApps(){const d=await api("/api/desktop");APPS=(d&&d.apps)||[];VOLS=(d&&d.volumes)||[];renderApps();paintVols();
+async function pollApps(){const d=await api("/api/desktop");APPS=(d&&d.apps)||[];VOLS=(d&&d.volumes)||[];APPS_LOADED=true;renderApps();paintVols();
  if(OPEN.__files&&OPEN.__files._vols)OPEN.__files._vols();}
 async function pollDisks(){const d=await api("/api/disks");paintDiskWidget(d.disks||[]);}
 
@@ -3480,7 +3487,6 @@ function maybeOnboard(){let done=false;try{done=localStorage.getItem("nas_onboar
  setInterval(pollStacks,15000);setInterval(pollTop,10000);
  if("serviceWorker" in navigator&&window.isSecureContext)navigator.serviceWorker.register("/sw.js").catch(()=>{});
  matchMedia("(prefers-color-scheme:light)").addEventListener("change",()=>{if(SET.theme==="auto")applySettings();});
- setTimeout(()=>{if(!LIVE&&!AUTHUI)toast("Демо-режим: примерные данные (нет связи с бэкендом)");},1400);
 })();
 })();
 </script></body></html>

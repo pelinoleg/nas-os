@@ -61,7 +61,7 @@
     --sh-sm:0 1px 2px rgba(20,40,70,.05), 0 2px 6px -2px rgba(20,40,70,.08);
     --sh:0 1px 2px rgba(20,40,70,.05), 0 10px 26px -14px rgba(20,40,70,.20), 0 32px 60px -34px rgba(20,40,70,.22);
   }
-  *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font);font-size:15px;letter-spacing:-.006em;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+  *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font);font-size:15px;line-height:1.5;letter-spacing:-.006em;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
   .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}button{font-family:inherit;cursor:pointer;color:inherit}
   ::selection{background:var(--accent-soft)}
   ::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-thumb{background:var(--line-2);border-radius:6px;border:3px solid transparent;background-clip:padding-box}
@@ -82,13 +82,14 @@
   .step .dot{width:7px;height:7px;border-radius:50%;background:var(--line-2)}.step.done .dot{background:var(--good);box-shadow:0 0 0 3px var(--good-soft)}
   .panel{padding:32px clamp(20px,4vw,48px)}
   .eyebrow{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.14em;color:var(--mut);margin-bottom:10px}
-  h1{font-size:1.7rem;margin:0 0 10px;letter-spacing:-.02em;color:var(--ink)}
-  .lead{color:var(--dim);margin:0 0 22px;max-width:60ch}
-  .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);padding:18px;margin-bottom:14px;box-shadow:var(--sh-sm)}
-  .opt{display:flex;align-items:center;gap:13px;padding:11px 0;border-top:1px solid var(--line)}.opt:first-child{border-top:none}
-  .opt .ic{width:30px;height:30px;border-radius:var(--r-sm);background:var(--bg);display:grid;place-items:center;color:var(--dim);flex:none}
+  h1{font-size:1.7rem;line-height:1.2;margin:0 0 10px;letter-spacing:-.02em;color:var(--ink)}
+  .lead{color:var(--dim);margin:0 0 22px;max-width:62ch;line-height:1.55}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);padding:8px 20px;margin-bottom:14px;box-shadow:var(--sh-sm)}
+  .card+.eyebrow{margin-top:24px}
+  .opt{display:flex;align-items:center;gap:14px;padding:14px 0;border-top:1px solid var(--line)}.opt:first-child{border-top:none}
+  .opt .ic{width:32px;height:32px;border-radius:var(--r-sm);background:var(--bg);display:grid;place-items:center;color:var(--dim);flex:none}
   .opt.on .ic{background:var(--accent-soft);color:var(--accent)}
-  .opt .m{flex:1}.opt .m .t{font-weight:600;font-size:13.5px}.opt .m .d{font-size:12px;color:var(--mut)}
+  .opt .m{flex:1;display:flex;flex-direction:column;gap:2px;min-width:0}.opt .m .t{font-weight:600;font-size:13.5px;line-height:1.35}.opt .m .d{font-size:12px;color:var(--mut);line-height:1.45}
   .field{display:flex;flex-direction:column;gap:6px;margin-bottom:12px}.field label{font-size:12.5px;font-weight:600}
   input,select{background:var(--bg);border:1px solid var(--line-2);border-radius:var(--r-sm);color:var(--text);padding:10px 12px;font-size:14px;width:100%;font-family:var(--font)}
   input.mono{font-family:var(--mono)}input:focus,select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
@@ -99,13 +100,14 @@
   .btn.dng:disabled{background:var(--bg);color:var(--mut);cursor:not-allowed;box-shadow:none;transform:none;filter:none;border-color:var(--line)}
   .btn.sm{padding:7px 12px;font-size:12.5px}
   .actions{display:flex;gap:10px;margin-top:18px}
-  .disk{display:flex;align-items:center;gap:13px;padding:13px;border:1px solid var(--line);border-radius:var(--r-md);margin-bottom:9px;background:var(--surface);box-shadow:var(--sh-sm)}
-  .disk .ic{color:var(--dim)}.disk .info{flex:1}.disk .p{font-family:var(--mono);font-weight:600;font-size:14px}.disk .mo{font-size:12px;color:var(--mut)}
+  .disk{display:flex;align-items:center;gap:14px;padding:14px 16px;border:1px solid var(--line);border-radius:var(--r-md);margin-bottom:10px;background:var(--surface);box-shadow:var(--sh-sm)}
+  .disk .ic{color:var(--dim);flex:none}.disk .info{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}.disk .p{font-family:var(--mono);font-weight:600;font-size:14px}.disk .mo{font-size:12px;color:var(--mut);line-height:1.4}
   .seg{display:inline-flex;background:var(--bg);border:1px solid var(--line-2);border-radius:var(--r-sm);padding:3px;gap:3px}
   .seg button{border:none;background:none;color:var(--dim);padding:6px 12px;border-radius:6px;font-size:13px;font-weight:600;transition:.12s}
   .seg button.on{background:var(--sel);color:var(--accent)}
-  .note{display:flex;gap:11px;padding:12px 14px;border-radius:var(--r-md);font-size:13px;background:var(--accent-soft);border:1px solid var(--accent-line);color:var(--text)}
-  .note.dng{background:var(--danger-soft);border-color:var(--danger)}
+  .note{display:flex;align-items:flex-start;gap:11px;padding:13px 15px;border-radius:var(--r-md);font-size:13px;line-height:1.5;background:var(--accent-soft);border:1px solid var(--accent-line);color:var(--text)}
+  .note svg{flex:none;margin-top:1px;color:var(--accent)}
+  .note.dng{background:var(--danger-soft);border-color:var(--danger)}.note.dng svg{color:var(--danger)}
   .console{background:var(--code-bg);border:1px solid var(--line);border-radius:var(--r-md);padding:13px 15px;font-family:var(--mono);font-size:12.5px;line-height:1.7;max-height:240px;overflow:auto;color:var(--code-fg);margin-top:14px;display:none}
   .console.show{display:block}.console .ok{color:var(--good)}.console .er{color:var(--danger)}.console .dim{color:var(--mut)}
   .scrim{position:fixed;inset:0;background:rgba(6,10,17,.55);backdrop-filter:blur(4px);display:none;place-items:center;z-index:50;padding:20px}
@@ -241,7 +243,7 @@ const R={
     <div class="actions" style="margin-top:12px"><button class="btn pri" id="godk">Установить Dockge</button><a class="btn" href="http://${location.hostname}:5001" target="_blank">Открыть Dockge ↗</a></div></div>
    <div class="eyebrow">Скопировать готовые стеки в Dockge</div>
    <div class="card" id="box">${chk("cronmaster","Cronmaster","планировщик cron-задач хоста (+ окно на десктопе)",true,"cube")}${chk("dozzle","Dozzle","логи контейнеров",false,"cube")}${chk("scrutiny","Scrutiny","SMART-здоровье дисков",false,"cube")}${chk("homepage","Homepage","дашборд",false,"cube")}${chk("syncthing","Syncthing","синхронизация файлов",false,"cube")}${chk("nextexplorer","NextExplorer","файловый менеджер",false,"cube")}${chk("diun","Diun","уведомления об обновлениях образов",false,"cube")}</div>
-   <div class="note">${svg("cube",18)}&nbsp; Стеки только копируются в Dockge. Запускайте их там — там же логи, правка compose и старт/стоп. Ярлыки на рабочем столе появятся сами по меткам <b>web-desktop.*</b> в compose.</div>
+   <div class="note">${svg("cube",18)}<span>Стеки только копируются в Dockge. Запускайте их там — там же логи, правка compose и старт/стоп. Ярлыки на рабочем столе появятся сами по меткам <b>web-desktop.*</b> в compose.</span></div>
    <div class="actions"><button class="btn pri" id="gocp">Скопировать выбранные</button></div><div class="console" id="con"></div>`;
   p.querySelector("#godk").onclick=()=>run("dockge");
   p.querySelector("#gocp").onclick=()=>run("copy-stacks",{keys:keys(p.querySelector("#box"))});},
