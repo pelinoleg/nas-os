@@ -190,18 +190,26 @@
 
   /* desktop layout — apps left, widgets pinned right */
   .desk{position:fixed;inset:46px 0 96px 0}
-  .apps{position:absolute;inset:0 398px 0 0;padding:32px 34px 140px;overflow:auto;
+  .apps{position:absolute;inset:0 398px 0 0;padding:32px 34px;overflow:auto;
     display:grid;grid-template-columns:repeat(auto-fill,96px);gap:18px 8px;align-content:start}
   .rail{position:absolute;top:0;right:0;bottom:0;width:398px;padding:26px 26px 26px 26px;overflow-y:auto;
     display:flex;flex-direction:column;gap:16px}
   .rail::-webkit-scrollbar{width:0}
-  /* диски вне пула — полоса внизу рабочего стола */
-  .vols{position:absolute;left:0;right:398px;bottom:0;padding:8px 34px 10px;display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;pointer-events:none}
-  .vols .app{pointer-events:auto}
-  body.rail-off .vols{right:0}
-  body.dock-left .vols{left:var(--dockw)}
-  body.dock-right .vols{right:calc(398px + var(--dockw))}
-  @media(max-width:960px){.vols{right:0}}
+  /* виджет «Носители» — компактный список томов вне пула */
+  .vline{display:flex;align-items:center;gap:9px;padding:7px 0;border-top:1px solid var(--line);cursor:pointer;font-size:12.5px}
+  .vline:first-child{border-top:none}
+  .vline .vi{flex:none;color:var(--accent-2);display:flex}
+  .vline.off .vi{color:var(--mut)}
+  .vline .vn{flex:1;min-width:0;font-weight:550;word-break:break-word;line-height:1.3}
+  .vline.off .vn{color:var(--dim)}
+  .vline .vs{font-family:var(--mono);font-size:11.5px;color:var(--mut);flex:none}
+  .vline .vm{font-size:10.5px;color:var(--accent);border:1px solid var(--accent-line);border-radius:999px;padding:1px 8px;flex:none}
+  .vline .vx{border:none;background:none;color:var(--mut);display:none;padding:2px;cursor:pointer;flex:none}
+  .vline:hover .vx{display:flex}.vline .vx:hover{color:var(--danger)}
+  .vline:hover .vn{color:var(--accent)}
+  /* мини-бар заполнения в виджете дисков */
+  .dbar{height:3px;border-radius:999px;background:var(--card-2);margin-top:4px;overflow:hidden}
+  .dbar i{display:block;height:100%;border-radius:999px}
   @media(max-width:960px){.apps{inset:0}.rail{display:none}}
   /* телефон: окна-шиты на весь экран, компактный хром */
   @media(max-width:640px){
@@ -848,7 +856,6 @@
 
 <div class="desk">
   <div class="apps" id="apps"></div>
-  <div class="vols" id="vols"></div>
   <div class="rail" id="rail"></div>
 </div>
 
@@ -957,6 +964,7 @@ const WP_DEFAULT="https://wall.pelin.top/random/desktop/optimized";
 let SET={accent:"teal",accentHex:"",theme:"light",wpType:"url",wpUrl:WP_DEFAULT,wpVer:0,fxDim:0,fxBlur:0,fxNoise:0,
  perf:false,blur:false,wpSlide:false,wpSlideMin:30,mbAlpha:1,wdgAlpha:1,mbIcon:1,mbFs:1,
  deskIcon:1,deskFs:1,deskLc:"",deskShadow:true,widgets:null,railHidden:false,
+ mbOp:null,dockOp:null,wdgOp:null,
  tray:null,dockPos:"bottom",dockIcon:1,dockAlpha:1,textContrast:1,dockTiles:true,dockLabels:true,dockOrder:null,
  wdgLight:"",wdgDark:"",winAlpha:.9,menuAlpha:.92,radius:1.1,tintLight:"",tintDark:"",
  winBlur:30,winNoise:12,shadow:"md",
@@ -1018,7 +1026,9 @@ function applySettings(){
  const lvlRgb=n=>litRgb(mat,clampf(veilBase+(n-1)*veilStep,0,.85));
  const lvlA=n=>clampf(eBase+(n-1)*alphaStep,.1,1);
  const lvl=n=>`rgba(${lvlRgb(n)},${lvlA(n).toFixed(3)})`;
- root.style.setProperty("--mb-bg",lvl(1));root.style.setProperty("--dock-bg",lvl(1));
+ // отдельная прозрачность панели/дока/виджетов (mbOp/dockOp/wdgOp, %); null = как у окон (общая база)
+ const ovrOp=(key,n)=>{const v=SET[key];return (v==null||v==="")?lvl(n):`rgba(${lvlRgb(n)},${clampf(+v/100,0,1).toFixed(3)})`;};
+ root.style.setProperty("--mb-bg",ovrOp("mbOp",1));root.style.setProperty("--dock-bg",ovrOp("dockOp",1));
  root.style.setProperty("--win-bg",lvl(2));
  // Поверхности ВНУТРИ окон (карточки, инпуты): в тёмной теме — еле заметный ЧИСТО БЕЛЫЙ
  // слой (не тонированный), очень прозрачный; выше уровень → плотнее (менее прозрачный).
@@ -1032,7 +1042,8 @@ function applySettings(){
  }
  root.style.setProperty("--menu-bg",lvl(4));
  const wc=isLight()?SET.wdgLight:SET.wdgDark;
- root.style.setProperty("--wdg-bg",/^#[0-9a-f]{6}$/i.test(wc||"")?`rgba(${hexRgb(wc)},${eBase.toFixed(3)})`:lvl(1));
+ const wOp=(SET.wdgOp==null||SET.wdgOp==="")?lvlA(1):clampf(+SET.wdgOp/100,0,1);
+ root.style.setProperty("--wdg-bg",/^#[0-9a-f]{6}$/i.test(wc||"")?`rgba(${hexRgb(wc)},${wOp.toFixed(3)})`:`rgba(${lvlRgb(1)},${wOp.toFixed(3)})`);
  const rq=clampf(SET.radius??1,.4,1.6);
  root.style.setProperty("--r-win",(20*rq).toFixed(0)+"px");root.style.setProperty("--r-lg",(16*rq).toFixed(0)+"px");
  root.style.setProperty("--r-md",(12*rq).toFixed(0)+"px");root.style.setProperty("--r-sm",(9*rq).toFixed(0)+"px");
@@ -1286,15 +1297,6 @@ function renderApps(){
  APPS.forEach(app=>{if(!app.url)return;
   const b=el(`<button class="app" title="${app.container||""}${app.running?"":" · остановлен"}"><div class="tile applbl" style="background:${tileColor(app.name)}">${appIconHTML(app)}</div><div class="lbl">${app.name}</div><span class="st ${app.running?"on":"off"}"></span></button>`);
   b.onclick=()=>window.open(app.url,"_blank");box.appendChild(b);});
- const vbox=document.getElementById("vols");if(vbox){vbox.innerHTML="";
-  VOLS.forEach(v=>{
-   const b=el(`<button class="app" title="${att(v.dev+" · "+(v.fstype||"")+" · "+(v.size||""))}${v.mounted?"":" · не смонтирован"}"><div class="tile" style="background:linear-gradient(135deg,#7b8ba3,#5a6a82)">${svg(volIcon(v),26)}</div><div class="lbl">${esc(v.label||"Диск")}</div><span class="st ${v.mounted?"on":"off"}"></span></button>`);
-   b.onclick=()=>openVolume(v);
-   b.oncontextmenu=e=>{e.preventDefault();e.stopPropagation();showMenu(e.clientX,e.clientY,[
-     {label:"Открыть",ic:svg("folder",17),act:()=>openVolume(v)},
-     ...(v.mounted?[{label:"Извлечь",ic:svg("eject",17),act:()=>ejectVolume(v),dng:1}]:[]),
-   ]);};
-   vbox.appendChild(b);});}
  if(!APPS.filter(a=>a.url).length)box.appendChild(el(`<div class="apps-hint">Ярлыки приложений появятся здесь автоматически.<br>Добавьте контейнеру метки <b>web-desktop.*</b> в docker-compose, поднимите его в <b>Dockge</b> и нажмите <b>«Обновить ярлыки»</b> (правый клик по столу).<br><br>Системные инструменты — в панели снизу.</div>`));
 }
 function volIcon(v){return v.rotational?"hdd":(v.tran==="mmc"?"sd":"ssd");}
@@ -2816,6 +2818,10 @@ function fxSlider(label,key,min,max,unit,tip){const v=+SET[key]||0;return `<div 
 const TFMT={pct:v=>Math.round(v*100)+"%",min:v=>v+" мин",px:v=>v+" px",pctn:v=>v+"%"};
 function pSlider(label,key,min,max,step,type,tip){const v=SET[key];return `<div class="fx-row"><div class="fx-top"><span>${esc(label)}${tip?tipHTML(tip):""}</span><span class="fx-val" id="o_${key}">${TFMT[type](v)}</span></div><input type="range" class="fx-range" data-p="${key}" data-type="${type}" min="${min}" max="${max}" step="${step}" value="${v}"></div>`;}
 function pToggle(label,tip,key,sub){return `<div class="srow"><div class="srow-l"><div class="srow-t">${esc(label)}${tip?tipHTML(tip):""}</div>${sub?`<div class="srow-d">${esc(sub)}</div>`:""}</div><div class="srow-c"><label class="tgl"><input type="checkbox" data-pt="${key}"${SET[key]?" checked":""}><span class="sl"></span></label></div></div>`;}
+function baseOpPct(){return Math.round(clampf(isLight()?(SET.elevBaseLight??.55):(SET.elevBaseDark??.5),.1,.96)*100);}
+function opSlider(label,key,tip){const v=(SET[key]==null||SET[key]==="")?null:+SET[key];
+ return `<div class="fx-row"><div class="fx-top"><span>${esc(label)}${tip?tipHTML(tip):""}</span><span class="fx-val" id="o_${key}">${v==null?"как у окон":v+"%"}</span></div><input type="range" class="fx-range" data-op="${key}" min="0" max="100" step="1" value="${v==null?baseOpPct():v}"></div>
+ <div style="display:flex;justify-content:flex-end;margin:-2px 0 8px"><button class="btn sm" data-opreset="${key}" ${v==null?"disabled":""}>Сброс — как у окон</button></div>`;}
 function paintWpPrev(box){if(!box)return;if(SET.wpVer){box.style.backgroundImage=`url(/api/wallpaper/img?v=${SET.wpVer})`;box.classList.remove("empty");box.textContent="";}else{box.style.backgroundImage="";box.classList.add("empty");box.textContent="обои не заданы";}}
 function cfgList(box,getCfg,setCfg,defs,after){const cfg=getCfg();box.innerHTML="";cfg.forEach((w,i)=>{const d=defs[w.id];
   const row=el(`<div class="wg-cfg"><span class="nm">${svg(d.ic,15)} ${esc(d.name)}</span><div class="ord"><button data-u ${i===0?"disabled":""} title="Выше">${svg("arrowup",14)}</button><button data-dn ${i===cfg.length-1?"disabled":""} title="Ниже" style="transform:rotate(180deg)">${svg("arrowup",14)}</button></div><label class="tgl"><input type="checkbox" ${w.on?"checked":""}><span class="sl"></span></label></div>`);
@@ -2829,6 +2835,13 @@ function wireLook(lb){
  lb.querySelectorAll("input[data-fx]").forEach(sl=>{const out=lb.querySelector("#o_"+sl.dataset.fx);paintRange(sl);sl.oninput=()=>{SET[sl.dataset.fx]=+sl.value;if(out)out.textContent=sl.value+sl.dataset.unit;paintRange(sl);applyFx();};sl.onchange=saveSettings;});
  lb.querySelectorAll("input[data-p]").forEach(sl=>{const key=sl.dataset.p,ty=sl.dataset.type,out=lb.querySelector("#o_"+key);paintRange(sl);sl.oninput=()=>{SET[key]=+sl.value;if(out)out.textContent=TFMT[ty](+sl.value);paintRange(sl);applySettings();};sl.onchange=()=>{saveSettings();if(key==="wpSlideMin")startSlideshow();};});
  lb.querySelectorAll("input[data-pt]").forEach(inp=>{inp.onchange=()=>{const k=inp.dataset.pt;SET[k]=inp.checked;applySettings();saveSettings();if(k==="wpSlide"){const si=lb.querySelector("#slideInt");if(si)si.style.display=inp.checked?"":"none";startSlideshow();}};});
+ lb.querySelectorAll("input[data-op]").forEach(sl=>{const key=sl.dataset.op,out=lb.querySelector("#o_"+key);paintRange(sl);
+  sl.oninput=()=>{SET[key]=+sl.value;if(out)out.textContent=sl.value+"%";paintRange(sl);applySettings();
+   const rb=lb.querySelector(`[data-opreset="${key}"]`);if(rb)rb.disabled=false;};
+  sl.onchange=saveSettings;});
+ lb.querySelectorAll("[data-opreset]").forEach(b=>b.onclick=()=>{const k=b.dataset.opreset;SET[k]=null;applySettings();saveSettings();
+  const sl=lb.querySelector(`input[data-op="${k}"]`),out=lb.querySelector("#o_"+k);
+  if(out)out.textContent="как у окон";if(sl){sl.value=baseOpPct();paintRange(sl);}b.disabled=true;});
 }
 function lsTheme(lb){lb.innerHTML=`
   <div class="set-card">
@@ -2877,6 +2890,7 @@ function lsBar(lb){lb.innerHTML=`
   <div class="set-card">
    ${pSlider("Размер иконок","mbIcon",.8,1.5,.05,"pct","Масштаб иконок в верхней панели.")}
    ${pSlider("Размер шрифта","mbFs",.8,1.4,.05,"pct","Масштаб текста (часы, метрики).")}
+   ${opSlider("Прозрачность фона","mbOp","Своя плотность фона верхней панели. По умолчанию — общая, как у окон (вкладка «Материал»).")}
   </div>
   <div class="set-card"><div class="set-grp">Метрики справа</div>
    <div class="mon-note" style="margin:0 0 6px">Что показывать в панели:</div><div id="trayList"></div></div>`;
@@ -2886,12 +2900,13 @@ function lsWidgets(lb){const cl=/^#[0-9a-f]{6}$/i;lb.innerHTML=`
   <div class="set-card">
    ${pToggle("Скрыть панель виджетов","Убирает правую панель целиком — рабочий стол на всю ширину.","railHidden","правая панель со сводками")}
   </div>
-  <div class="set-card"><div class="set-grp">Цвет фона виджетов</div>
-   <div class="srow"><div class="srow-l"><div class="srow-t">Светлая тема${tipHTML("Свой цвет подложки виджетов для светлой темы. Прозрачность — ползунком выше.")}</div></div><div class="srow-c"><input type="color" id="wdgL" value="${cl.test(SET.wdgLight||"")?SET.wdgLight:"#ffffff"}" class="ccell"><button class="btn sm" data-wreset="wdgLight">Сброс</button></div></div>
+  <div class="set-card"><div class="set-grp">Фон виджетов</div>
+   ${opSlider("Прозрачность фона","wdgOp","Своя плотность подложек виджетов. По умолчанию — общая, как у окон (вкладка «Материал»).")}
+   <div class="srow"><div class="srow-l"><div class="srow-t">Светлая тема${tipHTML("Свой цвет подложки виджетов для светлой темы.")}</div></div><div class="srow-c"><input type="color" id="wdgL" value="${cl.test(SET.wdgLight||"")?SET.wdgLight:"#ffffff"}" class="ccell"><button class="btn sm" data-wreset="wdgLight">Сброс</button></div></div>
    <div class="srow"><div class="srow-l"><div class="srow-t">Тёмная тема${tipHTML("Свой цвет подложки виджетов для тёмной темы.")}</div></div><div class="srow-c"><input type="color" id="wdgD" value="${cl.test(SET.wdgDark||"")?SET.wdgDark:"#161e2a"}" class="ccell"><button class="btn sm" data-wreset="wdgDark">Сброс</button></div></div>
   </div>
   <div class="set-card"><div class="set-grp">Виджеты панели</div><div id="wgList"></div></div>`;
- cfgList(lb.querySelector("#wgList"),railWidgets,c=>{SET.widgets=c;},WIDGET_DEFS,()=>{renderRail();poll();pollDisks();});
+ cfgList(lb.querySelector("#wgList"),railWidgets,c=>{SET.widgets=c;},WIDGET_DEFS,()=>{renderRail();poll();});
  const wl=lb.querySelector("#wdgL"),wd=lb.querySelector("#wdgD");
  wl.oninput=()=>{SET.wdgLight=wl.value;applySettings();};wl.onchange=()=>saveSettings();
  wd.oninput=()=>{SET.wdgDark=wd.value;applySettings();};wd.onchange=()=>saveSettings();
@@ -2904,6 +2919,7 @@ function lsDock(lb){lb.innerHTML=`
     <button data-d="left" class="${SET.dockPos==="left"?"on":""}">Слева</button>
     <button data-d="right" class="${SET.dockPos==="right"?"on":""}">Справа</button></div></div>
    ${pSlider("Размер иконок","dockIcon",.7,1.5,.05,"pct","Размер иконок в доке.")}
+   ${opSlider("Прозрачность фона","dockOp","Своя плотность подложки дока. По умолчанию — общая, как у окон (вкладка «Материал»).")}
    ${pToggle("Плитки под иконками","Цветная подложка под иконками. Выключи — чистые иконки.","dockTiles","цветной фон под каждой иконкой")}
    ${pToggle("Подписи у иконок","Названия под иконками. Выключи — компактный док только из иконок (уже, когда сбоку).","dockLabels","показывать названия приложений")}
    <div class="mon-note" style="margin-top:2px">Порядок иконок меняется перетаскиванием прямо в доке (и когда док сбоку).</div>
@@ -3111,33 +3127,75 @@ function piTab(tc){withSysc(tc,()=>{const p=SYSC.pi||{};const g=p.governor||{};c
 /* widgets (right rail) */
 let NETH=[];
 const WIDGET_DEFS={
+ vols:{name:"Носители",ic:"hdd",body:'<div id="wg-vols"></div>'},
  sys:{name:"Система",ic:"gauge",body:'<div id="wg-sys"></div>'},
  disk:{name:"Диски",ic:"disks",extra:'<span class="more" id="more-disks">все →</span>',body:'<div id="wg-disk"></div>'},
- net:{name:"Сеть",ic:"net",body:'<canvas id="wg-net" width="300" height="46" style="width:100%;height:46px;display:block"></canvas><div id="wg-net2" style="margin-top:8px"></div>'},
- qa:{name:"Быстрые действия",ic:"cube",body:'<div class="qa" id="wg-qa"></div>'},
+ net:{name:"Сеть",ic:"net",body:'<canvas id="wg-net" width="300" height="40" style="width:100%;height:40px;display:block"></canvas><div id="wg-net2" style="margin-top:8px"></div>'},
+ docker:{name:"Контейнеры",ic:"cube",extra:'<span class="more" id="more-docker">все →</span>',body:'<div id="wg-docker"></div>'},
+ top:{name:"Топ процессов",ic:"activity",def:false,extra:'<span class="more" id="more-top">все →</span>',body:'<div id="wg-top"></div>'},
+ qa:{name:"Быстрые действия",ic:"grid",def:false,body:'<div class="qa" id="wg-qa"></div>'},
 };
-const WIDGET_ORDER=["sys","disk","net","qa"];
-function railWidgets(){let cfg=(SET.widgets&&SET.widgets.length)?SET.widgets.slice():WIDGET_ORDER.map(id=>({id,on:true}));
+const WIDGET_ORDER=["vols","sys","disk","net","docker","top","qa"];
+function railWidgets(){let cfg=(SET.widgets&&SET.widgets.length)?SET.widgets.slice():WIDGET_ORDER.map(id=>({id,on:WIDGET_DEFS[id].def!==false}));
  cfg=cfg.filter(w=>WIDGET_DEFS[w.id]);
- WIDGET_ORDER.forEach(id=>{if(!cfg.find(w=>w.id===id))cfg.push({id,on:true});});
+ WIDGET_ORDER.forEach(id=>{if(!cfg.find(w=>w.id===id))cfg.push({id,on:WIDGET_DEFS[id].def!==false});});
  return cfg;}
 function renderRail(){const rail=document.getElementById("rail");if(!rail)return;
  const list=railWidgets().filter(w=>w.on);
  rail.innerHTML=list.map(w=>{const d=WIDGET_DEFS[w.id];return `<div class="wdg"><h4>${svg(d.ic,15)} ${d.name} ${d.extra||""}</h4>${d.body}</div>`;}).join("")
    ||`<div style="color:var(--mut);font-size:12px;padding:10px 4px">Виджеты выключены — включите в Настройках → Оформление.</div>`;
  const md=document.getElementById("more-disks");if(md)md.onclick=()=>winDisks();
+ const mdk=document.getElementById("more-docker");if(mdk)mdk.onclick=()=>winServices();
+ const mt=document.getElementById("more-top");if(mt)mt.onclick=()=>winMon();
  const qa=document.getElementById("wg-qa");
  if(qa)[["Cockpit","grid",()=>window.open(cockpitURL(),"_blank")],["Мастер","wand",()=>location.href="/setup.html"],
   ["Настройки","cog",()=>winSettings()],["Перезагрузка","power",()=>reboot()]]
  .forEach(([l,ic,fn])=>{const b=el(`<button><span class="ic">${svg(ic,17)}</span>${l}</button>`);b.onclick=fn;qa.appendChild(b);});
+ paintVols();if(LAST){paintSys(LAST);}pollDisks();pollStacks();pollTop();
 }
-function paintSys(s){const m=document.getElementById("wg-sys");if(!m)return;m.innerHTML=`
+function paintVols(){const box=document.getElementById("wg-vols");if(!box)return;box.innerHTML="";
+ if(!VOLS.length){box.innerHTML='<div style="color:var(--mut);font-size:12px">Подключите USB-диск или карту — он появится здесь</div>';return;}
+ VOLS.forEach(v=>{
+  const it=el(`<div class="vline${v.mounted?"":" off"}" title="${att(v.dev+" · "+(v.fstype||"")+(v.mounted?" · "+v.mount:""))}">
+    <span class="vi">${svg(volIcon(v),16)}</span><span class="vn">${esc(v.label||v.dev)}</span>
+    <span class="vs">${esc(v.size||"")}</span>
+    ${v.mounted?`<button class="vx" title="Извлечь">${svg("eject",14)}</button>`:`<span class="vm">открыть</span>`}
+  </div>`);
+  it.onclick=()=>openVolume(v);
+  const x=it.querySelector(".vx");if(x)x.onclick=e=>{e.stopPropagation();ejectVolume(v);};
+  box.appendChild(it);});
+}
+function paintSys(s){const m=document.getElementById("wg-sys");if(!m)return;
+ const thr=s.throttled&&s.throttled.raw&&s.throttled.raw!=="0x0";
+ m.innerHTML=`
   <div class="gauges"><div class="gauge">${ring(s.cpu,"var(--accent)")}<div class="v">${s.cpu}%</div><div class="l">CPU</div></div>
   <div class="gauge">${ring(s.temp?Math.min(s.temp/85*100,100):0,tcol(s.temp))}<div class="v">${s.temp?s.temp+"°":"—"}</div><div class="l">°C</div></div>
   <div class="gauge">${ring(s.mem.pct,"var(--accent-2)")}<div class="v">${s.mem.pct}%</div><div class="l">RAM</div></div></div>
-  <div class="krow" style="margin-top:12px"><span>Аптайм</span><b>${fmtUp(s.uptime)}</b></div>`;
- const n2=document.getElementById("wg-net2");if(n2)n2.innerHTML=`<div class="krow"><span>↓ приём</span><b>${fmtR(s.net.rx)}</b></div><div class="krow"><span>↑ отдача</span><b>${fmtR(s.net.tx)}</b></div>`;
+  <div class="krow" style="margin-top:12px"><span>Аптайм</span><b>${fmtUp(s.uptime)}</b></div>
+  <div class="krow"><span>Load 1м / 5м</span><b>${s.load?s.load[0].toFixed(2)+" / "+s.load[1].toFixed(2):"—"}</b></div>
+  <div class="krow"><span>ОЗУ занято</span><b>${s.mem.used?fmtB(s.mem.used):"—"} из ${s.mem.total?fmtB(s.mem.total):"—"}</b></div>
+  ${thr?`<div class="krow" style="color:var(--warn)"><span>⚠ троттлинг</span><b>${esc(s.throttled.raw)}</b></div>`:""}`;
+ const n2=document.getElementById("wg-net2");if(n2)n2.innerHTML=
+  `<div class="krow"><span>↓ ${fmtR(s.net.rx)}</span><b style="color:var(--dim);font-weight:500">↑ ${fmtR(s.net.tx)}</b></div>
+   <div class="krow"><span>${esc(s.iface||"—")}</span><b>${esc(s.ip||"")}</b></div>`;
  NETH.push(s.net.rx);if(NETH.length>60)NETH.shift();drawNet();
+}
+async function pollStacks(){const box=document.getElementById("wg-docker");if(!box)return;
+ const r=await api("/api/stacks");const st=(r&&r.stacks)||[];
+ const act=st.filter(x=>x.total>0);
+ const run=act.reduce((s,x)=>s+x.running,0),tot=act.reduce((s,x)=>s+x.total,0);
+ let h=`<div class="krow"><span>Запущено контейнеров</span><b>${run} из ${tot}</b></div>`;
+ act.slice(0,5).forEach(x=>{
+  const bad=x.containers.some(c=>c.health==="unhealthy"),part=x.running<x.total;
+  const col=bad?"var(--danger)":part?"var(--warn)":x.running?"var(--good)":"var(--mut)";
+  h+=`<div class="dline" style="padding:6px 0"><span style="width:8px;height:8px;border-radius:50%;background:${col};flex:none"></span><span class="nm">${esc(x.name)}</span><span class="pc">${x.running}/${x.total}</span></div>`;});
+ if(!act.length)h+=`<div style="color:var(--mut);font-size:12px">Нет запущенных стеков</div>`;
+ box.innerHTML=h;
+}
+async function pollTop(){const box=document.getElementById("wg-top");if(!box)return;
+ const r=await api("/api/processes?sort=cpu");const ps=((r&&r.processes)||[]).slice(0,4);
+ box.innerHTML=ps.map(p=>`<div class="dline" style="padding:6px 0"><span class="nm" title="${att(p.cmd||"")}">${esc(p.name)}</span><span class="pc">${(p.cpu||0).toFixed(0)}% · ${fmtB(p.rss)}</span></div>`).join("")
+  ||`<div style="color:var(--mut);font-size:12px">—</div>`;
 }
 function drawNet(){const cv=document.getElementById("wg-net");if(!cv)return;const ctx=cv.getContext("2d"),W=cv.width,H=cv.height;
  ctx.clearRect(0,0,W,H);if(NETH.length<2)return;const mx=Math.max(...NETH,1);const st=getComputedStyle(document.documentElement).getPropertyValue("--accent").trim()||"#34C6BE";
@@ -3147,7 +3205,15 @@ function drawNet(){const cv=document.getElementById("wg-net");if(!cv)return;cons
 }
 function paintDiskWidget(disks){const box=document.getElementById("wg-disk");if(!box)return;box.innerHTML="";
  const arr=disks||[];
- arr.slice(0,5).forEach(d=>{const u=d.usage;box.appendChild(el(`<div class="dline"><span class="dbadge ${d.role}">${roleName[d.role]||d.role}</span><span class="nm">${d.name}</span><span class="pc">${u?u.pct+"%":d.size}</span></div>`));});
+ const barCol=p=>p>=90?"var(--danger)":p>=75?"var(--warn)":"var(--accent)";
+ if(LAST&&LAST.disk_pool&&LAST.disk_pool.path==="/mnt/storage"){const u=LAST.disk_pool;
+  box.appendChild(el(`<div class="dline"><span class="dbadge data">пул</span>
+   <span class="nm">storage<div class="dbar"><i style="width:${u.pct}%;background:${barCol(u.pct)}"></i></div></span>
+   <span class="pc">${fmtB(u.total-u.used)} своб.</span></div>`));}
+ arr.slice(0,6).forEach(d=>{const u=d.usage,pct=u?u.pct:null;
+  box.appendChild(el(`<div class="dline"><span class="dbadge ${d.role}">${roleName[d.role]||d.role}</span>
+   <span class="nm">${esc(d.label||d.name)}${pct!=null?`<div class="dbar"><i style="width:${pct}%;background:${barCol(pct)}"></i></div>`:""}</span>
+   <span class="pc">${u?fmtB(u.total-u.used)+" своб.":d.size}</span></div>`));});
  if(!arr.length)box.innerHTML=`<div style="color:var(--mut);font-size:12px">Диски не найдены</div>`;
 }
 
@@ -3197,7 +3263,7 @@ function sparkSVG(data,color,max){const w=120,h=28,d=(data||[]).slice(-40);if(d.
 async function poll(){const s=await api("/api/stats");LAST=s;pushHist(s);paintTray(s);paintSys(s);
  const bn=document.getElementById("brandName");if(bn)bn.textContent=(s.host||location.hostname.split(".")[0]||"pi5")+".local";
  if(OPEN.__sys&&OPEN.__sys._sub)OPEN.__sys._sub(s);}
-async function pollApps(){const d=await api("/api/desktop");APPS=(d&&d.apps)||[];VOLS=(d&&d.volumes)||[];renderApps();
+async function pollApps(){const d=await api("/api/desktop");APPS=(d&&d.apps)||[];VOLS=(d&&d.volumes)||[];renderApps();paintVols();
  if(OPEN.__files&&OPEN.__files._vols)OPEN.__files._vols();}
 async function pollDisks(){const d=await api("/api/disks");paintDiskWidget(d.disks||[]);}
 
@@ -3240,7 +3306,9 @@ function maybeOnboard(){let done=false;try{done=localStorage.getItem("nas_onboar
  if(!snInit){seedSnips();try{localStorage.setItem("nassnipinit","1");}catch(e){}saveSnips();}
  renderRail();renderApps();renderDock();renderWinbar();tickClock();
  poll();pollApps();pollDisks();maybeOnboard();
+ pollStacks();pollTop();
  setInterval(poll,3000);setInterval(pollApps,8000);setInterval(pollDisks,15000);setInterval(tickClock,10000);
+ setInterval(pollStacks,15000);setInterval(pollTop,10000);
  if("serviceWorker" in navigator&&window.isSecureContext)navigator.serviceWorker.register("/sw.js").catch(()=>{});
  matchMedia("(prefers-color-scheme:light)").addEventListener("change",()=>{if(SET.theme==="auto")applySettings();});
  setTimeout(()=>{if(!LIVE&&!AUTHUI)toast("Демо-режим: примерные данные (нет связи с бэкендом)");},1400);

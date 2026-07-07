@@ -576,6 +576,7 @@ def stats():
         "net": net_rate(iface),
         "iface": iface,
         "uptime": uptime_s(),
+        "load": list(os.getloadavg()),
         "ts": int(time.time()),
     }
 
