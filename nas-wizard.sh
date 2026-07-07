@@ -876,7 +876,10 @@ $(findmnt -rno TARGET,SOURCE,FSTYPE,SIZE /mnt/disk* /mnt/parity* 2>/dev/null | s
 # ---------------------------------------------------------------------------
 # ЭТАП 2b: mergerfs (пул из >= 2 дисков данных)
 # ---------------------------------------------------------------------------
-MERGERFS_OPTS="defaults,allow_other,use_ino,category.create=mfs,minfreespace=20G,fsname=mergerfs"
+# nofail — не блокировать загрузку в emergency mode, если пул не смонтировался.
+# x-systemd.requires=<ветка> добавляется на каждую ветку динамически в generate_mergerfs
+# (пути дисков не статичны), чтобы пул монтировался ТОЛЬКО после своих веток, а не поверх пустых /mnt/diskN.
+MERGERFS_OPTS="defaults,nofail,allow_other,use_ino,category.create=mfs,minfreespace=20G,fsname=mergerfs"
 
 remove_fstab_mergerfs() {
     if [ "$DRY_RUN" -eq 1 ]; then
@@ -895,9 +898,11 @@ generate_mergerfs() {
         return 0
     fi
 
-    local branchspec line
+    local branchspec line opts="$MERGERFS_OPTS"
     branchspec="$(IFS=:; printf '%s' "${branches[*]}")"
-    line="${branchspec}  ${STORAGE_MNT}  fuse.mergerfs  ${MERGERFS_OPTS}  0  0"
+    # пул ждёт каждую ветку (иначе смонтируется поверх ещё пустых /mnt/diskN)
+    for mp in "${branches[@]}"; do opts+=",x-systemd.requires=${mp}"; done
+    line="${branchspec}  ${STORAGE_MNT}  fuse.mergerfs  ${opts}  0  0"
 
     backup_fstab
     run mkdir -p "$STORAGE_MNT"
