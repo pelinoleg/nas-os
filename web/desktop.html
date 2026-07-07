@@ -233,6 +233,7 @@
     .win{inset:46px 0 82px 0!important;width:auto!important;height:auto!important;border-radius:16px 16px 0 0;max-width:100%}
     .win.max{inset:46px 0 82px 0!important}
     .win .wgrip{display:none}
+    .win>.rz{display:none}
     .win .wbar{cursor:default}
     .dock{bottom:10px;gap:1px;padding:6px 8px;max-width:calc(100% - 12px);justify-content:flex-start}
     .dock button{padding:4px 6px}
@@ -266,7 +267,7 @@
   .ob-card h2{margin:0 0 6px;font-size:21px;letter-spacing:-.02em}
   .ob-card .sub{color:var(--dim);font-size:13.5px;line-height:1.5;margin-bottom:18px}
   .ob-steps{display:grid;gap:10px;text-align:left;margin-bottom:22px}
-  .ob-step{display:flex;gap:12px;align-items:center;padding:11px 13px;background:var(--bg);border-radius:var(--r-md);font-size:13px}
+  .ob-step{display:flex;gap:12px;align-items:center;padding:11px 13px;background:var(--card);border-radius:var(--r-md);font-size:13px}
   .ob-step .oi{flex:none;width:34px;height:34px;border-radius:10px;display:grid;place-items:center;color:var(--accent);background:var(--accent-soft)}
   .ob-step b{display:block;font-weight:640;margin-bottom:1px}
   .ob-step span{color:var(--mut);font-size:11.5px}
@@ -358,13 +359,24 @@
   .win .wbar{height:36px;display:flex;align-items:center;gap:10px;padding:0 14px;cursor:grab;
     user-select:none;flex:none}
   .win .wbar.drag{cursor:grabbing}
-  .lights{display:flex;gap:7px}.lights i{width:11px;height:11px;border-radius:50%;display:block;transition:.12s}
+  .lights{display:flex;gap:7px}.lights i{width:11px;height:11px;border-radius:50%;display:block;cursor:pointer;transition:.12s}
   .lights .c{background:#ff5f57}.lights .m{background:#febc2e}.lights .z{background:#28c840}
   .lights i:hover{filter:brightness(1.12)}
   .win .ttl{font-size:13.5px;font-weight:650;flex:1;text-align:center;color:var(--dim);padding-right:44px;letter-spacing:-.01em}
   .win .body{padding:22px 26px;overflow:auto;flex:1}
   .win.max{inset:56px 14px 108px 14px!important;width:auto!important;height:auto!important}
   .win .wgrip{position:absolute;right:0;bottom:0;width:20px;height:20px;cursor:nwse-resize;z-index:6;touch-action:none}
+  /* ресайз окна со всех сторон/углов: невидимые полосы-ручки, только курсор */
+  .win>.rz{position:absolute;z-index:7;touch-action:none;background:transparent}
+  .win>.rz-n{top:0;left:14px;right:14px;height:6px;cursor:ns-resize}
+  .win>.rz-s{bottom:0;left:14px;right:14px;height:7px;cursor:ns-resize}
+  .win>.rz-e{right:0;top:14px;bottom:14px;width:7px;cursor:ew-resize}
+  .win>.rz-w{left:0;top:14px;bottom:14px;width:7px;cursor:ew-resize}
+  .win>.rz-ne{top:0;right:0;width:15px;height:15px;cursor:nesw-resize}
+  .win>.rz-nw{top:0;left:0;width:15px;height:15px;cursor:nwse-resize}
+  .win>.rz-se{bottom:0;right:0;width:16px;height:16px;cursor:nwse-resize}
+  .win>.rz-sw{bottom:0;left:0;width:15px;height:15px;cursor:nesw-resize}
+  .win.max .rz,body.expo-on .rz{display:none!important}
   .win .wgrip::after{content:"";position:absolute;right:3px;bottom:3px;width:9px;height:9px;border-right:2px solid var(--line-2);border-bottom:2px solid var(--line-2);border-bottom-right-radius:3px;opacity:.7}
   .win.max .wgrip{display:none}
 
@@ -622,7 +634,7 @@
   .fm{display:flex;height:100%}
   .fm-side{flex:1;min-width:0;display:flex;flex-direction:column}
   .fm-bar{display:flex;gap:4px;align-items:center;margin-bottom:9px}
-  .fm-path{margin-bottom:8px;font-family:var(--mono);font-size:11px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:5px 8px;background:var(--bg);border-radius:var(--r-sm)}
+  .fm-path{margin-bottom:8px;font-family:var(--mono);font-size:11px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:5px 8px;background:var(--card);border-radius:var(--r-sm)}
   .fm-list{flex:1;overflow:auto;margin:0 -4px}
   /* ===== Корзина (в стиле файлменеджера) ===== */
   .trwrap{display:flex;flex-direction:column;height:100%}
@@ -683,7 +695,7 @@
   .ed-dark .cm-variable-2,.ed-dark .cm-def,.ed-dark .cm-variable{color:#e5c07b}
   .ed-dark .cm-tag,.ed-dark .cm-meta,.ed-dark .cm-attribute{color:#56b6c2}
   .cstat{font-family:var(--mono);font-size:10px;color:var(--mut);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .stk-note{width:100%;margin-top:9px;background:var(--bg);border:1px solid var(--line);border-radius:var(--r-sm);color:var(--dim);font-size:12px;font-family:var(--font);padding:7px 9px;resize:vertical;min-height:34px}
+  .stk-note{width:100%;margin-top:9px;background:var(--card);border:1px solid var(--line);border-radius:var(--r-sm);color:var(--dim);font-size:12px;font-family:var(--font);padding:7px 9px;resize:vertical;min-height:34px}
   .stk-note:focus{outline:none;border-color:var(--accent);color:var(--text)}
   .stk-note::placeholder{color:var(--mut)}
   .cm-s-default .cm-keyword{color:#c792ea}.cm-s-default .cm-atom{color:#f78c6c}
@@ -932,8 +944,10 @@
   .ev-thr{width:56px;flex:none;text-align:center;padding:6px 4px!important}
   .ev-u{font-size:11px;color:var(--mut);flex:none;margin-left:-4px}
   .ev-c{width:52px;flex:none;display:flex;justify-content:center}
-  .ev-cols{position:sticky;top:-14px;z-index:3;display:flex;align-items:center;gap:10px;padding:8px 0 8px;background:var(--menu-bg,var(--glass-2));backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid var(--line);margin-bottom:2px}
+  .ev-cols{position:sticky;top:-14px;z-index:3;display:flex;align-items:center;gap:10px;padding:8px 0 8px;background:var(--glass);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid var(--line-2);margin-bottom:2px}
   .ev-col{width:52px;flex:none;display:flex;align-items:center;justify-content:center;gap:4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--dim)}
+  .ev-colp{width:112px;flex:none;text-align:center;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--dim)}
+  .ev-row .ev-prio{width:112px!important}
   .ev-prio{width:auto!important;flex:none;padding:6px 8px!important;font-size:11.5px;font-weight:600}
   .ev-row .set-h:first-child{margin-top:0}
   #nfEvents .set-h{margin:16px 0 8px}#nfEvents .set-h:first-child{margin-top:6px}
@@ -1005,15 +1019,20 @@
   .mbp-h{font-size:12.5px;font-weight:700;padding:5px 6px 6px 10px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--line);margin-bottom:5px}
   .mbp-hb{border:none;background:transparent;color:var(--dim);cursor:pointer;padding:5px;border-radius:8px;display:flex;flex:none;transition:.12s}
   .mbp-hb:hover{color:var(--text);background:var(--sel);box-shadow:var(--sh-sm)}
+  /* внутри .menu общий стиль кнопок растягивает на 100% — возвращаем компактность */
+  .menu .mbp-hb{width:auto;padding:5px}
+  .menu .mbp-hb:hover{background:var(--sel);color:var(--text)}
+  .menu .op-x{width:auto;padding:3px}
+  .menu .op-x:hover{background:var(--danger-soft);color:var(--danger)}
   .mbp-cnt{font-size:10.5px;font-weight:700;color:var(--accent);background:var(--accent-soft);padding:2px 8px;border-radius:999px}
   .nico{position:relative;width:27px;height:27px;border-radius:8px;background:var(--card-2);display:flex;align-items:center;justify-content:center;color:var(--dim);flex:none}
-  .nico .ndot{position:absolute;top:-2px;right:-2px;margin:0;width:7px;height:7px}
-  .nico .ndot.crit{box-shadow:0 0 0 2px var(--danger-soft)}
+  .nico .ndot{position:absolute;top:-3px;right:-3px;margin:0;width:9px;height:9px;box-shadow:0 0 0 2px var(--glass-2)}
+  .nico .ndot.crit{box-shadow:0 0 0 2px var(--glass-2),0 0 6px var(--danger)}
   .mbp-row{display:flex;gap:9px;padding:7px 10px;border-radius:9px;align-items:flex-start;cursor:pointer}
   .mbp-row:hover{background:var(--sel)}
   .ndot{width:8px;height:8px;border-radius:50%;margin-top:4px;flex:none}
   .ndot.crit{background:var(--danger);box-shadow:0 0 0 3px var(--danger-soft)}
-  .ndot.warn{background:var(--warn)}.ndot.ok{background:var(--good)}.ndot.info{background:var(--mut)}
+  .ndot.warn{background:var(--warn)}.ndot.ok{background:var(--good)}.ndot.info{background:var(--accent-2)}
   .mbp-m{min-width:0;flex:1}
   .mbp-t{font-size:12.3px;font-weight:600;line-height:1.35}
   .mbp-s{font-size:11.3px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -1023,7 +1042,7 @@
   .nmul{font-size:10px;color:var(--mut);font-weight:700}
   /* плашки-уведомления сверху справа */
   .ntoasts{position:fixed;top:48px;right:12px;z-index:640;display:flex;flex-direction:column;gap:8px;width:min(344px,calc(100vw - 24px));pointer-events:none}
-  .ntoast{display:flex;gap:9px;align-items:flex-start;background:var(--menu-bg,var(--glass-2));backdrop-filter:blur(24px) saturate(1.4);-webkit-backdrop-filter:blur(24px) saturate(1.4);border:1px solid var(--line);border-radius:14px;box-shadow:var(--sh);padding:11px 12px;opacity:0;transform:translateX(16px);transition:.22s;pointer-events:auto;cursor:pointer}
+  .ntoast{display:flex;gap:9px;align-items:flex-start;background:var(--glass-2);backdrop-filter:blur(24px) saturate(1.4);-webkit-backdrop-filter:blur(24px) saturate(1.4);border:1px solid var(--line);border-radius:14px;box-shadow:var(--sh);padding:11px 12px;opacity:0;transform:translateX(16px);transition:.22s;pointer-events:auto;cursor:pointer}
   .ntoast.show{opacity:1;transform:none}
   .ntoast .nt-m{flex:1;min-width:0}
   .ntoast .nt-t{font-size:12.5px;font-weight:650}
@@ -1567,7 +1586,7 @@ function openWin(id,title,build,opts={}){
  bar.querySelector(".c").onclick=()=>closeW(id);
  bar.querySelector(".m").onclick=()=>{w.style.display="none";w.classList.remove("wfocus");focusTop();renderWinbar();};
  bar.querySelector(".z").onclick=()=>{w.classList.toggle("max");persistWin(w);};
- drag(w,bar);resize(w,w.querySelector(".wgrip"));w.addEventListener("pointerdown",()=>focus(w));renderDock();return w;
+ drag(w,bar);resize(w,w.querySelector(".wgrip"));resizeEdges(w);w.addEventListener("pointerdown",()=>focus(w));renderDock();return w;
 }
 function resize(w,grip){let rz=false,rw,rh,sx,sy;
  grip.addEventListener("pointerdown",e=>{e.stopPropagation();e.preventDefault();rz=true;w.classList.remove("max");
@@ -1576,6 +1595,24 @@ function resize(w,grip){let rz=false,rw,rh,sx,sy;
    w.style.width=Math.max(360,Math.min(innerWidth-w.offsetLeft-6,rw+e.clientX-sx))+"px";
    w.style.height=Math.max(220,Math.min(innerHeight-w.offsetTop-6,rh+e.clientY-sy))+"px";});
  grip.addEventListener("pointerup",e=>{rz=false;try{grip.releasePointerCapture(e.pointerId);}catch(x){}persistWin(w);});
+}
+// ресайз со всех сторон и углов: невидимые ручки по периметру (курсор меняется, иконок нет)
+const RZ_DIRS={n:[0,-1],s:[0,1],e:[1,0],w:[-1,0],ne:[1,-1],nw:[-1,-1],se:[1,1],sw:[-1,1]};
+function resizeEdges(w){
+ Object.keys(RZ_DIRS).forEach(d=>{
+  const[dx,dy]=RZ_DIRS[d];
+  const h=el(`<div class="rz rz-${d}"></div>`);w.appendChild(h);let st=null;
+  h.addEventListener("pointerdown",e=>{e.stopPropagation();e.preventDefault();w.classList.remove("max");
+   st={x:e.clientX,y:e.clientY,l:w.offsetLeft,t:w.offsetTop,w:w.offsetWidth,h:w.offsetHeight};
+   h.setPointerCapture(e.pointerId);focus(w);});
+  h.addEventListener("pointermove",e=>{if(!st)return;
+   const mx=e.clientX-st.x,my=e.clientY-st.y;
+   if(dx===1)w.style.width=Math.max(360,Math.min(innerWidth-st.l-6,st.w+mx))+"px";
+   if(dx===-1){const nl=Math.min(Math.max(6,st.l+mx),st.l+st.w-360);w.style.left=nl+"px";w.style.width=(st.w+st.l-nl)+"px";}
+   if(dy===1)w.style.height=Math.max(220,Math.min(innerHeight-st.t-6,st.h+my))+"px";
+   if(dy===-1){const nt=Math.min(Math.max(44,st.t+my),st.t+st.h-220);w.style.top=nt+"px";w.style.height=(st.h+st.t-nt)+"px";}});
+  const fin=e=>{if(!st)return;st=null;try{h.releasePointerCapture(e.pointerId);}catch(x){}persistWin(w);};
+  h.addEventListener("pointerup",fin);h.addEventListener("pointercancel",fin);});
 }
 function focus(w){for(const k in OPEN)OPEN[k].classList.toggle("wfocus",OPEN[k]===w);w.style.zIndex=++Z;w.style.display="flex";renderWinbar();}
 function focusTop(){let top=null,tz=-1;for(const k in OPEN){const el=OPEN[k];if(el.style.display==="none")continue;const z=+el.style.zIndex||0;if(z>tz){tz=z;top=el;}}if(top)top.classList.add("wfocus");renderWinbar();}
@@ -3154,7 +3191,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
        <div class="field" style="margin:0"><label>Цифр</label><input id="brDig" value="2"></div></div>
      <label style="display:flex;align-items:center;gap:8px;margin:10px 0 4px;font-size:12.5px;cursor:pointer"><input type="checkbox" id="brExt" checked style="width:15px;height:15px;accent-color:var(--accent)"> Сохранять расширение</label>
      <div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin:8px 0 4px">Предпросмотр</div>
-     <div id="brPrev" style="max-height:180px;overflow:auto;background:var(--bg);border-radius:var(--r-sm);padding:6px 9px"></div>
+     <div id="brPrev" style="max-height:180px;overflow:auto;background:var(--card);border-radius:var(--r-sm);padding:6px 9px"></div>
      <div class="r"><button class="btn" id="brX">Отмена</button><button class="btn pri" id="brO">Применить</button></div></div>`;
    s.classList.add("show");s.querySelectorAll("#brFind,#brRepl,#brPre,#brSuf,#brBase,#brStart,#brDig").forEach(i=>i.oninput=drawPrev);
    s.querySelectorAll("#brNum,#brExt").forEach(c=>c.onchange=drawPrev);drawPrev();
@@ -3678,7 +3715,7 @@ function notifyTab(tc){tc.innerHTML=`<div style="color:var(--mut);font-size:12px
    <div class="mon-row"><span>Слать push-уведомления на телефон (Pushover)</span><label class="tgl"><input type="checkbox" id="nfEn"><span class="sl"></span></label></div>
    <div class="field" style="margin:8px 0 4px"><label>Не повторять одно событие чаще, мин</label><input id="nfCd" class="mono" style="max-width:120px"></div>
    <div class="mon-note">Все события всегда записываются в журнал (колокольчик в верхнем баре). Колонка «Стол» — плашка на рабочем столе и счётчик на колокольчике, «Push» — уведомление в Pushover на телефон (при включённом переключателе выше). Выпадающий список — приоритет Pushover.</div>
-   <div class="ev-cols"><span style="font-size:11px;color:var(--mut)">Событие</span><span class="grow"></span><span class="ev-col" title="Плашка на рабочем столе + колокольчик">${svg("grid",12)} Стол</span><span class="ev-col" title="Push в Pushover на телефон">${svg("bell",12)} Push</span></div>
+   <div class="ev-cols"><span style="font-size:11px;color:var(--mut)">Событие</span><span class="grow"></span><span class="ev-colp" title="Приоритет уведомления в Pushover (не влияет на рабочий стол)">Приоритет push</span><span class="ev-col" title="Плашка на рабочем столе + колокольчик">${svg("grid",12)} Стол</span><span class="ev-col" title="Push в Pushover на телефон">${svg("bell",12)} Push</span></div>
    <div id="nfEvents"></div>`;
   const en=tc.querySelector("#nfEn");en.checked=!!MON.enabled;
   const evbox=tc.querySelector("#nfEvents");
