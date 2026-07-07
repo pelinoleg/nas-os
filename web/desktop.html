@@ -817,6 +817,9 @@
   .ev-d{font-size:11px;color:var(--mut);margin-top:1px}
   .ev-thr{width:56px;flex:none;text-align:center;padding:6px 4px!important}
   .ev-u{font-size:11px;color:var(--mut);flex:none;margin-left:-4px}
+  .ev-prio{width:auto!important;flex:none;padding:6px 8px!important;font-size:11.5px;font-weight:600}
+  .ev-row .set-h:first-child{margin-top:0}
+  #nfEvents .set-h{margin:16px 0 8px}#nfEvents .set-h:first-child{margin-top:6px}
   /* --- settings window: sidebar nav + rows + tooltips --- */
   .set-nav{width:186px;flex:none;background:none;border-right:1px solid var(--line);padding:16px 10px 16px 14px;display:flex;flex-direction:column;gap:3px;overflow-y:auto}
   .set-nav button{display:flex;align-items:center;gap:10px;width:100%;border:none;background:none;color:var(--dim);padding:8px 10px;border-radius:var(--r-sm);font-size:12.5px;font-weight:550;text-align:left;transition:.12s}
@@ -3163,15 +3166,35 @@ function lookTab(tc){const SUBS=[["theme","Тема","sun"],["wall","Обои","
  // при смене темы перерисовать открытую вкладку — в ней уже значения новой темы
  lookTab._re=()=>{if(document.body.contains(tc))render();else lookTab._re=null;};
  render();}
+// Каталог событий уведомлений (grp — заголовок группы; dp — приоритет по умолчанию).
+// Приоритеты Pushover: 2 экстренно (с подтверждением), 1 важно, 0 обычное, -1 тихо, -2 бейдж.
 const EVMETA=[
- {k:"temp",t:"Перегрев CPU",d:"температура выше порога",thr:"°C"},
- {k:"throttle",t:"Троттлинг / просадка питания",d:"нехватка тока БП или снижение частоты"},
- {k:"pool",t:"Хранилище заполнено",d:"пул занят выше порога",thr:"%"},
- {k:"mem",t:"Мало оперативной памяти",d:"RAM занята выше порога",thr:"%"},
- {k:"smart",t:"SMART-сбой диска",d:"диск сообщает о неисправности"},
- {k:"svcfail",t:"Сбой systemd-службы",d:"какая-либо служба упала (failed)"},
- {k:"boot",t:"Загрузка системы",d:"NAS включился или перезагрузился"},
+ {grp:"Диски: подключение и режим"},
+ {k:"disk_add",t:"Диск подключён",d:"USB-диск или карта появились в системе",dp:0},
+ {k:"disk_remove",t:"Диск отключён",d:"устройство внезапно пропало",dp:1},
+ {k:"readonly",t:"Диск только для чтения",d:"ФС перемонтирована ro — риск для данных",dp:2},
+ {k:"fserror",t:"Ошибки диска в логе ядра",d:"EXT4/XFS/I-O ошибки в journalctl -k",dp:1},
+ {grp:"Здоровье дисков (SMART, проверка раз в 10 мин)"},
+ {k:"smart",t:"SMART-сбой",d:"диск не прошёл самооценку — под замену",dp:2},
+ {k:"smart_wear",t:"Износ диска",d:"растут переназначенные/ожидающие секторы",thr:"сект",dp:1},
+ {k:"disktemp",t:"Перегрев диска",d:"температура диска выше порога",thr:"°C",dp:1},
+ {grp:"Место"},
+ {k:"pool",t:"Пул заполнен",d:"mergerfs /mnt/storage выше порога",thr:"%",dp:0},
+ {k:"diskfull",t:"Диск заполняется",d:"любой /mnt/diskN выше порога",thr:"%",dp:0},
+ {grp:"Raspberry Pi: питание и ресурсы"},
+ {k:"temp",t:"Перегрев CPU",d:"температура выше порога",thr:"°C",dp:1},
+ {k:"throttle",t:"Троттлинг / просадка питания",d:"нехватка тока БП или снижение частоты",dp:1},
+ {k:"mem",t:"Мало ОЗУ",d:"RAM занята выше порога",thr:"%",dp:0},
+ {k:"swap",t:"Активный swap",d:"подкачка выше порога — не хватает ОЗУ",thr:"%",dp:0},
+ {k:"load",t:"Высокая нагрузка",d:"load average 1 мин выше порога",thr:"",dp:0},
+ {grp:"Службы и контейнеры"},
+ {k:"svcfail",t:"Сбой systemd-службы",d:"какая-либо служба упала (failed)",dp:1},
+ {k:"container",t:"Проблема с контейнером",d:"контейнер упал или стал unhealthy",dp:0},
+ {grp:"Обслуживание"},
+ {k:"reboot_req",t:"Нужна перезагрузка",d:"обновления ядра/libc ждут ребута",dp:-1},
+ {k:"boot",t:"Загрузка системы",d:"NAS включился или перезагрузился",dp:-1},
 ];
+const PRIO=[[2,"Экстренно"],[1,"Важно"],[0,"Обычное"],[-1,"Тихо"],[-2,"Бейдж"]];
 function notifyTab(tc){tc.innerHTML=`<div style="color:var(--mut);font-size:12px">загрузка…</div>`;
  api("/api/monitor").then(r=>{const MON=(r&&r.monitor)||{events:{}},NTF=(r&&r.notify)||{},ev=MON.events||{};
   tc.innerHTML=`
@@ -3186,14 +3209,19 @@ function notifyTab(tc){tc.innerHTML=`<div style="color:var(--mut);font-size:12px
    <div id="nfEvents"></div>`;
   const en=tc.querySelector("#nfEn");en.checked=!!MON.enabled;
   const evbox=tc.querySelector("#nfEvents"),dimAll=()=>evbox.classList.toggle("mon-dim",!en.checked);
-  EVMETA.forEach(m=>{const e=ev[m.k]||{};
-   const row=el(`<div class="ev-row"><div class="ev-txt"><div class="ev-t">${esc(m.t)}</div><div class="ev-d">${esc(m.d)}</div></div>${m.thr?`<input class="ev-thr mono" id="ev_${m.k}" value="${e.threshold!=null?e.threshold:''}"><span class="ev-u">${m.thr}</span>`:""}<label class="tgl"><input type="checkbox" id="evon_${m.k}"${e.on?" checked":""}><span class="sl"></span></label></div>`);
+  EVMETA.forEach(m=>{
+   if(m.grp){evbox.appendChild(el(`<div class="set-h">${esc(m.grp)}</div>`));return;}
+   const e=ev[m.k]||{},pv=e.priority!=null?e.priority:m.dp;
+   const hasThr=m.thr!==undefined;
+   const prioSel=`<select class="ev-prio" id="evp_${m.k}" title="Уровень Pushover">${PRIO.map(([v,l])=>`<option value="${v}"${v===pv?" selected":""}>${l}</option>`).join("")}</select>`;
+   const row=el(`<div class="ev-row"><div class="ev-txt"><div class="ev-t">${esc(m.t)}</div><div class="ev-d">${esc(m.d)}</div></div>${hasThr?`<input class="ev-thr mono" id="ev_${m.k}" value="${e.threshold!=null?e.threshold:''}">${m.thr?`<span class="ev-u">${m.thr}</span>`:""}`:""}${prioSel}<label class="tgl"><input type="checkbox" id="evon_${m.k}"${e.on?" checked":""}><span class="sl"></span></label></div>`);
    evbox.appendChild(row);});
   const cd=tc.querySelector("#nfCd");cd.value=Math.round((MON.cooldown||1800)/60);dimAll();
-  const collect=()=>{const events={};EVMETA.forEach(m=>{const o={on:tc.querySelector("#evon_"+m.k).checked};if(m.thr)o.threshold=+tc.querySelector("#ev_"+m.k).value||0;events[m.k]=o;});return {enabled:en.checked,cooldown:Math.max(1,+cd.value||30)*60,events};};
+  const items=EVMETA.filter(m=>m.k);
+  const collect=()=>{const events={};items.forEach(m=>{const o={on:tc.querySelector("#evon_"+m.k).checked,priority:+tc.querySelector("#evp_"+m.k).value};if(m.thr!==undefined)o.threshold=+tc.querySelector("#ev_"+m.k).value||0;events[m.k]=o;});return {enabled:en.checked,cooldown:Math.max(1,+cd.value||30)*60,events};};
   const saveMon=()=>api("/api/monitor",{method:"POST",body:JSON.stringify({monitor:collect()})});
   en.onchange=()=>{dimAll();saveMon();};cd.onchange=saveMon;
-  EVMETA.forEach(m=>{tc.querySelector("#evon_"+m.k).onchange=saveMon;if(m.thr)tc.querySelector("#ev_"+m.k).onchange=saveMon;});
+  items.forEach(m=>{tc.querySelector("#evon_"+m.k).onchange=saveMon;tc.querySelector("#evp_"+m.k).onchange=saveMon;if(m.thr!==undefined)tc.querySelector("#ev_"+m.k).onchange=saveMon;});
   tc.querySelector("#nfSave").onclick=async()=>{const rr=await api("/api/monitor",{method:"POST",body:JSON.stringify({notify:{user:tc.querySelector("#nfU").value.trim(),token:tc.querySelector("#nfT").value.trim()}})});const st=tc.querySelector("#nfStat");if(rr&&rr.notify){st.textContent=rr.notify.configured?"✓ ключи заданы":"не настроено";st.style.color=rr.notify.configured?"var(--good)":"var(--mut)";}toast(LIVE?"Ключи сохранены":"Демо");};
   tc.querySelector("#nfTest").onclick=async()=>{const rr=await api("/api/monitor",{method:"POST",body:JSON.stringify({test:true})});toast(LIVE?(rr&&rr.ok?"Тест отправлен в Pushover ✓":"Не отправлено: "+((rr&&rr.log)||"")):"Демо");};
  });}

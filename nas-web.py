@@ -68,7 +68,8 @@ def mem_info():
     avail = m.get("MemAvailable", 0)
     used = total - avail
     return {"total": total * 1024, "used": used * 1024,
-            "pct": round(100 * used / total, 1) if total else 0}
+            "pct": round(100 * used / total, 1) if total else 0,
+            "swap_total": m.get("SwapTotal", 0) * 1024, "swap_free": m.get("SwapFree", 0) * 1024}
 
 def disk_info(path):
     try:
@@ -588,16 +589,37 @@ NOTIFY_CONF = "/etc/nas-wizard/notify.conf"
 _MON_LAST = {}
 _MON_BOOT_SENT = False
 _MON_SMART_LAST = 0
+_MON_DEVS = None      # набор томов с ФС на прошлом тике (для disk_add/disk_remove)
 
+# Каталог событий: on (по умолчанию), priority (Pushover: -2 тихо … 2 экстренно), threshold.
+# priority-подсказка: 2 = риск потери данных (требует подтверждения), 1 = важно/срочно,
+# 0 = обычное, -1 = к сведению (без звука), -2 = только бейдж.
 def _def_monitor():
     return {"enabled": False, "cooldown": 1800, "events": {
-        "temp":     {"on": True,  "threshold": 75},
-        "throttle": {"on": True},
-        "pool":     {"on": True,  "threshold": 90},
-        "mem":      {"on": False, "threshold": 92},
-        "smart":    {"on": True},
-        "svcfail":  {"on": True},
-        "boot":     {"on": False},
+        # --- диски: подключение/отключение/режим ---
+        "disk_add":    {"on": True,  "priority": 0},
+        "disk_remove": {"on": True,  "priority": 1},
+        "readonly":    {"on": True,  "priority": 2},
+        "fserror":     {"on": True,  "priority": 1},
+        # --- здоровье дисков (SMART, раз в 10 мин) ---
+        "smart":       {"on": True,  "priority": 2},
+        "smart_wear":  {"on": True,  "priority": 1, "threshold": 1},
+        "disktemp":    {"on": True,  "priority": 1, "threshold": 60},
+        # --- место ---
+        "pool":        {"on": True,  "priority": 0, "threshold": 90},
+        "diskfull":    {"on": True,  "priority": 0, "threshold": 90},
+        # --- Pi: питание/температура/ресурсы ---
+        "temp":        {"on": True,  "priority": 1, "threshold": 75},
+        "throttle":    {"on": True,  "priority": 1},
+        "mem":         {"on": False, "priority": 0, "threshold": 92},
+        "swap":        {"on": False, "priority": 0, "threshold": 60},
+        "load":        {"on": False, "priority": 0, "threshold": 8},
+        # --- службы и контейнеры ---
+        "svcfail":     {"on": True,  "priority": 1},
+        "container":   {"on": True,  "priority": 0},
+        # --- обслуживание / к сведению ---
+        "reboot_req":  {"on": True,  "priority": -1},
+        "boot":        {"on": False, "priority": -1},
     }}
 
 def load_monitor():
@@ -674,76 +696,229 @@ def save_notify(user, token):
         return {"ok": False, "log": str(e)}
     return {"ok": True}
 
-def push_notify(title, msg):
+def push_notify(title, msg, priority=0):
+    try:
+        priority = max(-2, min(2, int(priority)))
+    except (ValueError, TypeError):
+        priority = 0
     n = load_notify()
     if n["user"] and n["token"]:
         try:
-            data = urlencode({"token": n["token"], "user": n["user"], "title": title, "message": msg}).encode()
+            body = {"token": n["token"], "user": n["user"], "title": title,
+                    "message": msg, "priority": priority}
+            if priority == 2:            # экстренный: Pushover требует retry/expire + подтверждение
+                body["retry"] = 60
+                body["expire"] = 3600
+            data = urlencode(body).encode()
             urllib.request.urlopen("https://api.pushover.net/1/messages.json", data=data, timeout=15)
             return True
         except OSError:
             pass
     if os.path.exists("/usr/local/bin/nas-notify.sh"):
-        return _run(["/usr/local/bin/nas-notify.sh", title, msg], timeout=15)["ok"]
+        return _run(["/usr/local/bin/nas-notify.sh", title, msg, str(priority)], timeout=15)["ok"]
     return False
 
-def _smart_problems():
-    out = []
+def _phys_devs():
     try:
-        devs = [d for d in os.listdir("/dev") if re.match(r"^(sd[a-z]|nvme\d+n\d+)$", d)]
+        return ["/dev/" + d for d in os.listdir("/dev") if re.match(r"^(sd[a-z]|nvme\d+n\d+)$", d)]
     except OSError:
-        devs = []
-    for d in devs:
-        r = _run(["smartctl", "-H", "-j", "/dev/" + d], timeout=15)
+        return []
+
+def _smart_scan():
+    """Один проход smartctl по всем физическим дискам → dict со здоровьем/износом/темп."""
+    res = {}
+    for dev in _phys_devs():
+        r = _run(["smartctl", "-H", "-A", "-j", dev], timeout=15)
         try:
             j = json.loads(r.get("log") or "{}")
-            if (j.get("smart_status") or {}).get("passed") is False:
-                out.append("/dev/%s: SMART FAIL" % d)
         except ValueError:
-            pass
+            continue
+        passed = (j.get("smart_status") or {}).get("passed")
+        realloc = pending = temp = None
+        for a in ((j.get("ata_smart_attributes") or {}).get("table") or []):
+            nm, raw = a.get("name", ""), (a.get("raw") or {}).get("value")
+            if nm == "Reallocated_Sector_Ct": realloc = raw
+            elif nm == "Current_Pending_Sector": pending = raw
+            elif nm in ("Temperature_Celsius", "Airflow_Temperature_Cel") and temp is None: temp = raw
+        if temp is None:
+            temp = (j.get("temperature") or {}).get("current")
+        if isinstance(temp, int) and temp > 200:      # некоторые прошивки кладут в raw мусор
+            temp = temp & 0xff
+        res[dev] = {"passed": passed, "realloc": realloc, "pending": pending, "temp": temp}
+    return res
+
+def _block_volumes():
+    """Устройства с файловой системой: путь → метка (для событий подключён/отключён)."""
+    vols = {}
+    def walk(node):
+        fs = node.get("fstype")
+        if fs and fs not in ("swap", "linux_raid_member", "LVM2_member"):
+            vols[node.get("path")] = node.get("label") or node.get("name")
+        for c in node.get("children", []) or []:
+            walk(c)
+    for d in _lsblk():
+        if (d.get("name") or "").startswith(("zram", "loop")):
+            continue
+        walk(d)
+    return vols
+
+def _readonly_mounts():
+    out = []
+    for line in _read("/proc/mounts").splitlines():
+        p = line.split()
+        if len(p) < 4:
+            continue
+        mp, fstype, opts = p[1], p[2], p[3]
+        if fstype in ("iso9660", "squashfs", "tmpfs", "devtmpfs", "overlay", "proc", "sysfs", "cgroup2"):
+            continue
+        if not (mp.startswith("/mnt/") or mp.startswith("/media/")):
+            continue
+        if re.search(r"(^|,)ro(,|$)", opts):
+            out.append(mp)
     return out
 
+def _kernel_fs_errors():
+    r = _run(["journalctl", "-k", "--since", "-90 seconds", "--no-pager", "-q"], timeout=8)
+    pat = re.compile(r"EXT4-fs error|XFS.*(error|corruption)|Buffer I/O error|"
+                     r"I/O error|remounting filesystem read-only|critical medium error", re.I)
+    return [l.strip()[-140:] for l in (r.get("log") or "").splitlines() if pat.search(l)][:4]
+
+def _data_mounts_usage():
+    out = []
+    seen = set()
+    for mp in sorted(glob.glob("/mnt/disk*") + glob.glob("/mnt/parity*") + ["/mnt/storage"]):
+        if mp in seen or not os.path.ismount(mp):
+            continue
+        seen.add(mp)
+        di = disk_info(mp)
+        if di:
+            out.append((mp, di["pct"]))
+    return out
+
+def _bad_containers():
+    r = _run(["docker", "ps", "-a", "--format", "{{.Names}}\t{{.State}}\t{{.Status}}"], timeout=12)
+    bad = []
+    for l in (r.get("log") or "").splitlines():
+        f = l.split("\t")
+        if len(f) < 3:
+            continue
+        name, state, status = f[0], f[1], f[2]
+        if state == "exited" and "Exited (0)" not in status:
+            bad.append("%s (упал)" % name)
+        elif "unhealthy" in status.lower():
+            bad.append("%s (unhealthy)" % name)
+    return bad
+
 def monitor_tick():
-    global _MON_BOOT_SENT, _MON_SMART_LAST
+    global _MON_BOOT_SENT, _MON_SMART_LAST, _MON_DEVS
     cfg = load_monitor()
     if not cfg.get("enabled"):
         return
     ev = cfg.get("events", {})
-    on = lambda k: ev.get(k, {}).get("on")
+    on  = lambda k: ev.get(k, {}).get("on")
+    pri = lambda k: ev.get(k, {}).get("priority", 0)
     thr = lambda k, dv: ev.get(k, {}).get("threshold", dv)
     now = time.time()
     cd = cfg.get("cooldown", 1800)
-    def fire(key, title, msg):
+    def fire(key, title, msg, priority=0):
         if now - _MON_LAST.get(key, 0) >= cd:
-            if push_notify(title, msg):
+            if push_notify(title, msg, priority):
                 _MON_LAST[key] = now
     s = stats()
+    host = s.get("host", "NAS")
+
+    # --- запуск системы ---
     if not _MON_BOOT_SENT:
         if on("boot"):
-            push_notify("NAS: система запущена", "%s снова в сети" % s.get("host", "NAS"))
+            push_notify("NAS: система запущена", "%s снова в сети" % host, pri("boot"))
         _MON_BOOT_SENT = True
+
+    # --- подключение / отключение дисков (по изменению набора томов) ---
+    vols = _block_volumes()
+    if _MON_DEVS is not None:
+        added   = [vols[d] for d in vols if d not in _MON_DEVS]
+        removed = [_MON_DEVS[d] for d in _MON_DEVS if d not in vols]
+        if added and on("disk_add"):
+            push_notify("NAS: диск подключён", "Появился: " + ", ".join(map(str, added)), pri("disk_add"))
+        if removed and on("disk_remove"):
+            push_notify("NAS: диск отключён", "Пропал: " + ", ".join(map(str, removed)), pri("disk_remove"))
+    _MON_DEVS = vols
+
+    # --- файловая система в режиме «только чтение» (риск данных) ---
+    if on("readonly"):
+        ro = _readonly_mounts()
+        if ro:
+            fire("readonly", "NAS: диск только для чтения",
+                 "Смонтировано ro (сбой ФС?): " + ", ".join(ro), pri("readonly"))
+
+    # --- ошибки ФС/ввода-вывода в журнале ядра ---
+    if on("fserror"):
+        errs = _kernel_fs_errors()
+        if errs:
+            fire("fserror", "NAS: ошибки диска в логе ядра", "\n".join(errs), pri("fserror"))
+
+    # --- Pi: температура / троттлинг / память / swap / нагрузка ---
     t = s.get("temp")
     if on("temp") and t and t >= thr("temp", 75):
-        fire("temp", "NAS: перегрев", "Температура %s°C (порог %s°C)" % (t, thr("temp", 75)))
+        fire("temp", "NAS: перегрев", "Температура %s°C (порог %s°C)" % (t, thr("temp", 75)), pri("temp"))
     tr = s.get("throttled") or {}
     if on("throttle") and not tr.get("ok", True):
-        fire("throttle", "NAS: троттлинг", "Просадка питания/троттлинг: %s" % tr.get("raw", ""))
-    pool = s.get("disk_pool") or {}
-    if on("pool") and pool.get("pct", 0) >= thr("pool", 90):
-        fire("pool", "NAS: хранилище заполнено", "%s занят на %s%%" % (pool.get("path", "пул"), pool.get("pct")))
+        fire("throttle", "NAS: троттлинг", "Просадка питания/троттлинг: %s" % tr.get("raw", ""), pri("throttle"))
     m = (s.get("mem") or {}).get("pct", 0)
     if on("mem") and m >= thr("mem", 92):
-        fire("mem", "NAS: мало памяти", "RAM занята на %s%%" % m)
+        fire("mem", "NAS: мало памяти", "RAM занята на %s%%" % m, pri("mem"))
+    mem = mem_info()
+    if on("swap") and mem.get("swap_total"):
+        swp = round(100 * (mem["swap_total"] - mem["swap_free"]) / mem["swap_total"])
+        if swp >= thr("swap", 60):
+            fire("swap", "NAS: активный swap", "Подкачка занята на %s%% — не хватает ОЗУ" % swp, pri("swap"))
+    load1 = (s.get("load") or [0])[0]
+    if on("load") and load1 >= thr("load", 8):
+        fire("load", "NAS: высокая нагрузка", "Load average 1м = %.2f" % load1, pri("load"))
+
+    # --- место: пул + отдельные диски ---
+    pool = s.get("disk_pool") or {}
+    if on("pool") and pool.get("pct", 0) >= thr("pool", 90):
+        fire("pool", "NAS: хранилище заполнено", "%s занят на %s%%" % (pool.get("path", "пул"), pool.get("pct")), pri("pool"))
+    if on("diskfull"):
+        for mp, pct in _data_mounts_usage():
+            if mp == "/mnt/storage":
+                continue
+            if pct >= thr("diskfull", 90):
+                fire("diskfull:" + mp, "NAS: диск заполняется", "%s занят на %s%%" % (mp, pct), pri("diskfull"))
+
+    # --- службы и контейнеры ---
     if on("svcfail"):
         r = _run(["systemctl", "list-units", "--failed", "--no-legend", "--plain", "--no-pager"], timeout=10)
         failed = [l.split()[0] for l in (r.get("log") or "").splitlines() if l.strip()]
         if failed:
-            fire("svcfail", "NAS: сбой службы", "Упали: " + ", ".join(failed[:8]))
-    if on("smart") and now - _MON_SMART_LAST >= 600:
-        _MON_SMART_LAST = now
-        bad = _smart_problems()
+            fire("svcfail", "NAS: сбой службы", "Упали: " + ", ".join(failed[:8]), pri("svcfail"))
+    if on("container") and shutil.which("docker"):
+        bad = _bad_containers()
         if bad:
-            fire("smart", "NAS: проблема с диском", "; ".join(bad))
+            fire("container", "NAS: проблема с контейнером", "; ".join(bad[:8]), pri("container"))
+
+    # --- требуется перезагрузка (обновления ядра/libc) ---
+    if on("reboot_req") and os.path.exists("/var/run/reboot-required"):
+        fire("reboot_req", "NAS: нужна перезагрузка", "Обновления применятся после ребута", pri("reboot_req"))
+
+    # --- SMART: раз в 10 минут единым проходом (здоровье / износ / температура) ---
+    if (on("smart") or on("smart_wear") or on("disktemp")) and now - _MON_SMART_LAST >= 600:
+        _MON_SMART_LAST = now
+        scan = _smart_scan()
+        for dev, d in scan.items():
+            if on("smart") and d.get("passed") is False:
+                fire("smart:" + dev, "NAS: диск не прошёл SMART", "%s — SMART FAIL, замените диск" % dev, pri("smart"))
+            if on("smart_wear"):
+                bad = []
+                if isinstance(d.get("realloc"), int) and d["realloc"] >= thr("smart_wear", 1):
+                    bad.append("переназначено секторов: %d" % d["realloc"])
+                if isinstance(d.get("pending"), int) and d["pending"] >= thr("smart_wear", 1):
+                    bad.append("ожидают: %d" % d["pending"])
+                if bad:
+                    fire("wear:" + dev, "NAS: износ диска", "%s — %s" % (dev, ", ".join(bad)), pri("smart_wear"))
+            if on("disktemp") and isinstance(d.get("temp"), int) and d["temp"] >= thr("disktemp", 60):
+                fire("dtemp:" + dev, "NAS: диск перегрет", "%s — %s°C" % (dev, d["temp"]), pri("disktemp"))
 
 def monitor_loop():
     while True:
