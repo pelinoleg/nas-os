@@ -792,8 +792,11 @@ stage_disk() {
     if [ "$role" = "data" ]; then
         local n mp label
         n="$(next_disk_number)"
-        mp="$(ui_input "Точка монтирования" "Точка монтирования для диска данных:" "/mnt/disk${n}")" || return 0
-        [ -z "$mp" ] && mp="/mnt/disk${n}"
+        # Путь ФИКСИРОВАН как /mnt/diskN, а не свободный ввод: вся дискавери
+        # (mounted_data_disks, largest_data_disk_bytes, next_disk_number, имена
+        # snapraid d$n) находит диски данных по шаблону /mnt/disk*. Кастомная точка
+        # сделала бы диск невидимым для пула и SnapRAID — тихая дыра в защите данных.
+        mp="/mnt/disk${n}"
         label="disk${n}"
 
         confirm_destructive "$dev" "ДАННЫЕ ($mp)" "$fs" "$label" || return 0
