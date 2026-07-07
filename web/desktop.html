@@ -214,7 +214,7 @@
   .vline:hover .vx{display:flex}.vline .vx:hover{color:var(--danger)}
   .vline:hover .vn{color:var(--accent)}
   /* мини-бар заполнения в виджете дисков */
-  .dbar{height:3px;border-radius:999px;background:var(--card-2);margin-top:4px;overflow:hidden}
+  .dbar{height:4px;border-radius:999px;background:var(--line-2);margin-top:4px;overflow:hidden}
   .dbar i{display:block;height:100%;border-radius:999px}
   @media(max-width:960px){.apps{inset:0}.rail{display:none}}
   /* телефон: окна-шиты на весь экран, компактный хром */
@@ -285,10 +285,8 @@
   .krow span{color:var(--dim)}.krow b{font-family:var(--mono);font-variant-numeric:tabular-nums}
   .dline{display:flex;align-items:center;gap:10px;font-size:12.5px;padding:9px 0;border-top:1px solid var(--line)}
   .dline:first-of-type{border-top:none}
-  .dbadge{font-family:var(--mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;padding:3px 7px;border-radius:6px;background:var(--line);color:var(--mut);flex:none;font-weight:600}
-  .dbadge.data{color:var(--accent);background:var(--accent-soft)}.dbadge.parity{color:var(--accent-2);background:rgba(76,141,246,.13)}
-  .dbadge.system{color:var(--mut)}.dbadge.free{color:var(--warn);background:var(--warn-soft)}.dbadge.pool{color:var(--good);background:var(--good-soft)}
-  .dbadge.removable{color:#8a7dff;background:rgba(138,125,255,.14)}
+  .dbadge{font-family:var(--mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;padding:2px 7px;border-radius:6px;background:none;border:1px solid var(--line-2);color:var(--dim);flex:none;font-weight:600;min-width:58px;text-align:center}
+  .dbadge.free{color:var(--warn);border-color:var(--warn)}
   .drow-hdr{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}
   .dline .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .dline .pc{font-family:var(--mono);color:var(--dim)}
@@ -318,7 +316,7 @@
   .dock .sep{width:1px;background:var(--line-2);margin:6px 4px;align-self:stretch;flex:none}
 
   /* windows */
-  .win{position:fixed;z-index:100;background:var(--win-bg,var(--glass-2));backdrop-filter:blur(var(--win-blur,30px)) saturate(1.5);-webkit-backdrop-filter:blur(var(--win-blur,30px)) saturate(1.5);
+  .win{position:fixed;z-index:100;background:var(--win-bg,var(--glass-2));backdrop-filter:var(--win-bf,none);-webkit-backdrop-filter:var(--win-bf,none);
     border-radius:var(--r-win);box-shadow:var(--sh);display:flex;flex-direction:column;min-width:300px;overflow:hidden;animation:winin .2s cubic-bezier(.2,.8,.3,1)}
   .win::before{content:"";position:absolute;inset:0;pointer-events:none;border-radius:inherit;z-index:0;opacity:var(--win-noise,0);mix-blend-mode:overlay;background-size:180px 180px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
   .win>*{position:relative;z-index:1}
@@ -840,7 +838,7 @@
   .scrim{position:fixed;inset:0;background:rgba(12,20,32,.5);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);display:grid;place-items:center;z-index:500;
     opacity:0;pointer-events:none;transition:.18s;padding:20px}
   .scrim.show{opacity:1;pointer-events:auto}
-  .dialog{background:var(--menu-bg,var(--glass-2));backdrop-filter:blur(var(--win-blur,30px)) saturate(1.5);-webkit-backdrop-filter:blur(var(--win-blur,30px)) saturate(1.5);border-radius:var(--r-win);max-width:440px;width:100%;box-shadow:var(--sh);padding:26px;animation:winin .18s ease}
+  .dialog{background:var(--menu-bg,var(--glass-2));backdrop-filter:var(--win-bf,none);-webkit-backdrop-filter:var(--win-bf,none);border-radius:var(--r-win);max-width:440px;width:100%;box-shadow:var(--sh);padding:26px;animation:winin .18s ease}
   .dialog h3{margin:0 0 9px;font-size:17px;font-weight:680;letter-spacing:-.01em}.dialog p{margin:0 0 18px;color:var(--dim);font-size:13.5px;line-height:1.5}
   .dialog .r{display:flex;gap:10px;justify-content:flex-end;margin-top:4px}
   .toast{position:fixed;left:50%;bottom:96px;transform:translateX(-50%) translateY(14px);z-index:600;background:var(--glass-2);backdrop-filter:blur(20px) saturate(1.4);-webkit-backdrop-filter:blur(20px) saturate(1.4);
@@ -974,7 +972,7 @@ let SET={accent:"teal",accentHex:"",theme:"light",wpType:"url",wpUrl:WP_DEFAULT,
  perf:false,blur:false,wpSlide:false,wpSlideMin:30,mbAlpha:1,wdgAlpha:1,mbIcon:1,mbFs:1,
  deskIcon:1,deskFs:1,deskLc:"",deskShadow:true,widgets:null,railHidden:false,
  mbOp:null,dockOp:null,wdgOp:null,mbBlur:26,dockBlur:28,wdgBlur:22,
- winShadow:true,dockShadow:true,tileShadow:true,
+ winShadow:true,dockShadow:true,tileShadow:true,mbSat:100,dockSat:100,wdgSat:100,winSat:100,
  tray:null,dockPos:"bottom",dockIcon:1,dockAlpha:1,textContrast:1,dockTiles:true,dockLabels:true,dockOrder:null,
  wdgLight:"",wdgDark:"",winAlpha:.9,menuAlpha:.92,radius:1.1,tintLight:"",tintDark:"",
  winBlur:30,winNoise:12,shadow:"md",
@@ -1058,7 +1056,6 @@ function applySettings(){
  const rq=clampf(SET.radius??1,.4,1.6);
  root.style.setProperty("--r-win",(20*rq).toFixed(0)+"px");root.style.setProperty("--r-lg",(16*rq).toFixed(0)+"px");
  root.style.setProperty("--r-md",(12*rq).toFixed(0)+"px");root.style.setProperty("--r-sm",(9*rq).toFixed(0)+"px");
- root.style.setProperty("--win-blur",clampf(SET.winBlur??30,0,60).toFixed(0)+"px");
  root.style.setProperty("--win-noise",(clampf(SET.winNoise??0,0,100)/100*0.6).toFixed(3));
  const shl=SET.shadow||(SET.shadows===false?"none":"md");
  if(shl==="none"){root.classList.add("no-shadow");}
@@ -1096,13 +1093,17 @@ function applySettings(){
  setPanelFg("mb",elAlpha("mbOp"),lvlRgb(1));
  setPanelFg("dock",elAlpha("dockOp"),lvlRgb(1));
  setPanelFg("wdg",wOp,/^#[0-9a-f]{6}$/i.test(wc||"")?hexRgb(wc):lvlRgb(1));
- // раздельное размытие под панелью/доком/виджетами (0 = выкл у элемента);
- // «Производительный режим» гасит всё разом (html.perf в CSS дублирует страховкой)
+ // раздельные размытие и насыщенность под панелью/доком/виджетами/окнами
+ // (blur 0 и saturate 100% = выкл); «Производительный режим» гасит всё разом
  const bfOn=!SET.perf;
- const bf=(key,def,sat)=>{const px=clampf(SET[key]??def,0,60);return bfOn&&px>0?`blur(${px}px) saturate(${sat})`:"none";};
- root.style.setProperty("--mb-bf",bf("mbBlur",26,1.6));
- root.style.setProperty("--dock-bf",bf("dockBlur",28,1.5));
- root.style.setProperty("--wdg-bf",bf("wdgBlur",22,1.3));
+ const bf=(blurKey,satKey)=>{if(!bfOn)return "none";
+  const px=clampf(SET[blurKey]??0,0,60),sat=clampf(SET[satKey]??100,0,200);
+  const parts=[];if(px>0)parts.push(`blur(${px}px)`);if(sat!==100)parts.push(`saturate(${(sat/100).toFixed(2)})`);
+  return parts.length?parts.join(" "):"none";};
+ root.style.setProperty("--mb-bf",bf("mbBlur","mbSat"));
+ root.style.setProperty("--dock-bf",bf("dockBlur","dockSat"));
+ root.style.setProperty("--wdg-bf",bf("wdgBlur","wdgSat"));
+ root.style.setProperty("--win-bf",bf("winBlur","winSat"));
  root.classList.toggle("perf",!!SET.perf);
  document.body.classList.toggle("rail-off",!!SET.railHidden);
  document.body.classList.toggle("dock-left",SET.dockPos==="left");
@@ -2926,6 +2927,7 @@ function lsBar(lb){lb.innerHTML=`
    ${pSlider("Размер шрифта","mbFs",.8,1.4,.05,"pct","Масштаб текста (часы, метрики).")}
    ${opSlider("Прозрачность фона","mbOp","Своя плотность фона верхней панели. По умолчанию — общая, как у окон (вкладка «Материал»).")}
    ${pSlider("Размытие под панелью","mbBlur",0,50,1,"px","Матовое размытие обоев под панелью. 0 — без размытия.")}
+   ${pSlider("Насыщенность под панелью","mbSat",0,200,5,"pctn","Сочность фона, просвечивающего сквозь панель: 100% — без изменений, меньше — обесцвечивает, больше — сочнее. Видно при полупрозрачном фоне.")}
   </div>
   <div class="set-card"><div class="set-grp">Метрики справа</div>
    <div class="mon-note" style="margin:0 0 6px">Что показывать в панели:</div><div id="trayList"></div></div>`;
@@ -2938,6 +2940,7 @@ function lsWidgets(lb){const cl=/^#[0-9a-f]{6}$/i;lb.innerHTML=`
   <div class="set-card"><div class="set-grp">Фон виджетов</div>
    ${opSlider("Прозрачность фона","wdgOp","Своя плотность подложек виджетов. По умолчанию — общая, как у окон (вкладка «Материал»).")}
    ${pSlider("Размытие под виджетами","wdgBlur",0,50,1,"px","Матовое размытие обоев под виджетами. 0 — без размытия.")}
+   ${pSlider("Насыщенность под виджетами","wdgSat",0,200,5,"pctn","Сочность фона под виджетами: 100% — без изменений, меньше — обесцвечивает, больше — сочнее.")}
    <div class="srow"><div class="srow-l"><div class="srow-t">Светлая тема${tipHTML("Свой цвет подложки виджетов для светлой темы.")}</div></div><div class="srow-c"><input type="color" id="wdgL" value="${cl.test(SET.wdgLight||"")?SET.wdgLight:"#ffffff"}" class="ccell"><button class="btn sm" data-wreset="wdgLight">Сброс</button></div></div>
    <div class="srow"><div class="srow-l"><div class="srow-t">Тёмная тема${tipHTML("Свой цвет подложки виджетов для тёмной темы.")}</div></div><div class="srow-c"><input type="color" id="wdgD" value="${cl.test(SET.wdgDark||"")?SET.wdgDark:"#161e2a"}" class="ccell"><button class="btn sm" data-wreset="wdgDark">Сброс</button></div></div>
   </div>
@@ -2957,6 +2960,7 @@ function lsDock(lb){lb.innerHTML=`
    ${pSlider("Размер иконок","dockIcon",.7,1.5,.05,"pct","Размер иконок в доке.")}
    ${opSlider("Прозрачность фона","dockOp","Своя плотность подложки дока. По умолчанию — общая, как у окон (вкладка «Материал»).")}
    ${pSlider("Размытие под доком","dockBlur",0,50,1,"px","Матовое размытие обоев под доком. 0 — без размытия.")}
+   ${pSlider("Насыщенность под доком","dockSat",0,200,5,"pctn","Сочность фона под доком: 100% — без изменений, меньше — обесцвечивает, больше — сочнее.")}
    ${pToggle("Тень дока","Мягкая тень под доком и иконками в нём.","dockShadow","глубина у панели дока")}
    ${pToggle("Плитки под иконками","Цветная подложка под иконками. Выключи — чистые иконки.","dockTiles","цветной фон под каждой иконкой")}
    ${pToggle("Подписи у иконок","Названия под иконками. Выключи — компактный док только из иконок (уже, когда сбоку).","dockLabels","показывать названия приложений")}
@@ -2996,6 +3000,7 @@ function lsWindows(lb){const cl=/^#[0-9a-f]{6}$/i;lb.innerHTML=`
   </div>
   <div class="set-card"><div class="set-grp">Стекло и интенсивность</div>
    ${pSlider("Размытие фона окон","winBlur",0,60,1,"px","Сила матового размытия под окнами, меню и диалогами. 0 — без размытия.")}
+   ${pSlider("Насыщенность под окнами","winSat",0,200,5,"pctn","Сочность фона, просвечивающего сквозь окна и диалоги: 100% — без изменений, меньше — обесцвечивает, больше — сочнее.")}
    ${pSlider("Зерно / шум в окнах","winNoise",0,100,1,"pctn","Плёночная текстура на материале окон. Работает вместе с размытием.")}
   </div>
   <div class="set-card"><div class="set-grp">Форма и глубина</div>
@@ -3164,12 +3169,12 @@ function piTab(tc){withSysc(tc,()=>{const p=SYSC.pi||{};const g=p.governor||{};c
 });}
 
 /* widgets (right rail) */
-let NETH=[];
+let NETH=[],NETT=[];
 const WIDGET_DEFS={
  vols:{name:"Носители",ic:"hdd",body:'<div id="wg-vols"></div>'},
  sys:{name:"Система",ic:"gauge",body:'<div id="wg-sys"></div>'},
  disk:{name:"Диски",ic:"disks",extra:'<span class="more" id="more-disks">все →</span>',body:'<div id="wg-disk"></div>'},
- net:{name:"Сеть",ic:"net",body:'<canvas id="wg-net" width="300" height="40" style="width:100%;height:40px;display:block"></canvas><div id="wg-net2" style="margin-top:8px"></div>'},
+ net:{name:"Сеть",ic:"net",extra:'<span id="wg-nets" style="margin-left:auto;letter-spacing:0;text-transform:none;font-family:var(--mono);font-size:11px;font-weight:600;display:flex;gap:9px"></span>',body:'<canvas id="wg-net" width="300" height="40" style="width:100%;height:40px;display:block"></canvas><div id="wg-net2" style="margin-top:8px"></div>'},
  docker:{name:"Контейнеры",ic:"cube",extra:'<span class="more" id="more-docker">все →</span>',body:'<div id="wg-docker"></div>'},
  top:{name:"Топ процессов",ic:"activity",def:false,extra:'<span class="more" id="more-top">все →</span>',body:'<div id="wg-top"></div>'},
 };
@@ -3207,12 +3212,13 @@ function paintSys(s){const m=document.getElementById("wg-sys");if(!m)return;
   <div class="gauge">${ring(s.mem.pct,"var(--accent-2)")}<div class="v">${s.mem.pct}%</div><div class="l">RAM</div></div></div>
   <div class="krow" style="margin-top:12px"><span>Аптайм</span><b>${fmtUp(s.uptime)}</b></div>
   <div class="krow"><span>Load 1м / 5м</span><b>${s.load?s.load[0].toFixed(2)+" / "+s.load[1].toFixed(2):"—"}</b></div>
-  <div class="krow"><span>ОЗУ занято</span><b>${s.mem.used?fmtB(s.mem.used):"—"} из ${s.mem.total?fmtB(s.mem.total):"—"}</b></div>
   ${thr?`<div class="krow" style="color:var(--warn)"><span>⚠ троттлинг</span><b>${esc(s.throttled.raw)}</b></div>`:""}`;
+ const ns=document.getElementById("wg-nets");if(ns)ns.innerHTML=
+  `<span style="color:var(--good)">↓ ${fmtR(s.net.rx)}</span><span style="color:var(--danger)">↑ ${fmtR(s.net.tx)}</span>`;
  const n2=document.getElementById("wg-net2");if(n2)n2.innerHTML=
-  `<div class="krow"><span>↓ ${fmtR(s.net.rx)}</span><b style="color:var(--dim);font-weight:500">↑ ${fmtR(s.net.tx)}</b></div>
-   <div class="krow"><span>${esc(s.iface||"—")}</span><b>${esc(s.ip||"")}</b></div>`;
- NETH.push(s.net.rx);if(NETH.length>60)NETH.shift();drawNet();
+  `<div class="krow"><span>${esc(s.iface||"—")}</span><b>${esc(s.ip||"")}</b></div>`;
+ NETH.push(s.net.rx);if(NETH.length>60)NETH.shift();
+ NETT.push(s.net.tx);if(NETT.length>60)NETT.shift();drawNet();
 }
 async function pollStacks(){const box=document.getElementById("wg-docker");if(!box)return;
  const r=await api("/api/stacks");const st=(r&&r.stacks)||[];
@@ -3232,14 +3238,20 @@ async function pollTop(){const box=document.getElementById("wg-top");if(!box)ret
   ||`<div style="color:var(--mut);font-size:12px">—</div>`;
 }
 function drawNet(){const cv=document.getElementById("wg-net");if(!cv)return;const ctx=cv.getContext("2d"),W=cv.width,H=cv.height;
- ctx.clearRect(0,0,W,H);if(NETH.length<2)return;const mx=Math.max(...NETH,1);const st=getComputedStyle(document.documentElement).getPropertyValue("--accent").trim()||"#34C6BE";
- ctx.beginPath();NETH.forEach((v,i)=>{const x=i/(NETH.length-1)*W,y=H-4-(v/mx)*(H-8);i?ctx.lineTo(x,y):ctx.moveTo(x,y);});
- ctx.strokeStyle=st;ctx.lineWidth=2;ctx.lineJoin="round";ctx.stroke();
- ctx.lineTo(W,H);ctx.lineTo(0,H);ctx.closePath();ctx.fillStyle=st+"22";ctx.fill();
+ ctx.clearRect(0,0,W,H);if(NETH.length<2)return;
+ const cs=getComputedStyle(document.documentElement);
+ const cRx=cs.getPropertyValue("--good").trim()||"#1FA971",cTx=cs.getPropertyValue("--danger").trim()||"#DE4E48";
+ const mx=Math.max(...NETH,...NETT,1);
+ const line=(data,col,fill)=>{if(data.length<2)return;
+  ctx.beginPath();data.forEach((v,i)=>{const x=i/(data.length-1)*W,y=H-3-Math.min((v||0)/mx,1)*(H-6);i?ctx.lineTo(x,y):ctx.moveTo(x,y);});
+  ctx.strokeStyle=col;ctx.lineWidth=2;ctx.lineJoin="round";ctx.stroke();
+  if(fill){ctx.lineTo(W,H);ctx.lineTo(0,H);ctx.closePath();ctx.fillStyle=col+"26";ctx.fill();}};
+ line(NETH,cRx,true);   // download — зелёный, с заливкой
+ line(NETT,cTx,false);  // upload — красный, только линия
 }
 function paintDiskWidget(disks){const box=document.getElementById("wg-disk");if(!box)return;box.innerHTML="";
  const arr=disks||[];
- const barCol=p=>p>=90?"var(--danger)":p>=75?"var(--warn)":"var(--accent)";
+ const barCol=p=>p>=90?"var(--danger)":p>=75?"var(--warn)":"var(--good)";
  if(LAST&&LAST.disk_pool&&LAST.disk_pool.path==="/mnt/storage"){const u=LAST.disk_pool;
   box.appendChild(el(`<div class="dline"><span class="dbadge data">пул</span>
    <span class="nm">storage<div class="dbar"><i style="width:${u.pct}%;background:${barCol(u.pct)}"></i></div></span>
@@ -3257,7 +3269,8 @@ const TRAY_DEFS={
  cpu:{name:"Загрузка CPU",ic:"cpu",val:s=>(s.cpu!=null?s.cpu:0)+"%"},
  temp:{name:"Температура",ic:"therm",val:s=>s.temp?s.temp+"°":"—",warn:s=>s.temp&&s.temp>=70},
  ram:{name:"Память",ic:"ram",val:s=>(s.mem?s.mem.pct:0)+"%"},
- net:{name:"Сеть ↓↑",ic:"net",val:s=>`${netS(s.net&&s.net.rx)}↓ ${netS(s.net&&s.net.tx)}↑`},
+ net:{name:"Сеть ↓↑",ic:"net",val:s=>`${netS(s.net&&s.net.rx)}↓ ${netS(s.net&&s.net.tx)}↑`,
+  html:s=>`<span style="color:var(--good)">↓${netS(s.net&&s.net.rx)}</span> <span style="color:var(--danger)">↑${netS(s.net&&s.net.tx)}</span>`},
  disk:{name:"Заполнение пула",ic:"disks",val:s=>s.disk_pool&&s.disk_pool.pct!=null?Math.round(s.disk_pool.pct)+"%":"—"},
  ip:{name:"IP-адрес",ic:"globe",val:s=>s.ip||location.hostname},
  uptime:{name:"Аптайм",ic:"clock",val:s=>s.uptime?fmtUp(s.uptime):"—"},
@@ -3266,7 +3279,7 @@ const TRAY_ORDER=["cpu","temp","ram","net","disk","ip","uptime"];
 function trayCfg(){let c=(SET.tray&&SET.tray.length)?SET.tray.slice():TRAY_ORDER.map(id=>({id,on:["cpu","temp","ram"].indexOf(id)>=0}));
  c=c.filter(x=>TRAY_DEFS[x.id]);TRAY_ORDER.forEach(id=>{if(!c.find(x=>x.id===id))c.push({id,on:false});});return c;}
 function paintTray(s){const t=document.getElementById("tray");if(!t)return;s=s||{};
- t.innerHTML=trayCfg().filter(x=>x.on).map(x=>{const d=TRAY_DEFS[x.id],w=d.warn&&d.warn(s)?"warn":"";return `<button class="pill ${w}"><span class="ic">${svg(d.ic,15)}</span><b>${esc(String(d.val(s)))}</b></button>`;}).join("");
+ t.innerHTML=trayCfg().filter(x=>x.on).map(x=>{const d=TRAY_DEFS[x.id],w=d.warn&&d.warn(s)?"warn":"";return `<button class="pill ${w}"><span class="ic">${svg(d.ic,15)}</span><b>${d.html?d.html(s):esc(String(d.val(s)))}</b></button>`;}).join("");
  t.querySelectorAll(".pill").forEach(p=>p.onclick=()=>winMon());}
 const MONTHS=["янв","фев","мар","апр","мая","июн","июл","авг","сен","окт","ноя","дек"];
 function tickClock(){const d=new Date(),dd=["вс","пн","вт","ср","чт","пт","сб"];
