@@ -364,9 +364,16 @@ ensure_log() {
 
 # Родительский диск для точки монтирования (например / -> mmcblk0)
 disk_of_mountpoint() {
-    local mp="$1" src pk
+    local mp="$1" src pk mm
     src="$(findmnt -no SOURCE "$mp" 2>/dev/null)" || return 1
     [ -z "$src" ] && return 1
+    # findmnt может отдать псевдо-источник (/dev/root) — привести к реальному
+    # устройству через MAJ:MIN, иначе системный диск выпадет из-под защиты
+    if [ ! -b "$src" ] || [ "$src" = "/dev/root" ]; then
+        mm="$(findmnt -no MAJ:MIN "$mp" 2>/dev/null | head -1)"
+        [ -n "$mm" ] && [ -e "/dev/block/$mm" ] || return 1
+        src="$(realpath "/dev/block/$mm" 2>/dev/null)" || return 1
+    fi
     pk="$(lsblk -no PKNAME "$src" 2>/dev/null | head -1)"
     if [ -n "$pk" ]; then
         echo "/dev/$pk"
@@ -378,11 +385,20 @@ disk_of_mountpoint() {
 
 # Список защищённых дисков (система). Возвращает строки /dev/xxx
 protected_disks() {
-    local mp d
-    for mp in / /boot /boot/firmware /home /var; do
-        d="$(disk_of_mountpoint "$mp" 2>/dev/null)"
-        [ -n "$d" ] && echo "$d"
-    done | sort -u
+    local mp d src pk
+    {
+        for mp in / /boot /boot/firmware /home /var; do
+            d="$(disk_of_mountpoint "$mp" 2>/dev/null)"
+            [ -n "$d" ] && echo "$d"
+        done
+        # диск с активным swap-разделом тоже под защитой
+        while read -r src _; do
+            [ -b "$src" ] || continue
+            case "$src" in /dev/zram*) continue ;; esac
+            pk="$(lsblk -no PKNAME "$src" 2>/dev/null | head -1)"
+            if [ -n "$pk" ]; then echo "/dev/$pk"; else echo "$src"; fi
+        done < <(tail -n +2 /proc/swaps 2>/dev/null)
+    } | grep -v '^$' | sort -u
 }
 
 # Диск занят? (сам или любой его раздел куда-то смонтирован)
@@ -1046,8 +1062,11 @@ ACTION="${1:-sync}"
 LOG=/var/log/snapraid.log
 CONF=/etc/nas-wizard/notify.conf
 DELETE_THRESHOLD=500
+HEALTHCHECK_URL=""
 [ -f "$CONF" ] && . "$CONF"
 notify(){ [ -x /usr/local/bin/nas-notify.sh ] && /usr/local/bin/nas-notify.sh "$@" || true; }
+# пинг Healthchecks/ntfy/webhook: успех — базовый URL, ошибка — /fail (конвенция Healthchecks)
+ping_hc(){ [ -n "$HEALTHCHECK_URL" ] && curl -fsS -m 12 --retry 2 "$HEALTHCHECK_URL$1" >/dev/null 2>&1 || true; }
 
 {
     echo "===== $(date '+%F %T') snapraid $ACTION ====="
@@ -1066,8 +1085,13 @@ notify(){ [ -x /usr/local/bin/nas-notify.sh ] && /usr/local/bin/nas-notify.sh "$
     fi
 } >>"$LOG" 2>&1
 rc=$?
-if [ "$rc" -eq 0 ]; then notify "SnapRAID: $ACTION ок" "Завершено успешно $(date '+%F %T')"
-else notify "SnapRAID: $ACTION ошибка" "Код $rc — см. /var/log/snapraid.log" 1; fi
+if [ "$rc" -eq 0 ]; then
+    notify "SnapRAID: $ACTION ок" "Завершено успешно $(date '+%F %T')"
+    ping_hc ""
+else
+    notify "SnapRAID: $ACTION ошибка" "Код $rc — см. /var/log/snapraid.log" 1
+    ping_hc "/fail"
+fi
 exit "$rc"
 WRAP
     run chmod +x /usr/local/bin/nas-snapraid.sh
@@ -1133,13 +1157,7 @@ setup_snapraid_notify() {
         local url
         url="$(ui_input "URL пинга" "URL, который дёргать при УСПЕХЕ:" "")" || return 0
         if [ -z "$url" ]; then info "URL пуст — уведомления не настроены"; return 0; fi
-        run mkdir -p /etc/nas-wizard
-        write_file /etc/nas-wizard/notify.conf <<EOF
-# nas-wizard: конфиг уведомлений snapraid
-HEALTHCHECK_URL="$url"
-# Порог: если snapraid diff показывает больше удалённых файлов — sync прервётся
-DELETE_THRESHOLD=500
-EOF
+        notify_conf_set HEALTHCHECK_URL "$url"
         info "уведомления настроены: $url"
     else
         info "уведомления не настраиваются"
@@ -1247,7 +1265,7 @@ done
 exit "\$rc"
 DEPLOY
     [ "$DRY_RUN" -eq 0 ] && chmod +x "$NAS_CONFIG/scripts/deploy.sh" 2>/dev/null
-    run_as chown "$TARGET_USER:$TARGET_USER" "$NAS_CONFIG/scripts/deploy.sh" 2>/dev/null || true
+    run chown "$TARGET_USER:$TARGET_USER" "$NAS_CONFIG/scripts/deploy.sh" 2>/dev/null || true
 }
 
 # Порядок загрузки: docker ждёт mergerfs-пул, стеки поднимаются после монтирования.
@@ -1978,6 +1996,23 @@ main_menu() {
 # ---------------------------------------------------------------------------
 # Уведомления (Pushover) — единый помощник, зовётся из обёрток
 # ---------------------------------------------------------------------------
+NOTIFY_CONF=/etc/nas-wizard/notify.conf
+# Точечно выставить KEY="VAL" в notify.conf, не затирая чужие ключи: у файла
+# три писателя (Healthchecks-URL из мастера, Pushover из api notify и веб-UI).
+notify_conf_set() {
+    local key="$1" val="${2//\"/}"
+    log "NOTIFY-CONF: $key"
+    if [ "$DRY_RUN" -eq 1 ]; then
+        printf '  [DRY-RUN] notify.conf: %s="%s"\n' "$key" "$val"
+        return 0
+    fi
+    mkdir -p /etc/nas-wizard
+    { [ -f "$NOTIFY_CONF" ] && grep -v "^${key}=" "$NOTIFY_CONF"; true
+      printf '%s="%s"\n' "$key" "$val"; } > "${NOTIFY_CONF}.tmp"
+    mv "${NOTIFY_CONF}.tmp" "$NOTIFY_CONF"
+    chmod 600 "$NOTIFY_CONF"
+}
+
 install_notify_helper() {
     write_file /usr/local/bin/nas-notify.sh <<'NOTIFY'
 #!/usr/bin/env bash
@@ -2328,14 +2363,8 @@ api_keys_run() {               # $1=prefix (pi|sec|...) ; вызывает <pref
     done
 }
 api_notify() {                 # Pushover в /etc/nas-wizard/notify.conf
-    run mkdir -p /etc/nas-wizard
-    write_file /etc/nas-wizard/notify.conf <<EOF
-# nas-wizard: уведомления (Pushover)
-PUSHOVER_USER="${NASW_PUSER:-}"
-PUSHOVER_TOKEN="${NASW_PTOKEN:-}"
-# события: ${NASW_EVENTS:-sync smart temp}
-DELETE_THRESHOLD=500
-EOF
+    notify_conf_set PUSHOVER_USER  "${NASW_PUSER:-}"
+    notify_conf_set PUSHOVER_TOKEN "${NASW_PTOKEN:-}"
     install_notify_helper
     echo "Pushover настроен"
 }
