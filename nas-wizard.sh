@@ -151,6 +151,20 @@ run() {
     return $rc
 }
 
+# remove_fstab_mount — удалить из /etc/fstab строки, монтирующие в заданную точку
+# (кроме комментариев); нужно перед добавлением новой строки с новым UUID.
+remove_fstab_mount() {
+    local mp="$1"
+    [ -n "$mp" ] || return 0
+    if [ "$DRY_RUN" -eq 1 ]; then
+        printf '  [DRY-RUN] удалить старые строки fstab для %s\n' "$mp"
+        return 0
+    fi
+    [ -f /etc/fstab ] || return 0
+    awk -v mp="$mp" '$1 ~ /^#/ || $2 != mp' /etc/fstab > /etc/fstab.nastmp \
+        && cat /etc/fstab.nastmp > /etc/fstab && rm -f /etc/fstab.nastmp
+}
+
 # append_line — идемпотентно дописать строку в файл (для fstab и т.п.)
 append_line() {
     local line="$1" file="$2"
@@ -162,6 +176,11 @@ append_line() {
     if [ "$DRY_RUN" -eq 1 ]; then
         printf '  [DRY-RUN] echo %q >> %s\n' "$line" "$file"
         return 0
+    fi
+    # гарантировать перевод строки в конце файла, иначе новая строка слипнется с последней
+    # (порча предыдущей записи fstab → возможен сбой загрузки)
+    if [ -s "$file" ] && [ -n "$(tail -c1 "$file")" ]; then
+        printf '\n' >>"$file"
     fi
     printf '%s\n' "$line" >>"$file"
 }
@@ -690,13 +709,15 @@ mkfs_available() { command -v "mkfs.$1" >/dev/null 2>&1; }
 make_fs() {
     local dev="$1" fs="$2" label="$3"
     mkfs_available "$fs" || die "нет mkfs.$fs — установите пакет (exfatprogs/ntfs-3g/btrfs-progs/xfsprogs)"
+    # mkfs ДОЛЖЕН падать жёстко: иначе format_and_mount возьмёт старый UUID (blkid),
+    # смонтирует недоформатированную ФС и внесёт её в fstab/пул → потеря/каша данных.
     case "$fs" in
-        ext4)  run mkfs.ext4  -F -L "$label" "$dev" ;;
-        xfs)   run mkfs.xfs   -f -L "$(printf '%s' "$label" | cut -c1-12)" "$dev" ;;
-        btrfs) run mkfs.btrfs -f -L "$label" "$dev" ;;
-        exfat) run mkfs.exfat -L "$label" "$dev" ;;
-        ntfs)  run mkfs.ntfs  -Q -L "$label" "$dev" ;;
-        vfat)  run mkfs.vfat  -n "$(printf '%s' "$label" | tr 'a-z' 'A-Z' | tr -cd 'A-Z0-9_-' | cut -c1-11)" "$dev" ;;
+        ext4)  run mkfs.ext4  -F -L "$label" "$dev" || die "mkfs.ext4 не удался на $dev" ;;
+        xfs)   run mkfs.xfs   -f -L "$(printf '%s' "$label" | cut -c1-12)" "$dev" || die "mkfs.xfs не удался на $dev" ;;
+        btrfs) run mkfs.btrfs -f -L "$label" "$dev" || die "mkfs.btrfs не удался на $dev" ;;
+        exfat) run mkfs.exfat -L "$label" "$dev" || die "mkfs.exfat не удался на $dev" ;;
+        ntfs)  run mkfs.ntfs  -Q -L "$label" "$dev" || die "mkfs.ntfs не удался на $dev" ;;
+        vfat)  run mkfs.vfat  -n "$(printf '%s' "$label" | tr 'a-z' 'A-Z' | tr -cd 'A-Z0-9_-' | cut -c1-11)" "$dev" || die "mkfs.vfat не удался на $dev" ;;
         *)     die "неизвестная ФС: $fs" ;;
     esac
 }
@@ -720,6 +741,10 @@ format_and_mount() {
     # каталог точки монтирования
     run mkdir -p "$mp"
 
+    # убрать устаревшие строки fstab для этой же точки (после переформатирования UUID меняется —
+    # иначе останется мёртвая строка со старым UUID для того же /mnt/diskN)
+    remove_fstab_mount "$mp"
+
     # fstab по UUID (+ nofail: чтобы отсутствие диска не блокировало загрузку NAS)
     local fstab_line="UUID=$uuid  $mp  $fs  defaults,noatime,nofail,x-systemd.device-timeout=10  0  $pass"
     append_line "$fstab_line" /etc/fstab
@@ -742,10 +767,14 @@ format_and_mount() {
 
 # Идемпотентность: диск уже настроен?
 disk_already_configured() {
-    local dev="$1" uuid
+    # Диск уже настроен, если его UUID (или UUID любого его раздела) есть в fstab.
+    local dev="$1" uuid u
     uuid="$(blkid -s UUID -o value "$dev" 2>/dev/null)"
-    [ -z "$uuid" ] && return 1
-    grep -qsF "UUID=$uuid" /etc/fstab
+    [ -n "$uuid" ] && grep -qsF "UUID=$uuid" /etc/fstab && return 0
+    while read -r u; do
+        [ -n "$u" ] && grep -qsF "UUID=$u" /etc/fstab && return 0
+    done < <(lsblk -nro UUID "$dev" 2>/dev/null)
+    return 1
 }
 
 stage_disk() {
@@ -1070,8 +1099,29 @@ ping_hc(){ [ -n "$HEALTHCHECK_URL" ] && curl -fsS -m 12 --retry 2 "$HEALTHCHECK_
 
 {
     echo "===== $(date '+%F %T') snapraid $ACTION ====="
+    # ЗАЩИТА ДАННЫХ: если хоть один диск данных из конфига не смонтирован, его файлы
+    # выглядят как «удалённые» → sync записал бы удаления в чётность. Прерываем.
+    miss=""
+    while read -r _ _ dpath; do
+        [ -n "$dpath" ] || continue
+        mountpoint -q "$dpath" || miss="$miss $dpath"
+    done < <(grep -E '^data ' /etc/snapraid.conf 2>/dev/null)
+    if [ -n "$miss" ]; then
+        echo "ABORT: диски данных не смонтированы:$miss — $ACTION ПРОПУЩЕН (защита чётности)."
+        ping_hc "/fail"
+        echo "NASRESULT $ACTION err rc=9" >>"$LOG"
+        exit 9
+    fi
     if [ "$ACTION" = "sync" ]; then
-        removed=$(snapraid diff 2>&1 | sed -n 's/^ *\([0-9][0-9]*\) removed$/\1/p')
+        # diff должен отработать корректно (0=нет изменений, 2=есть изменения); иначе — НЕ синкать
+        diff_out="$(snapraid diff 2>&1)"; diff_rc=$?
+        printf '%s\n' "$diff_out"
+        if [ "$diff_rc" != 0 ] && [ "$diff_rc" != 2 ]; then
+            echo "ABORT: snapraid diff завершился с кодом $diff_rc — sync ПРОПУЩЕН (не удалось оценить удаления)."
+            ping_hc "/fail"
+            exit 1
+        fi
+        removed=$(printf '%s\n' "$diff_out" | sed -n 's/^ *\([0-9][0-9]*\) removed$/\1/p')
         removed=${removed:-0}
         echo "diff: removed=$removed threshold=$DELETE_THRESHOLD"
         if [ "$removed" -gt "$DELETE_THRESHOLD" ]; then
@@ -2106,10 +2156,16 @@ automount_now() {
 }
 
 api_format_disk() {
-    local dev="${NASW_DEV:-}" role="${NASW_ROLE:-data}" fs="${NASW_FS:-ext4}" n mp label
+    local dev="${NASW_DEV:-}" role="${NASW_ROLE:-data}" fs="${NASW_FS:-ext4}" n mp label parent
     [ -n "$dev" ] || { echo "не указан диск (NASW_DEV)"; return 2; }
+    [ -b "$dev" ] || { echo "ОТКАЗ: $dev не блочное устройство"; return 2; }
     is_protected "$dev" && { echo "ОТКАЗ: $dev — системный диск"; return 2; }
+    # защитить и разделы системного диска: проверить родительское устройство
+    parent="$(lsblk -no PKNAME "$dev" 2>/dev/null | head -1)"
+    [ -n "$parent" ] && is_protected "/dev/$parent" && { echo "ОТКАЗ: $dev — раздел системного диска"; return 2; }
     disk_in_use "$dev"  && { echo "ОТКАЗ: $dev смонтирован (сначала отмонтируйте)"; return 2; }
+    # НЕ переформатировать уже настроенный диск (мог временно отвалиться от mount из-за nofail)
+    disk_already_configured "$dev" && { echo "ОТКАЗ: $dev уже настроен (его UUID есть в /etc/fstab) — форматирование отменено во избежание потери данных"; return 2; }
     case "$role" in
         parity)
             n="$(next_parity_number)"; mp="/mnt/parity${n}"; label="${NASW_LABEL:-parity${n}}"

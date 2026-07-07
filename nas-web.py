@@ -184,7 +184,9 @@ def _smartctl_json(extra, dev, timeout=12):
     return last
 
 def smart_info(dev):
-    j = _smartctl_json(["-H", "-A"], dev, timeout=8)
+    # -n standby: НЕ будить спящий диск ради фонового опроса (список/виджет/health).
+    # Если диск в standby, smartctl вернёт пусто → диск покажет здоровье/темп как «—».
+    j = _smartctl_json(["-n", "standby", "-H", "-A"], dev, timeout=8)
     if not _smart_has_data(j):
         return None
     return {"temp": (j.get("temperature") or {}).get("current"),
@@ -331,9 +333,11 @@ def smart_detail(dev):
         "attrs": attrs,
     }
 
+_C_ENV = dict(os.environ, LC_ALL="C", LANG="C")   # стабильный (английский) вывод утилит для парсинга
+
 def _run(cmd, timeout=40):
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=_C_ENV)
         return {"ok": p.returncode == 0, "code": p.returncode, "log": (p.stdout + p.stderr).strip()}
     except (OSError, subprocess.SubprocessError) as e:
         return {"ok": False, "code": -1, "log": str(e)}
@@ -407,8 +411,20 @@ def disk_eject(dev):
     po = _run(["udisksctl", "power-off", "-b", dev], timeout=15)
     return {"ok": True, "log": "можно отключать" + (" (питание снято)" if po["ok"] else " (отмонтировано)")}
 
+_health_cache = {"t": 0, "data": None}
+_health_lock = threading.Lock()
+
 def health_report():
-    """Одностраничная сводка здоровья: список проверок с уровнем ok/warn/bad."""
+    """Сводка здоровья с кэшем 60 с (тяжёлая: smartctl/systemctl/disks)."""
+    with _health_lock:
+        if _health_cache["data"] is not None and time.time() - _health_cache["t"] < 60:
+            return _health_cache["data"]
+    data = _health_report_build()
+    with _health_lock:
+        _health_cache["t"] = time.time(); _health_cache["data"] = data
+    return data
+
+def _health_report_build():
     checks = []
     def add(name, value, lvl, hint=""):
         checks.append({"name": name, "value": value, "lvl": lvl, "hint": hint})
@@ -582,7 +598,16 @@ def processes(sort="cpu", limit=45):
 
 def kill_process(pid, sig=15):
     try:
-        os.kill(int(pid), int(sig))
+        pid = int(pid); sig = int(sig)
+    except (ValueError, TypeError):
+        return {"ok": False, "log": "неверный pid/сигнал"}
+    # pid<=1 у os.kill означает «вся группа/все процессы» или init — категорически запрещаем
+    if pid <= 1:
+        return {"ok": False, "log": "недопустимый pid"}
+    if pid == os.getpid():
+        return {"ok": False, "log": "нельзя убить сам сервер"}
+    try:
+        os.kill(pid, sig)
         return {"ok": True, "log": f"сигнал {sig} -> {pid}"}
     except (ProcessLookupError, PermissionError, ValueError) as e:
         return {"ok": False, "log": str(e)}
@@ -966,7 +991,7 @@ def _smart_scan():
     """Один проход smartctl по всем физическим дискам → dict со здоровьем/износом/темп."""
     res = {}
     for dev in _phys_devs():
-        j = _smartctl_json(["-H", "-A"], dev, timeout=15)
+        j = _smartctl_json(["-n", "standby", "-H", "-A"], dev, timeout=15)   # не будить спящие диски
         if not _smart_has_data(j):
             continue
         passed = (j.get("smart_status") or {}).get("passed")
@@ -1039,8 +1064,10 @@ def _bad_containers():
         if len(f) < 3:
             continue
         name, state, status = f[0], f[1], f[2]
-        if state == "exited" and "Exited (0)" not in status:
-            bad.append("%s (упал)" % name)
+        # 0/143(SIGTERM)/137(SIGKILL) — штатная остановка (docker stop), не сбой
+        m = re.search(r"Exited \((\d+)\)", status)
+        if state == "exited" and m and int(m.group(1)) not in (0, 143, 137):
+            bad.append("%s (упал, код %s)" % (name, m.group(1)))
         elif "unhealthy" in status.lower():
             bad.append("%s (unhealthy)" % name)
     return bad
@@ -1049,6 +1076,14 @@ def _bad_containers():
 #  Единая отправка события уведомления (проверяет вкл./cooldown/приоритет).
 #  Зовётся и из monitor_tick, и из хука входа в панель.
 # --------------------------------------------------------------------------- #
+def _safe(fn, default=None):
+    """Вызвать детектор, проглотив исключение — один сбойный детектор не должен
+    останавливать весь monitor_tick."""
+    try:
+        return fn()
+    except Exception:
+        return default
+
 def mon_notify(dedup_key, title, msg, event=None):
     cfg = load_monitor()
     if not cfg.get("enabled"):
@@ -1176,6 +1211,12 @@ def _cron_failures():
     return [j.get("id") or j.get("name") for j in (st.get("failed") or [])][:8] if isinstance(st, dict) else []
 
 def _ntp_unsynced():
+    # chrony часто держит NTPSynchronized=no, будучи синхронным — сначала спросим сам chrony
+    if shutil.which("chronyc"):
+        r = _run(["chronyc", "-n", "tracking"], timeout=6)
+        log = r.get("log") or ""
+        if "Leap status" in log:
+            return "Not synchronised" in log
     r = _run(["timedatectl", "show", "-p", "NTPSynchronized", "--value"], timeout=6)
     return (r.get("log") or "").strip() == "no"
 
@@ -1246,11 +1287,16 @@ def monitor_tick():
     thr = lambda k, dv: ev.get(k, {}).get("threshold", dv)
     now = time.time()
     cd = cfg.get("cooldown", 1800)
+    if len(_MON_LAST) > 400:            # не копить ключи вечно (ssh:/panel_new: по IP)
+        for k in [k for k, v in list(_MON_LAST.items()) if now - v > max(cd * 2, 7200)]:
+            _MON_LAST.pop(k, None)
     def fire(key, title, msg, priority=0):
         if now - _MON_LAST.get(key, 0) >= cd:
             if push_notify(title, msg, priority):
                 _MON_LAST[key] = now
-    s = stats()
+    s = _safe(stats)
+    if not s:                       # без базовых метрик тик пропускаем (следующий повторит)
+        return
     host = s.get("host", "NAS")
 
     # --- запуск системы ---
@@ -1260,26 +1306,27 @@ def monitor_tick():
         _MON_BOOT_SENT = True
 
     # --- подключение / отключение дисков (по изменению набора томов) ---
-    vols = _block_volumes()
-    if _MON_DEVS is not None:
-        added   = [vols[d] for d in vols if d not in _MON_DEVS]
-        removed = [_MON_DEVS[d] for d in _MON_DEVS if d not in vols]
-        if added and on("disk_add"):
-            push_notify("NAS: диск подключён", "Появился: " + ", ".join(map(str, added)), pri("disk_add"))
-        if removed and on("disk_remove"):
-            push_notify("NAS: диск отключён", "Пропал: " + ", ".join(map(str, removed)), pri("disk_remove"))
-    _MON_DEVS = vols
+    vols = _safe(_block_volumes)
+    if vols is not None:            # при сбое не портим _MON_DEVS (иначе ложные add/remove)
+        if _MON_DEVS is not None:
+            added   = [vols[d] for d in vols if d not in _MON_DEVS]
+            removed = [_MON_DEVS[d] for d in _MON_DEVS if d not in vols]
+            if added and on("disk_add"):
+                fire("disk_add", "NAS: диск подключён", "Появился: " + ", ".join(map(str, added)), pri("disk_add"))
+            if removed and on("disk_remove"):
+                fire("disk_remove", "NAS: диск отключён", "Пропал: " + ", ".join(map(str, removed)), pri("disk_remove"))
+        _MON_DEVS = vols
 
     # --- файловая система в режиме «только чтение» (риск данных) ---
     if on("readonly"):
-        ro = _readonly_mounts()
+        ro = _safe(_readonly_mounts, [])
         if ro:
             fire("readonly", "NAS: диск только для чтения",
                  "Смонтировано ro (сбой ФС?): " + ", ".join(ro), pri("readonly"))
 
     # --- ошибки ФС/ввода-вывода в журнале ядра ---
     if on("fserror"):
-        errs = _kernel_fs_errors()
+        errs = _safe(_kernel_fs_errors, [])
         if errs:
             fire("fserror", "NAS: ошибки диска в логе ядра", "\n".join(errs), pri("fserror"))
 
@@ -1293,7 +1340,7 @@ def monitor_tick():
     m = (s.get("mem") or {}).get("pct", 0)
     if on("mem") and m >= thr("mem", 92):
         fire("mem", "NAS: мало памяти", "RAM занята на %s%%" % m, pri("mem"))
-    mem = mem_info()
+    mem = _safe(mem_info, {})
     if on("swap") and mem.get("swap_total"):
         swp = round(100 * (mem["swap_total"] - mem["swap_free"]) / mem["swap_total"])
         if swp >= thr("swap", 60):
@@ -1307,7 +1354,7 @@ def monitor_tick():
     if on("pool") and pool.get("pct", 0) >= thr("pool", 90):
         fire("pool", "NAS: хранилище заполнено", "%s занят на %s%%" % (pool.get("path", "пул"), pool.get("pct")), pri("pool"))
     if on("diskfull"):
-        for mp, pct in _data_mounts_usage():
+        for mp, pct in _safe(_data_mounts_usage, []):
             if mp == "/mnt/storage":
                 continue
             if pct >= thr("diskfull", 90):
@@ -1320,7 +1367,7 @@ def monitor_tick():
         if failed:
             fire("svcfail", "NAS: сбой службы", "Упали: " + ", ".join(failed[:8]), pri("svcfail"))
     if on("container") and shutil.which("docker"):
-        bad = _bad_containers()
+        bad = _safe(_bad_containers, [])
         if bad:
             fire("container", "NAS: проблема с контейнером", "; ".join(bad[:8]), pri("container"))
 
@@ -1331,7 +1378,7 @@ def monitor_tick():
     # --- SMART: раз в 10 минут единым проходом (здоровье / износ / температура) ---
     if (on("smart") or on("smart_wear") or on("disktemp")) and now - _MON_SMART_LAST >= 600:
         _MON_SMART_LAST = now
-        scan = _smart_scan()
+        scan = _safe(_smart_scan, {})
         for dev, d in scan.items():
             if on("smart") and d.get("passed") is False:
                 fire("smart:" + dev, "NAS: диск не прошёл SMART", "%s — SMART FAIL, замените диск" % dev, pri("smart"))
@@ -1349,43 +1396,47 @@ def monitor_tick():
     # --- контейнеры: restart-loop + распухший docker ---
     if shutil.which("docker"):
         if on("container_loop"):
-            loops = _restart_loops()
+            loops = _safe(_restart_loops, [])
             if loops:
                 fire("cloop", "NAS: контейнер не поднимается", "Перезапускается по кругу: " + ", ".join(loops[:8]), pri("container_loop"))
         if on("docker_space") and _hourly("docker_space"):
-            gb = _docker_reclaimable_gb()
+            gb = _safe(_docker_reclaimable_gb, 0) or 0
             if gb >= thr("docker_space", 20):
                 fire("dspace", "NAS: docker распух", "Можно освободить ~%s ГБ (prune)" % gb, pri("docker_space"))
 
     # --- SSH-вход ---
     if on("ssh_login"):
-        for user, ip in _ssh_logins():
+        for user, ip in _safe(_ssh_logins, []):
             fire("ssh:" + ip, "NAS: вход по SSH", "%s с %s" % (user, ip), pri("ssh_login"))
 
-    # --- сеть: смена IP / линка / VPN ---
+    # --- сеть: смена IP / линка / VPN (через fire → cooldown, не спамим при мерцании) ---
     ip = s.get("ip")
     if _MON_IP is not None and ip and ip != _MON_IP and on("ip_changed"):
-        push_notify("NAS: сменился IP", "Было %s → стало %s" % (_MON_IP, ip), pri("ip_changed"))
+        fire("ip_changed", "NAS: сменился IP", "Было %s → стало %s" % (_MON_IP, ip), pri("ip_changed"))
     _MON_IP = ip or _MON_IP
     iface = s.get("iface")
-    if _MON_IFACE is not None and iface != _MON_IFACE and on("link_changed"):
-        push_notify("NAS: смена сети", "Активный интерфейс: %s → %s" % (_MON_IFACE or "нет", iface or "нет"), pri("link_changed"))
-    _MON_IFACE = iface
-    if on("vpn_offline") and _tailscale_offline():
+    # только реальные переходы между непустыми интерфейсами (иначе мерцание null → спам)
+    if _MON_IFACE is not None and iface and iface != _MON_IFACE and on("link_changed"):
+        fire("link_changed", "NAS: смена сети", "Активный интерфейс: %s → %s" % (_MON_IFACE, iface), pri("link_changed"))
+    _MON_IFACE = iface or _MON_IFACE
+    if on("vpn_offline") and _safe(_tailscale_offline):
         fire("vpn", "NAS: VPN offline", "Tailscale не в сети — удалённый доступ недоступен", pri("vpn_offline"))
 
     # --- защита данных: SnapRAID + mergerfs + бэкап ---
-    sn = _snapraid_events() or {}
-    if on("snap_ok") and sn.get("sync_ok"):
-        fire("snapok", "NAS: SnapRAID sync ок", sn["sync_ok"], pri("snap_ok"))
-    if on("snap_err") and sn.get("sync_err"):
-        fire("snaperr", "NAS: SnapRAID sync ошибка", sn["sync_err"], pri("snap_err"))
-    if on("scrub_err") and sn.get("scrub_err"):
-        fire("scruberr", "NAS: SnapRAID нашёл повреждение", sn["scrub_err"], pri("scrub_err"))
-    if on("delete_block") and sn.get("delete_blocked"):
-        fire("delblk", "NAS: sync остановлен защитой", sn["delete_blocked"], pri("delete_block"))
+    # берём последние sync/scrub с датой (snapraid_status) и включаем дату в ключ дедупа —
+    # так каждое событие уведомляет ОДИН раз, а не каждый cooldown, пока строка в хвосте лога
+    sn = _safe(snapraid_status, {}) or {}
+    ls, lsc = sn.get("last_sync") or {}, sn.get("last_scrub") or {}
+    if on("snap_ok") and ls.get("result") == "ok":
+        fire("snapok:" + str(ls.get("date")), "NAS: SnapRAID sync ок", "Синхронизация чётности прошла (%s)" % (ls.get("date") or ""), pri("snap_ok"))
+    if on("snap_err") and ls.get("result") == "err":
+        fire("snaperr:" + str(ls.get("date")), "NAS: SnapRAID sync ошибка", "Синхронизация чётности не удалась (%s)" % (ls.get("date") or ""), pri("snap_err"))
+    if on("scrub_err") and lsc.get("result") == "err":
+        fire("scruberr:" + str(lsc.get("date")), "NAS: SnapRAID scrub ошибка", "Проверка нашла проблему (%s)" % (lsc.get("date") or ""), pri("scrub_err"))
+    if on("delete_block") and sn.get("blocked"):
+        fire("delblk", "NAS: sync остановлен защитой", sn["blocked"], pri("delete_block"))
     if on("mergerfs"):
-        miss = _mergerfs_missing()
+        miss = _safe(_mergerfs_missing, [])
         if miss:
             fire("mfs", "NAS: диск выпал из пула", "Не смонтированы: " + ", ".join(miss), pri("mergerfs"))
     if on("backup"):
@@ -1398,11 +1449,11 @@ def monitor_tick():
                 fire("bkp", "NAS: бэкап выполнен", last[-160:], pri("backup"))
 
     # --- обслуживание ---
-    root = disk_info("/") or {}
+    root = _safe(lambda: disk_info("/")) or {}
     if on("root_full") and root.get("pct", 0) >= thr("root_full", 90):
         fire("rootfull", "NAS: мало места на системной карте", "Раздел / занят на %s%%" % root.get("pct"), pri("root_full"))
     if on("sd_degrade"):
-        sd = _sd_errors()
+        sd = _safe(_sd_errors, [])
         if sd:
             fire("sderr", "NAS: сбои SD-карты", "\n".join(sd), pri("sd_degrade"))
     if on("sustained_heat"):
@@ -1411,21 +1462,21 @@ def monitor_tick():
         if _MON_HEAT >= thr("sustained_heat", 10):
             fire("heat", "NAS: держится перегрев/троттлинг", "Уже %d мин подряд — проверьте охлаждение/питание" % _MON_HEAT, pri("sustained_heat"))
     if on("fan_stall"):
-        rpm = _fan_rpm()
+        rpm = _safe(_fan_rpm)
         if rpm == 0 and t and t >= thr("temp", 75):
             fire("fan", "NAS: вентилятор стоит", "0 об/мин при %s°C — проверьте кулер" % t, pri("fan_stall"))
     if on("cron_failed"):
-        cf = _cron_failures()
+        cf = _safe(_cron_failures, [])
         if cf:
             fire("cron", "NAS: задача по расписанию упала", "Ошибка: " + ", ".join(map(str, cf)), pri("cron_failed"))
-    if on("time_drift") and _ntp_unsynced():
+    if on("time_drift") and _safe(_ntp_unsynced):
         fire("ntp", "NAS: время не синхронизировано", "Часы могут уплыть — проверьте chrony/timesyncd", pri("time_drift"))
     if on("updates") and _hourly("updates"):
-        n = _apt_upgradable()
+        n = _safe(_apt_upgradable, 0) or 0
         if n > 0:
             fire("upd", "NAS: доступны обновления", "Можно обновить пакетов: %d" % n, pri("updates"))
     if on("sec_updates") and _hourly("sec_updates"):
-        su = _sec_updates_recent()
+        su = _safe(_sec_updates_recent, [])
         if su:
             fire("secupd", "NAS: накатились security-обновления", su[-1], pri("sec_updates"))
 
@@ -1434,15 +1485,15 @@ def monitor_tick():
     if on("traffic") and tx >= thr("traffic", 50) * 1024 * 1024:
         fire("traffic", "NAS: большой исходящий трафик", "Отдача %s/с — проверьте, что это ожидаемо" % fmt_bytes(tx), pri("traffic"))
     if on("slow_disk"):
-        for dev, aw in _diskstat_await().items():
+        for dev, aw in (_safe(_diskstat_await, {}) or {}).items():
             if aw >= thr("slow_disk", 100):
                 fire("slow:" + dev, "NAS: диск отвечает медленно", "%s — задержка %d мс/операцию" % (dev, round(aw)), pri("slow_disk"))
     if on("proc_hog"):
-        hog = _proc_hog(thr("proc_hog", 80))
+        hog = _safe(lambda: _proc_hog(thr("proc_hog", 80)))
         if hog:
             fire("hog", "NAS: процесс грузит систему", hog, pri("proc_hog"))
     if on("inodes"):
-        ino = _inodes_full(thr("inodes", 90))
+        ino = _safe(lambda: _inodes_full(thr("inodes", 90)), [])
         if ino:
             fire("inodes", "NAS: заканчиваются inode", "; ".join(ino), pri("inodes"))
 
@@ -1482,6 +1533,7 @@ HISTORY_FILE = os.path.join(NAS_CONFIG, "history.json")
 HISTORY_CAP  = 1500          # ~25 часов при шаге 60 с
 _history = None
 _hist_dirty = 0
+_hist_lock = threading.Lock()
 
 def _load_history():
     global _history
@@ -1494,10 +1546,14 @@ def _load_history():
         _history = []
     return _history
 
+def history_snapshot():
+    """Копия истории под локом — безопасно сериализовать в HTTP-потоке."""
+    with _hist_lock:
+        return list(_load_history())
+
 def history_sample():
     """Снять одну точку метрик и добавить в историю (зовётся раз в минуту)."""
     global _hist_dirty
-    h = _load_history()
     try:
         s = stats()
     except Exception:
@@ -1506,17 +1562,22 @@ def history_sample():
           "mem": (s.get("mem") or {}).get("pct"),
           "rx": (s.get("net") or {}).get("rx"), "tx": (s.get("net") or {}).get("tx"),
           "pool": (s.get("disk_pool") or {}).get("pct")}
-    h.append(pt)
-    if len(h) > HISTORY_CAP:
-        del h[:len(h) - HISTORY_CAP]
-    _hist_dirty += 1
-    if _hist_dirty >= 5:                 # писать на диск не чаще ~раз в 5 мин
-        _hist_dirty = 0
+    with _hist_lock:
+        h = _load_history()
+        h.append(pt)
+        if len(h) > HISTORY_CAP:
+            del h[:len(h) - HISTORY_CAP]
+        _hist_dirty += 1
+        write = _hist_dirty >= 5
+        if write:
+            _hist_dirty = 0
+            snap = list(h)
+    if write:                            # запись на диск вне лока (не держим мониторинг)
         try:
             os.makedirs(NAS_CONFIG, exist_ok=True)
             tmp = HISTORY_FILE + ".tmp"
             with open(tmp, "w") as f:
-                json.dump(h, f)
+                json.dump(snap, f)
             os.replace(tmp, HISTORY_FILE)
         except OSError:
             pass
@@ -2005,7 +2066,9 @@ def gen_thumb(src):
         return None
     # вписать в коробку THUMB_PX×THUMB_PX (портретные/вертикальные не становятся огромными)
     scale = "scale='min(%d,iw)':'min(%d,ih)':force_original_aspect_ratio=decrease" % (THUMB_PX, THUMB_PX)
-    tmp = tp + ".%d.tmp.jpg" % os.getpid()
+    # уникальный суффикс на КАЖДЫЙ вызов (pid одинаков во всех потоках, до 3 генераций разом)
+    uniq = "%d.%s" % (os.getpid(), secrets.token_hex(4))
+    tmp = tp + "." + uniq + ".tmp.jpg"
     ok = False
     with _thumb_sem:
         try:
@@ -2029,7 +2092,7 @@ def gen_thumb(src):
             elif kind == "aud":
                 cmd = ["ffmpeg","-y","-v","error","-i",src,"-an","-vf",scale,"-frames:v","1",tmp]
             else:
-                base = tp[:-4]
+                base = tp[:-4] + "." + uniq
                 cmd = ["pdftoppm","-jpeg","-f","1","-l","1","-scale-to",str(THUMB_PX),src,base]
             r = subprocess.run(cmd, capture_output=True, timeout=25)
             if kind == "pdf":
@@ -2042,8 +2105,11 @@ def gen_thumb(src):
         except Exception:
             ok = False
         finally:
+            # подчистить все временные файлы этого вызова (в т.ч. варианты pdftoppm base-*.jpg)
             try:
-                if os.path.exists(tmp): os.remove(tmp)
+                for leftover in glob.glob(tp + "." + uniq + ".tmp.jpg") + glob.glob(tp[:-4] + "." + uniq + "*.jpg"):
+                    try: os.remove(leftover)
+                    except OSError: pass
             except OSError:
                 pass
     if ok:
@@ -2685,6 +2751,7 @@ SESS_FILE   = "/etc/nas-os/sessions.json"   # сессии переживают 
 SESSION_TTL = 30 * 86400
 _sess_lock  = threading.Lock()
 _login_fail = {"n": 0, "t": 0.0}        # антибрутфорс: пауза после серии неудач
+_login_lock = threading.Lock()
 
 def _load_sessions():
     try:
@@ -2725,6 +2792,11 @@ def auth_set_password(password):
                    "hash": _pw_hash(password, salt)}, f)
     os.chmod(tmp, 0o600)
     os.replace(tmp, AUTH_FILE)
+    # смена пароля отзывает ВСЕ прежние сессии (в т.ч. возможную украденную куку);
+    # вызывающий сразу получит новую сессию в обработчике
+    with _sess_lock:
+        _sessions.clear()
+        _save_sessions()
     return {"ok": True}
 
 def auth_check_password(password):
@@ -3506,9 +3578,8 @@ class H(BaseHTTPRequestHandler):
         return ""
 
     def _client_ip(self):
-        xff = self.headers.get("X-Forwarded-For")
-        if xff:
-            return xff.split(",")[0].strip()
+        # сервер слушает 0.0.0.0 напрямую (без доверенного прокси), поэтому берём
+        # реальный адрес сокета, а НЕ подделываемый клиентом X-Forwarded-For
         try:
             return self.client_address[0]
         except (AttributeError, IndexError):
@@ -3536,10 +3607,19 @@ class H(BaseHTTPRequestHandler):
             self._json({"configured": auth_configured(), "authed": self._authed()})
         elif p == "/api/auth/login":
             b = self._body()
-            if _login_fail["n"] >= 5 and time.time() - _login_fail["t"] < 3.0:
-                self._json({"ok": False, "log": "слишком много попыток, подождите"}, 429)
+            # антибрутфорс под локом: гейтим ДО проверки пароля, чтобы параллельные
+            # запросы не проскочили пачкой (ThreadingHTTPServer)
+            with _login_lock:
+                now = time.time()
+                if now - _login_fail["t"] > 60:           # окно попыток — минута
+                    _login_fail["n"] = 0
+                blocked = _login_fail["n"] >= 8
+            if blocked:
+                time.sleep(1.0)
+                self._json({"ok": False, "log": "слишком много попыток, подождите минуту"}, 429)
             elif auth_configured() and auth_check_password(b.get("password", "")):
-                _login_fail["n"] = 0
+                with _login_lock:
+                    _login_fail["n"] = 0
                 ip = self._client_ip()
                 if ip and ip not in _known_ips():         # вход с нового адреса
                     _remember_ip(ip)
@@ -3548,12 +3628,12 @@ class H(BaseHTTPRequestHandler):
                         daemon=True).start()
                 self._json({"ok": True}, cookie=self._session_cookie(session_new()))
             else:
-                _login_fail["n"] += 1
-                _login_fail["t"] = time.time()
-                if _login_fail["n"] >= load_monitor().get("events", {}).get("panel_fail", {}).get("threshold", 5):
+                with _login_lock:
+                    _login_fail["n"] += 1; _login_fail["t"] = time.time(); n = _login_fail["n"]
+                if n >= load_monitor().get("events", {}).get("panel_fail", {}).get("threshold", 5):
                     threading.Thread(target=mon_notify, args=("panel_fail",
                         "NAS: подбор пароля к панели", "%d неудачных попыток входа (последняя с %s)"
-                        % (_login_fail["n"], self._client_ip() or "?"), "panel_fail"), daemon=True).start()
+                        % (n, self._client_ip() or "?"), "panel_fail"), daemon=True).start()
                 time.sleep(0.5)     # притормозить перебор
                 self._json({"ok": False, "log": "неверный пароль"}, 403)
         elif p == "/api/auth/setup":
@@ -3589,14 +3669,22 @@ class H(BaseHTTPRequestHandler):
                                  text=True, bufsize=1)
         except OSError as e:
             self.wfile.write(("ошибка запуска: %s\n__EXIT__1\n" % e).encode()); return
-        for line in iter(p.stdout.readline, ""):
-            try:
-                self.wfile.write(line.encode()); self.wfile.flush()
-            except (BrokenPipeError, ConnectionResetError):
-                p.kill(); break
-        p.wait()
+        # сторож: убить зависший движок (напр. блок на мёртвом mount), чтобы не течь потоком/сокетом
+        deadline = threading.Timer(1800, lambda: p.poll() is None and p.kill())
+        deadline.daemon = True; deadline.start()
         try:
-            self.wfile.write(("__EXIT__%d\n" % p.returncode).encode()); self.wfile.flush()
+            for line in iter(p.stdout.readline, ""):
+                try:
+                    self.wfile.write(line.encode()); self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    p.kill(); break
+            p.wait()
+        finally:
+            deadline.cancel()
+            try: p.stdout.close()
+            except OSError: pass
+        try:
+            self.wfile.write(("__EXIT__%d\n" % (p.returncode if p.returncode is not None else -1)).encode()); self.wfile.flush()
         except OSError:
             pass
 
@@ -3900,7 +3988,7 @@ class H(BaseHTTPRequestHandler):
             if p == "/api/stats":
                 self._json(stats())
             elif p == "/api/history":
-                self._json({"history": _load_history()})
+                self._json({"history": history_snapshot()})
             elif p == "/api/health":
                 self._json(health_report())
             elif p == "/api/desktop":
@@ -4118,6 +4206,10 @@ class H(BaseHTTPRequestHandler):
                     self._json({"ok": False, "log": "недопустимая ФС"}, 400)
                 elif label and not re.match(r"^[A-Za-z0-9._-]{1,16}$", label):
                     self._json({"ok": False, "log": "недопустимая метка (латиница/цифры/._-, до 16)"}, 400)
+                elif any(mp in _SYS_MPS or mp == STORAGE or mp.startswith("/mnt/disk") or mp.startswith("/mnt/parity")
+                         for mp in _disk_mountpoints(dev)):
+                    # защита в вебе поверх движка: не форматировать системный/пуловый диск
+                    self._json({"ok": False, "log": "это системный или пуловый диск — форматирование запрещено"}, 400)
                 else:
                     self._json(engine("format-disk", {"dev": dev, "role": b.get("role", "data"),
                         "fs": b.get("fs", "ext4"), "label": label}, dry=b.get("dry", False)))
