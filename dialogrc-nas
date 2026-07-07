@@ -1,0 +1,50 @@
+# nas-wizard: тёмная тема для dialog. Подключается через DIALOGRC.
+# Формат: element = (foreground, background, highlight)
+use_shadow = ON
+use_colors = ON
+
+screen_color = (CYAN,BLACK,ON)
+shadow_color = (BLACK,BLACK,ON)
+
+dialog_color = (WHITE,BLACK,OFF)
+title_color = (CYAN,BLACK,ON)
+border_color = (WHITE,BLACK,ON)
+border2_color = (WHITE,BLACK,ON)
+
+button_active_color = (BLACK,CYAN,ON)
+button_inactive_color = (WHITE,BLACK,OFF)
+button_key_active_color = (BLACK,CYAN,ON)
+button_key_inactive_color = (RED,BLACK,OFF)
+button_label_active_color = (BLACK,CYAN,ON)
+button_label_inactive_color = (WHITE,BLACK,ON)
+
+inputbox_color = (WHITE,BLACK,OFF)
+inputbox_border_color = (WHITE,BLACK,ON)
+inputbox_border2_color = (WHITE,BLACK,ON)
+
+searchbox_color = (WHITE,BLACK,OFF)
+searchbox_title_color = (CYAN,BLACK,ON)
+searchbox_border_color = (WHITE,BLACK,ON)
+searchbox_border2_color = (WHITE,BLACK,ON)
+
+position_indicator_color = (CYAN,BLACK,ON)
+
+menubox_color = (WHITE,BLACK,OFF)
+menubox_border_color = (WHITE,BLACK,ON)
+menubox_border2_color = (WHITE,BLACK,ON)
+
+item_color = (WHITE,BLACK,OFF)
+item_selected_color = (BLACK,CYAN,ON)
+
+tag_color = (CYAN,BLACK,ON)
+tag_selected_color = (BLACK,CYAN,ON)
+tag_key_color = (RED,BLACK,OFF)
+tag_key_selected_color = (BLACK,CYAN,ON)
+
+check_color = (WHITE,BLACK,OFF)
+check_selected_color = (BLACK,CYAN,ON)
+
+uarrow_color = (CYAN,BLACK,ON)
+darrow_color = (CYAN,BLACK,ON)
+
+gauge_color = (CYAN,BLACK,ON)

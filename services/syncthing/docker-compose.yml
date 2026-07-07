@@ -1,0 +1,22 @@
+# Syncthing — синхронизация файлов между устройствами. http://<pi>:8384
+services:
+  syncthing:
+    image: lscr.io/linuxserver/syncthing:2.1.1
+    container_name: syncthing
+    hostname: syncthing
+    restart: unless-stopped
+    labels:
+      web-desktop.name: "Syncthing"
+      web-desktop.url: "http://pi5.local:8384"
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Madrid
+    volumes:
+      - /opt/docker/syncthing/config:/config
+      - /mnt/storage:/data                 # пул mergerfs
+    ports:
+      - "8384:8384"          # web UI
+      - "22000:22000/tcp"    # синхронизация
+      - "22000:22000/udp"
+      - "21027:21027/udp"    # обнаружение

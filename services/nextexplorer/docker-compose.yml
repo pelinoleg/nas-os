@@ -1,0 +1,24 @@
+# NextExplorer — веб-файловый менеджер (https://github.com/nxzai/NextExplorer). http://<pi>:3000
+# ОБЯЗАТЕЛЬНО замените SESSION_SECRET на случайную строку >=32 символов:
+#   openssl rand -hex 32
+services:
+  nextexplorer:
+    image: nxzai/explorer:v2.2.4
+    container_name: nextexplorer
+    restart: unless-stopped
+    labels:
+      web-desktop.name: "NextExplorer"
+      web-desktop.url: "http://pi5.local:3000"
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - PORT=3000
+      - PUID=1000
+      - PGID=1000
+      - PUBLIC_URL=http://raspberrypi.local:3000   # укажите реальный адрес/хост Pi, без слэша в конце
+      - SESSION_SECRET=CHANGE-ME-openssl-rand-hex-32
+    volumes:
+      - /opt/docker/nextexplorer/config:/config     # БД/настройки (персистентно)
+      - /opt/docker/nextexplorer/cache:/cache       # миниатюры/индексы
+      - /mnt/storage:/mnt/Storage                    # каждый /mnt/<Label> = том в UI

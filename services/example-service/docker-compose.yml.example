@@ -1,0 +1,18 @@
+# ШАБЛОН. Скопируйте папку, переименуйте файл в docker-compose.yml, отредактируйте.
+# Визард видит только docker-compose.yml / .yaml / compose.yml / .yaml (НЕ .example).
+services:
+  myservice:
+    image: ghcr.io/example/myservice:1.2.3    # фиксированный тег, НЕ latest
+    container_name: myservice
+    restart: unless-stopped
+    environment:
+      - TZ=Europe/Madrid
+      # - PUID=1000
+      # - PGID=1000
+    ports:
+      - "8080:8080"
+    volumes:
+      - /opt/docker/myservice/config:/config          # конфиг контейнера
+      - /mnt/storage/myservice:/data                   # данные на пуле mergerfs
+    security_opt:
+      - no-new-privileges:true

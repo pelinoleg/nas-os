@@ -1,0 +1,23 @@
+# NAS-OS репозиторий живёт в домашней папке рядом с личными файлами и ~/nas-config.
+# Игнорируем ВСЁ на верхнем уровне, затем явно разрешаем только файлы проекта,
+# чтобы `git add -A` не затянул домашний мусор, конфиг и кэши.
+/*
+!/.gitignore
+!/README.md
+!/install.sh
+!/nas-web.py
+!/nas-wizard.sh
+!/nas-web.service
+!/nas-web-install.sh
+!/dialogrc-nas
+!/web/
+!/services/
+
+# внутри web/: не тащим кэш обоев и превью (это runtime), остальное (иконки, ассеты) — в репо
+web/wallpaper.*
+web/.nas-trash/
+
+# python/OS мусор
+__pycache__/
+*.pyc
+.DS_Store
