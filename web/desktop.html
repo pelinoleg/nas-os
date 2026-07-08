@@ -1194,7 +1194,7 @@
   .mbp-row:hover{background:var(--sel)}
   .mbp-row.new{background:var(--accent-soft)}
   .mbp-row.new:hover{background:var(--sel)}
-  .nt-row.new{background:var(--accent-soft)}
+  .nt-row.new{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent)}
   .ndot{width:8px;height:8px;border-radius:50%;margin-top:4px;flex:none}
   .ndot.crit{background:var(--danger);box-shadow:0 0 0 3px var(--danger-soft)}
   .ndot.warn{background:var(--warn)}.ndot.ok{background:var(--good)}.ndot.info{background:var(--accent-2)}
@@ -1233,7 +1233,8 @@
   .nt-bar .seg button{padding:5px 10px;font-size:12px}
   .nt-bar input,.nt-bar select{background:var(--card);border:1px solid var(--line);border-radius:9px;color:var(--text);padding:7px 10px;font-size:12.3px}
   .nt-bar input{width:140px}
-  .nt-row{display:flex;gap:10px;padding:9px 10px;border-radius:10px;align-items:flex-start;margin-bottom:3px}
+  .nt-row{display:flex;gap:10px;padding:9px 10px;border-radius:10px;align-items:flex-start;margin-bottom:6px}
+  .nt-row.new+.nt-row.new{margin-top:2px}
   .nt-row:hover{background:var(--card)}
   .nt-row .nt-w{width:110px;flex:none;font-size:11px;color:var(--mut);margin-top:2.5px}
   .nt-row .nt-k{flex:none;font-size:10px;font-weight:700;color:var(--dim);background:var(--card-2);border-radius:6px;padding:2.5px 7px;margin-top:1px}

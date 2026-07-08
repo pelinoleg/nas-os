@@ -5084,8 +5084,13 @@ class H(BaseHTTPRequestHandler):
             data = f.read()
         self.send_response(200)
         self.send_header("Content-Type", ctype)
-        # HTML/JS/CSS всегда ревалидировать — иначе браузер показывает старую версию после правок
-        if os.path.splitext(full)[1] in (".html", ".js", ".css"):
+        # HTML — НЕ кэшировать вовсе (мобильные браузеры при no-cache без валидатора
+        # всё равно показывали старую оболочку); JS/CSS ревалидировать.
+        ext = os.path.splitext(full)[1]
+        if ext == ".html":
+            self.send_header("Cache-Control", "no-store, must-revalidate")
+            self.send_header("Pragma", "no-cache")
+        elif ext in (".js", ".css"):
             self.send_header("Cache-Control", "no-cache, must-revalidate")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
