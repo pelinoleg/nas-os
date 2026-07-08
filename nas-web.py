@@ -2323,8 +2323,13 @@ def nb_run(cfg, dry, writer, cancel=lambda: False):
         try: p.stdout.close()
         except OSError: pass
         ok = p.returncode in (0, 24)     # 24 = vanished files — не ошибка
-        results.append({"src": j["src"], "dest": j["dest"], "ok": ok, "code": p.returncode})
-        writer("[%s] %s" % ("ок" if ok else "ошибка %d" % p.returncode, j["src"]))
+        sz = None
+        if not dry:
+            try: sz = _du_bytes(j["dest"])
+            except Exception: sz = None
+        results.append({"src": j["src"], "dest": j["dest"], "ok": ok, "code": p.returncode, "size": sz})
+        writer("[%s] %s%s" % ("ок" if ok else "ошибка %d" % p.returncode, j["src"],
+                              (" · " + fmt_bytes(sz)) if sz else ""))
     if not dry:
         try: pruned = _nb_prune(cfg)
         except Exception: pruned = 0

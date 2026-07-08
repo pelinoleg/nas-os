@@ -767,6 +767,7 @@
   .nb-src{flex:none;max-width:38%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--accent)}
   .nb-arr{color:var(--mut);flex:none}
   .nb-dst{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dim)}
+  .nb-sz{flex:none;color:var(--mut);font-size:11px}
   .nb-help{display:flex;flex-direction:column;gap:3px;background:var(--card);border:1px solid var(--line);border-radius:var(--r-md);padding:11px 13px;margin:10px 0 4px;font-size:12.5px;line-height:1.5}
   .nb-help b{font-weight:640;color:var(--text)}.nb-help span{color:var(--dim)}
   .nb-testr{margin:2px 0 0}
@@ -4383,16 +4384,17 @@ function winBackup(){openWin("__nasbak","Бэкап главного NAS",(body,
    <div class="nb-prog" id="oProg" style="display:none;margin-top:10px"></div>
    <div class="upd-con" id="oCon" style="display:none;margin-top:8px"></div>`;
   const g=s=>tc.querySelector(s);
-  // папки со статусом последнего прогона
-  api("/api/backup/status").then(st=>{const jn=g("#oJobs");if(!jn)return;
+  // папки со статусом последнего прогона (перекрашиваем и после завершения бэкапа)
+  const paintStatus=()=>api("/api/backup/status").then(st=>{const jn=g("#oJobs");if(!jn)return;
    const byS={};((st&&st.jobs)||[]).forEach(j=>byS[j.src]=j);
    if(!(c.jobs||[]).length){jn.innerHTML='<div style="color:var(--mut);font-size:12px;padding:4px 0">Источники не выбраны — добавьте на вкладке «Источники».</div>';}
    else jn.innerHTML="";
    (c.jobs||[]).forEach(j=>{const r=byS[j.src];const dot=r?(r.ok?"var(--good)":"var(--danger)"):"var(--mut)";
-    jn.appendChild(el(`<div class="nb-job"><span class="ovh-dot" style="background:${dot};flex:none"></span><span class="nb-src mono" title="${att(j.src)}">${esc(j.src)}</span><span class="nb-arr">→</span><span class="nb-dst mono" title="${att(j.dest)}">${esc(j.dest)}</span></div>`));});
+    jn.appendChild(el(`<div class="nb-job"><span class="ovh-dot" style="background:${dot};flex:none"></span><span class="nb-src mono" title="${att(j.src)}">${esc(j.src)}</span><span class="nb-arr">→</span><span class="nb-dst mono" title="${att(j.dest)}">${esc(j.dest)}</span>${r&&r.size?`<span class="nb-sz mono">${fmtB(r.size)}</span>`:""}</div>`));});
    const sn=g("#oStatus");if(sn){if(st&&st.running)sn.innerHTML=`<span style="color:var(--accent)">идёт сейчас…</span>`;
     else if(st&&st.ts){const ok=(st.jobs||[]).filter(x=>x.ok).length,tot=(st.jobs||[]).length;sn.innerHTML=`${fmDate(st.ts)} · <b style="color:${ok===tot?"var(--good)":"var(--warn)"}">${ok}/${tot}</b> задач успешно`;}
     else sn.textContent="ещё не запускался";}});
+  paintStatus();
   const con=g("#oCon");
   // фон + переподключение к логу (переживает перезагрузку страницы)
   const nbErr=l=>/^rsync:|\(code \d|IO error|permission denied|failed to (set|create|open)|cannot |ОШИБКА|ОТКАЗ|не удалось|не создать|не запустить/i.test(l);
@@ -4412,7 +4414,8 @@ function winBackup(){openWin("__nasbak","Бэкап главного NAS",(body,
     if(op){if(r.running){op.style.display="flex";op.innerHTML=`<span class="nb-prog-cur">${svg("folder",13)} ${esc(r.cur||"…")}</span>${r.line?`<span class="nb-prog-l mono">${esc(r.line.trim())}</span>`:""}`;}else op.style.display="none";}
     if(!r.running){clearInterval(win._nbpi);win._nbpi=null;setBusy(false);
      notifyDone(r.dry?"Пробный прогон завершён":(r.result==="ok"?"Бэкап завершён":r.result==="unreachable"?"Главный NAS недоступен":"Бэкап с ошибками"),"");
-     const sn=g("#oStatus");if(sn)sn.innerHTML=r.dry?`<b>пробный прогон завершён</b>`:`<b style="color:${r.result==="ok"?"var(--good)":"var(--warn)"}">${r.result==="ok"?"бэкап завершён":r.result==="unreachable"?"источник недоступен":"завершён с ошибками — см. лог ниже"}</b>`;}   // консоль с логом оставляем
+     if(r.dry){const sn=g("#oStatus");if(sn)sn.innerHTML=`<b>пробный прогон завершён</b>`;}
+     else paintStatus();}   // реальный прогон → перекрасить точки/итог/размеры без перезагрузки
    },1500);}
   const run=async dry=>{if(!(c.jobs||[]).length){toast("Сначала выберите источники (вкладка «Источники»)");return;}
    con.style.display="block";con.innerHTML="";nbCursor=0;nbStarted=null;setBusy(true);
