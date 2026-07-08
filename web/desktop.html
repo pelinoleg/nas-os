@@ -254,6 +254,19 @@
   .phone-nav button.on{color:var(--accent)}
   .phone-nav button svg{width:22px;height:22px}
   .wback{display:none;align-items:center;justify-content:center;width:30px;height:30px;margin-right:2px;border:none;background:none;color:var(--text);cursor:pointer;font-size:26px;line-height:1;flex:none}
+  /* телефон: master-detail складываем (сайдбар+панель не влезают бок о бок) */
+  @media(max-width:640px){
+    /* текстовые табы (Настройки, Бэкап) — горизонтальная лента сверху */
+    .body:has(.set-nav){flex-direction:column}
+    .set-nav{width:auto;flex:none;flex-direction:row;overflow-x:auto;overflow-y:hidden;
+      border-right:none;border-bottom:1px solid var(--line);padding:8px 10px;gap:6px;-webkit-overflow-scrolling:touch}
+    .set-nav button{flex:0 0 auto;width:auto;white-space:nowrap}
+    .set-pane{padding:16px 16px}
+    /* богатые списки (Диски, Docker) — список сверху (со скроллом), детали ниже */
+    .dm2{flex-direction:column}
+    .dm2-side{width:auto;flex:none;max-height:40vh;border-right:none;border-bottom:1px solid var(--line)}
+    .dm2-detail{padding:16px 16px}
+  }
   /* планшет (641–1024): окна крупнее (в JS), сайдбары уже, виджеты — сеткой под приложениями */
   @media(min-width:641px) and (max-width:1024px){
     .set-nav{width:172px;padding:14px 8px}
@@ -262,8 +275,14 @@
     .desk{overflow-y:auto}
     .apps{position:static;inset:auto;padding:22px 22px 6px;grid-template-columns:repeat(auto-fill,88px)}
     .rail{position:static;width:auto;overflow:visible;display:grid;
-      grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;padding:6px 22px 26px;
+      grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;padding:6px 22px 110px;
       align-content:start}
+    /* планшет: док всегда снизу по центру (боковой налезал бы на плитки/виджеты) */
+    .dock,.dock.pos-left,.dock.pos-right{top:auto!important;bottom:14px!important;left:50%!important;right:auto!important;
+      transform:translateX(-50%)!important;flex-direction:row!important;max-height:none!important;
+      max-width:calc(100% - 24px)!important;overflow-x:auto!important;overflow-y:hidden!important;border-radius:18px}
+    body.dock-left .apps,body.dock-right .apps,body.dock-right .rail{left:auto!important;right:auto!important}
+    body.dock-left .desk,body.dock-right .desk{bottom:0}
   }
   /* сенсорные экраны (планшет+телефон): крупнее тап-таргеты, комфортнее нажимать */
   @media(pointer:coarse){
