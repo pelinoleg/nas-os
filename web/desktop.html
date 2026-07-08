@@ -247,7 +247,7 @@
      с горизонтальным скроллом (без дубля с таббаром, без перекрытия виджетов) */
   @media(max-width:1024px){
     .phone-nav{display:none!important}
-    .wall-refresh{display:none}       /* плавающая кнопка обоев мешает нижнему доку */
+    .wall-refresh{display:none!important}   /* инлайновый display:flex от JS перебивал без !important */
     .dock,.dock.pos-left,.dock.pos-right{
       top:auto!important;bottom:0!important;left:0!important;right:0!important;transform:none!important;
       width:100%!important;max-width:none!important;max-height:none!important;border-radius:0!important;
@@ -262,6 +262,20 @@
     /* контент резервирует высоту дока, а не прячется под ним */
     .desk,body.dock-left .desk,body.dock-right .desk{bottom:calc(60px + env(safe-area-inset-bottom))!important}
     body.dock-left .apps,body.dock-right .apps,body.dock-right .rail{left:auto!important;right:auto!important}
+    /* окна — на всю высоту между менубаром и доком (и на планшете тоже) */
+    .win,.win.max{inset:40px 0 calc(60px + env(safe-area-inset-bottom)) 0!important;width:auto!important;height:auto!important;border-radius:0!important;max-width:100%}
+    .win .wgrip,.win>.rz{display:none}
+    .win .wbar{cursor:default}
+    .win .wbar .lights{display:none}
+    .win .wback{display:flex}
+    .win .wbar .ttl{margin-left:0;font-size:15px;font-weight:650}
+    /* списки Дисков/Docker — компактная горизонтальная лента (и планшет, и телефон) */
+    .dm2{flex-direction:column}
+    .dm2-side{width:auto;flex:none;max-height:none;flex-direction:row;overflow-x:auto;overflow-y:hidden;
+      gap:6px;padding:8px 10px;border-right:none;border-bottom:1px solid var(--line);-webkit-overflow-scrolling:touch}
+    .dm2-side::-webkit-scrollbar{height:0}
+    .dm2-side-h,.dm2-slots{display:none}
+    .dm2-item{flex:0 0 auto;width:auto;min-width:132px;max-width:220px}
   }
   .wback{display:none;align-items:center;justify-content:center;width:30px;height:30px;margin-right:2px;border:none;background:none;color:var(--text);cursor:pointer;font-size:26px;line-height:1;flex:none}
   /* телефон: master-detail складываем (сайдбар+панель не влезают бок о бок) */
@@ -1749,7 +1763,7 @@ function openWin(id,title,build,opts={}){
  bar.querySelector(".m").onclick=()=>{w.style.display="none";w.classList.remove("wfocus");focusTop();renderWinbar();};
  bar.querySelector(".z").onclick=()=>{w.classList.toggle("max");persistWin(w);};
  bar.querySelector(".wback").onclick=()=>goHome();          // телефон: «назад» → домой (окно в фоне)
- if(!isPhone()){drag(w,bar);resize(w,w.querySelector(".wgrip"));resizeEdges(w);}  // на телефоне без перетаскивания/ресайза
+ if(!isPhone()&&!isTablet()){drag(w,bar);resize(w,w.querySelector(".wgrip"));resizeEdges(w);}  // на телефоне/планшете окна полноэкранные — без drag/resize
  w.addEventListener("pointerdown",()=>focus(w));renderDock();renderPhoneNav();return w;
 }
 // телефон: свернуть все окна на «домашний экран» (сетку приложений)
