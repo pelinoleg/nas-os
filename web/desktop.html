@@ -850,34 +850,44 @@
   .fm-empty{flex:1;display:grid;place-items:center;color:var(--mut);font-size:13px;text-align:center;padding:22px;line-height:1.5}
   .fm-prev{flex:1;overflow:auto;display:grid;place-items:center;background:var(--code-bg);border-radius:var(--r-md);padding:10px}
   .fm-prev img{max-width:100%;max-height:100%;border-radius:4px}
-  /* CodeMirror под наши токены (тёмный редактор в обеих темах, как консоль) */
-  .CodeMirror{height:100%;font-family:var(--mono);font-size:12.5px;line-height:1.55;background:var(--code-bg);color:var(--code-fg)}
+  /* CodeMirror — единый читаемый тёмный редактор (файл-менеджер и compose) */
+  .CodeMirror{height:100%;font-family:var(--mono);font-size:13px;line-height:1.6;background:var(--code-bg);color:var(--code-fg)}
   .CodeMirror-gutters{background:var(--code-bg);border-right:1px solid rgba(140,160,195,.15)}
-  .CodeMirror-linenumber{color:var(--mut)}
-  .CodeMirror-cursor{border-left:1.5px solid var(--accent)}
-  .CodeMirror-selected{background:rgba(90,140,220,.28)!important}
-  .CodeMirror-activeline-background{background:rgba(140,160,195,.06)}
-  .ed-dark{background:#21252b}.ed-dark .CodeMirror{height:100%;background:#21252b;color:#abb2bf}
-  .ed-dark .CodeMirror-gutters{background:#21252b;border-right:1px solid rgba(120,140,175,.12)}
-  .ed-dark .CodeMirror-linenumber{color:#4b5263}
-  .ed-dark .CodeMirror-cursor{border-left:1.5px solid #56b6c2}
-  .ed-dark .CodeMirror-selected{background:rgba(90,130,180,.3)!important}
-  .ed-dark .CodeMirror-activeline-background{background:rgba(255,255,255,.035)}
-  .ed-dark .cm-keyword{color:#c678dd}.ed-dark .cm-atom{color:#d19a66}
-  .ed-dark .cm-number{color:#d19a66}.ed-dark .cm-string,.ed-dark .cm-string-2{color:#98c379}
-  .ed-dark .cm-comment{color:#7f8b9c;font-style:italic}.ed-dark .cm-property{color:#61afef}
-  .ed-dark .cm-variable-2,.ed-dark .cm-def,.ed-dark .cm-variable{color:#e5c07b}
-  .ed-dark .cm-tag,.ed-dark .cm-meta,.ed-dark .cm-attribute{color:#56b6c2}
+  .CodeMirror-linenumber{color:#6b7688}
+  .CodeMirror-cursor{border-left:2px solid var(--accent)}
+  .CodeMirror-selected{background:rgba(90,140,220,.30)!important}
+  .CodeMirror-activeline-background{background:rgba(150,175,215,.07)}
+  .CodeMirror-matchingbracket{color:#ffe08a!important;font-weight:700;border-bottom:1px solid rgba(255,224,138,.55)}
+  .ed-dark{background:#1b1f27}.ed-dark .CodeMirror{height:100%;background:#1b1f27;color:#d6deec}
+  .ed-dark .CodeMirror-gutters{background:#1b1f27;border-right:1px solid rgba(150,170,205,.13)}
+  .ed-dark .CodeMirror-linenumber{color:#6b7688}
+  .ed-dark .CodeMirror-cursor{border-left:2px solid #5ec8d4}
+  .ed-dark .CodeMirror-selected{background:rgba(90,130,180,.34)!important}
+  .ed-dark .CodeMirror-activeline-background{background:rgba(255,255,255,.05)}
+  .ed-dark .cm-keyword{color:#d8a0f0}.ed-dark .cm-atom{color:#f0a878}
+  .ed-dark .cm-number{color:#f0a878}.ed-dark .cm-string,.ed-dark .cm-string-2{color:#a9dc8a}
+  .ed-dark .cm-comment{color:#8b95ab;font-style:italic}.ed-dark .cm-property{color:#74c0ff}
+  .ed-dark .cm-variable-2,.ed-dark .cm-def,.ed-dark .cm-variable{color:#e8c583}
+  .ed-dark .cm-tag,.ed-dark .cm-meta,.ed-dark .cm-attribute{color:#63cddb}
+  /* подсветка проблемных строк YAML (табы/отступы + ошибка docker compose) */
+  .ed-err-line{background:rgba(255,95,95,.16)!important}
+  .CodeMirror .ed-lint-mk{color:#ff6b6b;font-weight:800;padding-left:3px}
+  .ed-errbox{margin-top:6px;font-family:var(--mono);font-size:11.5px;line-height:1.5;border-radius:var(--r-sm);
+    border:1px solid color-mix(in srgb,var(--danger) 40%,transparent);background:color-mix(in srgb,var(--danger) 12%,transparent);
+    color:var(--text);padding:7px 10px;max-height:120px;overflow:auto;white-space:pre-wrap;word-break:break-word}
+  .ed-errbox .ed-warn{color:var(--warn)}
+  .ed-okbox{margin-top:6px;font-family:var(--mono);font-size:11.5px;border-radius:var(--r-sm);
+    border:1px solid color-mix(in srgb,var(--good) 40%,transparent);background:color-mix(in srgb,var(--good) 12%,transparent);color:var(--good);padding:7px 10px}
   .cstat{font-family:var(--mono);font-size:10px;color:var(--mut);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .stk-note{width:100%;margin-top:9px;background:var(--card);border:1px solid var(--line);border-radius:var(--r-sm);color:var(--dim);font-size:12px;font-family:var(--font);padding:7px 9px;resize:vertical;min-height:34px}
   .stk-note:focus{outline:none;border-color:var(--accent);color:var(--text)}
   .stk-note::placeholder{color:var(--mut)}
-  .cm-s-default .cm-keyword{color:#c792ea}.cm-s-default .cm-atom{color:#f78c6c}
-  .cm-s-default .cm-number{color:#f78c6c}.cm-s-default .cm-string,.cm-s-default .cm-string-2{color:#c3e88d}
-  .cm-s-default .cm-comment{color:#5f7e97;font-style:italic}.cm-s-default .cm-property{color:#82aaff}
-  .cm-s-default .cm-variable-2{color:#82aaff}.cm-s-default .cm-def{color:#82aaff}
-  .cm-s-default .cm-tag{color:#f07178}.cm-s-default .cm-attribute{color:#c792ea}
-  .cm-s-default .cm-meta{color:#ffcb6b}.cm-s-default .cm-builtin{color:#82aaff}
+  .cm-s-default .cm-keyword{color:#d8a0f0}.cm-s-default .cm-atom{color:#f0a878}
+  .cm-s-default .cm-number{color:#f0a878}.cm-s-default .cm-string,.cm-s-default .cm-string-2{color:#a9dc8a}
+  .cm-s-default .cm-comment{color:#8b95ab;font-style:italic}.cm-s-default .cm-property{color:#74c0ff}
+  .cm-s-default .cm-variable-2{color:#e8c583}.cm-s-default .cm-def{color:#e8c583}
+  .cm-s-default .cm-tag{color:#63cddb}.cm-s-default .cm-attribute{color:#d8a0f0}
+  .cm-s-default .cm-meta{color:#f0c96b}.cm-s-default .cm-builtin{color:#74c0ff}
   /* полноценный менеджер: крошки, чипы, колонки, выбор, dnd */
   .fm-status{display:flex;gap:12px;padding:7px 8px 2px;font-size:11px;color:var(--mut);font-family:var(--mono);border-top:1px solid var(--line);margin-top:4px}
   .fm-status b{color:var(--dim);font-weight:600}
@@ -2223,8 +2233,22 @@ function poolStrip(disks,am,reload,snap){
  }
  const amb=el(`<button class="btn sm${am.enabled?" pri":""}" title="Автоподключение: вставленные USB-диски и флешки монтируются сами (в ${esc(am.base||"/media/nas")}) и появляются на рабочем столе. Сейчас ${am.enabled?"включено":"выключено"} — нажмите, чтобы настроить.">${svg("usb",13)} Автоподключение USB: ${am.enabled?"вкл":"выкл"}</button>`);
  amb.onclick=()=>automountDlg(am,reload);w.appendChild(amb);
+ // SnapRAID sync — доступен, когда защита настроена (есть parity-диск)
+ if(snap&&snap.configured){const sb=el(`<button class="btn sm" title="Пересчитать чётность SnapRAID под текущее содержимое дисков. Запусти после добавления диска в пул — иначе новый диск ещё не под защитой.">${svg("shield",13)} SnapRAID sync</button>`);
+  sb.onclick=()=>snapraidDlg(reload);w.appendChild(sb);}
  const cta=w.querySelector("#poolcta");if(cta)cta.onclick=()=>location.href="/setup.html";
  return w;
+}
+// диалог ручной синхронизации SnapRAID с живым логом
+function snapraidDlg(after){const s=document.getElementById("scrim");
+ s.innerHTML=`<div class="dialog" style="max-width:580px"><h3>${svg("shield",16)} SnapRAID — синхронизация чётности</h3>
+   <p style="font-size:13px;color:var(--dim)">Sync пересчитывает данные чётности на parity-диске под текущее содержимое дисков данных — именно они позволяют восстановить диск при сбое. Идёт по расписанию (ежедневно), но после добавления диска в пул запусти вручную. Защита от массового удаления: если удалено много файлов, sync прервётся.</p>
+   <div class="mcon" id="srcon" style="display:none"></div>
+   <div class="r"><button class="btn" id="srx">Закрыть</button><button class="btn pri" id="srgo">${svg("sync",14)} Синхронизировать сейчас</button></div></div>`;
+ s.classList.add("show");
+ s.querySelector("#srx").onclick=()=>s.classList.remove("show");
+ s.querySelector("#srgo").onclick=()=>{const go=s.querySelector("#srgo"),con=s.querySelector("#srcon");go.disabled=true;con.style.display="block";
+   runStream("snapraid-sync",{kind:"sync"},con,()=>{notifyDone("SnapRAID: sync завершён","чётность обновлена");go.disabled=false;after&&after();});};
 }
 
 function diskListItem(x){
@@ -2306,6 +2330,8 @@ function diskDetail(x,reload){
        toast(LIVE?((r&&r.ok)?r.log:("Ошибка: "+((r&&r.log)||""))):"Демо");if(r&&r.ok)reload();},false);
      acts.appendChild(ej);
    }
+   // свободный диск → одним действием отформатировать в ext4 и подключить к пулу /mnt/storage
+   if(x.role==="free"){const pb=el(`<button class="btn sm pri">${svg("layers",13)} Добавить в пул</button>`);pb.title="Отформатировать (ext4) и подключить диск к пулу /mnt/storage";pb.onclick=()=>formatDlg(x,reload,"pool");acts.appendChild(pb);}
    acts.appendChild(el(`<span class="grow"></span>`));
    const fb=el(`<button class="btn sm dng">${svg("trash",13)} Форматировать</button>`);fb.onclick=()=>formatDlg(x,reload);acts.appendChild(fb);
  }else acts.appendChild(el(`<span class="dd-note">${svg("shield",13)} Системный диск — размонтирование и форматирование недоступны</span>`));
@@ -2367,23 +2393,24 @@ function renameDlg(dev,cur,after){const s=document.getElementById("scrim");
    if(r&&r.ok&&LIVE){s.classList.remove("show");after&&after();}else s.querySelector("#rcon").textContent=(r&&r.log||"").trim();};}
 const FS_BY_ROLE={data:["ext4","xfs","btrfs"],parity:["ext4","xfs"],removable:["exfat","ntfs","vfat","ext4"]};
 let FS_AVAIL=null;
-function formatDlg(x,after){const s=document.getElementById("scrim");
+function formatDlg(x,after,mode){const s=document.getElementById("scrim");
+ const pool=mode==="pool";   // «Добавить в пул»: роль зафиксирована как «данные»
  const avail=r=>{const a=FS_BY_ROLE[r].filter(f=>!FS_AVAIL||FS_AVAIL.includes(f));return a.length?a:FS_BY_ROLE[r];};
  let role="data",fs=avail("data")[0];
  const fsOpts=r=>avail(r).map(f=>`<option value="${f}">${f}</option>`).join("");
- s.innerHTML=`<div class="dialog"><h3>Форматировать ${x.path}?</h3><p>${(x.model||"")} · ${x.size}. <b style="color:var(--danger)">Все данные будут удалены безвозвратно.</b></p>
-  <div class="field"><label>Роль</label><div class="seg" id="fr"><button class="on" data-r="data">Данные</button><button data-r="parity">Чётность</button><button data-r="removable">Съёмный</button></div></div>
+ s.innerHTML=`<div class="dialog"><h3>${pool?"Добавить в пул: "+x.path:"Форматировать "+x.path+"?"}</h3><p>${(x.model||"")} · ${x.size}. ${pool?"Диск будет отформатирован (ext4) и подключён к пулу <b>/mnt/storage</b>. ":""}<b style="color:var(--danger)">Все данные будут удалены безвозвратно.</b></p>
+  ${pool?"":`<div class="field"><label>Роль</label><div class="seg" id="fr"><button class="on" data-r="data">Данные</button><button data-r="parity">Чётность</button><button data-r="removable">Съёмный</button></div></div>`}
   <div class="field"><label>Файловая система</label><select id="ffs">${fsOpts("data")}</select></div>
   <div class="field"><label>Метка (необязательно)</label><input id="flabel" placeholder="авто: disk1 / parity1 / USB" autocomplete="off"></div>
   <div class="field"><label>Подтверждение — введите путь устройства</label><input class="mono" id="fp" placeholder="${x.path}" autocomplete="off"></div>
-  <div class="r"><button class="btn" id="fc">Отмена</button><button class="btn dng" id="fo" disabled>Форматировать</button></div>
+  <div class="r"><button class="btn" id="fc">Отмена</button><button class="btn dng" id="fo" disabled>${pool?"Добавить в пул":"Форматировать"}</button></div>
   <div class="mcon" id="fcon"></div></div>`;
  s.classList.add("show");const inp=s.querySelector("#fp"),ok=s.querySelector("#fo"),fsel=s.querySelector("#ffs");inp.focus();
- s.querySelector("#fr").querySelectorAll("button").forEach(b=>b.onclick=()=>{role=b.dataset.r;s.querySelectorAll("#fr button").forEach(z=>z.classList.toggle("on",z===b));fsel.innerHTML=fsOpts(role);fs=avail(role)[0];});
+ const fr=s.querySelector("#fr");if(fr)fr.querySelectorAll("button").forEach(b=>b.onclick=()=>{role=b.dataset.r;fr.querySelectorAll("button").forEach(z=>z.classList.toggle("on",z===b));fsel.innerHTML=fsOpts(role);fs=avail(role)[0];});
  fsel.onchange=()=>fs=fsel.value;
  inp.oninput=()=>ok.disabled=inp.value.trim()!==x.path;
  s.querySelector("#fc").onclick=()=>s.classList.remove("show");
- ok.onclick=()=>{ok.disabled=true;runStream("format-disk",{dev:x.path,role,fs,label:s.querySelector("#flabel").value.trim()},s.querySelector("#fcon"),()=>{toast(x.path+" отформатирован");setTimeout(()=>{s.classList.remove("show");after&&after();},1000);});};}
+ ok.onclick=()=>{ok.disabled=true;runStream("format-disk",{dev:x.path,role,fs,label:s.querySelector("#flabel").value.trim()},s.querySelector("#fcon"),()=>{toast(pool?x.path+" добавлен в пул":x.path+" отформатирован");setTimeout(()=>{s.classList.remove("show");after&&after();},1000);});};}
 function automountDlg(am,after){const s=document.getElementById("scrim");am=am||{};
  s.innerHTML=`<div class="dialog"><h3>Автомонтирование носителей</h3>
   <p>USB-флешки и внешние диски будут автоматически монтироваться при подключении в каталог-базу. Диски NAS (в fstab) не затрагиваются.</p>
@@ -2934,6 +2961,24 @@ function stackLogs(name){openWin("slog:"+name,"Логи · "+name,(body,win)=>{
  fb.onclick=()=>{follow=!follow;setFol();};setFol();
  load();clearInterval(win._pi);win._pi=setInterval(()=>{if(!document.body.contains(body)){clearInterval(win._pi);return;}if(follow)load();},2500);
 },{w:820,h:560});}
+// --- лёгкий линт YAML для compose: ловит табы в отступах — частая «невидимая» причина
+//     «визуально всё ок, а потом ошибка форматирования» ---
+function yamlLint(text){const out=[];(text||"").split("\n").forEach((ln,i)=>{
+  if(((ln.match(/^[ \t]*/)||[""])[0]).indexOf("\t")>=0)out.push({line:i,msg:"табуляция в отступе — YAML требует пробелы"});
+ });return out;}
+function edClearMarks(cm){(cm._marks||[]).forEach(i=>{try{cm.removeLineClass(i,"background","ed-err-line");cm.setGutterMarker(i,"ed-lint",null);}catch(e){}});cm._marks=[];}
+function edMark(cm,line,msg){try{cm.addLineClass(line,"background","ed-err-line");const m=document.createElement("span");m.className="ed-lint-mk";m.textContent="!";if(msg)m.title=msg;cm.setGutterMarker(line,"ed-lint",m);(cm._marks=cm._marks||[]).push(line);}catch(e){}}
+function edPanel(cm,panel,probs,srvErr){if(!panel)return;let h="";
+  if(srvErr)h+=`<div class="ed-errbox">${esc(srvErr)}</div>`;
+  else if(probs&&probs.length)h+=`<div class="ed-errbox"><span class="ed-warn">Проблемы отступов</span>\n`+probs.slice(0,8).map(p=>"строка "+(p.line+1)+": "+p.msg).join("\n")+`</div>`;
+  panel.innerHTML=h;panel.style.display=h?"block":"none";}
+// живой линт: только табы (детерминированно, без парсера) — подсветка строки + маркер
+function edLintPaint(cm,panel){edClearMarks(cm);const probs=yamlLint(cm.getValue());probs.forEach(p=>edMark(cm,p.line,p.msg));edPanel(cm,panel,probs,cm._srvErr);}
+// ответ docker compose config: вытащить № строки, подсветить, прокрутить, показать полный текст
+function edServerErr(cm,panel,log){cm._srvErr=(log||"").trim();edClearMarks(cm);yamlLint(cm.getValue()).forEach(p=>edMark(cm,p.line,p.msg));
+  const m=(log||"").match(/line (\d+)/i)||(log||"").match(/:(\d+):\d+/)||(log||"").match(/\bat line (\d+)/i);
+  if(m){const ln=Math.min(cm.lineCount()-1,Math.max(0,parseInt(m[1],10)-1));edMark(cm,ln);cm.setCursor(ln,0);cm.scrollIntoView({line:ln,ch:0},60);cm.focus();}
+  edPanel(cm,panel,[],cm._srvErr);}
 function editStack(name,after){const isNew=!name,wid=isNew?"snew":"sed:"+name;openWin(wid,isNew?"Новый стек":("Изменить · "+name),(body,win)=>{
  body.style.display="flex";body.style.flexDirection="column";body.style.padding="0";
  let cmC=null,cmE=null;const data={compose:isNew?STACK_SKELETON:"",env:""};
@@ -2950,9 +2995,18 @@ function editStack(name,after){const isNew=!name,wid=isNew?"snew":"sed:"+name;op
    <div style="flex:1;display:flex;flex-direction:column;gap:6px;min-width:0">
      ${lbl("compose.yaml")}
      <div id="seC" class="ed-dark" style="flex:1;min-height:0;border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden"></div>
+     <div id="seErr" style="display:none;flex:none"></div>
    </div></div>`;
  if(isNew){const ni=body.querySelector("#seName");ni.oninput=()=>{const v=ni.value.trim();body.querySelector("#sePath").textContent="/opt/stacks/"+(v||"…")+"/";};ni.focus();}
  const grab=()=>{if(cmC)data.compose=cmC.getValue();if(cmE)data.env=cmE.getValue();};
+ const seErr=()=>body.querySelector("#seErr");
+ // проверка compose с ИНЛАЙН-выводом: подсветка строки + полный текст ошибки (не обрезанный тост)
+ async function validateInline(nm){if(!cmC)return false;const pnl=seErr();
+   const r=await api("/api/stack/validate?name="+encodeURIComponent(nm));
+   if(r&&r.ok){cmC._srvErr="";const probs=yamlLint(cmC.getValue());edClearMarks(cmC);probs.forEach(p=>edMark(cmC,p.line,p.msg));
+     if(pnl){if(probs.length){edPanel(cmC,pnl,probs,"");}else{pnl.innerHTML='<div class="ed-okbox">✓ compose валиден</div>';pnl.style.display="block";}}}
+   else{edServerErr(cmC,pnl,(r&&r.log)||"ошибка проверки");}
+   return !!(r&&r.ok);}
  const doSave=async(then)=>{grab();const nm=isNew?(body.querySelector("#seName").value.trim()):name;
    if(isNew&&!/^[a-zA-Z0-9][\w.-]*$/.test(nm)){toast("Имя: латиница/цифры/-_");return;}
    const r=await api(isNew?"/api/stack/create":"/api/stack/save",{method:"POST",body:JSON.stringify({name:nm,compose:data.compose,env:data.env})});
@@ -2961,15 +3015,16 @@ function editStack(name,after){const isNew=!name,wid=isNew?"snew":"sed:"+name;op
    if(then)await then(nm);
    if(isNew){closeW(wid);editStack(nm,after);}};
  body.querySelector("#seCancel").onclick=()=>closeW(wid);
- body.querySelector("#seSave").onclick=()=>doSave();
+ // сохранить И сразу проверить — ошибки видно инлайн, а не «потом»
+ body.querySelector("#seSave").onclick=()=>doSave().then(()=>{if(!isNew&&cmC)validateInline(name);});
  body.querySelector("#seUp").onclick=()=>doSave(nm=>stackAct(nm,"up",after));
  body.querySelector("#seVal").onclick=async()=>{grab();const nm=isNew?body.querySelector("#seName").value.trim():name;
    if(isNew&&!/^[a-zA-Z0-9][\w.-]*$/.test(nm)){toast("Сначала задайте имя");return;}
    const w=await api(isNew?"/api/stack/create":"/api/stack/save",{method:"POST",body:JSON.stringify({name:nm,compose:data.compose,env:data.env})});
    if(!w||!w.ok){toast(LIVE?"Не сохранить: "+((w&&w.log)||""):"Демо");return;}
-   const r=await api("/api/stack/validate?name="+encodeURIComponent(nm));
-   toast(r&&r.ok?"compose валиден ✓":"Ошибка: "+((r&&r.log)||"").slice(0,140));after&&after();};
- ensureCM(()=>{cmC=CodeMirror(body.querySelector("#seC"),{value:data.compose,mode:"yaml",lineNumbers:true,tabSize:2,indentUnit:2,styleActiveLine:true,lineWrapping:false});
+   const okv=await validateInline(nm);toast(okv?"compose валиден ✓":"compose: ошибка — подсвечено");after&&after();};
+ ensureCM(()=>{cmC=CodeMirror(body.querySelector("#seC"),{value:data.compose,mode:"yaml",lineNumbers:true,tabSize:2,indentUnit:2,styleActiveLine:true,lineWrapping:false,matchBrackets:true,gutters:["CodeMirror-linenumbers","ed-lint"]});
+   {const pnl=seErr();let lt;cmC.on("change",()=>{clearTimeout(lt);lt=setTimeout(()=>{cmC._srvErr="";edLintPaint(cmC,pnl);},350);});edLintPaint(cmC,pnl);}
    cmE=CodeMirror(body.querySelector("#seE"),{value:data.env,mode:"properties",lineNumbers:true,tabSize:2});
    setTimeout(()=>{cmC.refresh();cmE.refresh();},50);
    if(window.ResizeObserver){new ResizeObserver(()=>cmC&&cmC.refresh()).observe(body.querySelector("#seC"));new ResizeObserver(()=>cmE&&cmE.refresh()).observe(body.querySelector("#seE"));}});
