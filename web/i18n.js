@@ -6,6 +6,9 @@
    Перевод применяется только к целым «словам» (границы — не-кириллица), длинные фразы приоритетнее. */
 window.NAS_I18N = { en: {
 "Анализ места": "Disk usage",
+"Сработала защита от удаления": "Deletion guard triggered",
+"бэкап остановлен: удалилось бы слишком много файлов (порог на вкладке «Удалённые»)": "backup stopped: too many files would be deleted (threshold on the «Deleted» tab)",
+"NAS-бэкап: остановлен защитой": "NAS backup: stopped by guard",
 "История прогонов": "Run history",
 "Последние запуски бэкапа: когда, сколько шёл, что передано.": "Recent backup runs: when, how long, what was transferred.",
 "Пока пусто — история появится после первого прогона.": "Empty for now — history appears after the first run.",

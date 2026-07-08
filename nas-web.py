@@ -978,6 +978,7 @@ def _def_monitor():
         "nb_stale":    {"on": True,  "priority": 1, "threshold": 7,  "desk": True},
         "nb_size":     {"on": False, "priority": 0, "threshold": 40, "desk": True},
         "nb_dest":     {"on": True,  "priority": 1, "threshold": 95, "desk": True},
+        "nb_guard":    {"on": True,  "priority": 2, "desk": True},   # сработала защита --max-delete
         # --- надёжность: диск сам переподключился (авто-mount) ---
         "disk_remount":{"on": True, "priority": 0, "desk": True},
         # --- активная термозащита (предупреждение/действие) ---
@@ -1143,7 +1144,7 @@ for _k in ("panel_new", "panel_fail", "ssh_login"):
 for _k in ("ip_changed", "link_changed", "vpn_offline", "traffic"):
     _EVENT_KIND[_k] = "net"
 for _k in ("snap_ok", "snap_err", "scrub_err", "delete_block", "backup", "mergerfs",
-           "nas_backup", "nb_conn", "nb_srcmiss", "nb_stale", "nb_size", "nb_dest"):
+           "nas_backup", "nb_conn", "nb_srcmiss", "nb_stale", "nb_size", "nb_dest", "nb_guard"):
     _EVENT_KIND[_k] = "protect"
 
 def log_event(event, title, msg="", lvl=None, kind=None, desk=None):
@@ -2620,6 +2621,13 @@ def nb_run_cli(dry=False):
         r = nb_run(nb_load(), dry, w, cancel)
         res = "ok" if r.get("ok") else ("unreachable" if r.get("unreachable") else "warn")
         if not dry:
+            guarded = [j.get("src") for j in r.get("jobs", []) if j.get("code") == 25]
+            if guarded:      # сработала защита от массового удаления — отдельное важное уведомление
+                try: notify_event("nb_guard", "nb_guard", "NAS-бэкап: остановлен защитой",
+                                  "Защита от массового удаления сработала: " + ", ".join(guarded) +
+                                  ". Ничего не удалено — проверьте источник (не стёрли/размонтировали ли его).",
+                                  "crit", cooldown=0)
+                except Exception: pass
             msg = "все задачи выполнены" if r.get("ok") else ("главный NAS недоступен — пропущено" if r.get("unreachable") else "часть задач с ошибками")
             try: log_event("nas_backup", "Бэкап главного NAS", msg, "ok" if r.get("ok") else "warn", kind="backup", desk=True)
             except Exception: pass
