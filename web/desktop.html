@@ -1378,15 +1378,22 @@ const ACCENTS={teal:["#14B8AC","#4C8DF6"],blue:["#4C8DF6","#8A7DFF"],violet:["#8
  green:["#1FA971","#14B8AC"],amber:["#E0913C","#F0876A"],coral:["#F0665E","#E05AB4"]};
 
 const WP_DEFAULT="https://wall.pelin.top/random/desktop/optimized";
-let SET={accent:"teal",accentHex:"",theme:"light",wpType:"url",wpUrl:WP_DEFAULT,wpVer:0,fxDim:0,fxBlur:0,fxNoise:0,
- perf:false,blur:false,wpSlide:false,wpSlideMin:30,mbAlpha:1,wdgAlpha:1,mbIcon:1,mbFs:1,
- deskIcon:1,deskFs:1,deskLc:"",deskShadow:true,widgets:null,railHidden:false,
- mbOp:null,dockOp:null,wdgOp:null,mbBlur:26,dockBlur:28,wdgBlur:22,
- winShadow:true,dockShadow:true,tileShadow:true,mbSat:100,dockSat:100,wdgSat:100,winSat:100,
- tray:null,dockPos:"bottom",dockIcon:1,dockAlpha:1,textContrast:1,dockTiles:true,dockLabels:true,dockOrder:null,
- wdgLight:"",wdgDark:"",winAlpha:.9,menuAlpha:.92,radius:1.1,tintLight:"",tintDark:"",
- winBlur:30,winNoise:12,shadow:"md",
- elevBaseLight:.55,elevBaseDark:.5,elevStep:.13,elevLight:.05,autoContrast:true};
+/* Дефолт оформления = текущий вид системы (чтобы свежая установка/сброс выглядели так же).
+   Списки виджетов/трея/дока — на авто (null). Правил пользователь → перезапишется из desktop.json. */
+let SET={accent:"coral",accentHex:"#405e6d",theme:"light",wpType:"url",wpUrl:WP_DEFAULT,wpVer:0,fxDim:34,fxBlur:30,fxNoise:100,
+ perf:false,blur:false,wpSlide:true,wpSlideMin:30,mbAlpha:1,wdgAlpha:1,mbIcon:.95,mbFs:1.05,
+ deskIcon:1.05,deskFs:1.15,deskLc:"",deskShadow:false,widgets:null,railHidden:false,
+ mbOp:0,dockOp:3,wdgOp:15,mbBlur:0,dockBlur:0,wdgBlur:1,
+ winShadow:true,dockShadow:false,tileShadow:true,mbSat:100,dockSat:100,wdgSat:90,winSat:100,
+ tray:null,dockPos:"left",dockIcon:1.15,dockAlpha:1,textContrast:1.35,dockTiles:true,dockLabels:true,dockOrder:null,
+ wdgLight:"",wdgDark:"#000000",winAlpha:.9,menuAlpha:.92,radius:.65,tintLight:"",tintDark:"#0b0d13",
+ winBlur:60,winNoise:22,shadow:"lg",
+ elevBaseLight:.3,elevBaseDark:.74,elevStep:.28,elevLight:.05,autoContrast:true,
+ wallpaper:"midnight",lang:"en",
+ themeProfiles:{
+  light:{accent:"coral",accentHex:"#405e6d",radius:.65,shadow:"lg",winShadow:true,dockShadow:false,tileShadow:true,textContrast:1.35,elevStep:.28,elevLight:.05,mbOp:0,dockOp:3,wdgOp:15,mbBlur:0,dockBlur:0,wdgBlur:1,winBlur:60,mbSat:100,dockSat:100,wdgSat:90,winSat:100,winNoise:22,deskLc:"",deskShadow:false,autoContrast:true,dockTiles:true,dockLabels:true,fxDim:34,fxBlur:30,fxNoise:100},
+  dark:{accent:"green",accentHex:"#00fbff",radius:.65,shadow:"lg",winShadow:true,dockShadow:false,tileShadow:true,textContrast:1.4,elevStep:.06,elevLight:.06,mbOp:0,dockOp:16,wdgOp:11,mbBlur:0,dockBlur:39,wdgBlur:0,winBlur:60,mbSat:85,dockSat:90,wdgSat:90,winSat:100,winNoise:22,deskLc:"",deskShadow:false,autoContrast:true,dockTiles:true,dockLabels:true,fxDim:44,fxBlur:27,fxNoise:100}
+ }};
 const hexRgb=h=>{const n=parseInt(h.slice(1),16);return `${n>>16&255},${n>>8&255},${n&255}`;};
 
 /* Раздельные профили оформления для светлой/тёмной темы. SET — рабочая копия
