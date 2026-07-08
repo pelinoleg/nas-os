@@ -125,6 +125,10 @@
   html.nosh-dock .dock .di svg{filter:none!important}
   html.nosh-icons .app .tile{box-shadow:none!important}
   html.nosh-icons .app .tile svg{filter:none!important}
+  /* нейтральные плитки по теме (бел./тёмн. стекло) вместо цветного хеша — читаемо на любых обоях */
+  html.desk-glass .app .tile{background:var(--desk-tile-bg)!important;-webkit-backdrop-filter:var(--desk-tile-bf);backdrop-filter:var(--desk-tile-bf);color:var(--desk-tile-fg)!important;border:1px solid var(--desk-tile-line)}
+  html.desk-glass .app .tile .tletter{color:var(--desk-tile-fg)!important;text-shadow:none}
+  html.desk-glass .app .tile>svg{filter:none}
   html{--dockw:84px}
   body.rail-off .rail{display:none}
   body.rail-off .apps{right:0}
@@ -1413,7 +1417,7 @@ const WP_DEFAULT="https://wall.pelin.top/random/desktop/optimized";
    Списки виджетов/трея/дока — на авто (null). Правил пользователь → перезапишется из desktop.json. */
 let SET={accent:"coral",accentHex:"#405e6d",theme:"light",wpType:"url",wpUrl:WP_DEFAULT,wpVer:0,fxDim:34,fxBlur:30,fxNoise:100,
  perf:false,blur:false,wpSlide:true,wpSlideMin:30,mbAlpha:1,wdgAlpha:1,mbIcon:.95,mbFs:1.05,
- deskIcon:1.05,deskFs:1.15,deskLc:"",deskShadow:false,widgets:null,railHidden:false,
+ deskIcon:1.05,deskFs:1.15,deskLc:"",deskShadow:false,deskGlass:true,deskTileOp:82,deskTileBlur:3,widgets:null,railHidden:false,
  mbOp:0,dockOp:3,wdgOp:15,mbBlur:0,dockBlur:0,wdgBlur:1,
  winShadow:true,dockShadow:false,tileShadow:true,mbSat:100,dockSat:100,wdgSat:90,winSat:100,
  tray:null,dockPos:"left",dockIcon:1.15,dockAlpha:1,textContrast:1.35,dockTiles:true,dockLabels:true,dockOrder:null,
@@ -1422,8 +1426,8 @@ let SET={accent:"coral",accentHex:"#405e6d",theme:"light",wpType:"url",wpUrl:WP_
  elevBaseLight:.3,elevBaseDark:.74,elevStep:.28,elevLight:.05,autoContrast:true,
  wallpaper:"midnight",lang:"en",
  themeProfiles:{
-  light:{accent:"coral",accentHex:"#405e6d",radius:.65,shadow:"lg",winShadow:true,dockShadow:false,tileShadow:true,textContrast:1.35,elevStep:.28,elevLight:.05,mbOp:0,dockOp:3,wdgOp:15,mbBlur:0,dockBlur:0,wdgBlur:1,winBlur:60,mbSat:100,dockSat:100,wdgSat:90,winSat:100,winNoise:22,deskLc:"",deskShadow:false,autoContrast:true,dockTiles:true,dockLabels:true,fxDim:34,fxBlur:30,fxNoise:100},
-  dark:{accent:"green",accentHex:"#00fbff",radius:.65,shadow:"lg",winShadow:true,dockShadow:false,tileShadow:true,textContrast:1.4,elevStep:.06,elevLight:.06,mbOp:0,dockOp:16,wdgOp:11,mbBlur:0,dockBlur:39,wdgBlur:0,winBlur:60,mbSat:85,dockSat:90,wdgSat:90,winSat:100,winNoise:22,deskLc:"",deskShadow:false,autoContrast:true,dockTiles:true,dockLabels:true,fxDim:44,fxBlur:27,fxNoise:100}
+  light:{accent:"coral",accentHex:"#405e6d",radius:.65,shadow:"lg",winShadow:true,dockShadow:false,tileShadow:true,textContrast:1.35,elevStep:.28,elevLight:.05,mbOp:0,dockOp:3,wdgOp:15,mbBlur:0,dockBlur:0,wdgBlur:1,winBlur:60,mbSat:100,dockSat:100,wdgSat:90,winSat:100,winNoise:22,deskLc:"",deskShadow:false,autoContrast:true,dockTiles:true,dockLabels:true,fxDim:34,fxBlur:30,fxNoise:100,deskGlass:true,deskTileOp:85,deskTileBlur:2},
+  dark:{accent:"green",accentHex:"#00fbff",radius:.65,shadow:"lg",winShadow:true,dockShadow:false,tileShadow:true,textContrast:1.4,elevStep:.06,elevLight:.06,mbOp:0,dockOp:16,wdgOp:11,mbBlur:0,dockBlur:39,wdgBlur:0,winBlur:60,mbSat:85,dockSat:90,wdgSat:90,winSat:100,winNoise:22,deskLc:"",deskShadow:false,autoContrast:true,dockTiles:true,dockLabels:true,fxDim:44,fxBlur:27,fxNoise:100,deskGlass:true,deskTileOp:58,deskTileBlur:8}
  }};
 const hexRgb=h=>{const n=parseInt(h.slice(1),16);return `${n>>16&255},${n>>8&255},${n&255}`;};
 
@@ -1434,7 +1438,7 @@ const hexRgb=h=>{const n=parseInt(h.slice(1),16);return `${n>>16&255},${n>>8&255
 const THEMED_KEYS=["accent","accentHex","radius","shadow","winShadow","dockShadow","tileShadow",
  "textContrast","elevStep","elevLight","mbOp","dockOp","wdgOp","mbBlur","dockBlur","wdgBlur","winBlur",
  "mbSat","dockSat","wdgSat","winSat","winNoise","deskLc","deskShadow","autoContrast",
- "dockTiles","dockLabels","fxDim","fxBlur","fxNoise"];
+ "dockTiles","dockLabels","fxDim","fxBlur","fxNoise","deskGlass","deskTileOp","deskTileBlur"];
 let CUR_THEME=null;
 function themeSnapshot(theme){
  if(!theme)return;
@@ -1630,6 +1634,13 @@ function applySettings(){
  root.style.setProperty("--dock-bf",bf("dockBlur","dockSat"));
  root.style.setProperty("--wdg-bf",bf("wdgBlur","wdgSat"));
  root.style.setProperty("--win-bf",bf("winBlur","winSat"));
+ // плитки значков стола: нейтральное стекло по теме (бел./тёмн.) + своя прозрачность/блюр
+ root.classList.toggle("desk-glass",SET.deskGlass!==false);
+ const dtOp=clampf((SET.deskTileOp==null?82:+SET.deskTileOp)/100,0,1);
+ root.style.setProperty("--desk-tile-bg",`rgba(${isLight()?"255,255,255":"34,40,52"},${dtOp.toFixed(3)})`);
+ root.style.setProperty("--desk-tile-fg",isLight()?"#1b2634":"#eef2f8");
+ root.style.setProperty("--desk-tile-line",isLight()?"rgba(20,30,50,.12)":"rgba(255,255,255,.14)");
+ root.style.setProperty("--desk-tile-bf",bf("deskTileBlur","deskTileSat"));
  // меню и поповеры — стекло как у окон (чуть плотнее), а не солид lvl(4);
  // если блюр окон выключен, держим плотность выше ради читаемости
  const menuGlass=bfOn&&clampf(SET.winBlur??0,0,60)>0;
@@ -4202,6 +4213,9 @@ function lsIcons(lb){lb.innerHTML=`
   <div class="set-card">
    ${pSlider("Размер иконок","deskIcon",.7,1.6,.05,"pct","Размер плиток приложений на рабочем столе.")}
    ${pSlider("Размер подписей","deskFs",.8,1.6,.05,"pct","Размер шрифта подписей под иконками.")}
+   ${pToggle("Нейтральный фон плиток по теме","Плитки приложений — светлое/тёмное стекло по теме вместо случайного цвета из имени: читается на любых обоях, иконка/буква становится контрастной. Выключи — вернутся цветные плитки.","deskGlass","бел./тёмн. вместо цветных")}
+   ${pSlider("Прозрачность плиток","deskTileOp",0,100,1,"pctn","Плотность фона плиток приложений (для нейтрального фона). Меньше — прозрачнее.")}
+   ${pSlider("Размытие под плитками","deskTileBlur",0,50,1,"px","Матовое размытие обоев под плитками. 0 — без размытия.")}
    ${pToggle("Авто-контраст по обоям","Определяет яркость обоев и сам делает подписи светлыми на тёмном фоне и тёмными на светлом — чтобы всегда читались. Переопределяет ручной «Цвет подписей».","autoContrast","подстраивать цвет под фон")}
    <div class="srow"><div class="srow-l"><div class="srow-t">Цвет подписей${tipHTML("Ручной цвет текста под иконками (когда авто-контраст выключен). По умолчанию — по теме.")}</div></div><div class="srow-c"><input type="color" id="deskLcInp" value="${/^#[0-9a-f]{6}$/i.test(SET.deskLc)?SET.deskLc:(isLight()?"#1a2431":"#e9eff7")}" class="ccell"><button class="btn sm" id="deskLcReset">Сброс</button></div></div>
    ${pToggle("Тень подписей","Тёмная/светлая тень под текстом — читается на любых обоях.","deskShadow","обводка-тень для читаемости")}
