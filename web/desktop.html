@@ -492,6 +492,9 @@
   /* индикатор запущенного приложения — снизу по центру, читаем на любом фоне дока */
   .dock .run{position:absolute;left:50%;bottom:-3px;transform:translateX(-50%);width:5px;height:5px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 1.5px var(--dock-bg,var(--glass-2))}
   .dock.pos-left .run,.dock.pos-right .run{left:auto;bottom:auto;top:50%;right:-3px;transform:translateY(-50%)}
+  /* индикатор идущего бэкапа: вращающееся кольцо поверх иконки дока */
+  .dock .di-spin{position:absolute;inset:-3px;border-radius:inherit;border:2px solid transparent;border-top-color:#fff;border-right-color:rgba(255,255,255,.6);animation:wspin .9s linear infinite;pointer-events:none}
+  .dock .di-busy{box-shadow:0 0 0 2px rgba(255,255,255,.35)}
   .dock .sep{width:1px;background:var(--line-2);margin:6px 4px;align-self:stretch;flex:none}
 
   /* windows */
@@ -2069,6 +2072,7 @@ addEventListener("resize",()=>{for(const id in OPEN){const w=OPEN[id];if(!w||w.c
 /* apps */
 let APPS=[],APPS_LOADED=false;   // ярлыки из docker-лейблов web-desktop.* (/api/desktop)
 let VOLS=[];   // тома вне пула (USB/свободные диски) — ярлыки на столе + сайдбар ФМ
+let NB_RUNNING=false;   // идёт ли бэкап главного NAS (индикатор на иконке дока)
 const INTERNAL=[
  {id:"__sys",name:"Система",color:"linear-gradient(135deg,#34C6BE,#2C9C9C)",ic:"gauge",fn:()=>winSystem()},
  {id:"__disks",name:"Диски",color:"linear-gradient(135deg,#e5544e,#c2403a)",ic:"disks",fn:()=>winDisks()},
@@ -2137,7 +2141,7 @@ function dockDragAfter(d,x,y){const vert=(SET.dockPos==="left"||SET.dockPos==="r
  return best;}
 function renderDock(){
  const d=document.getElementById("dock");if(!d)return;d.innerHTML="";
- dockItems().forEach(a=>{const b=el(`<button title="${esc(a.name)}" draggable="true" data-did="${a.id}"><span class="di" style="background:${a.color}">${I[a.ic]}${OPEN[a.id]?'<span class="run"></span>':''}</span><span class="dl">${esc(a.name)}</span></button>`);
+ dockItems().forEach(a=>{const busy=a.id==="__nasbak"&&NB_RUNNING;const b=el(`<button title="${esc(a.name)}${busy?" — идёт бэкап":""}" draggable="true" data-did="${a.id}"><span class="di${busy?" di-busy":""}" style="background:${a.color}">${I[a.ic]}${OPEN[a.id]?'<span class="run"></span>':''}${busy?'<span class="di-spin"></span>':''}</span><span class="dl">${esc(a.name)}</span></button>`);
   b.onclick=a.fn;
   if(OPEN[a.id])b.oncontextmenu=e=>{e.preventDefault();winCtxMenu(a.id,e.clientX,e.clientY);};
   b.ondragstart=()=>b.classList.add("dragging");
@@ -4335,7 +4339,7 @@ function winBackup(){openWin("__nasbak","Бэкап главного NAS",(body,
    <div id="oStatus" style="font-size:12.5px;color:var(--dim);padding:2px 2px 6px">загрузка…</div>
    <div class="set-h">Папки</div>
    <div id="oJobs"></div>
-   <div class="nb-foot"><button class="btn" id="oDry">Пробный прогон</button><button class="btn pri" id="oRun">${svg("sync",14)} Запустить бэкап</button><button class="btn sm" id="oTest" style="margin-left:auto">${svg("refresh",13)} Проверить связь</button></div>
+   <div class="nb-foot"><button class="btn" id="oDry">Пробный прогон</button><button class="btn pri" id="oRun">${svg("sync",14)} Запустить бэкап</button><button class="btn sm dng" id="oCancel" style="display:none">${svg("x",13)} Остановить</button><button class="btn sm" id="oTest" style="margin-left:auto">${svg("refresh",13)} Проверить связь</button></div>
    <div class="upd-con" id="oCon" style="display:none;margin-top:10px"></div>`;
   const g=s=>tc.querySelector(s);
   // папки со статусом последнего прогона
@@ -4349,11 +4353,30 @@ function winBackup(){openWin("__nasbak","Бэкап главного NAS",(body,
     else if(st&&st.ts){const ok=(st.jobs||[]).filter(x=>x.ok).length,tot=(st.jobs||[]).length;sn.innerHTML=`${fmDate(st.ts)} · <b style="color:${ok===tot?"var(--good)":"var(--warn)"}">${ok}/${tot}</b> задач успешно`;}
     else sn.textContent="ещё не запускался";}});
   const con=g("#oCon");
+  // фон + переподключение к логу (переживает перезагрузку страницы)
+  const nbErr=l=>/^rsync:|\(code \d|IO error|permission denied|failed to (set|create|open)|cannot |ОШИБКА|ОТКАЗ|не удалось|не создать|не запустить/i.test(l);
+  const nbAppend=lines=>{const st=con.scrollHeight-con.scrollTop-con.clientHeight<40;
+    lines.forEach(l=>con.appendChild(el(`<div class="${nbErr(l)?"er":""}">${(l||"").replace(/</g,"&lt;")||"&nbsp;"}</div>`)));if(st)con.scrollTop=con.scrollHeight;};
+  let nbCursor=0,nbStarted=null;
+  const setBusy=b=>{const r=g("#oRun"),d=g("#oDry"),cb=g("#oCancel");if(r)r.disabled=b;if(d)d.disabled=b;if(cb)cb.style.display=b?"":"none";};
+  function attachLog(){clearInterval(win._nbpi);
+   win._nbpi=setInterval(async()=>{if(!document.body.contains(con)){clearInterval(win._nbpi);win._nbpi=null;return;}
+    const r=await api("/api/backup/log?since="+nbCursor);if(!r)return;
+    if(nbStarted!==null&&r.started!==nbStarted){con.innerHTML="";nbCursor=0;}
+    nbStarted=r.started;
+    if(r.base>nbCursor&&nbCursor>0)con.innerHTML="";
+    if(r.lines&&r.lines.length)nbAppend(r.lines);
+    nbCursor=r.seq;
+    if(!r.running){clearInterval(win._nbpi);win._nbpi=null;setBusy(false);
+     notifyDone(r.dry?"Пробный прогон завершён":(r.result==="ok"?"Бэкап завершён":r.result==="unreachable"?"Главный NAS недоступен":"Бэкап с ошибками"),"");}
+   },1500);}
   const run=async dry=>{if(!(c.jobs||[]).length){toast("Сначала выберите источники (вкладка «Источники»)");return;}
-   con.style.display="block";g("#oRun").disabled=true;g("#oDry").disabled=true;
-   streamPost("/api/backup/run",con,code=>{g("#oRun").disabled=false;g("#oDry").disabled=false;
-    notifyDone(dry?"Пробный прогон завершён":(code===0?"Бэкап завершён":"Бэкап с ошибками"),"");tabOverview(tc);},{dry});};
+   con.style.display="block";con.innerHTML="";nbCursor=0;nbStarted=null;setBusy(true);
+   await api("/api/backup/run-bg",{method:"POST",body:JSON.stringify({dry})});attachLog();};
   g("#oRun").onclick=()=>run(false);g("#oDry").onclick=()=>run(true);
+  g("#oCancel").onclick=()=>{api("/api/backup/cancel",{method:"POST",body:"{}"});toast("Останавливаю…");};
+  // если бэкап уже идёт (в т.ч. после перезагрузки) — подключаемся к его логу
+  api("/api/backup/log?since=0").then(r=>{if(r&&r.running){con.style.display="block";con.innerHTML="";nbCursor=0;nbStarted=null;setBusy(true);attachLog();}});
   g("#oTest").onclick=async()=>{toast("Проверяю связь…");const t=await api("/api/backup/test",{method:"POST",body:"{}"});toast(t&&t.ok?"✓ связь работает":("✗ "+((t&&t.log)||"нет связи")));};
  }
 
@@ -5373,6 +5396,7 @@ function sparkSVG(data,color,max){const w=120,h=28,d=(data||[]).slice(-40);if(d.
  return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round"/></svg>`;}
 async function poll(){const s=await api("/api/stats");LAST=s;pushHist(s);paintTray(s);paintSys(s);
  const bn=document.getElementById("brandName");if(bn)bn.textContent=(s.host||location.hostname.split(".")[0]||"pi5")+".local";
+ const nr=!!(s&&s.nb_running);if(nr!==NB_RUNNING){NB_RUNNING=nr;renderDock();}
  if(OPEN.__sys&&OPEN.__sys._sub)OPEN.__sys._sub(s);}
 async function pollApps(){const d=await api("/api/desktop");APPS=(d&&d.apps)||[];VOLS=(d&&d.volumes)||[];APPS_LOADED=true;renderApps();paintVols();
  if(OPEN.__files&&OPEN.__files._vols)OPEN.__files._vols();}

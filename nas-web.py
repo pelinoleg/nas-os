@@ -884,6 +884,7 @@ def stats():
         "iface": iface,
         "uptime": uptime_s(),
         "load": list(os.getloadavg()),
+        "nb_running": _nb_state["running"],   # идёт ли бэкап (для индикатора на иконке дока)
         "ts": int(time.time()),
     }
 
@@ -1992,7 +1993,17 @@ def history_sample():
 NB_CONF   = "/etc/nas-os/nas-backup.json"                 # секреты → root 600
 NB_STATUS = os.path.join(NAS_CONFIG, "nas-backup-status.json")
 _nb_lock  = threading.Lock()
-_nb_state = {"running": False, "cancel": False, "started": 0, "line": ""}
+# log — кольцевой буфер строк прогона (для переподключения UI после перезагрузки),
+# log_base — seq первой строки в буфере (seq = log_base + len(log)).
+_nb_state = {"running": False, "cancel": False, "started": 0, "line": "",
+             "log": [], "log_base": 0, "dry": False, "result": None}
+
+def _nb_log(line):
+    lg = _nb_state["log"]
+    lg.append(line)
+    if len(lg) > 800:                       # держим последние ~800 строк
+        drop = len(lg) - 800
+        del lg[:drop]; _nb_state["log_base"] += drop
 # разрешённые корни для локальных папок-приёмников (не системные каталоги)
 _NB_DEST_OK = ("/mnt/", "/media/", "/srv/", "/home/")
 
@@ -2260,25 +2271,42 @@ def nb_status():
     st["line"] = _nb_state.get("line", "")
     return st
 
+def nb_log_tail(since):
+    """Хвост лога текущего/последнего прогона с seq>since — для переподключения UI."""
+    try:
+        since = int(since)
+    except (ValueError, TypeError):
+        since = 0
+    base = _nb_state.get("log_base", 0)
+    lg = _nb_state.get("log", [])
+    end = base + len(lg)
+    start = max(0, since - base)
+    return {"running": _nb_state["running"], "started": _nb_state.get("started", 0),
+            "dry": _nb_state.get("dry", False), "result": _nb_state.get("result"),
+            "seq": end, "base": base, "lines": lg[start:]}
+
 def nb_run_bg(dry=False):
     """Фоновый запуск (для расписания и кнопки «в фоне»)."""
     with _nb_lock:
         if _nb_state["running"]:
             return False
-        _nb_state.update(running=True, cancel=False, started=int(time.time()), line="")
+        _nb_state.update(running=True, cancel=False, started=int(time.time()), line="",
+                         log=[], log_base=0, dry=bool(dry), result=None)
     def work():
         def w(l):
-            _nb_state["line"] = l[:200]
+            _nb_state["line"] = l[:200]; _nb_log(l)
+        res = None
         try:
             r = nb_run(nb_load(), dry, w, lambda: _nb_state["cancel"])
+            res = "ok" if r.get("ok") else ("unreachable" if r.get("unreachable") else "warn")
             if not dry:
-                lvl = "ok" if r.get("ok") else ("warn" if r.get("unreachable") else "warn")
                 msg = "все задачи выполнены" if r.get("ok") else ("главный NAS недоступен — пропущено" if r.get("unreachable") else "часть задач с ошибками")
-                log_event("nas_backup", "Бэкап главного NAS", msg, lvl, kind="backup", desk=True)
+                log_event("nas_backup", "Бэкап главного NAS", msg, "ok" if r.get("ok") else "warn", kind="backup", desk=True)
         except Exception as e:
+            res = "warn"; _nb_log("сбой: %s" % e)
             log_event("nas_backup", "Бэкап главного NAS", "сбой: %s" % e, "warn", kind="backup", desk=True)
         finally:
-            _nb_state.update(running=False, cancel=False, line="")
+            _nb_state.update(running=False, cancel=False, line="", result=(res or "warn"))
     threading.Thread(target=work, daemon=True).start()
     return True
 
@@ -5950,6 +5978,8 @@ class H(BaseHTTPRequestHandler):
                 self._json({"config": nb_public()})
             elif p == "/api/backup/status":
                 self._json(nb_status())
+            elif p == "/api/backup/log":
+                self._json(nb_log_tail((q.get("since") or ["0"])[0]))
             elif p == "/api/winpos":
                 self._json({"winpos": load_winpos()})
             elif p == "/api/snippets":
