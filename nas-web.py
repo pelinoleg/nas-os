@@ -3962,6 +3962,191 @@ def fs_du(path):
                 pass
     return {"ok": True, "size": total, "files": files, "dirs": dirs}
 
+# --------------------------------------------------------------------------- #
+#  Анализатор места (DaisyDisk-подобный). Фоновый обход одного тома (в пределах
+#  одной ФС, как `du -x`), строим плоскую карту каталогов с размерами, кэшируем
+#  в ~/nas-config/duscan-<hash>.json. Фронт запрашивает по одному узлу (ленивый
+#  drill-down) → маленькие ответы даже на терабайтных пулах.
+# --------------------------------------------------------------------------- #
+DUSCAN_TOPF = 12     # хранить топ-N крупнейших файлов на каталог
+DUSCAN_MAXCH = 60    # максимум детей в узле (остальное → «прочее»)
+_duscan = {}         # root -> статус/прогресс скана
+_duscache = {}       # root -> загруженное дерево {nodes, ts, size, files, dirs}
+_duscan_lock = threading.Lock()
+
+def _duscan_cache_path(root):
+    h = hashlib.md5(root.encode("utf-8", "surrogatepass")).hexdigest()[:16]
+    return os.path.join(NAS_CONFIG, "duscan-" + h + ".json")
+
+def _duscan_build(root):
+    dev = os.stat(root).st_dev
+    own = {}; topf = {}; nfiles = {}; kids = {}; parent = {}; order = []
+    tb = [0]
+    for dp, dns, fns in os.walk(root, topdown=True, onerror=lambda e: None, followlinks=False):
+        keep = []
+        for d in dns:                       # не выходим за пределы ФС и не идём по симлинкам
+            fp = os.path.join(dp, d)
+            try:
+                if os.path.islink(fp):
+                    continue
+                if os.stat(fp).st_dev != dev:
+                    continue
+            except OSError:
+                continue
+            keep.append(d)
+        dns[:] = keep
+        ob = 0; nf = 0; fl = []
+        for fn in fns:
+            fp = os.path.join(dp, fn)
+            try:
+                if os.path.islink(fp):
+                    continue
+                sz = os.lstat(fp).st_size
+            except OSError:
+                continue
+            ob += sz; nf += 1; fl.append((sz, fn))
+        fl.sort(reverse=True)
+        own[dp] = ob; nfiles[dp] = nf; topf[dp] = fl[:DUSCAN_TOPF]; kids[dp] = []; order.append(dp)
+        for d in dns:
+            parent[os.path.join(dp, d)] = dp
+        tb[0] += ob
+        with _duscan_lock:
+            s = _duscan.get(root)
+            if s:
+                if s.get("cancel"):
+                    raise RuntimeError("cancelled")
+                s["scanned"] = len(order); s["bytes"] = tb[0]
+    for d in order:
+        p = parent.get(d)
+        if p in kids:
+            kids[p].append(d)
+    total = {}
+    for d in sorted(order, key=lambda x: x.count("/"), reverse=True):   # дети раньше родителей
+        t = own.get(d, 0)
+        for c in kids.get(d, []):
+            t += total.get(c, 0)
+        total[d] = t
+    nodes = {}
+    for d in order:
+        ch = []
+        for c in kids.get(d, []):
+            ch.append({"n": os.path.basename(c) or c, "p": c, "s": total.get(c, 0), "d": 1})
+        shown = 0
+        for sz, fn in topf.get(d, []):
+            ch.append({"n": fn, "p": os.path.join(d, fn), "s": sz}); shown += 1
+        extra = nfiles.get(d, 0) - shown
+        if extra > 0:
+            esz = own.get(d, 0) - sum(s for s, _ in topf.get(d, []))
+            if esz > 0:
+                ch.append({"n": "… ещё %d" % extra, "s": esz, "o": 1})
+        ch.sort(key=lambda x: x["s"], reverse=True)
+        if len(ch) > DUSCAN_MAXCH:
+            rest = ch[DUSCAN_MAXCH:]; ch = ch[:DUSCAN_MAXCH]
+            ch.append({"n": "… прочее (%d)" % len(rest), "s": sum(x["s"] for x in rest), "o": 1})
+        nodes[d] = {"s": total.get(d, 0), "ch": ch}
+    return {"root": root, "ts": time.time(), "size": total.get(root, 0),
+            "files": sum(nfiles.values()), "dirs": len(order), "nodes": nodes}
+
+def _duscan_run(root):
+    try:
+        data = _duscan_build(root)
+    except Exception as e:
+        with _duscan_lock:
+            if (_duscan.get(root) or {}).get("cancel"):
+                _duscan[root] = {"status": "none", "root": root}
+            else:
+                _duscan[root] = {"status": "error", "root": root, "error": str(e)[:200]}
+        return
+    try:
+        with open(_duscan_cache_path(root), "w") as f:
+            json.dump(data, f)
+    except OSError:
+        pass
+    with _duscan_lock:
+        _duscache[root] = data
+        _duscan[root] = {"status": "done", "root": root, "ts": data["ts"],
+                         "size": data["size"], "files": data["files"], "dirs": data["dirs"]}
+
+def duscan_start(root):
+    root = os.path.realpath(root or "/")
+    if not os.path.isdir(root):
+        return {"ok": False, "log": "не каталог: " + root}
+    with _duscan_lock:
+        s = _duscan.get(root)
+        if s and s.get("status") == "scanning":
+            return {"ok": True, "status": "scanning"}
+        _duscan[root] = {"status": "scanning", "root": root, "scanned": 0, "bytes": 0, "started": time.time()}
+    threading.Thread(target=_duscan_run, args=(root,), daemon=True).start()
+    return {"ok": True, "status": "scanning"}
+
+def duscan_cancel(root):
+    root = os.path.realpath(root or "/")
+    with _duscan_lock:
+        s = _duscan.get(root)
+        if s and s.get("status") == "scanning":
+            s["cancel"] = True
+    return {"ok": True}
+
+def _duscan_load_cache(root):
+    if root in _duscache:
+        return _duscache[root]
+    try:
+        with open(_duscan_cache_path(root)) as f:
+            data = json.load(f)
+        _duscache[root] = data
+        return data
+    except (OSError, ValueError):
+        return None
+
+def duscan_status(root):
+    root = os.path.realpath(root or "/")
+    with _duscan_lock:
+        s = dict(_duscan.get(root) or {})
+    if s.get("status") == "scanning":
+        return {"status": "scanning", "scanned": s.get("scanned", 0), "bytes": s.get("bytes", 0), "root": root}
+    if s.get("status") == "error":
+        return {"status": "error", "error": s.get("error"), "root": root}
+    data = _duscan_load_cache(root)
+    if data:
+        return {"status": "done", "ts": data.get("ts"), "size": data.get("size"),
+                "files": data.get("files"), "dirs": data.get("dirs"), "root": root}
+    return {"status": "none", "root": root}
+
+def duscan_node(root, path, depth=1):
+    root = os.path.realpath(root or "/")
+    path = os.path.realpath(path or root)
+    data = _duscan_load_cache(root)
+    if not data:
+        return {"ok": False, "log": "нет данных — запустите скан"}
+    nodes = data.get("nodes", {})
+    if path not in nodes:
+        return {"ok": False, "log": "нет данных по этому пути (пере-сканируйте)"}
+    try:
+        depth = max(1, min(3, int(depth)))
+    except (ValueError, TypeError):
+        depth = 1
+    def build(p, dep):
+        nd = nodes.get(p)
+        if not nd:
+            return []
+        out = []
+        for c in nd["ch"]:
+            it = {"n": c["n"], "s": c["s"]}
+            if c.get("d"):
+                it["d"] = 1; it["p"] = c["p"]
+                if dep > 1:
+                    sub = build(c["p"], dep - 1)
+                    if sub:
+                        it["c"] = sub
+            elif c.get("o"):
+                it["o"] = 1
+            else:
+                it["p"] = c.get("p")
+            out.append(it)
+        return out
+    return {"ok": True, "root": root, "path": path, "s": nodes[path]["s"],
+            "ch": build(path, depth), "scanTs": data.get("ts")}
+
 def fs_grep(path, query, limit=200):
     path = os.path.realpath(path or "/")
     q = (query or "").strip()
@@ -5676,6 +5861,11 @@ class H(BaseHTTPRequestHandler):
                 self._json(fs_stat((q.get("path") or [""])[0]))
             elif p == "/api/fs/du":
                 self._json(fs_du((q.get("path") or [""])[0]))
+            elif p == "/api/fs/duscan/status":
+                self._json(duscan_status((q.get("root") or ["/"])[0]))
+            elif p == "/api/fs/duscan/node":
+                self._json(duscan_node((q.get("root") or ["/"])[0],
+                                       (q.get("path") or [""])[0], (q.get("depth") or ["1"])[0]))
             elif p == "/api/fs/grep":
                 self._json(fs_grep((q.get("path") or ["/"])[0], (q.get("q") or [""])[0]))
             elif p == "/api/fs/trash":
@@ -5789,6 +5979,10 @@ class H(BaseHTTPRequestHandler):
                 b = self._body(); self._json({"maintenance": save_maintenance(b.get("maintenance", {}))})
             elif p == "/api/fs/thumbcache/clear":
                 self._json({"ok": True, "removed": thumbs_cache_clear()})
+            elif p == "/api/fs/duscan/start":
+                self._json(duscan_start(self._body().get("root", "/")))
+            elif p == "/api/fs/duscan/cancel":
+                self._json(duscan_cancel(self._body().get("root", "/")))
             elif p == "/api/winpos":
                 b = self._body(); save_winpos(b.get("winpos", {}))
                 self._json({"ok": True})

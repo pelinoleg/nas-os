@@ -917,6 +917,40 @@
   .fm-status b{color:var(--dim);font-weight:600}
   .fm-tile .ti img,.fm-row .fi img{object-fit:contain;border-radius:4px}
   .fmico{display:block;filter:drop-shadow(0 1px 1px rgba(20,30,50,.22))}
+  /* анализатор места */
+  .du{display:flex;flex-direction:column;height:100%;padding:12px 16px 14px}
+  .du-top{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+  .du-roots{flex-wrap:wrap}
+  .du-meta{font-family:var(--mono);font-size:11px;color:var(--mut);white-space:nowrap}
+  .du-main{flex:1;min-height:0;display:flex;flex-direction:column}
+  .du-empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:var(--dim);font-size:13px;text-align:center}
+  .du-empty svg{color:var(--accent);opacity:.8}
+  .du-empty .du-prog{font-family:var(--mono);font-size:12px;color:var(--mut)}
+  .du-spin svg{animation:wspin 1s linear infinite;color:var(--accent)}
+  .du-empty2{color:var(--mut);font-size:12px;padding:12px}
+  .du-crumb{display:flex;gap:1px;align-items:center;flex-wrap:wrap;font-family:var(--mono);font-size:11.5px;margin-bottom:10px}
+  .du-crumb a{color:var(--dim);cursor:pointer;padding:2px 5px;border-radius:5px}
+  .du-crumb a:last-child{color:var(--text)}.du-crumb a:hover{background:var(--sel);color:var(--accent)}
+  .du-crumb .sepc{color:var(--mut)}
+  .du-cols{flex:1;min-height:0;display:flex;gap:16px}
+  .du-chart{flex:none;display:flex;align-items:flex-start;justify-content:center}
+  .du-chart svg{max-width:100%;height:auto}
+  .duseg{cursor:pointer;transition:opacity .12s;stroke:var(--win,#fff);stroke-width:.8}
+  .du-hole{fill:var(--glass);stroke:var(--line)}
+  .du-ctext{fill:var(--text);font-family:var(--mono);font-weight:700;font-size:15px}
+  .du-csub{fill:var(--mut);font-size:9.5px}
+  .du-list{flex:1;min-width:0;overflow:auto}
+  .du-row{display:flex;align-items:center;gap:9px;padding:6px 6px;border-radius:var(--r-sm);font-size:12.5px}
+  .du-row:hover{background:var(--sel)}
+  .du-row.isdir .du-nm,.du-row.isdir .du-sw{cursor:pointer}
+  .du-sw{flex:none;width:11px;height:11px;border-radius:3px}
+  .du-nm{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .du-bar{flex:1;min-width:40px;height:6px;background:var(--line);border-radius:999px;overflow:hidden;margin:0 2px}
+  .du-bar i{display:block;height:100%;border-radius:999px}
+  .du-sz{flex:none;font-family:var(--mono);font-size:11px;color:var(--mut);min-width:62px;text-align:right}
+  .du-x{flex:none;border:none;background:none;color:var(--mut);padding:3px 5px;border-radius:6px;opacity:0;cursor:pointer}
+  .du-row:hover .du-x{opacity:1}.du-x:hover{color:var(--danger);background:var(--danger-soft)}
+  @media (max-width:900px){.du-cols{flex-direction:column;overflow:auto}.du-chart{align-self:center}}
   .fm-cur{outline:2px solid var(--accent);outline-offset:-2px}
   .fm-top{display:flex;flex-direction:column;gap:7px;margin-bottom:8px}
   .fm-bar2{display:flex;gap:5px;align-items:center;flex-wrap:wrap}
@@ -1410,6 +1444,7 @@ const P={
  trash:'<path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
  eject:'<path d="M6 15h12"/><path d="m12 5-6 7h12z"/>',
  activity:'<path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/>',
+ chartpie:'<path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/>',
  term:'<path d="m7 11 2-2-2-2"/><path d="M11 13h4"/><rect width="18" height="18" x="3" y="3" rx="2"/>',
  info:'<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
  wifi:'<path d="M12 20h.01"/><path d="M2 8.82a15 15 0 0 1 20 0"/><path d="M5 12.859a10 10 0 0 1 14 0"/><path d="M8.5 16.429a5 5 0 0 1 7 0"/>',
@@ -3478,7 +3513,8 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
        <button class="iconbtn" id="fRef" title="Обновить">${svg("refresh",15)}</button>
        <div class="fm-crumb" id="fCrumb"></div>
        <button class="iconbtn" id="fView" title="Список / плитка">${svg("grid",15)}</button>
-       <button class="iconbtn" id="fHid" title="Скрытые файлы">${svg("eye",15)}</button></div>
+       <button class="iconbtn" id="fHid" title="Скрытые файлы">${svg("eye",15)}</button>
+       <button class="iconbtn" id="fDU" title="Анализ места">${svg("chartpie",15)}</button></div>
      <div class="fm-bar2">
        <input class="fm-search" id="fSearch" placeholder="фильтр…  (Enter — поиск во вложенных)">
        <button class="iconbtn" id="fSMode" title="Искать в содержимом файлов">${svg("logs",15)}</button>
@@ -3559,14 +3595,15 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    renderFav();}
  function selUpdate(){const sb=body.querySelector("#fSel"),n=sel.size;
    if(!n)sb.style.display="none";else{sb.style.display="flex";sb.innerHTML="";
-     sb.appendChild(el(`<span class="cnt">${n} выбрано</span>`));
-     const mk=(l,ic,fn,cls)=>{const b=el(`<button class="btn sm ${cls||""}">${svg(ic,13)} ${l}</button>`);b.onclick=fn;sb.appendChild(b);};
+     sb.appendChild(el(`<span class="cnt">${n}</span>`));
+     // иконочные кнопки с тултипами — иначе плашка не влезает и появляется скролл (тем более на RU)
+     const mk=(l,ic,fn,cls)=>{const b=el(`<button class="iconbtn ${cls||""}" title="${att(l)}">${svg(ic,16)}</button>`);b.onclick=fn;sb.appendChild(b);};
      mk("Копировать","copy",()=>{clip={mode:"copy",items:[...sel]};toast("В буфер: "+sel.size);selUpdate();});
      mk("Вырезать","file",()=>{clip={mode:"cut",items:[...sel]};toast("Вырезано: "+sel.size);selUpdate();});
-     mk("Zip","download",()=>doZip([...sel]));
+     mk("Скачать ZIP","download",()=>doZip([...sel]));
      if(n>1)mk("Переименовать","save",()=>doBulkRename(curArr.filter(e=>sel.has(e.path))));
      mk("В корзину","trash",()=>doDelete([...sel]),"dng");
-     const x=el(`<button class="btn sm" style="margin-left:2px">Снять</button>`);x.onclick=()=>{sel.clear();renderList();selUpdate();};sb.appendChild(x);}
+     const x=el(`<button class="iconbtn" title="Снять выделение">${svg("x",16)}</button>`);x.onclick=()=>{sel.clear();renderList();selUpdate();};sb.appendChild(x);}
    const pb=body.querySelector("#fPaste");if(clip&&clip.items.length){pb.style.display="inline-flex";pb.textContent="Вставить ("+clip.items.length+")";}else pb.style.display="none";
    renderStatus();}
  function renderList(){const srcArr=searchRes||entries;let arr=srcArr.slice();
@@ -3847,6 +3884,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    it.push({label:"Создать архив…",ic:svg("archive",16),act:()=>doArchive(selOr(e))});
    if(/\.(zip|tar|gz|tgz|bz2|xz)$/i.test(e.name))it.push({label:"Распаковать сюда",ic:svg("archive",16),act:()=>doUnzip(e)});
    it.push({label:"Права и владелец…",ic:svg("shield",16),act:()=>doPerms(e)});
+   if(e.type==="dir")it.push({label:"Анализировать место",ic:svg("chartpie",16),act:()=>winDiskUsage(e.path)});
    it.push({label:"Терминал здесь",ic:svg("term",16),act:()=>terminalHere(e.type==="dir"?e.path:cwd)});
    it.push({label:"Свойства",ic:svg("eye",16),act:()=>doProps(e)});
    it.push({sep:1},{label:"В корзину",ic:svg("trash",16),dng:1,act:()=>doDelete(selOr(e))});
@@ -3865,6 +3903,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
  body.querySelector("#fFavAdd").onclick=addFav;
  const vbtn=body.querySelector("#fView");vbtn.classList.toggle("pri",viewMode==="grid");
  vbtn.onclick=function(){viewMode=viewMode==="grid"?"list":"grid";SET.fmView=viewMode;saveSettings();this.classList.toggle("pri",viewMode==="grid");renderList();};
+ body.querySelector("#fDU").onclick=()=>winDiskUsage(cwd);
  body.querySelector("#fNewF").onclick=doNewFile;
  body.querySelector("#fNewD").onclick=doMkdir;
  body.querySelector("#fUpl").onclick=()=>inp.click();
@@ -3909,6 +3948,84 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
  win._nav=p=>load(p);
  loadFav();renderVols();load(cwd);
 },{w:880,h:620});}
+/* ===== Анализ места (DaisyDisk-подобный): sunburst + drill-down ===== */
+function winDiskUsage(initRoot){openWin("__duscan","Анализ места",(body,win)=>{
+ body.style.padding="0";
+ const norm=p=>((p||"").replace(/\/+$/,"")||"/");
+ function rootList(){const out=[],seen=new Set();
+   const add=(p,l)=>{p=norm(p);if(seen.has(p))return;seen.add(p);out.push({p,l});};
+   if(initRoot)add(initRoot, norm(initRoot)==="/"?"Система":(norm(initRoot).split("/").pop()||initRoot));
+   add("/mnt/storage","Пул");add("/","Система");
+   (VOLS||[]).forEach(v=>{if(v.mounted&&v.mount)add(v.mount,v.label||v.dev);});
+   return out;}
+ let roots=rootList();
+ let root=initRoot?norm(initRoot):((roots[0]&&roots[0].p)||"/mnt/storage");
+ let cur=root,node=null,cache={};
+ body.innerHTML=`<div class="du"><div class="du-top"><div class="seg du-roots" id="duRoots"></div><span class="grow"></span><span class="du-meta" id="duMeta"></span><button class="btn sm" id="duRescan">${svg("refresh",13)} Пересканировать</button></div><div class="du-main" id="duMain"></div></div>`;
+ const rootsEl=body.querySelector("#duRoots"),metaEl=body.querySelector("#duMeta"),mainEl=body.querySelector("#duMain");
+ const DUCOL=["#4C8DF6","#33BE86","#E0913C","#8A7DFF","#E0669E","#2FB0BC","#E5544E","#5B9BD5","#46B98A","#B07A44","#7A6EE0","#D9A62E"];
+ const shade=(hex,f)=>{const m=/^#(..)(..)(..)$/.exec(hex);if(!m)return hex;const mix=v=>Math.round(parseInt(v,16)+(255-parseInt(v,16))*f);return `rgb(${mix(m[1])},${mix(m[2])},${mix(m[3])})`;};
+ const fmtTs=ts=>{if(!ts)return"";const d=Date.now()/1000-ts;if(d<60)return"только что";if(d<3600)return Math.floor(d/60)+" мин назад";if(d<86400)return Math.floor(d/3600)+" ч назад";return Math.floor(d/86400)+" дн назад";};
+ function paintRoots(){roots=rootList();rootsEl.innerHTML=roots.map(r=>`<button data-r="${att(r.p)}" class="${r.p===root?"on":""}">${esc(r.l)}</button>`).join("");
+   rootsEl.querySelectorAll("button").forEach(b=>b.onclick=()=>{root=b.dataset.r;cur=root;cache={};paintRoots();refresh();});}
+ async function refresh(){const st=await api("/api/fs/duscan/status?root="+encodeURIComponent(root));
+   if(!st){mainEl.innerHTML="<div class='du-empty'>Ошибка</div>";return;}
+   if(st.status==="scanning"){renderScanning(st);pollScan();return;}
+   if(st.status==="error"){mainEl.innerHTML=`<div class="du-empty">${svg("activity",30)}<p>Ошибка скана: ${esc(st.error||"")}</p><button class="btn pri" id="duGo">Повторить</button></div>`;bindGo();metaEl.textContent="";return;}
+   if(st.status==="done"){metaEl.textContent=`${fmtB(st.size||0)} · ${st.dirs||0} папок · скан ${fmtTs(st.ts)}`;cur=root;drill(root);return;}
+   mainEl.innerHTML=`<div class="du-empty">${svg("chartpie",34)}<p>Нет данных по <span class="mono">${esc(root)}</span></p><button class="btn pri" id="duGo">${svg("chartpie",14)} Сканировать</button></div>`;bindGo();metaEl.textContent="";}
+ function bindGo(){const g=mainEl.querySelector("#duGo");if(g)g.onclick=startScan;}
+ async function startScan(){await api("/api/fs/duscan/start",{method:"POST",body:JSON.stringify({root})});cache={};refresh();}
+ function renderScanning(st){mainEl.innerHTML=`<div class="du-empty"><div class="du-spin">${svg("refresh",30)}</div><p>Сканирую <span class="mono">${esc(root)}</span>…</p><p class="du-prog" id="duProg">${(st.scanned||0)} папок · ${fmtB(st.bytes||0)}</p><button class="btn sm" id="duCancel">Отмена</button></div>`;
+   const c=mainEl.querySelector("#duCancel");if(c)c.onclick=async()=>{await api("/api/fs/duscan/cancel",{method:"POST",body:JSON.stringify({root})});setTimeout(refresh,500);};}
+ function pollScan(){clearInterval(win._pi);win._pi=setInterval(async()=>{const st=await api("/api/fs/duscan/status?root="+encodeURIComponent(root));
+   if(!st)return;if(st.status==="scanning"){const pe=mainEl.querySelector("#duProg");if(pe)pe.textContent=`${st.scanned||0} папок · ${fmtB(st.bytes||0)}`;}else{clearInterval(win._pi);refresh();}},1200);}
+ async function drill(path){let d=cache[path];
+   if(!d){d=await api("/api/fs/duscan/node?root="+encodeURIComponent(root)+"&path="+encodeURIComponent(path)+"&depth=2");if(d&&d.ok)cache[path]=d;}
+   if(!d||!d.ok){toast((d&&d.log)||"нет данных");return;}
+   cur=path;node=d;renderView();}
+ function renderView(){mainEl.innerHTML=`<div class="du-crumb" id="duCrumb"></div><div class="du-cols"><div class="du-chart" id="duChart"></div><div class="du-list" id="duList"></div></div>`;
+   renderCrumb();renderChart();renderList();}
+ function renderCrumb(){const c=mainEl.querySelector("#duCrumb");c.innerHTML="";
+   const mk=(label,path)=>{const a=el(`<a>${esc(label)}</a>`);a.onclick=()=>drill(path);c.appendChild(a);};
+   mk((roots.find(r=>r.p===root)||{}).l||root,root);
+   const rel=cur===root?"":cur.slice(root==="/"?0:root.length);let acc=root;
+   rel.split("/").filter(Boolean).forEach(seg=>{acc=(acc==="/"?"":acc)+"/"+seg;const p=acc;c.appendChild(el(`<span class="sepc">/</span>`));mk(seg,p);});}
+ function renderChart(){const box=mainEl.querySelector("#duChart");if(!box)return;
+   const ch=(node.ch||[]).filter(x=>x.s>0),total=ch.reduce((s,x)=>s+x.s,0)||node.s||1;
+   const cx=130,cy=130,r0=44,r1=87,r2=122,TAU=Math.PI*2;
+   const arc=(ri,ro,a0,a1)=>{const P=(r,a)=>[cx+r*Math.cos(a),cy+r*Math.sin(a)];const laf=(a1-a0)>Math.PI?1:0;
+     const A=P(ro,a0),B=P(ro,a1),C=P(ri,a1),D=P(ri,a0);
+     return `M${A[0].toFixed(2)} ${A[1].toFixed(2)}A${ro} ${ro} 0 ${laf} 1 ${B[0].toFixed(2)} ${B[1].toFixed(2)}L${C[0].toFixed(2)} ${C[1].toFixed(2)}A${ri} ${ri} 0 ${laf} 0 ${D[0].toFixed(2)} ${D[1].toFixed(2)}Z`;};
+   const segs=[];let a=-Math.PI/2;
+   ch.forEach((c,i)=>{const span=Math.max(0,(c.s/total)*TAU),a0=a,a1=a+span;a=a1;if(span<0.012)return;
+     const col=DUCOL[i%DUCOL.length],full=span>=TAU-0.001;
+     segs.push({c,col,ring:1,full,path:full?null:arc(r0,r1,a0,a1)});
+     if(c.d&&c.c&&c.c.length){const sub=c.c.filter(x=>x.s>0),st=sub.reduce((s,x)=>s+x.s,0)||c.s;let aa=a0;
+       sub.forEach(sc=>{const sp=Math.max(0,(sc.s/st)*span),b0=aa,b1=aa+sp;aa=b1;if(sp<0.012)return;segs.push({c:sc,col:shade(col,.44),ring:2,path:arc(r1,r2,b0,b1)});});}});
+   const inner=segs.map((s,idx)=>s.ring===1&&s.full?`<circle cx="${cx}" cy="${cy}" r="${(r0+r1)/2}" fill="none" stroke="${s.col}" stroke-width="${r1-r0}" data-i="${idx}" class="duseg"/>`:`<path d="${s.path}" fill="${s.col}" data-i="${idx}" class="duseg"/>`).join("");
+   box.innerHTML=`<svg viewBox="0 0 260 260" width="260" height="260">${inner}<circle cx="${cx}" cy="${cy}" r="${r0-4}" class="du-hole" id="duHole"/><text x="${cx}" y="${cy-3}" text-anchor="middle" class="du-ctext" id="duC1"></text><text x="${cx}" y="${cy+13}" text-anchor="middle" class="du-csub" id="duC2"></text></svg>`;
+   const setC=(t1,t2)=>{const a1=box.querySelector("#duC1"),a2=box.querySelector("#duC2");if(a1)a1.textContent=t1;if(a2)a2.textContent=t2;};
+   setC(fmtB(node.s||total),"");
+   box.querySelectorAll(".duseg").forEach(elm=>{const s=segs[+elm.dataset.i];
+     elm.onmouseenter=()=>{setC(fmtB(s.c.s),s.c.n.length>18?s.c.n.slice(0,17)+"…":s.c.n);box.querySelectorAll(".duseg").forEach(o=>{o.style.opacity=o===elm?"1":".4";});};
+     elm.onmouseleave=()=>{setC(fmtB(node.s||total),"");box.querySelectorAll(".duseg").forEach(o=>{o.style.opacity="1";});};
+     elm.onclick=()=>{if(s.c.d)drill(s.c.p);};});
+   const hole=box.querySelector("#duHole");if(hole&&cur!==root)hole.onclick=()=>{const par=cur.replace(/\/[^/]+$/,"")||"/";drill(par.length<root.length?root:par);};}
+ function renderList(){const box=mainEl.querySelector("#duList");if(!box)return;box.innerHTML="";
+   const ch=(node.ch||[]).filter(x=>x.s>0),max=ch.reduce((m,x)=>Math.max(m,x.s),1);
+   if(!ch.length){box.innerHTML=`<div class="du-empty2">Пусто</div>`;return;}
+   ch.forEach((c,i)=>{const col=c.o?"var(--mut)":DUCOL[i%DUCOL.length];
+     const row=el(`<div class="du-row${c.d?" isdir":""}"><span class="du-sw" style="background:${col}"></span><span class="du-nm" title="${att(c.n)}">${esc(c.n)}</span><span class="du-bar"><i style="width:${Math.max(2,c.s/max*100).toFixed(1)}%;background:${col}"></i></span><span class="du-sz">${fmtB(c.s)}</span>${c.p?`<button class="du-x" title="В корзину">${svg("trash",13)}</button>`:""}</div>`);
+     if(c.d){row.querySelector(".du-nm").onclick=()=>drill(c.p);row.querySelector(".du-sw").onclick=()=>drill(c.p);}
+     if(c.p)row.oncontextmenu=ev=>{ev.preventDefault();showMenu(ev.clientX,ev.clientY,[{label:"Показать в Файлах",ic:svg("folder",16),act:()=>winFiles(c.d?c.p:(c.p.replace(/\/[^/]+$/,"")||"/"))},{label:"В корзину",ic:svg("trash",16),dng:1,act:()=>trashItem(c)}]);};
+     const x=row.querySelector(".du-x");if(x)x.onclick=ev=>{ev.stopPropagation();trashItem(c);};
+     box.appendChild(row);});}
+ function trashItem(c){confirmDlg("В корзину?",esc(c.n),async()=>{const r=await api("/api/fs/trash",{method:"POST",body:JSON.stringify({path:c.p})});
+   if(r&&r.ok){node.ch=node.ch.filter(x=>x!==c);renderView();toast("В корзину. Размеры обновятся после пере-скана.");}else toast("Ошибка: "+((r&&r.log)||"?"));});}
+ body.querySelector("#duRescan").onclick=startScan;
+ paintRoots();refresh();
+},{w:900,h:640});}
 /* Отдельное окно-редактор/просмотрщик файла (заголовок = имя, свои кнопки) */
 function openFileWin(e){openWin("ed:"+e.path,e.name,body=>{
  body.style.padding="0";
@@ -4292,7 +4409,11 @@ function filesTab(tc){
    ${row("Формат даты","",seg("fmDateFmt",[["dmy_hm","Дата и время"],["dmy","Только дата"],["rel","Относительно"]],DF))}
    ${row("Одновременных загрузок","",seg("fmUpPar",[["1","1"],["2","2"],["3","3"],["4","4"]],UP),"Сколько файлов заливать параллельно при загрузке с компьютера.")}
    ${row("Отступ в редакторе","",seg("fmTabSize",[["2","2"],["4","4"],["8","8"]],TS),"Ширина табуляции и отступа в текстовом редакторе файлов.")}
+  </div>
+  <div class="set-card"><div class="set-grp">Анализ места</div>
+   ${row("Что занимает место","круговая карта диска (система / пул / USB), drill-down по папкам",`<button class="btn sm pri" id="fmDU">${svg("chartpie",14)} Открыть анализ</button>`)}
   </div>`;
+ tc.querySelector("#fmDU").onclick=()=>winDiskUsage("/mnt/storage");
  // применить к уже открытому окну «Файлы» на лету (без перезагрузки)
  const apply=()=>{const w=OPEN.__files;if(w&&w._syncSettings)w._syncSettings();};
  const wireSeg=(id,fn)=>tc.querySelectorAll("#"+id+" button").forEach(b=>b.onclick=()=>{tc.querySelectorAll("#"+id+" button").forEach(x=>x.classList.toggle("on",x===b));fn(b.dataset.v);});
