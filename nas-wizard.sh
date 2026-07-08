@@ -50,7 +50,7 @@ STACK_PACKAGES=(cockpit cockpit-storaged cockpit-networkmanager mergerfs snaprai
 UTIL_PACKAGES=(
   dialog
   curl wget ca-certificates gnupg
-  git rsync
+  git rsync sshpass
   vim nano
   htop iotop
   tmux screen

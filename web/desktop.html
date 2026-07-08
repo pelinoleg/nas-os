@@ -733,6 +733,9 @@
   .nb-dst{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dim)}
   .nb-help{display:flex;flex-direction:column;gap:3px;background:var(--card);border:1px solid var(--line);border-radius:var(--r-md);padding:11px 13px;margin:10px 0 4px;font-size:12.5px;line-height:1.5}
   .nb-help b{font-weight:640;color:var(--text)}.nb-help span{color:var(--dim)}
+  .nb-testr{margin:2px 0 0}
+  .nb-testr .nb-ok{color:var(--good);font-size:12.5px;font-weight:600}
+  .nb-testr .nb-err{margin-top:2px;background:var(--danger-soft);color:var(--danger);font-size:11.5px;padding:8px 11px;border-radius:var(--r-sm);white-space:pre-wrap;word-break:break-word;max-height:120px;overflow:auto;font-family:var(--mono);line-height:1.45}
   .nb-field{margin:16px 0 6px}
   .nb-field>label{display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;margin-bottom:6px}
   .nb-field-row{display:flex;gap:8px}
@@ -4165,26 +4168,27 @@ function winBackup(){openWin("__nasbak","Бэкап главного NAS",(body,
  /* ── Подключение ── */
  function tabConn(tc){const c=CFG,ssh=c.transport==="ssh";
   const MHELP={rsync:{t:"rsync-демон",d:"На главном NAS работает служба rsync (rsync daemon), которая отдаёт шары как «модули». Быстро, без шифрования — подходит для домашней сети. Нужны включённая служба rsync, имя пользователя и пароль. Если не знаешь, есть ли она — жми «Проверить связь»: покажет список модулей."},
-   ssh:{t:"SSH + rsync",d:"Копирование поверх SSH — работает почти на любом NAS/Linux, где есть SSH. Идёт по ключу (без пароля в настройках): один раз выполни на этом NAS «ssh-keygen» и добавь ключ на главный «ssh-copy-id пользователь@адрес». Медленнее (шифрование), но безопаснее и универсальнее."}};
+   ssh:{t:"SSH + rsync",d:"Копирование поверх SSH — работает почти на любом NAS/Linux с SSH. Можно по паролю (введите его ниже) или по ключу (оставьте пароль пустым и добавьте ключ: ssh-copy-id пользователь@адрес). Медленнее (шифрование), но безопаснее и универсальнее."}};
   const mh=MHELP[ssh?"ssh":"rsync"];
   tc.innerHTML=`<h3 class="set-title">Подключение</h3><p class="set-sub">Откуда забирать данные для бэкапа.</p>
    <div class="srow"><div class="srow-l"><div class="srow-t">Способ подключения</div></div><div class="srow-c"><div class="seg" id="cTr"><button data-v="rsync" class="${!ssh?"on":""}">rsync-демон</button><button data-v="ssh" class="${ssh?"on":""}">SSH</button></div></div></div>
    <div class="nb-help" id="cHelp"><b>${esc(mh.t)}</b><span>${esc(mh.d)}</span></div>
    <div class="srow"><div class="srow-l"><div class="srow-t">Адрес NAS</div></div><div class="srow-c"><input class="mono" id="cHost" value="${att(c.host||"")}" placeholder="192.168.1.95"></div></div>
    <div class="srow"><div class="srow-l"><div class="srow-t">Пользователь</div></div><div class="srow-c"><input class="mono" id="cUser" value="${att(c.user||"")}" placeholder="oleg"></div></div>
-   <div class="srow" id="cPwRow" style="${ssh?"display:none":""}"><div class="srow-l"><div class="srow-t">Пароль rsync${tipHTML("Пароль модуля rsync-демона. Хранится на этом NAS.")}</div></div><div class="srow-c"><input type="password" class="mono" id="cPw" placeholder="${c.has_password?"•••••• (задан)":"пароль"}"></div></div>
-   <div class="srow" id="cPortRow" style="${ssh?"":"display:none"}"><div class="srow-l"><div class="srow-t">SSH-порт${tipHTML("Копирование идёт по SSH-ключу (без пароля). Сгенерируйте ключ на этом NAS и добавьте на главный: ssh-copy-id user@nas.")}</div></div><div class="srow-c"><input class="mono" id="cPort" style="max-width:90px" value="${c.ssh_port||22}"></div></div>
-   <div class="srow"><div class="srow-l"></div><div class="srow-c"><button class="btn sm" id="cTest">${svg("refresh",13)} Проверить связь</button><span id="cTestR" style="font-size:12px;margin-left:8px"></span></div></div>`;
+   <div class="srow" id="cPwRow"><div class="srow-l"><div class="srow-t">Пароль${tipHTML("rsync-демон — пароль модуля. SSH — пароль учётной записи (идёт через sshpass). Для SSH можно оставить пустым и настроить вход по ключу. Хранится на этом NAS.")}</div>${ssh?'<div class="srow-d">для SSH: пусто = вход по ключу</div>':""}</div><div class="srow-c"><input type="password" class="mono" id="cPw" placeholder="${c.has_password?"•••••• (задан)":"пароль"}"></div></div>
+   <div class="srow" id="cPortRow" style="${ssh?"":"display:none"}"><div class="srow-l"><div class="srow-t">SSH-порт</div></div><div class="srow-c"><input class="mono" id="cPort" style="max-width:90px" value="${c.ssh_port||22}"></div></div>
+   <div class="srow"><div class="srow-l"></div><div class="srow-c"><button class="btn sm" id="cTest">${svg("refresh",13)} Проверить связь</button></div></div>
+   <div class="nb-testr" id="cTestR"></div>`;
   const g=s=>tc.querySelector(s);
-  wireSeg(tc,"#cTr",v=>{g("#cPwRow").style.display=v==="ssh"?"none":"";g("#cPortRow").style.display=v==="ssh"?"":"none";const hh=MHELP[v];g("#cHelp").innerHTML=`<b>${esc(hh.t)}</b><span>${esc(hh.d)}</span>`;saveCfg({transport:v});});
+  wireSeg(tc,"#cTr",v=>{g("#cPortRow").style.display=v==="ssh"?"":"none";const hh=MHELP[v];g("#cHelp").innerHTML=`<b>${esc(hh.t)}</b><span>${esc(hh.d)}</span>`;saveCfg({transport:v}).then(()=>tabConn(tc));});
   g("#cHost").onchange=()=>saveCfg({host:g("#cHost").value.trim()});
   g("#cUser").onchange=()=>saveCfg({user:g("#cUser").value.trim()});
   g("#cPw").onchange=()=>{if(g("#cPw").value)saveCfg({password:g("#cPw").value});};
   g("#cPort").onchange=()=>saveCfg({ssh_port:+g("#cPort").value||22});
-  g("#cTest").onclick=async()=>{const rr=g("#cTestR");rr.textContent="проверяю…";rr.style.color="var(--mut)";
+  g("#cTest").onclick=async()=>{const rr=g("#cTestR");rr.innerHTML=`<span class="nb-ok" style="color:var(--mut)">проверяю…</span>`;
    const t=await api("/api/backup/test",{method:"POST",body:"{}"});
-   rr.textContent=t&&t.ok?("✓ "+(t.log||"работает")+(t.modules&&t.modules.length?" · модули: "+t.modules.join(", "):"")):("✗ "+((t&&t.log)||"нет связи"));
-   rr.style.color=t&&t.ok?"var(--good)":"var(--danger)";};
+   if(t&&t.ok)rr.innerHTML=`<span class="nb-ok">✓ ${esc(t.log||"работает")}${t.modules&&t.modules.length?" · модули: "+esc(t.modules.join(", ")):""}</span>`;
+   else rr.innerHTML=`<div class="nb-err">✗ ${esc((t&&t.log)||"нет связи")}</div>`;};
  }
  /* ── Источники ── */
  function tabSources(tc){const c=CFG,per=c.dest_mode==="per";

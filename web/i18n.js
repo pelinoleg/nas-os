@@ -6,6 +6,17 @@
    Перевод применяется только к целым «словам» (границы — не-кириллица), длинные фразы приоритетнее. */
 window.NAS_I18N = { en: {
 "Анализ места": "Disk usage",
+"для SSH: пусто = вход по ключу": "for SSH: empty = key-based login",
+"доступ отклонён — проверьте пользователя и пароль (или ключ)": "access denied — check the username and password (or key)",
+"соединение отклонено — служба/порт недоступны на источнике": "connection refused — service/port unavailable on the source",
+"таймаут соединения": "connection timeout",
+"rsync-демон отклонил запрос (модуль или пароль)": "rsync daemon rejected the request (module or password)",
+"проблема с host-key SSH источника": "problem with the source's SSH host key",
+"sshpass не установлен (нужен для пароля по SSH)": "sshpass is not installed (needed for SSH password auth)",
+"неизвестная ошибка": "unknown error",
+"для пароля по SSH нужен sshpass (переустановите/обновите систему) — или используйте ключ": "SSH password auth needs sshpass (reinstall/update the system) — or use a key",
+"SSH-подключение работает": "SSH connection works",
+"Копирование поверх SSH — работает почти на любом NAS/Linux с SSH. Можно по паролю (введите его ниже) или по ключу (оставьте пароль пустым и добавьте ключ: ssh-copy-id пользователь@адрес). Медленнее (шифрование), но безопаснее и универсальнее.": "Copy over SSH — works on almost any NAS/Linux with SSH. Use a password (enter it below) or a key (leave the password empty and add a key: ssh-copy-id user@address). Slower (encryption), but safer and more universal.",
 "Избранное и диски (боковая панель)": "Favorites & disks (side panel)",
 "Поиск": "Search",
 "Размер значков (S/M/L)": "Icon size (S/M/L)",

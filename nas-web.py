@@ -338,9 +338,9 @@ def smart_detail(dev):
 
 _C_ENV = dict(os.environ, LC_ALL="C", LANG="C")   # стабильный (английский) вывод утилит для парсинга
 
-def _run(cmd, timeout=40):
+def _run(cmd, timeout=40, env=None):
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=_C_ENV)
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=env or _C_ENV)
         return {"ok": p.returncode == 0, "code": p.returncode, "log": (p.stdout + p.stderr).strip()}
     except (OSError, subprocess.SubprocessError) as e:
         return {"ok": False, "code": -1, "log": str(e)}
@@ -2071,10 +2071,31 @@ def _nb_remote_env(cfg):
     user, host = cfg.get("user", ""), cfg.get("host", "")
     if cfg.get("transport") == "ssh":
         port = int(cfg.get("ssh_port", 22) or 22)
-        rsh = ["-e", "ssh -p %d -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10" % port]
-        return ("%s@%s:" % (user, host), _C_ENV, rsh)     # SSH — по ключу (BatchMode)
+        pw = cfg.get("password", "")
+        base = "ssh -p %d -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10" % port
+        if pw and shutil.which("sshpass"):                # пароль по SSH через sshpass (env SSHPASS)
+            return ("%s@%s:" % (user, host), dict(_C_ENV, SSHPASS=pw), ["-e", "sshpass -e " + base])
+        return ("%s@%s:" % (user, host), _C_ENV, ["-e", base + " -o BatchMode=yes"])   # без пароля — по ключу
     env = dict(_C_ENV, RSYNC_PASSWORD=cfg.get("password", ""))
     return ("%s@%s::" % (user, host), env, [])            # rsync-демон — пароль через RSYNC_PASSWORD
+
+def _nb_err(raw):
+    """Короткое человекочитаемое объяснение ошибки rsync/ssh (без простыни на весь экран)."""
+    low = (raw or "").lower()
+    if "sshpass" in low and ("not found" in low or "no such" in low):
+        return "sshpass не установлен (нужен для пароля по SSH)"
+    if "permission denied" in low or "auth" in low or "password" in low:
+        return "доступ отклонён — проверьте пользователя и пароль (или ключ)"
+    if "connection refused" in low:
+        return "соединение отклонено — служба/порт недоступны на источнике"
+    if "timed out" in low or "timeout" in low:
+        return "таймаут соединения"
+    if "@error" in low:
+        return "rsync-демон отклонил запрос (модуль или пароль)"
+    if "host key" in low or "remote host identification" in low:
+        return "проблема с host-key SSH источника"
+    lines = [l.strip() for l in (raw or "").splitlines() if l.strip()]
+    return (lines[-1] if lines else "неизвестная ошибка")[:180]
 
 def nb_test(cfg=None):
     """Проверка связи + (для rsync-демона) список модулей."""
@@ -2086,12 +2107,14 @@ def nb_test(cfg=None):
         return {"ok": False, "log": "%s не отвечает на ping" % cfg["host"]}
     remote, env, rsh = _nb_remote_env(cfg)
     if cfg.get("transport") == "ssh":
-        r = _run(["rsync"] + rsh + ["--list-only", remote + "/"], timeout=25)
-        return {"ok": r["ok"], "log": "SSH-подключение работает" if r["ok"] else ("не удалось: " + r["log"][-160:])}
+        if cfg.get("password") and not shutil.which("sshpass"):
+            return {"ok": False, "log": "для пароля по SSH нужен sshpass (переустановите/обновите систему) — или используйте ключ"}
+        r = _run(["rsync"] + rsh + ["--list-only", remote + "/"], timeout=25, env=env)
+        return {"ok": r["ok"], "log": "SSH-подключение работает" if r["ok"] else _nb_err(r["log"])}
     r = subprocess.run(["rsync", remote], capture_output=True, text=True, env=env, timeout=25)
     out = (r.stdout + r.stderr).strip()
     if r.returncode != 0 or "auth failed" in out or "@ERROR" in out:
-        return {"ok": False, "log": "не удалось: " + out[-160:]}
+        return {"ok": False, "log": _nb_err(out)}
     mods = [l.split("\t")[0].split()[0] for l in out.splitlines() if l.strip() and not l.startswith("@")]
     return {"ok": True, "modules": [m for m in mods if m], "log": "подключение работает"}
 
