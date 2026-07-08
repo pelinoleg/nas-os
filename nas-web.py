@@ -2775,6 +2775,24 @@ def _automount_tick():
                 notify_event("disk_remount", "remount:%s" % STORAGE, "NAS: пул переподключён",
                              "%s поднят сервисом nas-mergerfs" % STORAGE, "ok", cooldown=120)
 
+def _pool_recovery():
+    """Состояние сервиса пула mergerfs: активен ли и сколько раз systemd его
+    автоматически перезапускал (= крашей FUSE восстановлено) с момента загрузки.
+    None — если пул ещё не переведён на сервис (старая схема через fstab)."""
+    if not os.path.exists("/etc/systemd/system/nas-mergerfs.service"):
+        return None
+    st = {"service": True, "active": _mounted(STORAGE), "restarts": 0}
+    try:
+        p = subprocess.run(["systemctl", "show", "nas-mergerfs.service",
+                            "-p", "NRestarts", "-p", "ActiveState"],
+                           capture_output=True, text=True, timeout=5)
+        vals = dict(l.split("=", 1) for l in p.stdout.splitlines() if "=" in l)
+        st["restarts"] = int(vals.get("NRestarts", "0") or 0)
+        st["active"] = vals.get("ActiveState") == "active" and _mounted(STORAGE)
+    except (OSError, subprocess.SubprocessError, ValueError):
+        pass
+    return st
+
 # ---- ежедневная/еженедельная сводка состояния ----
 _LAST_SUMMARY = ""
 
@@ -5509,7 +5527,8 @@ class H(BaseHTTPRequestHandler):
             elif p == "/api/fs/zip":
                 self._send_zip(q.get("item") or [], (q.get("name") or ["archive.zip"])[0])
             elif p == "/api/disks":
-                self._json({"disks": disks(), "fs": fs_tools(), "snapraid": snapraid_status()})
+                self._json({"disks": disks(), "fs": fs_tools(), "snapraid": snapraid_status(),
+                            "pool": _pool_recovery()})
             elif p == "/api/disk/smart":
                 self._json(smart_detail((q.get("dev") or [""])[0]))
             elif p == "/api/processes":

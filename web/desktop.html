@@ -2179,7 +2179,7 @@ function winDisks(){openWin("__disks","Хранилище",(body,win)=>{
   if(!DM_SEL||!disks.find(x=>x.path===DM_SEL))DM_SEL=((disks.find(x=>x.role!=="system"))||disks[0]||{}).path;
   body.innerHTML="";
   const root=el(`<div class="dmroot"></div>`);
-  root.appendChild(poolStrip(disks,am,load,(d&&d.snapraid)||{}));
+  root.appendChild(poolStrip(disks,am,load,(d&&d.snapraid)||{},(d&&d.pool)||null));
   const split=el(`<div class="dm2"></div>`);
   const side=el(`<aside class="dm2-side"></aside>`);
   // группируем: система (всегда сверху) · пул (данные/чётность/pool) · вне пула (внешние/свободные)
@@ -2210,7 +2210,9 @@ function scrubLine(snap){
  const fmt=e=>e&&e.date?`<span style="color:${e.result==="ok"?"var(--good)":"var(--danger)"}">${e.result==="ok"?"✓":"✗"}</span> ${e.date.slice(5,16)}`:"—";
  return ` · чётность: sync ${fmt(snap.last_sync)}, scrub ${fmt(snap.last_scrub)}`;
 }
-function poolStrip(disks,am,reload,snap){
+function poolStrip(disks,am,reload,snap,pool){
+ // строка про автоподъёмы пула (сервис mergerfs с Restart=always)
+ const recov=(pool&&pool.service)?` · <span style="color:${pool.restarts>0?"var(--warn)":"var(--mut)"}" title="Сколько раз systemd автоматически поднял пул mergerfs после падения FUSE (с момента загрузки). 0 — пул ни разу не падал. Если растёт — стоит разобраться в причине.">↻ автоподъёмов: ${pool.restarts}</span>`:"";
  const cnt=r=>disks.filter(x=>x.role===r).length;
  const poolMount=disks.find(x=>x.role==="pool"),dataArr=disks.filter(x=>x.role==="data"||x.role==="pool");
  const hasPool=!!poolMount||cnt("data")>0;
@@ -2222,7 +2224,7 @@ function poolStrip(disks,am,reload,snap){
   const pct=total?Math.max(used/total*100,.4):0;
   w.innerHTML=`<span class="dp-ic">${svg("layers",17)}</span>
    <div class="dp-txt"><div class="dp-t">Пул /mnt/storage <span class="hstat ${hcls}" style="margin-left:4px">${hlbl}</span></div>
-    <div class="dp-s">${cnt("data")} данных · ${cnt("parity")} чётности${cnt("removable")?` · ${cnt("removable")} внешних`:""}${scrubLine(snap)}</div></div>
+    <div class="dp-s">${cnt("data")} данных · ${cnt("parity")} чётности${cnt("removable")?` · ${cnt("removable")} внешних`:""}${scrubLine(snap)}${recov}</div></div>
    <div class="dp-cap"><div class="capbar" style="width:150px"><span class="used" style="width:${pct}%"></span></div>
     <div class="dp-lbl">${fmtB(total-used)} своб · ${fmtB(total)}</div></div>`;
  }else{

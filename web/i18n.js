@@ -1231,6 +1231,8 @@ window.NAS_I18N = { en: {
 "Отформатировать (ext4) и подключить диск к пулу /mnt/storage": "Format (ext4) and attach the disk to the /mnt/storage pool",
 "SnapRAID — синхронизация чётности": "SnapRAID — parity synchronization",
 "Синхронизировать сейчас": "Sync now",
+"автоподъёмов:": "auto-recoveries:",
+"Сколько раз systemd автоматически поднял пул mergerfs после падения FUSE (с момента загрузки). 0 — пул ни разу не падал. Если растёт — стоит разобраться в причине.": "How many times systemd auto-recovered the mergerfs pool after a FUSE crash (since boot). 0 — the pool never crashed. If it grows, the root cause is worth investigating.",
 "Диск добавлен в пул": "Disk added to the pool",
 "Чтобы новый диск попал под защиту от сбоя, нужно пересчитать чётность SnapRAID. Запустить синхронизацию сейчас?": "For the new disk to be protected against failure, SnapRAID parity must be recomputed. Run synchronization now?",
 "Пересчитать чётность SnapRAID под текущее содержимое дисков. Запусти после добавления диска в пул — иначе новый диск ещё не под защитой.": "Recompute SnapRAID parity for the current disk contents. Run it after adding a disk to the pool — otherwise the new disk isn't protected yet.",
