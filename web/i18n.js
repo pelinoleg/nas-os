@@ -6,6 +6,8 @@
    Перевод применяется только к целым «словам» (границы — не-кириллица), длинные фразы приоритетнее. */
 window.NAS_I18N = { en: {
 "Анализ места": "Disk usage",
+"Показать журнал": "Show log",
+"Скрыть журнал": "Hide log",
 "Сработала защита от удаления": "Deletion guard triggered",
 "бэкап остановлен: удалилось бы слишком много файлов (порог на вкладке «Удалённые»)": "backup stopped: too many files would be deleted (threshold on the «Deleted» tab)",
 "NAS-бэкап: остановлен защитой": "NAS backup: stopped by guard",
