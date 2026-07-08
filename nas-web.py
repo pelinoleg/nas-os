@@ -4619,9 +4619,11 @@ USB_IMPORT_CONF = "/etc/nas-wizard/usb-import.conf"
 USB_IMPORT_SH   = "/usr/local/bin/nas-usb-import.sh"
 USB_IMPORT_RULE = "/etc/udev/rules.d/98-nas-usb-import.rules"
 _USB_DEFAULT = {"enabled": False, "dest": "/mnt/storage/imports",
-                "subdir": "dated", "notify": False, "eject": False}
+                "subdir": "dated", "notify": False, "eject": False, "media_only": False}
 _USB_SH = r'''#!/bin/bash
 # nas-wizard: авто-импорт содержимого вставленного USB в заданную папку.
+# Копирование only-forward: с флешки ничего не удаляется. Стейджинг в .incomplete
+# с переименованием на успехе — прерванный импорт виден и не путается с готовым.
 CONF=/etc/nas-wizard/usb-import.conf
 [ -r "$CONF" ] || exit 0
 . "$CONF"
@@ -4639,21 +4641,42 @@ if [ -z "$mp" ]; then
   mount -o ro "$dev" "$mp" 2>>"$LOG" || { log "mount fail $dev"; rmdir "$mp" 2>/dev/null; exit 1; }
   selfmount=1
 fi
+cleanup(){ [ "$selfmount" = "1" ] && { umount "$mp" 2>>"$LOG"; rmdir "$mp" 2>/dev/null; }; }
+base="${IMPORT_DEST:-/mnt/storage/imports}"
+# защита от импорта самого себя (напр. флешка примонтирована внутри приёмника)
+case "$(readlink -f "$base")/" in "$(readlink -f "$mp")"/*) log "self-import guard: $mp внутри $base"; cleanup; exit 0;; esac
 case "${IMPORT_SUBDIR:-dated}" in
   dated) sub="${label}-$(date '+%Y%m%d-%H%M%S')";;
   label) sub="$label";;
   *)     sub="";;
 esac
-dest="${IMPORT_DEST:-/mnt/storage/imports}"; [ -n "$sub" ] && dest="$dest/$sub"
-mkdir -p "$dest" 2>>"$LOG"
+# фильтр «только фото/видео» (регистронезависимо)
+filter=(); if [ "${IMPORT_MEDIA_ONLY:-0}" = "1" ]; then
+  filter=(--include='*/')
+  for e in jpg jpeg png gif heic heif webp tif tiff bmp dng raw arw cr2 cr3 nef orf rw2 raf srw \
+           mp4 mov avi mkv m4v mts m2ts 3gp mpg mpeg wmv webm; do
+    u="$(printf '%s' "$e" | tr a-z A-Z)"; filter+=(--include="*.$e" --include="*.$u")
+  done
+  filter+=(--exclude='*')
+fi
+# проверка свободного места (нужно + 5% запас)
+need="$(du -sb "$mp" 2>/dev/null | cut -f1)"; avail="$(df -PB1 "$base" 2>/dev/null | awk 'NR==2{print $4}')"
+if [ -n "$need" ] && [ -n "$avail" ] && [ "$avail" -lt "$((need + need/20 + 10485760))" ]; then
+  log "no space: need=$need avail=$avail"; notify "USB-импорт: мало места" "«$label» не поместится в $base"; cleanup; exit 1
+fi
+if [ -n "$sub" ]; then dest="$base/$sub"; stage="$base/.incomplete-$$-$sub"; else dest="$base"; stage="$dest"; fi
+mkdir -p "$stage" 2>>"$LOG"
 log "import $dev ($label) -> $dest"
 notify "USB-импорт начат" "Копирую «$label» в $dest"
-if rsync -a "$mp"/ "$dest"/ >>"$LOG" 2>&1; then
+rsync -a "${filter[@]}" "$mp"/ "$stage"/ >>"$LOG" 2>&1; rc=$?
+own="$(getent passwd 1000 | cut -d: -f1)"; [ -n "$own" ] && chown -R "$own:$own" "$stage" 2>/dev/null
+if [ "$rc" = 0 ] || [ "$rc" = 23 ] || [ "$rc" = 24 ]; then
+  [ "$stage" != "$dest" ] && mv "$stage" "$dest" 2>>"$LOG"
   log "import OK -> $dest"; notify "USB-импорт готов" "«$label» скопирован в $dest"
 else
-  log "import FAIL $dev"; notify "USB-импорт: ошибка" "Не удалось скопировать «$label»"
+  log "import FAIL $dev rc=$rc (частичное в $stage)"; notify "USB-импорт: ошибка" "Не удалось скопировать «$label» (rc=$rc)"
 fi
-[ "$selfmount" = "1" ] && { umount "$mp" 2>>"$LOG"; rmdir "$mp" 2>/dev/null; }
+cleanup
 if [ "${IMPORT_EJECT:-0}" = "1" ]; then
   pk="$(lsblk -no PKNAME "$dev" 2>/dev/null | head -1)"
   [ -n "$pk" ] && { udisksctl power-off -b "/dev/$pk" >>"$LOG" 2>&1 || eject "/dev/$pk" >>"$LOG" 2>&1 || true; log "eject /dev/$pk"; }
@@ -4674,6 +4697,7 @@ def usb_import_load():
         elif k == "IMPORT_SUBDIR": cfg["subdir"] = v
         elif k == "IMPORT_NOTIFY": cfg["notify"] = v == "1"
         elif k == "IMPORT_EJECT":  cfg["eject"] = v == "1"
+        elif k == "IMPORT_MEDIA_ONLY": cfg["media_only"] = v == "1"
     cfg["installed"] = os.path.isfile(USB_IMPORT_RULE)
     cfg["rsync"] = bool(shutil.which("rsync"))
     return cfg
@@ -4708,6 +4732,7 @@ def usb_import_save(cfg):
             f.write("IMPORT_SUBDIR=%s\n" % subdir)
             f.write("IMPORT_NOTIFY=%d\n" % (1 if cfg.get("notify") else 0))
             f.write("IMPORT_EJECT=%d\n" % (1 if cfg.get("eject") else 0))
+            f.write("IMPORT_MEDIA_ONLY=%d\n" % (1 if cfg.get("media_only") else 0))
     except OSError as e:
         return {"ok": False, "log": str(e)}
     err = _usb_install(bool(cfg.get("enabled")))

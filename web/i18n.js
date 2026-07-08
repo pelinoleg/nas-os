@@ -7,6 +7,11 @@
 window.NAS_I18N = { en: {
 "Бэкап главного NAS": "Main NAS backup",
 "Надёжность и отчёты": "Reliability & reports",
+"Только фото и видео": "Photos and videos only",
+"Копировать лишь снимки и ролики (jpg, heic, RAW: dng/cr2/nef/arw…, mp4, mov и т.п.), пропуская всё остальное. Удобно для карт памяти из фотоаппарата.": "Copy only photos and clips (jpg, heic, RAW: dng/cr2/nef/arw…, mp4, mov, etc.), skipping everything else. Handy for camera memory cards.",
+"пропускать документы, приложения и прочее": "skip documents, apps and the rest",
+"Копирование безопасное: во время переноса папка помечается": "Safe copy: during transfer the folder is marked",
+"и переименовывается только после успешного завершения — прерванный импорт не спутать с готовым. Владелец файлов выставляется автоматически.": "and renamed only after it finishes successfully — an interrupted import won't be mistaken for a complete one. File ownership is set automatically.",
 "Авто-переподключение диска": "Auto-reconnect disk",
 "Если диск данных внезапно отвалился (частая беда USB-SATA мостов), NAS сам пытается снова его смонтировать раз в 5 минут и уведомляет, когда получилось. Без этого бэкап мог бы тихо не работать, пока не заметишь.": "If a data disk suddenly drops (a common USB-SATA bridge problem), the NAS tries to remount it every 5 minutes and notifies you when it succeeds. Without this, a backup could silently stop working until you noticed.",
 "Активная термозащита": "Active thermal protection",
