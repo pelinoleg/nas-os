@@ -2410,7 +2410,12 @@ function formatDlg(x,after,mode){const s=document.getElementById("scrim");
  fsel.onchange=()=>fs=fsel.value;
  inp.oninput=()=>ok.disabled=inp.value.trim()!==x.path;
  s.querySelector("#fc").onclick=()=>s.classList.remove("show");
- ok.onclick=()=>{ok.disabled=true;runStream("format-disk",{dev:x.path,role,fs,label:s.querySelector("#flabel").value.trim()},s.querySelector("#fcon"),()=>{toast(pool?x.path+" добавлен в пул":x.path+" отформатирован");setTimeout(()=>{s.classList.remove("show");after&&after();},1000);});};}
+ ok.onclick=()=>{ok.disabled=true;runStream("format-disk",{dev:x.path,role,fs,label:s.querySelector("#flabel").value.trim()},s.querySelector("#fcon"),()=>{toast(pool?x.path+" добавлен в пул":x.path+" отформатирован");setTimeout(()=>{s.classList.remove("show");after&&after();if(pool)poolSyncReminder();},1000);});};}
+// после добавления диска в пул — напомнить пересчитать чётность SnapRAID (иначе новый диск вне защиты)
+async function poolSyncReminder(){const d=await api("/api/disks");
+ if(d&&d.snapraid&&d.snapraid.configured)
+  confirmDlg("Диск добавлен в пул","Чтобы новый диск попал под защиту от сбоя, нужно пересчитать чётность SnapRAID. Запустить синхронизацию сейчас?",()=>snapraidDlg(),false);
+}
 function automountDlg(am,after){const s=document.getElementById("scrim");am=am||{};
  s.innerHTML=`<div class="dialog"><h3>Автомонтирование носителей</h3>
   <p>USB-флешки и внешние диски будут автоматически монтироваться при подключении в каталог-базу. Диски NAS (в fstab) не затрагиваются.</p>
@@ -2555,6 +2560,7 @@ function winTerminal(initCmd,execC){openWin("__term","Терминал",(body,wi
  body.style.padding="0";body.style.background="#0a0f17";body.style.overflow="hidden";
  let fs=13;try{fs=+(SET.termFs??localStorage.getItem("nastermfs"))||13;}catch(e){}
  let sideHidden=false;try{sideHidden=SET.termSide!=null?!!SET.termSide:localStorage.getItem("nastermside")==="1";}catch(e){}
+ if(!isPhone())sideHidden=false;   // на десктопе/планшете боковая панель всегда открыта при открытии окна
  let pasteMode=false;
  body.innerHTML=`<div class="term-wrap${sideHidden?" nosd":""}">
    <div class="term-main">
@@ -3156,7 +3162,10 @@ function winVault(){openWin("__vault","Хранилище доступов",body
 let CM_READY=false;
 function ensureCM(cb){
  if(window.CodeMirror&&CM_READY){cb();return;}
- if(!document.getElementById("cmcss")){const l=document.createElement("link");l.id="cmcss";l.rel="stylesheet";l.href="/codemirror.css";document.head.appendChild(l);}
+ // ВАЖНО: codemirror.css грузим ПЕРВЫМ в <head> (insertBefore), иначе его дефолтная
+ // тема (.cm-s-default .cm-atom{color:#219}) перебивает наши инлайн-стили при равной
+ // специфичности — токены/фон редактора не менялись бы (см. баг с нечитаемой темой).
+ if(!document.getElementById("cmcss")){const l=document.createElement("link");l.id="cmcss";l.rel="stylesheet";l.href="/codemirror.css";document.head.insertBefore(l,document.head.firstChild);}
  const load=src=>new Promise(res=>{const s=document.createElement("script");s.src=src;s.onload=res;s.onerror=res;document.head.appendChild(s);});
  (window.CodeMirror?Promise.resolve():load("/codemirror.js")).then(()=>Promise.all(
    ["cm-yaml.js","cm-shell.js","cm-javascript.js","cm-python.js","cm-xml.js","cm-css.js","cm-properties.js","cm-dockerfile.js"].map(load)))
@@ -3685,6 +3694,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
  /* тулбар */
  {const fm=body.querySelector(".fm"),ft=body.querySelector("#fFavT");
   let hid=SET.fmFavHidden;if(hid===undefined)hid=isPhone();   // на телефоне по умолчанию свёрнут
+  if(!isPhone())hid=false;   // на десктопе/планшете сайдбар избранного всегда открыт при открытии окна
   const apply=()=>{fm.classList.toggle("fav-hidden",hid);ft.classList.toggle("pri",!hid);};apply();
   ft.onclick=()=>{hid=!hid;SET.fmFavHidden=hid;apply();saveSettings();};}
  body.querySelector("#fUp").onclick=()=>load(cwd==="/"?"/":(cwd.replace(/\/[^/]+$/,"")||"/"));

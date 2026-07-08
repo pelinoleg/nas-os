@@ -1231,6 +1231,8 @@ window.NAS_I18N = { en: {
 "Отформатировать (ext4) и подключить диск к пулу /mnt/storage": "Format (ext4) and attach the disk to the /mnt/storage pool",
 "SnapRAID — синхронизация чётности": "SnapRAID — parity synchronization",
 "Синхронизировать сейчас": "Sync now",
+"Диск добавлен в пул": "Disk added to the pool",
+"Чтобы новый диск попал под защиту от сбоя, нужно пересчитать чётность SnapRAID. Запустить синхронизацию сейчас?": "For the new disk to be protected against failure, SnapRAID parity must be recomputed. Run synchronization now?",
 "Пересчитать чётность SnapRAID под текущее содержимое дисков. Запусти после добавления диска в пул — иначе новый диск ещё не под защитой.": "Recompute SnapRAID parity for the current disk contents. Run it after adding a disk to the pool — otherwise the new disk isn't protected yet.",
 "Sync пересчитывает данные чётности на parity-диске под текущее содержимое дисков данных — именно они позволяют восстановить диск при сбое. Идёт по расписанию (ежедневно), но после добавления диска в пул запусти вручную. Защита от массового удаления: если удалено много файлов, sync прервётся.": "Sync recomputes parity on the parity disk for the current contents of the data disks — that's what lets a failed disk be rebuilt. It runs on a schedule (daily), but run it manually after adding a disk to the pool. Mass-delete guard: if many files were removed, sync aborts.",
 "чётность обновлена": "parity updated",

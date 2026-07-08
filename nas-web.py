@@ -12,7 +12,7 @@ nas-web.py — веб-бэкенд мастера настройки NAS и ра
 Системные изменения выполняет проверенный движок nas-wizard.sh (api-режим), поэтому
 сервер нужно запускать от root (launcher nas-setup.sh это делает).
 """
-import json, os, re, subprocess, time, shutil, socket, threading, pwd, mimetypes, glob
+import json, os, re, subprocess, time, shutil, socket, threading, pwd, mimetypes, glob, errno
 import pty, select, struct, hashlib, base64, signal, fcntl, termios, secrets, hmac
 import urllib.request, urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -2731,20 +2731,38 @@ def _fstab_targets():
 def _mounted(mp):
     return subprocess.run(["mountpoint", "-q", mp]).returncode == 0
 
+def _stale_endpoint(mp):
+    """Мёртвый FUSE-эндпоинт (mergerfs упал): stat() даёт ENOTCONN «Transport endpoint
+    is not connected». mount на нём падает — точку сначала надо снять (umount -l)."""
+    try:
+        os.stat(mp)
+        return False
+    except OSError as e:
+        return e.errno == errno.ENOTCONN
+    except Exception:
+        return False
+
 def _automount_tick():
     if not load_maintenance().get("automount_recover", True):
         return
     now = time.time()
     for mp in _fstab_targets():
-        if _mounted(mp):
+        stale = _stale_endpoint(mp)           # завис ли FUSE-эндпоинт (пул mergerfs)
+        if _mounted(mp) and not stale:
             _MOUNT_TRY.pop(mp, None)
             continue
-        if now - _MOUNT_TRY.get(mp, 0) < 300:     # не долбить чаще раза в 5 мин
+        # завис mergerfs — снимаем чаще (раз в минуту), обычный remount — не чаще 5 мин
+        if now - _MOUNT_TRY.get(mp, 0) < (55 if stale else 300):
             continue
         _MOUNT_TRY[mp] = now
+        if stale:
+            # снять зависший эндпоинт, иначе mount выдаёт «Transport endpoint is not connected»
+            _run(["umount", "-l", mp], timeout=20)
+            _run(["fusermount", "-uz", mp], timeout=20)
         _run(["mount", mp], timeout=30)
         if _mounted(mp):
-            notify_event("disk_remount", "remount:%s" % mp, "NAS: диск переподключён",
+            notify_event("disk_remount", "remount:%s" % mp,
+                         "NAS: пул переподключён" if stale else "NAS: диск переподключён",
                          "%s снова смонтирован автоматически" % mp, "ok", cooldown=120)
 
 # ---- ежедневная/еженедельная сводка состояния ----
