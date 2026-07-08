@@ -743,9 +743,12 @@
   .nb-pcrumb .sepc{color:var(--mut)}
   .nb-saved{font-size:12px;color:var(--good);font-weight:600;opacity:0;transition:opacity .2s;margin-left:4px}
   .nb-saved.show{opacity:1}
-  .nb-prog{display:flex;flex-wrap:wrap;align-items:center;gap:10px;font-size:12px;padding:8px 12px;background:var(--accent-soft);border-radius:var(--r-sm)}
-  .nb-prog-cur{display:inline-flex;align-items:center;gap:5px;color:var(--accent);font-weight:600;min-width:0}
+  .nb-prog{font-size:12px;padding:9px 12px;background:var(--accent-soft);border-radius:var(--r-sm)}
+  .nb-prog-cur{display:flex;align-items:center;gap:5px;color:var(--accent);font-weight:600;min-width:0}
   .nb-prog-cur svg{flex:none}
+  .nb-prog-pct{margin-left:auto;font-family:var(--mono);font-weight:700}
+  .nb-pbar{height:6px;border-radius:999px;background:var(--line-2);overflow:hidden;margin:6px 0 4px}
+  .nb-pbar i{display:block;height:100%;background:var(--accent);border-radius:999px;transition:width .4s}
   .nb-prog-l{color:var(--mut);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   /* дерево-выбор источников */
   .nb-pick{max-width:660px;width:min(660px,94vw)}
@@ -768,6 +771,11 @@
   .nb-arr{color:var(--mut);flex:none}
   .nb-dst{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dim)}
   .nb-sz{flex:none;color:var(--mut);font-size:11px}
+  .nb-hrun{display:flex;align-items:center;gap:8px;margin-top:12px;padding-top:8px;border-top:1px solid var(--line);font-size:12.5px}
+  .nb-hrun:first-child{margin-top:0;border-top:none}
+  .nb-hdate{font-weight:600}.nb-hmeta{margin-left:auto;color:var(--mut);font-size:11px}
+  .nb-hjob{display:flex;align-items:center;gap:8px;padding:3px 0 3px 16px;font-size:12px}
+  .nb-hjm{margin-left:auto;color:var(--mut);font-size:11px;white-space:nowrap}
   .nb-help{display:flex;flex-direction:column;gap:3px;background:var(--card);border:1px solid var(--line);border-radius:var(--r-md);padding:11px 13px;margin:10px 0 4px;font-size:12.5px;line-height:1.5}
   .nb-help b{font-weight:640;color:var(--text)}.nb-help span{color:var(--dim)}
   .nb-testr{margin:2px 0 0}
@@ -2137,6 +2145,13 @@ async function ejectVolume(v){
 }
 
 /* dock */
+// быстрое меню бэкапа с иконки дока (запуск/отмена без открытия окна)
+async function nbDockMenu(x,y){
+ const it=[{label:"Открыть бэкап",ic:svg("sync",16),act:()=>winBackup()}];
+ if(NB_RUNNING)it.push({label:"Остановить бэкап",ic:svg("x",16),dng:1,act:()=>{api("/api/backup/cancel",{method:"POST",body:"{}"});toast("Останавливаю…");}});
+ else{it.push({label:"Запустить бэкап сейчас",ic:svg("sync",16),act:async()=>{const r=await api("/api/backup/run-bg",{method:"POST",body:"{}"});toast(r&&r.ok?"Бэкап запущен":(r&&r.log)||"уже выполняется");}},
+   {label:"Пробный прогон",ic:svg("eye",16),act:async()=>{await api("/api/backup/run-bg",{method:"POST",body:JSON.stringify({dry:true})});toast("Пробный прогон запущен");}});}
+ showMenu(x,y,it);}
 function dockItems(){
  const base=INTERNAL.map(a=>({id:a.id,ic:a.ic,color:a.color,name:a.name,fn:a.fn}));
  base.push({id:"__cockpit",ic:"grid",color:"linear-gradient(135deg,#4b7bec,#3a63c9)",name:"Cockpit",fn:()=>window.open(cockpitURL(),"_blank")});
@@ -2155,7 +2170,8 @@ function renderDock(){
  const d=document.getElementById("dock");if(!d)return;d.innerHTML="";
  dockItems().forEach(a=>{const busy=a.id==="__nasbak"&&NB_RUNNING;const b=el(`<button title="${esc(a.name)}${busy?" — идёт бэкап":""}" draggable="true" data-did="${a.id}"><span class="di${busy?" di-busy":""}" style="background:${a.color}">${I[a.ic]}${OPEN[a.id]?'<span class="run"></span>':''}${busy?'<span class="di-spin"></span>':''}</span><span class="dl">${esc(a.name)}</span></button>`);
   b.onclick=a.fn;
-  if(OPEN[a.id])b.oncontextmenu=e=>{e.preventDefault();winCtxMenu(a.id,e.clientX,e.clientY);};
+  if(a.id==="__nasbak")b.oncontextmenu=e=>{e.preventDefault();nbDockMenu(e.clientX,e.clientY);};
+  else if(OPEN[a.id])b.oncontextmenu=e=>{e.preventDefault();winCtxMenu(a.id,e.clientX,e.clientY);};
   b.ondragstart=()=>b.classList.add("dragging");
   b.ondragend=()=>{b.classList.remove("dragging");SET.dockOrder=[...d.querySelectorAll("button[data-did]")].map(x=>x.dataset.did);saveSettings();};
   d.appendChild(b);});
@@ -4250,6 +4266,7 @@ function winBackup(){openWin("__nasbak","Бэкап главного NAS",(body,
   {id:"sources",name:"Источники",ic:"folder"},
   {id:"deleted",name:"Удалённые файлы",ic:"trash"},
   {id:"sched",name:"Расписание",ic:"clock"},
+  {id:"history",name:"История",ic:"activity"},
  ];
  const saveCfg=async patch=>{const r=await api("/api/backup/config",{method:"POST",body:JSON.stringify({config:patch})});CFG=(r&&r.config)||CFG;JOBS=(CFG.jobs||[]).slice();return CFG;};
  const wireSeg=(tc,id,cb)=>{const seg=tc.querySelector(id);if(!seg)return;seg.querySelectorAll("button").forEach(b=>b.onclick=()=>{seg.querySelectorAll("button").forEach(x=>x.classList.toggle("on",x===b));cb(b.dataset.v);});};
@@ -4270,6 +4287,7 @@ function winBackup(){openWin("__nasbak","Бэкап главного NAS",(body,
    <div class="srow" id="cPwRow"><div class="srow-l"><div class="srow-t">Пароль${tipHTML("rsync-демон — пароль модуля. SSH — пароль учётной записи (идёт через sshpass). Для SSH можно оставить пустым и настроить вход по ключу. Хранится на этом NAS.")}</div>${ssh?'<div class="srow-d">для SSH: пусто = вход по ключу</div>':""}</div><div class="srow-c"><input type="password" class="mono" id="cPw" placeholder="${c.has_password?"•••••• (задан)":"пароль"}"></div></div>
    <div class="srow" id="cPortRow" style="${ssh?"":"display:none"}"><div class="srow-l"><div class="srow-t">SSH-порт</div></div><div class="srow-c"><input class="mono" id="cPort" style="max-width:90px" value="${c.ssh_port||22}"></div></div>
    <div class="srow" id="cSudoRow" style="${ssh?"":"display:none"}"><div class="srow-l"><div class="srow-t">Читать через sudo на источнике${tipHTML("Если часть файлов на главном NAS недоступна пользователю (ошибки «Permission denied») — rsync на источнике запускается через sudo и читает всё. Требуется беспарольный sudo для rsync на источнике: в /etc/sudoers.d добавить строку вида «"+(c.user||"oleg")+" ALL=(root) NOPASSWD: /usr/bin/rsync».")}</div><div class="srow-d">лечит «Permission denied» на части файлов</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="cSudo"${c.remote_sudo?" checked":""}><span class="sl"></span></label></div></div>
+   <div class="srow"><div class="srow-l"><div class="srow-t">Ограничение скорости${tipHTML("Лимит скорости передачи в КБ/с (rsync --bwlimit), чтобы бэкап не забивал сеть и диск. 0 — без ограничения.")}</div><div class="srow-d">чтобы не забивать сеть/диск</div></div><div class="srow-c"><input class="mono" id="cBw" style="max-width:90px" value="${c.bwlimit||0}"><span style="color:var(--mut);font-size:12px">КБ/с</span></div></div>
    <div class="srow"><div class="srow-l"></div><div class="srow-c"><button class="btn sm pri" id="cSave">${svg("save",13)} Сохранить</button><button class="btn sm" id="cTest">${svg("refresh",13)} Проверить связь</button><span id="cSaved" class="nb-saved"></span></div></div>
    <div class="nb-testr" id="cTestR"></div>`;
   const g=s=>tc.querySelector(s);
@@ -4284,6 +4302,7 @@ function winBackup(){openWin("__nasbak","Бэкап главного NAS",(body,
   g("#cPw").onchange=()=>{if(g("#cPw").value)saveCfg({password:g("#cPw").value});};
   g("#cPort").onchange=()=>saveCfg({ssh_port:+g("#cPort").value||22});
   {const su=g("#cSudo");if(su)su.onchange=()=>saveCfg({remote_sudo:su.checked});}
+  {const bw=g("#cBw");if(bw)bw.onchange=()=>saveCfg({bwlimit:+bw.value||0});}
   g("#cTest").onclick=async()=>{const rr=g("#cTestR");rr.innerHTML=`<span class="nb-ok" style="color:var(--mut)">проверяю…</span>`;
    const t=await api("/api/backup/test",{method:"POST",body:"{}"});
    if(t&&t.ok)rr.innerHTML=`<span class="nb-ok">✓ ${esc(t.log||"работает")}${t.modules&&t.modules.length?" · модули: "+esc(t.modules.join(", ")):""}</span>`;
@@ -4329,6 +4348,7 @@ function winBackup(){openWin("__nasbak","Бэкап главного NAS",(body,
   tc.innerHTML=`<h3 class="set-title">Удалённые файлы</h3><p class="set-sub">Что делать с файлами, которые удалили на главном NAS.</p>
    <div class="srow"><div class="srow-l"><div class="srow-t">Режим</div></div><div class="srow-c"><div class="seg" id="dDel"><button data-v="archive" class="${dm==="archive"?"on":""}">Архив</button><button data-v="mirror" class="${dm==="mirror"?"on":""}">Зеркало</button><button data-v="add" class="${dm==="add"?"on":""}">Добавлять</button></div></div></div>
    <div class="nb-help" id="dHelp"><b>${esc(h.t)}</b><span>${esc(h.d)}</span></div>
+   <div class="srow" id="dGuardRow" style="${dm==="add"?"display:none":""}"><div class="srow-l"><div class="srow-t">Защита от массового удаления${tipHTML("Если за прогон удалилось бы больше этого % файлов (от числа в прошлый раз) — бэкап останавливается и НИЧЕГО не удаляет. Спасает, если источник случайно стёрли/размонтировали. Рекомендую 20%. 0 — выключить защиту.")}</div><div class="srow-d">стоп, если удаляется слишком много (рекоменд. 20%)</div></div><div class="srow-c"><input class="mono" id="dMax" style="max-width:60px" value="${c.max_delete_pct==null?20:c.max_delete_pct}"><span style="color:var(--mut);font-size:12px">%</span></div></div>
    <div id="dArch" style="${dm==="archive"?"":"display:none"}">
    <div class="set-h">Куда складывать удалённые${tipHTML("Шаблон папки внутри приёмника, куда переносятся удалённые/изменённые файлы. Соберите из токенов ниже. «/» создаёт вложенные папки (напр. _deleted/{year}/{month}). Первая папка должна быть постоянной (её и чистит ретеншен).")}</div>
    <div class="usb-sub">
@@ -4340,7 +4360,8 @@ function winBackup(){openWin("__nasbak","Бэкап главного NAS",(body,
    <div class="srow" id="dRetRow"><div class="srow-l"><div class="srow-t">Хранить архив удалённых${tipHTML("Старые снимки чистятся по возрасту И по суммарному размеру — что наступит раньше. 0 в поле — этот лимит не применять.")}</div><div class="srow-d">чистка по возрасту и по размеру</div></div><div class="srow-c"><input class="mono" id="dRd" style="max-width:60px" value="${c.retention_days||0}"><span style="color:var(--mut);font-size:12px">дней</span><input class="mono" id="dRg" style="max-width:60px" value="${c.retention_gb||0}"><span style="color:var(--mut);font-size:12px">ГБ</span></div></div>
    </div>`;
   const g=s=>tc.querySelector(s);
-  wireSeg(tc,"#dDel",v=>{g("#dArch").style.display=v==="archive"?"":"none";const hh=HELP[v];g("#dHelp").innerHTML=`<b>${esc(hh.t)}</b><span>${esc(hh.d)}</span>`;saveCfg({delete_mode:v});});
+  wireSeg(tc,"#dDel",v=>{g("#dArch").style.display=v==="archive"?"":"none";g("#dGuardRow").style.display=v==="add"?"none":"";const hh=HELP[v];g("#dHelp").innerHTML=`<b>${esc(hh.t)}</b><span>${esc(hh.d)}</span>`;saveCfg({delete_mode:v});});
+  g("#dMax").onchange=()=>saveCfg({max_delete_pct:+g("#dMax").value||0});
   g("#dRd").onchange=()=>saveCfg({retention_days:+g("#dRd").value||0});
   g("#dRg").onchange=()=>saveCfg({retention_gb:+g("#dRg").value||0});
   const dt=g("#dTpl"),dp=g("#dPrev"),base=(c.dest_base||"/mnt/storage/nas-backup").replace(/\/$/,"");
@@ -4411,7 +4432,15 @@ function winBackup(){openWin("__nasbak","Бэкап главного NAS",(body,
     if(r.lines&&r.lines.length)nbAppend(r.lines);
     nbCursor=r.seq;
     const op=g("#oProg");
-    if(op){if(r.running){op.style.display="flex";op.innerHTML=`<span class="nb-prog-cur">${svg("folder",13)} ${esc(r.cur||"…")}</span>${r.line?`<span class="nb-prog-l mono">${esc(r.line.trim())}</span>`:""}`;}else op.style.display="none";}
+    if(op){if(r.running){const ln=r.line||"";
+      const pm=/(\d+)%/.exec(ln),pct=pm?+pm[1]:null;
+      const rm=/([\d.]+[KMGT]?B\/s)/.exec(ln),rate=rm?rm[1]:"";
+      const tk=/to-chk=(\d+)\/(\d+)/.exec(ln),left=tk?+tk[1]:null;
+      op.style.display="block";
+      op.innerHTML=`<div class="nb-prog-cur">${svg("folder",13)} ${esc(r.cur||"…")}${pct!=null?`<span class="nb-prog-pct">${pct}%</span>`:""}</div>`
+        +(pct!=null?`<div class="nb-pbar"><i style="width:${pct}%"></i></div>`:"")
+        +`<div class="nb-prog-l mono">${esc(rate)}${left!=null?` · осталось ${left} файлов`:""}</div>`;
+    }else op.style.display="none";}
     if(!r.running){clearInterval(win._nbpi);win._nbpi=null;setBusy(false);
      notifyDone(r.dry?"Пробный прогон завершён":(r.result==="ok"?"Бэкап завершён":r.result==="unreachable"?"Главный NAS недоступен":"Бэкап с ошибками"),"");
      if(r.dry){const sn=g("#oStatus");if(sn)sn.innerHTML=`<b>пробный прогон завершён</b>`;}
@@ -4427,7 +4456,19 @@ function winBackup(){openWin("__nasbak","Бэкап главного NAS",(body,
   g("#oTest").onclick=async()=>{toast("Проверяю связь…");const t=await api("/api/backup/test",{method:"POST",body:"{}"});toast(t&&t.ok?"✓ связь работает":("✗ "+((t&&t.log)||"нет связи")));};
  }
 
- const TABS={overview:tabOverview,conn:tabConn,sources:tabSources,deleted:tabDeleted,sched:tabSched};
+ function tabHistory(tc){tc.innerHTML=`<h3 class="set-title">История прогонов</h3><p class="set-sub">Последние запуски бэкапа: когда, сколько шёл, что передано.</p><div id="hList"><div class="set-load">загрузка…</div></div>`;
+  api("/api/backup/history").then(r=>{const list=(r&&r.history)||[],box=tc.querySelector("#hList");if(!box)return;
+   if(!list.length){box.innerHTML=`<div class="mon-note">Пока пусто — история появится после первого прогона.</div>`;return;}
+   const dur=s=>{s=+s||0;return s<60?s+" с":s<3600?Math.floor(s/60)+" мин "+(s%60)+" с":Math.floor(s/3600)+" ч "+Math.floor(s%3600/60)+" мин";};
+   box.innerHTML="";
+   list.forEach(run=>{const ok=(run.jobs||[]).filter(x=>x.ok).length,tot=(run.jobs||[]).length;
+    const bad=run.result!=="ok";
+    const head=el(`<div class="nb-hrun"><span class="ovh-dot" style="background:${bad?"var(--warn)":"var(--good)"};flex:none"></span><span class="nb-hdate">${fmDate(run.ts)}</span><span class="nb-hmeta mono">${ok}/${tot} · ${esc(dur(run.dur))}</span></div>`);
+    box.appendChild(head);
+    (run.jobs||[]).forEach(j=>{const line=(j.code===25)?"остановлено защитой":((j.xfer||0)+" файлов · "+fmtB(j.xfer_bytes||0)+(j.deleted?(" · удалено "+j.deleted):""));
+     box.appendChild(el(`<div class="nb-hjob"><span class="ovh-dot" style="background:${j.ok?"var(--good)":"var(--danger)"};flex:none"></span><span class="nb-src mono" title="${att(j.src)}">${esc(j.src)}</span><span class="nb-hjm mono">${esc(line)}</span></div>`));});
+   });});}
+ const TABS={overview:tabOverview,conn:tabConn,sources:tabSources,deleted:tabDeleted,sched:tabSched,history:tabHistory};
  const render=async()=>{const r=await api("/api/backup/config");CFG=(r&&r.config)||{};JOBS=(CFG.jobs||[]).slice();
   body.innerHTML=`<div class="set-nav">${CATS.map(c=>`<button data-t="${c.id}" class="${tab===c.id?"on":""}">${svg(c.ic,17)}<span>${c.name}</span></button>`).join("")}</div><div class="set-pane" id="tc"></div>`;
   body.querySelectorAll(".set-nav button").forEach(b=>b.onclick=()=>{tab=b.dataset.t;render();});

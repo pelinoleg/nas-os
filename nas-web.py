@@ -2053,7 +2053,7 @@ def nb_load():
                       ".gradle/", ".idea/", ".vscode/", ".pytest_cache/", ".mypy_cache/",
                       "*.egg-info/", ".cache/", "bower_components/", ".turbo/"],
          "delete_mode": "archive", "retention_days": 30, "retention_gb": 0,
-         "deleted_dir": "_deleted/{date}",
+         "deleted_dir": "_deleted/{date}", "max_delete_pct": 20, "bwlimit": 0,
          "schedule": {"enabled": False, "freq": "daily", "time": "03:00", "dow": "Sun"}}
     try:
         with open(NB_CONF) as f:
@@ -2074,10 +2074,13 @@ def nb_save(patch):
     if isinstance(patch.get("deleted_dir"), str):
         v = re.sub(r"[^\w \-.{}/А-Яа-яЁё]", "", patch["deleted_dir"]).replace("..", "").strip("/")[:120]
         cur["deleted_dir"] = v or "_deleted/{date}"
-    for k in ("ssh_port", "retention_days", "retention_gb"):
+    for k in ("ssh_port", "retention_days", "retention_gb", "bwlimit"):
         if k in patch:
             try: cur[k] = max(0, int(patch[k]))
             except (ValueError, TypeError): pass
+    if "max_delete_pct" in patch:
+        try: cur["max_delete_pct"] = max(0, min(100, int(patch["max_delete_pct"])))
+        except (ValueError, TypeError): pass
     if "remote_sudo" in patch:
         cur["remote_sudo"] = bool(patch["remote_sudo"])
     if isinstance(patch.get("jobs"), list):
@@ -2266,27 +2269,35 @@ def nb_deleted_rel(cfg, t=None):
     rel = _nb_render_tpl(cfg.get("deleted_dir") or "_deleted/{date}", t)
     return rel or ("_deleted/" + time.strftime("%Y-%m-%d", t or time.localtime()))
 
-def nb_build_cmd(cfg, job, dry):
-    """rsync-команда (+env) для одной задачи."""
+def nb_build_cmd(cfg, job, dry, prev_files=0):
+    """rsync-команда (+env) для одной задачи. prev_files — число файлов в прошлый
+    прогон (для защиты --max-delete по проценту)."""
     remote, env, rsh = _nb_remote_env(cfg)
     dest = job["dest"].rstrip("/") + "/"
-    uid = os.environ.get("SUDO_UID") or "1000"
     owner = TARGET_USER
-    args = ["rsync", "-rltD", "--info=progress2", "--no-inc-recursive",
+    args = ["rsync", "-rltD", "--info=progress2", "--stats", "--no-inc-recursive",
             "--no-owner", "--no-group", "--no-perms", "--chown=%s:%s" % (owner, owner)] + rsh
     dm = cfg.get("delete_mode", "archive")
     if dm in ("archive", "mirror"):
         args.append("--delete")
+        # защита: не удалять больше N% файлов (от числа в прошлый прогон) — иначе rsync
+        # выходит с кодом 25 и НИЧЕГО не удаляет. Спасает от «источник стёрли/размонтировали».
+        pct = int(cfg.get("max_delete_pct", 20) or 0)
+        if pct > 0 and prev_files > 0:
+            args.append("--max-delete=%d" % max(1, int(prev_files * pct / 100.0)))
     if dm == "archive":
         snap = os.path.join(dest, nb_deleted_rel(cfg))   # шаблон с токенами, по умолчанию _deleted/{date}
         args += ["--backup", "--backup-dir=" + snap]
         args.append("--exclude=/" + nb_deleted_top(cfg)) # не бэкапить сам архив удалённых
     for ex in cfg.get("excludes", []):
         args.append("--exclude=" + ex)
+    bw = int(cfg.get("bwlimit", 0) or 0)
+    if bw > 0:
+        args.append("--bwlimit=%d" % bw)                 # КБ/с
     if cfg.get("transport") == "ssh" and cfg.get("remote_sudo"):
         args.append("--rsync-path=sudo rsync")   # читать файлы без доступа у пользователя (нужен NOPASSWD sudo на источнике)
     if dry:
-        args += ["--dry-run", "--stats"]   # сводка: сколько файлов и байт будет передано
+        args.append("--dry-run")
     args += [remote + job["src"] + "/", dest]
     return args, env
 
@@ -2299,6 +2310,12 @@ def nb_run(cfg, dry, writer, cancel=lambda: False):
     t = nb_test(cfg)
     if not t.get("ok"):
         writer("ОШИБКА связи: " + t.get("log", "")); return {"ok": False, "unreachable": True, "jobs": []}
+    try:
+        with open(NB_STATUS) as f:
+            prevf = {x.get("src"): x.get("files", 0) for x in json.load(f).get("jobs", [])}
+    except (OSError, ValueError):
+        prevf = {}
+    t0 = time.time()
     results = []
     for j in jobs:
         if cancel():
@@ -2309,34 +2326,90 @@ def nb_run(cfg, dry, writer, cancel=lambda: False):
             os.makedirs(j["dest"], exist_ok=True)
         except OSError as e:
             writer("не создать папку: %s" % e); results.append({"src": j["src"], "ok": False}); continue
-        args, env = nb_build_cmd(cfg, j, dry)
+        args, env = nb_build_cmd(cfg, j, dry, prev_files=prevf.get(j["src"], 0))
+        stat_lines = []
         try:
             p = subprocess.Popen(args, env=env, stdout=subprocess.PIPE,
                                  stderr=subprocess.STDOUT, text=True, bufsize=1)
         except OSError as e:
             writer("не запустить rsync: %s" % e); results.append({"src": j["src"], "ok": False}); continue
         for line in iter(p.stdout.readline, ""):
-            writer(line.rstrip("\n"))
+            line = line.rstrip("\n")
+            writer(line)
+            if "Number of" in line or "Total transferred" in line or "Total file size" in line:
+                stat_lines.append(line)
             if cancel():
                 p.kill(); break
         p.wait()
         try: p.stdout.close()
         except OSError: pass
         ok = p.returncode in (0, 24)     # 24 = vanished files — не ошибка
+        stt = _nb_parse_stats(stat_lines)
+        if p.returncode == 25:           # сработала защита --max-delete
+            writer("⚠ ОСТАНОВЛЕНО ЗАЩИТОЙ: rsync попытался удалить слишком много файлов "
+                   "(> %d%%). Ничего не удалено. Проверьте источник." % int(cfg.get("max_delete_pct", 20) or 0))
         sz = None
         if not dry:
             try: sz = _du_bytes(j["dest"])
             except Exception: sz = None
-        results.append({"src": j["src"], "dest": j["dest"], "ok": ok, "code": p.returncode, "size": sz})
-        writer("[%s] %s%s" % ("ок" if ok else "ошибка %d" % p.returncode, j["src"],
-                              (" · " + fmt_bytes(sz)) if sz else ""))
+        res = {"src": j["src"], "dest": j["dest"], "ok": ok, "code": p.returncode, "size": sz,
+               "files": stt.get("files", prevf.get(j["src"], 0)), "xfer": stt.get("xfer", 0),
+               "xfer_bytes": stt.get("xfer_bytes", 0), "deleted": stt.get("deleted", 0)}
+        results.append(res)
+        extra = " · %d файлов, передано %s" % (stt.get("xfer", 0), fmt_bytes(stt.get("xfer_bytes", 0))) if stt else ""
+        writer("[%s] %s%s%s" % ("ок" if ok else ("остановлено" if p.returncode == 25 else "ошибка %d" % p.returncode),
+                                j["src"], (" · " + fmt_bytes(sz)) if sz else "", extra))
     if not dry:
         try: pruned = _nb_prune(cfg)
         except Exception: pruned = 0
         if pruned: writer("очищено старых снимков удалённых: %d" % pruned)
         _nb_write_status(results)
+        allok = all(r["ok"] for r in results) and len(results) == len(jobs)
+        try: _nb_history_add({"ts": int(time.time()), "dur": int(time.time() - t0),
+                              "result": "ok" if allok else "warn", "jobs": results})
+        except Exception: pass
     allok = all(r["ok"] for r in results) and len(results) == len(jobs)
     return {"ok": allok, "jobs": results}
+
+def _nb_parse_stats(lines):
+    """Вытащить числа из блока rsync --stats."""
+    out = {}
+    pats = {"files": r"Number of files:\s*([\d,]+)",
+            "xfer": r"Number of regular files transferred:\s*([\d,]+)",
+            "xfer_bytes": r"Total transferred file size:\s*([\d,]+)",
+            "deleted": r"Number of deleted files:\s*([\d,]+)"}
+    for l in lines:
+        for k, pat in pats.items():
+            m = re.search(pat, l)
+            if m:
+                try: out[k] = int(m.group(1).replace(",", ""))
+                except ValueError: pass
+    return out
+
+NB_HISTORY = os.path.join(NAS_CONFIG, "nas-backup-history.json")
+
+def _nb_history_add(entry):
+    try:
+        with open(NB_HISTORY) as f:
+            hist = json.load(f)
+        if not isinstance(hist, list): hist = []
+    except (OSError, ValueError):
+        hist = []
+    hist.append(entry)
+    hist = hist[-50:]                    # последние 50 прогонов
+    try:
+        os.makedirs(NAS_CONFIG, exist_ok=True)
+        with open(NB_HISTORY, "w") as f: json.dump(hist, f)
+    except OSError:
+        pass
+
+def nb_history():
+    try:
+        with open(NB_HISTORY) as f:
+            hist = json.load(f)
+        return list(reversed(hist)) if isinstance(hist, list) else []
+    except (OSError, ValueError):
+        return []
 
 def _nb_write_status(results):
     st = {"ts": int(time.time()), "jobs": results}
@@ -6235,6 +6308,8 @@ class H(BaseHTTPRequestHandler):
                 self._json(nb_status())
             elif p == "/api/backup/log":
                 self._json(nb_log_tail((q.get("since") or ["0"])[0]))
+            elif p == "/api/backup/history":
+                self._json({"history": nb_history()})
             elif p == "/api/winpos":
                 self._json({"winpos": load_winpos()})
             elif p == "/api/snippets":
