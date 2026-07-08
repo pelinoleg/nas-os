@@ -737,6 +737,21 @@
   .nb-pcrumb .sepc{color:var(--mut)}
   .nb-saved{font-size:12px;color:var(--good);font-weight:600;opacity:0;transition:opacity .2s;margin-left:4px}
   .nb-saved.show{opacity:1}
+  /* дерево-выбор источников */
+  .nb-pick{max-width:660px;width:min(660px,94vw)}
+  .nb-tree{max-height:min(64vh,620px);overflow:auto;border:1px solid var(--line);border-radius:var(--r-md);padding:4px}
+  .nb-selc{margin-right:auto;font-size:12px;color:var(--mut)}
+  .nb-trow{display:flex;align-items:center;gap:7px;padding:6px 10px;cursor:pointer;font-size:12.5px;border-radius:7px}
+  .nb-trow:hover{background:var(--sel)}
+  .nb-trow.checked>.nb-tn,.nb-trow.covered>.nb-tn{color:var(--accent);font-weight:600}
+  .nb-trow.indet>.nb-tn{color:var(--text);font-weight:600}
+  .nb-trow.locked{cursor:default;opacity:.75}
+  .nb-tw{width:18px;flex:none;display:flex;justify-content:center}
+  .nb-tchev{border:none;background:none;color:var(--mut);padding:0;cursor:pointer;display:flex;transition:transform .12s}
+  .nb-tchev.open{transform:rotate(90deg)}.nb-tchev.busy{opacity:.5}
+  .nb-tck{width:15px;height:15px;accent-color:var(--accent);flex:none}
+  .nb-tn{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .nb-trow>svg{flex:none;color:var(--accent-2)}
   .nb-job{display:flex;align-items:center;gap:8px;padding:7px 0;border-top:1px solid var(--line);font-size:12px}
   .nb-job:first-child{border-top:none}
   .nb-src{flex:none;max-width:38%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--accent)}
@@ -4146,34 +4161,57 @@ function nbPickLocal(start,onPick){const s=document.getElementById("scrim");let 
   s.querySelectorAll("[data-p]").forEach(n=>n.onclick=()=>{cur=n.dataset.p;draw();});};
  draw();}
 // модалка визуального выбора папок ИСТОЧНИКА (чекбоксы) — навигация по главному NAS
-function nbPickSource(preselected,onPick){const s=document.getElementById("scrim");let cur="",sel=new Set(preselected||[]);
- const draw=async()=>{
-  const parts=cur?cur.split("/"):[];let acc="";const crumbs=[`<a data-p="">/</a>`];
-  parts.forEach(p=>{acc=(acc?acc+"/":"")+p;crumbs.push(`<span class="sepc">/</span><a data-p="${att(acc)}">${esc(p)}</a>`);});
-  s.innerHTML=`<div class="dialog" style="max-width:580px"><h3>${svg("net",16)} Что копировать с главного NAS</h3>
-   <div class="nb-pcrumb mono" id="nbCrumb">${crumbs.join("")}</div>
-   <div class="nb-brl" id="nbSl"><div style="color:var(--mut);padding:8px">загрузка…</div></div>
-   <div class="mon-note" style="margin:8px 0 0">Отмечайте папки на любом уровне — уже выбранные показаны галочкой. Клик по строке — выбрать; стрелка → или двойной клик — зайти внутрь.</div>
-   <div class="r"><button class="btn" id="nbsX">Отмена</button><button class="btn pri" id="nbsO">Сохранить выбор (<span id="nbsC">${sel.size}</span>)</button></div></div>`;
-  s.classList.add("show");
-  s.querySelectorAll("#nbCrumb a").forEach(a=>a.onclick=()=>{cur=a.dataset.p;draw();});
-  s.querySelector("#nbsX").onclick=()=>s.classList.remove("show");
-  s.querySelector("#nbsO").onclick=()=>{s.classList.remove("show");onPick([...sel]);};
-  const r=await api("/api/backup/browse",{method:"POST",body:JSON.stringify({path:cur})});
-  const box=s.querySelector("#nbSl");
-  if(!r||!r.ok){box.innerHTML=`<div class="er" style="padding:8px">${esc((r&&r.log)||"нет связи с источником — проверьте подключение")}</div>`;return;}
-  const es=r.entries||[];
-  box.innerHTML=es.length?es.map(e=>{const full=(cur?cur+"/":"")+e.name;
-    return `<div class="nb-bri${sel.has(full)?" sel":""}" data-full="${att(full)}" data-dir="${e.dir?1:0}"><input type="checkbox" style="pointer-events:none" ${sel.has(full)?"checked":""}> ${svg(e.dir?"folder":"file",15)} <span class="nb-brn">${esc(e.name)}</span>${e.dir?`<button class="nb-brgo" title="Открыть">${svg("chev",16)}</button>`:""}</div>`;}).join(""):'<div style="color:var(--mut);padding:8px">пусто</div>';
-  const upd=()=>{s.querySelector("#nbsC").textContent=sel.size;};
-  box.querySelectorAll(".nb-bri").forEach(n=>{const full=n.dataset.full,ck=n.querySelector("input");
-    n.onclick=ev=>{if(ev.target.closest(".nb-brgo"))return;
-      if(sel.has(full)){sel.delete(full);ck.checked=false;n.classList.remove("sel");}
-      else{sel.add(full);ck.checked=true;n.classList.add("sel");}upd();};
-    const go=n.querySelector(".nb-brgo");if(go)go.onclick=ev=>{ev.stopPropagation();cur=full;draw();};
-    n.ondblclick=()=>{if(n.dataset.dir==="1"){cur=full;draw();}};});
-  upd();};
- draw();}
+function nbPickSource(preselected,onPick){const s=document.getElementById("scrim");
+ const sel=new Set(preselected||[]),expanded=new Set(),kids={};   // kids[path]: массив | null(ошибка) | undefined(не грузили)
+ // состояние узла: checked=выбран сам; covered=внутри выбранного родителя; indet=выбран кто-то внутри; none
+ const state=full=>{if(sel.has(full))return"checked";
+   for(const x of sel){if(full.startsWith(x+"/"))return"covered";}
+   for(const x of sel){if(x.startsWith(full+"/"))return"indet";}return"none";};
+ s.innerHTML=`<div class="dialog nb-pick"><h3>${svg("net",16)} Что копировать с главного NAS</h3>
+   <div class="mon-note" style="margin:0 0 8px">Разворачивайте папки ▸ и отмечайте нужное на любом уровне. Галочка на папке — копируется вся папка; частичный выбор внутри показан значком «−».</div>
+   <div class="nb-tree" id="nbTree"><div style="color:var(--mut);padding:10px">загрузка…</div></div>
+   <div class="r"><span class="nb-selc" id="nbSelInfo"></span><button class="btn" id="nbsX">Отмена</button><button class="btn pri" id="nbsO">Сохранить выбор (<span id="nbsC">${sel.size}</span>)</button></div></div>`;
+ s.classList.add("show");
+ const treeEl=s.querySelector("#nbTree");
+ const browse=async path=>{if(kids[path]!==undefined)return kids[path];
+   const r=await api("/api/backup/browse",{method:"POST",body:JSON.stringify({path})});
+   kids[path]=(r&&r.ok)?(r.entries||[]):null;return kids[path];};
+ const buildRows=(path,depth,out)=>{const list=kids[path];
+   if(list===null){out.push({err:1,depth});return;}
+   if(!list)return;
+   list.forEach(e=>{const full=(path?path+"/":"")+e.name;out.push({e,full,depth});
+     if(e.dir&&expanded.has(full))buildRows(full,depth+1,out);});};
+ function refresh(){
+   s.querySelector("#nbsC").textContent=sel.size;
+   const info=s.querySelector("#nbSelInfo");if(info)info.textContent=sel.size?(sel.size+" выбрано"):"ничего не выбрано";
+   if(kids[""]===null){treeEl.innerHTML=`<div class="er" style="padding:10px">нет связи с источником — проверьте подключение</div>`;return;}
+   const out=[];buildRows("",0,out);
+   if(!out.length){treeEl.innerHTML='<div style="color:var(--mut);padding:10px">пусто</div>';return;}
+   treeEl.innerHTML="";
+   out.forEach(row=>{
+     if(row.err){treeEl.appendChild(el(`<div class="nb-trow locked" style="padding-left:${row.depth*18+34}px;font-size:11.5px;color:var(--mut)">нет доступа</div>`));return;}
+     const {e,full,depth}=row,st=state(full),exp=expanded.has(full);
+     const n=el(`<div class="nb-trow ${st}" style="padding-left:${depth*18+10}px"><span class="nb-tw">${e.dir?`<button class="nb-tchev ${exp?"open":""}" title="Развернуть">${svg("chev",14)}</button>`:""}</span><input type="checkbox" class="nb-tck" style="pointer-events:none">${svg(e.dir?"folder":"file",15)}<span class="nb-tn">${esc(e.name)}</span></div>`);
+     const ck=n.querySelector(".nb-tck");ck.checked=(st==="checked"||st==="covered");ck.indeterminate=(st==="indet");
+     if(st==="covered")n.title="входит в выбранную родительскую папку";
+     const chev=n.querySelector(".nb-tchev");
+     if(chev)chev.onclick=async ev=>{ev.stopPropagation();
+       if(expanded.has(full))expanded.delete(full);
+       else{expanded.add(full);if(kids[full]===undefined){chev.classList.add("busy");await browse(full);}}
+       refresh();};
+     n.onclick=ev=>{if(ev.target.closest(".nb-tchev"))return;
+       const cs=state(full);if(cs==="covered")return;
+       if(cs==="checked")sel.delete(full);
+       else{for(const x of [...sel])if(x.startsWith(full+"/"))sel.delete(x);sel.add(full);}   // выбрать папку → снять вложенные (входят в неё)
+       refresh();};
+     treeEl.appendChild(n);});}
+ s.querySelector("#nbsX").onclick=()=>s.classList.remove("show");
+ s.querySelector("#nbsO").onclick=()=>{s.classList.remove("show");onPick([...sel]);};
+ (async()=>{await browse("");
+   // авто-раскрытие веток к уже выбранным (чтобы сразу были видны)
+   const anc=new Set();sel.forEach(p=>{const pr=p.split("/");let acc="";for(let i=0;i<pr.length-1;i++){acc=(acc?acc+"/":"")+pr[i];anc.add(acc);}});
+   for(const p of [...anc].sort((a,b)=>a.split("/").length-b.split("/").length)){expanded.add(p);if(kids[p]===undefined)await browse(p);}
+   refresh();})();}
 function winBackup(){openWin("__nasbak","Бэкап главного NAS",(body,win)=>{
  body.style.display="flex";body.style.padding="0";
  let tab="overview",CFG={},JOBS=[];

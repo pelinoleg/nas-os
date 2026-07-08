@@ -7,6 +7,10 @@
 window.NAS_I18N = { en: {
 "Анализ места": "Disk usage",
 "Сохранить выбор": "Save selection",
+"ничего не выбрано": "nothing selected",
+"Развернуть": "Expand",
+"входит в выбранную родительскую папку": "included in a selected parent folder",
+"Разворачивайте папки ▸ и отмечайте нужное на любом уровне. Галочка на папке — копируется вся папка; частичный выбор внутри показан значком «−».": "Expand folders ▸ and tick what you need at any level. A check on a folder copies the whole folder; a partial selection inside is shown with a «−».",
 "Отмечайте папки на любом уровне — уже выбранные показаны галочкой. Клик по строке — выбрать; стрелка → или двойной клик — зайти внутрь.": "Tick folders at any level — already selected ones are checked. Click a row to select; the → arrow or a double click enters it.",
 "для SSH: пусто = вход по ключу": "for SSH: empty = key-based login",
 "доступ отклонён — проверьте пользователя и пароль (или ключ)": "access denied — check the username and password (or key)",
