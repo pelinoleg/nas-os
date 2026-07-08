@@ -170,6 +170,11 @@
   ::-webkit-scrollbar-thumb:hover{background:var(--mut);background-clip:padding-box;border:3px solid transparent}
 
   /* menubar */
+  /* доп. тёмный градиент-скрим под верхней панелью (чёрный сверху → прозрачный вниз) */
+  .mb-grad{position:fixed;top:0;left:0;right:0;height:0;z-index:299;pointer-events:none;
+    background:linear-gradient(to bottom,rgba(0,0,0,var(--mb-grad-a,0)) 0%,transparent 100%);
+    opacity:var(--mb-grad-o,1)}
+  html.mb-grad-on .mb-grad{height:var(--mb-grad-h,90px)}
   .menubar{position:fixed;top:0;left:0;right:0;height:40px;z-index:300;display:flex;align-items:center;gap:12px;
     padding:0 16px;background:var(--mb-bg,transparent);
     --text:var(--mb-fg,#1A2431);--ink:var(--mb-fg,#1A2431);--dim:var(--mb-dim,rgba(0,0,0,.72));--mut:var(--mb-mut,rgba(0,0,0,.56));color:var(--text);
@@ -1284,6 +1289,7 @@
 <div class="wall-fx" id="wallNoise"></div>
 <button class="wall-refresh" id="wallRefresh" title="Обновить обои" style="display:none"></button>
 
+<div class="mb-grad"></div>
 <div class="menubar">
   <div class="mb-brand"><img class="mb-logo" src="/icon-flat.svg" alt="Raspberry Pi" draggable="false"><span id="brandName">pi5.local</span></div>
   <span class="mb-sep"></span>
@@ -1420,6 +1426,7 @@ let SET={accent:"coral",accentHex:"#405e6d",theme:"light",wpType:"url",wpUrl:WP_
  perf:false,blur:false,wpSlide:true,wpSlideMin:30,mbAlpha:1,wdgAlpha:1,mbIcon:.95,mbFs:1.05,
  deskIcon:1.05,deskFs:1.15,deskLc:"",deskShadow:false,deskGlass:true,deskTileOp:82,deskTileBlur:3,widgets:null,railHidden:false,
  mbOp:0,dockOp:3,wdgOp:15,mbBlur:0,dockBlur:0,wdgBlur:1,
+ mbGrad:false,mbGradH:90,mbGradInt:50,mbGradOp:100,
  winShadow:true,dockShadow:false,tileShadow:true,mbSat:100,dockSat:100,wdgSat:90,winSat:100,
  tray:null,dockPos:"left",dockIcon:1.15,dockAlpha:1,textContrast:1.35,dockTiles:true,dockLabels:true,dockOrder:null,
  wdgLight:"",wdgDark:"#000000",winAlpha:.9,menuAlpha:.92,radius:.65,tintLight:"",tintDark:"#0b0d13",
@@ -1427,8 +1434,8 @@ let SET={accent:"coral",accentHex:"#405e6d",theme:"light",wpType:"url",wpUrl:WP_
  elevBaseLight:.3,elevBaseDark:.74,elevStep:.28,elevLight:.05,autoContrast:true,
  wallpaper:"midnight",lang:"en",
  themeProfiles:{
-  light:{accent:"coral",accentHex:"#405e6d",radius:.65,shadow:"lg",winShadow:true,dockShadow:false,tileShadow:true,textContrast:1.35,elevStep:.28,elevLight:.05,mbOp:0,dockOp:3,wdgOp:15,mbBlur:0,dockBlur:0,wdgBlur:1,winBlur:60,mbSat:100,dockSat:100,wdgSat:90,winSat:100,winNoise:22,deskLc:"",deskShadow:false,autoContrast:true,dockTiles:true,dockLabels:true,fxDim:34,fxBlur:30,fxNoise:100,deskGlass:true,deskTileOp:85,deskTileBlur:2},
-  dark:{accent:"green",accentHex:"#00fbff",radius:.65,shadow:"lg",winShadow:true,dockShadow:false,tileShadow:true,textContrast:1.4,elevStep:.06,elevLight:.06,mbOp:0,dockOp:16,wdgOp:11,mbBlur:0,dockBlur:39,wdgBlur:0,winBlur:60,mbSat:85,dockSat:90,wdgSat:90,winSat:100,winNoise:22,deskLc:"",deskShadow:false,autoContrast:true,dockTiles:true,dockLabels:true,fxDim:44,fxBlur:27,fxNoise:100,deskGlass:true,deskTileOp:58,deskTileBlur:8}
+  light:{accent:"coral",accentHex:"#405e6d",radius:.65,shadow:"lg",winShadow:true,dockShadow:false,tileShadow:true,textContrast:1.35,elevStep:.28,elevLight:.05,mbOp:0,dockOp:3,wdgOp:15,mbBlur:0,dockBlur:0,wdgBlur:1,winBlur:60,mbSat:100,dockSat:100,wdgSat:90,winSat:100,winNoise:22,deskLc:"",deskShadow:false,autoContrast:true,dockTiles:true,dockLabels:true,fxDim:34,fxBlur:30,fxNoise:100,deskGlass:true,deskTileOp:85,deskTileBlur:2,mbGrad:false,mbGradH:80,mbGradInt:40,mbGradOp:100},
+  dark:{accent:"green",accentHex:"#00fbff",radius:.65,shadow:"lg",winShadow:true,dockShadow:false,tileShadow:true,textContrast:1.4,elevStep:.06,elevLight:.06,mbOp:0,dockOp:16,wdgOp:11,mbBlur:0,dockBlur:39,wdgBlur:0,winBlur:60,mbSat:85,dockSat:90,wdgSat:90,winSat:100,winNoise:22,deskLc:"",deskShadow:false,autoContrast:true,dockTiles:true,dockLabels:true,fxDim:44,fxBlur:27,fxNoise:100,deskGlass:true,deskTileOp:58,deskTileBlur:8,mbGrad:false,mbGradH:110,mbGradInt:60,mbGradOp:100}
  }};
 const hexRgb=h=>{const n=parseInt(h.slice(1),16);return `${n>>16&255},${n>>8&255},${n&255}`;};
 
@@ -1439,7 +1446,8 @@ const hexRgb=h=>{const n=parseInt(h.slice(1),16);return `${n>>16&255},${n>>8&255
 const THEMED_KEYS=["accent","accentHex","radius","shadow","winShadow","dockShadow","tileShadow",
  "textContrast","elevStep","elevLight","mbOp","dockOp","wdgOp","mbBlur","dockBlur","wdgBlur","winBlur",
  "mbSat","dockSat","wdgSat","winSat","winNoise","deskLc","deskShadow","autoContrast",
- "dockTiles","dockLabels","fxDim","fxBlur","fxNoise","deskGlass","deskTileOp","deskTileBlur"];
+ "dockTiles","dockLabels","fxDim","fxBlur","fxNoise","deskGlass","deskTileOp","deskTileBlur",
+ "mbGrad","mbGradH","mbGradInt","mbGradOp"];
 let CUR_THEME=null;
 function themeSnapshot(theme){
  if(!theme)return;
@@ -1635,6 +1643,11 @@ function applySettings(){
  root.style.setProperty("--dock-bf",bf("dockBlur","dockSat"));
  root.style.setProperty("--wdg-bf",bf("wdgBlur","wdgSat"));
  root.style.setProperty("--win-bf",bf("winBlur","winSat"));
+ // доп. тёмный градиент-скрим под верхней панелью (раздельно по теме)
+ root.classList.toggle("mb-grad-on",SET.mbGrad===true);
+ root.style.setProperty("--mb-grad-h",clampf(SET.mbGradH??90,0,400)+"px");
+ root.style.setProperty("--mb-grad-a",clampf((SET.mbGradInt??50)/100,0,1).toFixed(3));
+ root.style.setProperty("--mb-grad-o",clampf((SET.mbGradOp??100)/100,0,1).toFixed(3));
  // плитки значков стола: нейтральное стекло по теме (бел./тёмн.) + своя прозрачность/блюр
  root.classList.toggle("desk-glass",SET.deskGlass!==false);
  const dtOp=clampf((SET.deskTileOp==null?82:+SET.deskTileOp)/100,0,1);
@@ -4171,6 +4184,12 @@ function lsBar(lb){lb.innerHTML=`
    ${opSlider("Прозрачность фона","mbOp","Своя плотность фона верхней панели. По умолчанию — общая, как у окон (вкладка «Материал»).")}
    ${pSlider("Размытие под панелью","mbBlur",0,50,1,"px","Матовое размытие обоев под панелью. 0 — без размытия.")}
    ${pSlider("Насыщенность под панелью","mbSat",0,200,5,"pctn","Сочность фона, просвечивающего сквозь панель: 100% — без изменений, меньше — обесцвечивает, больше — сочнее. Видно при полупрозрачном фоне.")}
+  </div>
+  <div class="set-card"><div class="set-grp">Тёмный градиент сверху</div>
+   ${pToggle("Градиент под панелью","Доп. слой: плавное затемнение от верха экрана вниз (чёрный → прозрачный) под верхней панелью — чтобы иконки/текст читались на светлых обоях. Обычный фон панели остаётся. Настройки раздельны для светлой и тёмной темы.","mbGrad","чёрный градиент, тает вниз")}
+   ${pSlider("Высота","mbGradH",0,300,5,"px","Насколько далеко вниз от верха тянется затемнение.")}
+   ${pSlider("Интенсивность","mbGradInt",0,100,1,"pctn","Насколько тёмный чёрный у самого верха.")}
+   ${pSlider("Прозрачность градиента","mbGradOp",0,100,1,"pctn","Общая непрозрачность слоя градиента.")}
   </div>
   <div class="set-card"><div class="set-grp">Метрики справа</div>
    <div class="mon-note" style="margin:0 0 6px">Что показывать в панели:</div><div id="trayList"></div></div>`;
