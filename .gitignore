@@ -4,6 +4,7 @@
 /*
 !/.gitignore
 !/README.md
+!/CLAUDE.md
 !/install.sh
 !/nas-web.py
 !/nas-wizard.sh
