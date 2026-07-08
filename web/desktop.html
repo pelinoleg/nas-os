@@ -1061,6 +1061,9 @@
   .mb-badge.crit{background:var(--danger);color:#fff}
   .mbh-dot{position:absolute;top:3px;right:3px;width:8px;height:8px;border-radius:50%;pointer-events:none}
   .mbh-dot.ok{background:var(--good)}.mbh-dot.warn{background:var(--warn)}.mbh-dot.bad{background:var(--danger);box-shadow:0 0 6px var(--danger)}.mbh-dot.na{background:var(--mut)}
+  /* здоровье в трее: цветная иконка сердца, при «плохо» — мягкий пульс */
+  #healthBtn.mbh-bad{animation:mbhpulse 1.8s ease-in-out infinite}
+  @keyframes mbhpulse{0%,100%{opacity:1}50%{opacity:.4}}
   .mbpop{min-width:324px;max-width:384px;padding:7px}
   .mbp-h{font-size:12.5px;font-weight:700;padding:5px 6px 6px 10px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--line);margin-bottom:5px}
   .mbp-hb{border:none;background:transparent;color:var(--dim);cursor:pointer;padding:5px;border-radius:8px;display:flex;flex:none;transition:.12s}
@@ -4443,7 +4446,10 @@ const HLVL={ok:["Всё в порядке","var(--good)"],warn:["Есть зам
 async function pollHealth(){const r=await api("/api/health");if(r&&r.checks){HEALTH=r;paintHealthBtn();}}
 function paintHealthBtn(){const b=document.getElementById("healthBtn");if(!b)return;
  const ov=HEALTH?HEALTH.overall:"na";
- b.innerHTML=svg("heart",16)+`<span class="mbh-dot ${ov}"></span>`;
+ b.innerHTML=svg("heart",16);
+ // красим саму иконку по статусу (зелёная = здоров), без отдельной точки
+ b.style.color={ok:"var(--good)",warn:"var(--warn)",bad:"var(--danger)"}[ov]||"";
+ b.classList.toggle("mbh-bad",ov==="bad");
  b.title=nasTr("Здоровье системы: "+((HLVL[ov]||["проверяю…"])[0]));}
 function healthPop(){const b=document.getElementById("healthBtn");
  const p=mbPop(b,pp=>{pp.innerHTML=`<div class="mbp-h"><span>Здоровье системы</span><span id="mbhBadge"></span><span class="grow"></span><button class="mbp-hb" id="mbhSys" title="Открыть Систему">${svg("gauge",15)}</button></div><div id="mbhBody"><div class="mbp-empty">Собираю сводку…</div></div>`;
