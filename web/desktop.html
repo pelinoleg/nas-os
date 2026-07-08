@@ -4726,7 +4726,9 @@ function renderRail(){const rail=document.getElementById("rail");if(!rail)return
  paintVols();if(LAST){paintSys(LAST);}pollDisks();pollStacks();pollTop();
 }
 function paintVols(){const box=document.getElementById("wg-vols");if(!box)return;box.innerHTML="";
- if(!VOLS.length){box.innerHTML='<div style="color:var(--mut);font-size:12px">Подключите USB-диск или карту — он появится здесь</div>';return;}
+ const wdg=box.closest(".wdg");   // нет томов → прячем всю карточку виджета, а не показываем пустую плашку
+ if(!VOLS||!VOLS.length){if(wdg)wdg.style.display="none";return;}
+ if(wdg)wdg.style.display="";
  VOLS.forEach(v=>{
   const it=el(`<div class="vline${v.mounted?"":" off"}" title="${att(v.dev+" · "+(v.fstype||"")+(v.mounted?" · "+v.mount:""))}">
     <span class="vi">${svg(volIcon(v),16)}</span><span class="vn">${esc(v.label||v.dev)}</span>
