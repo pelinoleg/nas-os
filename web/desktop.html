@@ -69,8 +69,13 @@
   .wall-fx{position:fixed;inset:0;pointer-events:none;transition:opacity .2s ease}
   #wallDim{z-index:-2;background:#000;opacity:0}
   #wallNoise{z-index:-1;opacity:0;mix-blend-mode:overlay;background-size:200px 200px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
-  .wall-refresh{position:fixed;left:18px;bottom:18px;z-index:200;width:40px;height:40px;border-radius:50%;border:1px solid var(--line);background:var(--glass);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);color:var(--dim);display:flex;align-items:center;justify-content:center;box-shadow:var(--sh-sm);cursor:pointer;transition:.15s}
-  .wall-refresh:hover{color:var(--accent);transform:translateY(-2px)}
+  /* стилизуется как верхний бар: фон/блюр/цвета берём из тех же --mb-* переменных,
+     поэтому иконка меняется вместе с настройками бара (прозрачность, тинт, блюр…) */
+  .wall-refresh{position:fixed;left:18px;bottom:18px;z-index:200;width:40px;height:40px;border-radius:50%;
+    border:1px solid var(--mb-line,var(--line));background:var(--mb-bg,var(--glass));
+    backdrop-filter:var(--mb-bf,blur(16px));-webkit-backdrop-filter:var(--mb-bf,blur(16px));
+    color:var(--mb-dim,var(--dim));display:flex;align-items:center;justify-content:center;box-shadow:var(--sh-sm);cursor:pointer;transition:.15s}
+  .wall-refresh:hover{color:var(--mb-accent,var(--accent));transform:translateY(-2px)}
   .wall-refresh.spin svg{animation:wspin 1s linear infinite}
   @keyframes wspin{to{transform:rotate(360deg)}}
   .mb-theme{display:flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:9px;border:none;background:transparent;color:var(--dim);cursor:pointer;transition:.13s;flex:none}
