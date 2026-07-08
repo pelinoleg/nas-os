@@ -916,6 +916,7 @@
   .fm-status{display:flex;gap:12px;padding:7px 8px 2px;font-size:11px;color:var(--mut);font-family:var(--mono);border-top:1px solid var(--line);margin-top:4px}
   .fm-status b{color:var(--dim);font-weight:600}
   .fm-tile .ti img,.fm-row .fi img{object-fit:contain;border-radius:4px}
+  .fmico{display:block;filter:drop-shadow(0 1px 1px rgba(20,30,50,.22))}
   .fm-cur{outline:2px solid var(--accent);outline-offset:-2px}
   .fm-top{display:flex;flex-direction:column;gap:7px;margin-bottom:8px}
   .fm-bar2{display:flex;gap:5px;align-items:center;flex-wrap:wrap}
@@ -3386,6 +3387,33 @@ function fileIcon(name,type){if(type==="dir")return "folder";const e=(name.split
  if(/^(mp4|mkv|avi|mov|webm|m4v)$/.test(e))return "video";
  if(/^(js|mjs|cjs|ts|py|sh|bash|zsh|yml|yaml|json|html?|css|xml|go|rs|c|cpp|h|hpp|java|php|rb|conf|cfg|ini|toml|env|md|sql)$/.test(e)||/^Dockerfile/i.test(name))return "code";
  return "file";}
+/* Классические «залитые» (флэт) иконки файлменеджера: жёлтая папка + цветные листы по типу.
+   Многоцветные, поэтому это готовый <svg> (а не путь для svg()/currentColor). */
+function fmKind(name,type){if(type==="dir")return "folder";const e=(name.split(".").pop()||"").toLowerCase();
+ if(isImgName(name))return "image";
+ if(/^(zip|tar|gz|tgz|bz2|xz|7z|rar)$/.test(e))return "archive";
+ if(/^(mp3|flac|wav|ogg|m4a|aac|opus|wma)$/.test(e))return "music";
+ if(/^(mp4|mkv|avi|mov|webm|m4v|ogv|wmv|flv|3gp|mpe?g|ts)$/.test(e))return "video";
+ if(e==="pdf")return "pdf";
+ if(/^(js|mjs|cjs|ts|py|sh|bash|zsh|yml|yaml|json|html?|css|xml|go|rs|c|cpp|h|hpp|java|php|rb|conf|cfg|ini|toml|env|sql)$/.test(e)||/^Dockerfile/i.test(name))return "code";
+ if(/^(txt|md|rtf|doc|docx|odt|log)$/.test(e))return "doc";
+ return "file";}
+const FM_ICO_C={image:["#33BE86","#2A9C6E"],video:["#8A7DFF","#6E5FE0"],music:["#E0669E","#C64F86"],
+ archive:["#E0A24A","#C6883A"],code:["#4C8DF6","#3A6FD0"],pdf:["#E5544E","#C63F3A"],
+ doc:["#5B9BD5","#4785C0"],file:["#AEB9C6","#93A0AE"]};
+const FM_GLYPH={
+ image:'<circle cx="8.7" cy="13.4" r="1.15" fill="#fff"/><path fill="#fff" d="M6.3 18.3l2.7-3.2 1.7 2 2.1-2.8 2.9 4z"/>',
+ video:'<path fill="#fff" d="M9.7 12.9l4.6 2.7-4.6 2.7z"/>',
+ music:'<path fill="#fff" d="M15 11l-4.7 1.2v4.75a1.75 1.45 0 1 0 1 1.3V13.7l2.7-.68z"/>',
+ archive:'<rect x="10.5" y="11.3" width="1.5" height="1.5" fill="#fff"/><rect x="10.5" y="13.5" width="1.5" height="1.5" fill="#fff"/><rect x="10.5" y="15.7" width="1.5" height="1.5" fill="#fff"/>',
+ code:'<path fill="none" stroke="#fff" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" d="M10.1 12.8l-1.9 1.95 1.9 1.95M13.9 12.8l1.9 1.95-1.9 1.95"/>',
+ pdf:'<path fill="#fff" d="M8 13.2h8v1.3H8zM8 15.5h8v1.3H8zM8 17.8h5v1.3H8z"/>',
+ doc:'<path fill="#fff" d="M8 13.2h8v1.15H8zM8 15.35h8v1.15H8zM8 17.5h5v1.15H8z"/>',
+ file:''};
+function fmIcon(name,type,size){const k=fmKind(name,type);
+ if(k==="folder")return `<svg class="fmico" viewBox="0 0 24 24" width="${size}" height="${size}"><path fill="#E0A63C" d="M2.8 6.4c0-1 .8-1.8 1.8-1.8h4.1c.5 0 1 .2 1.35.58L11.3 6.5h8.1c1 0 1.8.8 1.8 1.8v1.1H2.8z"/><path fill="#F5C24C" d="M2.2 9.4c0-.9.72-1.6 1.6-1.6h16.4c.9 0 1.6.72 1.6 1.6l-.66 8.1c-.075.92-.84 1.62-1.76 1.62H4.62c-.92 0-1.685-.7-1.76-1.62z"/></svg>`;
+ const c=FM_ICO_C[k]||FM_ICO_C.file;
+ return `<svg class="fmico" viewBox="0 0 24 24" width="${size}" height="${size}"><path fill="${c[0]}" d="M6 2.6h7L19 8.6V19a2.4 2.4 0 0 1-2.4 2.4H6A2.4 2.4 0 0 1 3.6 19V5A2.4 2.4 0 0 1 6 2.6z"/><path fill="${c[1]}" d="M13 2.6l6 6h-4.5A1.5 1.5 0 0 1 13 7.1z"/>${FM_GLYPH[k]||""}</svg>`;}
 const FM_CHIPS=[["Home","/home/oleg"],["Хранилище","/mnt/storage"],["Стеки","/opt/stacks"],["Конфиги","/etc"],["Логи","/var/log"],["Корень","/"]];
 const fmDate=ts=>{if(!ts)return"";const d=new Date(ts*1000),p=n=>String(n).padStart(2,"0");
  const fmt=SET.fmDateFmt||"dmy_hm";
@@ -3525,11 +3553,11 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    if(!arr.length){listBox.innerHTML=`<div style="color:var(--mut);font-size:12px;padding:10px">${searchRes?"Ничего не найдено":"Пусто"}</div>`;renderStatus();return;}
    const toggleSel=(e,i,shift)=>{if(shift&&lastIdx>=0){const a=Math.min(lastIdx,i),b=Math.max(lastIdx,i);for(let k=a;k<=b;k++)sel.add(arr[k].path);}else{if(sel.has(e.path))sel.delete(e.path);else sel.add(e.path);}lastIdx=i;renderList();selUpdate();};
    arr.forEach((e,i)=>{
-     const isSel=sel.has(e.path),ik=fileIcon(e.name,e.type);
+     const isSel=sel.has(e.path),baseIco=fmIcon(e.name,e.type,isz);
      let ficon;
      if(e.type==="file"&&thumbsOn&&thumbable(e.name)){
-       ficon=svg(ik,isz)+`<img class="thumb" src="/api/fs/thumb?path=${encodeURIComponent(e.path)}" alt="" loading="lazy" onerror="this.remove()">`;}
-     else ficon=svg(ik,isz);
+       ficon=baseIco+`<img class="thumb" src="/api/fs/thumb?path=${encodeURIComponent(e.path)}" alt="" loading="lazy" onerror="this.remove()">`;}
+     else ficon=baseIco;
      let node;
      if(grid){node=el(`<div class="fm-tile ${e.type}${isSel?" sel":""}${i===cursor?" fm-cur":""}"><input type="checkbox" class="fm-ck"${isSel?" checked":""}><div class="ti">${ficon}</div><div class="tn" title="${att(searchRes?e.path:e.name)}">${esc(e.name)}</div></div>`);}
      else{const nmH=esc(e.name)+(e.match?` <small style="color:var(--mut);font-weight:400">— ${esc(e.match.slice(0,90))}${e.line?" :"+e.line:""}</small>`:"");
@@ -3583,7 +3611,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
      else if(isAudName(e.name))inner=`<audio src="${raw}" controls autoplay style="width:70%"></audio>`;
      else{const r=await api("/api/fs/read?path="+encodeURIComponent(e.path));
        if(r&&r.ok&&!r.binary)inner=`<pre>${esc((r.content||"").slice(0,5000))}</pre>`;
-       else inner=`<div class="ql-meta">${svg(fileIcon(e.name,e.type),46)}<br>${esc(e.name)}<br>${fmtB(e.size)} · ${fmDate(e.mtime)}</div>`;}
+       else inner=`<div class="ql-meta">${fmIcon(e.name,e.type,46)}<br>${esc(e.name)}<br>${fmtB(e.size)} · ${fmDate(e.mtime)}</div>`;}
      ov.innerHTML=`<div class="ql-bar"><span class="ql-t">${esc(e.name)}</span><span class="ql-i">${e.type==="dir"?"":fmtB(e.size)}</span><button id="qlOpen">Открыть</button><button id="qlX">✕ Esc</button></div><div class="ql-body">${inner}</div>`;
      ov.querySelector("#qlX").onclick=close;ov.querySelector("#qlOpen").onclick=()=>{const e2=curArr[i];close();if(e2)openEntry(e2);};}
    win.appendChild(ov);document.addEventListener("keydown",onkey,true);draw();}
