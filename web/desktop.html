@@ -126,7 +126,7 @@
   html.nosh-icons .app .tile{box-shadow:none!important}
   html.nosh-icons .app .tile svg{filter:none!important}
   /* нейтральные плитки по теме (бел./тёмн. стекло) вместо цветного хеша — читаемо на любых обоях */
-  html.desk-glass .app .tile{background:var(--desk-tile-bg)!important;-webkit-backdrop-filter:var(--desk-tile-bf);backdrop-filter:var(--desk-tile-bf);color:var(--desk-tile-fg)!important;border:1px solid var(--desk-tile-line)}
+  html.desk-glass .app .tile{background:var(--desk-tile-bg)!important;-webkit-backdrop-filter:var(--desk-tile-bf);backdrop-filter:var(--desk-tile-bf);color:var(--desk-tile-fg)!important;border:0}
   html.desk-glass .app .tile .tletter{color:var(--desk-tile-fg)!important;text-shadow:none}
   html.desk-glass .app .tile>svg{filter:none}
   html{--dockw:84px}
@@ -1222,7 +1222,9 @@
   .toast.show{opacity:1;transform:translateX(-50%)}
   /* ---- верхний бар: здоровье / операции / уведомления ---- */
   .mbi{position:relative}
-  .mb-badge{position:absolute;top:1px;right:-1px;min-width:15px;height:15px;padding:0 4px;border-radius:999px;background:var(--accent);color:var(--accent-ink,#fff);font-size:9.5px;font-weight:700;display:flex;align-items:center;justify-content:center;pointer-events:none;box-shadow:0 1px 4px rgba(0,0,0,.25)}
+  /* фон = --accent-fill (сочная заливка), текст = --accent-ink (подобран под неё по WCAG);
+     раньше фон был --accent (осветлённый для контраста с баром) → ink не совпадал → цифра плыла */
+  .mb-badge{position:absolute;top:-2px;right:-3px;min-width:16px;height:16px;padding:0 4px;border-radius:999px;background:var(--accent-fill);color:var(--accent-ink,#fff);font-size:10.5px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums;letter-spacing:-.02em;display:flex;align-items:center;justify-content:center;pointer-events:none;box-shadow:0 0 0 2px var(--mb-bg,rgba(0,0,0,.18)),0 1px 3px rgba(0,0,0,.35)}
   .mb-badge.crit{background:var(--danger);color:#fff}
   .mbh-dot{position:absolute;top:3px;right:3px;width:8px;height:8px;border-radius:50%;pointer-events:none}
   .mbh-dot.ok{background:var(--good)}.mbh-dot.warn{background:var(--warn)}.mbh-dot.bad{background:var(--danger);box-shadow:0 0 6px var(--danger)}.mbh-dot.na{background:var(--mut)}
@@ -1410,14 +1412,18 @@ const cockpitURL=()=>`https://${host()}:9090`;
 /* цвет плитки для label-ярлыка: детерминированный по имени */
 const TILECOLORS=["#34C6BE","#4C8DF6","#8A7DFF","#46B98A","#E0913C","#E5544E","#3b9ff2","#E05AB4"];
 const tileColor=n=>{let h=0;for(let i=0;i<(n||"").length;i++)h=(h*31+n.charCodeAt(i))>>>0;return TILECOLORS[h%TILECOLORS.length];};
-/* иконка ярлыка: web-desktop.icon → фавикон внешнего домена → буква */
+/* иконка ярлыка: web-desktop.icon → фавикон внешнего домена → буква.
+   Внешние http(s)-картинки грузим не напрямую, а через локальный кэш NAS
+   (/api/icon) — сервер один раз качает и отдаёт с диска; смена URL в метке
+   = новый ключ = свежая загрузка. data:/локальные пути отдаём как есть. */
+const iconSrc=u=>(/^https?:\/\//i.test(u||"")?"/api/icon?u="+encodeURIComponent(u):(u||""));
 function appIconHTML(app){
  const letter=`<span class="tletter">${((app.name||"?").trim()[0]||"?").toUpperCase()}</span>`;
  let src=app.icon||"";
  if(!src){try{const h=new URL(app.url).hostname;
    const lan=!h||h==="localhost"||/^[\d.]+$/.test(h)||h.endsWith(".local")||h.endsWith(".lan")||h.endsWith(".home");
    if(h&&!lan)src=`https://www.google.com/s2/favicons?domain=${h}&sz=64`;}catch(e){}}
- return letter+(src?`<img class="tico" src="${src}" alt="" onerror="this.remove()">`:"");}
+ return letter+(src?`<img class="tico" src="${iconSrc(src)}" alt="" onerror="this.remove()">`:"");}
 
 /* wallpapers + accents */
 const WALLS=[

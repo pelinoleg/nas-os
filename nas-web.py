@@ -3265,6 +3265,74 @@ def discover_desktop_apps():
     return apps
 
 # --------------------------------------------------------------------------- #
+#  Кэш иконок ярлыков (web-desktop.icon).  Браузер грузит иконку не из интернета,
+#  а с NAS: сервер один раз качает картинку по URL и кладёт в ~/nas-config/icons/.
+#  Ключ кэша = сам URL, поэтому смена метки (нового URL) = свежая загрузка,
+#  а старый файл просто перестаёт использоваться.
+# --------------------------------------------------------------------------- #
+ICON_CACHE_DIR = os.path.join(NAS_CONFIG, "icons")
+ICON_MAX_BYTES = 2 * 1024 * 1024          # 2 МБ на иконку — потолок
+_icon_sem = threading.Semaphore(4)        # не долбить сеть десятками потоков
+_ICON_CT_EXT = {
+    "image/png": ".png", "image/jpeg": ".jpg", "image/jpg": ".jpg",
+    "image/gif": ".gif", "image/webp": ".webp", "image/svg+xml": ".svg",
+    "image/x-icon": ".ico", "image/vnd.microsoft.icon": ".ico",
+    "image/avif": ".avif", "image/bmp": ".bmp",
+}
+_ICON_EXTS = (".png", ".jpg", ".svg", ".ico", ".gif", ".webp", ".avif", ".bmp", "")
+
+def _icon_cached_path(url):
+    """Готовый файл кэша для URL (ищем <hash>.* среди известных расширений) или None."""
+    h = hashlib.sha1(url.encode("utf-8", "surrogatepass")).hexdigest()
+    base = os.path.join(ICON_CACHE_DIR, h)
+    for ext in _ICON_EXTS:
+        p = base + ext
+        if os.path.isfile(p):
+            return p
+    return None
+
+def fetch_icon(url):
+    """Путь к локальной копии иконки по http(s)-URL (качает при отсутствии) или None."""
+    if not re.match(r"https?://", url or "", re.I):
+        return None
+    hit = _icon_cached_path(url)
+    if hit:
+        return hit
+    with _icon_sem:
+        hit = _icon_cached_path(url)          # мог скачать параллельный запрос
+        if hit:
+            return hit
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "nas-web"})
+            with urllib.request.urlopen(req, timeout=12) as r:
+                ct = (r.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+                data = r.read(ICON_MAX_BYTES + 1)
+        except (urllib.error.URLError, OSError, ValueError):
+            return None
+        if not data or len(data) > ICON_MAX_BYTES:
+            return None
+        ext = _ICON_CT_EXT.get(ct)
+        if not ext:                            # тип не пришёл — угадать по URL
+            path = urlparse(url).path.lower()
+            for e in (".png", ".jpg", ".jpeg", ".svg", ".ico", ".gif", ".webp", ".avif", ".bmp"):
+                if path.endswith(e):
+                    ext = ".jpg" if e == ".jpeg" else e
+                    break
+        if not ext:
+            ext = ".png"
+        h = hashlib.sha1(url.encode("utf-8", "surrogatepass")).hexdigest()
+        try:
+            os.makedirs(ICON_CACHE_DIR, exist_ok=True)
+            p = os.path.join(ICON_CACHE_DIR, h + ext)
+            tmp = p + ".tmp"
+            with open(tmp, "wb") as f:
+                f.write(data)
+            os.replace(tmp, p)
+            return p
+        except OSError:
+            return None
+
+# --------------------------------------------------------------------------- #
 #  Cronmaster — прокси к его REST API (один origin, без CORS и ключей)
 # --------------------------------------------------------------------------- #
 def _cron(method, path, body=None, timeout=12):
@@ -5243,6 +5311,27 @@ class H(BaseHTTPRequestHandler):
         except OSError:
             pass
 
+    def _send_icon(self, url):
+        fp = fetch_icon(url)
+        if not fp:
+            self.send_error(404); return
+        try:
+            with open(fp, "rb") as f:
+                data = f.read()
+        except OSError:
+            self.send_error(404); return
+        ctype = mimetypes.guess_type(fp)[0] or "image/png"
+        self.send_response(200)
+        self.send_header("Content-Type", ctype)
+        # URL-ключ стабилен → можно смело держать в кэше браузера надолго
+        self.send_header("Cache-Control", "public, max-age=604800")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        try:
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+
     def _send_thumb(self, src):
         src = os.path.realpath(src or "")
         tp = gen_thumb(src)
@@ -5485,6 +5574,8 @@ class H(BaseHTTPRequestHandler):
                 self._json(health_report())
             elif p == "/api/desktop":
                 self._json({"apps": discover_desktop_apps(), "volumes": external_volumes()})
+            elif p == "/api/icon":
+                self._send_icon((q.get("u") or [""])[0])
             elif p == "/api/cron/jobs":
                 self._json(cron_jobs())
             elif p == "/api/cron/stats":
