@@ -2278,9 +2278,11 @@ esac
 AM
     run chmod +x /usr/local/bin/nas-automount.sh
     write_file /etc/udev/rules.d/99-nas-automount.rules <<'RULES'
-# nas-wizard: автомонтирование съёмных носителей (USB)
-ACTION=="add",    SUBSYSTEM=="block", ENV{ID_FS_USAGE}=="filesystem", ENV{ID_BUS}=="usb", RUN+="/usr/bin/systemd-run --no-block /usr/local/bin/nas-automount.sh add %k"
-ACTION=="remove", SUBSYSTEM=="block", ENV{ID_BUS}=="usb", RUN+="/usr/bin/systemd-run --no-block /usr/local/bin/nas-automount.sh remove %k"
+# nas-wizard: автомонтирование съёмных USB-носителей.
+# Матчим по ID_USB_DRIVER (usb-storage/uas), а НЕ по ID_BUS==usb: USB-SATA мосты
+# (UAS) отдают диск как ID_BUS=ata, и старое правило для них не срабатывало.
+ACTION=="add",    SUBSYSTEM=="block", ENV{ID_FS_USAGE}=="filesystem", ENV{ID_USB_DRIVER}=="?*", RUN+="/usr/bin/systemd-run --no-block /usr/local/bin/nas-automount.sh add %k"
+ACTION=="remove", SUBSYSTEM=="block", ENV{ID_USB_DRIVER}=="?*", RUN+="/usr/bin/systemd-run --no-block /usr/local/bin/nas-automount.sh remove %k"
 RULES
     run udevadm control --reload-rules
     run udevadm trigger --subsystem-match=block --action=add 2>/dev/null || true

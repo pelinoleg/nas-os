@@ -4700,7 +4700,9 @@ if [ "${IMPORT_EJECT:-0}" = "1" ]; then
   [ -n "$pk" ] && { udisksctl power-off -b "/dev/$pk" >>"$LOG" 2>&1 || eject "/dev/$pk" >>"$LOG" 2>&1 || true; log "eject /dev/$pk"; }
 fi
 '''
-_USB_RULE = ('ACTION=="add", SUBSYSTEM=="block", ENV{ID_BUS}=="usb", '
+# матчим по ID_USB_DRIVER (usb-storage/uas), а не ID_BUS==usb — иначе USB-SATA
+# мосты (ID_BUS=ata) не срабатывают.
+_USB_RULE = ('ACTION=="add", SUBSYSTEM=="block", ENV{ID_USB_DRIVER}=="?*", '
             'ENV{ID_FS_USAGE}=="filesystem", '
             'RUN+="/usr/bin/systemd-run --no-block /usr/local/bin/nas-usb-import.sh $devnode"\n')
 
