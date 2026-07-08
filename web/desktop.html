@@ -2149,8 +2149,8 @@ async function ejectVolume(v){
 async function nbDockMenu(x,y){
  const it=[{label:"Открыть бэкап",ic:svg("sync",16),act:()=>winBackup()}];
  if(NB_RUNNING)it.push({label:"Остановить бэкап",ic:svg("x",16),dng:1,act:()=>{api("/api/backup/cancel",{method:"POST",body:"{}"});toast("Останавливаю…");}});
- else{it.push({label:"Запустить бэкап сейчас",ic:svg("sync",16),act:async()=>{const r=await api("/api/backup/run-bg",{method:"POST",body:"{}"});toast(r&&r.ok?"Бэкап запущен":(r&&r.log)||"уже выполняется");}},
-   {label:"Пробный прогон",ic:svg("eye",16),act:async()=>{await api("/api/backup/run-bg",{method:"POST",body:JSON.stringify({dry:true})});toast("Пробный прогон запущен");}});}
+ else{it.push({label:"Запустить бэкап сейчас",ic:svg("sync",16),act:async()=>{const r=await api("/api/backup/run-bg",{method:"POST",body:"{}"});toast(r&&r.ok?"Бэкап запущен":(r&&r.log)||"уже выполняется");winBackup();}},
+   {label:"Пробный прогон",ic:svg("eye",16),act:async()=>{await api("/api/backup/run-bg",{method:"POST",body:JSON.stringify({dry:true})});toast("Пробный прогон запущен");winBackup();}});}
  showMenu(x,y,it);}
 function dockItems(){
  const base=INTERNAL.map(a=>({id:a.id,ic:a.ic,color:a.color,name:a.name,fn:a.fn}));

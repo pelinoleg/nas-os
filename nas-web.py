@@ -2443,13 +2443,17 @@ def nb_log_tail(since):
             lines.pop()
     except OSError:
         lines = []
+    cur_line = ""                            # последняя строка прогресса rsync (для полосы в UI)
+    for l in reversed(lines[-8:]):
+        if "%" in l and "/s" in l:
+            cur_line = l.strip(); break
     base = 0
     if len(lines) > 2000:                    # ограничить объём ответа
         base = len(lines) - 2000; lines = lines[-2000:]
     end = base + len(lines)
     start = max(0, since - base)
     return {"running": running, "started": rs.get("started", 0), "dry": rs.get("dry", False),
-            "result": rs.get("result"), "cur": rs.get("cur", ""), "line": "",
+            "result": rs.get("result"), "cur": rs.get("cur", ""), "line": cur_line,
             "seq": end, "base": base, "lines": lines[start:]}
 
 # --------------------------------------------------------------------------- #
