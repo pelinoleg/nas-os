@@ -288,6 +288,10 @@
     /* редактор стека Docker: колонки в стопку */
     .stk-edit{flex-direction:column!important;height:auto!important;overflow:auto}
     .stk-edit-side{width:auto!important}
+    /* защита от горизонтального сдвига всей страницы */
+    html,body{overflow-x:hidden}
+    /* шапки «заголовок + действия» — переносим, чтобы не жались */
+    .pool-top,.dm-sectop,.tr-top,.drow-hdr{flex-wrap:wrap}
   }
   /* планшет (641–1024): окна крупнее (в JS), сайдбары уже, виджеты — сеткой под приложениями */
   @media(min-width:641px) and (max-width:1024px){
