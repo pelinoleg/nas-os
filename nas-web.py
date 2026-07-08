@@ -2053,6 +2053,7 @@ def nb_load():
                       ".gradle/", ".idea/", ".vscode/", ".pytest_cache/", ".mypy_cache/",
                       "*.egg-info/", ".cache/", "bower_components/", ".turbo/"],
          "delete_mode": "archive", "retention_days": 30, "retention_gb": 0,
+         "deleted_dir": "_deleted/{date}",
          "schedule": {"enabled": False, "freq": "daily", "time": "03:00", "dow": "Sun"}}
     try:
         with open(NB_CONF) as f:
@@ -2070,6 +2071,9 @@ def nb_save(patch):
     for k in ("transport", "host", "user", "password", "dest_base", "delete_mode", "dest_mode"):
         if k in patch and isinstance(patch[k], str):
             cur[k] = patch[k].strip()
+    if isinstance(patch.get("deleted_dir"), str):
+        v = re.sub(r"[^\w \-.{}/А-Яа-яЁё]", "", patch["deleted_dir"]).replace("..", "").strip("/")[:120]
+        cur["deleted_dir"] = v or "_deleted/{date}"
     for k in ("ssh_port", "retention_days", "retention_gb"):
         if k in patch:
             try: cur[k] = max(0, int(patch[k]))
@@ -2204,8 +2208,9 @@ def _nb_prune(cfg):
     gb   = int(cfg.get("retention_gb", 0) or 0)
     snaps = []   # (mtime, path, size)
     dests = set(j["dest"] for j in cfg.get("jobs", [])) | {cfg.get("dest_base", "")}
+    top = nb_deleted_top(cfg)
     for base in dests:
-        d = os.path.join(base, "_deleted")
+        d = os.path.join(base, top)
         if not os.path.isdir(d): continue
         for name in os.listdir(d):
             p = os.path.join(d, name)
@@ -2233,6 +2238,34 @@ def _nb_prune(cfg):
             except OSError: pass
     return removed
 
+_NB_MONTHS = ["", "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль",
+              "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"]
+
+def _nb_render_tpl(tpl, t=None):
+    """Раскрыть токены шаблона папки удалённых ({date}/{year}/{month}/… как в USB-импорте)."""
+    t = t or time.localtime()
+    rep = {"{date}": time.strftime("%Y-%m-%d", t), "{time}": time.strftime("%H-%M-%S", t),
+           "{datetime}": time.strftime("%Y-%m-%d_%H-%M-%S", t), "{year}": time.strftime("%Y", t),
+           "{month}": time.strftime("%m", t), "{month-name}": _NB_MONTHS[t.tm_mon],
+           "{day}": time.strftime("%d", t), "{hour}": time.strftime("%H", t),
+           "{minute}": time.strftime("%M", t)}
+    s = tpl or ""
+    for k, v in rep.items():
+        s = s.replace(k, v)
+    s = re.sub(r"\{[^}]*\}", "", s)                              # выкинуть неизвестные токены
+    s = re.sub(r"[^\w \-.А-Яа-яЁё/]", "", s).replace("..", "")
+    s = re.sub(r"/+", "/", s).strip("/")
+    return s
+
+def nb_deleted_top(cfg):
+    """Верхняя (статическая) папка архива удалённых — для exclude и ретеншена."""
+    top = _nb_render_tpl((cfg.get("deleted_dir") or "_deleted/{date}").split("/")[0])
+    return top or "_deleted"
+
+def nb_deleted_rel(cfg, t=None):
+    rel = _nb_render_tpl(cfg.get("deleted_dir") or "_deleted/{date}", t)
+    return rel or ("_deleted/" + time.strftime("%Y-%m-%d", t or time.localtime()))
+
 def nb_build_cmd(cfg, job, dry):
     """rsync-команда (+env) для одной задачи."""
     remote, env, rsh = _nb_remote_env(cfg)
@@ -2245,9 +2278,9 @@ def nb_build_cmd(cfg, job, dry):
     if dm in ("archive", "mirror"):
         args.append("--delete")
     if dm == "archive":
-        snap = os.path.join(dest, "_deleted", time.strftime("%Y-%m-%d"))
+        snap = os.path.join(dest, nb_deleted_rel(cfg))   # шаблон с токенами, по умолчанию _deleted/{date}
         args += ["--backup", "--backup-dir=" + snap]
-        args.append("--exclude=/_deleted")          # не бэкапить сам архив удалённых
+        args.append("--exclude=/" + nb_deleted_top(cfg)) # не бэкапить сам архив удалённых
     for ex in cfg.get("excludes", []):
         args.append("--exclude=" + ex)
     if cfg.get("transport") == "ssh" and cfg.get("remote_sudo"):

@@ -4240,7 +4240,9 @@ function winBackup(){openWin("__nasbak","Бэкап главного NAS",(body,
  ];
  const saveCfg=async patch=>{const r=await api("/api/backup/config",{method:"POST",body:JSON.stringify({config:patch})});CFG=(r&&r.config)||CFG;JOBS=(CFG.jobs||[]).slice();return CFG;};
  const wireSeg=(tc,id,cb)=>{const seg=tc.querySelector(id);if(!seg)return;seg.querySelectorAll("button").forEach(b=>b.onclick=()=>{seg.querySelectorAll("button").forEach(x=>x.classList.toggle("on",x===b));cb(b.dataset.v);});};
- const destFor=src=>{const base=(CFG.dest_base||"/mnt/storage/nas-backup").replace(/\/$/,"");return base+"/"+src.split("/").pop();};
+ // единая папка: воссоздаём ВСЁ дерево источника под базой (Cloud/Desktop → base/Cloud/Desktop),
+ // а не только последнюю папку — иначе теряется структура и совпадают имена
+ const destFor=src=>{const base=(CFG.dest_base||"/mnt/storage/nas-backup").replace(/\/$/,"");return base+"/"+String(src).replace(/^\/+/,"");};
 
  /* ── Подключение ── */
  function tabConn(tc){const c=CFG,ssh=c.transport==="ssh";
@@ -4295,8 +4297,9 @@ function winBackup(){openWin("__nasbak","Бэкап главного NAS",(body,
   const bb=g("#sBase");if(bb)bb.onchange=()=>saveCfg({dest_base:bb.value.trim()});
   const bbB=g("#sBaseB");if(bbB)bbB.onclick=()=>nbPickLocal(bb.value||"/mnt",p=>{bb.value=p;saveCfg({dest_base:p});});
   g("#sAdd").onclick=()=>nbPickSource(JOBS.map(j=>j.src),list=>{const chosen=new Set(list);
-    JOBS=JOBS.filter(j=>chosen.has(j.src));                                   // снятые — убрать (dest сохранённых остаётся)
+    JOBS=JOBS.filter(j=>chosen.has(j.src));                                   // снятые — убрать
     list.forEach(src=>{if(!JOBS.some(j=>j.src===src))JOBS.push({src,dest:destFor(src),enabled:true});});
+    if(!per)JOBS.forEach(j=>{j.dest=destFor(j.src);});                        // единая папка: выровнять дерево у всех (в т.ч. старых)
     saveCfg({jobs:JOBS}).then(()=>tabSources(tc));});
   const exList=()=>g("#sExcl").value.split("\n").map(x=>x.trim()).filter(Boolean);
   const exSet=arr=>{const uniq=[...new Set(arr)];g("#sExcl").value=uniq.join("\n");saveCfg({excludes:uniq});};
@@ -4313,11 +4316,27 @@ function winBackup(){openWin("__nasbak","Бэкап главного NAS",(body,
   tc.innerHTML=`<h3 class="set-title">Удалённые файлы</h3><p class="set-sub">Что делать с файлами, которые удалили на главном NAS.</p>
    <div class="srow"><div class="srow-l"><div class="srow-t">Режим</div></div><div class="srow-c"><div class="seg" id="dDel"><button data-v="archive" class="${dm==="archive"?"on":""}">Архив</button><button data-v="mirror" class="${dm==="mirror"?"on":""}">Зеркало</button><button data-v="add" class="${dm==="add"?"on":""}">Добавлять</button></div></div></div>
    <div class="nb-help" id="dHelp"><b>${esc(h.t)}</b><span>${esc(h.d)}</span></div>
-   <div class="srow" id="dRetRow" style="${dm==="archive"?"":"display:none"}"><div class="srow-l"><div class="srow-t">Хранить архив удалённых${tipHTML("Старые снимки в _deleted чистятся по возрасту И по суммарному размеру — что наступит раньше. 0 в поле — этот лимит не применять.")}</div><div class="srow-d">чистка по возрасту и по размеру</div></div><div class="srow-c"><input class="mono" id="dRd" style="max-width:60px" value="${c.retention_days||0}"><span style="color:var(--mut);font-size:12px">дней</span><input class="mono" id="dRg" style="max-width:60px" value="${c.retention_gb||0}"><span style="color:var(--mut);font-size:12px">ГБ</span></div></div>`;
+   <div id="dArch" style="${dm==="archive"?"":"display:none"}">
+   <div class="set-h">Куда складывать удалённые${tipHTML("Шаблон папки внутри приёмника, куда переносятся удалённые/изменённые файлы. Соберите из токенов ниже. «/» создаёт вложенные папки (напр. _deleted/{year}/{month}). Первая папка должна быть постоянной (её и чистит ретеншен).")}</div>
+   <div class="usb-sub">
+     <input id="dTpl" class="mono" value="${att(c.deleted_dir||"_deleted/{date}")}" placeholder="_deleted/{date}">
+     <div class="usb-prev">Путь: <span class="mono" id="dPrev"></span></div>
+     <div class="usb-chips"><span class="usb-lbl">Токены:</span>${DEL_TOKENS.map(t=>`<button class="usb-tok" data-t="${att(t[0])}" title="${att(t[1])}">${esc(t[0])}</button>`).join("")}<button class="usb-tok" data-t="/" title="вложенная папка">/</button></div>
+     <div class="usb-chips"><span class="usb-lbl">Готовые:</span><button class="usb-pre" data-t="_deleted/{date}">по дате</button><button class="usb-pre" data-t="_deleted/{year}/{month}">год / месяц</button><button class="usb-pre" data-t="_deleted/{datetime}">дата и время</button></div>
+   </div>
+   <div class="srow" id="dRetRow"><div class="srow-l"><div class="srow-t">Хранить архив удалённых${tipHTML("Старые снимки чистятся по возрасту И по суммарному размеру — что наступит раньше. 0 в поле — этот лимит не применять.")}</div><div class="srow-d">чистка по возрасту и по размеру</div></div><div class="srow-c"><input class="mono" id="dRd" style="max-width:60px" value="${c.retention_days||0}"><span style="color:var(--mut);font-size:12px">дней</span><input class="mono" id="dRg" style="max-width:60px" value="${c.retention_gb||0}"><span style="color:var(--mut);font-size:12px">ГБ</span></div></div>
+   </div>`;
   const g=s=>tc.querySelector(s);
-  wireSeg(tc,"#dDel",v=>{g("#dRetRow").style.display=v==="archive"?"":"none";const hh=HELP[v];g("#dHelp").innerHTML=`<b>${esc(hh.t)}</b><span>${esc(hh.d)}</span>`;saveCfg({delete_mode:v});});
+  wireSeg(tc,"#dDel",v=>{g("#dArch").style.display=v==="archive"?"":"none";const hh=HELP[v];g("#dHelp").innerHTML=`<b>${esc(hh.t)}</b><span>${esc(hh.d)}</span>`;saveCfg({delete_mode:v});});
   g("#dRd").onchange=()=>saveCfg({retention_days:+g("#dRd").value||0});
   g("#dRg").onchange=()=>saveCfg({retention_gb:+g("#dRg").value||0});
+  const dt=g("#dTpl"),dp=g("#dPrev"),base=(c.dest_base||"/mnt/storage/nas-backup").replace(/\/$/,"");
+  const updD=()=>dp.textContent=base+"/…/"+nbDelPreview(dt.value);updD();
+  dt.oninput=updD;
+  dt.onchange=()=>saveCfg({deleted_dir:dt.value.trim()});
+  tc.querySelectorAll("#dArch .usb-tok").forEach(b=>b.onclick=()=>{const psel=dt.selectionStart||dt.value.length;
+    dt.value=dt.value.slice(0,psel)+b.dataset.t+dt.value.slice(dt.selectionEnd||psel);dt.focus();updD();dt.onchange();});
+  tc.querySelectorAll("#dArch .usb-pre").forEach(b=>b.onclick=()=>{dt.value=b.dataset.t;updD();dt.onchange();});
  }
  /* ── Расписание ── */
  function tabSched(tc){const c=CFG,s=c.schedule||{},wk=s.freq==="weekly";
@@ -4999,6 +5018,14 @@ function securityTab(tc){withSysc(tc,()=>{const s=SYSC.security||{};const u=s.uf
 });}
 /* --- settings: USB авто-импорт --- */
 const USB_TOKENS=[["{label}","метка носителя (имя флешки/карты)"],["{date}","дата ГГГГ-ММ-ДД"],["{time}","время ЧЧ-ММ-СС"],["{year}","год"],["{month}","месяц ММ"],["{month-name}","месяц названием"],["{day}","день"],["{hour}","час"],["{minute}","минута"],["{datetime}","дата+время слитно"]];
+// токены папки удалённых (архив бэкапа) — как в USB-импорте, но без {label}
+const DEL_TOKENS=[["{date}","дата ГГГГ-ММ-ДД"],["{year}","год"],["{month}","месяц ММ"],["{month-name}","месяц названием"],["{day}","день"],["{time}","время ЧЧ-ММ-СС"],["{hour}","час"],["{minute}","минута"],["{datetime}","дата+время слитно"]];
+function nbDelPreview(tpl){const d=new Date(),p=n=>String(n).padStart(2,"0"),
+  MON=["Январь","Февраль","Март","Апрель","Май","Июнь","Июль","Август","Сентябрь","Октябрь","Ноябрь","Декабрь"];
+ const map={"{datetime}":`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}_${p(d.getHours())}-${p(d.getMinutes())}-${p(d.getSeconds())}`,"{date}":`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`,"{time}":`${p(d.getHours())}-${p(d.getMinutes())}-${p(d.getSeconds())}`,"{year}":d.getFullYear(),"{month-name}":MON[d.getMonth()],"{month}":p(d.getMonth()+1),"{day}":p(d.getDate()),"{hour}":p(d.getHours()),"{minute}":p(d.getMinutes())};
+ let s=tpl||"_deleted/{date}";for(const k of Object.keys(map))s=s.split(k).join(map[k]);
+ s=s.replace(/\{[^}]*\}/g,"").replace(/\.\./g,"").replace(/^\/+|\/+$/g,"").replace(/\/{2,}/g,"/");
+ return s||"_deleted";}
 function usbSubPreview(tpl){
  if(tpl==="dated")tpl="{label}-{date}-{time}";else if(tpl==="label")tpl="{label}";else if(tpl==="flat")tpl="";
  const d=new Date(),p=n=>String(n).padStart(2,"0"),MON=["January","February","March","April","May","June","July","August","September","October","November","December"];

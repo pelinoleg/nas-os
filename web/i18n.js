@@ -6,6 +6,12 @@
    Перевод применяется только к целым «словам» (границы — не-кириллица), длинные фразы приоритетнее. */
 window.NAS_I18N = { en: {
 "Анализ места": "Disk usage",
+"Куда складывать удалённые": "Where to keep deleted files",
+"Путь:": "Path:",
+"по дате": "by date",
+"год / месяц": "year / month",
+"дата и время": "date & time",
+"Шаблон папки внутри приёмника, куда переносятся удалённые/изменённые файлы. Соберите из токенов ниже. «/» создаёт вложенные папки (напр. _deleted/{year}/{month}). Первая папка должна быть постоянной (её и чистит ретеншен).": "Template for the folder inside the destination where deleted/changed files are moved. Build it from the tokens below. «/» creates nested folders (e.g. _deleted/{year}/{month}). The first folder should be constant (retention cleans it).",
 "NAS-бэкап: источник недоступен": "NAS backup: source unreachable",
 "NAS-бэкап: пропала исходная папка": "NAS backup: source folder gone",
 "NAS-бэкап: ещё не выполнялся": "NAS backup: never run yet",
