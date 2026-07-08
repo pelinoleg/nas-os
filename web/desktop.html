@@ -960,6 +960,8 @@
   .du{display:flex;flex-direction:column;height:100%;padding:12px 16px 14px}
   .du-top{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
   .du-roots{flex-wrap:wrap}
+  .du-roots button{display:inline-flex;align-items:center;gap:5px}
+  .du-roots button svg{opacity:.8}
   .du-meta{font-family:var(--mono);font-size:11.5px;color:var(--mut);white-space:nowrap;display:inline-flex;align-items:center;gap:8px}
   .du-age{display:inline-flex;align-items:center;gap:4px;font-weight:700;font-size:12px;padding:3px 9px;border-radius:999px}
   .du-age svg{opacity:.85}
@@ -994,7 +996,9 @@
   .du-row{display:flex;align-items:center;gap:9px;padding:6px 6px;border-radius:var(--r-sm);font-size:12.5px}
   .du-row:hover{background:var(--sel)}
   .du-row.isdir .du-nm,.du-row.isdir .du-sw{cursor:pointer}
-  .du-sw{flex:none;width:11px;height:11px;border-radius:3px}
+  .du-sw{flex:none;width:5px;height:22px;border-radius:3px}
+  .du-ico{flex:none;width:20px;height:20px;display:grid;place-items:center}
+  .du-agg{color:var(--mut)}
   .du-nm{flex:0 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .du-bar{flex:1;min-width:40px;height:6px;background:var(--line);border-radius:999px;overflow:hidden;margin:0 2px}
   .du-bar i{display:block;height:100%;border-radius:999px}
@@ -4034,15 +4038,22 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
 function winDiskUsage(initRoot){openWin("__duscan","Анализ места",(body,win)=>{
  body.style.padding="0";
  const norm=p=>((p||"").replace(/\/+$/,"")||"/");
+ // Корни всегда одни и те же ТОМА (единые названия + иконки дисков): Хранилище, USB…, Система
  function rootList(){const out=[],seen=new Set();
-   const add=(p,l)=>{p=norm(p);if(seen.has(p))return;seen.add(p);out.push({p,l});};
-   if(initRoot)add(initRoot, norm(initRoot)==="/"?"Система":(norm(initRoot).split("/").pop()||initRoot));
-   add("/mnt/storage","Пул");add("/","Система");
-   (VOLS||[]).forEach(v=>{if(v.mounted&&v.mount)add(v.mount,v.label||v.dev);});
+   const add=(p,l,ic)=>{p=norm(p);if(seen.has(p))return;seen.add(p);out.push({p,l,ic});};
+   add("/mnt/storage","Хранилище","disks");
+   (VOLS||[]).forEach(v=>{if(v.mounted&&v.mount)add(v.mount,v.label||v.dev,"usb");});
+   add("/","Система","cpu");
    return out;}
+ // том, содержащий путь (самый длинный префикс) — чтобы открыть из папки на её томе
+ function volFor(path){path=norm(path);let best=null;
+   rootList().forEach(v=>{if(path===v.p||path.startsWith(v.p==="/"?"/":v.p+"/")){if(!best||v.p.length>best.p.length)best=v;}});
+   return best||{p:"/",l:"Система"};}
  let roots=rootList();
- let root=initRoot?norm(initRoot):((roots[0]&&roots[0].p)||"/mnt/storage");
- let cur=root,node=null,cache={},showL2=SET.duL2!==false;
+ let root=initRoot?volFor(initRoot).p:(roots[0]&&roots[0].p||"/mnt/storage");
+ // при открытии из папки — проваливаемся к ней (полный путь в крошках), иначе корень тома
+ let cur=(initRoot&&(norm(initRoot)===root||norm(initRoot).startsWith(root==="/"?"/":root+"/")))?norm(initRoot):root;
+ let node=null,cache={},showL2=SET.duL2!==false;
  body.innerHTML=`<div class="du"><div class="du-top"><div class="seg du-roots" id="duRoots"></div><span class="grow"></span><span class="du-meta" id="duMeta"></span><button class="iconbtn" id="duL2" title="Показывать второй уровень колец">${svg("layers",15)}</button><button class="btn sm" id="duRescan">${svg("refresh",13)} Пересканировать</button></div><div class="du-main" id="duMain"></div></div>`;
  const rootsEl=body.querySelector("#duRoots"),metaEl=body.querySelector("#duMeta"),mainEl=body.querySelector("#duMain");
  // палитра чуть приглушена, читается в обеих темах; 2-й уровень отделяем прозрачностью (см. CSS), а не осветлением в белый
@@ -4056,13 +4067,13 @@ function winDiskUsage(initRoot){openWin("__duscan","Анализ места",(bo
    {label:"Показать в Файлах",ic:svg("folder",16),act:()=>winFiles(c.d?c.p:(c.p.replace(/\/[^/]+$/,"")||"/"))},
    ...(c.d?[{label:"Провалиться внутрь",ic:svg("chartpie",16),act:()=>drill(c.p)}]:[]),
    {label:"В корзину",ic:svg("trash",16),dng:1,act:()=>trashItem(c)}]);}
- function paintRoots(){roots=rootList();rootsEl.innerHTML=roots.map(r=>`<button data-r="${att(r.p)}" class="${r.p===root?"on":""}">${esc(r.l)}</button>`).join("");
+ function paintRoots(){roots=rootList();rootsEl.innerHTML=roots.map(r=>`<button data-r="${att(r.p)}" class="${r.p===root?"on":""}">${svg(r.ic||"disks",14)} ${esc(r.l)}</button>`).join("");
    rootsEl.querySelectorAll("button").forEach(b=>b.onclick=()=>{root=b.dataset.r;cur=root;cache={};paintRoots();refresh();});}
  async function refresh(){const st=await api("/api/fs/duscan/status?root="+encodeURIComponent(root));
    if(!st){mainEl.innerHTML="<div class='du-empty'>Ошибка</div>";return;}
    if(st.status==="scanning"){renderScanning(st);pollScan();return;}
    if(st.status==="error"){mainEl.innerHTML=`<div class="du-empty">${svg("activity",30)}<p>Ошибка скана: ${esc(st.error||"")}</p><button class="btn pri" id="duGo">Повторить</button></div>`;bindGo();metaEl.textContent="";return;}
-   if(st.status==="done"){metaEl.innerHTML=`${fmtB(st.size||0)} · ${st.dirs||0} папок <span class="du-age ${ageCls(st.ts)}">${svg("clock",12)} скан ${fmtTs(st.ts)}</span>`;cur=root;drill(root);return;}
+   if(st.status==="done"){metaEl.innerHTML=`${fmtB(st.size||0)} · ${st.dirs||0} папок <span class="du-age ${ageCls(st.ts)}">${svg("clock",12)} скан ${fmtTs(st.ts)}</span>`;drill(cur);return;}
    mainEl.innerHTML=`<div class="du-empty">${svg("chartpie",34)}<p>Нет данных по <span class="mono">${esc(root)}</span></p><button class="btn pri" id="duGo">${svg("chartpie",14)} Сканировать</button></div>`;bindGo();metaEl.textContent="";}
  function bindGo(){const g=mainEl.querySelector("#duGo");if(g)g.onclick=startScan;}
  async function startScan(){await api("/api/fs/duscan/start",{method:"POST",body:JSON.stringify({root})});cache={};refresh();}
@@ -4072,7 +4083,7 @@ function winDiskUsage(initRoot){openWin("__duscan","Анализ места",(bo
    if(!st)return;if(st.status==="scanning"){const pe=mainEl.querySelector("#duProg");if(pe)pe.textContent=`${st.scanned||0} папок · ${fmtB(st.bytes||0)}`;}else{clearInterval(win._pi);refresh();}},1200);}
  async function drill(path){let d=cache[path];
    if(!d){d=await api("/api/fs/duscan/node?root="+encodeURIComponent(root)+"&path="+encodeURIComponent(path)+"&depth=2");if(d&&d.ok)cache[path]=d;}
-   if(!d||!d.ok){toast((d&&d.log)||"нет данных");return;}
+   if(!d||!d.ok){if(norm(path)!==root){drill(root);return;}toast((d&&d.log)||"нет данных");return;}
    cur=path;node=d;renderView();}
  function renderView(){mainEl.innerHTML=`<div class="du-crumb" id="duCrumb"></div><div class="du-cols"><div class="du-chart" id="duChart"></div><div class="du-list" id="duList"></div></div>`;
    renderCrumb();renderChart();renderList();}
@@ -4117,7 +4128,8 @@ function winDiskUsage(initRoot){openWin("__duscan","Анализ места",(bo
    const ch=(node.ch||[]).filter(x=>x.s>0),max=ch.reduce((m,x)=>Math.max(m,x.s),1);
    if(!ch.length){box.innerHTML=`<div class="du-empty2">Пусто</div>`;return;}
    ch.forEach((c,i)=>{const col=c.o?"var(--mut)":DUCOL[i%DUCOL.length];
-     const row=el(`<div class="du-row${c.d?" isdir":""}" data-key="${i}"><span class="du-sw" style="background:${col}"></span><span class="du-nm" title="${att(c.n)}">${esc(c.n)}</span><span class="du-bar"><i style="width:${Math.max(2,c.s/max*100).toFixed(1)}%;background:${col}"></i></span><span class="du-sz">${fmtB(c.s)}</span>${c.p?`<button class="du-x" title="В корзину">${svg("trash",13)}</button>`:""}</div>`);
+     const ico=c.o?`<span class="du-ico du-agg">${svg("layers",16)}</span>`:`<span class="du-ico">${fmIcon(c.n,c.d?"dir":"file",20)}</span>`;
+     const row=el(`<div class="du-row${c.d?" isdir":""}" data-key="${i}"><span class="du-sw" style="background:${col}"></span>${ico}<span class="du-nm" title="${att(c.n)}">${esc(c.n)}</span><span class="du-bar"><i style="width:${Math.max(2,c.s/max*100).toFixed(1)}%;background:${col}"></i></span><span class="du-sz">${fmtB(c.s)}</span>${c.p?`<button class="du-x" title="В корзину">${svg("trash",13)}</button>`:""}</div>`);
      if(c.d)row.onclick=ev=>{if(ev.target.closest(".du-x"))return;drill(c.p);};
      if(c.p)row.oncontextmenu=ev=>{ev.preventDefault();ctxMenu(c,ev.clientX,ev.clientY);};
      row.onmouseenter=()=>duHi(i,true);row.onmouseleave=()=>duHi(i,false);
