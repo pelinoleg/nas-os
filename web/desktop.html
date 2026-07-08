@@ -2787,6 +2787,8 @@ function winServices(initTab){openWin("__services","Docker",(body,win)=>{
  const load=async force=>{
   const d=await api("/api/stacks");if(!document.body.contains(body))return;
   ok=!!(d&&d.ok);stacks=(d&&d.stacks)||[];
+  // сначала запущенные (есть работающие контейнеры), затем по алфавиту
+  stacks.sort((a,b)=>((b.running>0)-(a.running>0))||(a.name||"").localeCompare(b.name||"",undefined,{sensitivity:"base",numeric:true}));
   if(DK_SEL.startsWith("stack:")&&!stacks.find(y=>"stack:"+y.name===DK_SEL))DK_SEL="overview";
   const ns=JSON.stringify([ok,DK_SEL,stacks.map(s=>[s.name,s.running,s.total,s.note,(s.containers||[]).map(c=>[c.name,c.state,c.health])])]);
   if(force||ns!==sig){sig=ns;paintSide();paintDetail();}
