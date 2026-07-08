@@ -77,10 +77,11 @@ def disk_info(path):
     except OSError:
         return None
     total = s.f_blocks * s.f_frsize
-    free  = s.f_bavail * s.f_frsize
-    used  = total - free
-    return {"path": path, "total": total, "used": used,
-            "pct": round(100 * used / total, 1) if total else 0}
+    free  = s.f_bavail * s.f_frsize                  # доступно (как df Avail; БЕЗ ext4-резерва)
+    used  = (s.f_blocks - s.f_bfree) * s.f_frsize    # реально занято данными (резерв ≠ «занято»)
+    denom = used + free                              # база для % как в df (без учёта резерва)
+    return {"path": path, "total": total, "used": used, "free": free,
+            "pct": round(100 * used / denom, 1) if denom else 0}
 
 def default_iface():
     for line in _read("/proc/net/route").splitlines()[1:]:

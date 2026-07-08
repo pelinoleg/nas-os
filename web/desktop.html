@@ -435,17 +435,18 @@
   .dline .nm .dn{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .dline .nm .dsub{display:block;font-size:10px;color:var(--mut);font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px}
   .dline .pc{font-family:var(--mono);color:var(--dim);flex:none}
-  /* карточка пула в виджете — заметно не как обычный диск */
-  .dpool{display:flex;align-items:center;gap:10px;padding:9px 10px;margin-bottom:9px;border-radius:var(--r-sm);
+  /* карточка пула в виджете — заметно не как обычный диск: заголовок, полоса заполнения во всю ширину */
+  .dpool{display:flex;flex-direction:column;gap:7px;padding:10px 11px;margin-bottom:9px;border-radius:var(--r-sm);
     background:color-mix(in srgb,var(--good) 12%,transparent);border:1px solid color-mix(in srgb,var(--good) 26%,transparent)}
+  .dpool .dpool-h{display:flex;align-items:center;gap:9px}
   .dpool .dp-ic{width:27px;height:27px;border-radius:8px;display:grid;place-items:center;color:var(--good);
     background:color-mix(in srgb,var(--good) 20%,transparent);flex:none}
   .dpool .dp-nm{flex:1;min-width:0;display:flex;flex-direction:column}
   .dpool .dp-nm b{font-size:12.5px;font-weight:660;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .dpool .dp-sub{font-size:10px;color:var(--mut);font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px}
-  .dpool .dp-cap{flex:none;text-align:right;min-width:104px}
-  .dpool .dp-cap .dbar{width:104px;margin-top:0}
-  .dpool .dp-free{font-size:10px;color:var(--dim);font-family:var(--mono);display:block;margin-top:4px}
+  .dpool .dp-pct{font-family:var(--mono);font-size:12px;font-weight:700;flex:none}
+  .dpool .capbar{width:100%;height:12px}
+  .dpool .dp-free2{font-size:10.5px;color:var(--dim);font-family:var(--mono)}
   .qa{display:grid;grid-template-columns:1fr 1fr;gap:9px}
   .qa button{display:flex;align-items:center;gap:9px;padding:11px 12px;border:none;border-radius:var(--r-md);background:var(--card);font-size:12.5px;font-weight:550;transition:.14s;box-shadow:var(--sh-sm)}
   .qa button:hover{border-color:var(--accent-line);background:var(--accent-soft);color:var(--accent)}
@@ -2233,13 +2234,13 @@ function poolStrip(disks,am,reload,snap,pool){
  const hcls=hbad?"bad":(sm.length?"ok":"na"),hlbl=hbad?"Внимание":(sm.length?"Исправно":"—");
  const w=el(`<div class="dm-pool${hasPool?"":" np"}"></div>`);
  if(hasPool){
-  let total=0,used=0;(poolMount?[poolMount]:dataArr).forEach(x=>{if(x.usage){total+=x.usage.total;used+=x.usage.used;}});
-  const pct=total?Math.max(used/total*100,.4):0;
+  let total=0,used=0,free=0;(poolMount?[poolMount]:dataArr).forEach(x=>{if(x.usage){total+=x.usage.total;used+=x.usage.used;free+=(x.usage.free!=null?x.usage.free:x.usage.total-x.usage.used);}});
+  const pct=(used+free)?Math.max(used/(used+free)*100,.4):0;
   w.innerHTML=`<span class="dp-ic">${svg("layers",17)}</span>
    <div class="dp-txt"><div class="dp-t">Пул /mnt/storage <span class="hstat ${hcls}" style="margin-left:4px">${hlbl}</span></div>
     <div class="dp-s">${cnt("data")} данных · ${cnt("parity")} чётности${cnt("removable")?` · ${cnt("removable")} внешних`:""}${scrubLine(snap)}${recov}</div></div>
    <div class="dp-cap"><div class="capbar" style="width:150px"><span class="used" style="width:${pct}%"></span></div>
-    <div class="dp-lbl">${fmtB(total-used)} своб · ${fmtB(total)}</div></div>`;
+    <div class="dp-lbl">${fmtB(free)} своб · ${fmtB(total)}</div></div>`;
  }else{
   w.innerHTML=`<span class="dp-ic">${svg("layers",17)}</span>
    <div class="dp-txt"><div class="dp-t">Пул не собран</div>
@@ -2294,7 +2295,7 @@ function diskDetail(x,reload){
    <div class="dd-health">${sm&&sm.healthy!=null?`<div class="hstat ${sm.healthy?"ok":"bad"}">${sm.healthy?"Исправно":"Сбой"}</div>`:`<div class="hstat na">SMART —</div>`}
      <div class="htemp" data-dtemp="${x.path}" style="color:${sm&&sm.temp!=null?diskTcol(sm.temp):""}">${sm&&sm.temp!=null?sm.temp+"°C":""}</div></div></div>`));
  if(u)box.appendChild(el(`<div class="dd-usage"><div class="capbar"><span class="used" style="width:${Math.max(u.pct,.4)}%"></span></div>
-   <div class="lbls"><span>${fmtB(u.used)} занято · ${u.pct}%</span><span>${fmtB(u.total-u.used)} свободно · ${fmtB(u.total)}</span></div></div>`));
+   <div class="lbls"><span>${fmtB(u.used)} занято · ${u.pct}%</span><span>${fmtB(u.free!=null?u.free:u.total-u.used)} свободно · ${fmtB(u.total)}</span></div></div>`));
  // краткие факты
  const facts=[["Размер",x.size||"—"],["Файловая система",x.fstype?(""+x.fstype).toUpperCase():(hasParts?"таблица разделов":"не отформатирован")],
    ["Точка монтирования",x.mount||"не смонтирован"],["В fstab",x.in_fstab?"да":"нет"]];
@@ -4679,13 +4680,15 @@ function dRow(role,name,pct,free,temp,sys,sub){
    <span class="pc">${free}</span></div>`;}
 // отдельная «карточка пула» в виджете — визуально не как обычный диск (иконка-слоёв, акцент, счётчик дисков)
 function poolRow(u,ndata,nparity){
- const pct=u.total?Math.max(u.pct,.4):0;
+ const pct=u.total?Math.max(u.pct,.6):0;
+ const free=(u.free!=null?u.free:u.total-u.used);
  const sub=`${ndata} данных${nparity?" · "+nparity+" чётности":""}`;
  return `<div class="dpool" title="${att("Пул хранилища /mnt/storage · "+sub)}">
-   <span class="dp-ic">${svg("layers",15)}</span>
-   <span class="dp-nm"><b>Пул хранилища</b><span class="dp-sub">${sub}</span></span>
-   <span class="dp-cap"><span class="dbar"><i style="width:${pct}%;background:${barCol(u.pct)}"></i></span>
-     <span class="dp-free">${fmtB(u.total-u.used)} своб. · ${fmtB(u.total)}</span></span></div>`;}
+   <div class="dpool-h"><span class="dp-ic">${svg("layers",15)}</span>
+     <span class="dp-nm"><b>Пул хранилища</b><span class="dp-sub">${sub}</span></span>
+     <span class="dp-pct" style="color:${barCol(u.pct)}">${Math.round(u.pct)}%</span></div>
+   <div class="capbar"><span class="used" style="width:${pct}%;background:${barCol(u.pct)}"></span></div>
+   <div class="dp-free2">${fmtB(free)} свободно · ${fmtB(u.total)}</div></div>`;}
 function paintDiskWidget(disks){const box=document.getElementById("wg-disk");if(!box)return;
  const arr=(disks||[]).slice().sort((a,b)=>roleRank(a.role)-roleRank(b.role));
  const temps=arr.map(d=>d.smart&&d.smart.temp).filter(t=>t!=null);
@@ -4697,7 +4700,7 @@ function paintDiskWidget(disks){const box=document.getElementById("wg-disk");if(
   const nm=sys?("Система · "+driveType(d).label):(d.label||d.name);
   // мелким шрифтом — модель/производитель, чтобы понимать, что за физический диск
   const sub=(d.model&&d.model!==nm)?d.model:(!d.label&&d.name!==nm?d.name:"");
-  const free=u?fmtB(u.total-u.used)+" своб.":(d.mounted?(d.size||""):"не смонт.");
+  const free=u?fmtB(u.free!=null?u.free:u.total-u.used)+" своб.":(d.mounted?(d.size||""):"не смонт.");
   h+=dRow(d.role,nm,pct,free,tmp,sys,sub);});
  box.innerHTML=h||`<div style="color:var(--mut);font-size:12px">Диски не найдены</div>`;
 }
