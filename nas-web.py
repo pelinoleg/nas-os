@@ -5498,6 +5498,7 @@ class H(BaseHTTPRequestHandler):
         items = [os.path.realpath(i) for i in items if i]
         if not items:
             self.send_error(400); return
+        name = re.sub(r'[\r\n"\\/]', "_", name or "").strip() or "archive.zip"
         if not name.endswith(".zip"):
             name += ".zip"
         tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".zip")

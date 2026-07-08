@@ -2647,7 +2647,7 @@ function winTerminal(initCmd,execC){openWin("__term","Терминал",(body,wi
  function connect(sess){const ws=new WebSocket(`${proto()}://${location.host}/ws/term`+(sess.execC?("?exec="+encodeURIComponent(sess.execC)):""));ws.binaryType="arraybuffer";sess.ws=ws;hideReco(sess);
    const resize=()=>{if(ws.readyState===1)ws.send("\x01"+JSON.stringify({rows:sess.term.rows,cols:sess.term.cols}));};sess._resize=resize;
    ws.onopen=()=>{sess.connected=true;sess.autoRetried=false;if(sess.id===activeId)setStatus("подключено",true);renderTabs();setTimeout(()=>{refit(sess);resize();},40);sess.term.focus();
-     if(sess.initCmd){setTimeout(()=>{if(ws.readyState===1)ws.send(sess.initCmd+"\n");},250);sess.initCmd=null;}};
+     if(sess.initCmd){const _ic=sess.initCmd;sess.initCmd=null;setTimeout(()=>{if(ws.readyState===1)ws.send(_ic+"\n");},250);}};
    ws.onmessage=e=>sess.term.write(new Uint8Array(e.data));
    ws.onclose=()=>{sess.connected=false;if(sess.id===activeId)setStatus("отключено",false);renderTabs();if(sess.closing)return;
      sess.term.write("\r\n\x1b[38;5;203m[соединение закрыто]\x1b[0m\r\n");showReco(sess);
@@ -3448,7 +3448,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
  function saveFav(){api("/api/fm/favorites",{method:"POST",body:JSON.stringify({favorites:favs})});}
  function renderFav(){const c=body.querySelector("#fFav");c.innerHTML="";
    favs.forEach((f,i)=>{const it=el(`<div class="fm-fav-i${f.path===cwd?" on":""}"><span class="fi">${svg(f.icon||"folder",15)}</span><span class="fn" title="${att(f.path)}">${esc(f.name)}</span><button class="fx" title="Убрать">${svg("trash",12)}</button></div>`);
-     it.querySelector(".fn").onclick=()=>load(f.path);it.querySelector(".fi").onclick=()=>load(f.path);
+     it.onclick=ev=>{if(ev.target.closest(".fx"))return;load(f.path);};
      it.querySelector(".fx").onclick=ev=>{ev.stopPropagation();favs.splice(i,1);saveFav();renderFav();};
      it.addEventListener("dragover",ev=>{if(!dragPaths||dragPaths.includes(f.path))return;ev.preventDefault();ev.stopPropagation();ev.dataTransfer.dropEffect="move";it.classList.add("dragover");});
      it.addEventListener("dragleave",()=>it.classList.remove("dragover"));
@@ -3467,7 +3467,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
        const r=await api("/api/disk/mount-dev",{method:"POST",body:JSON.stringify({dev:v.dev})});
        if(r&&r.ok){await pollApps();const nv=VOLS.find(x=>x.dev===v.dev);if(nv&&nv.mount)load(nv.mount);}
        else toast(r&&r.log?("Не смонтировалось: "+r.log.trim().split("\n").pop()):"Не удалось смонтировать");};
-     it.querySelector(".fn").onclick=go;it.querySelector(".fi").onclick=go;
+     it.onclick=ev=>{if(ev.target.closest(".fx"))return;go();};
      it.oncontextmenu=ev=>{ev.preventDefault();ev.stopPropagation();showMenu(ev.clientX,ev.clientY,[
        v.mounted?{label:"Открыть",ic:svg("folder",16),act:()=>load(v.mount)}
                 :{label:"Монтировать и открыть",ic:svg("folder",16),act:go},
@@ -3535,19 +3535,16 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
      else{const nmH=esc(e.name)+(e.match?` <small style="color:var(--mut);font-weight:400">— ${esc(e.match.slice(0,90))}${e.line?" :"+e.line:""}</small>`:"");
        node=el(`<div class="fm-row ${e.type}${isSel?" sel":""}${i===cursor?" fm-cur":""}"><input type="checkbox" class="fm-ck"${isSel?" checked":""}><span class="fi">${ficon}</span><span class="fn" title="${att(searchRes?e.path:e.name)}">${nmH}</span><span class="fsz">${e.type==="dir"?"":fmtB(e.size)}</span><span class="fdate">${fmDate(e.mtime)}</span></div>`);}
      node.querySelector(".fm-ck").onclick=ev=>{ev.stopPropagation();toggleSel(e,i,ev.shiftKey);};
-     const nmeNode=node.querySelector(".fn")||node.querySelector(".tn");
-     const icNode=node.querySelector(".fi")||node.querySelector(".ti");
+     // клик по ВСЕЙ строке/плитке (кроме чекбокса), а не только по имени/иконке — иначе клик
+     // по колонке размера/даты или по отступам «проваливался» и папка не открывалась
+     const inCk=ev=>ev.target.closest&&ev.target.closest(".fm-ck");
      if(dblOpen){
-       const selOne=ev=>{if(ev&&ev.target.classList.contains("fm-ck"))return;cursor=i;
-         if(ev&&(ev.ctrlKey||ev.metaKey||ev.shiftKey)){toggleSel(e,i,ev.shiftKey);return;}
+       node.onclick=ev=>{if(inCk(ev))return;cursor=i;
+         if(ev.ctrlKey||ev.metaKey||ev.shiftKey){toggleSel(e,i,ev.shiftKey);return;}
          sel.clear();sel.add(e.path);lastIdx=i;renderList();selUpdate();};
-       const op=()=>{cursor=i;openEntry(e);};
-       if(nmeNode){nmeNode.onclick=selOne;nmeNode.ondblclick=op;}
-       if(icNode){icNode.onclick=selOne;icNode.ondblclick=op;}
+       node.ondblclick=ev=>{if(inCk(ev))return;cursor=i;openEntry(e);};
      }else{
-       const op=ev=>{if(ev&&ev.target.classList.contains("fm-ck"))return;cursor=i;openEntry(e);};
-       if(nmeNode)nmeNode.onclick=op;
-       if(icNode)icNode.onclick=op;
+       node.onclick=ev=>{if(inCk(ev))return;cursor=i;openEntry(e);};
      }
      node.oncontextmenu=ev=>{ev.preventDefault();ev.stopPropagation();cursor=i;rowMenu(e,ev.clientX,ev.clientY);};
      node.draggable=true;
@@ -3690,7 +3687,10 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
      const ok=await runBatch("Удаление…",paths,async p=>{const r=await api("/api/fs/delete",{method:"POST",body:JSON.stringify({path:p})});return r&&r.ok;});
      toast(LIVE?`Удалено навсегда: ${ok}`:"Демо");load(cwd);},true);}
  function doZip(paths){if(!paths.length)return;const a=document.createElement("a");
-   a.href="/api/fs/zip?"+paths.map(p=>"item="+encodeURIComponent(p)).join("&")+"&name=nas-files.zip";
+   // имя архива: по единственной папке/файлу, иначе — по текущей папке
+   const base=p=>(String(p).replace(/\/+$/,"").split("/").pop()||"");
+   const zname=((paths.length===1?base(paths[0]):base(cwd))||"nas-files")+".zip";
+   a.href="/api/fs/zip?"+paths.map(p=>"item="+encodeURIComponent(p)).join("&")+"&name="+encodeURIComponent(zname);
    document.body.appendChild(a);a.click();a.remove();}
  function doRename(e){const s=document.getElementById("scrim");
    s.innerHTML=`<div class="dialog"><h3>Переименовать</h3><div class="field"><label>Новое имя</label><input id="rn" value="${att(e.name)}"></div><div class="r"><button class="btn" id="rx">Отмена</button><button class="btn pri" id="ro">OK</button></div></div>`;
