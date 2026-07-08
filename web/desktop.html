@@ -1717,6 +1717,20 @@ function notifyDone(title,body){toast(body?title+": "+body:title);
 function ring(pct,color,size=64){const r=size/2-5,c=2*Math.PI*r,off=c*(1-Math.min(pct,100)/100);
  return `<svg class="ring" viewBox="0 0 ${size} ${size}"><circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="var(--track,var(--line))" stroke-width="6"/><circle cx="${size/2}" cy="${size/2}" r="${r}" fill="none" stroke="${color}" stroke-width="6" stroke-linecap="round" stroke-dasharray="${c}" stroke-dashoffset="${off}" transform="rotate(-90 ${size/2} ${size/2})"/></svg>`;}
 const tcol=t=>t==null?"var(--mut)":t>=75?"var(--danger)":t>=65?"var(--warn)":"var(--good)";
+// цвет по нагрузке 0..100: зелёный→янтарный→красный, интерполяция между
+// УЖЕ контрастно-подогнанными токенами --wdg-good/warn/danger (та же система, что везде)
+const _hex2rgb=h=>{const n=parseInt(h.slice(1),16);return [n>>16&255,n>>8&255,n&255];};
+function loadCol(pct,pfx){
+ pct=Math.max(0,Math.min(100,+pct||0));pfx=pfx||"wdg";
+ const cs=getComputedStyle(document.documentElement);
+ const rd=(n,f)=>{const v=(cs.getPropertyValue("--"+pfx+n)||"").trim();return /^#[0-9a-f]{6}$/i.test(v)?v:f;};
+ const g=_hex2rgb(rd("-good","#1FA971")),w=_hex2rgb(rd("-warn","#CF881B")),d=_hex2rgb(rd("-danger","#DE4E48"));
+ if(pct<50)return `rgb(${g[0]},${g[1]},${g[2]})`;         // всё хорошо — зелёный
+ let a,b,t;if(pct<78){a=g;b=w;t=(pct-50)/28;}else{a=w;b=d;t=(pct-78)/22;}  // →янтарный →красный
+ const m=a.map((v,i)=>Math.round(v+(b[i]-v)*t));
+ return `rgb(${m[0]},${m[1]},${m[2]})`;}
+// температуру приводим к 0..100 в разумном диапазоне (~45°C=спокойно … 85°C=предел)
+const tempLoad=t=>t==null?0:Math.max(0,Math.min(100,(t-45)/40*100));
 const roleName={data:"данные",parity:"чётность",system:"система",pool:"пул",free:"не в пуле",removable:"внешний"};
 
 /* menus */
@@ -2025,9 +2039,9 @@ function overviewTab(tc,win){
  const card=(h,v,vc,data,col,max)=>`<div class="ov-card"><div class="h">${h}</div><div class="v"${vc?` style="color:${vc}"`:""}>${v}</div>${sparkSVG(data,col,max)}</div>`;
  const draw=s=>{if(!document.body.contains(tc)){win._sub=null;return;}
    const cc=tc.querySelector("#ovCards");if(cc)cc.innerHTML=
-     card("CPU",s.cpu+"%","","cpu"in HIST?HIST.cpu:[],"var(--accent)",100)+
-     card("Темп.",s.temp?s.temp+"°":"—",tcol(s.temp),HIST.temp,tcol(s.temp),90)+
-     card("RAM",s.mem.pct+"%","",HIST.mem,"var(--accent-2)",100)+
+     card("CPU",s.cpu+"%",loadCol(s.cpu,"win"),"cpu"in HIST?HIST.cpu:[],loadCol(s.cpu,"win"),100)+
+     card("Темп.",s.temp?s.temp+"°":"—",s.temp?loadCol(tempLoad(s.temp),"win"):"var(--mut)",HIST.temp,s.temp?loadCol(tempLoad(s.temp),"win"):"var(--mut)",90)+
+     card("RAM",s.mem.pct+"%",loadCol(s.mem.pct,"win"),HIST.mem,loadCol(s.mem.pct,"win"),100)+
      card("↓ Сеть",fmtR(s.net.rx),"",HIST.rx,"#5aa9ff");
    const thr=s.throttled||{},ok=thr.ok!==false;const tb=tc.querySelector("#ovThr");
    if(tb)tb.innerHTML=`<div class="ov-thr ${ok?"good":"bad"}" title="${att(THR_HINT)}"><span class="dt"></span><div><b>${ok?"Питание и частота в норме":"Троттлинг / просадка питания"}</b><div class="sub">${esc(thr.raw||"throttled=0x0")} · нажмите для справки</div></div></div>`;
@@ -4488,9 +4502,10 @@ function paintVols(){const box=document.getElementById("wg-vols");if(!box)return
 function paintSys(s){const m=document.getElementById("wg-sys");if(!m)return;
  const thr=s.throttled&&s.throttled.raw&&s.throttled.raw!=="0x0";
  m.innerHTML=`
-  <div class="gauges"><div class="gauge">${ring(s.cpu,"var(--accent)")}<div class="v">${s.cpu}%</div><div class="l">CPU</div></div>
-  <div class="gauge">${ring(s.temp?Math.min(s.temp/85*100,100):0,tcol(s.temp))}<div class="v">${s.temp?s.temp+"°":"—"}</div><div class="l">°C</div></div>
-  <div class="gauge">${ring(s.mem.pct,"var(--accent-2)")}<div class="v">${s.mem.pct}%</div><div class="l">RAM</div></div></div>
+  <div class="gauges">
+   <div class="gauge">${ring(s.cpu,loadCol(s.cpu))}<div class="v" style="color:${loadCol(s.cpu)}">${s.cpu}%</div><div class="l">CPU</div></div>
+   <div class="gauge">${ring(s.temp?Math.min(s.temp/85*100,100):0,s.temp?loadCol(tempLoad(s.temp)):"var(--mut)")}<div class="v" style="color:${s.temp?loadCol(tempLoad(s.temp)):"var(--mut)"}">${s.temp?s.temp+"°":"—"}</div><div class="l">°C</div></div>
+   <div class="gauge">${ring(s.mem.pct,loadCol(s.mem.pct))}<div class="v" style="color:${loadCol(s.mem.pct)}">${s.mem.pct}%</div><div class="l">RAM</div></div></div>
   <div class="krow" style="margin-top:12px"><span>Аптайм</span><b>${fmtUp(s.uptime)}</b></div>
   <div class="krow"><span>Load 1м / 5м</span><b>${s.load?s.load[0].toFixed(2)+" / "+s.load[1].toFixed(2):"—"}</b></div>
   ${thr?`<div class="krow" style="color:var(--warn)"><span>⚠ троттлинг</span><b>${esc(s.throttled.raw)}</b></div>`:""}`;
