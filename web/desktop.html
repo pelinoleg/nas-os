@@ -726,6 +726,17 @@
   .nb-brl{max-height:300px;overflow-y:auto;border:1px solid var(--line);border-radius:var(--r-md);margin:2px 0 4px}
   .nb-bri{display:flex;align-items:center;gap:8px;padding:8px 11px;border-top:1px solid var(--line);cursor:pointer;font-size:12.5px}
   .nb-bri:first-child{border-top:none}.nb-bri:hover{background:var(--sel)}
+  .nb-bri input[type=checkbox]{width:15px;height:15px;accent-color:var(--accent);flex:none}
+  .nb-bri.sel{background:var(--accent-soft)}.nb-bri.sel .nb-brn{color:var(--accent);font-weight:600}
+  .nb-brn{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .nb-brgo{flex:none;border:none;background:none;color:var(--mut);padding:2px 4px;border-radius:6px;cursor:pointer}
+  .nb-brgo:hover{background:var(--card);color:var(--accent)}
+  .nb-pcrumb{display:flex;flex-wrap:wrap;align-items:center;gap:1px;padding:4px 2px 8px;font-size:12px}
+  .nb-pcrumb a{color:var(--dim);cursor:pointer;padding:2px 6px;border-radius:6px}
+  .nb-pcrumb a:last-child{color:var(--text);font-weight:600}.nb-pcrumb a:hover{background:var(--sel);color:var(--accent)}
+  .nb-pcrumb .sepc{color:var(--mut)}
+  .nb-saved{font-size:12px;color:var(--good);font-weight:600;opacity:0;transition:opacity .2s;margin-left:4px}
+  .nb-saved.show{opacity:1}
   .nb-job{display:flex;align-items:center;gap:8px;padding:7px 0;border-top:1px solid var(--line);font-size:12px}
   .nb-job:first-child{border-top:none}
   .nb-src{flex:none;max-width:38%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--accent)}
@@ -1467,6 +1478,7 @@ const P={
  activity:'<path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/>',
  chartpie:'<path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/>',
  "panel-left":'<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M5.5 7h1.5M5.5 10h1.5"/>',
+ chev:'<path d="m9 18 6-6-6-6"/>',
  term:'<path d="m7 11 2-2-2-2"/><path d="M11 13h4"/><rect width="18" height="18" x="3" y="3" rx="2"/>',
  info:'<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
  wifi:'<path d="M12 20h.01"/><path d="M2 8.82a15 15 0 0 1 20 0"/><path d="M5 12.859a10 10 0 0 1 14 0"/><path d="M8.5 16.429a5 5 0 0 1 7 0"/>',
@@ -4134,22 +4146,33 @@ function nbPickLocal(start,onPick){const s=document.getElementById("scrim");let 
   s.querySelectorAll("[data-p]").forEach(n=>n.onclick=()=>{cur=n.dataset.p;draw();});};
  draw();}
 // модалка визуального выбора папок ИСТОЧНИКА (чекбоксы) — навигация по главному NAS
-function nbPickSource(onPick){const s=document.getElementById("scrim");let cur="",sel=new Set();
- const draw=async()=>{s.innerHTML=`<div class="dialog" style="max-width:560px"><h3>${svg("net",16)} Что копировать с главного NAS</h3>
-   <div class="nb-crumb mono">/${esc(cur)}</div><div class="nb-brl" id="nbSl"><div style="color:var(--mut);padding:8px">загрузка…</div></div>
-   <div class="mon-note" style="margin:8px 0 0">Отметьте папки/шары для бэкапа. Двойной клик — зайти внутрь.</div>
-   <div class="r"><button class="btn" id="nbsX">Отмена</button><button class="btn pri" id="nbsO">Добавить выбранное (<span id="nbsC">0</span>)</button></div></div>`;
+function nbPickSource(preselected,onPick){const s=document.getElementById("scrim");let cur="",sel=new Set(preselected||[]);
+ const draw=async()=>{
+  const parts=cur?cur.split("/"):[];let acc="";const crumbs=[`<a data-p="">/</a>`];
+  parts.forEach(p=>{acc=(acc?acc+"/":"")+p;crumbs.push(`<span class="sepc">/</span><a data-p="${att(acc)}">${esc(p)}</a>`);});
+  s.innerHTML=`<div class="dialog" style="max-width:580px"><h3>${svg("net",16)} Что копировать с главного NAS</h3>
+   <div class="nb-pcrumb mono" id="nbCrumb">${crumbs.join("")}</div>
+   <div class="nb-brl" id="nbSl"><div style="color:var(--mut);padding:8px">загрузка…</div></div>
+   <div class="mon-note" style="margin:8px 0 0">Отмечайте папки на любом уровне — уже выбранные показаны галочкой. Клик по строке — выбрать; стрелка → или двойной клик — зайти внутрь.</div>
+   <div class="r"><button class="btn" id="nbsX">Отмена</button><button class="btn pri" id="nbsO">Сохранить выбор (<span id="nbsC">${sel.size}</span>)</button></div></div>`;
   s.classList.add("show");
+  s.querySelectorAll("#nbCrumb a").forEach(a=>a.onclick=()=>{cur=a.dataset.p;draw();});
+  s.querySelector("#nbsX").onclick=()=>s.classList.remove("show");
+  s.querySelector("#nbsO").onclick=()=>{s.classList.remove("show");onPick([...sel]);};
   const r=await api("/api/backup/browse",{method:"POST",body:JSON.stringify({path:cur})});
   const box=s.querySelector("#nbSl");
-  if(!r||!r.ok){box.innerHTML=`<div class="er" style="padding:8px">${esc((r&&r.log)||"нет связи с источником — проверьте подключение")}</div>`;}
-  else{const es=r.entries||[];box.innerHTML=es.length?es.map(e=>{const full=(cur?cur+"/":"")+e.name;return `<div class="nb-bri" data-full="${att(full)}" data-dir="${e.dir?1:0}"><input type="checkbox" ${sel.has(full)?"checked":""} style="width:15px;height:15px;accent-color:var(--accent)"> ${svg(e.dir?"folder":"file",15)} ${esc(e.name)}</div>`;}).join(""):'<div style="color:var(--mut);padding:8px">пусто</div>';
-   box.querySelectorAll(".nb-bri").forEach(n=>{const full=n.dataset.full;
-    n.querySelector("input").onclick=ev=>{ev.stopPropagation();if(ev.target.checked)sel.add(full);else sel.delete(full);s.querySelector("#nbsC").textContent=sel.size;};
-    n.ondblclick=()=>{if(n.dataset.dir==="1"){cur=full;draw();}};});}
-  s.querySelector("#nbsC").textContent=sel.size;
-  s.querySelector("#nbsX").onclick=()=>s.classList.remove("show");
-  s.querySelector("#nbsO").onclick=()=>{s.classList.remove("show");onPick([...sel]);};};
+  if(!r||!r.ok){box.innerHTML=`<div class="er" style="padding:8px">${esc((r&&r.log)||"нет связи с источником — проверьте подключение")}</div>`;return;}
+  const es=r.entries||[];
+  box.innerHTML=es.length?es.map(e=>{const full=(cur?cur+"/":"")+e.name;
+    return `<div class="nb-bri${sel.has(full)?" sel":""}" data-full="${att(full)}" data-dir="${e.dir?1:0}"><input type="checkbox" style="pointer-events:none" ${sel.has(full)?"checked":""}> ${svg(e.dir?"folder":"file",15)} <span class="nb-brn">${esc(e.name)}</span>${e.dir?`<button class="nb-brgo" title="Открыть">${svg("chev",16)}</button>`:""}</div>`;}).join(""):'<div style="color:var(--mut);padding:8px">пусто</div>';
+  const upd=()=>{s.querySelector("#nbsC").textContent=sel.size;};
+  box.querySelectorAll(".nb-bri").forEach(n=>{const full=n.dataset.full,ck=n.querySelector("input");
+    n.onclick=ev=>{if(ev.target.closest(".nb-brgo"))return;
+      if(sel.has(full)){sel.delete(full);ck.checked=false;n.classList.remove("sel");}
+      else{sel.add(full);ck.checked=true;n.classList.add("sel");}upd();};
+    const go=n.querySelector(".nb-brgo");if(go)go.onclick=ev=>{ev.stopPropagation();cur=full;draw();};
+    n.ondblclick=()=>{if(n.dataset.dir==="1"){cur=full;draw();}};});
+  upd();};
  draw();}
 function winBackup(){openWin("__nasbak","Бэкап главного NAS",(body,win)=>{
  body.style.display="flex";body.style.padding="0";
@@ -4177,10 +4200,15 @@ function winBackup(){openWin("__nasbak","Бэкап главного NAS",(body,
    <div class="srow"><div class="srow-l"><div class="srow-t">Пользователь</div></div><div class="srow-c"><input class="mono" id="cUser" value="${att(c.user||"")}" placeholder="oleg"></div></div>
    <div class="srow" id="cPwRow"><div class="srow-l"><div class="srow-t">Пароль${tipHTML("rsync-демон — пароль модуля. SSH — пароль учётной записи (идёт через sshpass). Для SSH можно оставить пустым и настроить вход по ключу. Хранится на этом NAS.")}</div>${ssh?'<div class="srow-d">для SSH: пусто = вход по ключу</div>':""}</div><div class="srow-c"><input type="password" class="mono" id="cPw" placeholder="${c.has_password?"•••••• (задан)":"пароль"}"></div></div>
    <div class="srow" id="cPortRow" style="${ssh?"":"display:none"}"><div class="srow-l"><div class="srow-t">SSH-порт</div></div><div class="srow-c"><input class="mono" id="cPort" style="max-width:90px" value="${c.ssh_port||22}"></div></div>
-   <div class="srow"><div class="srow-l"></div><div class="srow-c"><button class="btn sm" id="cTest">${svg("refresh",13)} Проверить связь</button></div></div>
+   <div class="srow"><div class="srow-l"></div><div class="srow-c"><button class="btn sm pri" id="cSave">${svg("save",13)} Сохранить</button><button class="btn sm" id="cTest">${svg("refresh",13)} Проверить связь</button><span id="cSaved" class="nb-saved"></span></div></div>
    <div class="nb-testr" id="cTestR"></div>`;
   const g=s=>tc.querySelector(s);
   wireSeg(tc,"#cTr",v=>{g("#cPortRow").style.display=v==="ssh"?"":"none";const hh=MHELP[v];g("#cHelp").innerHTML=`<b>${esc(hh.t)}</b><span>${esc(hh.d)}</span>`;saveCfg({transport:v}).then(()=>tabConn(tc));});
+  // явное сохранение всех полей + подтверждение (поля также сохраняются по blur)
+  const saveConn=async()=>{const patch={host:g("#cHost").value.trim(),user:g("#cUser").value.trim(),ssh_port:+g("#cPort").value||22};
+    if(g("#cPw").value)patch.password=g("#cPw").value;await saveCfg(patch);
+    const sv=g("#cSaved");sv.textContent="✓ сохранено";sv.classList.add("show");setTimeout(()=>sv.classList.remove("show"),2000);};
+  g("#cSave").onclick=saveConn;
   g("#cHost").onchange=()=>saveCfg({host:g("#cHost").value.trim()});
   g("#cUser").onchange=()=>saveCfg({user:g("#cUser").value.trim()});
   g("#cPw").onchange=()=>{if(g("#cPw").value)saveCfg({password:g("#cPw").value});};
@@ -4210,7 +4238,10 @@ function winBackup(){openWin("__nasbak","Бэкап главного NAS",(body,
   wireSeg(tc,"#sDm",v=>saveCfg({dest_mode:v}).then(()=>tabSources(tc)));
   const bb=g("#sBase");if(bb)bb.onchange=()=>saveCfg({dest_base:bb.value.trim()});
   const bbB=g("#sBaseB");if(bbB)bbB.onclick=()=>nbPickLocal(bb.value||"/mnt",p=>{bb.value=p;saveCfg({dest_base:p});});
-  g("#sAdd").onclick=()=>nbPickSource(sel=>{sel.forEach(src=>{if(!JOBS.some(j=>j.src===src))JOBS.push({src,dest:destFor(src),enabled:true});});saveCfg({jobs:JOBS}).then(()=>tabSources(tc));});
+  g("#sAdd").onclick=()=>nbPickSource(JOBS.map(j=>j.src),list=>{const chosen=new Set(list);
+    JOBS=JOBS.filter(j=>chosen.has(j.src));                                   // снятые — убрать (dest сохранённых остаётся)
+    list.forEach(src=>{if(!JOBS.some(j=>j.src===src))JOBS.push({src,dest:destFor(src),enabled:true});});
+    saveCfg({jobs:JOBS}).then(()=>tabSources(tc));});
   const exList=()=>g("#sExcl").value.split("\n").map(x=>x.trim()).filter(Boolean);
   const exSet=arr=>{const uniq=[...new Set(arr)];g("#sExcl").value=uniq.join("\n");saveCfg({excludes:uniq});};
   g("#sExcl").onchange=()=>exSet(exList());
