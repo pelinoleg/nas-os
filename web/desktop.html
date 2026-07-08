@@ -492,10 +492,12 @@
   /* индикатор запущенного приложения — снизу по центру, читаем на любом фоне дока */
   .dock .run{position:absolute;left:50%;bottom:-3px;transform:translateX(-50%);width:5px;height:5px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 1.5px var(--dock-bg,var(--glass-2))}
   .dock.pos-left .run,.dock.pos-right .run{left:auto;bottom:auto;top:50%;right:-3px;transform:translateY(-50%)}
-  /* индикатор идущего бэкапа: аккуратная пульсирующая точка в углу иконки */
-  .dock .di-spin{position:absolute;left:50%;bottom:-3px;transform:translateX(-50%);width:6px;height:6px;border-radius:50%;background:var(--good);box-shadow:0 0 0 1.5px var(--dock-bg,var(--glass-2));animation:nbpulse 1.15s ease-in-out infinite;pointer-events:none}
-  .dock.pos-left .di-spin,.dock.pos-right .di-spin{left:auto;bottom:auto;top:50%;right:-3px;transform:translateY(-50%)}
-  @keyframes nbpulse{0%,100%{opacity:1}50%{opacity:.25}}
+  /* индикатор идущего бэкапа: круглый бейдж-спиннер в углу иконки (заметно и аккуратно) */
+  .dock .di-spin{position:absolute;right:-5px;bottom:-5px;width:15px;height:15px;border-radius:50%;
+    background:var(--good);box-shadow:0 1px 3px rgba(0,0,0,.35),0 0 0 2px var(--dock-bg,var(--glass-2));
+    display:grid;place-items:center;pointer-events:none;z-index:2}
+  .dock .di-spin::after{content:"";width:9px;height:9px;border-radius:50%;
+    border:2px solid rgba(255,255,255,.4);border-top-color:#fff;animation:wspin .8s linear infinite}
   .dock .sep{width:1px;background:var(--line-2);margin:6px 4px;align-self:stretch;flex:none}
 
   /* windows */

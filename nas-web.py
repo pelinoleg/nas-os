@@ -2001,7 +2001,6 @@ def history_sample():
 # =========================================================================== #
 NB_CONF   = "/etc/nas-os/nas-backup.json"                 # секреты → root 600
 NB_STATUS = os.path.join(NAS_CONFIG, "nas-backup-status.json")
-_nb_lock  = threading.Lock()
 # Прогон бэкапа запускается ОТДЕЛЬНЫМ процессом в транзиентном systemd-юните
 # (вне cgroup службы) → переживает перезапуск/обновление nas-web. Драйвер пишет
 # вывод в файл-лог и статус в json; UI/сервер их читают и переподключаются.
@@ -2009,7 +2008,6 @@ NB_RUN_LOG    = os.path.join(NAS_CONFIG, "nas-backup-run.log")
 NB_RUN_STATE  = os.path.join(NAS_CONFIG, "nas-backup-run.json")
 NB_RUN_CANCEL = os.path.join(NAS_CONFIG, "nas-backup-run.cancel")
 NB_RUN_UNIT   = "nas-backup-run"          # имя транзиентного юнита (systemd-run --unit)
-_nb_state = {"running": False, "cancel": False, "started": 0, "line": "", "cur": ""}   # legacy (стрим-эндпоинт)
 
 def _nb_run_state_read():
     try:
@@ -6495,37 +6493,12 @@ class H(BaseHTTPRequestHandler):
                 started = nb_run_bg(dry=bool(self._body().get("dry", False)))
                 self._json({"ok": started, "log": "запущено" if started else "уже выполняется"})
             elif p == "/api/backup/cancel":
-                self._body(); _nb_state["cancel"] = True     # legacy стрим
+                self._body()
                 try:
-                    open(NB_RUN_CANCEL, "w").close()         # флаг для отдельного процесса-драйвера
+                    open(NB_RUN_CANCEL, "w").close()         # флаг для процесса-драйвера в юните
                 except OSError:
                     pass
                 self._json({"ok": True})
-            elif p == "/api/backup/run":
-                # стрим прогона бэкапа построчно (как apt/движок)
-                dry = bool(self._body().get("dry", False))
-                self.send_response(200); self.send_header("Content-Type", "text/plain; charset=utf-8")
-                self.send_header("Cache-Control", "no-store"); self.send_header("X-Accel-Buffering", "no")
-                self.end_headers()
-                def w(line):
-                    try: self.wfile.write((line + "\n").encode()); self.wfile.flush()
-                    except (BrokenPipeError, ConnectionResetError): _nb_state["cancel"] = True
-                with _nb_lock:
-                    busy = _nb_state["running"]
-                    if not busy: _nb_state.update(running=True, cancel=False, started=int(time.time()))
-                if busy:
-                    w("бэкап уже выполняется");
-                else:
-                    try:
-                        r = nb_run(nb_load(), dry, w, lambda: _nb_state["cancel"])
-                        if not dry:
-                            log_event("nas_backup", "Бэкап главного NAS",
-                                      "все задачи выполнены" if r.get("ok") else ("главный NAS недоступен" if r.get("unreachable") else "часть задач с ошибками"),
-                                      "ok" if r.get("ok") else "warn", kind="backup", desk=True)
-                    finally:
-                        _nb_state.update(running=False, cancel=False, line="")
-                try: self.wfile.write(b"__EXIT__0\n"); self.wfile.flush()
-                except OSError: pass
             elif p.startswith("/api/setup/"):
                 action = p[len("/api/setup/"):]
                 b = self._body()
