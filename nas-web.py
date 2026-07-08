@@ -4058,6 +4058,7 @@ def _duscan_run(root):
                 _duscan[root] = {"status": "error", "root": root, "error": str(e)[:200]}
         return
     try:
+        os.makedirs(NAS_CONFIG, exist_ok=True)
         with open(_duscan_cache_path(root), "w") as f:
             json.dump(data, f)
     except OSError:
