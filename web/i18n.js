@@ -7,6 +7,7 @@
 window.NAS_I18N = { en: {
 "Бэкап главного NAS": "Main NAS backup",
 "Надёжность и отчёты": "Reliability & reports",
+"Боковая панель (избранное/диски)": "Side panel (favorites/disks)",
 "Обслуживание": "Maintenance",
 "Обслуживание и надёжность": "Maintenance & reliability",
 "Проверки дисков, защита данных и автоматические отчёты.": "Disk checks, data protection and automatic reports.",

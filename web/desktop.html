@@ -240,7 +240,6 @@
     .win .wback{display:flex}
     .win .wbar .ttl{margin-left:0;font-size:15px;font-weight:650}
     .scrim{padding:14px}
-    .fm-fav{display:none}
     .fm-cols .c-d,.fm-row .fdate{display:none}
     .menu{min-width:min(216px,calc(100vw - 24px))}
   }
@@ -869,6 +868,7 @@
   .iconbtn.pri{color:var(--accent);background:var(--accent-soft)}
   /* избранное-сайдбар */
   .fm-fav{width:160px;flex:none;display:flex;flex-direction:column;border-right:1px solid var(--line);margin-right:12px;padding-right:10px}
+  .fm.fav-hidden .fm-fav{display:none}
   .fm-fav-h{display:flex;align-items:center;justify-content:space-between;font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--mut);font-family:var(--mono);margin-bottom:6px;padding:2px 4px}
   .fm-fav-h .iconbtn{padding:1px 7px;font-size:15px;line-height:1}
   .fm-fav-list{flex:1;overflow:auto;margin:0 -4px}
@@ -3196,6 +3196,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    <div class="fm-top">
      <div class="fm-tabs" id="fTabs"></div>
      <div class="fm-bar2">
+       <button class="iconbtn" id="fFavT" title="Боковая панель (избранное/диски)">${svg("layers",15)}</button>
        <button class="iconbtn" id="fUp" title="Вверх">${svg("arrowup",15)}</button>
        <button class="iconbtn" id="fRef" title="Обновить">${svg("refresh",15)}</button>
        <div class="fm-crumb" id="fCrumb"></div>
@@ -3546,6 +3547,10 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    it.push({label:"Удалить навсегда",ic:svg("trash",16),dng:1,act:()=>doDeleteForever(selOr(e))});
    showMenu(x,y,it);}
  /* тулбар */
+ {const fm=body.querySelector(".fm"),ft=body.querySelector("#fFavT");
+  let hid=SET.fmFavHidden;if(hid===undefined)hid=isPhone();   // на телефоне по умолчанию свёрнут
+  const apply=()=>{fm.classList.toggle("fav-hidden",hid);ft.classList.toggle("pri",!hid);};apply();
+  ft.onclick=()=>{hid=!hid;SET.fmFavHidden=hid;apply();saveSettings();};}
  body.querySelector("#fUp").onclick=()=>load(cwd==="/"?"/":(cwd.replace(/\/[^/]+$/,"")||"/"));
  body.querySelector("#fRef").onclick=()=>load(cwd);
  body.querySelector("#fHid").onclick=function(){showHidden=!showHidden;this.classList.toggle("pri",showHidden);renderList();};
