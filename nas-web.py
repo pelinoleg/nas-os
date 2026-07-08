@@ -2098,6 +2098,12 @@ def _nb_err(raw):
     low = (raw or "").lower()
     if "sshpass" in low and ("not found" in low or "no such" in low):
         return "sshpass не установлен (нужен для пароля по SSH)"
+    if "sudo:" in low or "not in the sudoers" in low:      # sudo на источнике (до общей проверки пароля)
+        if "not allowed" in low or "not in the sudoers" in low or "may not run" in low:
+            return "sudo на источнике не разрешён для rsync — добавьте правило NOPASSWD в sudoers"
+        if "command not found" in low:
+            return "на источнике не найден sudo"
+        return "на источнике sudo требует пароль/TTY — нужен NOPASSWD sudo для rsync (см. подсказку у тумблера)"
     if "permission denied" in low or "auth" in low or "password" in low:
         return "доступ отклонён — проверьте пользователя и пароль (или ключ)"
     if "connection refused" in low:
@@ -2123,8 +2129,10 @@ def nb_test(cfg=None):
     if cfg.get("transport") == "ssh":
         if cfg.get("password") and not shutil.which("sshpass"):
             return {"ok": False, "log": "для пароля по SSH нужен sshpass (переустановите/обновите систему) — или используйте ключ"}
-        r = _run(["rsync"] + rsh + ["--list-only", remote + "/"], timeout=25, env=env)
-        return {"ok": r["ok"], "log": "SSH-подключение работает" if r["ok"] else _nb_err(r["log"])}
+        extra = ["--rsync-path=sudo rsync"] if cfg.get("remote_sudo") else []   # проверяем и сам sudo-путь
+        r = _run(["rsync"] + rsh + extra + ["--list-only", remote + "/"], timeout=25, env=env)
+        ok_msg = "SSH-подключение работает" + (" · sudo на источнике ок" if cfg.get("remote_sudo") else "")
+        return {"ok": r["ok"], "log": ok_msg if r["ok"] else _nb_err(r["log"])}
     r = subprocess.run(["rsync", remote], capture_output=True, text=True, env=env, timeout=25)
     out = (r.stdout + r.stderr).strip()
     if r.returncode != 0 or "auth failed" in out or "@ERROR" in out:

@@ -6,6 +6,10 @@
    Перевод применяется только к целым «словам» (границы — не-кириллица), длинные фразы приоритетнее. */
 window.NAS_I18N = { en: {
 "Анализ места": "Disk usage",
+"sudo на источнике ок": "sudo on source OK",
+"на источнике sudo требует пароль/TTY — нужен NOPASSWD sudo для rsync (см. подсказку у тумблера)": "sudo on the source needs a password/TTY — set up NOPASSWD sudo for rsync (see the tooltip)",
+"sudo на источнике не разрешён для rsync — добавьте правило NOPASSWD в sudoers": "sudo on the source isn't allowed for rsync — add a NOPASSWD rule to sudoers",
+"на источнике не найден sudo": "sudo not found on the source",
 "идёт сейчас…": "running now…",
 "источник недоступен": "source unreachable",
 "бэкап завершён": "backup finished",
