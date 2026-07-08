@@ -6,6 +6,16 @@
    Перевод применяется только к целым «словам» (границы — не-кириллица), длинные фразы приоритетнее. */
 window.NAS_I18N = { en: {
 "Анализ места": "Disk usage",
+"Источник бэкапа недоступен": "Backup source unreachable",
+"периодическая проверка связи с главным NAS (раз в ~30 мин)": "periodic connection check to the main NAS (~every 30 min)",
+"Пропала исходная папка": "Source folder gone",
+"выбранная для бэкапа папка исчезла на источнике": "a folder chosen for backup disappeared on the source",
+"Давно не было бэкапа": "No backup in a while",
+"последний прогон старше порога (или не было ни одного)": "last run older than the threshold (or none yet)",
+"Резко изменился размер бэкапа": "Backup size changed sharply",
+"размер приёмника прыгнул больше порога с прошлой проверки": "the destination size jumped more than the threshold since last check",
+"Мало места в приёмнике": "Low space in destination",
+"папка-приёмник заполнена выше порога или пул не смонтирован": "the destination is filled above the threshold, or the pool isn't mounted",
 "sudo на источнике ок": "sudo on source OK",
 "на источнике sudo требует пароль/TTY — нужен NOPASSWD sudo для rsync (см. подсказку у тумблера)": "sudo on the source needs a password/TTY — set up NOPASSWD sudo for rsync (see the tooltip)",
 "sudo на источнике не разрешён для rsync — добавьте правило NOPASSWD в sudoers": "sudo on the source isn't allowed for rsync — add a NOPASSWD rule to sudoers",

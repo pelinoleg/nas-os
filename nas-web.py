@@ -972,6 +972,12 @@ def _def_monitor():
         "usb_import":  {"on": False, "priority": 0, "desk": True},
         # --- бэкап главного NAS на этот NAS (итог прогона) ---
         "nas_backup":  {"on": True, "priority": 0, "desk": True},
+        # --- здоровье бэкапа (периодические проверки, раз в 30 мин) ---
+        "nb_conn":     {"on": True,  "priority": 1, "desk": True},
+        "nb_srcmiss":  {"on": False, "priority": 1, "desk": True},
+        "nb_stale":    {"on": True,  "priority": 1, "threshold": 7,  "desk": True},
+        "nb_size":     {"on": False, "priority": 0, "threshold": 40, "desk": True},
+        "nb_dest":     {"on": True,  "priority": 1, "threshold": 95, "desk": True},
         # --- надёжность: диск сам переподключился (авто-mount) ---
         "disk_remount":{"on": True, "priority": 0, "desk": True},
         # --- активная термозащита (предупреждение/действие) ---
@@ -1136,7 +1142,8 @@ for _k in ("panel_new", "panel_fail", "ssh_login"):
     _EVENT_KIND[_k] = "access"
 for _k in ("ip_changed", "link_changed", "vpn_offline", "traffic"):
     _EVENT_KIND[_k] = "net"
-for _k in ("snap_ok", "snap_err", "scrub_err", "delete_block", "backup", "mergerfs"):
+for _k in ("snap_ok", "snap_err", "scrub_err", "delete_block", "backup", "mergerfs",
+           "nas_backup", "nb_conn", "nb_srcmiss", "nb_stale", "nb_size", "nb_dest"):
     _EVENT_KIND[_k] = "protect"
 
 def log_event(event, title, msg="", lvl=None, kind=None, desk=None):
@@ -1771,6 +1778,8 @@ def monitor_tick():
     if on("vpn_offline") and _safe(_tailscale_offline):
         fire("vpn", "NAS: VPN offline", "Tailscale не в сети — удалённый доступ недоступен", pri("vpn_offline"), ev_name="vpn_offline")
 
+    # --- здоровье бэкапа главного NAS (связь/папки/давно/размер/место) ---
+    _safe(lambda: nb_health_tick(fire, ev, pri, thr, now))
     # --- защита данных: SnapRAID + mergerfs + бэкап ---
     # берём последние sync/scrub с датой (snapraid_status) и включаем дату в ключ дедупа —
     # так каждое событие уведомляет ОДИН раз, а не каждый cooldown, пока строка в хвосте лога
@@ -2221,7 +2230,7 @@ def nb_build_cmd(cfg, job, dry):
     if cfg.get("transport") == "ssh" and cfg.get("remote_sudo"):
         args.append("--rsync-path=sudo rsync")   # читать файлы без доступа у пользователя (нужен NOPASSWD sudo на источнике)
     if dry:
-        args.append("--dry-run")
+        args += ["--dry-run", "--stats"]   # сводка: сколько файлов и байт будет передано
     args += [remote + job["src"] + "/", dest]
     return args, env
 
@@ -2298,6 +2307,126 @@ def nb_log_tail(since):
             "dry": _nb_state.get("dry", False), "result": _nb_state.get("result"),
             "cur": _nb_state.get("cur", ""), "line": _nb_state.get("line", ""),
             "seq": end, "base": base, "lines": lg[start:]}
+
+# --------------------------------------------------------------------------- #
+#  Здоровье бэкапа — периодические проверки (события nb_conn/nb_srcmiss/nb_stale/
+#  nb_size/nb_dest). Гоняются не чаще раза в 30 мин и только если включена хоть
+#  одна проверка И бэкап настроен (есть адрес и задачи) — иначе тишина.
+# --------------------------------------------------------------------------- #
+_NB_HEALTH_FILE = os.path.join(NAS_CONFIG, "nas-backup-health.json")
+_nb_health_last = 0
+
+def _nb_health_load():
+    try:
+        with open(_NB_HEALTH_FILE) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+def _nb_health_save(d):
+    try:
+        os.makedirs(NAS_CONFIG, exist_ok=True)
+        with open(_NB_HEALTH_FILE, "w") as f:
+            json.dump(d, f)
+    except OSError:
+        pass
+
+def _du_bytes(path):
+    r = subprocess.run(["du", "-sb", path], capture_output=True, text=True, timeout=120)
+    try:
+        return int(r.stdout.split()[0])
+    except (ValueError, IndexError):
+        return None
+
+def nb_health_tick(fire, ev, pri, thr, now):
+    """Периодические проверки бэкапа; fire()/ev/pri/thr — из monitor_tick."""
+    global _nb_health_last
+    HK = ("nb_conn", "nb_srcmiss", "nb_stale", "nb_size", "nb_dest")
+    if not any(ev.get(k, {}).get("on") for k in HK):
+        return
+    if now - _nb_health_last < 1800:
+        return
+    _nb_health_last = now
+    cfg = nb_load()
+    jobs = [j for j in cfg.get("jobs", []) if j.get("enabled", True)]
+    if not cfg.get("host") or not jobs:
+        return
+    hs = _nb_health_load()
+    remote, env, rsh = _nb_remote_env(cfg)
+    extra = ["--rsync-path=sudo rsync"] if (cfg.get("transport") == "ssh" and cfg.get("remote_sudo")) else []
+    conn_ok = None
+    # --- связь с источником ---
+    if ev.get("nb_conn", {}).get("on"):
+        t = nb_test(cfg)
+        conn_ok = t.get("ok")
+        if not conn_ok:
+            fire("nb_conn", "NAS-бэкап: источник недоступен",
+                 "Не удаётся подключиться к %s: %s" % (cfg.get("host"), t.get("log", "")),
+                 pri("nb_conn"), ev_name="nb_conn", lvl="warn")
+    # --- исходные папки на месте (только если связь есть) ---
+    if ev.get("nb_srcmiss", {}).get("on"):
+        if conn_ok is None:
+            conn_ok = nb_test(cfg).get("ok")
+        if conn_ok:
+            missing = []
+            for j in jobs[:20]:
+                r = _run(["rsync"] + rsh + extra + ["--list-only", remote + j["src"] + "/"], timeout=20, env=env)
+                if not r["ok"] and re.search(r"no such file|not found|failed to", r["log"].lower()):
+                    missing.append(j["src"])
+            if missing:
+                fire("nb_srcmiss", "NAS-бэкап: пропала исходная папка",
+                     "Нет на источнике: " + ", ".join(missing), pri("nb_srcmiss"), ev_name="nb_srcmiss", lvl="warn")
+    # --- давно не было прогона ---
+    if ev.get("nb_stale", {}).get("on"):
+        days = thr("nb_stale", 7)
+        try:
+            with open(NB_STATUS) as f:
+                ts = json.load(f).get("ts", 0)
+        except (OSError, ValueError):
+            ts = 0
+        if days > 0 and not _nb_state["running"]:
+            if not ts:
+                fire("nb_stale", "NAS-бэкап: ещё не выполнялся",
+                     "Бэкап настроен, но не было ни одного прогона", pri("nb_stale"), ev_name="nb_stale", lvl="warn")
+            elif now - ts > days * 86400:
+                fire("nb_stale", "NAS-бэкап: давно не обновлялся",
+                     "Последний прогон %d дн назад (порог %d)" % (int((now - ts) / 86400), days),
+                     pri("nb_stale"), ev_name="nb_stale", lvl="warn")
+    # --- резкое изменение размера приёмника ---
+    if ev.get("nb_size", {}).get("on") and not _nb_state["running"]:
+        base_dir = cfg.get("dest_base") or "/mnt/storage/nas-backup"
+        if os.path.isdir(base_dir):
+            cur_sz = _du_bytes(base_dir)
+            prev = hs.get("dest_size")
+            if cur_sz is not None:
+                if prev and prev > 0:
+                    delta = abs(cur_sz - prev) * 100.0 / prev
+                    lim = thr("nb_size", 40)
+                    if delta >= lim:
+                        arrow = "вырос" if cur_sz > prev else "уменьшился"
+                        fire("nb_size", "NAS-бэкап: резко изменился размер",
+                             "Приёмник %s на %.0f%% (%s → %s)" % (arrow, delta, fmt_bytes(prev), fmt_bytes(cur_sz)),
+                             pri("nb_size"), ev_name="nb_size", lvl="warn")
+                hs["dest_size"] = cur_sz
+    # --- приёмник: место / смонтирован ли ---
+    if ev.get("nb_dest", {}).get("on"):
+        base_dir = cfg.get("dest_base") or "/mnt/storage/nas-backup"
+        top = "/mnt/storage" if base_dir.startswith("/mnt/storage") else base_dir
+        if top == "/mnt/storage" and not os.path.ismount("/mnt/storage"):
+            fire("nb_dest", "NAS-бэкап: приёмник не смонтирован",
+                 "Пул /mnt/storage не смонтирован — бэкап писать некуда", pri("nb_dest"), ev_name="nb_dest", lvl="warn")
+        else:
+            try:
+                st = os.statvfs(base_dir if os.path.isdir(base_dir) else "/")
+                used = 100.0 * (st.f_blocks - st.f_bfree) / max(st.f_blocks, 1)
+                lim = thr("nb_dest", 95)
+                if used >= lim:
+                    fire("nb_dest", "NAS-бэкап: мало места в приёмнике",
+                         "%s заполнен на %.0f%% (порог %d%%)" % (base_dir, used, lim),
+                         pri("nb_dest"), ev_name="nb_dest", lvl="warn")
+            except OSError:
+                pass
+    _nb_health_save(hs)
 
 def nb_run_bg(dry=False):
     """Фоновый запуск (для расписания и кнопки «в фоне»)."""
