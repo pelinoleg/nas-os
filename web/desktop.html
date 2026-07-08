@@ -935,7 +935,12 @@
   .du-cols{flex:1;min-height:0;display:flex;gap:16px}
   .du-chart{flex:none;display:flex;align-items:flex-start;justify-content:center}
   .du-chart svg{max-width:100%;height:auto}
-  .duseg{cursor:pointer;transition:opacity .12s;stroke:var(--win,#fff);stroke-width:.8}
+  .duseg{cursor:pointer;transition:opacity .12s,filter .12s;stroke:var(--line);stroke-width:1}
+  .duseg2{fill-opacity:.5}   /* 2-й уровень отступает через прозрачность — корректно и в тёмной теме */
+  .duseg.du-dim{opacity:.25}
+  .duseg.du-hot{filter:brightness(1.12)}
+  .du-row.du-hot{background:var(--sel)}
+  .du-row.du-dim{opacity:.45}
   .du-hole{fill:var(--glass);stroke:var(--line)}
   .du-ctext{fill:var(--text);font-family:var(--mono);font-weight:700;font-size:15px}
   .du-csub{fill:var(--mut);font-size:9.5px}
@@ -3960,12 +3965,19 @@ function winDiskUsage(initRoot){openWin("__duscan","Анализ места",(bo
    return out;}
  let roots=rootList();
  let root=initRoot?norm(initRoot):((roots[0]&&roots[0].p)||"/mnt/storage");
- let cur=root,node=null,cache={};
- body.innerHTML=`<div class="du"><div class="du-top"><div class="seg du-roots" id="duRoots"></div><span class="grow"></span><span class="du-meta" id="duMeta"></span><button class="btn sm" id="duRescan">${svg("refresh",13)} Пересканировать</button></div><div class="du-main" id="duMain"></div></div>`;
+ let cur=root,node=null,cache={},showL2=SET.duL2!==false;
+ body.innerHTML=`<div class="du"><div class="du-top"><div class="seg du-roots" id="duRoots"></div><span class="grow"></span><span class="du-meta" id="duMeta"></span><button class="iconbtn" id="duL2" title="Показывать второй уровень колец">${svg("layers",15)}</button><button class="btn sm" id="duRescan">${svg("refresh",13)} Пересканировать</button></div><div class="du-main" id="duMain"></div></div>`;
  const rootsEl=body.querySelector("#duRoots"),metaEl=body.querySelector("#duMeta"),mainEl=body.querySelector("#duMain");
+ // палитра чуть приглушена, читается в обеих темах; 2-й уровень отделяем прозрачностью (см. CSS), а не осветлением в белый
  const DUCOL=["#4C8DF6","#33BE86","#E0913C","#8A7DFF","#E0669E","#2FB0BC","#E5544E","#5B9BD5","#46B98A","#B07A44","#7A6EE0","#D9A62E"];
- const shade=(hex,f)=>{const m=/^#(..)(..)(..)$/.exec(hex);if(!m)return hex;const mix=v=>Math.round(parseInt(v,16)+(255-parseInt(v,16))*f);return `rgb(${mix(m[1])},${mix(m[2])},${mix(m[3])})`;};
  const fmtTs=ts=>{if(!ts)return"";const d=Date.now()/1000-ts;if(d<60)return"только что";if(d<3600)return Math.floor(d/60)+" мин назад";if(d<86400)return Math.floor(d/3600)+" ч назад";return Math.floor(d/86400)+" дн назад";};
+ // перекрёстная подсветка круг↔бары по ключу (индекс ребёнка верхнего уровня)
+ function duHi(key,on){mainEl.querySelectorAll("[data-key]").forEach(elm=>{const m=elm.dataset.key===String(key);
+   elm.classList.toggle("du-dim",on&&!m);elm.classList.toggle("du-hot",on&&m);});}
+ function ctxMenu(c,x,y){if(!c.p)return;showMenu(x,y,[
+   {label:"Показать в Файлах",ic:svg("folder",16),act:()=>winFiles(c.d?c.p:(c.p.replace(/\/[^/]+$/,"")||"/"))},
+   ...(c.d?[{label:"Провалиться внутрь",ic:svg("chartpie",16),act:()=>drill(c.p)}]:[]),
+   {label:"В корзину",ic:svg("trash",16),dng:1,act:()=>trashItem(c)}]);}
  function paintRoots(){roots=rootList();rootsEl.innerHTML=roots.map(r=>`<button data-r="${att(r.p)}" class="${r.p===root?"on":""}">${esc(r.l)}</button>`).join("");
    rootsEl.querySelectorAll("button").forEach(b=>b.onclick=()=>{root=b.dataset.r;cur=root;cache={};paintRoots();refresh();});}
  async function refresh(){const st=await api("/api/fs/duscan/status?root="+encodeURIComponent(root));
@@ -3993,37 +4005,44 @@ function winDiskUsage(initRoot){openWin("__duscan","Анализ места",(bo
    rel.split("/").filter(Boolean).forEach(seg=>{acc=(acc==="/"?"":acc)+"/"+seg;const p=acc;c.appendChild(el(`<span class="sepc">/</span>`));mk(seg,p);});}
  function renderChart(){const box=mainEl.querySelector("#duChart");if(!box)return;
    const ch=(node.ch||[]).filter(x=>x.s>0),total=ch.reduce((s,x)=>s+x.s,0)||node.s||1;
-   const cx=130,cy=130,r0=44,r1=87,r2=122,TAU=Math.PI*2;
+   const cx=130,cy=130,r0=44,r1=showL2?87:118,r2=122,TAU=Math.PI*2;
    const arc=(ri,ro,a0,a1)=>{const P=(r,a)=>[cx+r*Math.cos(a),cy+r*Math.sin(a)];const laf=(a1-a0)>Math.PI?1:0;
      const A=P(ro,a0),B=P(ro,a1),C=P(ri,a1),D=P(ri,a0);
      return `M${A[0].toFixed(2)} ${A[1].toFixed(2)}A${ro} ${ro} 0 ${laf} 1 ${B[0].toFixed(2)} ${B[1].toFixed(2)}L${C[0].toFixed(2)} ${C[1].toFixed(2)}A${ri} ${ri} 0 ${laf} 0 ${D[0].toFixed(2)} ${D[1].toFixed(2)}Z`;};
    const segs=[];let a=-Math.PI/2;
    ch.forEach((c,i)=>{const span=Math.max(0,(c.s/total)*TAU),a0=a,a1=a+span;a=a1;if(span<0.012)return;
      const col=DUCOL[i%DUCOL.length],full=span>=TAU-0.001;
-     segs.push({c,col,ring:1,full,path:full?null:arc(r0,r1,a0,a1)});
-     if(c.d&&c.c&&c.c.length){const sub=c.c.filter(x=>x.s>0),st=sub.reduce((s,x)=>s+x.s,0)||c.s;let aa=a0;
-       sub.forEach(sc=>{const sp=Math.max(0,(sc.s/st)*span),b0=aa,b1=aa+sp;aa=b1;if(sp<0.012)return;segs.push({c:sc,col:shade(col,.44),ring:2,path:arc(r1,r2,b0,b1)});});}});
-   const inner=segs.map((s,idx)=>s.ring===1&&s.full?`<circle cx="${cx}" cy="${cy}" r="${(r0+r1)/2}" fill="none" stroke="${s.col}" stroke-width="${r1-r0}" data-i="${idx}" class="duseg"/>`:`<path d="${s.path}" fill="${s.col}" data-i="${idx}" class="duseg"/>`).join("");
+     segs.push({c,col,ring:1,key:i,full,path:full?null:arc(r0,r1,a0,a1)});
+     if(showL2&&c.d&&c.c&&c.c.length){const sub=c.c.filter(x=>x.s>0),st=sub.reduce((s,x)=>s+x.s,0)||c.s;let aa=a0;
+       sub.forEach(sc=>{const sp=Math.max(0,(sc.s/st)*span),b0=aa,b1=aa+sp;aa=b1;if(sp<0.012)return;segs.push({c:sc,col,ring:2,key:i,path:arc(r1,r2,b0,b1)});});}});
+   const inner=segs.map((s,idx)=>{const cls=`duseg${s.ring===2?" duseg2":""}`;
+     return s.ring===1&&s.full
+       ?`<circle cx="${cx}" cy="${cy}" r="${(r0+r1)/2}" fill="none" stroke="${s.col}" stroke-width="${r1-r0}" data-i="${idx}" data-key="${s.key}" class="${cls}"/>`
+       :`<path d="${s.path}" fill="${s.col}" data-i="${idx}" data-key="${s.key}" class="${cls}"/>`;}).join("");
    box.innerHTML=`<svg viewBox="0 0 260 260" width="260" height="260">${inner}<circle cx="${cx}" cy="${cy}" r="${r0-4}" class="du-hole" id="duHole"/><text x="${cx}" y="${cy-3}" text-anchor="middle" class="du-ctext" id="duC1"></text><text x="${cx}" y="${cy+13}" text-anchor="middle" class="du-csub" id="duC2"></text></svg>`;
    const setC=(t1,t2)=>{const a1=box.querySelector("#duC1"),a2=box.querySelector("#duC2");if(a1)a1.textContent=t1;if(a2)a2.textContent=t2;};
    setC(fmtB(node.s||total),"");
    box.querySelectorAll(".duseg").forEach(elm=>{const s=segs[+elm.dataset.i];
-     elm.onmouseenter=()=>{setC(fmtB(s.c.s),s.c.n.length>18?s.c.n.slice(0,17)+"…":s.c.n);box.querySelectorAll(".duseg").forEach(o=>{o.style.opacity=o===elm?"1":".4";});};
-     elm.onmouseleave=()=>{setC(fmtB(node.s||total),"");box.querySelectorAll(".duseg").forEach(o=>{o.style.opacity="1";});};
-     elm.onclick=()=>{if(s.c.d)drill(s.c.p);};});
+     elm.onmouseenter=()=>{setC(fmtB(s.c.s),s.c.n.length>18?s.c.n.slice(0,17)+"…":s.c.n);duHi(s.key,true);};
+     elm.onmouseleave=()=>{setC(fmtB(node.s||total),"");duHi(s.key,false);};
+     elm.onclick=()=>{if(s.c.d)drill(s.c.p);};
+     elm.oncontextmenu=ev=>{if(!s.c.p)return;ev.preventDefault();ctxMenu(s.c,ev.clientX,ev.clientY);};});
    const hole=box.querySelector("#duHole");if(hole&&cur!==root)hole.onclick=()=>{const par=cur.replace(/\/[^/]+$/,"")||"/";drill(par.length<root.length?root:par);};}
  function renderList(){const box=mainEl.querySelector("#duList");if(!box)return;box.innerHTML="";
    const ch=(node.ch||[]).filter(x=>x.s>0),max=ch.reduce((m,x)=>Math.max(m,x.s),1);
    if(!ch.length){box.innerHTML=`<div class="du-empty2">Пусто</div>`;return;}
    ch.forEach((c,i)=>{const col=c.o?"var(--mut)":DUCOL[i%DUCOL.length];
-     const row=el(`<div class="du-row${c.d?" isdir":""}"><span class="du-sw" style="background:${col}"></span><span class="du-nm" title="${att(c.n)}">${esc(c.n)}</span><span class="du-bar"><i style="width:${Math.max(2,c.s/max*100).toFixed(1)}%;background:${col}"></i></span><span class="du-sz">${fmtB(c.s)}</span>${c.p?`<button class="du-x" title="В корзину">${svg("trash",13)}</button>`:""}</div>`);
-     if(c.d){row.querySelector(".du-nm").onclick=()=>drill(c.p);row.querySelector(".du-sw").onclick=()=>drill(c.p);}
-     if(c.p)row.oncontextmenu=ev=>{ev.preventDefault();showMenu(ev.clientX,ev.clientY,[{label:"Показать в Файлах",ic:svg("folder",16),act:()=>winFiles(c.d?c.p:(c.p.replace(/\/[^/]+$/,"")||"/"))},{label:"В корзину",ic:svg("trash",16),dng:1,act:()=>trashItem(c)}]);};
+     const row=el(`<div class="du-row${c.d?" isdir":""}" data-key="${i}"><span class="du-sw" style="background:${col}"></span><span class="du-nm" title="${att(c.n)}">${esc(c.n)}</span><span class="du-bar"><i style="width:${Math.max(2,c.s/max*100).toFixed(1)}%;background:${col}"></i></span><span class="du-sz">${fmtB(c.s)}</span>${c.p?`<button class="du-x" title="В корзину">${svg("trash",13)}</button>`:""}</div>`);
+     if(c.d)row.onclick=ev=>{if(ev.target.closest(".du-x"))return;drill(c.p);};
+     if(c.p)row.oncontextmenu=ev=>{ev.preventDefault();ctxMenu(c,ev.clientX,ev.clientY);};
+     row.onmouseenter=()=>duHi(i,true);row.onmouseleave=()=>duHi(i,false);
      const x=row.querySelector(".du-x");if(x)x.onclick=ev=>{ev.stopPropagation();trashItem(c);};
      box.appendChild(row);});}
  function trashItem(c){confirmDlg("В корзину?",esc(c.n),async()=>{const r=await api("/api/fs/trash",{method:"POST",body:JSON.stringify({path:c.p})});
    if(r&&r.ok){node.ch=node.ch.filter(x=>x!==c);renderView();toast("В корзину. Размеры обновятся после пере-скана.");}else toast("Ошибка: "+((r&&r.log)||"?"));});}
  body.querySelector("#duRescan").onclick=startScan;
+ {const b=body.querySelector("#duL2");b.classList.toggle("pri",showL2);
+  b.onclick=()=>{showL2=!showL2;SET.duL2=showL2;saveSettings();b.classList.toggle("pri",showL2);if(node)renderChart();};}
  paintRoots();refresh();
 },{w:900,h:640});}
 /* Отдельное окно-редактор/просмотрщик файла (заголовок = имя, свои кнопки) */
