@@ -830,7 +830,7 @@
   .feditor .ffoot{display:flex;justify-content:space-between;align-items:center;margin-top:11px}
   /* нативный файловый менеджер */
   .fm{display:flex;height:100%}
-  .fm-side{flex:1;min-width:0;display:flex;flex-direction:column}
+  .fm-side{flex:1;min-width:0;display:flex;flex-direction:column;position:relative}
   .fm-bar{display:flex;gap:4px;align-items:center;margin-bottom:9px}
   .fm-path{margin-bottom:8px;font-family:var(--mono);font-size:11px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:5px 8px;background:var(--card);border-radius:var(--r-sm)}
   .fm-list{flex:1;overflow:auto;margin:0 -4px}
@@ -860,7 +860,7 @@
   .fm-row{display:flex;align-items:center;gap:9px;padding:7px 8px;border-radius:var(--r-sm);cursor:pointer;font-size:12.5px}
   .fm-row:hover{background:var(--sel)}
   .fm-row.sel{background:var(--accent-soft);color:var(--accent)}
-  .fm-row .fi{flex:none;color:var(--dim);display:grid;place-items:center;width:20px;height:20px;position:relative}
+  .fm-row .fi{flex:none;color:var(--dim);display:grid;place-items:center;width:28px;height:28px;position:relative}
   .fm-row .fi .thumb{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;border-radius:4px}
   .fm-row.dir .fi{color:var(--accent-2)}
   .fm-row .fn{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -928,8 +928,13 @@
   .fm-chip{font-size:11px;padding:5px 11px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--dim);cursor:pointer;font-family:var(--mono)}
   .fm-chip:hover{border-color:var(--accent-line);color:var(--accent)}
   .fm-search{flex:1;min-width:110px;padding:7px 10px;font-size:12px}
-  .fm-selbar{display:flex;align-items:center;gap:6px;padding:7px 9px;background:var(--accent-soft);border:1px solid var(--accent-line);border-radius:var(--r-md);flex-wrap:wrap}
-  .fm-selbar .cnt{font-weight:650;color:var(--accent);margin-right:auto;font-size:12.5px}
+  /* плавающая «пилюля» действий над списком — не сдвигает контент вниз */
+  .fm-selbar{position:absolute;left:50%;bottom:44px;transform:translateX(-50%);z-index:20;
+    display:flex;align-items:center;gap:6px;padding:6px 9px;max-width:calc(100% - 20px);
+    background:var(--menu-bg,var(--glass));backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+    border:1px solid var(--line);border-radius:999px;box-shadow:var(--sh-md);overflow-x:auto}
+  .fm-selbar .cnt{font-weight:650;color:var(--accent);font-size:12.5px;white-space:nowrap;padding:0 4px}
+  .fm-selbar .btn{flex:none}
   .fm-cols{display:flex;align-items:center;gap:9px;padding:5px 8px 6px;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);font-family:var(--mono);border-bottom:1px solid var(--line)}
   .fm-cols span{cursor:pointer}.fm-cols .c-n{flex:1}.fm-cols .c-s{width:60px;text-align:right}.fm-cols .c-d{width:92px;text-align:right}
   .fm-cols .on{color:var(--accent)}
@@ -956,22 +961,22 @@
   .fm-fav-i:hover .fx{visibility:visible}.fm-fav-i .fx:hover{color:var(--danger)}
   .fm-fav-i .fx.fx-eject{visibility:visible;color:var(--accent)}
   /* плитки */
-  .fm-list.fm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:6px;align-content:start;padding:6px 2px}
+  .fm-list.fm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(108px,1fr));gap:6px;align-content:start;padding:6px 2px}
   .fm-tile{position:relative;display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 6px 10px;border-radius:var(--r-md);cursor:pointer;border:1px solid transparent}
   .fm-tile:hover{background:var(--sel);border-color:var(--line)}
   .fm-tile.sel{background:var(--accent-soft);border-color:var(--accent-line)}
-  .fm-tile .ti{position:relative;width:44px;height:44px;display:grid;place-items:center;color:var(--dim)}.fm-tile.dir .ti{color:var(--accent-2)}
+  .fm-tile .ti{position:relative;width:64px;height:64px;display:grid;place-items:center;color:var(--dim)}.fm-tile.dir .ti{color:var(--accent-2)}
   .fm-tile .ti .thumb{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;border-radius:6px}
   .fm-tile .tn{font-size:11px;text-align:center;line-height:1.25;word-break:break-word;max-height:2.6em;overflow:hidden;color:var(--text)}
   .fm-tile .fm-ck{position:absolute;top:6px;left:6px;opacity:0}
   .fm-tile:hover .fm-ck,.fm-tile.sel .fm-ck{opacity:1}
   /* размер значков/плиток ФМ (S/M/L; M — базовый, задаётся классом .fm-sz-* на .fm) */
-  .fm-sz-s .fm-row .fi{width:16px;height:16px}
-  .fm-sz-l .fm-row .fi{width:28px;height:28px}
-  .fm-sz-s .fm-list.fm-grid{grid-template-columns:repeat(auto-fill,minmax(70px,1fr))}
-  .fm-sz-l .fm-list.fm-grid{grid-template-columns:repeat(auto-fill,minmax(118px,1fr))}
-  .fm-sz-s .fm-tile .ti{width:34px;height:34px}
-  .fm-sz-l .fm-tile .ti{width:64px;height:64px}
+  .fm-sz-s .fm-row .fi{width:24px;height:24px}
+  .fm-sz-l .fm-row .fi{width:36px;height:36px}
+  .fm-sz-s .fm-list.fm-grid{grid-template-columns:repeat(auto-fill,minmax(84px,1fr))}
+  .fm-sz-l .fm-list.fm-grid{grid-template-columns:repeat(auto-fill,minmax(140px,1fr))}
+  .fm-sz-s .fm-tile .ti{width:48px;height:48px}
+  .fm-sz-l .fm-tile .ti{width:88px;height:88px}
   /* окно-редактор */
   .ed-wrap{display:flex;flex-direction:column;height:100%}
   .ed-bar{display:flex;align-items:center;gap:8px;padding:9px 13px;border-bottom:1px solid var(--line);flex:none}
@@ -3389,18 +3394,34 @@ function fileIcon(name,type){if(type==="dir")return "folder";const e=(name.split
  return "file";}
 /* Классические «залитые» (флэт) иконки файлменеджера: жёлтая папка + цветные листы по типу.
    Многоцветные, поэтому это готовый <svg> (а не путь для svg()/currentColor). */
-function fmKind(name,type){if(type==="dir")return "folder";const e=(name.split(".").pop()||"").toLowerCase();
- if(isImgName(name))return "image";
- if(/^(zip|tar|gz|tgz|bz2|xz|7z|rar)$/.test(e))return "archive";
- if(/^(mp3|flac|wav|ogg|m4a|aac|opus|wma)$/.test(e))return "music";
- if(/^(mp4|mkv|avi|mov|webm|m4v|ogv|wmv|flv|3gp|mpe?g|ts)$/.test(e))return "video";
+function fmKind(name,type){if(type==="dir")return "folder";
+ const e=(name.split(".").pop()||"").toLowerCase();
+ if(isImgName(name)||/^(tiff?|heic|heif|jfif|psd|xcf)$/.test(e))return "image";
+ if(/^(mp4|mkv|avi|mov|webm|m4v|ogv|wmv|flv|3gp|mpe?g)$/.test(e))return "video";
+ if(/^(mp3|flac|wav|ogg|m4a|aac|opus|wma|aiff?|mid|midi)$/.test(e))return "music";
+ if(/^(zip|tar|gz|tgz|bz2|xz|7z|rar|zst|lz|lzma|cab)$/.test(e))return "archive";
  if(e==="pdf")return "pdf";
- if(/^(js|mjs|cjs|ts|py|sh|bash|zsh|yml|yaml|json|html?|css|xml|go|rs|c|cpp|h|hpp|java|php|rb|conf|cfg|ini|toml|env|sql)$/.test(e)||/^Dockerfile/i.test(name))return "code";
- if(/^(txt|md|rtf|doc|docx|odt|log)$/.test(e))return "doc";
+ if(/^(xlsx?|csv|ods|tsv|numbers)$/.test(e))return "sheet";
+ if(/^(pptx?|odp)$/.test(e))return "slides";
+ if(/^(docx?|odt|rtf|pages)$/.test(e))return "doc";
+ if(/^(iso|img|dmg|vhd|vhdx|qcow2|vdi)$/.test(e))return "disk";
+ if(/^(exe|msi|appimage|apk|deb|rpm|app|run|bin)$/.test(e))return "app";
+ if(/^(ttf|otf|woff2?|eot)$/.test(e))return "font";
+ if(/^(sqlite3?|db|sql|mdb|accdb)$/.test(e))return "db";
+ if(/^(pem|crt|cer|key|pub|gpg|asc|p12|pfx|kdbx)$/.test(e))return "key";
+ if(/^(srt|vtt|sub|ass|ssa)$/.test(e))return "sub";
+ if(/^(epub|mobi|azw3?|fb2|djvu)$/.test(e))return "book";
+ if(e==="torrent")return "torrent";
+ if(/^(js|mjs|cjs|ts|tsx|jsx|py|sh|bash|zsh|yml|yaml|json|html?|css|scss|less|xml|go|rs|c|cpp|cc|h|hpp|java|php|rb|swift|kt|lua|pl|r|scala|dart|vue|svelte|toml|ini|cfg|conf|env|gradle)$/.test(e)||/^(Dockerfile|Makefile)/i.test(name))return "code";
+ if(/^(txt|log|md|markdown|nfo|me|text)$/.test(e))return "text";
  return "file";}
 const FM_ICO_C={image:["#33BE86","#2A9C6E"],video:["#8A7DFF","#6E5FE0"],music:["#E0669E","#C64F86"],
  archive:["#E0A24A","#C6883A"],code:["#4C8DF6","#3A6FD0"],pdf:["#E5544E","#C63F3A"],
- doc:["#5B9BD5","#4785C0"],file:["#AEB9C6","#93A0AE"]};
+ doc:["#4C86D8","#3A6CB4"],text:["#8593A6","#6E7B8C"],sheet:["#2E9E5B","#247E49"],
+ slides:["#E5834E","#C96A3A"],disk:["#2FB0BC","#248D97"],app:["#5A6675","#464F5B"],
+ font:["#7A6EE0","#6153C4"],db:["#B07A44","#946237"],key:["#D9A62E","#BE8B22"],
+ sub:["#34B3C6","#2892A3"],book:["#B5623C","#964E2F"],torrent:["#4FAE52","#3D9440"],
+ file:["#AEB9C6","#93A0AE"]};
 const FM_GLYPH={
  image:'<circle cx="8.7" cy="13.4" r="1.15" fill="#fff"/><path fill="#fff" d="M6.3 18.3l2.7-3.2 1.7 2 2.1-2.8 2.9 4z"/>',
  video:'<path fill="#fff" d="M9.7 12.9l4.6 2.7-4.6 2.7z"/>',
@@ -3409,6 +3430,17 @@ const FM_GLYPH={
  code:'<path fill="none" stroke="#fff" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round" d="M10.1 12.8l-1.9 1.95 1.9 1.95M13.9 12.8l1.9 1.95-1.9 1.95"/>',
  pdf:'<path fill="#fff" d="M8 13.2h8v1.3H8zM8 15.5h8v1.3H8zM8 17.8h5v1.3H8z"/>',
  doc:'<path fill="#fff" d="M8 13.2h8v1.15H8zM8 15.35h8v1.15H8zM8 17.5h5v1.15H8z"/>',
+ text:'<path fill="#fff" d="M8 13.4h7v1.05H8zM8 15.5h7v1.05H8zM8 17.6h4.5v1.05H8z"/>',
+ sheet:'<path fill="none" stroke="#fff" stroke-width="1" d="M7.6 12.7h8.8v6.1H7.6zM7.6 15.75h8.8M10.5 12.7v6.1M13.4 12.7v6.1"/>',
+ slides:'<rect x="7.4" y="12.5" width="9.2" height="6.1" rx="1" fill="none" stroke="#fff" stroke-width="1.1"/><path fill="#fff" d="M9 16.4h4.4v1.1H9z"/>',
+ disk:'<circle cx="12" cy="15.4" r="3.5" fill="none" stroke="#fff" stroke-width="1.2"/><circle cx="12" cy="15.4" r="0.95" fill="#fff"/>',
+ app:'<circle cx="12" cy="15.5" r="1.6" fill="none" stroke="#fff" stroke-width="1.15"/><path fill="none" stroke="#fff" stroke-width="1.15" stroke-linecap="round" d="M12 11.9v1.2M12 17.9v1.2M8.4 15.5h1.2M14.4 15.5h1.2M9.6 13.1l.85.85M13.55 17.05l.85.85M14.4 13.1l-.85.85M10.45 17.05l-.85.85"/>',
+ font:'<path fill="#fff" d="M8.1 18.8l2.35-6.7h1.35l2.35 6.7h-1.4l-.52-1.65h-2.25l-.5 1.65zM10.55 16h1.45l-.72-2.3z"/><path fill="#fff" d="M14.7 18.8v-4.9h1.15v4.9z"/>',
+ db:'<path fill="none" stroke="#fff" stroke-width="1.1" d="M8.5 12.8c0 .78 1.57 1.2 3.5 1.2s3.5-.42 3.5-1.2-1.57-1.2-3.5-1.2-3.5 .42-3.5 1.2z"/><path fill="none" stroke="#fff" stroke-width="1.1" d="M8.5 12.8v4.6c0 .78 1.57 1.2 3.5 1.2s3.5-.42 3.5-1.2v-4.6"/>',
+ key:'<circle cx="9.6" cy="14.3" r="1.95" fill="none" stroke="#fff" stroke-width="1.2"/><path fill="none" stroke="#fff" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" d="M11 15.7l3.9 3.9M13.6 18.3l1-1M15 16.9l-1 1"/>',
+ sub:'<rect x="7.3" y="12.9" width="9.4" height="5.6" rx="1.2" fill="none" stroke="#fff" stroke-width="1.1"/><path fill="#fff" d="M8.9 15.3h2.3v1H8.9zM12.3 15.3h2.8v1h-2.8z"/>',
+ book:'<path fill="#fff" d="M12 12.7c-1.05-.72-2.5-.95-3.9-.75v5.9c1.4-.2 2.85 .03 3.9 .75z"/><path fill="#fff" opacity=".82" d="M12 12.7c1.05-.72 2.5-.95 3.9-.75v5.9c-1.4-.2-2.85 .03-3.9 .75z"/>',
+ torrent:'<path fill="#fff" d="M11.1 11.7h1.8v3.3h2.05l-2.95 3.3-2.95-3.3h2.05z"/>',
  file:''};
 function fmIcon(name,type,size){const k=fmKind(name,type);
  if(k==="folder")return `<svg class="fmico" viewBox="0 0 24 24" width="${size}" height="${size}"><path fill="#E0A63C" d="M2.8 6.4c0-1 .8-1.8 1.8-1.8h4.1c.5 0 1 .2 1.35.58L11.3 6.5h8.1c1 0 1.8.8 1.8 1.8v1.1H2.8z"/><path fill="#F5C24C" d="M2.2 9.4c0-.9.72-1.6 1.6-1.6h16.4c.9 0 1.6.72 1.6 1.6l-.66 8.1c-.075.92-.84 1.62-1.76 1.62H4.62c-.92 0-1.685-.7-1.76-1.62z"/></svg>`;
@@ -3544,7 +3576,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    arr.sort((a,b)=>{if(foldersFirst&&a.type!==b.type)return a.type==="dir"?-1:1;
      let r=sortKey==="name"?(a.name.toLowerCase()<b.name.toLowerCase()?-1:1):((a[sortKey]||0)-(b[sortKey]||0));return r*sortDir;});
    const grid=viewMode==="grid";
-   const ICOPX={s:{list:14,grid:22},m:{list:16,grid:28},l:{list:22,grid:44}};
+   const ICOPX={s:{list:20,grid:44},m:{list:24,grid:60},l:{list:32,grid:84}};
    const isz=(ICOPX[SET.fmIconSize]||ICOPX.m)[grid?"grid":"list"],thumbsOn=SET.fmThumbs!==false;
    listBox.classList.toggle("fm-grid",grid);
    const cols=body.querySelector("#fCols");if(cols)cols.style.display=grid?"none":"flex";
