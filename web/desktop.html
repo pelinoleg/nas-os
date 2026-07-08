@@ -3403,7 +3403,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
  let tabs=[cwd],tabI=0;
  const sel=new Set();let clip=null,showHidden=SET.fmHidden===true,filt="",sortKey=SET.fmSortKey||"name",sortDir=SET.fmSortDir===-1?-1:1,lastIdx=-1,favs=[],dragPaths=null,searchMode="name";
  let viewMode="list";try{viewMode=SET.fmView||localStorage.getItem("fmview")||"list";}catch(e){}
- const dblOpen=(SET.fmClick||"single")==="double";   // открывать двойным кликом
+ let dblOpen=(SET.fmClick||"single")==="double";   // открывать двойным кликом
  body.innerHTML=`<div class="fm fm-sz-${(SET.fmIconSize||"m").replace(/[^slm]/g,"")||"m"}"><div class="fm-fav">
    <div class="fm-fav-h"><span>Избранное</span><button class="iconbtn" id="fFavAdd" title="Добавить текущую папку в избранное">+</button></div>
    <div class="fm-fav-list" id="fFav"></div>
@@ -3480,6 +3480,20 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
        await ejectVolume(v);renderVols();};
      c.appendChild(it);});}
  win._vols=renderVols;
+ // живое применение настроек ФМ к уже открытому окну (без перезагрузки страницы)
+ function syncSettings(){
+   showHidden=SET.fmHidden===true;
+   sortKey=SET.fmSortKey||"name";sortDir=SET.fmSortDir===-1?-1:1;
+   viewMode=SET.fmView||"list";dblOpen=(SET.fmClick||"single")==="double";
+   const fm=body.querySelector(".fm");
+   if(fm){fm.classList.remove("fm-sz-s","fm-sz-m","fm-sz-l");
+     fm.classList.add("fm-sz-"+((SET.fmIconSize||"m").replace(/[^slm]/g,"")||"m"));}
+   const hb=body.querySelector("#fHid");if(hb)hb.classList.toggle("pri",showHidden);
+   const vb=body.querySelector("#fView");if(vb)vb.classList.toggle("pri",viewMode==="grid");
+   body.querySelectorAll("#fCols [data-k]").forEach(x=>x.classList.toggle("on",x.dataset.k===sortKey));
+   renderList();
+ }
+ win._syncSettings=syncSettings;
  async function loadFav(){const r=await api("/api/fm/favorites");favs=(r&&r.favorites)||[];
    if(!favs.length){favs=FM_CHIPS.map(([name,path])=>({name,path}));if(LIVE)saveFav();}
    renderFav();}
@@ -4219,8 +4233,10 @@ function filesTab(tc){
    ${row("Одновременных загрузок","",seg("fmUpPar",[["1","1"],["2","2"],["3","3"],["4","4"]],UP),"Сколько файлов заливать параллельно при загрузке с компьютера.")}
    ${row("Отступ в редакторе","",seg("fmTabSize",[["2","2"],["4","4"],["8","8"]],TS),"Ширина табуляции и отступа в текстовом редакторе файлов.")}
   </div>`;
+ // применить к уже открытому окну «Файлы» на лету (без перезагрузки)
+ const apply=()=>{const w=OPEN.__files;if(w&&w._syncSettings)w._syncSettings();};
  const wireSeg=(id,fn)=>tc.querySelectorAll("#"+id+" button").forEach(b=>b.onclick=()=>{tc.querySelectorAll("#"+id+" button").forEach(x=>x.classList.toggle("on",x===b));fn(b.dataset.v);});
- const setK=(k,cast)=>v=>{SET[k]=cast?cast(v):v;saveSettings();};
+ const setK=(k,cast)=>v=>{SET[k]=cast?cast(v):v;saveSettings();apply();};
  wireSeg("fmClick",setK("fmClick"));wireSeg("fmSortKey",setK("fmSortKey"));wireSeg("fmSortDir",setK("fmSortDir",v=>+v));
  wireSeg("fmView",setK("fmView"));wireSeg("fmIconSize",setK("fmIconSize"));wireSeg("fmDateFmt",setK("fmDateFmt"));
  wireSeg("fmUpPar",setK("fmUpPar",v=>+v));wireSeg("fmTabSize",setK("fmTabSize",v=>+v));
@@ -4232,6 +4248,8 @@ function filesTab(tc){
  wireSeg("fmCacheLim",v=>{api("/api/maintenance",{method:"POST",body:JSON.stringify({maintenance:{thumb_cache_mb:+v}})});toast("Лимит кэша: "+(+v?(+v+" МБ"):"без лимита"));});
  tc.querySelector("#fmCacheClear").onclick=async()=>{const r=await api("/api/fs/thumbcache/clear",{method:"POST",body:"{}"});toast(r&&r.ok?("Кэш очищен: "+(r.removed||0)+" файлов"):"Ошибка");refreshStat();};
  wireLook(tc);
+ // тумблеры (fmHidden/fmThumbs/fmFoldersFirst): оборачиваем обработчик wireLook, чтобы менялось на лету
+ tc.querySelectorAll("input[data-pt]").forEach(inp=>{const prev=inp.onchange;inp.onchange=e=>{if(prev)prev.call(inp,e);apply();};});
 }
 function lsTheme(lb){lb.innerHTML=`
   <div class="set-card">
