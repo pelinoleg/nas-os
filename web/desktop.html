@@ -247,6 +247,7 @@
      с горизонтальным скроллом (без дубля с таббаром, без перекрытия виджетов) */
   @media(max-width:1024px){
     .phone-nav{display:none!important}
+    .wall-refresh{display:none}       /* плавающая кнопка обоев мешает нижнему доку */
     .dock,.dock.pos-left,.dock.pos-right{
       top:auto!important;bottom:0!important;left:0!important;right:0!important;transform:none!important;
       width:100%!important;max-width:none!important;max-height:none!important;border-radius:0!important;
@@ -271,9 +272,13 @@
       border-right:none;border-bottom:1px solid var(--line);padding:8px 10px;gap:6px;-webkit-overflow-scrolling:touch}
     .set-nav button{flex:0 0 auto;width:auto;white-space:nowrap}
     .set-pane{padding:16px 16px}
-    /* богатые списки (Диски, Docker) — список сверху (со скроллом), детали ниже */
+    /* списки Дисков/Docker — компактная горизонтальная лента сверху (детали получают весь экран) */
     .dm2{flex-direction:column}
-    .dm2-side{width:auto;flex:none;max-height:40vh;border-right:none;border-bottom:1px solid var(--line)}
+    .dm2-side{width:auto;flex:none;max-height:none;flex-direction:row;overflow-x:auto;overflow-y:hidden;
+      gap:6px;padding:8px 10px;border-right:none;border-bottom:1px solid var(--line);-webkit-overflow-scrolling:touch}
+    .dm2-side::-webkit-scrollbar{height:0}
+    .dm2-side-h,.dm2-slots{display:none}
+    .dm2-item{flex:0 0 auto;width:auto;min-width:132px;max-width:200px}
     .dm2-detail{padding:16px 16px}
     /* менубар: лишние кнопки прячем (статус — в поповере здоровья) */
     #expoBtn,#themeBtn,.tray{display:none}
