@@ -1794,7 +1794,8 @@ function clampGeom(g){const w=Math.max(300,Math.min(g.w,innerWidth-8)),h=Math.ma
  let y=Math.min(g.y,innerHeight-44);y=Math.max(y,MENUBAR_H+4);
  return {x,y,w,h,max:!!g.max};}
 function persistWin(w){if(!w||!w._id)return;
- WINPOS[w._id]=w.classList.contains("max")?Object.assign({},WINPOS[w._id],{max:true})
+ const k=w._geo||w._id;   // геометрия может быть общей для однотипных окон (напр. все редакторы стеков)
+ WINPOS[k]=w.classList.contains("max")?Object.assign({},WINPOS[k],{max:true})
    :{x:w.offsetLeft,y:w.offsetTop,w:w.offsetWidth,h:w.offsetHeight,max:false};
  saveWinPos();}
 // адаптив: определяем класс устройства (десктоп-поведение не трогаем)
@@ -1803,14 +1804,15 @@ const isPhone=()=>_mqPhone.matches, isTablet=()=>_mqTablet.matches, isTouch=()=>
 function openWin(id,title,build,opts={}){
  if(OPEN[id]){focus(OPEN[id]);return OPEN[id];}
  let ww=opts.w||520,wh=opts.h||440;const n=Object.keys(OPEN).length;
+ const gkey=opts.geoKey||id;   // ключ геометрии: opts.geoKey → общий размер для однотипных окон
  // планшет: окна крупнее, чтобы контент влезал (окна остаются перетаскиваемыми)
  if(isTablet()){ww=Math.min(innerWidth-24,Math.max(ww,Math.round(innerWidth*0.84)));wh=Math.min(innerHeight-96,Math.max(wh,Math.round(innerHeight*0.82)));}
  const w=el(`<div class="win"><div class="wbar"><button class="wback" title="Назад">‹</button><div class="lights"><i class="c"></i><i class="m"></i><i class="z"></i></div><div class="ttl">${title}</div></div><div class="body"></div><div class="wgrip" title="Изменить размер"></div></div>`);
- const saved=WINPOS[id];
+ const saved=WINPOS[gkey];
  const geom=(saved&&!saved.max)?clampGeom(saved):clampGeom({x:(innerWidth-ww)/2+n*26,y:(innerHeight-wh)/2-30+n*22,w:ww,h:wh});
  w.style.left=geom.x+"px";w.style.top=geom.y+"px";w.style.width=geom.w+"px";w.style.height=geom.h+"px";
  if(saved&&saved.max)w.classList.add("max");
- document.body.appendChild(w);OPEN[id]=w;w._id=id;w._title=title;build(w.querySelector(".body"),w);focus(w);
+ document.body.appendChild(w);OPEN[id]=w;w._id=id;w._geo=gkey;w._title=title;build(w.querySelector(".body"),w);focus(w);
  const bar=w.querySelector(".wbar");
  bar.querySelector(".c").onclick=()=>closeW(id);
  bar.querySelector(".m").onclick=()=>{w.style.display="none";w.classList.remove("wfocus");focusTop();renderWinbar();};
@@ -3039,7 +3041,7 @@ function editStack(name,after){const isNew=!name,wid=isNew?"snew":"sed:"+name;op
    setTimeout(()=>{cmC.refresh();cmE.refresh();},50);
    if(window.ResizeObserver){new ResizeObserver(()=>cmC&&cmC.refresh()).observe(body.querySelector("#seC"));new ResizeObserver(()=>cmE&&cmE.refresh()).observe(body.querySelector("#seE"));}});
  if(!isNew)(async()=>{const r=await api("/api/stack?name="+encodeURIComponent(name));if(r&&r.ok){data.compose=r.compose||"";data.env=r.env||"";if(cmC)cmC.setValue(data.compose);if(cmE)cmE.setValue(data.env);}})();
-},{w:820,h:640});}
+},{w:820,h:640,geoKey:"stack-edit"});}
 
 /* Cron — управляет сервисом cronmaster через наш прокси /api/cron/* */
 const esc=s=>(""+(s==null?"":s)).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
@@ -3774,7 +3776,7 @@ function openFileWin(e){openWin("ed:"+e.path,e.name,body=>{
      toast(LIVE?(w&&w.ok?"Сохранено (.bak создан)":("Ошибка: "+((w&&w.log)||"").slice(0,60))):"Демо: сохранение недоступно");
      if(w&&w.ok){dirty=false;const d=body.querySelector("#edDot");if(d)d.textContent="";}};};
  draw();
-},{w:720,h:560});}
+},{w:720,h:560,geoKey:"file-edit"});}
 
 /* ===== Бэкап главного NAS ===== */
 async function nbSave(patch){const r=await api("/api/backup/config",{method:"POST",body:JSON.stringify({config:patch})});return (r&&r.config)||{};}
