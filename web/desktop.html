@@ -245,6 +245,26 @@
     .fm-cols .c-d,.fm-row .fdate{display:none}
     .menu{min-width:min(216px,calc(100vw - 24px))}
   }
+  /* планшет (641–1024): окна крупнее (в JS), сайдбары уже, отступы плотнее */
+  @media(min-width:641px) and (max-width:1024px){
+    .set-nav{width:172px;padding:14px 8px}
+    .set-pane{padding:18px 18px}
+    .set-nav button{padding:9px 11px}
+    .rail{display:none}
+    .apps{grid-template-columns:repeat(auto-fill,88px)}
+  }
+  /* сенсорные экраны (планшет+телефон): крупнее тап-таргеты, комфортнее нажимать */
+  @media(pointer:coarse){
+    .btn{padding:11px 16px}
+    .seg button{padding:10px 16px}
+    .iconbtn{padding:8px 9px}
+    .mb-theme{width:38px;height:38px}
+    .tgl{transform:scale(1.12);transform-origin:right center}
+    .srow{padding:14px 0}
+    .set-nav button{padding:11px 12px}
+    .dock .di{width:44px;height:44px}
+    input,select,textarea{font-size:16px}   /* iOS не зумит при фокусе, если ≥16px */
+  }
   /* первый запуск — онбординг */
   .onboard{position:fixed;inset:0;z-index:600;background:rgba(10,16,26,.62);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);display:grid;place-items:center;padding:20px;opacity:0;pointer-events:none;transition:opacity .28s}
   /* Экран входа — самодостаточный фиксированный стиль, НЕ зависит от настроек темы/фона */
@@ -1633,9 +1653,14 @@ function persistWin(w){if(!w||!w._id)return;
  WINPOS[w._id]=w.classList.contains("max")?Object.assign({},WINPOS[w._id],{max:true})
    :{x:w.offsetLeft,y:w.offsetTop,w:w.offsetWidth,h:w.offsetHeight,max:false};
  saveWinPos();}
+// адаптив: определяем класс устройства (десктоп-поведение не трогаем)
+const _mqPhone=matchMedia("(max-width:640px)"),_mqTablet=matchMedia("(min-width:641px) and (max-width:1024px)");
+const isPhone=()=>_mqPhone.matches, isTablet=()=>_mqTablet.matches, isTouch=()=>matchMedia("(pointer:coarse)").matches;
 function openWin(id,title,build,opts={}){
  if(OPEN[id]){focus(OPEN[id]);return OPEN[id];}
- const ww=opts.w||520,wh=opts.h||440,n=Object.keys(OPEN).length;
+ let ww=opts.w||520,wh=opts.h||440;const n=Object.keys(OPEN).length;
+ // планшет: окна крупнее, чтобы контент влезал (окна остаются перетаскиваемыми)
+ if(isTablet()){ww=Math.min(innerWidth-24,Math.max(ww,Math.round(innerWidth*0.84)));wh=Math.min(innerHeight-96,Math.max(wh,Math.round(innerHeight*0.82)));}
  const w=el(`<div class="win"><div class="wbar"><div class="lights"><i class="c"></i><i class="m"></i><i class="z"></i></div><div class="ttl">${title}</div></div><div class="body"></div><div class="wgrip" title="Изменить размер"></div></div>`);
  const saved=WINPOS[id];
  const geom=(saved&&!saved.max)?clampGeom(saved):clampGeom({x:(innerWidth-ww)/2+n*26,y:(innerHeight-wh)/2-30+n*22,w:ww,h:wh});
