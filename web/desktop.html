@@ -557,6 +557,15 @@
   .dd-attrs{width:100%;border-collapse:collapse;font-size:11.5px;font-family:var(--mono)}
   .dd-attrs th{text-align:left;color:var(--mut);font-weight:500;padding:5px 8px;border-bottom:1px solid var(--line);font-family:var(--font)}
   .dd-attrs td{padding:5px 8px;border-bottom:1px solid var(--line);overflow-wrap:anywhere}
+  /* список обновлений пакетов */
+  .upd-list{max-height:300px;overflow-y:auto;border:1px solid var(--line);border-radius:var(--r-md)}
+  .upd-row{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 12px;border-top:1px solid var(--line);font-size:12.5px}
+  .upd-row:first-child{border-top:none}
+  .upd-n{font-weight:550;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .upd-sec{font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--warn);border:1px solid var(--warn);border-radius:5px;padding:0 5px;margin-left:6px}
+  .upd-v{font-size:11px;color:var(--mut);flex:none}
+  .upd-con{max-height:300px;overflow:auto;background:var(--code-bg);color:var(--code-fg);font-family:var(--mono);font-size:11.5px;line-height:1.6;padding:10px 12px;border-radius:var(--r-md);white-space:pre-wrap}
+  .upd-con .er{color:var(--danger)}
   /* история метрик */
   .grow{flex:1;min-width:8px}
   .dk-tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-top:14px}
@@ -1875,6 +1884,42 @@ async function runStream(action,params,con,onDone){
  const push=l=>{if(l.startsWith("__EXIT__")){code=parseInt(l.slice(8),10);return;}con.appendChild(el(`<div class="${/ОШИБКА|ОТКАЗ|ABORT/i.test(l)?"er":""}">${l.replace(/</g,"&lt;")||"&nbsp;"}</div>`));con.scrollTop=con.scrollHeight;};
  for(;;){const {done,value}=await rd.read();if(done)break;buf+=dec.decode(value,{stream:true});const ps=buf.split("\n");buf=ps.pop();ps.forEach(push);}
  if(buf)push(buf);if(code===0&&onDone)onDone();
+}
+// стрим произвольного POST-эндпоинта в консоль (для установки обновлений)
+async function streamPost(url,con,onDone){
+ con.innerHTML=`<div style="color:var(--mut)">запуск…</div>`;
+ let resp;try{resp=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:"{}"});}
+ catch(e){con.innerHTML=`<div class="er">нет связи с сервером</div>`;if(onDone)onDone(-1);return;}
+ if(!resp.body){con.textContent=await resp.text();if(onDone)onDone(0);return;}
+ const rd=resp.body.getReader(),dec=new TextDecoder();let buf="",code=null;con.innerHTML="";
+ const push=l=>{if(l.startsWith("__EXIT__")){code=parseInt(l.slice(8),10);return;}con.appendChild(el(`<div class="${/(ошибк|error|fail|^E:|^W:)/i.test(l)?"er":""}">${l.replace(/</g,"&lt;")||"&nbsp;"}</div>`));con.scrollTop=con.scrollHeight;};
+ for(;;){const {done,value}=await rd.read();if(done)break;buf+=dec.decode(value,{stream:true});const ps=buf.split("\n");buf=ps.pop();ps.forEach(push);}
+ if(buf)push(buf);if(onDone)onDone(code==null?0:code);
+}
+// диалог: список доступных обновлений + установка всех разом
+async function updatesDlg(){
+ const s=document.getElementById("scrim");
+ s.innerHTML=`<div class="dialog" style="max-width:580px"><h3>${svg("download",16)} Обновления пакетов</h3>
+   <div id="updBody" style="min-height:90px;font-size:13px">Загрузка списка…</div>
+   <div class="r"><button class="btn" id="updX">Закрыть</button>
+     <button class="btn" id="updRef">${svg("refresh",13)} Проверить</button>
+     <button class="btn pri" id="updGo" disabled>Обновить всё</button></div></div>`;
+ s.classList.add("show");
+ const body=s.querySelector("#updBody"),go=s.querySelector("#updGo"),ref=s.querySelector("#updRef");
+ s.querySelector("#updX").onclick=()=>s.classList.remove("show");
+ async function load(refresh){body.innerHTML="Загрузка списка…";go.disabled=true;
+   const r=await api("/api/updates"+(refresh?"?refresh=1":""));const ps=(r&&r.packages)||[];
+   if(!ps.length){body.innerHTML=`<div style="color:var(--good);padding:10px 0">✓ Всё актуально — обновлять нечего.</div>`;go.disabled=true;return;}
+   body.innerHTML=`<div style="font-size:12px;color:var(--mut);margin-bottom:8px">${ps.length} пакетов к обновлению${ps.some(p=>p.security)?" · есть обновления безопасности":""}</div>
+     <div class="upd-list">${ps.map(p=>`<div class="upd-row"><span class="upd-n">${esc(p.name)}${p.security?' <span class="upd-sec">безопасность</span>':''}</span><span class="upd-v mono">${esc(p.cur)} → ${esc(p.new)}</span></div>`).join("")}</div>`;
+   go.disabled=false;}
+ ref.onclick=()=>{ref.disabled=true;toast("Проверяю обновления…");load(true).finally(()=>ref.disabled=false);};
+ go.onclick=()=>{go.disabled=true;ref.disabled=true;s.querySelector("#updX").textContent="В фоне";
+   body.innerHTML=`<div class="upd-con" id="updCon"></div>`;
+   streamPost("/api/updates/apply",body.querySelector("#updCon"),code=>{
+     notifyDone(code===0?"Обновление завершено":"Обновление завершилось с ошибкой",code===0?"пакеты обновлены":"");
+     if(typeof refreshSysc==="function")refreshSysc(rerSet);});};
+ load(false);
 }
 const ROLE_ORDER={system:0,data:1,pool:2,parity:3,removable:4,free:5};
 const roleRank=r=>ROLE_ORDER[r]==null?9:ROLE_ORDER[r];
@@ -3831,7 +3876,7 @@ function systemTab(tc){withSysc(tc,()=>{const s=SYSC.system||{};
   ${tglRow("Автообновления безопасности","unattended-upgrades ставит security-патчи сам. Меньше ручной работы и дыр; минус — редкие неожиданные обновления.","unattended",s.unattended,"unattended-upgrades (только security)")}
   <div class="srow"><div class="srow-l"><div class="srow-t">Лимит журнала systemd${tipHTML("Максимум места под логи journald — защищает SD-карту от переполнения. Пусто = системное значение по умолчанию.")}</div><div class="srow-d">сейчас: ${esc(s.journald_max||"по умолчанию")}</div></div><div class="srow-c"><input class="mono" id="stJ" style="max-width:90px" value="${att(s.journald_max||"")}" placeholder="200M"><button class="btn sm" id="stJA">Применить</button></div></div>
   <div class="set-grp">Обслуживание</div>
-  <div class="srow"><div class="srow-l"><div class="srow-t">Обновления пакетов${tipHTML("Выполняет apt-get update и показывает, сколько пакетов можно обновить. Само не обновляет.")}</div></div><div class="srow-c"><button class="btn sm" id="mChk">${svg("refresh",13)} Проверить</button></div></div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Обновления пакетов${tipHTML("Показывает список доступных обновлений apt (что и с какой на какую версию) и устанавливает их по кнопке «Обновить всё». Обновления безопасности помечены.")}</div><div class="srow-d">${s.updates!=null?(s.updates?s.updates+" доступно":"всё актуально"):"посмотреть и установить"}</div></div><div class="srow-c"><button class="btn sm" id="mChk">${svg("download",13)} Обновления</button></div></div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Перезапустить панель${tipHTML("Перезапускает службу nas-web (веб-интерфейс). Соединение ненадолго прервётся.")}</div></div><div class="srow-c"><button class="btn sm" id="mWeb">Перезапустить nas-web</button></div></div>`;
  wireSc(tc);
  const H=tc.querySelector("#stHost"),Tz=tc.querySelector("#stTz"),J=tc.querySelector("#stJ");
@@ -3879,7 +3924,7 @@ function systemTab(tc){withSysc(tc,()=>{const s=SYSC.system||{};
     if(cur)cur.textContent=a?`сейчас: ${a} → /mnt/storage`:"сейчас: отключён";
     toast(a?`Псевдоним ${a} создан`:"Псевдоним отключён");};}
  tc.querySelector("#stJA").onclick=async()=>{await sconf("journald_max",J.value.trim());refreshSysc(rerSet);};
- tc.querySelector("#mChk").onclick=async()=>{toast("Проверяю обновления…");const r=await sconf("check_updates",1);};
+ tc.querySelector("#mChk").onclick=()=>updatesDlg();
  tc.querySelector("#mWeb").onclick=()=>confirmDlg("Перезапуск","Перезапустить веб-панель? Соединение ненадолго прервётся.",()=>sconf("restart_web",1));
 });}
 /* --- settings: Сеть --- */

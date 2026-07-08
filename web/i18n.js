@@ -5,6 +5,22 @@
    Ключ — точный русский фрагмент текста (без HTML-тегов и ${...}-вставок).
    Перевод применяется только к целым «словам» (границы — не-кириллица), длинные фразы приоритетнее. */
 window.NAS_I18N = { en: {
+"Обновления пакетов": "Package updates",
+"Показывает список доступных обновлений apt (что и с какой на какую версию) и устанавливает их по кнопке «Обновить всё». Обновления безопасности помечены.": "Shows the list of available apt updates (what, from which version to which) and installs them with the «Update all» button. Security updates are marked.",
+"посмотреть и установить": "view and install",
+"Загрузка списка…": "Loading list…",
+"Всё актуально — обновлять нечего.": "Everything is up to date — nothing to update.",
+"пакетов к обновлению": "packages to update",
+"есть обновления безопасности": "security updates available",
+"безопасность": "security",
+"Проверяю обновления…": "Checking for updates…",
+"Обновление завершено": "Update finished",
+"Обновление завершилось с ошибкой": "Update finished with an error",
+"пакеты обновлены": "packages updated",
+"В фоне": "In background",
+"нет связи с сервером": "no connection to the server",
+"доступно": "available",
+"всё актуально": "up to date",
 "# базовый юнит; сохранение создаст переопределение в": "# base unit; saving will create an override in",
 "# предпросмотр плана": "# plan preview",
 "$ выполняю": "$ running",

@@ -1483,6 +1483,22 @@ def _apt_upgradable():
     r = _run(["apt-get", "-s", "-o", "Debug::NoLocking=true", "upgrade"], timeout=40)
     return sum(1 for l in (r.get("log") or "").splitlines() if l.startswith("Inst "))
 
+def apt_updates(refresh=False):
+    """Список пакетов, доступных к обновлению: [{name, cur, new, security}]."""
+    if refresh:
+        _run(["apt-get", "update"], timeout=180)
+    r = _run(["apt-get", "-s", "-o", "Debug::NoLocking=true", "upgrade"], timeout=60)
+    pkgs = []
+    for l in (r.get("log") or "").splitlines():
+        # формат: Inst bash [5.2.15-2] (5.2.15-3 Debian:12/stable [arm64])
+        m = re.match(r"^Inst (\S+) \[([^\]]*)\] \((\S+)\s+([^)]*)\)", l)
+        if m:
+            src = m.group(4)
+            pkgs.append({"name": m.group(1), "cur": m.group(2), "new": m.group(3),
+                         "security": "security" in src.lower()})
+    pkgs.sort(key=lambda p: (not p["security"], p["name"]))
+    return {"ok": True, "count": len(pkgs), "packages": pkgs}
+
 def _sec_updates_recent():
     log = _read("/var/log/unattended-upgrades/unattended-upgrades.log")
     if not log:
@@ -4428,6 +4444,36 @@ class H(BaseHTTPRequestHandler):
             except Exception:
                 pass
 
+    def _stream_cmd(self, cmd, env=None, timeout=1800):
+        """Стримить stdout произвольной команды построчно с маркером __EXIT__ (как _stream_engine)."""
+        self.send_response(200)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Accel-Buffering", "no")
+        self.end_headers()
+        try:
+            p = subprocess.Popen(cmd, env=env or _C_ENV, stdout=subprocess.PIPE,
+                                 stderr=subprocess.STDOUT, text=True, bufsize=1)
+        except OSError as e:
+            self.wfile.write(("ошибка запуска: %s\n__EXIT__1\n" % e).encode()); return
+        deadline = threading.Timer(timeout, lambda: p.poll() is None and p.kill())
+        deadline.daemon = True; deadline.start()
+        try:
+            for line in iter(p.stdout.readline, ""):
+                try:
+                    self.wfile.write(line.encode()); self.wfile.flush()
+                except (BrokenPipeError, ConnectionResetError):
+                    p.kill(); break
+            p.wait()
+        finally:
+            deadline.cancel()
+            try: p.stdout.close()
+            except OSError: pass
+        try:
+            self.wfile.write(("__EXIT__%d\n" % (p.returncode if p.returncode is not None else -1)).encode()); self.wfile.flush()
+        except OSError:
+            pass
+
     def _body(self):
         n = int(self.headers.get("Content-Length", 0) or 0)
         raw = self.rfile.read(n) if n else b""
@@ -4843,6 +4889,8 @@ class H(BaseHTTPRequestHandler):
                 self._json({"settings": load_settings()})
             elif p == "/api/maintenance":
                 self._json({"maintenance": load_maintenance()})
+            elif p == "/api/updates":
+                self._json(apt_updates(refresh=(q.get("refresh") or ["0"])[0] == "1"))
             elif p == "/api/winpos":
                 self._json({"winpos": load_winpos()})
             elif p == "/api/snippets":
@@ -5111,6 +5159,18 @@ class H(BaseHTTPRequestHandler):
             elif re.match(r"^/api/cron/job/[\w.\-:]+$", p):
                 jid = p.rsplit("/", 1)[1]
                 self._json(cron_update(jid, self._body()))
+            elif p == "/api/updates/apply":
+                # установка обновлений apt со стримом лога; DEBIAN_FRONTEND чтобы не задавало вопросов
+                self._body()
+                env = dict(_C_ENV, DEBIAN_FRONTEND="noninteractive")
+                self._stream_cmd(["apt-get", "-y",
+                                  "-o", "Dpkg::Options::=--force-confold",
+                                  "-o", "Dpkg::Options::=--force-confdef", "upgrade"],
+                                 env=env, timeout=3600)
+                try:
+                    log_event("action", "Обновление пакетов apt", "", "ok", kind="action", desk=True)
+                except Exception:
+                    pass
             elif p.startswith("/api/setup/"):
                 action = p[len("/api/setup/"):]
                 b = self._body()
