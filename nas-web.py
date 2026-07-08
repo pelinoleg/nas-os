@@ -4195,6 +4195,52 @@ def _svc(units):
 def _svc_toggle(unit, on):
     return _run(["systemctl", "enable" if on else "disable", "--now", unit], timeout=40)
 
+def _zram_swap_active():
+    """Есть ли активный zram-своп в /proc/swaps."""
+    for l in _read("/proc/swaps").splitlines():
+        if l.startswith("/dev/zram"):
+            return True
+    return False
+
+def _zram_status():
+    """Состояние zram-swap: штатный (systemd-zram-generator/rpi-swap) или
+    legacy zram-tools (zramswap.service). На современном Pi OS zram поднимает
+    генератор, а zramswap.service мы глушим — поэтому статус берём по факту."""
+    for u in ("dev-zram0.swap", "systemd-zram-setup@zram0.service"):
+        s = _svc(u)
+        if s["installed"]:
+            # generated/static-юниты: "enabled" по факту активного свопа
+            s["enabled"] = s["active"] or _zram_swap_active()
+            return s
+    return _svc("zramswap")
+
+def _zram_off():
+    """Выключить zram-swap: и штатный генератор, и legacy zramswap."""
+    # legacy
+    if _svc("zramswap")["installed"]:
+        _svc_toggle("zramswap", False)
+    # штатный: убрать zram на следующей загрузке
+    try:
+        if os.path.isfile("/etc/rpi/swap.conf"):
+            os.makedirs("/etc/rpi/swap.conf.d", exist_ok=True)
+            with open("/etc/rpi/swap.conf.d/60-nas-os.conf", "w") as f:
+                f.write("# NAS-OS: zram-swap выключен из веб-панели. См. swap.conf(5).\n"
+                        "[Main]\nMechanism=swapfile\n")
+        elif os.path.isfile("/etc/systemd/zram-generator.conf") or \
+                os.path.isfile("/usr/lib/systemd/zram-generator.conf"):
+            with open("/etc/systemd/zram-generator.conf", "w") as f:
+                f.write("# NAS-OS: zram-swap выключен (нет секции [zram0]).\n")
+    except OSError:
+        pass
+    _run(["systemctl", "daemon-reload"], timeout=20)
+    # снять на живую (best-effort)
+    _run(["swapoff", "/dev/zram0"], timeout=20)
+    for u in ("dev-zram0.swap", "systemd-zram-setup@zram0.service"):
+        _run(["systemctl", "stop", u], timeout=20)
+    _run(["systemctl", "reset-failed", "dev-zram0.swap",
+          "systemd-zram-setup@zram0.service"], timeout=20)
+    return {"ok": True, "reboot": False}
+
 def _backup(path):
     try:
         if os.path.isfile(path):
@@ -4378,7 +4424,7 @@ def sysconf():
             "uasquirks": {"on": "usb-storage.quirks=" in _read(cl),
                           "detected": _usb_ids()},
             "watchdog": os.path.isfile("/etc/systemd/system.conf.d/watchdog.conf"),
-            "zram": _svc("zramswap"),
+            "zram": _zram_status(),
             "governor": _governor(),
             "config_path": cfg, "cmdline_path": cl,
         },
@@ -4533,7 +4579,7 @@ def sysconf_set(key, val, extra=None):
         if key == "watchdog":
             return _watchdog(b)
         if key == "zram":
-            return engine("pi", {"keys": "zram"}) if b else _svc_toggle("zramswap", False)
+            return engine("pi", {"keys": "zram"}) if b else _zram_off()
         if key == "governor_adaptive":
             return engine("pi", {"keys": "governor"}) if b \
                 else _svc_toggle("nas-governor.timer", False)
