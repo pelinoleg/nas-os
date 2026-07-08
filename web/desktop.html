@@ -567,7 +567,7 @@
   .upd-con{max-height:300px;overflow:auto;background:var(--code-bg);color:var(--code-fg);font-family:var(--mono);font-size:11.5px;line-height:1.6;padding:10px 12px;border-radius:var(--r-md);white-space:pre-wrap}
   .upd-con .er{color:var(--danger)}
   /* бэкап главного NAS */
-  .nbwrap{padding:6px 0 0}
+  .nbwrap{padding:2px 18px 0}
   .nb-crumb{font-size:11.5px;color:var(--mut);padding:6px 2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .nb-brl{max-height:300px;overflow-y:auto;border:1px solid var(--line);border-radius:var(--r-md);margin:2px 0 4px}
   .nb-bri{display:flex;align-items:center;gap:8px;padding:8px 11px;border-top:1px solid var(--line);cursor:pointer;font-size:12.5px}
@@ -577,7 +577,9 @@
   .nb-src{flex:none;max-width:38%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--accent)}
   .nb-arr{color:var(--mut);flex:none}
   .nb-dst{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dim)}
-  .nb-foot{display:flex;align-items:center;gap:9px;padding:14px 18px;border-top:1px solid var(--line);margin-top:8px}
+  .nb-foot{display:flex;align-items:center;gap:9px;padding:14px 0;border-top:1px solid var(--line);margin-top:8px;flex-wrap:wrap}
+  .nb-foot .grow{flex:1}
+  .nbwrap .set-h:first-child{margin-top:6px;padding-top:0;border-top:none}
   /* история метрик */
   .grow{flex:1;min-width:8px}
   .dk-tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-top:14px}
@@ -3529,8 +3531,8 @@ function winBackup(){openWin("__nasbak","Бэкап главного NAS",body=>
    <div class="set-h">Что и куда копировать</div>
    <div class="srow"><div class="srow-l"><div class="srow-t">Режим приёмника${tipHTML("Единая папка — всё копируется в одну папку по подпапкам. Отдельно для каждой — у каждого источника своя папка-приёмник (гибко).")}</div></div><div class="srow-c"><div class="seg" id="nbDm"><button data-v="single" class="${!per?"on":""}">Единая папка</button><button data-v="per" class="${per?"on":""}">Отдельно для каждой</button></div></div></div>
    ${!per?`<div class="srow"><div class="srow-l"><div class="srow-t">Общая папка-приёмник</div></div><div class="srow-c"><input class="mono" id="nbBase" value="${att(c.dest_base||"/mnt/storage/nas-backup")}" style="flex:1"><button class="btn sm" id="nbBaseB">${svg("folder",13)}</button></div></div>`:""}
-   <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 18px 2px"><span style="font-size:12px;color:var(--mut)">Источники (${(c.jobs||[]).length})</span><button class="btn sm pri" id="nbAdd">${svg("plus",13)} Выбрать с NAS</button></div>
-   <div id="nbJobs" style="padding:0 18px 8px"></div>
+   <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 2px 2px"><span style="font-size:12px;color:var(--mut)">Источники (${(c.jobs||[]).length})</span><button class="btn sm pri" id="nbAdd">${svg("plus",13)} Выбрать с NAS</button></div>
+   <div id="nbJobs" style="padding:0 0 8px"></div>
 
    <div class="set-h">Удалённые на источнике файлы</div>
    <div class="srow"><div class="srow-l"><div class="srow-t">Что делать${tipHTML("Архив: удалённое переносится в _deleted/дата (можно восстановить). Зеркало: удаляется и локально. Только добавлять: локально ничего не удаляется.")}</div></div><div class="srow-c"><div class="seg" id="nbDel"><button data-v="archive" class="${c.delete_mode!=="mirror"&&c.delete_mode!=="add"?"on":""}">Архив</button><button data-v="mirror" class="${c.delete_mode==="mirror"?"on":""}">Зеркало</button><button data-v="add" class="${c.delete_mode==="add"?"on":""}">Добавлять</button></div></div></div>
@@ -3541,7 +3543,7 @@ function winBackup(){openWin("__nasbak","Бэкап главного NAS",body=>
    <div class="srow" id="nbSchRow" style="${c.schedule&&c.schedule.enabled?"":"display:none"}"><div class="srow-l"><div class="srow-t">Когда</div></div><div class="srow-c"><div class="seg" id="nbFreq"><button data-v="daily" class="${!c.schedule||c.schedule.freq!=="weekly"?"on":""}">Ежедневно</button><button data-v="weekly" class="${c.schedule&&c.schedule.freq==="weekly"?"on":""}">Еженедельно</button></div><select id="nbDow" class="ev-prio" style="${c.schedule&&c.schedule.freq==="weekly"?"":"display:none"}">${[["Mon","пн"],["Tue","вт"],["Wed","ср"],["Thu","чт"],["Fri","пт"],["Sat","сб"],["Sun","вс"]].map(([v,l])=>`<option value="${v}"${c.schedule&&c.schedule.dow===v?" selected":""}>${l}</option>`).join("")}</select><input class="mono" id="nbTime" style="max-width:80px" value="${(c.schedule&&c.schedule.time)||"03:00"}"></div></div>
 
    <div class="nb-foot"><button class="btn" id="nbDry">Пробный прогон</button><button class="btn pri" id="nbRun">${svg("sync",14)} Запустить бэкап</button><span class="grow"></span><span id="nbStatus" style="font-size:12px;color:var(--mut)"></span></div>
-   <div class="upd-con" id="nbCon" style="display:none;margin:0 18px 16px"></div>`;
+   <div class="upd-con" id="nbCon" style="display:none;margin:0 0 16px"></div>`;
   // текущее состояние конфига (для сохранений)
   const g=id=>body.querySelector(id);
   const jobs=(c.jobs||[]).slice();
@@ -3930,6 +3932,7 @@ const EVMETA=[
  {k:"snap_err",t:"SnapRAID sync — ошибка",d:"синхронизация чётности не удалась",dp:1},
  {k:"scrub_err",t:"SnapRAID нашёл повреждение",d:"scrub обнаружил ошибки данных — важно",dp:2},
  {k:"delete_block",t:"Sync остановлен защитой",d:"слишком много удалённых файлов — sync пропущен",dp:1},
+ {k:"nas_backup",t:"Бэкап главного NAS",d:"итог бэкапа с главного NAS (ручного и по расписанию)",dp:0},
  {k:"backup",t:"Резервное копирование",d:"итог бэкапа из /var/log/nas-backup.log (если настроен)",dp:0},
  {grp:"Доступ (вход в панель и SSH)"},
  {k:"panel_new",t:"Вход в панель с нового адреса",d:"успешный вход с IP, которого раньше не было",dp:1},
