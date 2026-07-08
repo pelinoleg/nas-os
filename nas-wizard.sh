@@ -963,47 +963,73 @@ remove_fstab_mergerfs() {
     sed -i '/fuse\.mergerfs/d' /etc/fstab
 }
 
+# Опции mergerfs для КОМАНДНОЙ строки (-o ...): без fstab-конструкций defaults/nofail.
+MERGERFS_SVC_OPTS="allow_other,use_ino,category.create=mfs,minfreespace=20G,fsname=mergerfs"
+MERGERFS_UNIT="/etc/systemd/system/nas-mergerfs.service"
+# Пул mergerfs держим systemd-СЕРВИСОМ с Restart=always, а НЕ строкой fstab. Причина:
+# FUSE-процесс может упасть («Transport endpoint is not connected»), и fstab-mount тогда
+# мёртв до ручного umount+mount. Сервис же systemd поднимает за секунды сам (+ ExecStartPre
+# снимает зависшую точку). Ветки /mnt/disk* по-прежнему в fstab; пул зависит от local-fs.
 generate_mergerfs() {
     local branches=() mp
     while read -r mp; do [ -n "$mp" ] && branches+=("$mp"); done < <(mounted_data_disks)
     local count="${#branches[@]}"
     if [ "$count" -lt 2 ]; then
         info "смонтировано дисков данных: $count — mergerfs не требуется (нужно >= 2)"
+        # диск вышел из пула — снять сервис, если был
+        if [ -e "$MERGERFS_UNIT" ]; then
+            run systemctl disable --now nas-mergerfs.service
+            run rm -f "$MERGERFS_UNIT"
+            run systemctl daemon-reload
+        fi
         return 0
     fi
 
-    local branchspec line opts="$MERGERFS_OPTS"
+    local branchspec mergerfs_bin
     branchspec="$(IFS=:; printf '%s' "${branches[*]}")"
-    # пул ждёт каждую ветку (иначе смонтируется поверх ещё пустых /mnt/diskN)
-    for mp in "${branches[@]}"; do opts+=",x-systemd.requires=${mp}"; done
-    line="${branchspec}  ${STORAGE_MNT}  fuse.mergerfs  ${opts}  0  0"
+    mergerfs_bin="$(command -v mergerfs 2>/dev/null || echo /usr/bin/mergerfs)"
 
-    backup_fstab
+    # миграция со старой схемы: убрать строку пула из fstab (теперь пулом рулит сервис).
+    # Ветки /mnt/disk* в fstab не трогаем.
+    if grep -qsE 'fuse\.mergerfs' /etc/fstab; then
+        backup_fstab
+        findmnt -no TARGET "$STORAGE_MNT" >/dev/null 2>&1 && run umount -l "$STORAGE_MNT"
+        remove_fstab_mergerfs
+    fi
     run mkdir -p "$STORAGE_MNT"
 
-    if grep -qsE 'fuse\.mergerfs' /etc/fstab; then
-        if grep -qsF "$line" /etc/fstab; then
-            info "строка mergerfs уже актуальна ($count дисков)"
-        else
-            info "обновляю строку mergerfs (набор дисков изменился -> $count)"
-            findmnt -no TARGET "$STORAGE_MNT" >/dev/null 2>&1 && run umount "$STORAGE_MNT"
-            remove_fstab_mergerfs
-            append_line "$line" /etc/fstab
-        fi
-    else
-        append_line "$line" /etc/fstab
-    fi
+    # \$(seq …) экранируем — это команда времени ЗАПУСКА сервиса, а не генерации файла
+    write_file "$MERGERFS_UNIT" <<EOF
+[Unit]
+Description=NAS mergerfs pool (${STORAGE_MNT})
+After=local-fs.target
+Wants=local-fs.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStartPre=-/bin/umount -l ${STORAGE_MNT}
+ExecStart=${mergerfs_bin} -f ${branchspec} ${STORAGE_MNT} -o ${MERGERFS_SVC_OPTS}
+ExecStartPost=/bin/sh -c 'for i in \$(seq 1 50); do mountpoint -q ${STORAGE_MNT} && exit 0; sleep 0.1; done; exit 1'
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+EOF
 
     run systemctl daemon-reload
-    run mount -a
+    run systemctl enable nas-mergerfs.service
+    run systemctl restart nas-mergerfs.service
     if [ "$DRY_RUN" -eq 0 ]; then
+        sleep 1
         if findmnt -no TARGET "$STORAGE_MNT" >/dev/null 2>&1; then
-            info "mergerfs-пул смонтирован: $STORAGE_MNT"
+            info "mergerfs-пул поднят сервисом nas-mergerfs (Restart=always): $STORAGE_MNT ($count дисков)"
         else
-            warn "пул $STORAGE_MNT не смонтирован — проверьте fstab и 'mount -a'"
+            warn "пул $STORAGE_MNT не поднялся — проверьте: systemctl status nas-mergerfs"
         fi
     fi
-    commit_config "mergerfs: пул из $count дисков"
+    commit_config "mergerfs: сервис nas-mergerfs (пул из $count дисков)"
 }
 
 stage_mergerfs() {

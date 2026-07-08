@@ -2764,6 +2764,16 @@ def _automount_tick():
             notify_event("disk_remount", "remount:%s" % mp,
                          "NAS: пул переподключён" if stale else "NAS: диск переподключён",
                          "%s снова смонтирован автоматически" % mp, "ok", cooldown=120)
+    # Пул mergerfs держит systemd-сервис с Restart=always — он сам поднимается за секунды.
+    # Подстрахуем на случай, если сервис в failed: точка мертва/отсутствует → рестартим сервис.
+    if os.path.exists("/etc/systemd/system/nas-mergerfs.service"):
+        if (_stale_endpoint(STORAGE) or not _mounted(STORAGE)) and \
+                now - _MOUNT_TRY.get(STORAGE, 0) >= 55:
+            _MOUNT_TRY[STORAGE] = now
+            _run(["systemctl", "restart", "nas-mergerfs.service"], timeout=40)
+            if _mounted(STORAGE):
+                notify_event("disk_remount", "remount:%s" % STORAGE, "NAS: пул переподключён",
+                             "%s поднят сервисом nas-mergerfs" % STORAGE, "ok", cooldown=120)
 
 # ---- ежедневная/еженедельная сводка состояния ----
 _LAST_SUMMARY = ""
