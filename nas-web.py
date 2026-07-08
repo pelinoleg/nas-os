@@ -1991,8 +1991,15 @@ _NB_DEST_OK = ("/mnt/", "/media/", "/srv/", "/home/")
 def nb_load():
     d = {"transport": "rsync", "host": "", "user": "", "password": "", "ssh_port": 22,
          "dest_mode": "single", "dest_base": "/mnt/storage/nas-backup",
-         "jobs": [], "excludes": [".DS_Store", "Thumbs.db", "@eaDir/", "#recycle/",
-                                  "*.tmp", ".cache/", "@Recycle/", ".@__thumb/"],
+         "jobs": [],
+         "excludes": [".DS_Store", "._*", "Thumbs.db", "desktop.ini", "@eaDir/", "#recycle/",
+                      "@Recycle/", ".@__thumb/", "$RECYCLE.BIN/", "System Volume Information/",
+                      ".Trashes", ".Spotlight-V100", ".fseventsd", "*.tmp", "*.temp", "*.part",
+                      "*.crdownload", "~$*",
+                      "node_modules/", "__pycache__/", "*.pyc", ".venv/", "venv/", "vendor/",
+                      ".git/", ".svn/", ".next/", ".nuxt/", "dist/", "build/", "target/",
+                      ".gradle/", ".idea/", ".vscode/", ".pytest_cache/", ".mypy_cache/",
+                      "*.egg-info/", ".cache/", "bower_components/", ".turbo/"],
          "delete_mode": "archive", "retention_days": 30, "retention_gb": 0,
          "schedule": {"enabled": False, "freq": "daily", "time": "03:00", "dow": "Sun"}}
     try:
