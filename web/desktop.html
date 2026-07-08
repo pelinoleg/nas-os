@@ -281,6 +281,13 @@
     .fm-bar{flex-wrap:wrap}
     .win .body table{font-size:12px}
     .dialog{padding:20px 18px}
+    /* стол НЕ должен уходить под таббар даже при боковом доке (перебивал по специфичности) */
+    body.dock-left .desk,body.dock-right .desk{bottom:calc(56px + env(safe-area-inset-bottom))}
+    body.dock-left .apps,body.dock-right .apps,body.dock-right .rail{left:auto;right:auto}
+    .win{min-width:0!important}
+    /* редактор стека Docker: колонки в стопку */
+    .stk-edit{flex-direction:column!important;height:auto!important;overflow:auto}
+    .stk-edit-side{width:auto!important}
   }
   /* планшет (641–1024): окна крупнее (в JS), сайдбары уже, виджеты — сеткой под приложениями */
   @media(min-width:641px) and (max-width:1024px){
@@ -2837,8 +2844,8 @@ function editStack(name,after){const isNew=!name,wid=isNew?"snew":"sed:"+name;op
  body.style.display="flex";body.style.flexDirection="column";body.style.padding="0";
  let cmC=null,cmE=null;const data={compose:isNew?STACK_SKELETON:"",env:""};
  const lbl=t=>`<div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);font-family:var(--mono)">${t}</div>`;
- body.innerHTML=`<div style="display:flex;height:100%;padding:14px 16px;gap:12px">
-   <div style="width:280px;flex:none;display:flex;flex-direction:column;gap:8px;min-height:0">
+ body.innerHTML=`<div class="stk-edit" style="display:flex;height:100%;padding:14px 16px;gap:12px">
+   <div class="stk-edit-side" style="width:280px;flex:none;display:flex;flex-direction:column;gap:8px;min-height:0">
      ${isNew?`<div class="field" style="margin:0"><label>Имя стека</label><input id="seName" placeholder="my-app"></div>`:""}
      <div class="mono" style="font-size:11px;color:var(--dim);word-break:break-all" id="sePath">${isNew?"/opt/stacks/…/":("/opt/stacks/"+esc(name)+"/")}</div>
      ${lbl(".env — переменные и секреты")}
