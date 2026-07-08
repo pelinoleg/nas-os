@@ -2280,6 +2280,7 @@ _maint_last = 0
 def load_maintenance():
     # 0 = выключено (для *_days); все значения попадают в бэкап настроек вместе с файлом
     d = {"trash_days": 30, "pool_alias": "",
+         "thumb_cache_mb": 512,     # лимит кэша миниатюр ФМ, МБ (0 = без лимита)
          "smart_scan_min": 10,      # фоновый опрос SMART-статуса, минут
          "smart_short_days": 7,     # короткий самотест дисков, раз в N дней (ночью)
          "smart_long_days": 30,     # длинный самотест, раз в N дней (ночью)
@@ -2357,6 +2358,7 @@ def save_maintenance(d):
     err = ""
     # числовые настройки: ключ → (мин, макс)
     for k, (lo, hi) in {"trash_days": (0, 365), "smart_scan_min": (5, 120),
+                        "thumb_cache_mb": (0, 100000),
                         "smart_short_days": (0, 90), "smart_long_days": (0, 365),
                         "backup_days": (0, 30), "backup_keep": (2, 50)}.items():
         if k in d:
@@ -2453,6 +2455,10 @@ def maintenance_daily():
     _maint_last = now
     try:
         _trash_autoclean(load_maintenance().get("trash_days", 0))
+    except Exception:
+        pass
+    try:
+        thumbs_cache_gc(load_maintenance().get("thumb_cache_mb", 0))
     except Exception:
         pass
     try:
@@ -3567,6 +3573,60 @@ def thumbs_sweep(dirs):
                 if gen_thumb(full):
                     n += 1
     return n
+
+def thumbs_cache_stat():
+    """(суммарный размер в байтах, число файлов) кэша миниатюр."""
+    total = n = 0
+    for root, _dirs, files in os.walk(THUMBS_DIR):
+        for f in files:
+            try:
+                total += os.path.getsize(os.path.join(root, f)); n += 1
+            except OSError:
+                pass
+    return total, n
+
+def thumbs_cache_clear():
+    """Полностью очистить кэш миниатюр. Возвращает число удалённых файлов."""
+    n = 0
+    for root, _dirs, files in os.walk(THUMBS_DIR):
+        for f in files:
+            try:
+                os.remove(os.path.join(root, f)); n += 1
+            except OSError:
+                pass
+    return n
+
+def thumbs_cache_gc(limit_mb):
+    """Держим кэш в пределах лимита: удаляем самые старые (по mtime), пока не влезем.
+    limit_mb<=0 → без лимита (ничего не делаем). Возвращает число удалённых файлов."""
+    try:
+        limit_mb = int(limit_mb)
+    except (ValueError, TypeError):
+        return 0
+    if limit_mb <= 0:
+        return 0
+    limit = limit_mb * 1024 * 1024
+    files, total = [], 0
+    for root, _dirs, fs in os.walk(THUMBS_DIR):
+        for f in fs:
+            fp = os.path.join(root, f)
+            try:
+                st = os.stat(fp)
+            except OSError:
+                continue
+            files.append((st.st_mtime, st.st_size, fp)); total += st.st_size
+    if total <= limit:
+        return 0
+    files.sort()          # старые первыми
+    removed = 0
+    for _mt, sz, fp in files:
+        if total <= limit:
+            break
+        try:
+            os.remove(fp); total -= sz; removed += 1
+        except OSError:
+            pass
+    return removed
 
 def fs_list(path):
     path = os.path.realpath(path or "/")
@@ -5598,6 +5658,9 @@ class H(BaseHTTPRequestHandler):
                               (q.get("dl") or ["0"])[0] == "1")
             elif p == "/api/fs/thumb":
                 self._send_thumb((q.get("path") or [""])[0])
+            elif p == "/api/fs/thumbcache":
+                b, n = thumbs_cache_stat()
+                self._json({"bytes": b, "count": n})
             elif p == "/api/fs/vmeta":
                 self._json(video_meta((q.get("path") or [""])[0]))
             elif p == "/api/fs/transcode":
@@ -5723,6 +5786,8 @@ class H(BaseHTTPRequestHandler):
                 self._json({"ok": True})
             elif p == "/api/maintenance":
                 b = self._body(); self._json({"maintenance": save_maintenance(b.get("maintenance", {}))})
+            elif p == "/api/fs/thumbcache/clear":
+                self._json({"ok": True, "removed": thumbs_cache_clear()})
             elif p == "/api/winpos":
                 b = self._body(); save_winpos(b.get("winpos", {}))
                 self._json({"ok": True})

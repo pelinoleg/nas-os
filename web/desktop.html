@@ -964,6 +964,13 @@
   .fm-tile .tn{font-size:11px;text-align:center;line-height:1.25;word-break:break-word;max-height:2.6em;overflow:hidden;color:var(--text)}
   .fm-tile .fm-ck{position:absolute;top:6px;left:6px;opacity:0}
   .fm-tile:hover .fm-ck,.fm-tile.sel .fm-ck{opacity:1}
+  /* размер значков/плиток ФМ (S/M/L; M — базовый, задаётся классом .fm-sz-* на .fm) */
+  .fm-sz-s .fm-row .fi{width:16px;height:16px}
+  .fm-sz-l .fm-row .fi{width:28px;height:28px}
+  .fm-sz-s .fm-list.fm-grid{grid-template-columns:repeat(auto-fill,minmax(70px,1fr))}
+  .fm-sz-l .fm-list.fm-grid{grid-template-columns:repeat(auto-fill,minmax(118px,1fr))}
+  .fm-sz-s .fm-tile .ti{width:34px;height:34px}
+  .fm-sz-l .fm-tile .ti{width:64px;height:64px}
   /* окно-редактор */
   .ed-wrap{display:flex;flex-direction:column;height:100%}
   .ed-bar{display:flex;align-items:center;gap:8px;padding:9px 13px;border-bottom:1px solid var(--line);flex:none}
@@ -1455,6 +1462,9 @@ let SET={accent:"coral",accentHex:"#405e6d",theme:"light",wpType:"url",wpUrl:WP_
  winBlur:60,winNoise:22,shadow:"lg",
  elevBaseLight:.3,elevBaseDark:.74,elevStep:.28,elevLight:.05,autoContrast:true,
  wallpaper:"midnight",lang:"en",
+ /* Файловый менеджер (общие для обеих тем, не в themeProfiles) */
+ fmStart:"/mnt/storage",fmClick:"single",fmHidden:false,fmFoldersFirst:true,
+ fmSortKey:"name",fmSortDir:1,fmIconSize:"m",fmThumbs:true,fmDateFmt:"dmy_hm",fmUpPar:2,fmTabSize:2,
  themeProfiles:{
   light:{accent:"coral",accentHex:"#405e6d",radius:.65,shadow:"lg",winShadow:true,dockShadow:false,tileShadow:true,textContrast:1.35,elevStep:.28,elevLight:.05,mbOp:0,dockOp:3,wdgOp:15,mbBlur:0,dockBlur:0,wdgBlur:1,winBlur:60,mbSat:100,dockSat:100,wdgSat:90,winSat:100,winNoise:22,deskLc:"",deskShadow:false,autoContrast:true,dockTiles:true,dockLabels:true,fxDim:34,fxBlur:30,fxNoise:100,deskGlass:true,deskTileOp:85,deskTileBlur:2,mbGrad:false,mbGradH:80,mbGradInt:40,mbGradOp:100},
   dark:{accent:"green",accentHex:"#00fbff",radius:.65,shadow:"lg",winShadow:true,dockShadow:false,tileShadow:true,textContrast:1.4,elevStep:.06,elevLight:.06,mbOp:0,dockOp:16,wdgOp:11,mbBlur:0,dockBlur:39,wdgBlur:0,winBlur:60,mbSat:85,dockSat:90,wdgSat:90,winSat:100,winNoise:22,deskLc:"",deskShadow:false,autoContrast:true,dockTiles:true,dockLabels:true,fxDim:44,fxBlur:27,fxNoise:100,deskGlass:true,deskTileOp:58,deskTileBlur:8,mbGrad:false,mbGradH:110,mbGradInt:60,mbGradOp:100}
@@ -3377,15 +3387,24 @@ function fileIcon(name,type){if(type==="dir")return "folder";const e=(name.split
  if(/^(js|mjs|cjs|ts|py|sh|bash|zsh|yml|yaml|json|html?|css|xml|go|rs|c|cpp|h|hpp|java|php|rb|conf|cfg|ini|toml|env|md|sql)$/.test(e)||/^Dockerfile/i.test(name))return "code";
  return "file";}
 const FM_CHIPS=[["Home","/home/oleg"],["Хранилище","/mnt/storage"],["Стеки","/opt/stacks"],["Конфиги","/etc"],["Логи","/var/log"],["Корень","/"]];
-const fmDate=ts=>{if(!ts)return"";const d=new Date(ts*1000),p=n=>String(n).padStart(2,"0");return `${p(d.getDate())}.${p(d.getMonth()+1)}.${String(d.getFullYear()).slice(2)} ${p(d.getHours())}:${p(d.getMinutes())}`;};
+const fmDate=ts=>{if(!ts)return"";const d=new Date(ts*1000),p=n=>String(n).padStart(2,"0");
+ const fmt=SET.fmDateFmt||"dmy_hm";
+ if(fmt==="rel"){const s=Date.now()/1000-ts;
+   if(s<60)return"только что";if(s<3600)return Math.floor(s/60)+" мин назад";
+   if(s<86400)return Math.floor(s/3600)+" ч назад";if(s<604800)return Math.floor(s/86400)+" дн назад";
+   return `${p(d.getDate())}.${p(d.getMonth()+1)}.${String(d.getFullYear()).slice(2)}`;}
+ const date=`${p(d.getDate())}.${p(d.getMonth()+1)}.${String(d.getFullYear()).slice(2)}`;
+ if(fmt==="dmy")return date;
+ return `${date} ${p(d.getHours())}:${p(d.getMinutes())}`;};
 function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focus(ex);ex._nav(initPath);return;}
  openWin("__files","Файлы",(body,win)=>{
  body.style.padding="4px 16px 12px";   // файлменеджеру большой верхний отступ ни к чему
- let cwd=initPath||"/home/oleg",entries=[],searchRes=null;
+ let cwd=initPath||SET.fmStart||"/mnt/storage",entries=[],searchRes=null;
  let tabs=[cwd],tabI=0;
- const sel=new Set();let clip=null,showHidden=false,filt="",sortKey="name",sortDir=1,lastIdx=-1,favs=[],dragPaths=null,searchMode="name";
+ const sel=new Set();let clip=null,showHidden=SET.fmHidden===true,filt="",sortKey=SET.fmSortKey||"name",sortDir=SET.fmSortDir===-1?-1:1,lastIdx=-1,favs=[],dragPaths=null,searchMode="name";
  let viewMode="list";try{viewMode=SET.fmView||localStorage.getItem("fmview")||"list";}catch(e){}
- body.innerHTML=`<div class="fm"><div class="fm-fav">
+ const dblOpen=(SET.fmClick||"single")==="double";   // открывать двойным кликом
+ body.innerHTML=`<div class="fm fm-sz-${(SET.fmIconSize||"m").replace(/[^slm]/g,"")||"m"}"><div class="fm-fav">
    <div class="fm-fav-h"><span>Избранное</span><button class="iconbtn" id="fFavAdd" title="Добавить текущую папку в избранное">+</button></div>
    <div class="fm-fav-list" id="fFav"></div>
    <div id="fVolsWrap" style="display:none;flex:none"><div class="fm-fav-h"><span>Диски</span></div>
@@ -3479,9 +3498,12 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
  function renderList(){const srcArr=searchRes||entries;let arr=srcArr.slice();
    if(!showHidden&&!searchRes)arr=arr.filter(e=>!e.name.startsWith("."));
    if(filt&&!searchRes)arr=arr.filter(e=>e.name.toLowerCase().includes(filt));
-   arr.sort((a,b)=>{if(a.type!==b.type)return a.type==="dir"?-1:1;
+   const foldersFirst=SET.fmFoldersFirst!==false;
+   arr.sort((a,b)=>{if(foldersFirst&&a.type!==b.type)return a.type==="dir"?-1:1;
      let r=sortKey==="name"?(a.name.toLowerCase()<b.name.toLowerCase()?-1:1):((a[sortKey]||0)-(b[sortKey]||0));return r*sortDir;});
    const grid=viewMode==="grid";
+   const ICOPX={s:{list:14,grid:22},m:{list:16,grid:28},l:{list:22,grid:44}};
+   const isz=(ICOPX[SET.fmIconSize]||ICOPX.m)[grid?"grid":"list"],thumbsOn=SET.fmThumbs!==false;
    listBox.classList.toggle("fm-grid",grid);
    const cols=body.querySelector("#fCols");if(cols)cols.style.display=grid?"none":"flex";
    curArr=arr;if(cursor>=arr.length)cursor=arr.length-1;
@@ -3491,17 +3513,28 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    arr.forEach((e,i)=>{
      const isSel=sel.has(e.path),ik=fileIcon(e.name,e.type);
      let ficon;
-     if(e.type==="file"&&thumbable(e.name)){const sz=grid?28:16;
-       ficon=svg(ik,sz)+`<img class="thumb" src="/api/fs/thumb?path=${encodeURIComponent(e.path)}" alt="" loading="lazy" onerror="this.remove()">`;}
-     else ficon=svg(ik,grid?28:16);
+     if(e.type==="file"&&thumbsOn&&thumbable(e.name)){
+       ficon=svg(ik,isz)+`<img class="thumb" src="/api/fs/thumb?path=${encodeURIComponent(e.path)}" alt="" loading="lazy" onerror="this.remove()">`;}
+     else ficon=svg(ik,isz);
      let node;
      if(grid){node=el(`<div class="fm-tile ${e.type}${isSel?" sel":""}${i===cursor?" fm-cur":""}"><input type="checkbox" class="fm-ck"${isSel?" checked":""}><div class="ti">${ficon}</div><div class="tn" title="${att(searchRes?e.path:e.name)}">${esc(e.name)}</div></div>`);}
      else{const nmH=esc(e.name)+(e.match?` <small style="color:var(--mut);font-weight:400">— ${esc(e.match.slice(0,90))}${e.line?" :"+e.line:""}</small>`:"");
        node=el(`<div class="fm-row ${e.type}${isSel?" sel":""}${i===cursor?" fm-cur":""}"><input type="checkbox" class="fm-ck"${isSel?" checked":""}><span class="fi">${ficon}</span><span class="fn" title="${att(searchRes?e.path:e.name)}">${nmH}</span><span class="fsz">${e.type==="dir"?"":fmtB(e.size)}</span><span class="fdate">${fmDate(e.mtime)}</span></div>`);}
      node.querySelector(".fm-ck").onclick=ev=>{ev.stopPropagation();toggleSel(e,i,ev.shiftKey);};
-     const op=ev=>{if(ev&&ev.target.classList.contains("fm-ck"))return;cursor=i;openEntry(e);};
-     (node.querySelector(".fn")||node.querySelector(".tn")).onclick=op;
-     (node.querySelector(".fi")||node.querySelector(".ti")).onclick=op;
+     const nmeNode=node.querySelector(".fn")||node.querySelector(".tn");
+     const icNode=node.querySelector(".fi")||node.querySelector(".ti");
+     if(dblOpen){
+       const selOne=ev=>{if(ev&&ev.target.classList.contains("fm-ck"))return;cursor=i;
+         if(ev&&(ev.ctrlKey||ev.metaKey||ev.shiftKey)){toggleSel(e,i,ev.shiftKey);return;}
+         sel.clear();sel.add(e.path);lastIdx=i;renderList();selUpdate();};
+       const op=()=>{cursor=i;openEntry(e);};
+       if(nmeNode){nmeNode.onclick=selOne;nmeNode.ondblclick=op;}
+       if(icNode){icNode.onclick=selOne;icNode.ondblclick=op;}
+     }else{
+       const op=ev=>{if(ev&&ev.target.classList.contains("fm-ck"))return;cursor=i;openEntry(e);};
+       if(nmeNode)nmeNode.onclick=op;
+       if(icNode)icNode.onclick=op;
+     }
      node.oncontextmenu=ev=>{ev.preventDefault();ev.stopPropagation();cursor=i;rowMenu(e,ev.clientX,ev.clientY);};
      node.draggable=true;
      node.addEventListener("dragstart",ev=>{dragPaths=(sel.has(e.path)&&sel.size>1)?[...sel]:[e.path];ev.dataTransfer.effectAllowed="move";ev.dataTransfer.setData("text/plain",e.path);});
@@ -3694,7 +3727,8 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
      xhr.onerror=()=>fin(false);xhr.onabort=()=>fin(false);
      xhr.send(f);});
    const worker=async()=>{while(idx<files.length&&!o.cancelled)await one(files[idx++]);};
-   await Promise.all([worker(),worker()]);
+   const par=Math.max(1,Math.min(6,+SET.fmUpPar||2));
+   await Promise.all(Array.from({length:par},()=>worker()));
    const okAll=!o.cancelled&&!fail;
    opEnd(o,okAll,o.cancelled?`отменено · загружено ${done} из ${files.length}`:`${done} / ${files.length}${fail?` · ошибок: ${fail}`:""}`);
    if(LIVE){notifyDone(o.cancelled?"Загрузка отменена":okAll?"Загрузка завершена":"Загрузка с ошибками",`${done} из ${files.length} · ${dir}`);
@@ -3752,7 +3786,8 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
   ft.onclick=()=>{hid=!hid;SET.fmFavHidden=hid;apply();saveSettings();};}
  body.querySelector("#fUp").onclick=()=>load(cwd==="/"?"/":(cwd.replace(/\/[^/]+$/,"")||"/"));
  body.querySelector("#fRef").onclick=()=>load(cwd);
- body.querySelector("#fHid").onclick=function(){showHidden=!showHidden;this.classList.toggle("pri",showHidden);renderList();};
+ {const hb=body.querySelector("#fHid");hb.classList.toggle("pri",showHidden);
+  hb.onclick=function(){showHidden=!showHidden;SET.fmHidden=showHidden;saveSettings();this.classList.toggle("pri",showHidden);renderList();};}
  body.querySelector("#fFavAdd").onclick=addFav;
  const vbtn=body.querySelector("#fView");vbtn.classList.toggle("pri",viewMode==="grid");
  vbtn.onclick=function(){viewMode=viewMode==="grid"?"list":"grid";SET.fmView=viewMode;saveSettings();this.classList.toggle("pri",viewMode==="grid");renderList();};
@@ -3771,7 +3806,9 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    searchRes=null;renderList();si.focus();};
  body.querySelectorAll("#fCols [data-k]").forEach(h=>h.onclick=()=>{const k=h.dataset.k;
    if(sortKey===k)sortDir=-sortDir;else{sortKey=k;sortDir=1;}
+   SET.fmSortKey=sortKey;SET.fmSortDir=sortDir;saveSettings();
    body.querySelectorAll("#fCols [data-k]").forEach(x=>x.classList.toggle("on",x===h));renderList();});
+ body.querySelectorAll("#fCols [data-k]").forEach(x=>x.classList.toggle("on",x.dataset.k===sortKey));  // начальная подсветка по сохранённой сортировке
  listBox.addEventListener("contextmenu",ev=>{if(ev.target.closest(".fm-row,.fm-tile"))return;ev.preventDefault();
    const it=[];if(clip&&clip.items.length)it.push({label:"Вставить ("+clip.items.length+")",ic:svg("download",16),act:doPaste});
    it.push({label:"Новый файл",ic:svg("file",16),act:doNewFile},{label:"Новая папка",ic:svg("folder",16),act:doMkdir},{label:"Загрузить…",ic:svg("upload",16),act:()=>inp.click()},{sep:1},{label:"Терминал здесь",ic:svg("term",16),act:()=>terminalHere(cwd)},{label:"Корзина",ic:svg("trash",16),act:()=>winTrash()},{label:"Обновить",ic:svg("refresh",16),act:()=>load(cwd)});
@@ -3815,7 +3852,8 @@ function openFileWin(e){openWin("ed:"+e.path,e.name,body=>{
      <button class="iconbtn" id="edWrap" title="Перенос строк">${svg("logs",14)}</button>
      <a class="btn sm" href="/api/fs/raw?dl=1&path=${encodeURIComponent(e.path)}" download="${att(e.name)}" title="Скачать">${svg("download",13)}</a>
      <button class="btn sm pri" id="edSave">${svg("save",13)} Сохранить</button></div><div class="ed-body" id="edBody"></div></div>`;
-   ensureCM(()=>{cm=CodeMirror(body.querySelector("#edBody"),{value:r.content||"",mode:cmMode(e.name),lineNumbers:true,lineWrapping:false,tabSize:2,indentUnit:2,styleActiveLine:true});setTimeout(()=>cm.refresh(),40);
+   const _ts=Math.max(2,Math.min(8,+SET.fmTabSize||2));
+   ensureCM(()=>{cm=CodeMirror(body.querySelector("#edBody"),{value:r.content||"",mode:cmMode(e.name),lineNumbers:true,lineWrapping:false,tabSize:_ts,indentUnit:_ts,styleActiveLine:true});setTimeout(()=>cm.refresh(),40);
      cm.on("change",()=>{if(!dirty){dirty=true;const d=body.querySelector("#edDot");if(d)d.textContent="● ";}});
      if(window.ResizeObserver){const ro=new ResizeObserver(()=>cm&&cm.refresh());ro.observe(body.querySelector("#edBody"));}});
    body.querySelector("#edWrap").onclick=function(){if(!cm)return;const w=!cm.getOption("lineWrapping");cm.setOption("lineWrapping",w);this.classList.toggle("pri",w);};
@@ -4087,6 +4125,7 @@ function winSettings(initTab){openWin("__set","Настройки",body=>{
  let tab=initTab||"look";
  const CATS=[
   {id:"look",name:"Оформление",ic:"cog"},
+  {id:"files",name:"Файлы",ic:"folder"},
   {id:"notify",name:"Уведомления",ic:"bell"},
   {id:"system",name:"Система",ic:"activity"},
   {id:"maint",name:"Обслуживание",ic:"heart"},
@@ -4096,7 +4135,7 @@ function winSettings(initTab){openWin("__set","Настройки",body=>{
   {id:"backup",name:"Бэкап настроек",ic:"save"},
   {id:"pi",name:"Raspberry Pi",ic:"cpu"},
  ];
- const FN={look:lookTab,notify:notifyTab,system:systemTab,maint:maintTab,network:networkTab,security:securityTab,usb:usbTab,backup:backupTab,pi:piTab};
+ const FN={look:lookTab,files:filesTab,notify:notifyTab,system:systemTab,maint:maintTab,network:networkTab,security:securityTab,usb:usbTab,backup:backupTab,pi:piTab};
  const render=()=>{
   body.innerHTML=`<div class="set-nav">${CATS.map(c=>`<button data-t="${c.id}" class="${tab===c.id?"on":""}">${svg(c.ic,17)}<span>${c.name}</span></button>`).join("")}</div><div class="set-pane" id="tc"></div>`;
   body.querySelectorAll(".set-nav button").forEach(b=>b.onclick=()=>{tab=b.dataset.t;render();});
@@ -4150,6 +4189,49 @@ function wireLook(lb){
  lb.querySelectorAll("[data-opreset]").forEach(b=>b.onclick=()=>{const k=b.dataset.opreset;SET[k]=null;applySettings();saveSettings();
   const sl=lb.querySelector(`input[data-op="${k}"]`),out=lb.querySelector("#o_"+k);
   if(out)out.textContent="как у окон";if(sl){sl.value=baseOpPct();paintRange(sl);}b.disabled=true;});
+}
+function filesTab(tc){
+ const SZ=SET.fmIconSize||"m",CL=SET.fmClick||"single",SK=SET.fmSortKey||"name",SD=SET.fmSortDir===-1?-1:1,
+   VW=SET.fmView||"list",DF=SET.fmDateFmt||"dmy_hm",UP=Math.max(1,Math.min(4,+SET.fmUpPar||2)),TS=[2,4,8].includes(+SET.fmTabSize)?+SET.fmTabSize:2;
+ const seg=(id,opts,cur)=>`<div class="seg" id="${id}">${opts.map(([v,t])=>`<button data-v="${v}" class="${String(cur)===String(v)?"on":""}">${t}</button>`).join("")}</div>`;
+ const row=(t,d,ctl,tip)=>`<div class="srow"><div class="srow-l"><div class="srow-t">${t}${tip?tipHTML(tip):""}</div>${d?`<div class="srow-d">${d}</div>`:""}</div><div class="srow-c">${ctl}</div></div>`;
+ tc.innerHTML=`
+  <div class="set-card"><div class="set-grp">Поведение</div>
+   ${row("Стартовая папка","куда открывается менеджер при запуске",`<input class="mono" id="fmStart" value="${att(SET.fmStart||"/mnt/storage")}" placeholder="/mnt/storage" style="width:210px">`,"С какой папки открывается окно «Файлы». По умолчанию — хранилище /mnt/storage.")}
+   ${row("Открытие файлов","",seg("fmClick",[["single","Одинарный клик"],["double","Двойной клик"]],CL),"Одинарный — открывать сразу. Двойной — одиночный клик выделяет, открывает двойной (как в настольных ОС).")}
+   ${pToggle("Показывать скрытые файлы","Файлы и папки, начинающиеся с точки (.config и т.п.). Тумблер в самом окне остаётся.","fmHidden","дотфайлы видны сразу")}
+   ${pToggle("Папки в начале списка","Каталоги всегда идут перед файлами при любой сортировке. Выключи — сортировать вперемешку.","fmFoldersFirst","каталоги перед файлами")}
+   ${row("Сортировка по умолчанию","",seg("fmSortKey",[["name","Имя"],["size","Размер"],["mtime","Дата"]],SK))}
+   ${row("Порядок","",seg("fmSortDir",[["1","По возр."],["-1","По убыв."]],SD))}
+  </div>
+  <div class="set-card"><div class="set-grp">Вид</div>
+   ${row("Вид по умолчанию","",seg("fmView",[["list","Список"],["grid","Плитка"]],VW))}
+   ${row("Размер значков","",seg("fmIconSize",[["s","S"],["m","M"],["l","L"]],SZ),"Размер иконок и превью — мельче/крупнее. В режиме плитки заметнее всего.")}
+   ${pToggle("Миниатюры (превью)","Показывать превью картинок, видео, PDF и обложек аудио. Выключи ради экономии CPU на больших папках.","fmThumbs","эскизы вместо значков")}
+  </div>
+  <div class="set-card"><div class="set-grp">Кэш миниатюр</div>
+   <div class="mon-note" style="margin:0 0 8px">Превью хранятся в <span class="mono">/var/cache/nas-thumbs</span>. Сейчас: <b id="fmCacheStat">…</b></div>
+   ${row("Лимит кэша","",seg("fmCacheLim",[["0","Без лимита"],["256","256 МБ"],["512","512 МБ"],["1024","1 ГБ"],["2048","2 ГБ"]],512),"Когда кэш превышает лимит, самые старые превью удаляются (раз в сутки). «Без лимита» — не чистить.")}
+   ${row("Очистить сейчас","удалит все превью; создадутся заново по мере просмотра",`<button class="btn sm" id="fmCacheClear">${svg("trash",13)} Очистить</button>`)}
+  </div>
+  <div class="set-card"><div class="set-grp">Продвинутое</div>
+   ${row("Формат даты","",seg("fmDateFmt",[["dmy_hm","Дата и время"],["dmy","Только дата"],["rel","Относительно"]],DF))}
+   ${row("Одновременных загрузок","",seg("fmUpPar",[["1","1"],["2","2"],["3","3"],["4","4"]],UP),"Сколько файлов заливать параллельно при загрузке с компьютера.")}
+   ${row("Отступ в редакторе","",seg("fmTabSize",[["2","2"],["4","4"],["8","8"]],TS),"Ширина табуляции и отступа в текстовом редакторе файлов.")}
+  </div>`;
+ const wireSeg=(id,fn)=>tc.querySelectorAll("#"+id+" button").forEach(b=>b.onclick=()=>{tc.querySelectorAll("#"+id+" button").forEach(x=>x.classList.toggle("on",x===b));fn(b.dataset.v);});
+ const setK=(k,cast)=>v=>{SET[k]=cast?cast(v):v;saveSettings();};
+ wireSeg("fmClick",setK("fmClick"));wireSeg("fmSortKey",setK("fmSortKey"));wireSeg("fmSortDir",setK("fmSortDir",v=>+v));
+ wireSeg("fmView",setK("fmView"));wireSeg("fmIconSize",setK("fmIconSize"));wireSeg("fmDateFmt",setK("fmDateFmt"));
+ wireSeg("fmUpPar",setK("fmUpPar",v=>+v));wireSeg("fmTabSize",setK("fmTabSize",v=>+v));
+ const st=tc.querySelector("#fmStart");st.onchange=()=>{SET.fmStart=st.value.trim()||"/mnt/storage";saveSettings();};
+ const statEl=tc.querySelector("#fmCacheStat");
+ const refreshStat=async()=>{const s=await api("/api/fs/thumbcache");if(statEl&&s)statEl.textContent=fmtB(s.bytes||0)+" · "+(s.count||0)+" файлов";};
+ refreshStat();
+ api("/api/maintenance").then(r=>{const mb=r&&r.maintenance&&r.maintenance.thumb_cache_mb;if(mb!=null)tc.querySelectorAll("#fmCacheLim button").forEach(x=>x.classList.toggle("on",+x.dataset.v===+mb));});
+ wireSeg("fmCacheLim",v=>{api("/api/maintenance",{method:"POST",body:JSON.stringify({maintenance:{thumb_cache_mb:+v}})});toast("Лимит кэша: "+(+v?(+v+" МБ"):"без лимита"));});
+ tc.querySelector("#fmCacheClear").onclick=async()=>{const r=await api("/api/fs/thumbcache/clear",{method:"POST",body:"{}"});toast(r&&r.ok?("Кэш очищен: "+(r.removed||0)+" файлов"):"Ошибка");refreshStat();};
+ wireLook(tc);
 }
 function lsTheme(lb){lb.innerHTML=`
   <div class="set-card">
