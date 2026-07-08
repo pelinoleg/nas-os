@@ -968,6 +968,8 @@ def _def_monitor():
         # --- USB авто-импорт (итог копирования SD/флешки; Pushover off — скрипт
         #     импорта умеет слать сам, чтобы не дублировать) ---
         "usb_import":  {"on": False, "priority": 0, "desk": True},
+        # --- бэкап главного NAS на этот NAS (итог прогона) ---
+        "nas_backup":  {"on": True, "priority": 0, "desk": True},
     }}
 
 def _monitor_defaults_desk(d):
@@ -1976,6 +1978,287 @@ def history_sample():
 # --------------------------------------------------------------------------- #
 #  Автообслуживание: ежедневные фоновые задачи (авто-очистка корзины и т.п.)
 # --------------------------------------------------------------------------- #
+# =========================================================================== #
+#  Бэкап главного NAS на этот NAS (rsync-демон или SSH), отдельное мини-приложение
+# =========================================================================== #
+NB_CONF   = "/etc/nas-os/nas-backup.json"                 # секреты → root 600
+NB_STATUS = os.path.join(NAS_CONFIG, "nas-backup-status.json")
+_nb_lock  = threading.Lock()
+_nb_state = {"running": False, "cancel": False, "started": 0, "line": ""}
+# разрешённые корни для локальных папок-приёмников (не системные каталоги)
+_NB_DEST_OK = ("/mnt/", "/media/", "/srv/", "/home/")
+
+def nb_load():
+    d = {"transport": "rsync", "host": "", "user": "", "password": "", "ssh_port": 22,
+         "dest_mode": "single", "dest_base": "/mnt/storage/nas-backup",
+         "jobs": [], "excludes": [".DS_Store", "Thumbs.db", "@eaDir/", "#recycle/",
+                                  "*.tmp", ".cache/", "@Recycle/", ".@__thumb/"],
+         "delete_mode": "archive", "retention_days": 30, "retention_gb": 0,
+         "schedule": {"enabled": False, "freq": "daily", "time": "03:00", "dow": "Sun"}}
+    try:
+        with open(NB_CONF) as f:
+            d.update(json.load(f))
+    except (OSError, ValueError):
+        pass
+    return d
+
+def _nb_valid_dest(p):
+    p = os.path.normpath(str(p or ""))
+    return p.startswith(_NB_DEST_OK) and ".." not in p
+
+def nb_save(patch):
+    cur = nb_load()
+    for k in ("transport", "host", "user", "password", "dest_base", "delete_mode", "dest_mode"):
+        if k in patch and isinstance(patch[k], str):
+            cur[k] = patch[k].strip()
+    for k in ("ssh_port", "retention_days", "retention_gb"):
+        if k in patch:
+            try: cur[k] = max(0, int(patch[k]))
+            except (ValueError, TypeError): pass
+    if isinstance(patch.get("jobs"), list):
+        jobs = []
+        for j in patch["jobs"][:200]:
+            if not isinstance(j, dict): continue
+            src = str(j.get("src", "")).strip().rstrip("/")   # ведущий / сохраняем (SSH abs-пути)
+            dst = os.path.normpath(str(j.get("dest", "")).strip())
+            if not src or not _nb_valid_dest(dst): continue
+            jobs.append({"src": src, "dest": dst, "enabled": bool(j.get("enabled", True))})
+        cur["jobs"] = jobs
+    if isinstance(patch.get("excludes"), list):
+        cur["excludes"] = [str(x)[:150] for x in patch["excludes"] if str(x).strip()][:100]
+    if isinstance(patch.get("schedule"), dict):
+        s = patch["schedule"]
+        cur["schedule"]["enabled"] = bool(s.get("enabled", cur["schedule"]["enabled"]))
+        if s.get("freq") in ("daily", "weekly"): cur["schedule"]["freq"] = s["freq"]
+        if re.match(r"^([01]\d|2[0-3]):[0-5]\d$", str(s.get("time", ""))): cur["schedule"]["time"] = s["time"]
+        if s.get("dow") in ("Mon","Tue","Wed","Thu","Fri","Sat","Sun"): cur["schedule"]["dow"] = s["dow"]
+    if cur["transport"] not in ("rsync", "ssh"): cur["transport"] = "rsync"
+    if cur["delete_mode"] not in ("archive", "mirror", "add"): cur["delete_mode"] = "archive"
+    if cur["dest_mode"] not in ("single", "per"): cur["dest_mode"] = "single"
+    try:
+        os.makedirs(os.path.dirname(NB_CONF), exist_ok=True)
+        tmp = NB_CONF + ".tmp"
+        with open(tmp, "w") as f: json.dump(cur, f)
+        os.chmod(tmp, 0o600); os.replace(tmp, NB_CONF)
+    except OSError:
+        pass
+    return cur
+
+def nb_public(cfg=None):
+    """Конфиг для UI без утечки пароля."""
+    c = dict(cfg or nb_load())
+    c["has_password"] = bool(c.get("password"))
+    c["password"] = ""
+    return c
+
+def _nb_remote_env(cfg):
+    """(префикс удалённого пути, env, доп.аргументы rsync) для выбранного транспорта."""
+    user, host = cfg.get("user", ""), cfg.get("host", "")
+    if cfg.get("transport") == "ssh":
+        port = int(cfg.get("ssh_port", 22) or 22)
+        rsh = ["-e", "ssh -p %d -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10" % port]
+        return ("%s@%s:" % (user, host), _C_ENV, rsh)     # SSH — по ключу (BatchMode)
+    env = dict(_C_ENV, RSYNC_PASSWORD=cfg.get("password", ""))
+    return ("%s@%s::" % (user, host), env, [])            # rsync-демон — пароль через RSYNC_PASSWORD
+
+def nb_test(cfg=None):
+    """Проверка связи + (для rsync-демона) список модулей."""
+    cfg = cfg or nb_load()
+    if not cfg.get("host") or not cfg.get("user"):
+        return {"ok": False, "log": "не заданы адрес/пользователь"}
+    if subprocess.run(["ping", "-c", "1", "-W", "3", cfg["host"]],
+                      capture_output=True).returncode != 0:
+        return {"ok": False, "log": "%s не отвечает на ping" % cfg["host"]}
+    remote, env, rsh = _nb_remote_env(cfg)
+    if cfg.get("transport") == "ssh":
+        r = _run(["rsync"] + rsh + ["--list-only", remote + "/"], timeout=25)
+        return {"ok": r["ok"], "log": "SSH-подключение работает" if r["ok"] else ("не удалось: " + r["log"][-160:])}
+    r = subprocess.run(["rsync", remote], capture_output=True, text=True, env=env, timeout=25)
+    out = (r.stdout + r.stderr).strip()
+    if r.returncode != 0 or "auth failed" in out or "@ERROR" in out:
+        return {"ok": False, "log": "не удалось: " + out[-160:]}
+    mods = [l.split("\t")[0].split()[0] for l in out.splitlines() if l.strip() and not l.startswith("@")]
+    return {"ok": True, "modules": [m for m in mods if m], "log": "подключение работает"}
+
+def nb_browse(cfg, path):
+    """Список папок/файлов источника для визуального выбора (path='' → корень)."""
+    cfg = cfg or nb_load()
+    remote, env, rsh = _nb_remote_env(cfg)
+    path = str(path or "").strip().rstrip("/")
+    if cfg.get("transport") == "rsync" and not path:
+        # корень rsync-демона = список модулей
+        t = nb_test(cfg)
+        if not t.get("ok"): return {"ok": False, "log": t.get("log", "")}
+        return {"ok": True, "path": "", "entries": [{"name": m, "dir": True} for m in t.get("modules", [])]}
+    src = remote + (path + "/" if path else "/")
+    r = subprocess.run(["rsync"] + rsh + ["--list-only", "--no-h", src],
+                       capture_output=True, text=True, env=env, timeout=30)
+    if r.returncode != 0:
+        return {"ok": False, "log": (r.stderr or r.stdout)[-160:]}
+    entries = []
+    for l in r.stdout.splitlines():
+        # формат: "drwxr-xr-x  4096 2024/01/01 12:00:00 имя"
+        m = re.match(r"^(.)\S*\s+[\d,]+\s+\S+\s+\S+\s+(.+)$", l)
+        if not m: continue
+        name = m.group(2)
+        if name in (".", ""): continue
+        entries.append({"name": name, "dir": m.group(1) == "d"})
+    entries.sort(key=lambda e: (not e["dir"], e["name"].lower()))
+    return {"ok": True, "path": path, "entries": entries}
+
+def _nb_prune(cfg):
+    """Ретеншен архива удалённых (_deleted/ДАТА): по дням И по суммарному размеру (ГБ)."""
+    days = int(cfg.get("retention_days", 0) or 0)
+    gb   = int(cfg.get("retention_gb", 0) or 0)
+    snaps = []   # (mtime, path, size)
+    dests = set(j["dest"] for j in cfg.get("jobs", [])) | {cfg.get("dest_base", "")}
+    for base in dests:
+        d = os.path.join(base, "_deleted")
+        if not os.path.isdir(d): continue
+        for name in os.listdir(d):
+            p = os.path.join(d, name)
+            if not os.path.isdir(p): continue
+            try:
+                sz = sum(os.path.getsize(os.path.join(r, f)) for r, _, fs in os.walk(p) for f in fs
+                         if os.path.exists(os.path.join(r, f)))
+                snaps.append([os.path.getmtime(p), p, sz])
+            except OSError:
+                pass
+    removed = 0
+    now = time.time()
+    if days > 0:
+        for mt, p, _ in list(snaps):
+            if now - mt > days * 86400:
+                try: shutil.rmtree(p); removed += 1; snaps.remove([mt, p, _])
+                except OSError: pass
+    if gb > 0:
+        snaps.sort()  # старые сначала
+        total = sum(s[2] for s in snaps)
+        cap = gb * 1024**3
+        for mt, p, sz in snaps:
+            if total <= cap: break
+            try: shutil.rmtree(p); total -= sz; removed += 1
+            except OSError: pass
+    return removed
+
+def nb_build_cmd(cfg, job, dry):
+    """rsync-команда (+env) для одной задачи."""
+    remote, env, rsh = _nb_remote_env(cfg)
+    dest = job["dest"].rstrip("/") + "/"
+    uid = os.environ.get("SUDO_UID") or "1000"
+    owner = TARGET_USER
+    args = ["rsync", "-rltD", "--info=progress2", "--no-inc-recursive",
+            "--no-owner", "--no-group", "--no-perms", "--chown=%s:%s" % (owner, owner)] + rsh
+    dm = cfg.get("delete_mode", "archive")
+    if dm in ("archive", "mirror"):
+        args.append("--delete")
+    if dm == "archive":
+        snap = os.path.join(dest, "_deleted", time.strftime("%Y-%m-%d"))
+        args += ["--backup", "--backup-dir=" + snap]
+        args.append("--exclude=/_deleted")          # не бэкапить сам архив удалённых
+    for ex in cfg.get("excludes", []):
+        args.append("--exclude=" + ex)
+    if dry:
+        args.append("--dry-run")
+    args += [remote + job["src"] + "/", dest]
+    return args, env
+
+def nb_run(cfg, dry, writer, cancel=lambda: False):
+    """Прогнать все включённые задачи. writer(line) — вывод; cancel() — прерывание."""
+    cfg = cfg or nb_load()
+    jobs = [j for j in cfg.get("jobs", []) if j.get("enabled", True)]
+    if not jobs:
+        writer("нет задач для бэкапа"); return {"ok": False, "jobs": []}
+    t = nb_test(cfg)
+    if not t.get("ok"):
+        writer("ОШИБКА связи: " + t.get("log", "")); return {"ok": False, "unreachable": True, "jobs": []}
+    results = []
+    for j in jobs:
+        if cancel():
+            writer("— отменено —"); break
+        writer("")
+        writer("=== %s → %s ===" % (j["src"], j["dest"]))
+        try:
+            os.makedirs(j["dest"], exist_ok=True)
+        except OSError as e:
+            writer("не создать папку: %s" % e); results.append({"src": j["src"], "ok": False}); continue
+        args, env = nb_build_cmd(cfg, j, dry)
+        try:
+            p = subprocess.Popen(args, env=env, stdout=subprocess.PIPE,
+                                 stderr=subprocess.STDOUT, text=True, bufsize=1)
+        except OSError as e:
+            writer("не запустить rsync: %s" % e); results.append({"src": j["src"], "ok": False}); continue
+        for line in iter(p.stdout.readline, ""):
+            writer(line.rstrip("\n"))
+            if cancel():
+                p.kill(); break
+        p.wait()
+        try: p.stdout.close()
+        except OSError: pass
+        ok = p.returncode in (0, 24)     # 24 = vanished files — не ошибка
+        results.append({"src": j["src"], "dest": j["dest"], "ok": ok, "code": p.returncode})
+        writer("[%s] %s" % ("ок" if ok else "ошибка %d" % p.returncode, j["src"]))
+    if not dry:
+        try: pruned = _nb_prune(cfg)
+        except Exception: pruned = 0
+        if pruned: writer("очищено старых снимков удалённых: %d" % pruned)
+        _nb_write_status(results)
+    allok = all(r["ok"] for r in results) and len(results) == len(jobs)
+    return {"ok": allok, "jobs": results}
+
+def _nb_write_status(results):
+    st = {"ts": int(time.time()), "jobs": results}
+    try:
+        with open(NB_STATUS, "w") as f: json.dump(st, f)
+    except OSError:
+        pass
+
+def nb_status():
+    try:
+        with open(NB_STATUS) as f: st = json.load(f)
+    except (OSError, ValueError):
+        st = {}
+    st["running"] = _nb_state["running"]
+    st["line"] = _nb_state.get("line", "")
+    return st
+
+def nb_run_bg(dry=False):
+    """Фоновый запуск (для расписания и кнопки «в фоне»)."""
+    with _nb_lock:
+        if _nb_state["running"]:
+            return False
+        _nb_state.update(running=True, cancel=False, started=int(time.time()), line="")
+    def work():
+        def w(l):
+            _nb_state["line"] = l[:200]
+        try:
+            r = nb_run(nb_load(), dry, w, lambda: _nb_state["cancel"])
+            if not dry:
+                lvl = "ok" if r.get("ok") else ("warn" if r.get("unreachable") else "warn")
+                msg = "все задачи выполнены" if r.get("ok") else ("главный NAS недоступен — пропущено" if r.get("unreachable") else "часть задач с ошибками")
+                log_event("nas_backup", "Бэкап главного NAS", msg, lvl, kind="backup", desk=True)
+        except Exception as e:
+            log_event("nas_backup", "Бэкап главного NAS", "сбой: %s" % e, "warn", kind="backup", desk=True)
+        finally:
+            _nb_state.update(running=False, cancel=False, line="")
+    threading.Thread(target=work, daemon=True).start()
+    return True
+
+def nb_schedule_due(cfg, nowt):
+    """Пора ли запускать по расписанию (вызывается раз в минуту из monitor_loop)."""
+    s = cfg.get("schedule", {})
+    if not s.get("enabled"):
+        return False
+    if s.get("time") != time.strftime("%H:%M", time.localtime(nowt)):
+        return False
+    if s.get("freq") == "weekly":
+        dows = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+        if dows[time.localtime(nowt).tm_wday] != s.get("dow", "Sun"):
+            return False
+    return True
+
+_nb_last_sched = ""
+
 MAINT_FILE = os.path.join(NAS_CONFIG, "maintenance.json")
 _maint_last = 0
 
@@ -2358,10 +2641,20 @@ def _smart_selftest_tick():
                 pass
         break                      # один вид тестов за ночь
 
+def _nb_sched_tick():
+    """Запуск бэкапа главного NAS по расписанию (раз в минуту, без повтора в ту же минуту)."""
+    global _nb_last_sched
+    now = time.time(); slot = time.strftime("%Y-%m-%d %H:%M", time.localtime(now))
+    if slot == _nb_last_sched:
+        return
+    if nb_schedule_due(nb_load(), now):
+        _nb_last_sched = slot
+        nb_run_bg(dry=False)
+
 def monitor_loop():
     while True:
         time.sleep(60)
-        for fn in (history_sample, monitor_tick, maintenance_daily, _smart_selftest_tick):
+        for fn in (history_sample, monitor_tick, maintenance_daily, _smart_selftest_tick, _nb_sched_tick):
             try:
                 fn()
             except Exception:
@@ -4891,6 +5184,10 @@ class H(BaseHTTPRequestHandler):
                 self._json({"maintenance": load_maintenance()})
             elif p == "/api/updates":
                 self._json(apt_updates(refresh=(q.get("refresh") or ["0"])[0] == "1"))
+            elif p == "/api/backup/config":
+                self._json({"config": nb_public()})
+            elif p == "/api/backup/status":
+                self._json(nb_status())
             elif p == "/api/winpos":
                 self._json({"winpos": load_winpos()})
             elif p == "/api/snippets":
@@ -5171,6 +5468,42 @@ class H(BaseHTTPRequestHandler):
                     log_event("action", "Обновление пакетов apt", "", "ok", kind="action", desk=True)
                 except Exception:
                     pass
+            elif p == "/api/backup/config":
+                self._json({"config": nb_public(nb_save(self._body().get("config", {})))})
+            elif p == "/api/backup/test":
+                self._json(nb_test(nb_load()))
+            elif p == "/api/backup/browse":
+                self._json(nb_browse(nb_load(), self._body().get("path", "")))
+            elif p == "/api/backup/run-bg":
+                started = nb_run_bg(dry=bool(self._body().get("dry", False)))
+                self._json({"ok": started, "log": "запущено" if started else "уже выполняется"})
+            elif p == "/api/backup/cancel":
+                self._body(); _nb_state["cancel"] = True; self._json({"ok": True})
+            elif p == "/api/backup/run":
+                # стрим прогона бэкапа построчно (как apt/движок)
+                dry = bool(self._body().get("dry", False))
+                self.send_response(200); self.send_header("Content-Type", "text/plain; charset=utf-8")
+                self.send_header("Cache-Control", "no-store"); self.send_header("X-Accel-Buffering", "no")
+                self.end_headers()
+                def w(line):
+                    try: self.wfile.write((line + "\n").encode()); self.wfile.flush()
+                    except (BrokenPipeError, ConnectionResetError): _nb_state["cancel"] = True
+                with _nb_lock:
+                    busy = _nb_state["running"]
+                    if not busy: _nb_state.update(running=True, cancel=False, started=int(time.time()))
+                if busy:
+                    w("бэкап уже выполняется");
+                else:
+                    try:
+                        r = nb_run(nb_load(), dry, w, lambda: _nb_state["cancel"])
+                        if not dry:
+                            log_event("nas_backup", "Бэкап главного NAS",
+                                      "все задачи выполнены" if r.get("ok") else ("главный NAS недоступен" if r.get("unreachable") else "часть задач с ошибками"),
+                                      "ok" if r.get("ok") else "warn", kind="backup", desk=True)
+                    finally:
+                        _nb_state.update(running=False, cancel=False, line="")
+                try: self.wfile.write(b"__EXIT__0\n"); self.wfile.flush()
+                except OSError: pass
             elif p.startswith("/api/setup/"):
                 action = p[len("/api/setup/"):]
                 b = self._body()
