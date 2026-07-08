@@ -3970,6 +3970,7 @@ const EVMETA=[
  {grp:"Диски: подключение и режим"},
  {k:"disk_add",t:"Диск подключён",d:"USB-диск или карта появились в системе",dp:0},
  {k:"disk_remove",t:"Диск отключён",d:"устройство внезапно пропало из системы",dp:1},
+ {k:"disk_remount",t:"Диск переподключён",d:"отвалившийся диск был смонтирован автоматически",dp:0},
  {k:"readonly",t:"Диск только для чтения",d:"ФС перемонтирована ro — прямой риск для данных",dp:2},
  {k:"fserror",t:"Ошибки диска в логе ядра",d:"EXT4/XFS/I-O ошибки в journalctl -k",dp:1},
  {k:"mergerfs",t:"Диск выпал из пула",d:"ветка /mnt/diskN из fstab не смонтирована",dp:1},
@@ -3987,6 +3988,7 @@ const EVMETA=[
  {grp:"Raspberry Pi: питание и ресурсы"},
  {k:"temp",t:"Перегрев CPU",d:"температура выше порога",thr:"°C",dp:1},
  {k:"throttle",t:"Троттлинг / просадка питания",d:"нехватка тока БП или снижение частоты",dp:1},
+ {k:"thermal_guard",t:"Термозащита",d:"перегрев: предупреждение или авто-ограничение контейнера",dp:1},
  {k:"sustained_heat",t:"Держится перегрев/троттлинг",d:"жара или троттлинг не спадают N минут подряд",thr:"мин",dp:1},
  {k:"fan_stall",t:"Вентилятор стоит",d:"0 об/мин при высокой температуре",dp:1},
  {k:"sd_degrade",t:"Сбои SD-карты",d:"ошибки чтения/записи загрузочной карты в логе ядра",dp:1},
@@ -4022,6 +4024,7 @@ const EVMETA=[
  {k:"sec_updates",t:"Накатились security-обновления",d:"unattended-upgrades что-то установил",dp:-1},
  {k:"time_drift",t:"Время не синхронизировано",d:"часы могут уплыть (chrony/timesyncd)",dp:0},
  {k:"weekly",t:"Недельный отчёт",d:"раз в неделю: «жив», аптайм/темп/место",dp:-1},
+ {k:"daily_summary",t:"Сводка состояния",d:"ежедневная/еженедельная сводка: темп, память, место, здоровье, бэкап",dp:-1},
  {k:"boot",t:"Загрузка системы",d:"NAS включился или перезагрузился",dp:-1},
 ];
 const PRIO=[[2,"Экстренно"],[1,"Важно"],[0,"Обычное"],[-1,"Тихо"],[-2,"Бейдж"]];
@@ -4090,6 +4093,12 @@ function systemTab(tc){withSysc(tc,()=>{const s=SYSC.system||{};
    <div class="set-h">Защита данных · SnapRAID</div>
    <div class="srow"><div class="srow-l"><div class="srow-t">Sync — ежедневно${tipHTML("Синхронизация чётности: фиксирует изменения дня. Выберите время, когда NAS не занят.")}</div><div class="srow-d">время запуска</div></div><div class="srow-c"><input class="mono" id="stSnSync" style="max-width:90px" placeholder="03:00"></div></div>
    <div class="srow"><div class="srow-l"><div class="srow-t">Scrub — еженедельно${tipHTML("Проверка данных на скрытые повреждения (bit rot). Раз в неделю в выбранный день и время.")}</div><div class="srow-d">день и время</div></div><div class="srow-c"><select id="stSnDow" class="ev-prio">${[["Mon","пн"],["Tue","вт"],["Wed","ср"],["Thu","чт"],["Fri","пт"],["Sat","сб"],["Sun","вс"]].map(([v,l])=>`<option value="${v}">${l}</option>`).join("")}</select><input class="mono" id="stSnScrub" style="max-width:90px" placeholder="05:00"></div></div>
+   <div class="set-h">Надёжность и отчёты</div>
+   <div class="mon-row"><span>Авто-переподключение диска${tipHTML("Если диск данных внезапно отвалился (частая беда USB-SATA мостов), NAS сам пытается снова его смонтировать раз в 5 минут и уведомляет, когда получилось. Без этого бэкап мог бы тихо не работать, пока не заметишь.")}</span><label class="tgl"><input type="checkbox" id="stAmr"><span class="sl"></span></label></div>
+   <div class="mon-row"><span>Активная термозащита${tipHTML("При стойком перегреве Pi 5 (парити/нагрузка) NAS реагирует, а не только предупреждает. «Только предупреждать» — шлёт уведомление. «Авто» — ограничивает или приостанавливает самый жадный контейнер до охлаждения (базы данных не трогает), затем восстанавливает.")}</span><div class="seg" id="stTh"><button data-v="off">Выкл</button><button data-v="warn">Предупреждать</button><button data-v="auto">Авто</button></div></div>
+   <div class="srow" id="stThRow"><div class="srow-l"><div class="srow-t">Пороги температуры</div><div class="srow-d">«горячо» · «критично» (стоп в режиме Авто), °C</div></div><div class="srow-c"><input class="mono" id="stThHot" style="max-width:60px"><span style="color:var(--mut);font-size:12px">°C</span><input class="mono" id="stThCrit" style="max-width:60px"><span style="color:var(--mut);font-size:12px">°C</span></div></div>
+   <div class="mon-row"><span>Сводка состояния${tipHTML("Раз в день или неделю NAS присылает короткую сводку (температура, память, место, здоровье, итог бэкапа). Доставка — через уведомления: вкл/выкл Pushover в Настройки → Уведомления → «Сводка состояния».")}</span><label class="tgl"><input type="checkbox" id="stSumOn"><span class="sl"></span></label></div>
+   <div class="srow" id="stSumRow"><div class="srow-l"><div class="srow-t">Когда присылать</div></div><div class="srow-c"><div class="seg" id="stSumFreq"><button data-v="daily">Ежедневно</button><button data-v="weekly">Еженедельно</button></div><select id="stSumDow" class="ev-prio">${[["Mon","пн"],["Tue","вт"],["Wed","ср"],["Thu","чт"],["Fri","пт"],["Sat","сб"],["Sun","вс"]].map(([v,l])=>`<option value="${v}">${l}</option>`).join("")}</select><input class="mono" id="stSumTime" style="max-width:80px" placeholder="09:00"></div></div>
    <div class="set-h">Поведение панели</div>
    <div class="mon-row"><span>Автооткрывать центр операций${tipHTML("При старте загрузки/копирования поповер операций открывается сам. Выключите, если хотите открывать его только вручную с иконки в баре.")}</span><label class="tgl"><input type="checkbox" id="stOpsAuto"><span class="sl"></span></label></div>
   </div>`);
@@ -4108,6 +4117,30 @@ function systemTab(tc){withSysc(tc,()=>{const s=SYSC.system||{};
     sy.value=md.snap_sync_time;sd.value=md.snap_scrub_dow;sr.value=md.snap_scrub_time;
     toast(md.error?("Ошибка: "+md.error):"Сохранено");};
   [sc,ss,sl,sy,sd,sr].forEach(x=>x.onchange=saveSm);
+  // --- надёжность и отчёты ---
+  const amr=sec.querySelector("#stAmr"),sumOn=sec.querySelector("#stSumOn"),
+        sumRow=sec.querySelector("#stSumRow"),sumDow=sec.querySelector("#stSumDow"),sumTime=sec.querySelector("#stSumTime"),
+        thHot=sec.querySelector("#stThHot"),thCrit=sec.querySelector("#stThCrit"),thRow=sec.querySelector("#stThRow");
+  const segSet=(seg,v)=>seg.querySelectorAll("button").forEach(b=>b.classList.toggle("on",b.dataset.v===v));
+  const segVal=seg=>{const b=seg.querySelector("button.on");return b?b.dataset.v:seg.querySelector("button").dataset.v;};
+  const thSeg=sec.querySelector("#stTh"),sumFreq=sec.querySelector("#stSumFreq");
+  api("/api/maintenance").then(m=>{const md=(m&&m.maintenance)||{};
+    amr.checked=md.automount_recover!==false;
+    sumOn.checked=!!md.summary_enabled;sumRow.style.display=sumOn.checked?"":"none";
+    segSet(sumFreq,md.summary_freq||"daily");sumDow.value=md.summary_dow||"Mon";sumTime.value=md.summary_time||"09:00";
+    sumDow.style.display=(md.summary_freq==="weekly")?"":"none";
+    segSet(thSeg,md.thermal_mode||"warn");thRow.style.display=(md.thermal_mode!=="off")?"":"none";
+    thHot.value=md.thermal_hot!=null?md.thermal_hot:80;thCrit.value=md.thermal_crit!=null?md.thermal_crit:85;});
+  const saveRel=async()=>{const r=await api("/api/maintenance",{method:"POST",body:JSON.stringify({maintenance:{
+     automount_recover:amr.checked,summary_enabled:sumOn.checked,summary_freq:segVal(sumFreq),
+     summary_dow:sumDow.value,summary_time:sumTime.value.trim()||"09:00",
+     thermal_mode:segVal(thSeg),thermal_hot:+thHot.value||80,thermal_crit:+thCrit.value||85}})});
+    const md=(r&&r.maintenance)||{};thHot.value=md.thermal_hot;thCrit.value=md.thermal_crit;
+    toast(md.error?("Ошибка: "+md.error):"Сохранено");};
+  amr.onchange=saveRel;[sumDow,sumTime,thHot,thCrit].forEach(x=>x.onchange=saveRel);
+  sumOn.onchange=()=>{sumRow.style.display=sumOn.checked?"":"none";saveRel();};
+  thSeg.querySelectorAll("button").forEach(b=>b.onclick=()=>{segSet(thSeg,b.dataset.v);thRow.style.display=(b.dataset.v!=="off")?"":"none";saveRel();});
+  sumFreq.querySelectorAll("button").forEach(b=>b.onclick=()=>{segSet(sumFreq,b.dataset.v);sumDow.style.display=(b.dataset.v==="weekly")?"":"none";saveRel();});
   const oa=sec.querySelector("#stOpsAuto");oa.checked=SET.opsAuto!==false;
   oa.onchange=()=>{SET.opsAuto=oa.checked;saveSettings();};}
  // псевдоним пула (симлинк): показать текущий и применить новый

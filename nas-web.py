@@ -970,6 +970,12 @@ def _def_monitor():
         "usb_import":  {"on": False, "priority": 0, "desk": True},
         # --- бэкап главного NAS на этот NAS (итог прогона) ---
         "nas_backup":  {"on": True, "priority": 0, "desk": True},
+        # --- надёжность: диск сам переподключился (авто-mount) ---
+        "disk_remount":{"on": True, "priority": 0, "desk": True},
+        # --- активная термозащита (предупреждение/действие) ---
+        "thermal_guard":{"on": True, "priority": 1, "desk": True},
+        # --- ежедневная/еженедельная сводка состояния ---
+        "daily_summary":{"on": True, "priority": -1, "desk": False},
     }}
 
 def _monitor_defaults_desk(d):
@@ -1114,14 +1120,15 @@ def _events_save(ev):
 # категория события каталога → раздел журнала (для фильтров в окне уведомлений)
 _EVENT_KIND = {}
 for _k in ("disk_add", "disk_remove", "readonly", "fserror", "smart", "smart_wear",
-           "disktemp", "slow_disk", "sd_degrade", "usb_import"):
+           "disktemp", "slow_disk", "sd_degrade", "usb_import", "disk_remount"):
     _EVENT_KIND[_k] = "disk"
 for _k in ("pool", "diskfull", "root_full", "inodes", "docker_space"):
     _EVENT_KIND[_k] = "space"
-for _k in ("temp", "throttle", "mem", "swap", "load", "sustained_heat", "fan_stall", "proc_hog"):
+for _k in ("temp", "throttle", "mem", "swap", "load", "sustained_heat", "fan_stall",
+           "proc_hog", "thermal_guard"):
     _EVENT_KIND[_k] = "power"
 for _k in ("svcfail", "container", "container_loop", "cron_failed", "boot",
-           "reboot_req", "updates", "sec_updates", "time_drift", "weekly"):
+           "reboot_req", "updates", "sec_updates", "time_drift", "weekly", "daily_summary"):
     _EVENT_KIND[_k] = "svc"
 for _k in ("panel_new", "panel_fail", "ssh_login"):
     _EVENT_KIND[_k] = "access"
@@ -2279,7 +2286,15 @@ def load_maintenance():
          "backup_keep": 10,         # сколько бэкапов хранить
          "snap_sync_time": "03:00",   # SnapRAID: ежедневный sync
          "snap_scrub_dow": "Sun",     # SnapRAID: день недели scrub
-         "snap_scrub_time": "05:00"}  # SnapRAID: время scrub
+         "snap_scrub_time": "05:00",  # SnapRAID: время scrub
+         "automount_recover": True,   # авто-перемонтирование отвалившегося диска
+         "summary_enabled": False,    # сводка состояния (в Pushover/журнал)
+         "summary_freq": "daily",     # daily | weekly
+         "summary_time": "09:00",     # HH:MM
+         "summary_dow": "Mon",        # для weekly
+         "thermal_mode": "warn",      # off | warn | auto (активная термозащита)
+         "thermal_hot": 80,           # порог «горячо», °C
+         "thermal_crit": 85}          # порог «критично» (в auto — стоп контейнера)
     try:
         with open(MAINT_FILE) as f:
             d.update(json.load(f))
@@ -2379,6 +2394,25 @@ def save_maintenance(d):
                     except Exception:
                         pass
                 cur["pool_alias"] = v
+    # --- надёжность/отчёты/термозащита ---
+    if "automount_recover" in d:
+        cur["automount_recover"] = bool(d["automount_recover"])
+    if "summary_enabled" in d:
+        cur["summary_enabled"] = bool(d["summary_enabled"])
+    if d.get("summary_freq") in ("daily", "weekly"):
+        cur["summary_freq"] = d["summary_freq"]
+    if "summary_time" in d and re.match(r"^([01]\d|2[0-3]):[0-5]\d$", str(d["summary_time"] or "")):
+        cur["summary_time"] = d["summary_time"]
+    if d.get("summary_dow") in _DOW:
+        cur["summary_dow"] = d["summary_dow"]
+    if d.get("thermal_mode") in ("off", "warn", "auto"):
+        cur["thermal_mode"] = d["thermal_mode"]
+    for k, (lo, hi) in {"thermal_hot": (60, 85), "thermal_crit": (65, 90)}.items():
+        if k in d:
+            try: cur[k] = max(lo, min(hi, int(d[k])))
+            except (ValueError, TypeError): pass
+    if cur.get("thermal_crit", 85) <= cur.get("thermal_hot", 80):
+        cur["thermal_crit"] = cur.get("thermal_hot", 80) + 3
     try:
         os.makedirs(NAS_CONFIG, exist_ok=True)
         with open(MAINT_FILE, "w") as f:
@@ -2658,10 +2692,214 @@ def _nb_sched_tick():
         _nb_last_sched = slot
         nb_run_bg(dry=False)
 
+def notify_event(name, key, title, msg, lvl=None, priority=None, cooldown=1800):
+    """Доставка события вне monitor_tick: журнал всегда + Pushover, если включён и ev.on.
+    key — ключ кулдауна (реюзает _MON_LAST, как fire())."""
+    now = time.time()
+    if cooldown and now - _MON_LAST.get(key, 0) < cooldown:
+        return False
+    _MON_LAST[key] = now
+    cfg = load_monitor(); ev = cfg.get("events", {}).get(name, {})
+    if priority is None:
+        priority = ev.get("priority", 0)
+    try:
+        log_event(name, title, msg, lvl)
+    except Exception:
+        pass
+    if cfg.get("enabled") and ev.get("on"):
+        push_notify(title, msg, priority)
+    return True
+
+# ---- надёжность: авто-перемонтирование отвалившегося диска ----
+_MOUNT_TRY = {}   # mp -> время последней попытки (не чаще раза в 5 мин)
+
+def _fstab_targets():
+    """Точки монтирования данных/пула из fstab (под /mnt), которые должны быть смонтированы."""
+    out = []
+    for line in _read("/etc/fstab").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        f = line.split()
+        if len(f) < 4 or f[2] == "swap":
+            continue
+        mp = f[1]
+        if (mp.startswith("/mnt/") or mp == STORAGE) and "noauto" not in f[3]:
+            out.append(mp)
+    return out
+
+def _mounted(mp):
+    return subprocess.run(["mountpoint", "-q", mp]).returncode == 0
+
+def _automount_tick():
+    if not load_maintenance().get("automount_recover", True):
+        return
+    now = time.time()
+    for mp in _fstab_targets():
+        if _mounted(mp):
+            _MOUNT_TRY.pop(mp, None)
+            continue
+        if now - _MOUNT_TRY.get(mp, 0) < 300:     # не долбить чаще раза в 5 мин
+            continue
+        _MOUNT_TRY[mp] = now
+        _run(["mount", mp], timeout=30)
+        if _mounted(mp):
+            notify_event("disk_remount", "remount:%s" % mp, "NAS: диск переподключён",
+                         "%s снова смонтирован автоматически" % mp, "ok", cooldown=120)
+
+# ---- ежедневная/еженедельная сводка состояния ----
+_LAST_SUMMARY = ""
+
+def _build_summary():
+    s = _safe(stats) or {}
+    host = s.get("host", "NAS")
+    lines = []
+    up = s.get("uptime")
+    if isinstance(up, (int, float)) and up > 0:
+        d, rem = divmod(int(up), 86400); h, rem = divmod(rem, 3600); mi = rem // 60
+        lines.append("Аптайм: " + (("%dд %dч" % (d, h)) if d else ("%dч %dм" % (h, mi)) if h else ("%dм" % mi)))
+    elif up:
+        lines.append("Аптайм: %s" % up)
+    t = s.get("temp")
+    if isinstance(t, (int, float)):
+        lines.append("Температура: %d°C" % t)
+    mem = (s.get("mem") or {}).get("pct")
+    if isinstance(mem, (int, float)):
+        lines.append("Память: %d%%" % mem)
+    try:
+        u = shutil.disk_usage(STORAGE)
+        lines.append("Пул: занято %d%% (свободно %.0f ГБ)" % (
+            round(100 * u.used / u.total), u.free / 1024**3))
+    except OSError:
+        pass
+    try:
+        h = health_report()
+        bad = [c for c in (h.get("checks") or []) if c.get("lvl") in ("warn", "bad")]
+        lines.append("Здоровье: %s" % ("всё в норме" if not bad
+                     else ", ".join(c.get("name", "?") for c in bad[:4])))
+    except Exception:
+        pass
+    try:
+        st = nb_status()
+        if st.get("ts"):
+            okn = sum(1 for j in st.get("jobs", []) if j.get("ok"))
+            lines.append("Бэкап NAS: %d/%d ок" % (okn, len(st.get("jobs", []))))
+    except Exception:
+        pass
+    return "NAS: сводка (%s)" % host, "\n".join(lines) or "нет данных"
+
+def _summary_tick():
+    global _LAST_SUMMARY
+    m = load_maintenance()
+    if not m.get("summary_enabled"):
+        return
+    lt = time.localtime()
+    if time.strftime("%H:%M", lt) != m.get("summary_time", "09:00"):
+        return
+    if m.get("summary_freq") == "weekly" and _DOW[lt.tm_wday] != m.get("summary_dow", "Mon"):
+        return
+    slot = time.strftime("%Y-%m-%d %H:%M", lt)
+    if slot == _LAST_SUMMARY:
+        return
+    _LAST_SUMMARY = slot
+    title, body = _build_summary()
+    notify_event("daily_summary", "summary:%s" % slot, title, body, "info", cooldown=0)
+
+# ---- активная термозащита ----
+_THERM = {"hot": 0, "cool": 0, "acted": {}}   # acted: name -> {"cpus": orig, "paused": bool}
+
+def _hottest_container():
+    """(имя, %CPU) самого нагружающего CPU контейнера, или (None, 0)."""
+    r = _run(["docker", "stats", "--no-stream", "--format", "{{.Name}}\t{{.CPUPerc}}"], timeout=12)
+    best, bestv = None, 0.0
+    for l in (r.get("log") or "").splitlines():
+        f = l.split("\t")
+        if len(f) < 2:
+            continue
+        try:
+            v = float(f[1].strip().rstrip("%"))
+        except ValueError:
+            continue
+        if v > bestv and not re.search(r"(?i)dockge|postgres|mysql|mariadb|db", f[0]):
+            best, bestv = f[0].strip(), v
+    return best, bestv
+
+def _therm_restore():
+    for name, st in list(_THERM["acted"].items()):
+        try:
+            if st.get("paused"):
+                _run(["docker", "unpause", name], timeout=15)
+            _run(["docker", "update", "--cpus=%s" % (st.get("cpus") or 0), name], timeout=15)
+        except Exception:
+            pass
+    if _THERM["acted"]:
+        _THERM["acted"] = {}
+        return True
+    return False
+
+def _thermal_tick():
+    m = load_maintenance()
+    mode = m.get("thermal_mode", "warn")
+    if mode == "off":
+        return
+    t = _safe(temp_c)
+    if not isinstance(t, (int, float)):
+        return
+    hot = int(m.get("thermal_hot", 80)); crit = int(m.get("thermal_crit", 85))
+    if t >= hot:
+        _THERM["hot"] += 1; _THERM["cool"] = 0
+    elif t <= hot - 10:
+        _THERM["cool"] += 1; _THERM["hot"] = 0
+        if _THERM["cool"] >= 5 and _THERM["acted"]:
+            if _therm_restore():
+                notify_event("thermal_guard", "therm:restore", "NAS: температура в норме",
+                             "остыло до %d°C — ограничения контейнеров сняты" % t, "ok", cooldown=300)
+        return
+    else:
+        return
+    if _THERM["hot"] < 3:      # реагируем только на устойчивый перегрев (~3 мин)
+        return
+    victim, cpu = _hottest_container()
+    if mode == "warn":
+        notify_event("thermal_guard", "therm:warn",
+                     "NAS: перегрев %d°C" % t,
+                     "температура держится ≥%d°C%s — проверьте охлаждение" % (
+                         hot, (" (грузит: %s, %.0f%% CPU)" % (victim, cpu)) if victim else ""),
+                     "warn", cooldown=1800)
+        return
+    # auto: душим/паузим самый жадный контейнер
+    if not victim:
+        notify_event("thermal_guard", "therm:auto", "NAS: перегрев %d°C" % t,
+                     "нет контейнера-виновника — снизьте нагрузку вручную", "warn", cooldown=1800)
+        return
+    if t >= crit:
+        try:
+            _run(["docker", "pause", victim], timeout=15)
+            _THERM["acted"].setdefault(victim, {"cpus": _container_cpus(victim)})["paused"] = True
+        except Exception:
+            pass
+        notify_event("thermal_guard", "therm:auto",
+                     "NAS: критический перегрев %d°C" % t,
+                     "контейнер %s приостановлен до охлаждения" % victim, "crit", cooldown=600)
+    else:
+        if victim not in _THERM["acted"]:
+            _THERM["acted"][victim] = {"cpus": _container_cpus(victim), "paused": False}
+            _run(["docker", "update", "--cpus=0.5", victim], timeout=15)
+            notify_event("thermal_guard", "therm:auto", "NAS: перегрев %d°C" % t,
+                         "нагрузка %s ограничена (0.5 CPU) до охлаждения" % victim, "warn", cooldown=900)
+
+def _container_cpus(name):
+    r = _run(["docker", "inspect", "-f", "{{.HostConfig.NanoCpus}}", name], timeout=10)
+    try:
+        return round(int((r.get("log") or "0").strip()) / 1e9, 2) or 0
+    except (ValueError, TypeError):
+        return 0
+
 def monitor_loop():
     while True:
         time.sleep(60)
-        for fn in (history_sample, monitor_tick, maintenance_daily, _smart_selftest_tick, _nb_sched_tick):
+        for fn in (history_sample, monitor_tick, maintenance_daily, _smart_selftest_tick,
+                   _nb_sched_tick, _automount_tick, _summary_tick, _thermal_tick):
             try:
                 fn()
             except Exception:
