@@ -17,3 +17,4 @@ services:
       - "diun.enable=true"
       - "web-desktop.name=Homepage"
       - "web-desktop.url=http://pi5.local:3001"
+      - "web-desktop.icon=https://cdn.jsdelivr.net/gh/selfhst/icons@main/svg/homepage.svg"

@@ -6,8 +6,9 @@ services:
     container_name: scrutiny
     restart: unless-stopped
     labels:
-      web-desktop.name: "Scrutiny"
-      web-desktop.url: "http://pi5.local:8084"
+      - "web-desktop.name=Scrutiny"
+      - "web-desktop.url=http://pi5.local:8084"
+      - "web-desktop.icon=https://cdn.jsdelivr.net/gh/selfhst/icons@main/svg/scrutiny.svg"
     cap_add:
       - SYS_RAWIO
       - SYS_ADMIN            # нужно для NVMe-дисков

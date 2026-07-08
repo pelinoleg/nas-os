@@ -6,8 +6,9 @@ services:
     hostname: syncthing
     restart: unless-stopped
     labels:
-      web-desktop.name: "Syncthing"
-      web-desktop.url: "http://pi5.local:8384"
+      - "web-desktop.name=Syncthing"
+      - "web-desktop.url=http://pi5.local:8384"
+      - "web-desktop.icon=https://cdn.jsdelivr.net/gh/selfhst/icons@main/svg/syncthing.svg"
     environment:
       - PUID=1000
       - PGID=1000

@@ -2776,7 +2776,7 @@ function editUnit(name,after){openWin("unit:"+name,"Юнит · "+name,body=>{
    ensureCM(()=>{cm=CodeMirror(host,{value:(r&&r.content)||"",mode:"properties",lineNumbers:true,tabSize:2,styleActiveLine:true});setTimeout(()=>cm.refresh(),40);if(window.ResizeObserver)new ResizeObserver(()=>cm&&cm.refresh()).observe(host);});})();
 },{w:720,h:600});}
 /* ===== Менеджер docker-стеков (создание/редактирование/управление через GUI) ===== */
-const STACK_SKELETON="services:\n  app:\n    image: \n    container_name: app\n    restart: unless-stopped\n    ports:\n      - \"8080:80\"\n    labels:\n      web-desktop.name: \"App\"\n      web-desktop.url: \"http://pi5.local:8080\"\n";
+const STACK_SKELETON="services:\n  app:\n    image: \n    container_name: app\n    restart: unless-stopped\n    ports:\n      - \"8080:80\"\n    labels:\n      - \"web-desktop.name=App\"\n      - \"web-desktop.url=http://pi5.local:8080\"\n";
 let DK_SEL="overview";   // выбранный пункт: overview | stack:<имя> | images | volumes
 function winServices(initTab){openWin("__services","Docker",(body,win)=>{
  body.style.padding="0";

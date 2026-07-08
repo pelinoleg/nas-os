@@ -23,5 +23,5 @@ services:
     privileged: true
     init: true
     labels:
-      web-desktop.name: "Cronmaster"
-      web-desktop.url: "http://pi5.local:8123"
+      - "web-desktop.name=Cronmaster"
+      - "web-desktop.url=http://pi5.local:8123"
