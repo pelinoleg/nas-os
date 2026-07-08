@@ -266,6 +266,21 @@
     .dm2{flex-direction:column}
     .dm2-side{width:auto;flex:none;max-height:40vh;border-right:none;border-bottom:1px solid var(--line)}
     .dm2-detail{padding:16px 16px}
+    /* менубар: лишние кнопки прячем (статус — в поповере здоровья) */
+    #expoBtn,#themeBtn,.tray{display:none}
+    .menubar .mb-sep{display:none}.menubar{gap:5px}
+    /* поповеры здоровья/уведомлений/операций — шторка на всю ширину под баром */
+    .mbpop{position:fixed!important;left:8px!important;right:8px!important;top:46px!important;
+      width:auto!important;max-width:none!important;min-width:0!important;
+      max-height:calc(100vh - 130px);overflow-y:auto}
+    /* окна: отступы компактнее, табы и тулбары скроллятся, таблицы не ломают раскладку */
+    .win .body{padding:15px 13px}
+    .tabs{overflow-x:auto;flex-wrap:nowrap;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+    .tabs::-webkit-scrollbar{height:0}
+    .tabs button{flex:0 0 auto}
+    .fm-bar{flex-wrap:wrap}
+    .win .body table{font-size:12px}
+    .dialog{padding:20px 18px}
   }
   /* планшет (641–1024): окна крупнее (в JS), сайдбары уже, виджеты — сеткой под приложениями */
   @media(min-width:641px) and (max-width:1024px){
