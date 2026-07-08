@@ -1,0 +1,26 @@
+# Zerobyte — автоматизация бэкапов (веб-GUI поверх Restic). http://<pi>:4096
+# Нужен /dev/fuse + SYS_ADMIN (restic-mount). БЕЗОПАСНОСТЬ: не пробрасывайте порт
+# 4096 в интернет без туннеля/авторизации — только LAN.
+services:
+  zerobyte:
+    image: ghcr.io/nicotsx/zerobyte:v0.40.0
+    container_name: zerobyte
+    restart: unless-stopped
+    devices:
+      - /dev/fuse:/dev/fuse
+    cap_add:
+      - SYS_ADMIN
+    labels:
+      - "diun.enable=true"
+      - "web-desktop.name=Zerobyte"
+      - "web-desktop.url=http://pi5.local:4096"
+      - "web-desktop.icon=https://cdn.jsdelivr.net/gh/selfhst/icons@main/svg/zerobyte.svg"
+    environment:
+      - APP_SECRET=${APP_SECRET}
+      - BASE_URL=http://pi5.local:4096
+      - PORT=4096
+    ports:
+      - "4096:4096"
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - /opt/docker/zerobyte/data:/var/lib/zerobyte

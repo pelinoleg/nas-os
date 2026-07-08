@@ -1,0 +1,26 @@
+# qBittorrent — торрент-клиент с веб-интерфейсом. http://<pi>:8080
+# При первом старте пароль admin-пользователя пишется в лог контейнера
+# (docker logs qbittorrent) — смените его в Настройках → Веб-интерфейс.
+services:
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:5.2.3
+    container_name: qbittorrent
+    restart: unless-stopped
+    labels:
+      - "diun.enable=true"
+      - "web-desktop.name=qBittorrent"
+      - "web-desktop.url=http://pi5.local:8080"
+      - "web-desktop.icon=https://cdn.jsdelivr.net/gh/selfhst/icons@main/svg/qbittorrent.svg"
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Madrid
+      - WEBUI_PORT=8080
+      - TORRENTING_PORT=6881
+    volumes:
+      - /opt/docker/qbittorrent/config:/config
+      - /mnt/storage/downloads:/downloads
+    ports:
+      - "8080:8080"
+      - "6881:6881"
+      - "6881:6881/udp"

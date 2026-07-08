@@ -21,3 +21,16 @@ services:
       - "22000:22000/tcp"    # синхронизация
       - "22000:22000/udp"
       - "21027:21027/udp"    # обнаружение
+
+  # Светлая тема Vellum для веб-UI Syncthing: одноразово копирует файлы темы в
+  # конфиг (/config/gui/vellum-light). Появится в Actions → Settings → GUI →
+  # Theme = vellum-light (выбрать один раз). Не влияет на работу Syncthing:
+  # без hard-depends — если клон не удался, Syncthing всё равно поднимется.
+  syncthing-vellum:
+    image: alpine/git:latest
+    container_name: syncthing-vellum
+    restart: "no"
+    entrypoint: /bin/sh
+    command: -c "test -d /config/gui/vellum-light && exit 0; git clone --depth 1 https://github.com/pelinoleg/syncthing-vellum /tmp/v && mkdir -p /config/gui && cp -r /tmp/v/vellum-light /config/gui/ && chown -R 1000:1000 /config/gui/vellum-light && echo 'vellum-light installed'"
+    volumes:
+      - /opt/docker/syncthing/config:/config
