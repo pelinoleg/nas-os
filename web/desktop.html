@@ -921,17 +921,23 @@
   .du{display:flex;flex-direction:column;height:100%;padding:12px 16px 14px}
   .du-top{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
   .du-roots{flex-wrap:wrap}
-  .du-meta{font-family:var(--mono);font-size:11px;color:var(--mut);white-space:nowrap}
+  .du-meta{font-family:var(--mono);font-size:11.5px;color:var(--mut);white-space:nowrap;display:inline-flex;align-items:center;gap:8px}
+  .du-age{display:inline-flex;align-items:center;gap:4px;font-weight:700;font-size:12px;padding:3px 9px;border-radius:999px}
+  .du-age svg{opacity:.85}
+  .du-age.fresh{color:var(--good);background:var(--good-soft)}
+  .du-age.ok{color:var(--dim);background:var(--sel)}
+  .du-age.warn{color:var(--warn);background:var(--warn-soft)}
+  .du-age.old{color:var(--danger);background:var(--danger-soft)}
   .du-main{flex:1;min-height:0;display:flex;flex-direction:column}
   .du-empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:var(--dim);font-size:13px;text-align:center}
   .du-empty svg{color:var(--accent);opacity:.8}
   .du-empty .du-prog{font-family:var(--mono);font-size:12px;color:var(--mut)}
   .du-spin svg{animation:wspin 1s linear infinite;color:var(--accent)}
   .du-empty2{color:var(--mut);font-size:12px;padding:12px}
-  .du-crumb{display:flex;gap:1px;align-items:center;flex-wrap:wrap;font-family:var(--mono);font-size:11.5px;margin-bottom:10px}
-  .du-crumb a{color:var(--dim);cursor:pointer;padding:2px 5px;border-radius:5px}
-  .du-crumb a:last-child{color:var(--text)}.du-crumb a:hover{background:var(--sel);color:var(--accent)}
-  .du-crumb .sepc{color:var(--mut)}
+  .du-crumb{display:flex;gap:2px;align-items:center;flex-wrap:wrap;font-family:var(--mono);font-size:13.5px;margin-bottom:12px}
+  .du-crumb a{color:var(--dim);cursor:pointer;padding:3px 8px;border-radius:7px;font-weight:550}
+  .du-crumb a:last-child{color:var(--text);font-weight:700;background:var(--sel)}.du-crumb a:hover{background:var(--accent-soft);color:var(--accent)}
+  .du-crumb .sepc{color:var(--mut);font-size:12px}
   .du-cols{flex:1;min-height:0;display:flex;gap:16px}
   .du-chart{flex:none;display:flex;align-items:flex-start;justify-content:center}
   .du-chart svg{max-width:100%;height:auto}
@@ -942,6 +948,7 @@
   .du-row.du-hot{background:var(--sel)}
   .du-row.du-dim{opacity:.45}
   .du-hole{fill:var(--glass);stroke:var(--line)}
+  .du-lbl{fill:#fff;font-family:var(--mono);font-weight:600;font-size:9.5px;pointer-events:none;paint-order:stroke;stroke:rgba(0,0,0,.4);stroke-width:2.4px;stroke-linejoin:round}
   .du-ctext{fill:var(--text);font-family:var(--mono);font-weight:700;font-size:15px}
   .du-csub{fill:var(--mut);font-size:9.5px}
   .du-list{flex:1;min-width:0;overflow:auto}
@@ -967,7 +974,7 @@
   .fm-chip{font-size:11px;padding:5px 11px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--dim);cursor:pointer;font-family:var(--mono)}
   .fm-chip:hover{border-color:var(--accent-line);color:var(--accent)}
   .fm-search{flex:1;min-width:110px;padding:7px 10px;font-size:12px}
-  .fm-sep{width:1px;height:16px;background:var(--line);flex:none;margin:0 2px}
+  .fm-sep{width:2px;height:19px;background:var(--line-2);flex:none;margin:0 7px;border-radius:2px;opacity:.9}
   .du-sizebtn{font-weight:700;font-size:11px;min-width:26px;font-family:var(--mono)}
   .fm-row.srch{align-items:flex-start}
   .fm-row.srch .fn{white-space:normal;display:flex;flex-direction:column;gap:1px;line-height:1.32}
@@ -1456,6 +1463,7 @@ const P={
  eject:'<path d="M6 15h12"/><path d="m12 5-6 7h12z"/>',
  activity:'<path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.25.25 0 0 1-.48 0L9.24 2.18a.25.25 0 0 0-.48 0l-2.35 8.36A2 2 0 0 1 4.49 12H2"/>',
  chartpie:'<path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/>',
+ "panel-left":'<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/><path d="M5.5 7h1.5M5.5 10h1.5"/>',
  term:'<path d="m7 11 2-2-2-2"/><path d="M11 13h4"/><rect width="18" height="18" x="3" y="3" rx="2"/>',
  info:'<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
  wifi:'<path d="M12 20h.01"/><path d="M2 8.82a15 15 0 0 1 20 0"/><path d="M5 12.859a10 10 0 0 1 14 0"/><path d="M8.5 16.429a5 5 0 0 1 7 0"/>',
@@ -3519,7 +3527,8 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    <div class="fm-top">
      <div class="fm-tabs" id="fTabs"></div>
      <div class="fm-bar2">
-       <button class="iconbtn" id="fFavT" title="Боковая панель (избранное/диски)">${svg("layers",15)}</button>
+       <button class="iconbtn" id="fFavT" title="Избранное и диски (боковая панель)">${svg("panel-left",16)}</button>
+       <span class="fm-sep"></span>
        <button class="iconbtn" id="fUp" title="Вверх">${svg("arrowup",15)}</button>
        <button class="iconbtn" id="fRef" title="Обновить">${svg("refresh",15)}</button>
        <div class="fm-crumb" id="fCrumb"></div>
@@ -3993,6 +4002,7 @@ function winDiskUsage(initRoot){openWin("__duscan","Анализ места",(bo
  // палитра чуть приглушена, читается в обеих темах; 2-й уровень отделяем прозрачностью (см. CSS), а не осветлением в белый
  const DUCOL=["#4C8DF6","#33BE86","#E0913C","#8A7DFF","#E0669E","#2FB0BC","#E5544E","#5B9BD5","#46B98A","#B07A44","#7A6EE0","#D9A62E"];
  const fmtTs=ts=>{if(!ts)return"";const d=Date.now()/1000-ts;if(d<60)return"только что";if(d<3600)return Math.floor(d/60)+" мин назад";if(d<86400)return Math.floor(d/3600)+" ч назад";return Math.floor(d/86400)+" дн назад";};
+ const ageCls=ts=>{if(!ts)return"ok";const d=Date.now()/1000-ts;if(d<3600)return"fresh";if(d<86400)return"ok";if(d<7*86400)return"warn";return"old";};
  // перекрёстная подсветка круг↔бары по ключу (индекс ребёнка верхнего уровня)
  function duHi(key,on){mainEl.querySelectorAll("[data-key]").forEach(elm=>{const m=elm.dataset.key===String(key);
    elm.classList.toggle("du-dim",on&&!m);elm.classList.toggle("du-hot",on&&m);});}
@@ -4006,7 +4016,7 @@ function winDiskUsage(initRoot){openWin("__duscan","Анализ места",(bo
    if(!st){mainEl.innerHTML="<div class='du-empty'>Ошибка</div>";return;}
    if(st.status==="scanning"){renderScanning(st);pollScan();return;}
    if(st.status==="error"){mainEl.innerHTML=`<div class="du-empty">${svg("activity",30)}<p>Ошибка скана: ${esc(st.error||"")}</p><button class="btn pri" id="duGo">Повторить</button></div>`;bindGo();metaEl.textContent="";return;}
-   if(st.status==="done"){metaEl.textContent=`${fmtB(st.size||0)} · ${st.dirs||0} папок · скан ${fmtTs(st.ts)}`;cur=root;drill(root);return;}
+   if(st.status==="done"){metaEl.innerHTML=`${fmtB(st.size||0)} · ${st.dirs||0} папок <span class="du-age ${ageCls(st.ts)}">${svg("clock",12)} скан ${fmtTs(st.ts)}</span>`;cur=root;drill(root);return;}
    mainEl.innerHTML=`<div class="du-empty">${svg("chartpie",34)}<p>Нет данных по <span class="mono">${esc(root)}</span></p><button class="btn pri" id="duGo">${svg("chartpie",14)} Сканировать</button></div>`;bindGo();metaEl.textContent="";}
  function bindGo(){const g=mainEl.querySelector("#duGo");if(g)g.onclick=startScan;}
  async function startScan(){await api("/api/fs/duscan/start",{method:"POST",body:JSON.stringify({root})});cache={};refresh();}
@@ -4034,14 +4044,21 @@ function winDiskUsage(initRoot){openWin("__duscan","Анализ места",(bo
    const segs=[];let a=-Math.PI/2;
    ch.forEach((c,i)=>{const span=Math.max(0,(c.s/total)*TAU),a0=a,a1=a+span;a=a1;if(span<0.012)return;
      const col=DUCOL[i%DUCOL.length],full=span>=TAU-0.001;
-     segs.push({c,col,ring:1,key:i,full,path:full?null:arc(r0,r1,a0,a1)});
+     segs.push({c,col,ring:1,key:i,full,a0,a1,path:full?null:arc(r0,r1,a0,a1)});
      if(showL2&&c.d&&c.c&&c.c.length){const sub=c.c.filter(x=>x.s>0),st=sub.reduce((s,x)=>s+x.s,0)||c.s;let aa=a0;
-       sub.forEach(sc=>{const sp=Math.max(0,(sc.s/st)*span),b0=aa,b1=aa+sp;aa=b1;if(sp<0.012)return;segs.push({c:sc,col,ring:2,key:i,path:arc(r1,r2,b0,b1)});});}});
+       sub.forEach(sc=>{const sp=Math.max(0,(sc.s/st)*span),b0=aa,b1=aa+sp;aa=b1;if(sp<0.012)return;segs.push({c:sc,col,ring:2,key:i,a0:b0,a1:b1,path:arc(r1,r2,b0,b1)});});}});
    const inner=segs.map((s,idx)=>{const cls=`duseg${s.ring===2?" duseg2":""}`;
      return s.ring===1&&s.full
        ?`<circle cx="${cx}" cy="${cy}" r="${(r0+r1)/2}" fill="none" stroke="${s.col}" stroke-width="${r1-r0}" data-i="${idx}" data-key="${s.key}" class="${cls}"/>`
        :`<path d="${s.path}" fill="${s.col}" data-i="${idx}" data-key="${s.key}" class="${cls}"/>`;}).join("");
-   box.innerHTML=`<svg viewBox="0 0 260 260" width="260" height="260">${inner}<circle cx="${cx}" cy="${cy}" r="${r0-4}" class="du-hole" id="duHole"/><text x="${cx}" y="${cy-3}" text-anchor="middle" class="du-ctext" id="duC1"></text><text x="${cx}" y="${cy+13}" text-anchor="middle" class="du-csub" id="duC2"></text></svg>`;
+   // подписи папок прямо в кольце (где помещается по ширине сектора)
+   const midR=(r0+r1)/2;
+   const labels=segs.filter(s=>s.ring===1&&(s.full||(s.a1-s.a0)>=0.42)).map(s=>{
+     const ang=s.full?-Math.PI/2:(s.a0+s.a1)/2,arcLen=(s.full?TAU:(s.a1-s.a0))*midR,maxc=Math.max(2,Math.floor(arcLen/6.4));
+     let nm=s.c.n;if(nm.length>maxc)nm=nm.slice(0,Math.max(1,maxc-1))+"…";
+     const lx=cx+midR*Math.cos(ang),ly=cy+midR*Math.sin(ang);
+     return `<text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="middle" dominant-baseline="central" class="du-lbl">${esc(nm)}</text>`;}).join("");
+   box.innerHTML=`<svg viewBox="0 0 260 260" width="260" height="260">${inner}<circle cx="${cx}" cy="${cy}" r="${r0-4}" class="du-hole" id="duHole"/>${labels}<text x="${cx}" y="${cy-3}" text-anchor="middle" class="du-ctext" id="duC1"></text><text x="${cx}" y="${cy+13}" text-anchor="middle" class="du-csub" id="duC2"></text></svg>`;
    const setC=(t1,t2)=>{const a1=box.querySelector("#duC1"),a2=box.querySelector("#duC2");if(a1)a1.textContent=t1;if(a2)a2.textContent=t2;};
    setC(fmtB(node.s||total),"");
    box.querySelectorAll(".duseg").forEach(elm=>{const s=segs[+elm.dataset.i];
