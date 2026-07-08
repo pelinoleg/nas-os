@@ -12,7 +12,7 @@ nas-web.py — веб-бэкенд мастера настройки NAS и ра
 Системные изменения выполняет проверенный движок nas-wizard.sh (api-режим), поэтому
 сервер нужно запускать от root (launcher nas-setup.sh это делает).
 """
-import json, os, re, subprocess, time, shutil, socket, threading, pwd, mimetypes, glob, errno
+import json, os, re, subprocess, time, shutil, socket, threading, pwd, mimetypes, glob, errno, sys
 import pty, select, struct, hashlib, base64, signal, fcntl, termios, secrets, hmac
 import urllib.request, urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -884,7 +884,7 @@ def stats():
         "iface": iface,
         "uptime": uptime_s(),
         "load": list(os.getloadavg()),
-        "nb_running": _nb_state["running"],   # идёт ли бэкап (для индикатора на иконке дока)
+        "nb_running": bool(_nb_run_state_read().get("running")),   # идёт ли бэкап (индикатор на иконке; лёгкая проверка без systemctl)
         "ts": int(time.time()),
     }
 
@@ -2002,17 +2002,42 @@ def history_sample():
 NB_CONF   = "/etc/nas-os/nas-backup.json"                 # секреты → root 600
 NB_STATUS = os.path.join(NAS_CONFIG, "nas-backup-status.json")
 _nb_lock  = threading.Lock()
-# log — кольцевой буфер строк прогона (для переподключения UI после перезагрузки),
-# log_base — seq первой строки в буфере (seq = log_base + len(log)).
-_nb_state = {"running": False, "cancel": False, "started": 0, "line": "", "cur": "",
-             "log": [], "log_base": 0, "dry": False, "result": None}
+# Прогон бэкапа запускается ОТДЕЛЬНЫМ процессом в транзиентном systemd-юните
+# (вне cgroup службы) → переживает перезапуск/обновление nas-web. Драйвер пишет
+# вывод в файл-лог и статус в json; UI/сервер их читают и переподключаются.
+NB_RUN_LOG    = os.path.join(NAS_CONFIG, "nas-backup-run.log")
+NB_RUN_STATE  = os.path.join(NAS_CONFIG, "nas-backup-run.json")
+NB_RUN_CANCEL = os.path.join(NAS_CONFIG, "nas-backup-run.cancel")
+NB_RUN_UNIT   = "nas-backup-run"          # имя транзиентного юнита (systemd-run --unit)
+_nb_state = {"running": False, "cancel": False, "started": 0, "line": "", "cur": ""}   # legacy (стрим-эндпоинт)
 
-def _nb_log(line):
-    lg = _nb_state["log"]
-    lg.append(line)
-    if len(lg) > 800:                       # держим последние ~800 строк
-        drop = len(lg) - 800
-        del lg[:drop]; _nb_state["log_base"] += drop
+def _nb_run_state_read():
+    try:
+        with open(NB_RUN_STATE) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+def _nb_run_state_write(d):
+    try:
+        os.makedirs(NAS_CONFIG, exist_ok=True)
+        tmp = NB_RUN_STATE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(d, f)
+        os.replace(tmp, NB_RUN_STATE)
+    except OSError:
+        pass
+
+def _nb_unit_active():
+    try:
+        return subprocess.run(["systemctl", "is-active", "--quiet", NB_RUN_UNIT + ".service"],
+                              timeout=5).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+def nb_run_active():
+    """Идёт ли прогон: флаг в state И живой транзиентный юнит (чтобы не залипало после краха)."""
+    return bool(_nb_run_state_read().get("running")) and _nb_unit_active()
 # разрешённые корни для локальных папок-приёмников (не системные каталоги)
 _NB_DEST_OK = ("/mnt/", "/media/", "/srv/", "/home/")
 
@@ -2289,24 +2314,33 @@ def nb_status():
         with open(NB_STATUS) as f: st = json.load(f)
     except (OSError, ValueError):
         st = {}
-    st["running"] = _nb_state["running"]
-    st["line"] = _nb_state.get("line", "")
+    st["running"] = nb_run_active()
+    st["line"] = ""
     return st
 
 def nb_log_tail(since):
-    """Хвост лога текущего/последнего прогона с seq>since — для переподключения UI."""
+    """Хвост лога текущего/последнего прогона (из файла) — для переподключения UI."""
     try:
         since = int(since)
     except (ValueError, TypeError):
         since = 0
-    base = _nb_state.get("log_base", 0)
-    lg = _nb_state.get("log", [])
-    end = base + len(lg)
+    rs = _nb_run_state_read()
+    running = bool(rs.get("running")) and _nb_unit_active()
+    try:
+        with open(NB_RUN_LOG) as f:
+            lines = f.read().split("\n")
+        if lines and lines[-1] == "":
+            lines.pop()
+    except OSError:
+        lines = []
+    base = 0
+    if len(lines) > 2000:                    # ограничить объём ответа
+        base = len(lines) - 2000; lines = lines[-2000:]
+    end = base + len(lines)
     start = max(0, since - base)
-    return {"running": _nb_state["running"], "started": _nb_state.get("started", 0),
-            "dry": _nb_state.get("dry", False), "result": _nb_state.get("result"),
-            "cur": _nb_state.get("cur", ""), "line": _nb_state.get("line", ""),
-            "seq": end, "base": base, "lines": lg[start:]}
+    return {"running": running, "started": rs.get("started", 0), "dry": rs.get("dry", False),
+            "result": rs.get("result"), "cur": rs.get("cur", ""), "line": "",
+            "seq": end, "base": base, "lines": lines[start:]}
 
 # --------------------------------------------------------------------------- #
 #  Здоровье бэкапа — периодические проверки (события nb_conn/nb_srcmiss/nb_stale/
@@ -2384,7 +2418,7 @@ def nb_health_tick(fire, ev, pri, thr, now):
                 ts = json.load(f).get("ts", 0)
         except (OSError, ValueError):
             ts = 0
-        if days > 0 and not _nb_state["running"]:
+        if days > 0 and not nb_run_active():
             if not ts:
                 fire("nb_stale", "NAS-бэкап: ещё не выполнялся",
                      "Бэкап настроен, но не было ни одного прогона", pri("nb_stale"), ev_name="nb_stale", lvl="warn")
@@ -2393,7 +2427,7 @@ def nb_health_tick(fire, ev, pri, thr, now):
                      "Последний прогон %d дн назад (порог %d)" % (int((now - ts) / 86400), days),
                      pri("nb_stale"), ev_name="nb_stale", lvl="warn")
     # --- резкое изменение размера приёмника ---
-    if ev.get("nb_size", {}).get("on") and not _nb_state["running"]:
+    if ev.get("nb_size", {}).get("on") and not nb_run_active():
         base_dir = cfg.get("dest_base") or "/mnt/storage/nas-backup"
         if os.path.isdir(base_dir):
             cur_sz = _du_bytes(base_dir)
@@ -2429,31 +2463,71 @@ def nb_health_tick(fire, ev, pri, thr, now):
     _nb_health_save(hs)
 
 def nb_run_bg(dry=False):
-    """Фоновый запуск (для расписания и кнопки «в фоне»)."""
-    with _nb_lock:
-        if _nb_state["running"]:
-            return False
-        _nb_state.update(running=True, cancel=False, started=int(time.time()), line="", cur="",
-                         log=[], log_base=0, dry=bool(dry), result=None)
-    def work():
-        def w(l):
-            _nb_state["line"] = l[:200]; _nb_log(l)
-            if l.startswith("=== ") and " → " in l:          # маркер начала задачи → текущая папка
-                _nb_state["cur"] = l[4:].split(" → ")[0].strip()
-        res = None
-        try:
-            r = nb_run(nb_load(), dry, w, lambda: _nb_state["cancel"])
-            res = "ok" if r.get("ok") else ("unreachable" if r.get("unreachable") else "warn")
-            if not dry:
-                msg = "все задачи выполнены" if r.get("ok") else ("главный NAS недоступен — пропущено" if r.get("unreachable") else "часть задач с ошибками")
-                log_event("nas_backup", "Бэкап главного NAS", msg, "ok" if r.get("ok") else "warn", kind="backup", desk=True)
-        except Exception as e:
-            res = "warn"; _nb_log("сбой: %s" % e)
-            log_event("nas_backup", "Бэкап главного NAS", "сбой: %s" % e, "warn", kind="backup", desk=True)
-        finally:
-            _nb_state.update(running=False, cancel=False, line="", result=(res or "warn"))
-    threading.Thread(target=work, daemon=True).start()
+    """Запустить прогон ОТДЕЛЬНЫМ процессом в транзиентном systemd-юните — он
+    переживёт перезапуск/обновление nas-web. Возвращает False, если уже идёт."""
+    if nb_run_active():
+        return False
+    try:
+        if os.path.exists(NB_RUN_CANCEL):
+            os.remove(NB_RUN_CANCEL)
+    except OSError:
+        pass
+    # начальный статус (драйвер перезапишет) — чтобы UI сразу увидел «идёт»
+    _nb_run_state_write({"running": True, "started": int(time.time()), "dry": bool(dry),
+                         "cur": "", "result": None})
+    cmd = ["systemd-run", "--collect", "--quiet", "--unit", NB_RUN_UNIT,
+           "--setenv=SUDO_USER=" + TARGET_USER, "--setenv=HOME=" + HOME,   # тот же NAS_CONFIG, что у службы
+           sys.executable, os.path.join(HERE, "nas-web.py"), "backup-run"] + (["dry"] if dry else [])
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        _nb_run_state_write({"running": False, "result": "warn"})
+        return False
+    if r.returncode != 0:
+        _nb_run_state_write({"running": False, "result": "warn"})
+        return False
     return True
+
+def nb_run_cli(dry=False):
+    """Драйвер прогона (запускается в транзиентном юните). Пишет лог в файл и
+    статус в json — независимо от того, жив ли основной процесс nas-web."""
+    started = int(time.time())
+    _nb_run_state_write({"running": True, "started": started, "dry": bool(dry),
+                         "cur": "", "result": None, "pid": os.getpid()})
+    try:
+        logf = open(NB_RUN_LOG, "w", buffering=1)          # усечь и открыть на дозапись построчно
+    except OSError:
+        logf = None
+    def w(l):
+        if logf:
+            try: logf.write(l + "\n")
+            except OSError: pass
+        if l.startswith("=== ") and " → " in l:
+            st = _nb_run_state_read(); st["cur"] = l[4:].split(" → ")[0].strip(); _nb_run_state_write(st)
+    def cancel():
+        return os.path.exists(NB_RUN_CANCEL)
+    res = None
+    try:
+        r = nb_run(nb_load(), dry, w, cancel)
+        res = "ok" if r.get("ok") else ("unreachable" if r.get("unreachable") else "warn")
+        if not dry:
+            msg = "все задачи выполнены" if r.get("ok") else ("главный NAS недоступен — пропущено" if r.get("unreachable") else "часть задач с ошибками")
+            try: log_event("nas_backup", "Бэкап главного NAS", msg, "ok" if r.get("ok") else "warn", kind="backup", desk=True)
+            except Exception: pass
+    except Exception as e:
+        res = "warn"; w("сбой: %s" % e)
+        try: log_event("nas_backup", "Бэкап главного NAS", "сбой: %s" % e, "warn", kind="backup", desk=True)
+        except Exception: pass
+    finally:
+        st = _nb_run_state_read()
+        st.update(running=False, result=(res or "warn"), cur="", done=int(time.time()))
+        _nb_run_state_write(st)
+        try:
+            if os.path.exists(NB_RUN_CANCEL): os.remove(NB_RUN_CANCEL)
+        except OSError: pass
+        if logf:
+            try: logf.close()
+            except OSError: pass
 
 def nb_schedule_due(cfg, nowt):
     """Пора ли запускать по расписанию (вызывается раз в минуту из monitor_loop)."""
@@ -6421,7 +6495,12 @@ class H(BaseHTTPRequestHandler):
                 started = nb_run_bg(dry=bool(self._body().get("dry", False)))
                 self._json({"ok": started, "log": "запущено" if started else "уже выполняется"})
             elif p == "/api/backup/cancel":
-                self._body(); _nb_state["cancel"] = True; self._json({"ok": True})
+                self._body(); _nb_state["cancel"] = True     # legacy стрим
+                try:
+                    open(NB_RUN_CANCEL, "w").close()         # флаг для отдельного процесса-драйвера
+                except OSError:
+                    pass
+                self._json({"ok": True})
             elif p == "/api/backup/run":
                 # стрим прогона бэкапа построчно (как apt/движок)
                 dry = bool(self._body().get("dry", False))
@@ -6496,5 +6575,7 @@ if __name__ == "__main__":
     import sys
     if len(sys.argv) > 2 and sys.argv[1] == "thumbs-sweep":
         print("thumbs-sweep: сгенерировано", thumbs_sweep(sys.argv[2:]), "превью")
+    elif len(sys.argv) > 1 and sys.argv[1] == "backup-run":
+        nb_run_cli(dry=("dry" in sys.argv[2:]))
     else:
         main()
