@@ -3515,81 +3515,130 @@ function nbPickSource(onPick){const s=document.getElementById("scrim");let cur="
   s.querySelector("#nbsX").onclick=()=>s.classList.remove("show");
   s.querySelector("#nbsO").onclick=()=>{s.classList.remove("show");onPick([...sel]);};};
  draw();}
-function winBackup(){openWin("__nasbak","Бэкап главного NAS",body=>{
- body.style.padding="0";
- const render=async()=>{const r=await api("/api/backup/config"),c=(r&&r.config)||{};
-  const per=c.dest_mode==="per";
-  body.innerHTML=`<div class="nbwrap">
-   <div class="set-h" style="margin-top:0">Подключение к главному NAS</div>
-   <div class="srow"><div class="srow-l"><div class="srow-t">Способ${tipHTML("rsync-демон: на главном NAS включена служба rsync с шарами-модулями (Synology: Панель управления → rsync). SSH: доступ по SSH, копирование по ключу.")}</div></div><div class="srow-c"><div class="seg" id="nbTr"><button data-v="rsync" class="${c.transport!=="ssh"?"on":""}">rsync-демон</button><button data-v="ssh" class="${c.transport==="ssh"?"on":""}">SSH</button></div></div></div>
-   <div class="srow"><div class="srow-l"><div class="srow-t">Адрес NAS</div></div><div class="srow-c"><input class="mono" id="nbHost" value="${att(c.host||"")}" placeholder="192.168.1.95"></div></div>
-   <div class="srow"><div class="srow-l"><div class="srow-t">Пользователь</div></div><div class="srow-c"><input class="mono" id="nbUser" value="${att(c.user||"")}" placeholder="oleg"></div></div>
-   <div class="srow" id="nbPwRow" style="${c.transport==="ssh"?"display:none":""}"><div class="srow-l"><div class="srow-t">Пароль rsync${tipHTML("Пароль модуля rsync-демона. Хранится на этом NAS.")}</div></div><div class="srow-c"><input type="password" class="mono" id="nbPw" placeholder="${c.has_password?"•••••• (задан)":"пароль"}"></div></div>
-   <div class="srow" id="nbPortRow" style="${c.transport==="ssh"?"":"display:none"}"><div class="srow-l"><div class="srow-t">SSH-порт${tipHTML("Копирование идёт по SSH-ключу (без пароля). Сгенерируйте ключ на этом NAS и добавьте его на главный: ssh-copy-id user@nas.")}</div></div><div class="srow-c"><input class="mono" id="nbPort" style="max-width:90px" value="${c.ssh_port||22}"></div></div>
-   <div class="srow"><div class="srow-l"></div><div class="srow-c"><button class="btn sm" id="nbTest">${svg("refresh",13)} Проверить связь</button><span id="nbTestR" style="font-size:12px;margin-left:8px"></span></div></div>
+function winBackup(){openWin("__nasbak","Бэкап главного NAS",(body,win)=>{
+ body.style.display="flex";body.style.padding="0";
+ let tab="overview",CFG={},JOBS=[];
+ const CATS=[
+  {id:"overview",name:"Обзор",ic:"gauge"},
+  {id:"conn",name:"Подключение",ic:"net"},
+  {id:"sources",name:"Источники",ic:"folder"},
+  {id:"deleted",name:"Удалённые файлы",ic:"trash"},
+  {id:"sched",name:"Расписание",ic:"clock"},
+ ];
+ const saveCfg=async patch=>{const r=await api("/api/backup/config",{method:"POST",body:JSON.stringify({config:patch})});CFG=(r&&r.config)||CFG;JOBS=(CFG.jobs||[]).slice();return CFG;};
+ const wireSeg=(tc,id,cb)=>{const seg=tc.querySelector(id);if(!seg)return;seg.querySelectorAll("button").forEach(b=>b.onclick=()=>{seg.querySelectorAll("button").forEach(x=>x.classList.toggle("on",x===b));cb(b.dataset.v);});};
+ const destFor=src=>{const base=(CFG.dest_base||"/mnt/storage/nas-backup").replace(/\/$/,"");return base+"/"+src.split("/").pop();};
 
-   <div class="set-h">Что и куда копировать</div>
-   <div class="srow"><div class="srow-l"><div class="srow-t">Режим приёмника${tipHTML("Единая папка — всё копируется в одну папку по подпапкам. Отдельно для каждой — у каждого источника своя папка-приёмник (гибко).")}</div></div><div class="srow-c"><div class="seg" id="nbDm"><button data-v="single" class="${!per?"on":""}">Единая папка</button><button data-v="per" class="${per?"on":""}">Отдельно для каждой</button></div></div></div>
-   ${!per?`<div class="srow"><div class="srow-l"><div class="srow-t">Общая папка-приёмник</div></div><div class="srow-c"><input class="mono" id="nbBase" value="${att(c.dest_base||"/mnt/storage/nas-backup")}" style="flex:1"><button class="btn sm" id="nbBaseB">${svg("folder",13)}</button></div></div>`:""}
-   <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 2px 2px"><span style="font-size:12px;color:var(--mut)">Источники (${(c.jobs||[]).length})</span><button class="btn sm pri" id="nbAdd">${svg("plus",13)} Выбрать с NAS</button></div>
-   <div id="nbJobs" style="padding:0 0 8px"></div>
-
-   <div class="set-h">Удалённые на источнике файлы</div>
-   <div class="srow"><div class="srow-l"><div class="srow-t">Что делать${tipHTML("Архив: удалённое переносится в _deleted/дата (можно восстановить). Зеркало: удаляется и локально. Только добавлять: локально ничего не удаляется.")}</div></div><div class="srow-c"><div class="seg" id="nbDel"><button data-v="archive" class="${c.delete_mode!=="mirror"&&c.delete_mode!=="add"?"on":""}">Архив</button><button data-v="mirror" class="${c.delete_mode==="mirror"?"on":""}">Зеркало</button><button data-v="add" class="${c.delete_mode==="add"?"on":""}">Добавлять</button></div></div></div>
-   <div class="srow" id="nbRetRow" style="${c.delete_mode==="archive"?"":"display:none"}"><div class="srow-l"><div class="srow-t">Хранить архив удалённых${tipHTML("Старые снимки удалённых чистятся: по возрасту И по суммарному размеру. 0 — не ограничивать.")}</div><div class="srow-d">дней / гигабайт (0 = без лимита)</div></div><div class="srow-c"><input class="mono" id="nbRd" style="max-width:70px" value="${c.retention_days||0}"> дн <input class="mono" id="nbRg" style="max-width:70px" value="${c.retention_gb||0}"> ГБ</div></div>
-
-   <div class="set-h">Расписание</div>
-   <div class="mon-row"><span>Автоматический бэкап${tipHTML("Если главный NAS недоступен в момент запуска — тихо пропускается, без ошибок.")}</span><label class="tgl"><input type="checkbox" id="nbSchOn" ${c.schedule&&c.schedule.enabled?"checked":""}><span class="sl"></span></label></div>
-   <div class="srow" id="nbSchRow" style="${c.schedule&&c.schedule.enabled?"":"display:none"}"><div class="srow-l"><div class="srow-t">Когда</div></div><div class="srow-c"><div class="seg" id="nbFreq"><button data-v="daily" class="${!c.schedule||c.schedule.freq!=="weekly"?"on":""}">Ежедневно</button><button data-v="weekly" class="${c.schedule&&c.schedule.freq==="weekly"?"on":""}">Еженедельно</button></div><select id="nbDow" class="ev-prio" style="${c.schedule&&c.schedule.freq==="weekly"?"":"display:none"}">${[["Mon","пн"],["Tue","вт"],["Wed","ср"],["Thu","чт"],["Fri","пт"],["Sat","сб"],["Sun","вс"]].map(([v,l])=>`<option value="${v}"${c.schedule&&c.schedule.dow===v?" selected":""}>${l}</option>`).join("")}</select><input class="mono" id="nbTime" style="max-width:80px" value="${(c.schedule&&c.schedule.time)||"03:00"}"></div></div>
-
-   <div class="nb-foot"><button class="btn" id="nbDry">Пробный прогон</button><button class="btn pri" id="nbRun">${svg("sync",14)} Запустить бэкап</button><span class="grow"></span><span id="nbStatus" style="font-size:12px;color:var(--mut)"></span></div>
-   <div class="upd-con" id="nbCon" style="display:none;margin:0 0 16px"></div>`;
-  // текущее состояние конфига (для сохранений)
-  const g=id=>body.querySelector(id);
-  const jobs=(c.jobs||[]).slice();
-  const drawJobs=()=>{const box=g("#nbJobs");box.innerHTML=jobs.length?"":'<div style="color:var(--mut);font-size:12px;padding:6px 0">Пока ничего не выбрано — нажмите «Выбрать с NAS».</div>';
-   jobs.forEach((j,i)=>{const row=el(`<div class="nb-job"><span class="nb-src mono" title="${att(j.src)}">${svg("net",13)} ${esc(j.src)}</span><span class="nb-arr">→</span><span class="nb-dst mono" title="${att(j.dest)}">${esc(j.dest)}</span><button class="iconbtn nb-jb" title="Папка-приёмник">${svg("folder",14)}</button><button class="iconbtn dng nb-jx" title="Убрать">${svg("x",14)}</button></div>`);
-    row.querySelector(".nb-jx").onclick=()=>{jobs.splice(i,1);persist();drawJobs();};
-    row.querySelector(".nb-jb").onclick=()=>nbPickLocal(j.dest.replace(/\/[^/]+$/,"")||"/mnt",p=>{jobs[i].dest=p.replace(/\/$/,"")+"/"+j.src.split("/").pop();persist();drawJobs();});
+ /* ── Подключение ── */
+ function tabConn(tc){const c=CFG,ssh=c.transport==="ssh";
+  tc.innerHTML=`<h3 class="set-title">Подключение</h3><p class="set-sub">Откуда забирать данные для бэкапа.</p>
+   <div class="srow"><div class="srow-l"><div class="srow-t">Способ${tipHTML("rsync-демон: на главном NAS включена служба rsync с шарами-модулями (Synology: Панель управления → «Служба rsync»). SSH: копирование по SSH-ключу.")}</div><div class="srow-d">${ssh?"по SSH-ключу":"служба rsync на главном NAS"}</div></div><div class="srow-c"><div class="seg" id="cTr"><button data-v="rsync" class="${!ssh?"on":""}">rsync-демон</button><button data-v="ssh" class="${ssh?"on":""}">SSH</button></div></div></div>
+   <div class="srow"><div class="srow-l"><div class="srow-t">Адрес NAS</div></div><div class="srow-c"><input class="mono" id="cHost" value="${att(c.host||"")}" placeholder="192.168.1.95"></div></div>
+   <div class="srow"><div class="srow-l"><div class="srow-t">Пользователь</div></div><div class="srow-c"><input class="mono" id="cUser" value="${att(c.user||"")}" placeholder="oleg"></div></div>
+   <div class="srow" id="cPwRow" style="${ssh?"display:none":""}"><div class="srow-l"><div class="srow-t">Пароль rsync${tipHTML("Пароль модуля rsync-демона. Хранится на этом NAS.")}</div></div><div class="srow-c"><input type="password" class="mono" id="cPw" placeholder="${c.has_password?"•••••• (задан)":"пароль"}"></div></div>
+   <div class="srow" id="cPortRow" style="${ssh?"":"display:none"}"><div class="srow-l"><div class="srow-t">SSH-порт${tipHTML("Копирование идёт по SSH-ключу (без пароля). Сгенерируйте ключ на этом NAS и добавьте на главный: ssh-copy-id user@nas.")}</div></div><div class="srow-c"><input class="mono" id="cPort" style="max-width:90px" value="${c.ssh_port||22}"></div></div>
+   <div class="srow"><div class="srow-l"></div><div class="srow-c"><button class="btn sm" id="cTest">${svg("refresh",13)} Проверить связь</button><span id="cTestR" style="font-size:12px;margin-left:8px"></span></div></div>`;
+  const g=s=>tc.querySelector(s);
+  wireSeg(tc,"#cTr",v=>{g("#cPwRow").style.display=v==="ssh"?"none":"";g("#cPortRow").style.display=v==="ssh"?"":"none";saveCfg({transport:v});});
+  g("#cHost").onchange=()=>saveCfg({host:g("#cHost").value.trim()});
+  g("#cUser").onchange=()=>saveCfg({user:g("#cUser").value.trim()});
+  g("#cPw").onchange=()=>{if(g("#cPw").value)saveCfg({password:g("#cPw").value});};
+  g("#cPort").onchange=()=>saveCfg({ssh_port:+g("#cPort").value||22});
+  g("#cTest").onclick=async()=>{const rr=g("#cTestR");rr.textContent="проверяю…";rr.style.color="var(--mut)";
+   const t=await api("/api/backup/test",{method:"POST",body:"{}"});
+   rr.textContent=t&&t.ok?("✓ "+(t.log||"работает")+(t.modules&&t.modules.length?" · модули: "+t.modules.join(", "):"")):("✗ "+((t&&t.log)||"нет связи"));
+   rr.style.color=t&&t.ok?"var(--good)":"var(--danger)";};
+ }
+ /* ── Источники ── */
+ function tabSources(tc){const c=CFG,per=c.dest_mode==="per";
+  tc.innerHTML=`<h3 class="set-title">Источники</h3><p class="set-sub">Какие папки главного NAS копировать и куда.</p>
+   <div class="srow"><div class="srow-l"><div class="srow-t">Режим приёмника${tipHTML("Единая папка — всё в одну папку по подпапкам. Отдельно для каждой — у каждого источника своя папка-приёмник.")}</div></div><div class="srow-c"><div class="seg" id="sDm"><button data-v="single" class="${!per?"on":""}">Единая папка</button><button data-v="per" class="${per?"on":""}">Отдельно</button></div></div></div>
+   ${!per?`<div class="srow"><div class="srow-l"><div class="srow-t">Общая папка-приёмник</div></div><div class="srow-c"><input class="mono" id="sBase" value="${att(c.dest_base||"/mnt/storage/nas-backup")}" style="flex:1"><button class="btn sm" id="sBaseB">${svg("folder",13)}</button></div></div>`:""}
+   <div style="display:flex;justify-content:space-between;align-items:center;margin:14px 0 6px"><span class="set-h" style="margin:0;padding:0;border:none">Что копировать</span><button class="btn sm pri" id="sAdd">${svg("plus",13)} Выбрать с NAS</button></div>
+   <div id="sJobs"></div>
+   <div class="set-h">Исключения${tipHTML("Шаблоны rsync (по одному в строке): что не копировать — мусор, кэши, служебное.")}</div>
+   <textarea id="sExcl" style="width:100%;min-height:90px;font-family:var(--mono);font-size:12px">${esc((c.excludes||[]).join("\n"))}</textarea>`;
+  const g=s=>tc.querySelector(s);
+  const drawJobs=()=>{const box=g("#sJobs");box.innerHTML=JOBS.length?"":'<div style="color:var(--mut);font-size:12px;padding:6px 0">Пусто — нажмите «Выбрать с NAS».</div>';
+   JOBS.forEach((j,i)=>{const row=el(`<div class="nb-job"><span class="nb-src mono" title="${att(j.src)}">${svg("net",13)} ${esc(j.src)}</span><span class="nb-arr">→</span><span class="nb-dst mono" title="${att(j.dest)}">${esc(j.dest)}</span>${per?`<button class="iconbtn nb-jb" title="Папка-приёмник">${svg("folder",14)}</button>`:""}<button class="iconbtn dng nb-jx" title="Убрать">${svg("x",14)}</button></div>`);
+    row.querySelector(".nb-jx").onclick=()=>{JOBS.splice(i,1);saveCfg({jobs:JOBS});drawJobs();};
+    const jb=row.querySelector(".nb-jb");if(jb)jb.onclick=()=>nbPickLocal(j.dest.replace(/\/[^/]+$/,"")||"/mnt",p=>{JOBS[i].dest=p.replace(/\/$/,"")+"/"+j.src.split("/").pop();saveCfg({jobs:JOBS});drawJobs();});
     box.appendChild(row);});};
-  const curCfg=()=>({transport:g("#nbTr .on").dataset.v,host:g("#nbHost").value.trim(),user:g("#nbUser").value.trim(),
-    ssh_port:+g("#nbPort").value||22,dest_mode:g("#nbDm .on").dataset.v,dest_base:(g("#nbBase")?g("#nbBase").value.trim():c.dest_base),
-    delete_mode:g("#nbDel .on").dataset.v,retention_days:+g("#nbRd").value||0,retention_gb:+g("#nbRg").value||0,
-    jobs:jobs,schedule:{enabled:g("#nbSchOn").checked,freq:g("#nbFreq .on").dataset.v,dow:g("#nbDow").value,time:g("#nbTime").value.trim()}});
-  const persist=async()=>{const pw=g("#nbPw")?g("#nbPw").value:"";const p=curCfg();if(pw)p.password=pw;await nbSave(p);};
   drawJobs();
-  // сегменты
-  body.querySelectorAll(".seg").forEach(seg=>seg.querySelectorAll("button").forEach(b=>b.onclick=()=>{seg.querySelectorAll("button").forEach(x=>x.classList.toggle("on",x===b));
-    const id=seg.id;
-    if(id==="nbTr"){g("#nbPwRow").style.display=b.dataset.v==="ssh"?"none":"";g("#nbPortRow").style.display=b.dataset.v==="ssh"?"":"none";}
-    if(id==="nbDm"){persist().then(render);return;}
-    if(id==="nbDel")g("#nbRetRow").style.display=b.dataset.v==="archive"?"":"none";
-    if(id==="nbFreq")g("#nbDow").style.display=b.dataset.v==="weekly"?"":"none";
-    persist();}));
-  ["#nbHost","#nbUser","#nbPort","#nbRd","#nbRg","#nbTime"].forEach(s=>{const n=g(s);if(n)n.onchange=persist;});
-  const pw=g("#nbPw");if(pw)pw.onchange=persist;
-  const bb=g("#nbBase");if(bb)bb.onchange=persist;const bbB=g("#nbBaseB");if(bbB)bbB.onclick=()=>nbPickLocal(bb.value||"/mnt",p=>{bb.value=p;persist();});
-  g("#nbSchOn").onchange=()=>{g("#nbSchRow").style.display=g("#nbSchOn").checked?"":"none";persist();};
-  g("#nbDow").onchange=persist;
-  g("#nbAdd").onclick=()=>nbPickSource(sel=>{const base=(g("#nbBase")?g("#nbBase").value.trim():c.dest_base)||"/mnt/storage/nas-backup";
-    sel.forEach(src=>{if(jobs.some(j=>j.src===src))return;jobs.push({src,dest:base.replace(/\/$/,"")+"/"+src.split("/").pop(),enabled:true});});persist();drawJobs();});
-  g("#nbTest").onclick=async()=>{const rr=g("#nbTestR");rr.textContent="…";rr.style.color="var(--mut)";await persist();
-    const t=await api("/api/backup/test",{method:"POST",body:"{}"});
-    rr.textContent=t&&t.ok?("✓ "+(t.log||"работает")+(t.modules?" · модули: "+t.modules.join(", "):"")):("✗ "+((t&&t.log)||"нет связи"));rr.style.color=t&&t.ok?"var(--good)":"var(--danger)";};
-  const con=g("#nbCon");
-  const runBackup=async dry=>{if(!jobs.length){toast("Сначала выберите источники");return;}await persist();con.style.display="block";
-    g("#nbRun").disabled=true;g("#nbDry").disabled=true;
-    streamPost("/api/backup/run",con,code=>{g("#nbRun").disabled=false;g("#nbDry").disabled=false;
-      notifyDone(dry?"Пробный прогон завершён":(code===0?"Бэкап завершён":"Бэкап с ошибками"),"");refreshBackupStatus();},{dry});};
-  g("#nbRun").onclick=()=>runBackup(false);g("#nbDry").onclick=()=>runBackup(true);
-  async function refreshBackupStatus(){const st=await api("/api/backup/status");const n=g("#nbStatus");if(!n)return;
-    if(st&&st.running)n.textContent="выполняется: "+(st.line||"");
-    else if(st&&st.ts){const okn=(st.jobs||[]).filter(j=>j.ok).length;n.textContent=`последний прогон ${fmDate(st.ts)} · ${okn}/${(st.jobs||[]).length} ок`;}
-    else n.textContent="ещё не запускался";}
-  refreshBackupStatus();
- };
+  wireSeg(tc,"#sDm",v=>saveCfg({dest_mode:v}).then(()=>tabSources(tc)));
+  const bb=g("#sBase");if(bb)bb.onchange=()=>saveCfg({dest_base:bb.value.trim()});
+  const bbB=g("#sBaseB");if(bbB)bbB.onclick=()=>nbPickLocal(bb.value||"/mnt",p=>{bb.value=p;saveCfg({dest_base:p});});
+  g("#sAdd").onclick=()=>nbPickSource(sel=>{sel.forEach(src=>{if(!JOBS.some(j=>j.src===src))JOBS.push({src,dest:destFor(src),enabled:true});});saveCfg({jobs:JOBS}).then(()=>tabSources(tc));});
+  g("#sExcl").onchange=()=>saveCfg({excludes:g("#sExcl").value.split("\n").map(x=>x.trim()).filter(Boolean)});
+ }
+ /* ── Удалённые файлы ── */
+ function tabDeleted(tc){const c=CFG,dm=c.delete_mode||"archive";
+  tc.innerHTML=`<h3 class="set-title">Удалённые файлы</h3><p class="set-sub">Что делать с файлами, удалёнными на главном NAS.</p>
+   <div class="srow"><div class="srow-l"><div class="srow-t">Режим${tipHTML("Архив — удалённое переносится в _deleted/дата (можно восстановить). Зеркало — удаляется и локально. Только добавлять — локально ничего не удаляется.")}</div></div><div class="srow-c"><div class="seg" id="dDel"><button data-v="archive" class="${dm==="archive"?"on":""}">Архив</button><button data-v="mirror" class="${dm==="mirror"?"on":""}">Зеркало</button><button data-v="add" class="${dm==="add"?"on":""}">Добавлять</button></div></div></div>
+   <div class="srow" id="dRetRow" style="${dm==="archive"?"":"display:none"}"><div class="srow-l"><div class="srow-t">Хранить архив удалённых${tipHTML("Старые снимки чистятся по возрасту И по суммарному размеру. 0 — без лимита.")}</div><div class="srow-d">чистка по возрасту и по размеру</div></div><div class="srow-c"><input class="mono" id="dRd" style="max-width:64px" value="${c.retention_days||0}"><span style="color:var(--mut);font-size:12px">дней</span><input class="mono" id="dRg" style="max-width:64px" value="${c.retention_gb||0}"><span style="color:var(--mut);font-size:12px">ГБ</span></div></div>`;
+  const g=s=>tc.querySelector(s);
+  wireSeg(tc,"#dDel",v=>{g("#dRetRow").style.display=v==="archive"?"":"none";saveCfg({delete_mode:v});});
+  g("#dRd").onchange=()=>saveCfg({retention_days:+g("#dRd").value||0});
+  g("#dRg").onchange=()=>saveCfg({retention_gb:+g("#dRg").value||0});
+ }
+ /* ── Расписание ── */
+ function tabSched(tc){const c=CFG,s=c.schedule||{},wk=s.freq==="weekly";
+  tc.innerHTML=`<h3 class="set-title">Расписание</h3><p class="set-sub">Автоматический бэкап. Если главный NAS недоступен — тихо пропускается.</p>
+   <div class="mon-row"><span>Включить автоматический бэкап</span><label class="tgl"><input type="checkbox" id="hOn" ${s.enabled?"checked":""}><span class="sl"></span></label></div>
+   <div id="hRow" style="${s.enabled?"":"display:none"}">
+    <div class="srow"><div class="srow-l"><div class="srow-t">Частота</div></div><div class="srow-c"><div class="seg" id="hFreq"><button data-v="daily" class="${!wk?"on":""}">Ежедневно</button><button data-v="weekly" class="${wk?"on":""}">Еженедельно</button></div></div></div>
+    <div class="srow" id="hDowRow" style="${wk?"":"display:none"}"><div class="srow-l"><div class="srow-t">День недели</div></div><div class="srow-c"><select id="hDow" class="ev-prio">${[["Mon","понедельник"],["Tue","вторник"],["Wed","среда"],["Thu","четверг"],["Fri","пятница"],["Sat","суббота"],["Sun","воскресенье"]].map(([v,l])=>`<option value="${v}"${s.dow===v?" selected":""}>${l}</option>`).join("")}</select></div></div>
+    <div class="srow"><div class="srow-l"><div class="srow-t">Время${tipHTML("HH:MM (24ч). Ночь/раннее утро — меньше мешает.")}</div></div><div class="srow-c"><input class="mono" id="hTime" style="max-width:90px" value="${s.time||"03:00"}"></div></div>
+   </div>`;
+  const g=x=>tc.querySelector(x);
+  const save=()=>saveCfg({schedule:{enabled:g("#hOn").checked,freq:g("#hFreq .on").dataset.v,dow:g("#hDow").value,time:g("#hTime").value.trim()}});
+  g("#hOn").onchange=()=>{g("#hRow").style.display=g("#hOn").checked?"":"none";save();};
+  wireSeg(tc,"#hFreq",v=>{g("#hDowRow").style.display=v==="weekly"?"":"none";save();});
+  g("#hDow").onchange=save;g("#hTime").onchange=save;
+ }
+ /* ── Обзор ── */
+ function tabOverview(tc){const c=CFG;
+  const sched=c.schedule&&c.schedule.enabled?((c.schedule.freq==="weekly"?"еженедельно":"ежедневно")+" в "+(c.schedule.time||"03:00")):"выключено";
+  tc.innerHTML=`<h3 class="set-title">Бэкап главного NAS</h3>
+   <div class="ov-health"><div class="ovh-list">
+     <div class="ovh-row"><span class="ovh-dot" style="background:${c.host?"var(--good)":"var(--mut)"}"></span><span class="ovh-n">Источник</span><span class="ovh-v">${c.host?esc((c.transport==="ssh"?"ssh ":"rsync ")+c.user+"@"+c.host):"не задан"}</span></div>
+     <div class="ovh-row"><span class="ovh-dot" style="background:var(--accent)"></span><span class="ovh-n">Папок в бэкапе</span><span class="ovh-v">${(c.jobs||[]).length}</span></div>
+     <div class="ovh-row"><span class="ovh-dot" style="background:var(--accent-2)"></span><span class="ovh-n">Расписание</span><span class="ovh-v">${esc(sched)}</span></div>
+     <div class="ovh-row"><span class="ovh-dot" style="background:var(--dim)"></span><span class="ovh-n">Удалённые</span><span class="ovh-v">${c.delete_mode==="mirror"?"зеркало":c.delete_mode==="add"?"не удалять":"архив"}</span></div>
+   </div></div>
+   <div class="set-h">Последний прогон</div>
+   <div id="oStatus" style="font-size:12.5px;color:var(--dim);padding:2px 2px 6px">загрузка…</div>
+   <div class="set-h">Папки</div>
+   <div id="oJobs"></div>
+   <div class="nb-foot"><button class="btn" id="oDry">Пробный прогон</button><button class="btn pri" id="oRun">${svg("sync",14)} Запустить бэкап</button><button class="btn sm" id="oTest" style="margin-left:auto">${svg("refresh",13)} Проверить связь</button></div>
+   <div class="upd-con" id="oCon" style="display:none;margin-top:10px"></div>`;
+  const g=s=>tc.querySelector(s);
+  // папки со статусом последнего прогона
+  api("/api/backup/status").then(st=>{const jn=g("#oJobs");if(!jn)return;
+   const byS={};((st&&st.jobs)||[]).forEach(j=>byS[j.src]=j);
+   if(!(c.jobs||[]).length){jn.innerHTML='<div style="color:var(--mut);font-size:12px;padding:4px 0">Источники не выбраны — добавьте на вкладке «Источники».</div>';}
+   else jn.innerHTML="";
+   (c.jobs||[]).forEach(j=>{const r=byS[j.src];const dot=r?(r.ok?"var(--good)":"var(--danger)"):"var(--mut)";
+    jn.appendChild(el(`<div class="nb-job"><span class="ovh-dot" style="background:${dot};flex:none"></span><span class="nb-src mono" title="${att(j.src)}">${esc(j.src)}</span><span class="nb-arr">→</span><span class="nb-dst mono" title="${att(j.dest)}">${esc(j.dest)}</span></div>`));});
+   const sn=g("#oStatus");if(sn){if(st&&st.running)sn.innerHTML=`<span style="color:var(--accent)">выполняется…</span> ${esc(st.line||"")}`;
+    else if(st&&st.ts){const ok=(st.jobs||[]).filter(x=>x.ok).length,tot=(st.jobs||[]).length;sn.innerHTML=`${fmDate(st.ts)} · <b style="color:${ok===tot?"var(--good)":"var(--warn)"}">${ok}/${tot}</b> задач успешно`;}
+    else sn.textContent="ещё не запускался";}});
+  const con=g("#oCon");
+  const run=async dry=>{if(!(c.jobs||[]).length){toast("Сначала выберите источники (вкладка «Источники»)");return;}
+   con.style.display="block";g("#oRun").disabled=true;g("#oDry").disabled=true;
+   streamPost("/api/backup/run",con,code=>{g("#oRun").disabled=false;g("#oDry").disabled=false;
+    notifyDone(dry?"Пробный прогон завершён":(code===0?"Бэкап завершён":"Бэкап с ошибками"),"");tabOverview(tc);},{dry});};
+  g("#oRun").onclick=()=>run(false);g("#oDry").onclick=()=>run(true);
+  g("#oTest").onclick=async()=>{toast("Проверяю связь…");const t=await api("/api/backup/test",{method:"POST",body:"{}"});toast(t&&t.ok?"✓ связь работает":("✗ "+((t&&t.log)||"нет связи")));};
+ }
+
+ const TABS={overview:tabOverview,conn:tabConn,sources:tabSources,deleted:tabDeleted,sched:tabSched};
+ const render=async()=>{const r=await api("/api/backup/config");CFG=(r&&r.config)||{};JOBS=(CFG.jobs||[]).slice();
+  body.innerHTML=`<div class="set-nav">${CATS.map(c=>`<button data-t="${c.id}" class="${tab===c.id?"on":""}">${svg(c.ic,17)}<span>${c.name}</span></button>`).join("")}</div><div class="set-pane" id="tc"></div>`;
+  body.querySelectorAll(".set-nav button").forEach(b=>b.onclick=()=>{tab=b.dataset.t;render();});
+  TABS[tab](body.querySelector("#tc"));};
  render();body._reload=render;
-},{w:640,h:680});}
+},{w:820,h:600});}
 
 function winTrash(){openWin("__trash","Корзина",body=>{
  body.style.padding="0";
