@@ -222,36 +222,48 @@
   .dbar{height:4px;border-radius:999px;background:var(--track,var(--line-2));margin-top:4px;overflow:hidden}
   .dbar i{display:block;height:100%;border-radius:999px}
   @media(max-width:960px){.apps{inset:0}.rail{display:none}}
-  /* телефон: окна-шиты на весь экран, компактный хром */
+  /* нижний таббар телефона (полноэкран + таббар) */
+  .phone-nav{display:none}
   @media(max-width:640px){
     .menubar{gap:7px;padding:0 10px;height:40px}
     .mb-brand #brandName{max-width:96px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .clock small{display:none}
     .tray .pill:nth-child(3){display:none}
-    .desk{inset:40px 0 86px 0}
-    .apps{padding:18px 16px;grid-template-columns:repeat(auto-fill,78px);gap:14px 4px}
-    .win{inset:46px 0 82px 0!important;width:auto!important;height:auto!important;border-radius:16px 16px 0 0;max-width:100%}
-    .win.max{inset:46px 0 82px 0!important}
-    .win .wgrip{display:none}
-    .win>.rz{display:none}
+    .desk{inset:40px 0 calc(56px + env(safe-area-inset-bottom)) 0;overflow-y:auto}
+    .apps{position:static;inset:auto;padding:16px 16px 6px;grid-template-columns:repeat(auto-fill,78px);gap:14px 4px}
+    .rail{position:static;width:auto;overflow:visible;display:flex;flex-direction:column;gap:12px;padding:6px 16px 20px}
+    .win{inset:40px 0 calc(56px + env(safe-area-inset-bottom)) 0!important;width:auto!important;height:auto!important;border-radius:0;max-width:100%}
+    .win.max{inset:40px 0 calc(56px + env(safe-area-inset-bottom)) 0!important}
+    .win .wgrip,.win>.rz{display:none}
     .win .wbar{cursor:default}
-    .dock{bottom:10px;gap:1px;padding:6px 8px;max-width:calc(100% - 12px);justify-content:flex-start}
-    .dock button{padding:4px 6px}
-    .dock .di{width:34px;height:34px;border-radius:11px}
-    .dock .dl{font-size:9px;max-width:52px}
-    .dock button:hover{transform:none}
+    .win .wbar .lights{display:none}       /* светофоры прячем — есть «назад» */
+    .win .wback{display:flex}
+    .win .wbar .ttl{margin-left:0;font-size:15px;font-weight:650}
+    .dock{display:none}
+    .phone-nav{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:200;
+      height:calc(56px + env(safe-area-inset-bottom));padding-bottom:env(safe-area-inset-bottom);
+      background:var(--glass-2);backdrop-filter:blur(24px) saturate(1.5);-webkit-backdrop-filter:blur(24px) saturate(1.5);
+      border-top:1px solid var(--line);align-items:stretch}
     .scrim{padding:14px}
     .fm-fav{display:none}
     .fm-cols .c-d,.fm-row .fdate{display:none}
     .menu{min-width:min(216px,calc(100vw - 24px))}
   }
-  /* планшет (641–1024): окна крупнее (в JS), сайдбары уже, отступы плотнее */
+  .phone-nav button{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+    border:none;background:none;color:var(--mut);font-size:9.5px;font-weight:600;cursor:pointer;padding:0;transition:color .12s}
+  .phone-nav button.on{color:var(--accent)}
+  .phone-nav button svg{width:22px;height:22px}
+  .wback{display:none;align-items:center;justify-content:center;width:30px;height:30px;margin-right:2px;border:none;background:none;color:var(--text);cursor:pointer;font-size:26px;line-height:1;flex:none}
+  /* планшет (641–1024): окна крупнее (в JS), сайдбары уже, виджеты — сеткой под приложениями */
   @media(min-width:641px) and (max-width:1024px){
     .set-nav{width:172px;padding:14px 8px}
     .set-pane{padding:18px 18px}
     .set-nav button{padding:9px 11px}
-    .rail{display:none}
-    .apps{grid-template-columns:repeat(auto-fill,88px)}
+    .desk{overflow-y:auto}
+    .apps{position:static;inset:auto;padding:22px 22px 6px;grid-template-columns:repeat(auto-fill,88px)}
+    .rail{position:static;width:auto;overflow:visible;display:grid;
+      grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px;padding:6px 22px 26px;
+      align-content:start}
   }
   /* сенсорные экраны (планшет+телефон): крупнее тап-таргеты, комфортнее нажимать */
   @media(pointer:coarse){
@@ -1181,6 +1193,7 @@
 </div>
 
 <div class="dock" id="dock"></div>
+<nav class="phone-nav" id="phoneNav"></nav>
 <div class="scrim" id="scrim"></div>
 <div class="toast" id="toast"></div>
 <div class="ntoasts" id="ntoasts"></div>
@@ -1661,7 +1674,7 @@ function openWin(id,title,build,opts={}){
  let ww=opts.w||520,wh=opts.h||440;const n=Object.keys(OPEN).length;
  // планшет: окна крупнее, чтобы контент влезал (окна остаются перетаскиваемыми)
  if(isTablet()){ww=Math.min(innerWidth-24,Math.max(ww,Math.round(innerWidth*0.84)));wh=Math.min(innerHeight-96,Math.max(wh,Math.round(innerHeight*0.82)));}
- const w=el(`<div class="win"><div class="wbar"><div class="lights"><i class="c"></i><i class="m"></i><i class="z"></i></div><div class="ttl">${title}</div></div><div class="body"></div><div class="wgrip" title="Изменить размер"></div></div>`);
+ const w=el(`<div class="win"><div class="wbar"><button class="wback" title="Назад">‹</button><div class="lights"><i class="c"></i><i class="m"></i><i class="z"></i></div><div class="ttl">${title}</div></div><div class="body"></div><div class="wgrip" title="Изменить размер"></div></div>`);
  const saved=WINPOS[id];
  const geom=(saved&&!saved.max)?clampGeom(saved):clampGeom({x:(innerWidth-ww)/2+n*26,y:(innerHeight-wh)/2-30+n*22,w:ww,h:wh});
  w.style.left=geom.x+"px";w.style.top=geom.y+"px";w.style.width=geom.w+"px";w.style.height=geom.h+"px";
@@ -1671,8 +1684,28 @@ function openWin(id,title,build,opts={}){
  bar.querySelector(".c").onclick=()=>closeW(id);
  bar.querySelector(".m").onclick=()=>{w.style.display="none";w.classList.remove("wfocus");focusTop();renderWinbar();};
  bar.querySelector(".z").onclick=()=>{w.classList.toggle("max");persistWin(w);};
- drag(w,bar);resize(w,w.querySelector(".wgrip"));resizeEdges(w);w.addEventListener("pointerdown",()=>focus(w));renderDock();return w;
+ bar.querySelector(".wback").onclick=()=>goHome();          // телефон: «назад» → домой (окно в фоне)
+ if(!isPhone()){drag(w,bar);resize(w,w.querySelector(".wgrip"));resizeEdges(w);}  // на телефоне без перетаскивания/ресайза
+ w.addEventListener("pointerdown",()=>focus(w));renderDock();renderPhoneNav();return w;
 }
+// телефон: свернуть все окна на «домашний экран» (сетку приложений)
+function goHome(){for(const k in OPEN)OPEN[k].style.display="none";
+ document.querySelectorAll(".win.wfocus").forEach(w=>w.classList.remove("wfocus"));
+ renderWinbar();renderDock();renderPhoneNav();}
+const PHONE_NAV=[
+ {id:"__home",name:"Домой",ic:"grid",fn:goHome},
+ {id:"__sys",name:"Обзор",ic:"gauge",fn:()=>winSystem()},
+ {id:"__disks",name:"Диски",ic:"disks",fn:()=>winDisks()},
+ {id:"__files",name:"Файлы",ic:"folder",fn:()=>winFiles()},
+ {id:"__services",name:"Docker",ic:"cube",fn:()=>winServices()},
+];
+function renderPhoneNav(){const n=document.getElementById("phoneNav");if(!n)return;
+ let topId=null,tz=-1;for(const k in OPEN){const w=OPEN[k];if(w.style.display==="none")continue;const z=+w.style.zIndex||0;if(z>=tz){tz=z;topId=k;}}
+ const anyOpen=!!topId;
+ n.innerHTML="";
+ PHONE_NAV.forEach(a=>{const on=a.id==="__home"?!anyOpen:(topId===a.id);
+  const b=el(`<button class="${on?"on":""}" title="${esc(a.name)}">${svg(a.ic,22)}<span>${esc(a.name)}</span></button>`);
+  b.onclick=a.fn;n.appendChild(b);});}
 function resize(w,grip){let rz=false,rw,rh,sx,sy;
  grip.addEventListener("pointerdown",e=>{e.stopPropagation();e.preventDefault();rz=true;w.classList.remove("max");
    rw=w.offsetWidth;rh=w.offsetHeight;sx=e.clientX;sy=e.clientY;grip.setPointerCapture(e.pointerId);focus(w);});
@@ -1701,7 +1734,7 @@ function resizeEdges(w){
 }
 function focus(w){for(const k in OPEN)OPEN[k].classList.toggle("wfocus",OPEN[k]===w);w.style.zIndex=++Z;w.style.display="flex";renderWinbar();}
 function focusTop(){let top=null,tz=-1;for(const k in OPEN){const el=OPEN[k];if(el.style.display==="none")continue;const z=+el.style.zIndex||0;if(z>tz){tz=z;top=el;}}if(top)top.classList.add("wfocus");renderWinbar();}
-function closeW(id){const w=OPEN[id];if(w){persistWin(w);try{w._term&&w._term.dispose&&w._term.dispose();}catch(e){}try{w._term&&w._term.ws&&w._term.ws.close();}catch(e){}try{clearInterval(w._pi);}catch(e){}w.remove();delete OPEN[id];focusTop();renderDock();renderWinbar();}}
+function closeW(id){const w=OPEN[id];if(w){persistWin(w);try{w._term&&w._term.dispose&&w._term.dispose();}catch(e){}try{w._term&&w._term.ws&&w._term.ws.close();}catch(e){}try{clearInterval(w._pi);}catch(e){}w.remove();delete OPEN[id];focusTop();renderDock();renderWinbar();renderPhoneNav();}}
 /* таскбар открытых окон (верхняя панель) + Exposé */
 function winMeta(){const m={};INTERNAL.forEach(a=>m[a.id]={ic:a.ic,name:a.name});m["__cockpit"]={ic:"grid",name:"Cockpit"};return m;}
 function closeOthers(keepId){Object.keys(OPEN).forEach(id=>{if(id!==keepId)closeW(id);});}
@@ -4691,7 +4724,7 @@ function maybeOnboard(){let done=false;try{done=!!SET.onboarded||localStorage.ge
  let snInit=false;try{snInit=localStorage.getItem("nassnipinit")==="1";}catch(e){}
  if(!snInit){seedSnips();try{localStorage.setItem("nassnipinit","1");}catch(e){}saveSnips();}
  document.querySelectorAll("[title]").forEach(n=>{if(n.title)n.title=nasTr(n.title);});   // статические title из HTML
- renderRail();renderApps();renderDock();renderWinbar();tickClock();
+ renderRail();renderApps();renderDock();renderWinbar();renderPhoneNav();tickClock();
  poll();pollApps();pollDisks();maybeOnboard();
  pollStacks();pollTop();
  pollEvents();setTimeout(pollHealth,2500);
