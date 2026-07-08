@@ -967,6 +967,12 @@
   .fm-chip{font-size:11px;padding:5px 11px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--dim);cursor:pointer;font-family:var(--mono)}
   .fm-chip:hover{border-color:var(--accent-line);color:var(--accent)}
   .fm-search{flex:1;min-width:110px;padding:7px 10px;font-size:12px}
+  .fm-sep{width:1px;height:16px;background:var(--line);flex:none;margin:0 2px}
+  .du-sizebtn{font-weight:700;font-size:11px;min-width:26px;font-family:var(--mono)}
+  .fm-row.srch{align-items:flex-start}
+  .fm-row.srch .fn{white-space:normal;display:flex;flex-direction:column;gap:1px;line-height:1.32}
+  .fpath{display:inline-flex;align-items:center;gap:3px;font-size:10.5px;color:var(--mut);cursor:pointer;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .fpath:hover{color:var(--accent)}.fpath svg{flex:none;opacity:.75}
   /* плавающая «пилюля» действий над списком — не сдвигает контент вниз */
   .fm-selbar{position:absolute;left:50%;bottom:44px;transform:translateX(-50%);z-index:20;
     display:flex;align-items:center;gap:6px;padding:6px 9px;max-width:calc(100% - 20px);
@@ -3517,12 +3523,15 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
        <button class="iconbtn" id="fUp" title="Вверх">${svg("arrowup",15)}</button>
        <button class="iconbtn" id="fRef" title="Обновить">${svg("refresh",15)}</button>
        <div class="fm-crumb" id="fCrumb"></div>
+       <input class="fm-search" id="fSearch" placeholder="фильтр…  (Enter — во вложенных)" style="display:none">
+       <button class="iconbtn" id="fSMode" title="Искать в содержимом файлов" style="display:none">${svg("logs",15)}</button>
+       <button class="iconbtn" id="fFind" title="Поиск">${svg("search",15)}</button>
+       <span class="fm-sep"></span>
        <button class="iconbtn" id="fView" title="Список / плитка">${svg("grid",15)}</button>
+       <button class="iconbtn du-sizebtn" id="fSize" title="Размер значков (S/M/L)">M</button>
        <button class="iconbtn" id="fHid" title="Скрытые файлы">${svg("eye",15)}</button>
-       <button class="iconbtn" id="fDU" title="Анализ места">${svg("chartpie",15)}</button></div>
-     <div class="fm-bar2">
-       <input class="fm-search" id="fSearch" placeholder="фильтр…  (Enter — поиск во вложенных)">
-       <button class="iconbtn" id="fSMode" title="Искать в содержимом файлов">${svg("logs",15)}</button>
+       <button class="iconbtn" id="fDU" title="Анализ места">${svg("chartpie",15)}</button>
+       <span class="fm-sep"></span>
        <button class="iconbtn" id="fNewF" title="Новый файл">${svg("file-plus",15)}</button>
        <button class="iconbtn" id="fNewD" title="Новая папка">${svg("folder-plus",15)}</button>
        <button class="iconbtn" id="fUpl" title="Загрузить с компьютера">${svg("upload",15)}</button>
@@ -3548,7 +3557,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
      c.appendChild(el(`<span class="sepc">/</span>`));const a=el(`<a>${esc(p)}</a>`);a.onclick=()=>load(path);c.appendChild(a);});}
  function saveFav(){api("/api/fm/favorites",{method:"POST",body:JSON.stringify({favorites:favs})});}
  function renderFav(){const c=body.querySelector("#fFav");c.innerHTML="";
-   favs.forEach((f,i)=>{const it=el(`<div class="fm-fav-i${f.path===cwd?" on":""}"><span class="fi">${svg(f.icon||"folder",15)}</span><span class="fn" title="${att(f.path)}">${esc(f.name)}</span><button class="fx" title="Убрать">${svg("trash",12)}</button></div>`);
+   favs.forEach((f,i)=>{const it=el(`<div class="fm-fav-i${f.path===cwd?" on":""}"><span class="fi">${fmIcon(f.name,"dir",17)}</span><span class="fn" title="${att(f.path)}">${esc(f.name)}</span><button class="fx" title="Убрать">${svg("trash",12)}</button></div>`);
      it.onclick=ev=>{if(ev.target.closest(".fx"))return;load(f.path);};
      it.querySelector(".fx").onclick=ev=>{ev.stopPropagation();favs.splice(i,1);saveFav();renderFav();};
      it.addEventListener("dragover",ev=>{if(!dragPaths||dragPaths.includes(f.path))return;ev.preventDefault();ev.stopPropagation();ev.dataTransfer.dropEffect="move";it.classList.add("dragover");});
@@ -3617,14 +3626,15 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    const foldersFirst=SET.fmFoldersFirst!==false;
    arr.sort((a,b)=>{if(foldersFirst&&a.type!==b.type)return a.type==="dir"?-1:1;
      let r=sortKey==="name"?(a.name.toLowerCase()<b.name.toLowerCase()?-1:1):((a[sortKey]||0)-(b[sortKey]||0));return r*sortDir;});
-   const grid=viewMode==="grid";
+   const grid=viewMode==="grid"&&!searchRes;   // результаты поиска — всегда списком, чтобы видеть путь
    const ICOPX={s:{list:20,grid:44},m:{list:24,grid:60},l:{list:32,grid:84}};
    const isz=(ICOPX[SET.fmIconSize]||ICOPX.m)[grid?"grid":"list"],thumbsOn=SET.fmThumbs!==false;
    listBox.classList.toggle("fm-grid",grid);
    const cols=body.querySelector("#fCols");if(cols)cols.style.display=grid?"none":"flex";
    curArr=arr;if(cursor>=arr.length)cursor=arr.length-1;
    listBox.innerHTML="";
-   if(!arr.length){listBox.innerHTML=`<div style="color:var(--mut);font-size:12px;padding:10px">${searchRes?"Ничего не найдено":"Пусто"}</div>`;renderStatus();return;}
+   if(!arr.length){const msg=searchRes?"Ничего не найдено":(filt?"В этой папке нет совпадений. Enter — искать во вложенных.":"Пусто");
+     listBox.innerHTML=`<div style="color:var(--mut);font-size:12px;padding:10px">${msg}</div>`;renderStatus();return;}
    const toggleSel=(e,i,shift)=>{if(shift&&lastIdx>=0){const a=Math.min(lastIdx,i),b=Math.max(lastIdx,i);for(let k=a;k<=b;k++)sel.add(arr[k].path);}else{if(sel.has(e.path))sel.delete(e.path);else sel.add(e.path);}lastIdx=i;renderList();selUpdate();};
    arr.forEach((e,i)=>{
      const isSel=sel.has(e.path),baseIco=fmIcon(e.name,e.type,isz);
@@ -3634,8 +3644,12 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
      else ficon=baseIco;
      let node;
      if(grid){node=el(`<div class="fm-tile ${e.type}${isSel?" sel":""}${i===cursor?" fm-cur":""}"><input type="checkbox" class="fm-ck"${isSel?" checked":""}><div class="ti">${ficon}</div><div class="tn" title="${att(searchRes?e.path:e.name)}">${esc(e.name)}</div></div>`);}
-     else{const nmH=esc(e.name)+(e.match?` <small style="color:var(--mut);font-weight:400">— ${esc(e.match.slice(0,90))}${e.line?" :"+e.line:""}</small>`:"");
-       node=el(`<div class="fm-row ${e.type}${isSel?" sel":""}${i===cursor?" fm-cur":""}"><input type="checkbox" class="fm-ck"${isSel?" checked":""}><span class="fi">${ficon}</span><span class="fn" title="${att(searchRes?e.path:e.name)}">${nmH}</span><span class="fsz">${e.type==="dir"?"":fmtB(e.size)}</span><span class="fdate">${fmDate(e.mtime)}</span></div>`);}
+     else{let nmH=esc(e.name)+(e.match?` <small style="color:var(--mut);font-weight:400">— ${esc(e.match.slice(0,90))}${e.line?" :"+e.line:""}</small>`:"");
+       let relDir="";
+       if(searchRes){const par=e.path.replace(/\/[^/]+$/,"");relDir=(par.slice(cwd==="/"?0:cwd.length)||"/");
+         nmH+=`<span class="fpath" title="${att(par)}">${svg("folder",11)} ${esc(relDir)}</span>`;}
+       node=el(`<div class="fm-row ${e.type}${searchRes?" srch":""}${isSel?" sel":""}${i===cursor?" fm-cur":""}"><input type="checkbox" class="fm-ck"${isSel?" checked":""}><span class="fi">${ficon}</span><span class="fn" title="${att(searchRes?e.path:e.name)}">${nmH}</span><span class="fsz">${e.type==="dir"?"":fmtB(e.size)}</span><span class="fdate">${fmDate(e.mtime)}</span></div>`);
+       const pl=node.querySelector(".fpath");if(pl)pl.onclick=ev=>{ev.stopPropagation();load(e.path.replace(/\/[^/]+$/,"")||"/");};}
      node.querySelector(".fm-ck").onclick=ev=>{ev.stopPropagation();toggleSel(e,i,ev.shiftKey);};
      // клик по ВСЕЙ строке/плитке (кроме чекбокса), а не только по имени/иконке — иначе клик
      // по колонке размера/даты или по отступам «проваливался» и папка не открывалась
@@ -3915,13 +3929,21 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
  body.querySelector("#fUrl").onclick=doFetchUrl;
  body.querySelector("#fPaste").onclick=doPaste;
  inp.onchange=()=>{const files=[...inp.files];inp.value="";if(files.length)doUpload(files);};
- const si=body.querySelector("#fSearch");
- si.oninput=e=>{filt=e.target.value.toLowerCase();if(searchRes){searchRes=null;}renderList();};
- si.onkeydown=e=>{if(e.key==="Enter"){e.preventDefault();const v=e.target.value.trim();searchMode==="text"?doGrep(v):doSearch(v);}};
- const smBtn=body.querySelector("#fSMode");
+ const si=body.querySelector("#fSearch"),findBtn=body.querySelector("#fFind"),smBtn=body.querySelector("#fSMode"),crumbEl=body.querySelector("#fCrumb");
+ let searchOpen=false;
+ function toggleFind(open){searchOpen=open;findBtn.classList.toggle("pri",open);
+   crumbEl.style.display=open?"none":"";si.style.display=open?"":"none";smBtn.style.display=open?"":"none";
+   if(open)si.focus();else{si.value="";filt="";if(searchRes)searchRes=null;renderList();}}
+ findBtn.onclick=()=>toggleFind(!searchOpen);
+ si.oninput=e=>{filt=e.target.value.toLowerCase();if(searchRes)searchRes=null;renderList();};
+ si.onkeydown=e=>{if(e.key==="Enter"){e.preventDefault();const v=e.target.value.trim();searchMode==="text"?doGrep(v):doSearch(v);}
+   else if(e.key==="Escape"){e.preventDefault();toggleFind(false);}};
+ si.onblur=()=>{if(searchOpen&&!si.value.trim()&&!searchRes)toggleFind(false);};
  smBtn.onclick=()=>{searchMode=searchMode==="text"?"name":"text";smBtn.classList.toggle("pri",searchMode==="text");
-   si.placeholder=searchMode==="text"?"поиск в содержимом файлов…  (Enter)":"фильтр…  (Enter — поиск во вложенных)";
+   si.placeholder=searchMode==="text"?"в содержимом…  (Enter)":"фильтр…  (Enter — во вложенных)";
    searchRes=null;renderList();si.focus();};
+ {const SZO=["s","m","l"],fsz=body.querySelector("#fSize");const paintSz=()=>{fsz.textContent=(SET.fmIconSize||"m").toUpperCase();};paintSz();
+  fsz.onclick=()=>{const c=SET.fmIconSize||"m";SET.fmIconSize=SZO[(SZO.indexOf(c)+1)%3]||"m";saveSettings();paintSz();syncSettings();};}
  body.querySelectorAll("#fCols [data-k]").forEach(h=>h.onclick=()=>{const k=h.dataset.k;
    if(sortKey===k)sortDir=-sortDir;else{sortKey=k;sortDir=1;}
    SET.fmSortKey=sortKey;SET.fmSortDir=sortDir;saveSettings();

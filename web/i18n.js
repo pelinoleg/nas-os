@@ -6,6 +6,13 @@
    Перевод применяется только к целым «словам» (границы — не-кириллица), длинные фразы приоритетнее. */
 window.NAS_I18N = { en: {
 "Анализ места": "Disk usage",
+"Поиск": "Search",
+"Размер значков (S/M/L)": "Icon size (S/M/L)",
+"Провалиться внутрь": "Drill in",
+"Показывать второй уровень колец": "Show the second ring level",
+"В этой папке нет совпадений. Enter — искать во вложенных.": "No matches in this folder. Press Enter to search subfolders.",
+"фильтр…  (Enter — во вложенных)": "filter…  (Enter — search subfolders)",
+"в содержимом…  (Enter)": "in file contents…  (Enter)",
 "Пересканировать": "Rescan",
 "Ошибка скана": "Scan error",
 "Повторить": "Retry",
