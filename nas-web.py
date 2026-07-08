@@ -4619,7 +4619,7 @@ USB_IMPORT_CONF = "/etc/nas-wizard/usb-import.conf"
 USB_IMPORT_SH   = "/usr/local/bin/nas-usb-import.sh"
 USB_IMPORT_RULE = "/etc/udev/rules.d/98-nas-usb-import.rules"
 _USB_DEFAULT = {"enabled": False, "dest": "/mnt/storage/imports",
-                "subdir": "dated", "notify": False, "eject": False, "media_only": False}
+                "subdir": "{label}-{date}-{time}", "notify": False, "eject": False, "media_only": False}
 _USB_SH = r'''#!/bin/bash
 # nas-wizard: авто-импорт содержимого вставленного USB в заданную папку.
 # Копирование only-forward: с флешки ничего не удаляется. Стейджинг в .incomplete
@@ -4645,11 +4645,29 @@ cleanup(){ [ "$selfmount" = "1" ] && { umount "$mp" 2>>"$LOG"; rmdir "$mp" 2>/de
 base="${IMPORT_DEST:-/mnt/storage/imports}"
 # защита от импорта самого себя (напр. флешка примонтирована внутри приёмника)
 case "$(readlink -f "$base")/" in "$(readlink -f "$mp")"/*) log "self-import guard: $mp внутри $base"; cleanup; exit 0;; esac
-case "${IMPORT_SUBDIR:-dated}" in
-  dated) sub="${label}-$(date '+%Y%m%d-%H%M%S')";;
-  label) sub="$label";;
-  *)     sub="";;
+# раскладка подпапок: шаблон с токенами {label}/{date}/{time}/{year}/{month}/
+# {month-name}/{day}/{hour}/{minute}/{datetime}. Легаси-ключи мапим на шаблоны.
+tpl="${IMPORT_SUBDIR:-{label}-{date}-{time}}"
+case "$tpl" in
+  dated) tpl='{label}-{date}-{time}';;
+  label) tpl='{label}';;
+  flat)  tpl='';;
 esac
+sub="$tpl"
+if [ -n "$sub" ]; then
+  sub="${sub//\{label\}/$label}"
+  sub="${sub//\{datetime\}/$(date '+%Y%m%d-%H%M%S')}"
+  sub="${sub//\{date\}/$(date '+%Y-%m-%d')}"
+  sub="${sub//\{time\}/$(date '+%H-%M-%S')}"
+  sub="${sub//\{year\}/$(date '+%Y')}"
+  sub="${sub//\{month-name\}/$(date '+%B')}"
+  sub="${sub//\{month\}/$(date '+%m')}"
+  sub="${sub//\{day\}/$(date '+%d')}"
+  sub="${sub//\{hour\}/$(date '+%H')}"
+  sub="${sub//\{minute\}/$(date '+%M')}"
+  # безопасность пути: убрать .., ведущие слэши, схлопнуть повторы, обрезать пробелы у сегментов
+  sub="$(printf '%s' "$sub" | sed 's#\.\.##g; s#^/*##; s#/*$##; s#/\{2,\}#/#g')"
+fi
 # фильтр «только фото/видео» (регистронезависимо)
 filter=(); if [ "${IMPORT_MEDIA_ONLY:-0}" = "1" ]; then
   filter=(--include='*/')
@@ -4721,9 +4739,12 @@ def usb_import_save(cfg):
     dest = str(cfg.get("dest", "")).strip() or "/mnt/storage/imports"
     if dest == "/" or not re.match(r"^/[\w /.+-]{1,}$", dest):
         return {"ok": False, "log": "недопустимый путь назначения"}
-    subdir = cfg.get("subdir", "dated")
+    # раскладка: легаси-ключ ИЛИ шаблон с токенами (разрешаем буквы/цифры/пробел/-_.{}/ )
+    subdir = str(cfg.get("subdir", "{label}-{date}-{time}")).strip()
     if subdir not in ("dated", "label", "flat"):
-        subdir = "dated"
+        subdir = re.sub(r"[^\w \-.{}/А-Яа-яЁё]", "", subdir).replace("..", "").strip("/")[:120]
+        if not subdir:
+            subdir = "flat"
     try:
         os.makedirs("/etc/nas-wizard", exist_ok=True)
         with open(USB_IMPORT_CONF, "w") as f:
@@ -5451,7 +5472,8 @@ class H(BaseHTTPRequestHandler):
             elif p == "/api/settings":
                 self._json({"settings": load_settings()})
             elif p == "/api/maintenance":
-                self._json({"maintenance": load_maintenance()})
+                self._json({"maintenance": load_maintenance(),
+                            "snapraid_configured": os.path.isfile("/etc/snapraid.conf")})
             elif p == "/api/updates":
                 self._json(apt_updates(refresh=(q.get("refresh") or ["0"])[0] == "1"))
             elif p == "/api/backup/config":

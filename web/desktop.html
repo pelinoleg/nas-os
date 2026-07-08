@@ -585,6 +585,16 @@
   .nb-field-row input{flex:1;min-width:0}
   .nb-excl{width:100%;min-height:150px;font-family:var(--mono);font-size:12px;line-height:1.6;resize:vertical}
   .nb-foot{display:flex;align-items:center;gap:9px;padding:14px 0;border-top:1px solid var(--line);margin-top:8px;flex-wrap:wrap}
+  /* конструктор раскладки подпапок USB-импорта */
+  .usb-sub{background:var(--card);border:1px solid var(--line);border-radius:var(--r-md);padding:12px 13px;margin:2px 0 4px}
+  .usb-sub>input{width:100%;font-size:13px}
+  .usb-prev{font-size:12px;color:var(--dim);margin:8px 0 10px}
+  .usb-prev .mono{color:var(--accent)}
+  .usb-chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px}
+  .usb-lbl{font-size:11.5px;color:var(--mut);margin-right:2px}
+  .usb-tok,.usb-pre{font-family:var(--mono);font-size:11.5px;padding:3px 8px;border-radius:var(--r-sm);border:1px solid var(--line);background:var(--glass);color:var(--text);transition:.12s}
+  .usb-pre{font-family:var(--font)}
+  .usb-tok:hover,.usb-pre:hover{background:var(--accent-soft);border-color:var(--accent-line);color:var(--accent)}
   .nb-foot .grow{flex:1}
   .nbwrap .set-h:first-child{margin-top:6px;padding-top:0;border-top:none}
   /* история метрик */
@@ -1002,8 +1012,10 @@
   .srow-t{font-size:13px;font-weight:550;display:flex;align-items:center;gap:6px}
   .srow-d{font-size:11px;color:var(--mut);margin-top:2px;line-height:1.45}
   .srow-c{flex:none;display:flex;align-items:center;gap:8px}
+  .srow-off{opacity:.5}.srow input:disabled,.srow select:disabled{cursor:not-allowed}
   .srow-c input.mono{max-width:150px}
-  .tip{display:inline-flex;align-items:center;justify-content:center;color:var(--mut);cursor:help;opacity:.7;flex:none}
+  .tip{display:inline-flex;align-items:center;justify-content:center;color:var(--mut);cursor:help;opacity:.7;flex:none;vertical-align:middle;margin-left:4px;position:relative;top:-1px}
+  .srow-t .tip,.mon-row .tip{top:0}
   .tip:hover{opacity:1;color:var(--accent)}
   /* тултип — всегда тёмный пузырь со светлым текстом (не завязан на --ink, иначе в тёмной теме белое на белом) */
   .tipbox{position:fixed;z-index:9999;max-width:280px;background:#222c3a;color:#f2f5fa;border:1px solid rgba(255,255,255,.10);font-size:11.5px;line-height:1.5;font-weight:450;padding:9px 12px;border-radius:10px;box-shadow:0 8px 28px rgba(0,0,0,.4);pointer-events:none;opacity:0;transition:opacity .12s}
@@ -1108,7 +1120,7 @@
   .nt-bar .seg button{padding:5px 10px;font-size:12px}
   .nt-bar input,.nt-bar select{background:var(--card);border:1px solid var(--line);border-radius:9px;color:var(--text);padding:7px 10px;font-size:12.3px}
   .nt-bar input{width:140px}
-  .nt-row{display:flex;gap:10px;padding:9px 10px;border-radius:10px;align-items:flex-start}
+  .nt-row{display:flex;gap:10px;padding:9px 10px;border-radius:10px;align-items:flex-start;margin-bottom:3px}
   .nt-row:hover{background:var(--card)}
   .nt-row .nt-w{width:110px;flex:none;font-size:11px;color:var(--mut);margin-top:2.5px}
   .nt-row .nt-k{flex:none;font-size:10px;font-weight:700;color:var(--dim);background:var(--card-2);border-radius:6px;padding:2.5px 7px;margin-top:1px}
@@ -3753,13 +3765,14 @@ function winSettings(initTab){openWin("__set","Настройки",body=>{
   {id:"look",name:"Оформление",ic:"cog"},
   {id:"notify",name:"Уведомления",ic:"bell"},
   {id:"system",name:"Система",ic:"activity"},
+  {id:"maint",name:"Обслуживание",ic:"heart"},
   {id:"network",name:"Сеть",ic:"net"},
   {id:"security",name:"Безопасность",ic:"shield"},
   {id:"usb",name:"USB-импорт",ic:"usb"},
   {id:"backup",name:"Бэкап настроек",ic:"save"},
   {id:"pi",name:"Raspberry Pi",ic:"cpu"},
  ];
- const FN={look:lookTab,notify:notifyTab,system:systemTab,network:networkTab,security:securityTab,usb:usbTab,backup:backupTab,pi:piTab};
+ const FN={look:lookTab,notify:notifyTab,system:systemTab,maint:maintTab,network:networkTab,security:securityTab,usb:usbTab,backup:backupTab,pi:piTab};
  const render=()=>{
   body.innerHTML=`<div class="set-nav">${CATS.map(c=>`<button data-t="${c.id}" class="${tab===c.id?"on":""}">${svg(c.ic,17)}<span>${c.name}</span></button>`).join("")}</div><div class="set-pane" id="tc"></div>`;
   body.querySelectorAll(".set-nav button").forEach(b=>b.onclick=()=>{tab=b.dataset.t;render();});
@@ -4066,26 +4079,9 @@ function notifyTab(tc){tc.innerHTML=`<div style="color:var(--mut);font-size:12px
  });}
 
 /* --- settings: Система --- */
-function systemTab(tc){withSysc(tc,()=>{const s=SYSC.system||{};
- tc.innerHTML=`${rebootBan()}
-  <h3 class="set-title">Система</h3><p class="set-sub">Идентификация сервера, время и обслуживание.</p>
-  <div class="srow"><div class="srow-l"><div class="srow-t">Имя хоста${tipHTML("Сетевое имя NAS. По нему сервер виден как <имя>.local (mDNS) и в Samba. Меняет /etc/hostname.")}</div><div class="srow-d">сейчас: ${esc(s.hostname||"?")}</div></div><div class="srow-c"><input class="mono" id="stHost" value="${att(s.hostname||"")}"><button class="btn sm" id="stHostA">Применить</button></div></div>
-  <div class="srow"><div class="srow-l"><div class="srow-t">Часовой пояс${tipHTML("Локальное время в логах, cron и таймерах. Формат Area/City, напр. Europe/Madrid.")}</div><div class="srow-d">сейчас: ${esc(s.timezone||"?")}</div></div><div class="srow-c"><input class="mono" id="stTz" value="${att(s.timezone||"")}" placeholder="Europe/Madrid"><button class="btn sm" id="stTzA">Применить</button></div></div>
-  <div class="srow"><div class="srow-l"><div class="srow-t">Псевдоним пула${tipHTML("Дополнительное имя для пула /mnt/storage в корне системы — симлинк, оба пути работают одновременно. Удобно, если на другом NAS пул называется /volume2: скрипты и пути совпадут. Пустое поле — псевдоним отключён.")}</div><div class="srow-d" id="stAliasCur">…</div></div><div class="srow-c"><input class="mono" id="stAlias" placeholder="/volume2 (пусто = выкл)"><button class="btn sm" id="stAliasA">Применить</button></div></div>
-  ${svcRow("Синхронизация времени (chrony)","Держит часы Pi точными по интернету; заменяет systemd-timesyncd. Важно для таймстампов бэкапов, логов и TLS.","chrony",s.chrony,"NTP-клиент точного времени"+(s.time_synced?" · синхронизировано":""))}
-  ${tglRow("TRIM по расписанию","Еженедельно освобождает неиспользуемые блоки SSD/NVMe — держит скорость записи и ресурс. Для SSD/NVMe, не для HDD.","fstrim",s.fstrim&&s.fstrim.active,"fstrim.timer, еженедельный TRIM")}
-  ${tglRow("Автообновления безопасности","unattended-upgrades ставит security-патчи сам. Меньше ручной работы и дыр; минус — редкие неожиданные обновления.","unattended",s.unattended,"unattended-upgrades (только security)")}
-  <div class="srow"><div class="srow-l"><div class="srow-t">Лимит журнала systemd${tipHTML("Максимум места под логи journald — защищает SD-карту от переполнения. Пусто = системное значение по умолчанию.")}</div><div class="srow-d">сейчас: ${esc(s.journald_max||"по умолчанию")}</div></div><div class="srow-c"><input class="mono" id="stJ" style="max-width:90px" value="${att(s.journald_max||"")}" placeholder="200M"><button class="btn sm" id="stJA">Применить</button></div></div>
-  <div class="set-grp">Обслуживание</div>
-  <div class="srow"><div class="srow-l"><div class="srow-t">Обновления пакетов${tipHTML("Показывает список доступных обновлений apt (что и с какой на какую версию) и устанавливает их по кнопке «Обновить всё». Обновления безопасности помечены.")}</div><div class="srow-d">${s.updates!=null?(s.updates?s.updates+" доступно":"всё актуально"):"посмотреть и установить"}</div></div><div class="srow-c"><button class="btn sm" id="mChk">${svg("download",13)} Обновления</button></div></div>
-  <div class="srow"><div class="srow-l"><div class="srow-t">Перезапустить панель${tipHTML("Перезапускает службу nas-web (веб-интерфейс). Соединение ненадолго прервётся.")}</div></div><div class="srow-c"><button class="btn sm" id="mWeb">Перезапустить nas-web</button></div></div>`;
- wireSc(tc);
- const H=tc.querySelector("#stHost"),Tz=tc.querySelector("#stTz"),J=tc.querySelector("#stJ");
- tc.querySelector("#stHostA").onclick=async()=>{await sconf("hostname",H.value.trim());refreshSysc(rerSet);};
- tc.querySelector("#stTzA").onclick=async()=>{await sconf("timezone",Tz.value.trim());refreshSysc(rerSet);};
- // Диски и SMART + поведение панели (хранится в maintenance.json / SET)
- {const anchor=tc.querySelector("#stAliasCur").closest(".srow");
-  const sec=el(`<div>
+/* --- settings: Обслуживание (диски/SMART, SnapRAID, надёжность, отчёты) --- */
+function maintTab(tc){
+ tc.innerHTML=`<h3 class="set-title">Обслуживание и надёжность</h3><p class="set-sub">Проверки дисков, защита данных и автоматические отчёты.</p>
    <div class="set-h">Диски и SMART</div>
    <div class="srow"><div class="srow-l"><div class="srow-t">Фоновая проверка SMART${tipHTML("Как часто монитор опрашивает SMART-статус всех дисков (здоровье, износ, температура). Спящие диски не будятся. По результатам работают уведомления «Здоровье дисков».")}</div><div class="srow-d">статус/износ/температура, минут</div></div><div class="srow-c"><input class="mono" id="stSmScan" style="max-width:90px"></div></div>
    <div class="srow"><div class="srow-l"><div class="srow-t">Короткий SMART-самотест${tipHTML("Диск сам прогоняет быструю самодиагностику (~2 мин). Запускается ночью (03–06), раз в N дней. 0 — не запускать.")}</div><div class="srow-d">раз в N дней · 0 = выкл</div></div><div class="srow-c"><input class="mono" id="stSmShort" style="max-width:90px"></div></div>
@@ -4100,16 +4096,17 @@ function systemTab(tc){withSysc(tc,()=>{const s=SYSC.system||{};
    <div class="mon-row"><span>Сводка состояния${tipHTML("Раз в день или неделю NAS присылает короткую сводку (температура, память, место, здоровье, итог бэкапа). Доставка — через уведомления: вкл/выкл Pushover в Настройки → Уведомления → «Сводка состояния».")}</span><label class="tgl"><input type="checkbox" id="stSumOn"><span class="sl"></span></label></div>
    <div class="srow" id="stSumRow"><div class="srow-l"><div class="srow-t">Когда присылать</div></div><div class="srow-c"><div class="seg" id="stSumFreq"><button data-v="daily">Ежедневно</button><button data-v="weekly">Еженедельно</button></div><select id="stSumDow" class="ev-prio">${[["Mon","пн"],["Tue","вт"],["Wed","ср"],["Thu","чт"],["Fri","пт"],["Sat","сб"],["Sun","вс"]].map(([v,l])=>`<option value="${v}">${l}</option>`).join("")}</select><input class="mono" id="stSumTime" style="max-width:80px" placeholder="09:00"></div></div>
    <div class="set-h">Поведение панели</div>
-   <div class="mon-row"><span>Автооткрывать центр операций${tipHTML("При старте загрузки/копирования поповер операций открывается сам. Выключите, если хотите открывать его только вручную с иконки в баре.")}</span><label class="tgl"><input type="checkbox" id="stOpsAuto"><span class="sl"></span></label></div>
-  </div>`);
-  anchor.after(sec);
-  const sc=sec.querySelector("#stSmScan"),ss=sec.querySelector("#stSmShort"),sl=sec.querySelector("#stSmLong");
-  const sy=sec.querySelector("#stSnSync"),sd=sec.querySelector("#stSnDow"),sr=sec.querySelector("#stSnScrub");
+   <div class="mon-row"><span>Автооткрывать центр операций${tipHTML("При старте загрузки/копирования поповер операций открывается сам. Выключите, если хотите открывать его только вручную с иконки в баре.")}</span><label class="tgl"><input type="checkbox" id="stOpsAuto"><span class="sl"></span></label></div>`;
+  const sc=tc.querySelector("#stSmScan"),ss=tc.querySelector("#stSmShort"),sl=tc.querySelector("#stSmLong");
+  const sy=tc.querySelector("#stSnSync"),sd=tc.querySelector("#stSnDow"),sr=tc.querySelector("#stSnScrub");
   api("/api/maintenance").then(m=>{const md=(m&&m.maintenance)||{};
     sc.value=md.smart_scan_min!=null?md.smart_scan_min:10;
     ss.value=md.smart_short_days!=null?md.smart_short_days:7;
     sl.value=md.smart_long_days!=null?md.smart_long_days:30;
-    sy.value=md.snap_sync_time||"03:00";sd.value=md.snap_scrub_dow||"Sun";sr.value=md.snap_scrub_time||"05:00";});
+    sy.value=md.snap_sync_time||"03:00";sd.value=md.snap_scrub_dow||"Sun";sr.value=md.snap_scrub_time||"05:00";
+    const snapOk=!!(m&&m.snapraid_configured);[sy,sd,sr].forEach(x=>{x.disabled=!snapOk;x.closest(".srow").classList.toggle("srow-off",!snapOk);});
+    if(!snapOk){const snHead=[...tc.querySelectorAll(".set-h")].find(h=>h.textContent.includes("SnapRAID"));
+      if(snHead&&!snHead._noted){snHead._noted=1;snHead.after(el(`<div class="mon-note" style="margin:-2px 0 8px">${svg("info",13)} SnapRAID ещё не настроен — расписание включится после настройки защиты данных в Мастере.</div>`));}}});
   const saveSm=async()=>{const r=await api("/api/maintenance",{method:"POST",body:JSON.stringify({maintenance:{
      smart_scan_min:+sc.value||10,smart_short_days:+ss.value||0,smart_long_days:+sl.value||0,
      snap_sync_time:sy.value.trim(),snap_scrub_dow:sd.value,snap_scrub_time:sr.value.trim()}})});
@@ -4117,13 +4114,12 @@ function systemTab(tc){withSysc(tc,()=>{const s=SYSC.system||{};
     sy.value=md.snap_sync_time;sd.value=md.snap_scrub_dow;sr.value=md.snap_scrub_time;
     toast(md.error?("Ошибка: "+md.error):"Сохранено");};
   [sc,ss,sl,sy,sd,sr].forEach(x=>x.onchange=saveSm);
-  // --- надёжность и отчёты ---
-  const amr=sec.querySelector("#stAmr"),sumOn=sec.querySelector("#stSumOn"),
-        sumRow=sec.querySelector("#stSumRow"),sumDow=sec.querySelector("#stSumDow"),sumTime=sec.querySelector("#stSumTime"),
-        thHot=sec.querySelector("#stThHot"),thCrit=sec.querySelector("#stThCrit"),thRow=sec.querySelector("#stThRow");
+  const amr=tc.querySelector("#stAmr"),sumOn=tc.querySelector("#stSumOn"),
+        sumRow=tc.querySelector("#stSumRow"),sumDow=tc.querySelector("#stSumDow"),sumTime=tc.querySelector("#stSumTime"),
+        thHot=tc.querySelector("#stThHot"),thCrit=tc.querySelector("#stThCrit"),thRow=tc.querySelector("#stThRow");
   const segSet=(seg,v)=>seg.querySelectorAll("button").forEach(b=>b.classList.toggle("on",b.dataset.v===v));
   const segVal=seg=>{const b=seg.querySelector("button.on");return b?b.dataset.v:seg.querySelector("button").dataset.v;};
-  const thSeg=sec.querySelector("#stTh"),sumFreq=sec.querySelector("#stSumFreq");
+  const thSeg=tc.querySelector("#stTh"),sumFreq=tc.querySelector("#stSumFreq");
   api("/api/maintenance").then(m=>{const md=(m&&m.maintenance)||{};
     amr.checked=md.automount_recover!==false;
     sumOn.checked=!!md.summary_enabled;sumRow.style.display=sumOn.checked?"":"none";
@@ -4141,8 +4137,26 @@ function systemTab(tc){withSysc(tc,()=>{const s=SYSC.system||{};
   sumOn.onchange=()=>{sumRow.style.display=sumOn.checked?"":"none";saveRel();};
   thSeg.querySelectorAll("button").forEach(b=>b.onclick=()=>{segSet(thSeg,b.dataset.v);thRow.style.display=(b.dataset.v!=="off")?"":"none";saveRel();});
   sumFreq.querySelectorAll("button").forEach(b=>b.onclick=()=>{segSet(sumFreq,b.dataset.v);sumDow.style.display=(b.dataset.v==="weekly")?"":"none";saveRel();});
-  const oa=sec.querySelector("#stOpsAuto");oa.checked=SET.opsAuto!==false;
-  oa.onchange=()=>{SET.opsAuto=oa.checked;saveSettings();};}
+  const oa=tc.querySelector("#stOpsAuto");oa.checked=SET.opsAuto!==false;
+  oa.onchange=()=>{SET.opsAuto=oa.checked;saveSettings();};
+}
+function systemTab(tc){withSysc(tc,()=>{const s=SYSC.system||{};
+ tc.innerHTML=`${rebootBan()}
+  <h3 class="set-title">Система</h3><p class="set-sub">Идентификация сервера, время и обслуживание.</p>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Имя хоста${tipHTML("Сетевое имя NAS. По нему сервер виден как <имя>.local (mDNS) и в Samba. Меняет /etc/hostname.")}</div><div class="srow-d">сейчас: ${esc(s.hostname||"?")}</div></div><div class="srow-c"><input class="mono" id="stHost" value="${att(s.hostname||"")}"><button class="btn sm" id="stHostA">Применить</button></div></div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Часовой пояс${tipHTML("Локальное время в логах, cron и таймерах. Формат Area/City, напр. Europe/Madrid.")}</div><div class="srow-d">сейчас: ${esc(s.timezone||"?")}</div></div><div class="srow-c"><input class="mono" id="stTz" value="${att(s.timezone||"")}" placeholder="Europe/Madrid"><button class="btn sm" id="stTzA">Применить</button></div></div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Псевдоним пула${tipHTML("Дополнительное имя для пула /mnt/storage в корне системы — симлинк, оба пути работают одновременно. Удобно, если на другом NAS пул называется /volume2: скрипты и пути совпадут. Пустое поле — псевдоним отключён.")}</div><div class="srow-d" id="stAliasCur">…</div></div><div class="srow-c"><input class="mono" id="stAlias" placeholder="/volume2 (пусто = выкл)"><button class="btn sm" id="stAliasA">Применить</button></div></div>
+  ${svcRow("Синхронизация времени (chrony)","Держит часы Pi точными по интернету; заменяет systemd-timesyncd. Важно для таймстампов бэкапов, логов и TLS.","chrony",s.chrony,"NTP-клиент точного времени"+(s.time_synced?" · синхронизировано":""))}
+  ${tglRow("TRIM по расписанию","Еженедельно освобождает неиспользуемые блоки SSD/NVMe — держит скорость записи и ресурс. Для SSD/NVMe, не для HDD.","fstrim",s.fstrim&&s.fstrim.active,"fstrim.timer, еженедельный TRIM")}
+  ${tglRow("Автообновления безопасности","unattended-upgrades ставит security-патчи сам. Меньше ручной работы и дыр; минус — редкие неожиданные обновления.","unattended",s.unattended,"unattended-upgrades (только security)")}
+  <div class="srow"><div class="srow-l"><div class="srow-t">Лимит журнала systemd${tipHTML("Максимум места под логи journald — защищает SD-карту от переполнения. Пусто = системное значение по умолчанию.")}</div><div class="srow-d">сейчас: ${esc(s.journald_max||"по умолчанию")}</div></div><div class="srow-c"><input class="mono" id="stJ" style="max-width:90px" value="${att(s.journald_max||"")}" placeholder="200M"><button class="btn sm" id="stJA">Применить</button></div></div>
+  <div class="set-grp">Обслуживание</div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Обновления пакетов${tipHTML("Показывает список доступных обновлений apt (что и с какой на какую версию) и устанавливает их по кнопке «Обновить всё». Обновления безопасности помечены.")}</div><div class="srow-d">${s.updates!=null?(s.updates?s.updates+" доступно":"всё актуально"):"посмотреть и установить"}</div></div><div class="srow-c"><button class="btn sm" id="mChk">${svg("download",13)} Обновления</button></div></div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Перезапустить панель${tipHTML("Перезапускает службу nas-web (веб-интерфейс). Соединение ненадолго прервётся.")}</div></div><div class="srow-c"><button class="btn sm" id="mWeb">Перезапустить nas-web</button></div></div>`;
+ wireSc(tc);
+ const H=tc.querySelector("#stHost"),Tz=tc.querySelector("#stTz"),J=tc.querySelector("#stJ");
+ tc.querySelector("#stHostA").onclick=async()=>{await sconf("hostname",H.value.trim());refreshSysc(rerSet);};
+ tc.querySelector("#stTzA").onclick=async()=>{await sconf("timezone",Tz.value.trim());refreshSysc(rerSet);};
  // псевдоним пула (симлинк): показать текущий и применить новый
  {const cur=tc.querySelector("#stAliasCur"),inp=tc.querySelector("#stAlias");
   api("/api/maintenance").then(m=>{const a=(m&&m.maintenance&&m.maintenance.pool_alias)||"";
@@ -4193,13 +4207,28 @@ function securityTab(tc){withSysc(tc,()=>{const s=SYSC.security||{};const u=s.uf
  wireSc(tc);
 });}
 /* --- settings: USB авто-импорт --- */
+const USB_TOKENS=[["{label}","метка носителя (имя флешки/карты)"],["{date}","дата ГГГГ-ММ-ДД"],["{time}","время ЧЧ-ММ-СС"],["{year}","год"],["{month}","месяц ММ"],["{month-name}","месяц названием"],["{day}","день"],["{hour}","час"],["{minute}","минута"],["{datetime}","дата+время слитно"]];
+function usbSubPreview(tpl){
+ if(tpl==="dated")tpl="{label}-{date}-{time}";else if(tpl==="label")tpl="{label}";else if(tpl==="flat")tpl="";
+ const d=new Date(),p=n=>String(n).padStart(2,"0"),MON=["January","February","March","April","May","June","July","August","September","October","November","December"];
+ const map={"{label}":"CANON100","{datetime}":`${d.getFullYear()}${p(d.getMonth()+1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`,"{date}":`${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`,"{time}":`${p(d.getHours())}-${p(d.getMinutes())}-${p(d.getSeconds())}`,"{year}":d.getFullYear(),"{month-name}":MON[d.getMonth()],"{month}":p(d.getMonth()+1),"{day}":p(d.getDate()),"{hour}":p(d.getHours()),"{minute}":p(d.getMinutes())};
+ let s=tpl;for(const k of Object.keys(map))s=s.split(k).join(map[k]);
+ s=s.replace(/\.\./g,"").replace(/^\/+/,"").replace(/\/+$/,"").replace(/\/{2,}/g,"/");
+ return s?s:"(без подпапки — прямо в папку назначения)";}
 function usbTab(tc){tc.innerHTML=`<div class="set-load">загрузка…</div>`;
- api("/api/usb-import").then(r=>{const c=(r&&r.config)||{},drives=(r&&r.drives)||[],sub=c.subdir||"dated";
+ api("/api/usb-import").then(r=>{const c=(r&&r.config)||{},drives=(r&&r.drives)||[];
+  let sub=c.subdir||"";if(sub==="dated")sub="{label}-{date}-{time}";else if(sub==="label")sub="{label}";else if(sub==="flat")sub="";
   tc.innerHTML=`<h3 class="set-title">Авто-импорт с USB</h3><p class="set-sub">Копировать содержимое флешки в папку сразу при подключении (rsync — только копирование, с флешки ничего не удаляется).</p>
    ${c.rsync===false?`<div class="reboot-ban">${svg("power",16)} rsync не установлен — импорт не сработает. Поставится на этапе «Система» в Мастере.</div>`:""}
    <div class="srow"><div class="srow-l"><div class="srow-t">Включить авто-импорт${tipHTML("При вставке USB-накопителя его содержимое автоматически копируется в папку назначения. Срабатывает по udev при подключении.")}</div><div class="srow-d">${c.installed?"хук установлен":"будет установлен при сохранении"}</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="uEn"${c.enabled?" checked":""}><span class="sl"></span></label></div></div>
    <div class="srow"><div class="srow-l"><div class="srow-t">Папка назначения${tipHTML("Куда копировать. Обычно на пул, напр. /mnt/storage/imports. Папка создаётся автоматически.")}</div></div><div class="srow-c"><input class="mono" id="uDest" style="min-width:230px" value="${att(c.dest||"/mnt/storage/imports")}"></div></div>
-   <div class="srow"><div class="srow-l"><div class="srow-t">Раскладка подпапок${tipHTML("Дата — новая папка «метка-дата» на каждую вставку (ничего не перезапишется). Метка — папка по имени флешки (докопирует). Без — прямо в папку назначения.")}</div></div><div class="srow-c"><div class="seg" id="uSub"><button data-v="dated" class="${sub==="dated"?"on":""}">Дата</button><button data-v="label" class="${sub==="label"?"on":""}">Метка</button><button data-v="flat" class="${sub==="flat"?"on":""}">Без</button></div></div></div>
+   <div class="set-h">Раскладка подпапок${tipHTML("Шаблон имени папки, куда попадёт содержимое каждой вставленной флешки. Соберите его из токенов ниже. Косая черта «/» создаёт вложенные папки (напр. {year}/{month}). Пусто — копировать прямо в папку назначения.")}</div>
+   <div class="usb-sub">
+     <input id="uSubTpl" class="mono" value="${att(sub)}" placeholder="{label}-{date}">
+     <div class="usb-prev">Пример: <span class="mono" id="uSubPrev"></span></div>
+     <div class="usb-chips"><span class="usb-lbl">Токены:</span>${USB_TOKENS.map(t=>`<button class="usb-tok" data-t="${att(t[0])}" title="${att(t[1])}">${esc(t[0])}</button>`).join("")}<button class="usb-tok" data-t="/" title="вложенная папка">/</button></div>
+     <div class="usb-chips"><span class="usb-lbl">Готовые:</span><button class="usb-pre" data-t="{label}-{date}-{time}">метка + дата/время</button><button class="usb-pre" data-t="{year}/{month}/{label}">год / месяц / метка</button><button class="usb-pre" data-t="{label}">только метка</button><button class="usb-pre" data-t="">без подпапки</button></div>
+   </div>
    <div class="srow"><div class="srow-l"><div class="srow-t">Уведомлять (Pushover)${tipHTML("Пуш при старте и завершении копирования. Нужны ключи Pushover в разделе «Уведомления».")}</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="uNo"${c.notify?" checked":""}><span class="sl"></span></label></div></div>
    <div class="srow"><div class="srow-l"><div class="srow-t">Только фото и видео${tipHTML("Копировать лишь снимки и ролики (jpg, heic, RAW: dng/cr2/nef/arw…, mp4, mov и т.п.), пропуская всё остальное. Удобно для карт памяти из фотоаппарата.")}</div><div class="srow-d">пропускать документы, приложения и прочее</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="uMo"${c.media_only?" checked":""}><span class="sl"></span></label></div></div>
    <div class="srow"><div class="srow-l"><div class="srow-t">Извлечь после копирования${tipHTML("Безопасно отключить питание накопителя по завершении — можно сразу вынимать.")}</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="uEj"${c.eject?" checked":""}><span class="sl"></span></label></div></div>
@@ -4211,9 +4240,16 @@ function usbTab(tc){tc.innerHTML=`<div class="set-load">загрузка…</div
   if(!drives.length)dv.innerHTML=`<div class="mon-note">Съёмных USB-накопителей сейчас нет. Вставьте флешку и обновите.</div>`;
   else drives.forEach(d=>{const row=el(`<div class="srow"><div class="srow-l"><div class="srow-t">${esc(d.label||d.path)}</div><div class="srow-d mono">${esc(d.path)} · ${esc(d.mount)}</div></div><div class="srow-c"><button class="btn sm">${svg("copy",13)} Импортировать</button></div></div>`);
     row.querySelector("button").onclick=async()=>{toast("Импорт запущен…");const rr=await api("/api/usb-import/run",{method:"POST",body:JSON.stringify({dev:d.path})});toast(LIVE?(rr&&rr.ok?"Импорт запущен ✓":"Ошибка: "+((rr&&rr.log)||"")):"Демо");};dv.appendChild(row);});
-  tc.querySelectorAll("#uSub button").forEach(b=>b.onclick=()=>tc.querySelectorAll("#uSub button").forEach(x=>x.classList.toggle("on",x===b)));
-  tc.querySelector("#uSave").onclick=async()=>{const sb=tc.querySelector("#uSub button.on");
-   const cfg={enabled:tc.querySelector("#uEn").checked,dest:tc.querySelector("#uDest").value.trim(),subdir:sb?sb.dataset.v:"dated",notify:tc.querySelector("#uNo").checked,eject:tc.querySelector("#uEj").checked,media_only:tc.querySelector("#uMo").checked};
+  // конструктор раскладки: превью, вставка токенов, готовые шаблоны
+  const tpl=tc.querySelector("#uSubTpl"),prev=tc.querySelector("#uSubPrev");
+  const upd=()=>prev.textContent=usbSubPreview(tpl.value);upd();
+  tpl.oninput=upd;
+  tc.querySelectorAll(".usb-tok").forEach(b=>b.onclick=()=>{const p=tpl.selectionStart||tpl.value.length;
+    tpl.value=tpl.value.slice(0,p)+b.dataset.t+tpl.value.slice(tpl.selectionEnd||p);tpl.focus();
+    const np=p+b.dataset.t.length;tpl.setSelectionRange(np,np);upd();});
+  tc.querySelectorAll(".usb-pre").forEach(b=>b.onclick=()=>{tpl.value=b.dataset.t;upd();});
+  tc.querySelector("#uSave").onclick=async()=>{
+   const cfg={enabled:tc.querySelector("#uEn").checked,dest:tc.querySelector("#uDest").value.trim(),subdir:tpl.value.trim(),notify:tc.querySelector("#uNo").checked,eject:tc.querySelector("#uEj").checked,media_only:tc.querySelector("#uMo").checked};
    const rr=await api("/api/usb-import",{method:"POST",body:JSON.stringify(cfg)});
    toast(LIVE?(rr&&rr.ok?(rr.warn||"Сохранено ✓"):"Ошибка: "+((rr&&rr.log)||"?")):"Демо");};
  });}
