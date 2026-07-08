@@ -2256,7 +2256,9 @@ async function runStream(action,params,con,onDone){
  catch(e){con.innerHTML=`<div class="er">нет связи с бэкендом</div>`;return;}
  if(!resp.body){con.textContent=await resp.text();return;}
  const rd=resp.body.getReader(),dec=new TextDecoder();let buf="",code=null;con.innerHTML="";
- const push=l=>{if(l.startsWith("__EXIT__")){code=parseInt(l.slice(8),10);return;}con.appendChild(el(`<div class="${/ОШИБКА|ОТКАЗ|ABORT/i.test(l)?"er":""}">${l.replace(/</g,"&lt;")||"&nbsp;"}</div>`));con.scrollTop=con.scrollHeight;};
+ const push=l=>{if(l.startsWith("__EXIT__")){code=parseInt(l.slice(8),10);return;}
+  const stick=con.scrollHeight-con.scrollTop-con.clientHeight<40;
+  con.appendChild(el(`<div class="${/ОШИБКА|ОТКАЗ|ABORT/i.test(l)?"er":""}">${l.replace(/</g,"&lt;")||"&nbsp;"}</div>`));if(stick)con.scrollTop=con.scrollHeight;};
  for(;;){const {done,value}=await rd.read();if(done)break;buf+=dec.decode(value,{stream:true});const ps=buf.split("\n");buf=ps.pop();ps.forEach(push);}
  if(buf)push(buf);if(code===0&&onDone)onDone();
 }
@@ -2267,7 +2269,10 @@ async function streamPost(url,con,onDone,body){
  catch(e){con.innerHTML=`<div class="er">нет связи с сервером</div>`;if(onDone)onDone(-1);return;}
  if(!resp.body){con.textContent=await resp.text();if(onDone)onDone(0);return;}
  const rd=resp.body.getReader(),dec=new TextDecoder();let buf="",code=null;con.innerHTML="";
- const push=l=>{if(l.startsWith("__EXIT__")){code=parseInt(l.slice(8),10);return;}con.appendChild(el(`<div class="${/(ошибк|error|fail|^E:|^W:)/i.test(l)?"er":""}">${l.replace(/</g,"&lt;")||"&nbsp;"}</div>`));con.scrollTop=con.scrollHeight;};
+ const push=l=>{if(l.startsWith("__EXIT__")){code=parseInt(l.slice(8),10);return;}
+  const stick=con.scrollHeight-con.scrollTop-con.clientHeight<40;   // липнуть к низу только если пользователь уже внизу (иначе не даём прокрутить/скопировать)
+  const isErr=/^rsync:|\(code \d|IO error|permission denied|failed to (set|create|open)|cannot |ОШИБКА|ОТКАЗ|не удалось|не создать|не запустить/i.test(l);
+  con.appendChild(el(`<div class="${isErr?"er":""}">${l.replace(/</g,"&lt;")||"&nbsp;"}</div>`));if(stick)con.scrollTop=con.scrollHeight;};
  for(;;){const {done,value}=await rd.read();if(done)break;buf+=dec.decode(value,{stream:true});const ps=buf.split("\n");buf=ps.pop();ps.forEach(push);}
  if(buf)push(buf);if(onDone)onDone(code==null?0:code);
 }
