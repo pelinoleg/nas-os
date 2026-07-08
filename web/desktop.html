@@ -427,8 +427,21 @@
   .dbadge{font-family:var(--mono);font-size:9.5px;text-transform:uppercase;letter-spacing:.05em;padding:2px 7px;border-radius:6px;background:none;border:1px solid var(--line-2);color:var(--dim);flex:none;font-weight:600;min-width:58px;text-align:center}
   .dbadge.free{color:var(--warn);border-color:var(--warn)}
   .drow-hdr{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}
-  .dline .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .dline .pc{font-family:var(--mono);color:var(--dim)}
+  .dline .nm{flex:1;min-width:0}
+  .dline .nm .dn{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .dline .nm .dsub{display:block;font-size:10px;color:var(--mut);font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px}
+  .dline .pc{font-family:var(--mono);color:var(--dim);flex:none}
+  /* карточка пула в виджете — заметно не как обычный диск */
+  .dpool{display:flex;align-items:center;gap:10px;padding:9px 10px;margin-bottom:9px;border-radius:var(--r-sm);
+    background:color-mix(in srgb,var(--good) 12%,transparent);border:1px solid color-mix(in srgb,var(--good) 26%,transparent)}
+  .dpool .dp-ic{width:27px;height:27px;border-radius:8px;display:grid;place-items:center;color:var(--good);
+    background:color-mix(in srgb,var(--good) 20%,transparent);flex:none}
+  .dpool .dp-nm{flex:1;min-width:0;display:flex;flex-direction:column}
+  .dpool .dp-nm b{font-size:12.5px;font-weight:660;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .dpool .dp-sub{font-size:10px;color:var(--mut);font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px}
+  .dpool .dp-cap{flex:none;text-align:right;min-width:104px}
+  .dpool .dp-cap .dbar{width:104px;margin-top:0}
+  .dpool .dp-free{font-size:10px;color:var(--dim);font-family:var(--mono);display:block;margin-top:4px}
   .qa{display:grid;grid-template-columns:1fr 1fr;gap:9px}
   .qa button{display:flex;align-items:center;gap:9px;padding:11px 12px;border:none;border-radius:var(--r-md);background:var(--card);font-size:12.5px;font-weight:550;transition:.14s;box-shadow:var(--sh-sm)}
   .qa button:hover{border-color:var(--accent-line);background:var(--accent-soft);color:var(--accent)}
@@ -626,6 +639,8 @@
   .dm2{display:flex;flex:1;min-height:0}
   .dm2-side{width:210px;flex:none;border-right:1px solid var(--line);padding:8px 8px 12px;overflow-y:auto}
   .dm2-side-h{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--mut);font-family:var(--mono);padding:6px 8px 8px}
+  .dm2-grp{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--mut);font-family:var(--mono);padding:11px 8px 5px}
+  .dm2-grp:first-child{padding-top:4px}
   .dm2-item{display:flex;align-items:center;gap:9px;width:100%;padding:8px 9px;border-radius:var(--r-sm);border:1px solid transparent;background:transparent;text-align:left;margin-bottom:2px;transition:.12s}
   .dm2-item:hover{background:var(--sel)}
   .dm2-item.on{background:var(--sel);border-color:var(--accent-line)}
@@ -635,6 +650,7 @@
   .dm2-item .li-name{display:block;font-weight:600;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .dm2-item .li-sub{display:block;font-size:11px;color:var(--mut);font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .dm2-item .li-temp{font-family:var(--mono);font-size:11px;font-weight:650;flex:none}
+  .li-temp:empty,.htemp:empty{display:none}   /* нет температуры — не занимать место/зазор во flex */
   .dm2-item .li-pi{width:16px;height:16px;flex:none;margin:0 -4px}
   .dd-ic-pi{background:transparent!important;box-shadow:none!important}.dd-ic-pi img{width:100%;height:100%}
   .dm2-slots{font-size:11px;color:var(--mut);padding:10px 9px;line-height:1.5}
@@ -2131,7 +2147,19 @@ function driveType(x){
  return{ic:"ssd",label:"SSD"};
 }
 let DM_SEL=null;   // выбранный диск (dev), переживает перезагрузку списка
-function winDisks(){openWin("__disks","Хранилище",body=>{
+// живое обновление температур в открытом окне «Хранилище» без полной перерисовки
+// (перерисовка сбрасывала бы выбор/раскрытый SMART/скролл) — правим только [data-dtemp]
+async function refreshDiskTemps(root){
+ const d=await api("/api/disks");const by={};((d&&d.disks)||[]).forEach(x=>by[x.path]=x);
+ root.querySelectorAll("[data-dtemp]").forEach(node=>{
+  const x=by[node.getAttribute("data-dtemp")];if(!x)return;
+  const t=x.smart&&x.smart.temp!=null?x.smart.temp:null,bad=x.smart&&x.smart.healthy===false;
+  const hdr=node.classList.contains("htemp");
+  node.textContent=t!=null?(hdr?t+"°C":t+"°"):(hdr?"":(bad?"!":""));
+  node.style.color=t!=null?diskTcol(t):(bad&&!hdr?"var(--danger)":"");
+ });
+}
+function winDisks(){openWin("__disks","Хранилище",(body,win)=>{
  body.style.padding="0";
  const load=()=>Promise.all([api("/api/disks"),api("/api/automount")]).then(([d,am])=>{
   am=am||{};let disks=(d&&d.disks)||[];if(d&&d.fs)FS_AVAIL=d.fs;
@@ -2144,8 +2172,14 @@ function winDisks(){openWin("__disks","Хранилище",body=>{
   root.appendChild(poolStrip(disks,am,load,(d&&d.snapraid)||{}));
   const split=el(`<div class="dm2"></div>`);
   const side=el(`<aside class="dm2-side"></aside>`);
-  side.appendChild(el(`<div class="dm2-side-h">Накопители · ${disks.length}</div>`));
-  disks.forEach(x=>{const it=diskListItem(x);it.onclick=()=>{DM_SEL=x.path;paint();};side.appendChild(it);});
+  // группируем: система (всегда сверху) · пул (данные/чётность/pool) · вне пула (внешние/свободные)
+  const GRP_H=["Система","Пул","Вне пула"];
+  const grpOf=r=>r==="system"?0:(r==="data"||r==="parity"||r==="pool")?1:2;
+  let lastG=-1;
+  disks.forEach(x=>{const g=grpOf(x.role);
+   if(g!==lastG){lastG=g;const gn=disks.filter(y=>grpOf(y.role)===g).length;
+    side.appendChild(el(`<div class="dm2-grp">${GRP_H[g]} · ${gn}</div>`));}
+   const it=diskListItem(x);it.onclick=()=>{DM_SEL=x.path;paint();};side.appendChild(it);});
   if(empty.length)side.appendChild(el(`<div class="dm2-slots">${svg("sd",13)} Пустые слоты: <b class="mono">${empty.map(x=>x.name).join(", ")}</b></div>`));
   const detail=el(`<section class="dm2-detail"></section>`);
   split.appendChild(side);split.appendChild(detail);root.appendChild(split);body.appendChild(root);
@@ -2157,6 +2191,8 @@ function winDisks(){openWin("__disks","Хранилище",body=>{
   paint();
  });
  load();body._reload=load;
+ clearInterval(win._pi);
+ win._pi=setInterval(()=>{if(!document.body.contains(body)){clearInterval(win._pi);return;}refreshDiskTemps(body);},15000);
 },{w:740,h:640});}
 
 function scrubLine(snap){
@@ -2192,14 +2228,13 @@ function poolStrip(disks,am,reload,snap){
 }
 
 function diskListItem(x){
- const sys=x.role==="system",temp=x.smart&&x.smart.temp!=null?x.smart.temp:null;
- const nm=(sys?"Система · SD-карта":(x.label||x.model||x.name)).replace(/</g,"&lt;");
+ const sys=x.role==="system",temp=x.smart&&x.smart.temp!=null?x.smart.temp:null,bad=x.smart&&x.smart.healthy===false;
+ const nm=(sys?("Система · "+driveType(x).label):(x.label||x.model||x.name)).replace(/</g,"&lt;");
  const mark=sys?`<img class="li-pi" src="/icon-flat.svg" alt="">`:`<span class="dot" style="background:${roleColor(x.role)}"></span>`;
  const it=el(`<button class="dm2-item${sys?" sys":""}">
    ${mark}
    <span class="li-main"><span class="li-name">${nm}</span><span class="li-sub">${roleName[x.role]||x.role} · ${x.size||"—"}${sys?"":(x.mounted?"":" · не смонт.")}</span></span>
-   ${temp!=null?`<span class="li-temp" style="color:${diskTcol(temp)||"var(--mut)"}">${temp}°</span>`
-     :(x.smart&&x.smart.healthy===false?`<span class="li-temp" style="color:var(--danger)">!</span>`:"")}
+   <span class="li-temp" data-dtemp="${x.path}" style="color:${temp!=null?(diskTcol(temp)||"var(--mut)"):"var(--danger)"}">${temp!=null?temp+"°":(bad?"!":"")}</span>
  </button>`);
  return it;
 }
@@ -2212,13 +2247,13 @@ function diskDetail(x,reload){
  const sysHead=x.role==="system"
    ?`<div class="dd-ic dd-ic-pi"><img src="/icon-flat.svg" alt=""></div>`
    :`<div class="dd-ic" style="background:${roleColor(x.role)}">${I[dt.ic]||I.disks}</div>`;
- const headName=x.role==="system"?"Система · SD-карта":name;
+ const headName=x.role==="system"?("Система · "+dt.label):name;
  box.appendChild(el(`<div class="dd-head">
    ${sysHead}
    <div class="dd-hmain"><div class="dd-name">${headName} ${lbl}</div>
      <div class="dd-sub"><span class="rbadge ${x.role}">${roleName[x.role]||x.role}</span> ${dt.label} · <span class="mono">${x.path}</span></div></div>
    <div class="dd-health">${sm&&sm.healthy!=null?`<div class="hstat ${sm.healthy?"ok":"bad"}">${sm.healthy?"Исправно":"Сбой"}</div>`:`<div class="hstat na">SMART —</div>`}
-     ${sm&&sm.temp!=null?`<div class="htemp" style="color:${diskTcol(sm.temp)}">${sm.temp}°C</div>`:""}</div></div>`));
+     <div class="htemp" data-dtemp="${x.path}" style="color:${sm&&sm.temp!=null?diskTcol(sm.temp):""}">${sm&&sm.temp!=null?sm.temp+"°C":""}</div></div></div>`));
  if(u)box.appendChild(el(`<div class="dd-usage"><div class="capbar"><span class="used" style="width:${Math.max(u.pct,.4)}%"></span></div>
    <div class="lbls"><span>${fmtB(u.used)} занято · ${u.pct}%</span><span>${fmtB(u.total-u.used)} свободно · ${fmtB(u.total)}</span></div></div>`));
  // краткие факты
@@ -4508,6 +4543,7 @@ function paintSys(s){const m=document.getElementById("wg-sys");if(!m)return;
    <div class="gauge">${ring(s.mem.pct,loadCol(s.mem.pct))}<div class="v" style="color:${loadCol(s.mem.pct)}">${s.mem.pct}%</div><div class="l">RAM</div></div></div>
   <div class="krow" style="margin-top:12px"><span>Аптайм</span><b>${fmtUp(s.uptime)}</b></div>
   <div class="krow"><span>Load 1м / 5м</span><b>${s.load?s.load[0].toFixed(2)+" / "+s.load[1].toFixed(2):"—"}</b></div>
+  ${DISK_TEMP_MAX!=null?`<div class="krow"><span>Температура дисков</span><b style="color:${diskTcol(DISK_TEMP_MAX)}">${DISK_TEMP_MAX}°C</b></div>`:""}
   ${thr?`<div class="krow" style="color:var(--warn)"><span>⚠ троттлинг</span><b>${esc(s.throttled.raw)}</b></div>`:""}`;
  const ns=document.getElementById("wg-nets");if(ns)ns.innerHTML=
   `<span style="color:var(--good)">↓ ${fmtR(s.net.rx)}</span><span style="color:var(--danger)">↑ ${fmtR(s.net.tx)}</span>`;
@@ -4546,24 +4582,38 @@ function drawNet(){const cv=document.getElementById("wg-net");if(!cv)return;cons
  line(NETT,cTx,false);  // upload — красный, только линия
 }
 const DROLE_COL={system:"var(--mut)",data:"var(--accent)",pool:"var(--good)",parity:"var(--accent-2)",removable:"#8a7dff",free:"var(--warn)"};
+let DISK_TEMP_MAX=null;   // самая горячая температура диска — для виджета «Система»
 const diskTcol=t=>t==null?"":t>=60?"var(--danger)":t>=50?"var(--warn)":"var(--good)";
-function dRow(role,name,pct,free,temp,sys){
- const barCol=p=>p>=90?"var(--danger)":p>=75?"var(--warn)":"var(--good)";
+const barCol=p=>p>=90?"var(--danger)":p>=75?"var(--warn)":"var(--good)";
+function dRow(role,name,pct,free,temp,sys,sub){
  const mark=sys?`<img class="ddot-pi" src="/icon-flat.svg" alt="">`:`<span class="ddot" style="background:${DROLE_COL[role]||"var(--mut)"}"></span>`;
- return `<div class="dline${sys?" sys":""}" title="${att((roleName[role]||role)+(temp!=null?" · "+temp+"°C":""))}">
+ return `<div class="dline${sys?" sys":""}" title="${att((sub?sub+" · ":"")+(roleName[role]||role)+(temp!=null?" · "+temp+"°C":""))}">
    ${mark}
-   <span class="nm">${esc(name)}${pct!=null?`<div class="dbar"><i style="width:${Math.max(pct,.4)}%;background:${barCol(pct)}"></i></div>`:""}</span>
+   <span class="nm"><span class="dn">${esc(name)}</span>${sub?`<span class="dsub">${esc(sub)}</span>`:""}${pct!=null?`<div class="dbar"><i style="width:${Math.max(pct,.4)}%;background:${barCol(pct)}"></i></div>`:""}</span>
    ${temp!=null?`<span class="dtemp" style="color:${diskTcol(temp)}">${temp}°</span>`:""}
    <span class="pc">${free}</span></div>`;}
+// отдельная «карточка пула» в виджете — визуально не как обычный диск (иконка-слоёв, акцент, счётчик дисков)
+function poolRow(u,ndata,nparity){
+ const pct=u.total?Math.max(u.pct,.4):0;
+ const sub=`${ndata} данных${nparity?" · "+nparity+" чётности":""}`;
+ return `<div class="dpool" title="${att("Пул хранилища /mnt/storage · "+sub)}">
+   <span class="dp-ic">${svg("layers",15)}</span>
+   <span class="dp-nm"><b>Пул хранилища</b><span class="dp-sub">${sub}</span></span>
+   <span class="dp-cap"><span class="dbar"><i style="width:${pct}%;background:${barCol(u.pct)}"></i></span>
+     <span class="dp-free">${fmtB(u.total-u.used)} своб. · ${fmtB(u.total)}</span></span></div>`;}
 function paintDiskWidget(disks){const box=document.getElementById("wg-disk");if(!box)return;
  const arr=(disks||[]).slice().sort((a,b)=>roleRank(a.role)-roleRank(b.role));
+ const temps=arr.map(d=>d.smart&&d.smart.temp).filter(t=>t!=null);
+ DISK_TEMP_MAX=temps.length?Math.max(...temps):null;   // виджет «Система» подхватит на своём тике (paintSys каждые 3с)
  let h="";
- if(LAST&&LAST.disk_pool&&LAST.disk_pool.path==="/mnt/storage"){const u=LAST.disk_pool;
-  h+=dRow("pool","storage",u.pct,fmtB(u.total-u.used)+" своб.",null,false);}
+ if(LAST&&LAST.disk_pool&&LAST.disk_pool.path==="/mnt/storage")
+  h+=poolRow(LAST.disk_pool,arr.filter(d=>d.role==="data"||d.role==="pool").length,arr.filter(d=>d.role==="parity").length);
  arr.slice(0,6).forEach(d=>{const u=d.usage,pct=u?u.pct:null,tmp=d.smart&&d.smart.temp!=null?d.smart.temp:null,sys=d.role==="system";
-  const nm=sys?"Система · SD-карта":(d.label||d.name);
+  const nm=sys?("Система · "+driveType(d).label):(d.label||d.name);
+  // мелким шрифтом — модель/производитель, чтобы понимать, что за физический диск
+  const sub=(d.model&&d.model!==nm)?d.model:(!d.label&&d.name!==nm?d.name:"");
   const free=u?fmtB(u.total-u.used)+" своб.":(d.mounted?(d.size||""):"не смонт.");
-  h+=dRow(d.role,nm,pct,free,tmp,sys);});
+  h+=dRow(d.role,nm,pct,free,tmp,sys,sub);});
  box.innerHTML=h||`<div style="color:var(--mut);font-size:12px">Диски не найдены</div>`;
 }
 

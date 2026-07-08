@@ -1222,6 +1222,8 @@ window.NAS_I18N = { en: {
 "Синхронизация чётности: фиксирует изменения дня. Выберите время, когда NAS не занят.": "Parity synchronization: commits the day's changes. Pick a time when the NAS is idle.",
 "Система": "System",
 "Система · SD-карта": "System · SD card",
+"Вне пула": "Outside pool",
+"Температура дисков": "Disk temperature",
 "Система в порядке": "System is fine",
 "Система запущена": "System started",
 "Системная карта /": "System card /",
