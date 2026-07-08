@@ -6,6 +6,13 @@
    Перевод применяется только к целым «словам» (границы — не-кириллица), длинные фразы приоритетнее. */
 window.NAS_I18N = { en: {
 "Анализ места": "Disk usage",
+"идёт сейчас…": "running now…",
+"источник недоступен": "source unreachable",
+"бэкап завершён": "backup finished",
+"завершён с ошибками — см. лог ниже": "finished with errors — see the log below",
+"пробный прогон завершён": "dry run finished",
+"Читать через sudo на источнике": "Read via sudo on the source",
+"лечит «Permission denied» на части файлов": "fixes «Permission denied» on some files",
 "Останавливаю…": "Stopping…",
 "Главный NAS недоступен": "Main NAS unreachable",
 "идёт бэкап": "backup running",

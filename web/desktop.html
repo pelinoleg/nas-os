@@ -492,9 +492,10 @@
   /* индикатор запущенного приложения — снизу по центру, читаем на любом фоне дока */
   .dock .run{position:absolute;left:50%;bottom:-3px;transform:translateX(-50%);width:5px;height:5px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 1.5px var(--dock-bg,var(--glass-2))}
   .dock.pos-left .run,.dock.pos-right .run{left:auto;bottom:auto;top:50%;right:-3px;transform:translateY(-50%)}
-  /* индикатор идущего бэкапа: вращающееся кольцо поверх иконки дока */
-  .dock .di-spin{position:absolute;inset:-3px;border-radius:inherit;border:2px solid transparent;border-top-color:#fff;border-right-color:rgba(255,255,255,.6);animation:wspin .9s linear infinite;pointer-events:none}
-  .dock .di-busy{box-shadow:0 0 0 2px rgba(255,255,255,.35)}
+  /* индикатор идущего бэкапа: аккуратная пульсирующая точка в углу иконки */
+  .dock .di-spin{position:absolute;left:50%;bottom:-3px;transform:translateX(-50%);width:6px;height:6px;border-radius:50%;background:var(--good);box-shadow:0 0 0 1.5px var(--dock-bg,var(--glass-2));animation:nbpulse 1.15s ease-in-out infinite;pointer-events:none}
+  .dock.pos-left .di-spin,.dock.pos-right .di-spin{left:auto;bottom:auto;top:50%;right:-3px;transform:translateY(-50%)}
+  @keyframes nbpulse{0%,100%{opacity:1}50%{opacity:.25}}
   .dock .sep{width:1px;background:var(--line-2);margin:6px 4px;align-self:stretch;flex:none}
 
   /* windows */
@@ -740,6 +741,10 @@
   .nb-pcrumb .sepc{color:var(--mut)}
   .nb-saved{font-size:12px;color:var(--good);font-weight:600;opacity:0;transition:opacity .2s;margin-left:4px}
   .nb-saved.show{opacity:1}
+  .nb-prog{display:flex;flex-wrap:wrap;align-items:center;gap:10px;font-size:12px;padding:8px 12px;background:var(--accent-soft);border-radius:var(--r-sm)}
+  .nb-prog-cur{display:inline-flex;align-items:center;gap:5px;color:var(--accent);font-weight:600;min-width:0}
+  .nb-prog-cur svg{flex:none}
+  .nb-prog-l{color:var(--mut);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   /* дерево-выбор источников */
   .nb-pick{max-width:660px;width:min(660px,94vw)}
   .nb-tree{max-height:min(64vh,620px);overflow:auto;border:1px solid var(--line);border-radius:var(--r-md);padding:4px}
@@ -4247,6 +4252,7 @@ function winBackup(){openWin("__nasbak","Бэкап главного NAS",(body,
    <div class="srow"><div class="srow-l"><div class="srow-t">Пользователь</div></div><div class="srow-c"><input class="mono" id="cUser" value="${att(c.user||"")}" placeholder="oleg"></div></div>
    <div class="srow" id="cPwRow"><div class="srow-l"><div class="srow-t">Пароль${tipHTML("rsync-демон — пароль модуля. SSH — пароль учётной записи (идёт через sshpass). Для SSH можно оставить пустым и настроить вход по ключу. Хранится на этом NAS.")}</div>${ssh?'<div class="srow-d">для SSH: пусто = вход по ключу</div>':""}</div><div class="srow-c"><input type="password" class="mono" id="cPw" placeholder="${c.has_password?"•••••• (задан)":"пароль"}"></div></div>
    <div class="srow" id="cPortRow" style="${ssh?"":"display:none"}"><div class="srow-l"><div class="srow-t">SSH-порт</div></div><div class="srow-c"><input class="mono" id="cPort" style="max-width:90px" value="${c.ssh_port||22}"></div></div>
+   <div class="srow" id="cSudoRow" style="${ssh?"":"display:none"}"><div class="srow-l"><div class="srow-t">Читать через sudo на источнике${tipHTML("Если часть файлов на главном NAS недоступна пользователю (ошибки «Permission denied») — rsync на источнике запускается через sudo и читает всё. Требуется беспарольный sudo для rsync на источнике: в /etc/sudoers.d добавить строку вида «"+(c.user||"oleg")+" ALL=(root) NOPASSWD: /usr/bin/rsync».")}</div><div class="srow-d">лечит «Permission denied» на части файлов</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="cSudo"${c.remote_sudo?" checked":""}><span class="sl"></span></label></div></div>
    <div class="srow"><div class="srow-l"></div><div class="srow-c"><button class="btn sm pri" id="cSave">${svg("save",13)} Сохранить</button><button class="btn sm" id="cTest">${svg("refresh",13)} Проверить связь</button><span id="cSaved" class="nb-saved"></span></div></div>
    <div class="nb-testr" id="cTestR"></div>`;
   const g=s=>tc.querySelector(s);
@@ -4260,6 +4266,7 @@ function winBackup(){openWin("__nasbak","Бэкап главного NAS",(body,
   g("#cUser").onchange=()=>saveCfg({user:g("#cUser").value.trim()});
   g("#cPw").onchange=()=>{if(g("#cPw").value)saveCfg({password:g("#cPw").value});};
   g("#cPort").onchange=()=>saveCfg({ssh_port:+g("#cPort").value||22});
+  {const su=g("#cSudo");if(su)su.onchange=()=>saveCfg({remote_sudo:su.checked});}
   g("#cTest").onclick=async()=>{const rr=g("#cTestR");rr.innerHTML=`<span class="nb-ok" style="color:var(--mut)">проверяю…</span>`;
    const t=await api("/api/backup/test",{method:"POST",body:"{}"});
    if(t&&t.ok)rr.innerHTML=`<span class="nb-ok">✓ ${esc(t.log||"работает")}${t.modules&&t.modules.length?" · модули: "+esc(t.modules.join(", ")):""}</span>`;
@@ -4340,7 +4347,8 @@ function winBackup(){openWin("__nasbak","Бэкап главного NAS",(body,
    <div class="set-h">Папки</div>
    <div id="oJobs"></div>
    <div class="nb-foot"><button class="btn" id="oDry">Пробный прогон</button><button class="btn pri" id="oRun">${svg("sync",14)} Запустить бэкап</button><button class="btn sm dng" id="oCancel" style="display:none">${svg("x",13)} Остановить</button><button class="btn sm" id="oTest" style="margin-left:auto">${svg("refresh",13)} Проверить связь</button></div>
-   <div class="upd-con" id="oCon" style="display:none;margin-top:10px"></div>`;
+   <div class="nb-prog" id="oProg" style="display:none;margin-top:10px"></div>
+   <div class="upd-con" id="oCon" style="display:none;margin-top:8px"></div>`;
   const g=s=>tc.querySelector(s);
   // папки со статусом последнего прогона
   api("/api/backup/status").then(st=>{const jn=g("#oJobs");if(!jn)return;
@@ -4349,7 +4357,7 @@ function winBackup(){openWin("__nasbak","Бэкап главного NAS",(body,
    else jn.innerHTML="";
    (c.jobs||[]).forEach(j=>{const r=byS[j.src];const dot=r?(r.ok?"var(--good)":"var(--danger)"):"var(--mut)";
     jn.appendChild(el(`<div class="nb-job"><span class="ovh-dot" style="background:${dot};flex:none"></span><span class="nb-src mono" title="${att(j.src)}">${esc(j.src)}</span><span class="nb-arr">→</span><span class="nb-dst mono" title="${att(j.dest)}">${esc(j.dest)}</span></div>`));});
-   const sn=g("#oStatus");if(sn){if(st&&st.running)sn.innerHTML=`<span style="color:var(--accent)">выполняется…</span> ${esc(st.line||"")}`;
+   const sn=g("#oStatus");if(sn){if(st&&st.running)sn.innerHTML=`<span style="color:var(--accent)">идёт сейчас…</span>`;
     else if(st&&st.ts){const ok=(st.jobs||[]).filter(x=>x.ok).length,tot=(st.jobs||[]).length;sn.innerHTML=`${fmDate(st.ts)} · <b style="color:${ok===tot?"var(--good)":"var(--warn)"}">${ok}/${tot}</b> задач успешно`;}
     else sn.textContent="ещё не запускался";}});
   const con=g("#oCon");
@@ -4367,8 +4375,11 @@ function winBackup(){openWin("__nasbak","Бэкап главного NAS",(body,
     if(r.base>nbCursor&&nbCursor>0)con.innerHTML="";
     if(r.lines&&r.lines.length)nbAppend(r.lines);
     nbCursor=r.seq;
+    const op=g("#oProg");
+    if(op){if(r.running){op.style.display="flex";op.innerHTML=`<span class="nb-prog-cur">${svg("folder",13)} ${esc(r.cur||"…")}</span>${r.line?`<span class="nb-prog-l mono">${esc(r.line.trim())}</span>`:""}`;}else op.style.display="none";}
     if(!r.running){clearInterval(win._nbpi);win._nbpi=null;setBusy(false);
-     notifyDone(r.dry?"Пробный прогон завершён":(r.result==="ok"?"Бэкап завершён":r.result==="unreachable"?"Главный NAS недоступен":"Бэкап с ошибками"),"");}
+     notifyDone(r.dry?"Пробный прогон завершён":(r.result==="ok"?"Бэкап завершён":r.result==="unreachable"?"Главный NAS недоступен":"Бэкап с ошибками"),"");
+     const sn=g("#oStatus");if(sn)sn.innerHTML=r.dry?`<b>пробный прогон завершён</b>`:`<b style="color:${r.result==="ok"?"var(--good)":"var(--warn)"}">${r.result==="ok"?"бэкап завершён":r.result==="unreachable"?"источник недоступен":"завершён с ошибками — см. лог ниже"}</b>`;}   // консоль с логом оставляем
    },1500);}
   const run=async dry=>{if(!(c.jobs||[]).length){toast("Сначала выберите источники (вкладка «Источники»)");return;}
    con.style.display="block";con.innerHTML="";nbCursor=0;nbStarted=null;setBusy(true);

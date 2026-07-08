@@ -1995,7 +1995,7 @@ NB_STATUS = os.path.join(NAS_CONFIG, "nas-backup-status.json")
 _nb_lock  = threading.Lock()
 # log — кольцевой буфер строк прогона (для переподключения UI после перезагрузки),
 # log_base — seq первой строки в буфере (seq = log_base + len(log)).
-_nb_state = {"running": False, "cancel": False, "started": 0, "line": "",
+_nb_state = {"running": False, "cancel": False, "started": 0, "line": "", "cur": "",
              "log": [], "log_base": 0, "dry": False, "result": None}
 
 def _nb_log(line):
@@ -2009,6 +2009,7 @@ _NB_DEST_OK = ("/mnt/", "/media/", "/srv/", "/home/")
 
 def nb_load():
     d = {"transport": "rsync", "host": "", "user": "", "password": "", "ssh_port": 22,
+         "remote_sudo": False,
          "dest_mode": "single", "dest_base": "/mnt/storage/nas-backup",
          "jobs": [],
          "excludes": [".DS_Store", "._*", "Thumbs.db", "desktop.ini", "@eaDir/", "#recycle/",
@@ -2041,6 +2042,8 @@ def nb_save(patch):
         if k in patch:
             try: cur[k] = max(0, int(patch[k]))
             except (ValueError, TypeError): pass
+    if "remote_sudo" in patch:
+        cur["remote_sudo"] = bool(patch["remote_sudo"])
     if isinstance(patch.get("jobs"), list):
         jobs = []
         for j in patch["jobs"][:200]:
@@ -2207,6 +2210,8 @@ def nb_build_cmd(cfg, job, dry):
         args.append("--exclude=/_deleted")          # не бэкапить сам архив удалённых
     for ex in cfg.get("excludes", []):
         args.append("--exclude=" + ex)
+    if cfg.get("transport") == "ssh" and cfg.get("remote_sudo"):
+        args.append("--rsync-path=sudo rsync")   # читать файлы без доступа у пользователя (нужен NOPASSWD sudo на источнике)
     if dry:
         args.append("--dry-run")
     args += [remote + job["src"] + "/", dest]
@@ -2283,6 +2288,7 @@ def nb_log_tail(since):
     start = max(0, since - base)
     return {"running": _nb_state["running"], "started": _nb_state.get("started", 0),
             "dry": _nb_state.get("dry", False), "result": _nb_state.get("result"),
+            "cur": _nb_state.get("cur", ""), "line": _nb_state.get("line", ""),
             "seq": end, "base": base, "lines": lg[start:]}
 
 def nb_run_bg(dry=False):
@@ -2290,11 +2296,13 @@ def nb_run_bg(dry=False):
     with _nb_lock:
         if _nb_state["running"]:
             return False
-        _nb_state.update(running=True, cancel=False, started=int(time.time()), line="",
+        _nb_state.update(running=True, cancel=False, started=int(time.time()), line="", cur="",
                          log=[], log_base=0, dry=bool(dry), result=None)
     def work():
         def w(l):
             _nb_state["line"] = l[:200]; _nb_log(l)
+            if l.startswith("=== ") and " → " in l:          # маркер начала задачи → текущая папка
+                _nb_state["cur"] = l[4:].split(" → ")[0].strip()
         res = None
         try:
             r = nb_run(nb_load(), dry, w, lambda: _nb_state["cancel"])
