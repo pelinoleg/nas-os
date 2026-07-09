@@ -154,7 +154,8 @@ def net_speedtest():
     #     оборвался — Cloudflare может закрыть соединение после части объёма) ---
     n = 0.0; t0 = time.time()
     try:
-        req = urllib.request.Request("https://speed.cloudflare.com/__down?bytes=300000000",
+        # OVH (Европа) — Cloudflare в Испании часто заблокирован (LaLiga)
+        req = urllib.request.Request("https://proof.ovh.net/files/1Gb.dat",
                                      headers={"User-Agent": "nas-os"})
         with urllib.request.urlopen(req, timeout=40) as r:
             while time.time() - t0 < 10:
@@ -174,7 +175,7 @@ def net_speedtest():
     try:
         total = 60 * 1024 * 1024   # 60 МБ
         data = b"\0" * total
-        req = urllib.request.Request("https://speed.cloudflare.com/__up", data=data,
+        req = urllib.request.Request("http://speedtest.tele2.net/upload.php", data=data,
                                      headers={"User-Agent": "nas-os", "Content-Type": "application/octet-stream"})
         t0 = time.time()
         urllib.request.urlopen(req, timeout=40).read()
