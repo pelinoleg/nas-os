@@ -5842,13 +5842,43 @@ if [ -n "$sub" ]; then dest="$base/$sub"; stage="$base/.incomplete-$$-$sub"; els
 mkdir -p "$stage" 2>>"$LOG"
 log "import $dev ($label) -> $dest"
 notify "USB-импорт начат" "Копирую «$label» в $dest"
-rsync -a "${filter[@]}" "$mp"/ "$stage"/ >>"$LOG" 2>&1; rc=$?
+
+# --- прогресс для панели -----------------------------------------------------
+# rsync --info=progress2 обновляет строку через \r; гоним её в файл в /run.
+# pid пишем, чтобы панель отличила «идёт» от «процесс убили».
+PROGD=/run/nas-usb-import.progress
+PROG="$PROGD/${dev##*/}"
+START="$(date +%s)"
+mkdir -p "$PROGD" 2>/dev/null
+prog(){                       # $1=статус  $2=строка rsync
+  { printf 'pid=%s\ndev=%s\nlabel=%s\ndest=%s\ntotal=%s\nstarted=%s\nstatus=%s\n' \
+      "$$" "$dev" "$label" "$dest" "${need:-0}" "$START" "$1"
+    [ "$1" != "running" ] && printf 'finished=%s\n' "$(date +%s)"
+    printf 'line=%s\n' "$2"
+  } > "$PROG.tmp" 2>/dev/null && mv -f "$PROG.tmp" "$PROG" 2>/dev/null
+  return 0
+}
+prog running ""
+trap 'rm -f "$JOBD/$$" "$PROG.tmp" 2>/dev/null' EXIT
+
+# LC_ALL=C — чтобы разделитель тысяч был запятой и парсер не гадал по локали.
+# --no-inc-recursive: сканирует всё заранее, зато процент честный, а не «от
+# увиденного до сих пор».
+LC_ALL=C rsync -a --info=progress2 --no-inc-recursive "${filter[@]}" "$mp"/ "$stage"/ 2>>"$LOG" \
+  | tr '\r' '\n' \
+  | while IFS= read -r pl; do
+      case "$pl" in *%*) prog running "$pl" ;; esac
+    done
+rc=${PIPESTATUS[0]}
 own="$(getent passwd 1000 | cut -d: -f1)"; [ -n "$own" ] && chown -R "$own:$own" "$stage" 2>/dev/null
 if [ "$rc" = 0 ] || [ "$rc" = 23 ] || [ "$rc" = 24 ]; then
   [ "$stage" != "$dest" ] && mv "$stage" "$dest" 2>>"$LOG"
   log "import OK -> $dest"; notify "USB-импорт готов" "«$label» скопирован в $dest"
+  # сохранить последнюю строку rsync: иначе в «готово» пропадут байты и итог
+  prog done "$(sed -n 's/^line=//p' "$PROG" 2>/dev/null | tail -1)"
 else
   log "import FAIL $dev rc=$rc (частичное в $stage)"; notify "USB-импорт: ошибка" "Не удалось скопировать «$label» (rc=$rc)"
+  prog fail "rc=$rc"
 fi
 cleanup
 if [ "${IMPORT_EJECT:-0}" = "1" ] && [ -n "$pk" ]; then
@@ -5892,6 +5922,48 @@ def usb_import_load():
     cfg["installed"] = os.path.isfile(USB_IMPORT_RULE)
     cfg["rsync"] = bool(shutil.which("rsync"))
     return cfg
+
+USB_PROG_DIR = "/run/nas-usb-import.progress"
+# «  1,234,567  45%   12.34MB/s    0:00:12» — формат rsync --info=progress2 при LC_ALL=C
+_RSYNC_PROG = re.compile(r"^\s*([\d,]+)\s+(\d+)%\s+(\S+)\s+(\S+)")
+
+def usb_import_progress():
+    """Активные и недавно завершённые задания импорта. Файлы живут в /run,
+    поэтому перезагрузка чистит их сама."""
+    jobs = []
+    now = time.time()
+    try:
+        names = sorted(os.listdir(USB_PROG_DIR))
+    except OSError:
+        return {"jobs": []}
+    for n in names:
+        if n.endswith(".tmp"):
+            continue
+        meta = {}
+        for line in _read(os.path.join(USB_PROG_DIR, n)).splitlines():
+            k, _, v = line.partition("=")
+            meta[k] = v
+        st = meta.get("status", "running")
+        pid = meta.get("pid", "")
+        # процесс убили (или ребут udev-задания) — иначе задание висело бы «идёт» вечно
+        if st == "running" and pid and not os.path.isdir("/proc/" + pid):
+            st = "aborted"
+        fin = int(meta.get("finished") or 0)
+        if st != "running" and fin and now - fin > 600:
+            continue
+        job = {"dev": meta.get("dev"), "label": meta.get("label"), "dest": meta.get("dest"),
+               "status": st, "started": int(meta.get("started") or 0),
+               "total": int(meta.get("total") or 0) or None,
+               "percent": 100 if st == "done" else None,
+               "bytes": None, "speed": None, "eta": None}
+        m = _RSYNC_PROG.match(meta.get("line", ""))
+        if m:
+            job["bytes"] = int(m.group(1).replace(",", ""))
+            if st != "done":
+                job["percent"] = int(m.group(2))
+            job["speed"], job["eta"] = m.group(3), m.group(4)
+        jobs.append(job)
+    return {"jobs": jobs}
 
 def _usb_sh_sync():
     """Перезаписать /usr/local/bin/nas-usb-import.sh, если он разошёлся с кодом.
@@ -6791,6 +6863,8 @@ class H(BaseHTTPRequestHandler):
                 self._json(usb_devices())
             elif p == "/api/motd":
                 self._json({"config": motd_load(), "preview": motd_preview()})
+            elif p == "/api/usb-import/progress":
+                self._json(usb_import_progress())
             elif p == "/api/wallpaper/img":
                 wp = _wallpaper_path()
                 if wp:
