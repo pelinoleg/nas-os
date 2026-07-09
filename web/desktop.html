@@ -3093,7 +3093,7 @@ function editUnit(name,after){openWin("unit:"+name,"Юнит · "+name,body=>{
    ensureCM(()=>{cm=CodeMirror(host,{value:(r&&r.content)||"",mode:"properties",lineNumbers:true,tabSize:2,styleActiveLine:true});setTimeout(()=>cm.refresh(),40);if(window.ResizeObserver)new ResizeObserver(()=>cm&&cm.refresh()).observe(host);});})();
 },{w:720,h:600});}
 /* ===== Менеджер docker-стеков (создание/редактирование/управление через GUI) ===== */
-const STACK_SKELETON="services:\n  app:\n    image: \n    container_name: app\n    restart: unless-stopped\n    ports:\n      - \"8080:80\"\n    labels:\n      - \"web-desktop.name=App\"\n      - \"web-desktop.url=http://pi5.local:8080\"\n      # иконка ярлыка: замени app на слаг приложения с selfhst.st (или удали строку)\n      - \"web-desktop.icon=https://cdn.jsdelivr.net/gh/selfhst/icons@main/svg/app.svg\"\n";
+const STACK_SKELETON="services:\n  app:\n    image: \n    container_name: app\n    restart: unless-stopped\n    ports:\n      - \"8080:80\"\n    labels:\n      - \"web-desktop.name=App\"\n      - \"web-desktop.url=http://pi5.local:8080\"\n      # shortcut icon: replace app with the app slug from selfhst.st (or drop this line)\n      - \"web-desktop.icon=https://cdn.jsdelivr.net/gh/selfhst/icons@main/svg/app.svg\"\n";
 let DK_SEL="overview";   // выбранный пункт: overview | stack:<имя> | images | volumes
 function winServices(initTab){openWin("__services","Docker",(body,win)=>{
  body.style.padding="0";
@@ -3723,14 +3723,21 @@ function opProgress(title){const o=opAdd(title);
 // запись действия в журнал уведомлений (клиентская сторона — итоги пакетных операций)
 function logAct(title,msg,lvl,kind){api("/api/events/log",{method:"POST",body:JSON.stringify({title,msg:msg||"",lvl:lvl||"ok",kind:kind||"files"})});}
 const baseName=p=>String(p||"").replace(/\/+$/,"").split("/").pop()||String(p||"");
+const errShort=t=>String(t||"").trim().split("\n").pop().slice(0,90);
+/* Колбэк возвращает true/false или {ok, log}. Раньше текст ошибки уходил только
+   в тост и исчезал: в истории оставался голый счётчик «0 / 3». */
 async function runBatch(title,items,fn){
- const o=items.length?opAdd(title,{cancel:()=>{}}):null;let ok=0,i=0;
+ const o=items.length?opAdd(title,{cancel:()=>{}}):null;let ok=0,i=0,lastErr="";
  // подпись показывает текущий элемент: иначе на одном файле видно только «0 / 1»
  for(;i<items.length;i++){if(o&&o.cancelled)break;
   if(o)opSet(o,i/items.length,`${i+1} / ${items.length} · ${baseName(items[i])}`);
-  try{if(await fn(items[i],i))ok++;}catch(e){}
+  try{const r=await fn(items[i],i);
+    if(r===true||(r&&r.ok))ok++;
+    else if(r&&r.log)lastErr=errShort(r.log);
+  }catch(e){lastErr=errShort(e&&e.message);}
   if(o)opSet(o,(i+1)/items.length,`${i+1} / ${items.length} · ${baseName(items[i])}`);}
- if(o)opEnd(o,!o.cancelled&&ok===i,o.cancelled?`отменено · сделано ${ok} из ${items.length}`:`${ok} / ${items.length}`);
+ const why=(!o||o.cancelled||ok===i||!lastErr)?"":` · ${lastErr}`;
+ if(o)opEnd(o,!o.cancelled&&ok===i,o.cancelled?`отменено · сделано ${ok} из ${items.length}`:`${ok} / ${items.length}${why}`);
  if(LIVE)logAct(`${title.replace(/…$/,"")}: ${ok} из ${items.length}`+(o&&o.cancelled?" (отменено)":""),"",(o&&o.cancelled)||ok<items.length?"warn":"ok");
  return ok;}
 function fileIcon(name,type){if(type==="dir")return "folder";const e=(name.split(".").pop()||"").toLowerCase();
@@ -4168,13 +4175,13 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
  function openEntry(e){if(e.type==="dir")load(e.path);else if(isMediaName(e.name))openMediaWin(e);else openFileWin(e);}
  /* операции */
  async function doPaste(){if(!clip||!clip.items.length)return;const items=clip.items,cut=clip.mode==="cut";
-   const ok=await runBatch(cut?"Перемещение":"Копирование",items,async src=>{const r=await api(cut?"/api/fs/move":"/api/fs/copy",{method:"POST",body:JSON.stringify({src,dest:cwd})});if(r&&r.log&&!(r&&r.ok))toast("Ошибка: "+r.log);return r&&r.ok;});
+   const ok=await runBatch(cut?"Перемещение":"Копирование",items,async src=>{const r=await api(cut?"/api/fs/move":"/api/fs/copy",{method:"POST",body:JSON.stringify({src,dest:cwd})});if(r&&r.log&&!(r&&r.ok))toast("Ошибка: "+r.log);return {ok:!!(r&&r.ok),log:r&&r.log};});
    toast(LIVE?`Вставлено: ${ok}/${items.length}`:"Демо");if(cut)clip=null;load(cwd);}
  async function doMoveInto(paths,dir){const items=paths.filter(src=>!(src===dir||dir===src.replace(/\/[^/]+$/,"")));
-   const ok=await runBatch("Перемещение",items,async src=>{const r=await api("/api/fs/move",{method:"POST",body:JSON.stringify({src,dest:dir})});if(r&&r.log&&!(r&&r.ok))toast("Ошибка: "+r.log);return r&&r.ok;});
+   const ok=await runBatch("Перемещение",items,async src=>{const r=await api("/api/fs/move",{method:"POST",body:JSON.stringify({src,dest:dir})});if(r&&r.log&&!(r&&r.ok))toast("Ошибка: "+r.log);return {ok:!!(r&&r.ok),log:r&&r.log};});
    toast(LIVE?`Перемещено: ${ok}`:"Демо");load(cwd);}
  async function doDelete(paths){if(!paths.length)return;
-   const ok=await runBatch("В корзину",paths,async p=>{const r=await api("/api/fs/trash",{method:"POST",body:JSON.stringify({path:p})});if(r&&r.log&&!(r&&r.ok))toast("Ошибка: "+r.log);return r&&r.ok;});
+   const ok=await runBatch("В корзину",paths,async p=>{const r=await api("/api/fs/trash",{method:"POST",body:JSON.stringify({path:p})});if(r&&r.log&&!(r&&r.ok))toast("Ошибка: "+r.log);return {ok:!!(r&&r.ok),log:r&&r.log};});
    toast(LIVE?`В корзину: ${ok}`:"Демо");load(cwd);}
  function doDeleteForever(paths){if(!paths.length)return;
    confirmDlg("Удалить безвозвратно?",(paths.length>1?`${paths.length} объектов`:esc(paths[0]))+" — минуя корзину",async()=>{
@@ -4235,6 +4242,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    const upd=()=>{let n=0;active.forEach(v=>n+=v);
      opSet(o,total?Math.min((sent+n)/total,1):(done+fail)/items.length,
        `${done+fail} / ${items.length}${fail?` · ошибок: ${fail}`:""} · ${fmtB(sent+n)} из ${fmtB(total)} · ${cur}`);};
+   let lastErr="";
    const one=it=>new Promise(res=>{const xhr=new XMLHttpRequest();active.set(xhr,0);
      cur=(it.rel?it.rel+"/":"")+it.file.name;upd();
      xhr.open("POST","/api/fs/upload-raw?path="+encodeURIComponent(dir)
@@ -4242,14 +4250,20 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
        +(it.rel?"&rel="+encodeURIComponent(it.rel):""));
      if(xhr.upload)xhr.upload.onprogress=e=>{if(e.lengthComputable){active.set(xhr,e.loaded);upd();}};
      const fin=ok=>{active.delete(xhr);sent+=it.file.size||0;ok?done++:fail++;upd();res(ok);};
-     xhr.onload=()=>{let ok=xhr.status===200;try{ok=ok&&JSON.parse(xhr.responseText).ok!==false;}catch(e){}fin(ok);};
-     xhr.onerror=()=>fin(false);xhr.onabort=()=>fin(false);
+     xhr.onload=()=>{let ok=xhr.status===200;
+       try{const j=JSON.parse(xhr.responseText);ok=ok&&j.ok!==false;if(!ok&&j.log)lastErr=String(j.log).slice(0,90);}
+       catch(e){if(!ok)lastErr="HTTP "+xhr.status;}
+       if(!ok&&!lastErr)lastErr="HTTP "+xhr.status;
+       fin(ok);};
+     xhr.onerror=()=>{lastErr="нет связи с сервером";fin(false);};
+     xhr.onabort=()=>fin(false);
      xhr.send(it.file);});
    const worker=async()=>{while(idx<items.length&&!o.cancelled)await one(items[idx++]);};
    const par=Math.max(1,Math.min(6,+SET.fmUpPar||2));
    await Promise.all(Array.from({length:par},()=>worker()));
    const okAll=!o.cancelled&&!fail;
-   opEnd(o,okAll,o.cancelled?`отменено · загружено ${done} из ${items.length}`:`${done} / ${items.length}${fail?` · ошибок: ${fail}`:""}`);
+   opEnd(o,okAll,o.cancelled?`отменено · загружено ${done} из ${items.length}`
+     :`${done} / ${items.length}${fail?` · ошибок: ${fail}`:""}${fail&&lastErr?` · ${lastErr}`:""}`);
    if(LIVE){notifyDone(o.cancelled?"Загрузка отменена":okAll?"Загрузка завершена":"Загрузка с ошибками",`${done} из ${items.length} · ${dir}`);
      logAct(items.length>1?`Загружено ${done} из ${items.length} файлов`+(o.cancelled?" (отменено)":""):`Загружен файл ${items[0].file.name}`,dir,okAll?"ok":"warn");}
    else toast("Демо");
@@ -4764,7 +4778,7 @@ function winBackup(){openWin("__nasbak","Бэкап главного NAS",(body,
  }
  /* ── Обзор ── */
  function tabOverview(tc){const c=CFG;
-  const sched=c.schedule&&c.schedule.enabled?((c.schedule.freq==="weekly"?"еженедельно":"ежедневно")+" в "+(c.schedule.time||"03:00")):"выключено";
+  const sched=c.schedule&&c.schedule.enabled?((c.schedule.freq==="weekly"?"еженедельно в":"ежедневно в")+" "+(c.schedule.time||"03:00")):"выключено";
   tc.innerHTML=`<h3 class="set-title">Бэкап главного NAS</h3>
    <div class="ov-health"><div class="ovh-list">
      <div class="ovh-row"><span class="ovh-dot" style="background:${c.host?"var(--good)":"var(--mut)"}"></span><span class="ovh-n">Источник</span><span class="ovh-v">${c.host?esc((c.transport==="ssh"?"ssh ":"rsync ")+c.user+"@"+c.host):"не задан"}</span></div>

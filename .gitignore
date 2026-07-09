@@ -10,6 +10,7 @@
 !/nas-wizard.sh
 !/nas-web.service
 !/nas-web-install.sh
+!/check.sh
 !/dialogrc-nas
 !/web/
 !/services/

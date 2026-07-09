@@ -3157,6 +3157,9 @@ def load_maintenance():
     # 0 = выключено (для *_days); все значения попадают в бэкап настроек вместе с файлом
     d = {"trash_days": 30, "pool_alias": "",
          "thumb_cache_mb": 512,     # лимит кэша миниатюр ФМ, МБ (0 = без лимита)
+         "import_stale_hours": 24,  # снести брошенные .incomplete-* старше N часов (0 = не трогать)
+         "import_keep_days": 0,     # удалять импорты старше N дней (0 = хранить вечно)
+         "import_warm_thumbs": True,  # прогреть превью сразу после импорта
          "smart_scan_min": 10,      # фоновый опрос SMART-статуса, минут
          "smart_short_days": 7,     # короткий самотест дисков, раз в N дней (ночью)
          "smart_long_days": 30,     # длинный самотест, раз в N дней (ночью)
@@ -3237,6 +3240,7 @@ def save_maintenance(d):
     # числовые настройки: ключ → (мин, макс)
     for k, (lo, hi) in {"trash_days": (0, 365), "smart_scan_min": (5, 120),
                         "thumb_cache_mb": (0, 100000),
+                        "import_stale_hours": (0, 720), "import_keep_days": (0, 3650),
                         "smart_short_days": (0, 90), "smart_long_days": (0, 365),
                         "backup_days": (0, 30), "backup_keep": (2, 50)}.items():
         if k in d:
@@ -3346,6 +3350,11 @@ def maintenance_daily():
         pass
     try:
         thumbs_cache_gc(load_maintenance().get("thumb_cache_mb", 0))
+    except Exception:
+        pass
+    try:
+        m = load_maintenance()
+        usb_import_gc(m.get("import_stale_hours", 24), m.get("import_keep_days", 0))
     except Exception:
         pass
     try:
@@ -6488,9 +6497,65 @@ def gen_view(src):
                 except OSError: pass
     return vp if ok else None
 
+_IMPORT_ROOTS_OK = ("/mnt/", "/media/", "/srv/", "/home/")
+
+def usb_import_gc(stale_hours, keep_days):
+    """Прибрать приёмник импорта: брошенные стейджинги .incomplete-* и, если
+    попросили, старые импорты. Работаем ТОЛЬКО внутри папки назначения и только
+    если она под разрешённым корнем — иначе рекурсивное удаление слишком опасно."""
+    dest = os.path.realpath(usb_import_load().get("dest") or "")
+    if not dest.startswith(_IMPORT_ROOTS_OK) or dest.count("/") < 2 or not os.path.isdir(dest):
+        return 0
+    now = time.time()
+    removed = 0
+    try:
+        names = os.listdir(dest)
+    except OSError:
+        return 0
+    for name in names:
+        p = os.path.join(dest, name)
+        if not os.path.isdir(p) or os.path.islink(p):
+            continue
+        try:
+            age = now - os.path.getmtime(p)
+        except OSError:
+            continue
+        stale = name.startswith(".incomplete-")
+        # брошенный стейджинг: процесс импорта давно умер, папка мусорная
+        if stale and stale_hours > 0 and age > stale_hours * 3600:
+            try:
+                shutil.rmtree(p); removed += 1
+                log_event("info", "USB-импорт: убран брошенный стейджинг", name, "ok",
+                          kind="disk", desk=False)
+            except OSError:
+                pass
+        elif not stale and keep_days > 0 and age > keep_days * 86400:
+            try:
+                shutil.rmtree(p); removed += 1
+            except OSError:
+                pass
+    return removed
+
+def _thumbs_warm_bg(dest):
+    """Прогреть превью импортированной папки в фоне. os.nice — чтобы карточка
+    диска и панель не тормозили: миниатюра снимка 26 МП стоит ~0.8 с."""
+    try:
+        os.nice(15)
+    except OSError:
+        pass
+    try:
+        n = thumbs_sweep([dest])
+        if n:
+            log_event("info", "Превью подготовлены", "%s: %d шт." % (dest, n), "ok",
+                      kind="files", desk=False)
+    except Exception:
+        pass
+
 def usb_ops_sync():
     """Занести завершённые задания импорта в историю операций. Зовётся из
-    monitor_loop, поэтому история пополняется и с закрытой панелью."""
+    monitor_loop, поэтому история пополняется и с закрытой панелью. Новый
+    (не дублирующий) успешный импорт заодно запускает прогрев превью."""
+    warm = load_maintenance().get("import_warm_thumbs", True)
     for j in usb_import_progress()["jobs"]:
         if j["status"] == "running":
             continue
@@ -6499,10 +6564,14 @@ def usb_ops_sync():
             bits.append(fmt_bytes(j["bytes"]) + (" из " + fmt_bytes(j["total"]) if j.get("total") else ""))
         if j.get("dest"):
             bits.append(j["dest"])
-        ops_hist_add({"uid": "usb:%s:%s" % (j["dev"], j["started"]),
-                      "state": "done" if j["status"] == "done" else "err",
-                      "ts": j.get("finished") or j.get("started") or int(time.time()),
-                      "title": "Импорт с USB", "label": " · ".join(x for x in bits if x)})
+        r = ops_hist_add({"uid": "usb:%s:%s" % (j["dev"], j["started"]),
+                          "state": "done" if j["status"] == "done" else "err",
+                          "ts": j.get("finished") or j.get("started") or int(time.time()),
+                          "title": "Импорт с USB", "label": " · ".join(x for x in bits if x)})
+        # прогрев ровно один раз на импорт: dup означает, что мы его уже видели
+        if warm and r.get("ok") and not r.get("dup") and j["status"] == "done" \
+           and j.get("dest") and os.path.isdir(j["dest"]):
+            threading.Thread(target=_thumbs_warm_bg, args=(j["dest"],), daemon=True).start()
 
 def _usb_sh_sync():
     """Перезаписать /usr/local/bin/nas-usb-import.sh, если он разошёлся с кодом.
