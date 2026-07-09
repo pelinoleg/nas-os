@@ -5741,6 +5741,25 @@ dev="$1"; [ -b "$dev" ] || exit 0
 LOG=/var/log/nas-usb-import.log
 log(){ echo "$(date '+%F %T') $*" >> "$LOG" 2>/dev/null; }
 notify(){ [ "${IMPORT_NOTIFY:-0}" = "1" ] && [ -x /usr/local/bin/nas-notify.sh ] && /usr/local/bin/nas-notify.sh "$1" "$2" 2>/dev/null || true; }
+# udev дёргает нас отдельно на КАЖДЫЙ раздел диска. Регистрируем задание, чтобы
+# извлечение в конце не вырвало устройство из-под ещё копирующегося соседа.
+# Через pgrep это делать нельзя: подоболочка скрипта имеет ту же командную
+# строку, но другой PID, — сам себя увидишь и будешь ждать вечно.
+pk="$(lsblk -no PKNAME "$dev" 2>/dev/null | head -1)"
+JOBD="/run/nas-usb-import.jobs/${pk:-none}"
+mkdir -p "$JOBD" 2>/dev/null && : > "$JOBD/$$" 2>/dev/null
+trap 'rm -f "$JOBD/$$" 2>/dev/null' EXIT
+# сколько ЖИВЫХ соседей копируют этот же диск (мёртвые записи подчищаем)
+siblings(){
+  local n=0 f b
+  for f in "$JOBD"/*; do
+    b="${f##*/}"
+    [ "$b" = "*" ] && continue
+    [ "$b" = "$$" ] && continue
+    if [ -d "/proc/$b" ]; then n=$((n+1)); else rm -f "$f" 2>/dev/null; fi
+  done
+  echo "$n"
+}
 # белый список: если ограничение включено — автоимпорт ТОЛЬКО с разрешённых устройств
 # (по VID:PID). Ручной «импорт сейчас» (IMPORT_FORCE=1) список игнорирует.
 # UAS-мосты не дают ID_VENDOR_ID — падаем на ID_USB_VENDOR_ID. Регистр нормализуем:
@@ -5832,9 +5851,22 @@ else
   log "import FAIL $dev rc=$rc (частичное в $stage)"; notify "USB-импорт: ошибка" "Не удалось скопировать «$label» (rc=$rc)"
 fi
 cleanup
-if [ "${IMPORT_EJECT:-0}" = "1" ]; then
-  pk="$(lsblk -no PKNAME "$dev" 2>/dev/null | head -1)"
-  [ -n "$pk" ] && { udisksctl power-off -b "/dev/$pk" >>"$LOG" 2>&1 || eject "/dev/$pk" >>"$LOG" 2>&1 || true; log "eject /dev/$pk"; }
+if [ "${IMPORT_EJECT:-0}" = "1" ] && [ -n "$pk" ]; then
+  # дождаться соседних разделов того же диска (потолок 2 часа)
+  waited=0
+  while [ "$(siblings)" -gt 0 ] && [ "$waited" -lt 7200 ]; do
+    [ "$waited" = 0 ] && log "eject ждёт: копируются другие разделы /dev/$pk"
+    sleep 1; waited=$((waited+1))
+  done
+  # автомонт мог поднять разделы в /media — пока они смонтированы, power-off
+  # отказывает («drive in use») и остаётся только грубый eject с висящим монтом
+  for part in $(lsblk -lnpo NAME "/dev/$pk" 2>/dev/null); do
+    for mp in $(findmnt -rno TARGET -S "$part" 2>/dev/null); do
+      umount "$mp" 2>>"$LOG" || udisksctl unmount -b "$part" >>"$LOG" 2>&1 || true
+    done
+  done
+  udisksctl power-off -b "/dev/$pk" >>"$LOG" 2>&1 || eject "/dev/$pk" >>"$LOG" 2>&1 || true
+  log "eject /dev/$pk"
 fi
 '''
 # матчим по ID_USB_DRIVER (usb-storage/uas), а не ID_BUS==usb — иначе USB-SATA
@@ -5860,6 +5892,20 @@ def usb_import_load():
     cfg["installed"] = os.path.isfile(USB_IMPORT_RULE)
     cfg["rsync"] = bool(shutil.which("rsync"))
     return cfg
+
+def _usb_sh_sync():
+    """Перезаписать /usr/local/bin/nas-usb-import.sh, если он разошёлся с кодом.
+    Раньше хелпер обновлялся только при сохранении настроек, поэтому после
+    обновления панели на диске оставалась старая версия со старыми багами."""
+    if not os.path.isfile(USB_IMPORT_SH):
+        return
+    if _read(USB_IMPORT_SH) == _USB_SH:
+        return
+    with open(USB_IMPORT_SH, "w") as f:
+        f.write(_USB_SH)
+    os.chmod(USB_IMPORT_SH, 0o755)
+    log_event("info", "USB-импорт: хелпер обновлён до текущей версии", "", "ok",
+              kind="disk", desk=False)
 
 def _usb_install(enabled):
     try:
@@ -7104,6 +7150,10 @@ def main():
         pass
     try:
         _snap_sched_apply(load_maintenance())    # расписание SnapRAID из настроек
+    except Exception:
+        pass
+    try:
+        _usb_sh_sync()      # хелпер импорта на диске мог протухнуть после git pull
     except Exception:
         pass
     threading.Thread(target=monitor_loop, daemon=True).start()
