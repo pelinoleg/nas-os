@@ -3666,10 +3666,30 @@ function fmIcon(name,type,size){const k=fmKind(name,type);
  const c=FM_ICO_C[k]||FM_ICO_C.file;
  return `<svg class="fmico" viewBox="0 0 24 24" width="${size}" height="${size}"><path fill="${c[0]}" d="M6 2.6h7L19 8.6V19a2.4 2.4 0 0 1-2.4 2.4H6A2.4 2.4 0 0 1 3.6 19V5A2.4 2.4 0 0 1 6 2.6z"/><path fill="${c[1]}" d="M13 2.6l6 6h-4.5A1.5 1.5 0 0 1 13 7.1z"/>${FM_GLYPH[k]||""}</svg>`;}
 const FM_CHIPS=[["Home","/home/oleg"],["Хранилище","/mnt/storage"],["Стеки","/opt/stacks"],["Конфиги","/etc"],["Логи","/var/log"],["Корень","/"]];
-// FM_NEVER — не показываем НИКОГДА, даже при «показать скрытые» (чистый системный балласт)
-const FM_NEVER=new Set(["lost+found"]);
-// FM_SYS — системный «мусор»: прячем как скрытые (тумблер «скрытые» их покажет, приглушёнными)
-const FM_SYS=new Set(["$RECYCLE.BIN","System Volume Information","#recycle","@eaDir",".Trashes",".Spotlight-V100",".fseventsd"]);
+/* Балласт чужих ОС и NAS-прошивок: не показываем НИКОГДА, даже при «показать скрытые».
+   Сравнение регистронезависимое (Windows пишет и Thumbs.db, и thumbs.db).
+   «._имя» — AppleDouble: на не-HFS томах (exFAT/FAT/NTFS) macOS негде держать
+   ресурс-форк и расширенные атрибуты, и она кладёт их в файл-спутник рядом. */
+const FM_NEVER_LC=new Set([
+  "lost+found",                                   // ext4: обломки после fsck
+  // macOS
+  ".ds_store",".spotlight-v100",".spotlight-v200",".fseventsd",".trashes",".trash",
+  ".temporaryitems","temporary items",".documentrevisions-v100",".apdisk",".volumeicon.icns",
+  ".appledouble",".appledb",".appledesktop","network trash folder",
+  ".com.apple.timemachine.donotpresent",".metadata_never_index",".metadata_never_index_unless_rootfs",
+  ".pkinstallsandboxmanager",".pkinstallsandboxmanager-systemsoftware",
+  // Windows
+  "system volume information","$recycle.bin","recycler","thumbs.db","ehthumbs.db",
+  "ehthumbs_vista.db","desktop.ini","indexervolumeguid","wpsettings.dat",
+  // Android / камеры
+  "lost.dir",".thumbnails",".android_secure",
+  // Synology / QNAP
+  "@eadir","#recycle","#snapshot","@recycle",".@__thumb",".@upload_cache",
+]);
+// префиксы: ._AppleDouble, .Trash-1000 (корзина по uid на съёмных), осиротевшие файлы FUSE
+const FM_NEVER_PRE=["._",".trash-",".fuse_hidden"];
+const fmNever=n=>{const l=(n||"").toLowerCase();
+  return FM_NEVER_LC.has(l)||FM_NEVER_PRE.some(p=>l.startsWith(p));};
 let FM_HIDE_BK=null;   // имя папки бэкапа настроек, если включено «скрывать в ФМ» (из /api/maintenance)
 function refreshFmHideBk(){return api("/api/maintenance").then(r=>{const mm=(r&&r.maintenance)||{};
  FM_HIDE_BK=(mm.settings_backup_hide&&r&&r.settings_backup_path)?r.settings_backup_path.split("/").filter(Boolean).pop():null;}).catch(()=>{});}
@@ -3811,8 +3831,8 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    const pb=body.querySelector("#fPaste");if(clip&&clip.items.length){pb.style.display="inline-flex";pb.textContent="Вставить ("+clip.items.length+")";}else pb.style.display="none";
    renderStatus();}
  function renderList(){const srcArr=searchRes||entries;let arr=srcArr.slice();
-   arr=arr.filter(e=>!FM_NEVER.has(e.name));   // lost+found и т.п. — не показываем никогда
-   if(!showHidden&&!searchRes)arr=arr.filter(e=>!e.name.startsWith(".")&&!FM_SYS.has(e.name)&&e.name!==FM_HIDE_BK);
+   arr=arr.filter(e=>!fmNever(e.name));   // lost+found, ._AppleDouble, Spotlight и т.п. — никогда
+   if(!showHidden&&!searchRes)arr=arr.filter(e=>!e.name.startsWith(".")&&e.name!==FM_HIDE_BK);
    if(filt&&!searchRes)arr=arr.filter(e=>e.name.toLowerCase().includes(filt));
    const foldersFirst=SET.fmFoldersFirst!==false;
    arr.sort((a,b)=>{if(foldersFirst&&a.type!==b.type)return a.type==="dir"?-1:1;
@@ -3829,7 +3849,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    const toggleSel=(e,i,shift)=>{if(shift&&lastIdx>=0){const a=Math.min(lastIdx,i),b=Math.max(lastIdx,i);for(let k=a;k<=b;k++)sel.add(arr[k].path);}else{if(sel.has(e.path))sel.delete(e.path);else sel.add(e.path);}lastIdx=i;renderList();selUpdate();};
    arr.forEach((e,i)=>{
      const isSel=sel.has(e.path),baseIco=fmIcon(e.name,e.type,isz);
-     const isHid=e.name.startsWith(".")||FM_SYS.has(e.name)||e.name===FM_HIDE_BK;   // приглушаем, когда показаны
+     const isHid=e.name.startsWith(".")||e.name===FM_HIDE_BK;   // приглушаем, когда показаны
      let ficon;
      if(e.type==="file"&&thumbsOn&&thumbable(e.name)){
        ficon=baseIco+`<img class="thumb" src="/api/fs/thumb?path=${encodeURIComponent(e.path)}" alt="" loading="lazy" onerror="this.remove()">`;}
