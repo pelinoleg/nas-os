@@ -963,7 +963,8 @@ def stats():
         "iface": iface,
         "uptime": uptime_s(),
         "load": list(os.getloadavg()),
-        "nb_running": bool(_nb_run_state_read().get("running")),   # идёт ли бэкап (индикатор на иконке; лёгкая проверка без systemctl)
+        # идёт ли хоть один бэкап (индикатор на иконке; лёгкая проверка без systemctl)
+        "nb_running": any(_nb_run_state_read(p["id"]).get("running") for p in nb_profiles()),
         "ts": int(time.time()),
     }
 
@@ -2104,47 +2105,100 @@ def history_sample():
 #  Бэкап главного NAS на этот NAS (rsync-демон или SSH), отдельное мини-приложение
 # =========================================================================== #
 NB_CONF   = "/etc/nas-os/nas-backup.json"                 # секреты → root 600
-NB_STATUS = os.path.join(NAS_CONFIG, "nas-backup-status.json")
+NB_QUEUE  = os.path.join(NAS_CONFIG, "nas-backup-queue.json")
+NB_MAIN   = "main"                        # id первого (легаси) профиля
+NB_MAX_PROFILES = 8
+_NB_PID_RE = re.compile(r"^[a-z0-9]{1,12}$")
+
 # Прогон бэкапа запускается ОТДЕЛЬНЫМ процессом в транзиентном systemd-юните
 # (вне cgroup службы) → переживает перезапуск/обновление nas-web. Драйвер пишет
 # вывод в файл-лог и статус в json; UI/сервер их читают и переподключаются.
-NB_RUN_LOG    = os.path.join(NAS_CONFIG, "nas-backup-run.log")
-NB_RUN_STATE  = os.path.join(NAS_CONFIG, "nas-backup-run.json")
-NB_RUN_CANCEL = os.path.join(NAS_CONFIG, "nas-backup-run.cancel")
-NB_RUN_UNIT   = "nas-backup-run"          # имя транзиентного юнита (systemd-run --unit)
+# Всё состояние — ПОФАЙЛОВО НА ПРОФИЛЬ. У легаси-профиля имена без суффикса,
+# чтобы миграция не потеряла историю и статус существующего бэкапа.
+def _nb_f(pid, kind, ext):
+    sfx = "" if pid == NB_MAIN else "-" + pid
+    return os.path.join(NAS_CONFIG, "nas-backup-%s%s.%s" % (kind, sfx, ext))
 
-def _nb_run_state_read():
+def nb_status_file(pid):  return _nb_f(pid, "status",  "json")
+def nb_run_log(pid):      return _nb_f(pid, "run",     "log")
+def nb_run_state(pid):    return _nb_f(pid, "run",     "json")
+def nb_run_cancel(pid):   return _nb_f(pid, "run",     "cancel")
+def nb_history_file(pid): return _nb_f(pid, "history", "json")
+def nb_health_file(pid):  return _nb_f(pid, "health",  "json")
+def nb_unit(pid):         return "nas-backup-run" if pid == NB_MAIN else "nas-backup-run-" + pid
+
+def _nb_run_state_read(pid):
     try:
-        with open(NB_RUN_STATE) as f:
+        with open(nb_run_state(pid)) as f:
             return json.load(f)
     except (OSError, ValueError):
         return {}
 
-def _nb_run_state_write(d):
+def _nb_run_state_write(pid, d):
     try:
         os.makedirs(NAS_CONFIG, exist_ok=True)
-        tmp = NB_RUN_STATE + ".tmp"
+        tmp = nb_run_state(pid) + ".tmp"
         with open(tmp, "w") as f:
             json.dump(d, f)
-        os.replace(tmp, NB_RUN_STATE)
+        os.replace(tmp, nb_run_state(pid))
     except OSError:
         pass
 
-def _nb_unit_active():
+def _nb_unit_active(pid):
     try:
-        return subprocess.run(["systemctl", "is-active", "--quiet", NB_RUN_UNIT + ".service"],
+        return subprocess.run(["systemctl", "is-active", "--quiet", nb_unit(pid) + ".service"],
                               timeout=5).returncode == 0
     except (OSError, subprocess.SubprocessError):
         return False
 
-def nb_run_active():
+def nb_run_active(pid=NB_MAIN):
     """Идёт ли прогон: флаг в state И живой транзиентный юнит (чтобы не залипало после краха)."""
-    return bool(_nb_run_state_read().get("running")) and _nb_unit_active()
+    return bool(_nb_run_state_read(pid).get("running")) and _nb_unit_active(pid)
+
+def nb_any_active():
+    """Идёт ли прогон хоть какого-нибудь профиля (одновременно разрешён один)."""
+    return any(nb_run_active(p["id"]) for p in nb_profiles())
+
+# ---- очередь: параллельные прогоны запрещены, лишние ждут (см. _nb_queue_drain) ----
+def _nb_queue_read():
+    try:
+        with open(NB_QUEUE) as f:
+            q = json.load(f)
+        return [x for x in q if isinstance(x, dict) and x.get("pid")] if isinstance(q, list) else []
+    except (OSError, ValueError):
+        return []
+
+def _nb_queue_write(q):
+    try:
+        os.makedirs(NAS_CONFIG, exist_ok=True)
+        tmp = NB_QUEUE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(q[:NB_MAX_PROFILES], f)
+        os.replace(tmp, NB_QUEUE)
+    except OSError:
+        pass
+
+def nb_queued(pid):
+    return any(x["pid"] == pid for x in _nb_queue_read())
+
+def _nb_queue_add(pid, dry):
+    q = _nb_queue_read()
+    if any(x["pid"] == pid for x in q):
+        return False
+    q.append({"pid": pid, "dry": bool(dry), "ts": int(time.time())})
+    _nb_queue_write(q)
+    return True
+
+def _nb_queue_remove(pid):
+    q = _nb_queue_read()
+    q2 = [x for x in q if x["pid"] != pid]
+    if len(q2) != len(q):
+        _nb_queue_write(q2)
 # разрешённые корни для локальных папок-приёмников (не системные каталоги)
 _NB_DEST_OK = ("/mnt/", "/media/", "/srv/", "/home/")
 
-def nb_load():
-    d = {"transport": "rsync", "host": "", "user": "", "password": "", "ssh_port": 22,
+def _nb_defaults():
+    return {"transport": "rsync", "host": "", "user": "", "password": "", "ssh_port": 22,
          "remote_sudo": False,
          "dest_mode": "single", "dest_base": "/mnt/storage/nas-backup",
          "jobs": [],
@@ -2159,19 +2213,83 @@ def nb_load():
          "delete_mode": "archive", "retention_days": 30, "retention_gb": 0,
          "deleted_dir": "_deleted/{date}", "max_delete_pct": 20, "bwlimit": 0,
          "schedule": {"enabled": False, "freq": "daily", "time": "03:00", "dow": "Sun"}}
+
+def _nb_read_raw():
     try:
         with open(NB_CONF) as f:
-            d.update(json.load(f))
+            return json.load(f)
     except (OSError, ValueError):
+        return {}
+
+def nb_profiles():
+    """Все профили бэкапа. Всегда хотя бы один. Старый плоский конфиг (v1)
+    читается как единственный профиль «Основной» — на диск ничего не пишем,
+    запись делает _nb_migrate() один раз при старте."""
+    raw = _nb_read_raw()
+    if isinstance(raw, dict) and isinstance(raw.get("profiles"), list):
+        items = raw["profiles"]
+    elif isinstance(raw, dict) and raw:
+        items = [dict(raw, id=NB_MAIN, name=raw.get("name") or "Основной")]
+    else:
+        items = [{"id": NB_MAIN, "name": "Основной"}]
+    out, seen = [], set()
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        pid = str(it.get("id") or "")
+        if not _NB_PID_RE.match(pid) or pid in seen:
+            continue
+        seen.add(pid)
+        d = _nb_defaults()
+        d.update(it)
+        d["id"] = pid
+        d["name"] = (str(it.get("name") or "").strip() or "Бэкап")[:40]
+        out.append(d)
+    if not out:
+        d = _nb_defaults(); d.update({"id": NB_MAIN, "name": "Основной"}); out = [d]
+    return out
+
+def nb_load(pid=None):
+    """Профиль по id; без id — первый (совместимость со старым кодом и API)."""
+    profs = nb_profiles()
+    if pid:
+        for p in profs:
+            if p["id"] == pid:
+                return p
+    return profs[0]
+
+def _nb_write_profiles(profs):
+    try:
+        os.makedirs(os.path.dirname(NB_CONF), exist_ok=True)
+        tmp = NB_CONF + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump({"version": 2, "profiles": profs}, f)
+        os.chmod(tmp, 0o600); os.replace(tmp, NB_CONF)
+    except OSError:
         pass
-    return d
+
+def _nb_migrate():
+    """v1 (плоский конфиг) → v2 (список профилей). Один раз, с резервной копией."""
+    raw = _nb_read_raw()
+    if not isinstance(raw, dict) or isinstance(raw.get("profiles"), list):
+        return False
+    if not raw:                       # конфига ещё нет — писать нечего
+        return False
+    try:
+        shutil.copy2(NB_CONF, NB_CONF + ".v1.bak")
+    except OSError:
+        pass
+    _nb_write_profiles(nb_profiles())
+    log_event("info", "Бэкап NAS: конфиг переведён в формат профилей", "", "ok",
+              kind="backup", desk=False)
+    return True
 
 def _nb_valid_dest(p):
     p = os.path.normpath(str(p or ""))
     return p.startswith(_NB_DEST_OK) and ".." not in p
 
-def nb_save(patch):
-    cur = nb_load()
+def nb_save(patch, pid=None):
+    cur = nb_load(pid)
     for k in ("transport", "host", "user", "password", "dest_base", "delete_mode", "dest_mode"):
         if k in patch and isinstance(patch[k], str):
             cur[k] = patch[k].strip()
@@ -2207,13 +2325,8 @@ def nb_save(patch):
     if cur["transport"] not in ("rsync", "ssh"): cur["transport"] = "rsync"
     if cur["delete_mode"] not in ("archive", "mirror", "add"): cur["delete_mode"] = "archive"
     if cur["dest_mode"] not in ("single", "per"): cur["dest_mode"] = "single"
-    try:
-        os.makedirs(os.path.dirname(NB_CONF), exist_ok=True)
-        tmp = NB_CONF + ".tmp"
-        with open(tmp, "w") as f: json.dump(cur, f)
-        os.chmod(tmp, 0o600); os.replace(tmp, NB_CONF)
-    except OSError:
-        pass
+    profs = [cur if p["id"] == cur["id"] else p for p in nb_profiles()]
+    _nb_write_profiles(profs)
     return cur
 
 def nb_public(cfg=None):
@@ -2222,6 +2335,113 @@ def nb_public(cfg=None):
     c["has_password"] = bool(c.get("password"))
     c["password"] = ""
     return c
+
+def _nb_pid(pid):
+    """Нормализовать id профиля: None/мусор/неизвестный -> первый профиль."""
+    return nb_load(pid)["id"]
+
+def _nb_qpid(q):
+    """id профиля из query (?p=…); пусто -> первый профиль."""
+    v = (q.get("p") or [""])[0]
+    return v if _NB_PID_RE.match(v or "") else None
+
+def _nb_bpid(b):
+    """id профиля из тела POST."""
+    v = str((b or {}).get("p") or "")
+    return v if _NB_PID_RE.match(v) else None
+
+def nb_profiles_public():
+    """Короткая сводка по каждому профилю — для полосы вкладок."""
+    out = []
+    for p in nb_profiles():
+        pid = p["id"]
+        out.append({"id": pid, "name": p["name"],
+                    "running": nb_run_active(pid), "queued": nb_queued(pid),
+                    "jobs": len(p.get("jobs") or []),
+                    "configured": bool(p.get("host") and p.get("jobs"))})
+    return out
+
+def _nb_new_pid(existing):
+    for _ in range(64):
+        pid = secrets.token_hex(3)
+        if pid not in existing and _NB_PID_RE.match(pid):
+            return pid
+    return None
+
+def _nb_free_dest(base, taken):
+    """Уникальная папка-приёмник: два профиля в одну базу писать не должны —
+    их «защита от массового удаления» и архив _deleted перемешаются."""
+    cand, n = base, 2
+    while cand in taken and n < 50:
+        cand = "%s-%d" % (base.rstrip("/"), n); n += 1
+    return cand
+
+def nb_profile_add(name="", clone_from=""):
+    profs = nb_profiles()
+    if len(profs) >= NB_MAX_PROFILES:
+        return {"ok": False, "log": "больше %d профилей нельзя" % NB_MAX_PROFILES}
+    pid = _nb_new_pid({p["id"] for p in profs})
+    if not pid:
+        return {"ok": False, "log": "не удалось выделить id"}
+    name = (str(name or "").strip() or "Новый бэкап")[:40]
+    if clone_from:
+        src = next((p for p in profs if p["id"] == clone_from), None)
+        if not src:
+            return {"ok": False, "log": "нет такого профиля"}
+        # копируем подключение, исключения и политики; ИСТОЧНИКИ и расписание — нет:
+        # пути на другом NAS другие, а два включённых расписания сразу — сюрприз
+        new = dict(src)
+        new["jobs"] = []
+        new["schedule"] = dict(src.get("schedule") or {}, enabled=False)
+    else:
+        new = _nb_defaults()
+    new["id"] = pid
+    new["name"] = name
+    taken = {p.get("dest_base") for p in profs}
+    new["dest_base"] = _nb_free_dest(new.get("dest_base") or "/mnt/storage/nas-backup", taken)
+    profs.append(new)
+    _nb_write_profiles(profs)
+    log_event("action", "Бэкап NAS: создан профиль «%s»" % name, "", "ok", kind="backup", desk=False)
+    return {"ok": True, "id": pid, "config": nb_public(new)}
+
+def nb_profile_rename(pid, name):
+    name = str(name or "").strip()[:40]
+    if not name:
+        return {"ok": False, "log": "пустое имя"}
+    profs = nb_profiles()
+    if not any(p["id"] == pid for p in profs):
+        return {"ok": False, "log": "нет такого профиля"}
+    for p in profs:
+        if p["id"] == pid:
+            p["name"] = name
+    _nb_write_profiles(profs)
+    return {"ok": True}
+
+def nb_profile_delete(pid, confirm=""):
+    """Защита от дурака: последний профиль не удалить; сначала убрать все источники;
+    имя надо ввести вручную. Данные в приёмнике НЕ трогаем — исчезает только
+    конфиг, история и логи."""
+    profs = nb_profiles()
+    if len(profs) <= 1:
+        return {"ok": False, "log": "последний профиль удалить нельзя"}
+    p = next((x for x in profs if x["id"] == pid), None)
+    if not p:
+        return {"ok": False, "log": "нет такого профиля"}
+    if p.get("jobs"):
+        return {"ok": False, "log": "сначала уберите все источники (%d осталось)" % len(p["jobs"])}
+    if nb_run_active(pid):
+        return {"ok": False, "log": "идёт прогон — сначала остановите"}
+    if str(confirm or "").strip() != p["name"]:
+        return {"ok": False, "log": "имя профиля не совпало"}
+    _nb_queue_remove(pid)
+    _nb_write_profiles([x for x in profs if x["id"] != pid])
+    for f in (nb_status_file(pid), nb_run_log(pid), nb_run_state(pid),
+              nb_run_cancel(pid), nb_history_file(pid), nb_health_file(pid)):
+        try: os.remove(f)
+        except OSError: pass
+    log_event("action", "Бэкап NAS: удалён профиль «%s»" % p["name"],
+              "скопированные данные в приёмнике остались нетронутыми", "ok", kind="backup", desk=False)
+    return {"ok": True}
 
 def _nb_remote_env(cfg):
     """(префикс удалённого пути, env, доп.аргументы rsync) для выбранного транспорта."""
@@ -2414,8 +2634,9 @@ def nb_run(cfg, dry, writer, cancel=lambda: False):
     t = nb_test(cfg)
     if not t.get("ok"):
         writer("ОШИБКА связи: " + t.get("log", "")); return {"ok": False, "unreachable": True, "jobs": []}
+    pid = cfg.get("id") or NB_MAIN
     try:
-        with open(NB_STATUS) as f:
+        with open(nb_status_file(pid)) as f:
             prevf = {x.get("src"): x.get("files", 0) for x in json.load(f).get("jobs", [])}
     except (OSError, ValueError):
         prevf = {}
@@ -2467,9 +2688,9 @@ def nb_run(cfg, dry, writer, cancel=lambda: False):
         try: pruned = _nb_prune(cfg)
         except Exception: pruned = 0
         if pruned: writer("очищено старых снимков удалённых: %d" % pruned)
-        _nb_write_status(results)
+        _nb_write_status(pid, results)
         allok = all(r["ok"] for r in results) and len(results) == len(jobs)
-        try: _nb_history_add({"ts": int(time.time()), "dur": int(time.time() - t0),
+        try: _nb_history_add(pid, {"ts": int(time.time()), "dur": int(time.time() - t0),
                               "result": "ok" if allok else "warn", "jobs": results})
         except Exception: pass
     allok = all(r["ok"] for r in results) and len(results) == len(jobs)
@@ -2490,11 +2711,9 @@ def _nb_parse_stats(lines):
                 except ValueError: pass
     return out
 
-NB_HISTORY = os.path.join(NAS_CONFIG, "nas-backup-history.json")
-
-def _nb_history_add(entry):
+def _nb_history_add(pid, entry):
     try:
-        with open(NB_HISTORY) as f:
+        with open(nb_history_file(pid)) as f:
             hist = json.load(f)
         if not isinstance(hist, list): hist = []
     except (OSError, ValueError):
@@ -2503,39 +2722,42 @@ def _nb_history_add(entry):
     hist = hist[-50:]                    # последние 50 прогонов
     try:
         os.makedirs(NAS_CONFIG, exist_ok=True)
-        with open(NB_HISTORY, "w") as f: json.dump(hist, f)
+        with open(nb_history_file(pid), "w") as f: json.dump(hist, f)
     except OSError:
         pass
 
-def nb_history():
+def nb_history(pid=None):
+    pid = _nb_pid(pid)
     try:
-        with open(NB_HISTORY) as f:
+        with open(nb_history_file(pid)) as f:
             hist = json.load(f)
         return list(reversed(hist)) if isinstance(hist, list) else []
     except (OSError, ValueError):
         return []
 
-def _nb_write_status(results):
+def _nb_write_status(pid, results):
     st = {"ts": int(time.time()), "jobs": results}
     try:
-        with open(NB_STATUS, "w") as f: json.dump(st, f)
+        with open(nb_status_file(pid), "w") as f: json.dump(st, f)
     except OSError:
         pass
 
-def nb_status():
+def nb_status(pid=None):
+    pid = _nb_pid(pid)
     try:
-        with open(NB_STATUS) as f: st = json.load(f)
+        with open(nb_status_file(pid)) as f: st = json.load(f)
     except (OSError, ValueError):
         st = {}
-    st["running"] = nb_run_active()
+    st["running"] = nb_run_active(pid)
+    st["queued"] = nb_queued(pid)
     st["line"] = ""
     return st
 
-def nb_dest_state():
+def nb_dest_state(pid=None):
     """Реальное состояние приёмника СЕЙЧАС: существуют ли папки задач и не пусты ли.
     Быстро (isdir/listdir, без du). Ловит ручное удаление папок из приёмника —
     точки последнего прогона этого не видят."""
-    cfg = nb_load()
+    cfg = nb_load(pid)
     base = cfg.get("dest_base") or "/mnt/storage/nas-backup"
     arch = nb_deleted_top(cfg)
     jobs = []
@@ -2554,16 +2776,17 @@ def nb_dest_state():
     return {"base": base, "base_mounted": os.path.ismount(STORAGE),
             "base_exists": os.path.isdir(base), "jobs": jobs}
 
-def nb_log_tail(since):
+def nb_log_tail(since, pid=None):
     """Хвост лога текущего/последнего прогона (из файла) — для переподключения UI."""
+    pid = _nb_pid(pid)
     try:
         since = int(since)
     except (ValueError, TypeError):
         since = 0
-    rs = _nb_run_state_read()
-    running = bool(rs.get("running")) and _nb_unit_active()
+    rs = _nb_run_state_read(pid)
+    running = bool(rs.get("running")) and _nb_unit_active(pid)
     try:
-        with open(NB_RUN_LOG) as f:
+        with open(nb_run_log(pid)) as f:
             lines = f.read().split("\n")
         if lines and lines[-1] == "":
             lines.pop()
@@ -2578,7 +2801,8 @@ def nb_log_tail(since):
         base = len(lines) - 2000; lines = lines[-2000:]
     end = base + len(lines)
     start = max(0, since - base)
-    return {"running": running, "started": rs.get("started", 0), "dry": rs.get("dry", False),
+    return {"running": running, "queued": nb_queued(pid),
+            "started": rs.get("started", 0), "dry": rs.get("dry", False),
             "result": rs.get("result"), "cur": rs.get("cur", ""), "line": cur_line,
             "seq": end, "base": base, "lines": lines[start:]}
 
@@ -2587,20 +2811,19 @@ def nb_log_tail(since):
 #  nb_size/nb_dest). Гоняются не чаще раза в 30 мин и только если включена хоть
 #  одна проверка И бэкап настроен (есть адрес и задачи) — иначе тишина.
 # --------------------------------------------------------------------------- #
-_NB_HEALTH_FILE = os.path.join(NAS_CONFIG, "nas-backup-health.json")
 _nb_health_last = 0
 
-def _nb_health_load():
+def _nb_health_load(pid):
     try:
-        with open(_NB_HEALTH_FILE) as f:
+        with open(nb_health_file(pid)) as f:
             return json.load(f)
     except (OSError, ValueError):
         return {}
 
-def _nb_health_save(d):
+def _nb_health_save(pid, d):
     try:
         os.makedirs(NAS_CONFIG, exist_ok=True)
-        with open(_NB_HEALTH_FILE, "w") as f:
+        with open(nb_health_file(pid), "w") as f:
             json.dump(d, f)
     except OSError:
         pass
@@ -2613,7 +2836,8 @@ def _du_bytes(path):
         return None
 
 def nb_health_tick(fire, ev, pri, thr, now):
-    """Периодические проверки бэкапа; fire()/ev/pri/thr — из monitor_tick."""
+    """Периодические проверки бэкапа; fire()/ev/pri/thr — из monitor_tick.
+    Гоняем по каждому профилю отдельно: свой кулдаун, свой файл здоровья."""
     global _nb_health_last
     HK = ("nb_conn", "nb_srcmiss", "nb_stale", "nb_size", "nb_dest")
     if not any(ev.get(k, {}).get("on") for k in HK):
@@ -2621,11 +2845,24 @@ def nb_health_tick(fire, ev, pri, thr, now):
     if now - _nb_health_last < 1800:
         return
     _nb_health_last = now
-    cfg = nb_load()
+    profs = nb_profiles()
+    for cfg in profs:
+        try:
+            _nb_health_one(cfg, len(profs) > 1, fire, ev, pri, thr, now)
+        except Exception:
+            pass
+
+def _nb_health_one(cfg, many, fire, ev, pri, thr, now):
+    pid = cfg["id"]
+    # с несколькими профилями «NAS-бэкап: источник недоступен» бесполезно —
+    # дописываем имя, а ключ кулдауна делаем пер-профильным
+    sfx = (" · " + cfg["name"]) if many else ""
+    def fire_p(key, title, msg, priority, ev_name=None, lvl=None):
+        fire(key + ":" + pid, title + sfx, msg, priority, ev_name=ev_name or key, lvl=lvl)
     jobs = [j for j in cfg.get("jobs", []) if j.get("enabled", True)]
     if not cfg.get("host") or not jobs:
         return
-    hs = _nb_health_load()
+    hs = _nb_health_load(pid)
     remote, env, rsh = _nb_remote_env(cfg)
     extra = ["--rsync-path=sudo rsync"] if (cfg.get("transport") == "ssh" and cfg.get("remote_sudo")) else []
     conn_ok = None
@@ -2634,7 +2871,7 @@ def nb_health_tick(fire, ev, pri, thr, now):
         t = nb_test(cfg)
         conn_ok = t.get("ok")
         if not conn_ok:
-            fire("nb_conn", "NAS-бэкап: источник недоступен",
+            fire_p("nb_conn", "NAS-бэкап: источник недоступен",
                  "Не удаётся подключиться к %s: %s" % (cfg.get("host"), t.get("log", "")),
                  pri("nb_conn"), ev_name="nb_conn", lvl="warn")
     # --- исходные папки на месте (только если связь есть) ---
@@ -2648,26 +2885,26 @@ def nb_health_tick(fire, ev, pri, thr, now):
                 if not r["ok"] and re.search(r"no such file|not found|failed to", r["log"].lower()):
                     missing.append(j["src"])
             if missing:
-                fire("nb_srcmiss", "NAS-бэкап: пропала исходная папка",
+                fire_p("nb_srcmiss", "NAS-бэкап: пропала исходная папка",
                      "Нет на источнике: " + ", ".join(missing), pri("nb_srcmiss"), ev_name="nb_srcmiss", lvl="warn")
     # --- давно не было прогона ---
     if ev.get("nb_stale", {}).get("on"):
         days = thr("nb_stale", 7)
         try:
-            with open(NB_STATUS) as f:
+            with open(nb_status_file(pid)) as f:
                 ts = json.load(f).get("ts", 0)
         except (OSError, ValueError):
             ts = 0
-        if days > 0 and not nb_run_active():
+        if days > 0 and not nb_run_active(pid):
             if not ts:
-                fire("nb_stale", "NAS-бэкап: ещё не выполнялся",
+                fire_p("nb_stale", "NAS-бэкап: ещё не выполнялся",
                      "Бэкап настроен, но не было ни одного прогона", pri("nb_stale"), ev_name="nb_stale", lvl="warn")
             elif now - ts > days * 86400:
-                fire("nb_stale", "NAS-бэкап: давно не обновлялся",
+                fire_p("nb_stale", "NAS-бэкап: давно не обновлялся",
                      "Последний прогон %d дн назад (порог %d)" % (int((now - ts) / 86400), days),
                      pri("nb_stale"), ev_name="nb_stale", lvl="warn")
     # --- резкое изменение размера приёмника ---
-    if ev.get("nb_size", {}).get("on") and not nb_run_active():
+    if ev.get("nb_size", {}).get("on") and not nb_run_active(pid):
         base_dir = cfg.get("dest_base") or "/mnt/storage/nas-backup"
         if os.path.isdir(base_dir):
             cur_sz = _du_bytes(base_dir)
@@ -2678,7 +2915,7 @@ def nb_health_tick(fire, ev, pri, thr, now):
                     lim = thr("nb_size", 40)
                     if delta >= lim:
                         arrow = "вырос" if cur_sz > prev else "уменьшился"
-                        fire("nb_size", "NAS-бэкап: резко изменился размер",
+                        fire_p("nb_size", "NAS-бэкап: резко изменился размер",
                              "Приёмник %s на %.0f%% (%s → %s)" % (arrow, delta, fmt_bytes(prev), fmt_bytes(cur_sz)),
                              pri("nb_size"), ev_name="nb_size", lvl="warn")
                 hs["dest_size"] = cur_sz
@@ -2687,7 +2924,7 @@ def nb_health_tick(fire, ev, pri, thr, now):
         base_dir = cfg.get("dest_base") or "/mnt/storage/nas-backup"
         top = "/mnt/storage" if base_dir.startswith("/mnt/storage") else base_dir
         if top == "/mnt/storage" and not os.path.ismount("/mnt/storage"):
-            fire("nb_dest", "NAS-бэкап: приёмник не смонтирован",
+            fire_p("nb_dest", "NAS-бэкап: приёмник не смонтирован",
                  "Пул /mnt/storage не смонтирован — бэкап писать некуда", pri("nb_dest"), ev_name="nb_dest", lvl="warn")
         else:
             try:
@@ -2695,47 +2932,75 @@ def nb_health_tick(fire, ev, pri, thr, now):
                 used = 100.0 * (st.f_blocks - st.f_bfree) / max(st.f_blocks, 1)
                 lim = thr("nb_dest", 95)
                 if used >= lim:
-                    fire("nb_dest", "NAS-бэкап: мало места в приёмнике",
+                    fire_p("nb_dest", "NAS-бэкап: мало места в приёмнике",
                          "%s заполнен на %.0f%% (порог %d%%)" % (base_dir, used, lim),
                          pri("nb_dest"), ev_name="nb_dest", lvl="warn")
             except OSError:
                 pass
-    _nb_health_save(hs)
+    _nb_health_save(pid, hs)
 
-def nb_run_bg(dry=False):
-    """Запустить прогон ОТДЕЛЬНЫМ процессом в транзиентном systemd-юните — он
-    переживёт перезапуск/обновление nas-web. Возвращает False, если уже идёт."""
-    if nb_run_active():
-        return False
+def _nb_start_unit(pid, dry):
+    """Поднять транзиентный юнит с драйвером прогона. True — процесс стартовал."""
     try:
-        if os.path.exists(NB_RUN_CANCEL):
-            os.remove(NB_RUN_CANCEL)
+        if os.path.exists(nb_run_cancel(pid)):
+            os.remove(nb_run_cancel(pid))
     except OSError:
         pass
     # начальный статус (драйвер перезапишет) — чтобы UI сразу увидел «идёт»
-    _nb_run_state_write({"running": True, "started": int(time.time()), "dry": bool(dry),
-                         "cur": "", "result": None})
-    cmd = ["systemd-run", "--collect", "--quiet", "--unit", NB_RUN_UNIT,
+    _nb_run_state_write(pid, {"running": True, "started": int(time.time()), "dry": bool(dry),
+                              "cur": "", "result": None})
+    cmd = ["systemd-run", "--collect", "--quiet", "--unit", nb_unit(pid),
            "--setenv=SUDO_USER=" + TARGET_USER, "--setenv=HOME=" + HOME,   # тот же NAS_CONFIG, что у службы
-           sys.executable, os.path.join(HERE, "nas-web.py"), "backup-run"] + (["dry"] if dry else [])
+           sys.executable, os.path.join(HERE, "nas-web.py"), "backup-run", pid] + (["dry"] if dry else [])
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
     except (OSError, subprocess.SubprocessError):
-        _nb_run_state_write({"running": False, "result": "warn"})
+        _nb_run_state_write(pid, {"running": False, "result": "warn"})
         return False
     if r.returncode != 0:
-        _nb_run_state_write({"running": False, "result": "warn"})
+        _nb_run_state_write(pid, {"running": False, "result": "warn"})
         return False
     return True
 
-def nb_run_cli(dry=False):
+def nb_run_bg(pid=None, dry=False):
+    """Запустить прогон профиля. Одновременно идёт РОВНО ОДИН прогон: пока занято,
+    остальные ждут в очереди (два rsync на одном HDD только мешают друг другу)."""
+    cfg = nb_load(pid); pid = cfg["id"]
+    if nb_run_active(pid):
+        return {"ok": False, "log": "уже выполняется"}
+    if nb_any_active():
+        _nb_queue_add(pid, dry)
+        return {"ok": True, "queued": True, "log": "поставлено в очередь"}
+    _nb_queue_remove(pid)
+    if not _nb_start_unit(pid, dry):
+        return {"ok": False, "log": "не удалось запустить"}
+    return {"ok": True, "queued": False, "log": "запущено"}
+
+def _nb_queue_drain():
+    """Раз в минуту: если ничего не идёт — запустить первого из очереди."""
+    q = _nb_queue_read()
+    if not q or nb_any_active():
+        return
+    known = {p["id"] for p in nb_profiles()}
+    while q:
+        item = q.pop(0)
+        if item["pid"] in known:
+            _nb_queue_write(q)
+            _nb_start_unit(item["pid"], item.get("dry", False))
+            return
+    _nb_queue_write(q)
+
+def nb_run_cli(pid=None, dry=False):
     """Драйвер прогона (запускается в транзиентном юните). Пишет лог в файл и
     статус в json — независимо от того, жив ли основной процесс nas-web."""
+    cfg = nb_load(pid); pid = cfg["id"]
+    many = len(nb_profiles()) > 1
+    sfx = (" · " + cfg["name"]) if many else ""
     started = int(time.time())
-    _nb_run_state_write({"running": True, "started": started, "dry": bool(dry),
-                         "cur": "", "result": None, "pid": os.getpid()})
+    _nb_run_state_write(pid, {"running": True, "started": started, "dry": bool(dry),
+                              "cur": "", "result": None, "pid": os.getpid()})
     try:
-        logf = open(NB_RUN_LOG, "w", buffering=1)          # усечь и открыть на дозапись построчно
+        logf = open(nb_run_log(pid), "w", buffering=1)     # усечь и открыть на дозапись построчно
     except OSError:
         logf = None
     def w(l):
@@ -2743,34 +3008,35 @@ def nb_run_cli(dry=False):
             try: logf.write(l + "\n")
             except OSError: pass
         if l.startswith("=== ") and " → " in l:
-            st = _nb_run_state_read(); st["cur"] = l[4:].split(" → ")[0].strip(); _nb_run_state_write(st)
+            st = _nb_run_state_read(pid); st["cur"] = l[4:].split(" → ")[0].strip()
+            _nb_run_state_write(pid, st)
     def cancel():
-        return os.path.exists(NB_RUN_CANCEL)
+        return os.path.exists(nb_run_cancel(pid))
     res = None
     try:
-        r = nb_run(nb_load(), dry, w, cancel)
+        r = nb_run(cfg, dry, w, cancel)
         res = "ok" if r.get("ok") else ("unreachable" if r.get("unreachable") else "warn")
         if not dry:
             guarded = [j.get("src") for j in r.get("jobs", []) if j.get("code") == 25]
             if guarded:      # сработала защита от массового удаления — отдельное важное уведомление
-                try: notify_event("nb_guard", "nb_guard", "NAS-бэкап: остановлен защитой",
+                try: notify_event("nb_guard", "nb_guard:" + pid, "NAS-бэкап: остановлен защитой" + sfx,
                                   "Защита от массового удаления сработала: " + ", ".join(guarded) +
                                   ". Ничего не удалено — проверьте источник (не стёрли/размонтировали ли его).",
                                   "crit", cooldown=0)
                 except Exception: pass
             msg = "все задачи выполнены" if r.get("ok") else ("главный NAS недоступен — пропущено" if r.get("unreachable") else "часть задач с ошибками")
-            try: log_event("nas_backup", "Бэкап главного NAS", msg, "ok" if r.get("ok") else "warn", kind="backup", desk=True)
+            try: log_event("nas_backup", "Бэкап главного NAS" + sfx, msg, "ok" if r.get("ok") else "warn", kind="backup", desk=True)
             except Exception: pass
     except Exception as e:
         res = "warn"; w("сбой: %s" % e)
-        try: log_event("nas_backup", "Бэкап главного NAS", "сбой: %s" % e, "warn", kind="backup", desk=True)
+        try: log_event("nas_backup", "Бэкап главного NAS" + sfx, "сбой: %s" % e, "warn", kind="backup", desk=True)
         except Exception: pass
     finally:
-        st = _nb_run_state_read()
+        st = _nb_run_state_read(pid)
         st.update(running=False, result=(res or "warn"), cur="", done=int(time.time()))
-        _nb_run_state_write(st)
+        _nb_run_state_write(pid, st)
         try:
-            if os.path.exists(NB_RUN_CANCEL): os.remove(NB_RUN_CANCEL)
+            if os.path.exists(nb_run_cancel(pid)): os.remove(nb_run_cancel(pid))
         except OSError: pass
         if logf:
             try: logf.close()
@@ -3045,6 +3311,7 @@ def _bk_sources():
                     p = os.path.join(root, fn)
                     out.append((p, arcroot + "/" + os.path.relpath(p, base)))
     for p, arc in (("/etc/nas-os/webauth.json", "etc/nas-os/webauth.json"),
+                   (NB_CONF, "etc/nas-os/nas-backup.json"),
                    ("/etc/samba/smb.conf", "etc/samba/smb.conf"),
                    ("/var/lib/samba/private/passdb.tdb", "var/lib/samba/private/passdb.tdb"),
                    ("/etc/fstab", "reference/etc/fstab"),
@@ -3229,11 +3496,12 @@ def _nb_sched_tick():
     """Запуск бэкапа главного NAS по расписанию (раз в минуту, без повтора в ту же минуту)."""
     global _nb_last_sched
     now = time.time(); slot = time.strftime("%Y-%m-%d %H:%M", time.localtime(now))
-    if slot == _nb_last_sched:
-        return
-    if nb_schedule_due(nb_load(), now):
+    if slot != _nb_last_sched:
         _nb_last_sched = slot
-        nb_run_bg(dry=False)
+        for cfg in nb_profiles():
+            if nb_schedule_due(cfg, now):
+                nb_run_bg(cfg["id"], dry=False)
+    _nb_queue_drain()      # освободилось — берём следующего из очереди
 
 def notify_event(name, key, title, msg, lvl=None, priority=None, cooldown=1800):
     """Доставка события вне monitor_tick: журнал всегда + Pushover, если включён и ev.on.
@@ -3369,10 +3637,13 @@ def _build_summary():
     except Exception:
         pass
     try:
-        st = nb_status()
-        if st.get("ts"):
+        for _p in nb_profiles():
+            st = nb_status(_p["id"])
+            if not st.get("ts"):
+                continue
             okn = sum(1 for j in st.get("jobs", []) if j.get("ok"))
-            lines.append("Бэкап NAS: %d/%d ок" % (okn, len(st.get("jobs", []))))
+            _nm = (" «%s»" % _p["name"]) if len(nb_profiles()) > 1 else ""
+            lines.append("Бэкап NAS%s: %d/%d ок" % (_nm, okn, len(st.get("jobs", []))))
     except Exception:
         pass
     return "NAS: сводка (%s)" % host, "\n".join(lines) or "нет данных"
@@ -6967,15 +7238,17 @@ class H(BaseHTTPRequestHandler):
             elif p == "/api/updates":
                 self._json(apt_updates(refresh=(q.get("refresh") or ["0"])[0] == "1"))
             elif p == "/api/backup/config":
-                self._json({"config": nb_public()})
+                cfg = nb_load(_nb_qpid(q))
+                self._json({"config": nb_public(cfg), "profile": cfg["id"],
+                            "profiles": nb_profiles_public()})
             elif p == "/api/backup/status":
-                self._json(nb_status())
+                self._json(nb_status(_nb_qpid(q)))
             elif p == "/api/backup/dest-state":
-                self._json(nb_dest_state())
+                self._json(nb_dest_state(_nb_qpid(q)))
             elif p == "/api/backup/log":
-                self._json(nb_log_tail((q.get("since") or ["0"])[0]))
+                self._json(nb_log_tail((q.get("since") or ["0"])[0], _nb_qpid(q)))
             elif p == "/api/backup/history":
-                self._json({"history": nb_history()})
+                self._json({"history": nb_history(_nb_qpid(q))})
             elif p == "/api/winpos":
                 self._json({"winpos": load_winpos()})
             elif p == "/api/snippets":
@@ -7265,21 +7538,37 @@ class H(BaseHTTPRequestHandler):
                 except Exception:
                     pass
             elif p == "/api/backup/config":
-                self._json({"config": nb_public(nb_save(self._body().get("config", {})))})
+                b = self._body()
+                cfg = nb_save(b.get("config", {}), _nb_bpid(b))
+                self._json({"config": nb_public(cfg), "profile": cfg["id"],
+                            "profiles": nb_profiles_public()})
             elif p == "/api/backup/test":
-                self._json(nb_test(nb_load()))
+                self._json(nb_test(nb_load(_nb_bpid(self._body()))))
             elif p == "/api/backup/browse":
-                self._json(nb_browse(nb_load(), self._body().get("path", "")))
+                b = self._body()
+                self._json(nb_browse(nb_load(_nb_bpid(b)), b.get("path", "")))
             elif p == "/api/backup/run-bg":
-                started = nb_run_bg(dry=bool(self._body().get("dry", False)))
-                self._json({"ok": started, "log": "запущено" if started else "уже выполняется"})
+                b = self._body()
+                self._json(nb_run_bg(_nb_bpid(b), dry=bool(b.get("dry", False))))
             elif p == "/api/backup/cancel":
-                self._body()
+                b = self._body()
+                pid = nb_load(_nb_bpid(b))["id"]
+                _nb_queue_remove(pid)                        # если ещё не стартовал — просто выкинуть из очереди
                 try:
-                    open(NB_RUN_CANCEL, "w").close()         # флаг для процесса-драйвера в юните
+                    open(nb_run_cancel(pid), "w").close()    # флаг для процесса-драйвера в юните
                 except OSError:
                     pass
                 self._json({"ok": True})
+            elif p == "/api/backup/profile":
+                b = self._body(); act = b.get("action", "")
+                if act == "add":
+                    self._json(nb_profile_add(b.get("name", ""), b.get("clone_from", "")))
+                elif act == "rename":
+                    self._json(nb_profile_rename(_nb_bpid(b), b.get("name", "")))
+                elif act == "delete":
+                    self._json(nb_profile_delete(_nb_bpid(b), b.get("confirm", "")))
+                else:
+                    self._json({"ok": False, "log": "неизвестное действие"})
             elif p.startswith("/api/setup/"):
                 action = p[len("/api/setup/"):]
                 b = self._body()
@@ -7317,6 +7606,10 @@ def main():
         _usb_sh_sync()      # хелпер импорта на диске мог протухнуть после git pull
     except Exception:
         pass
+    try:
+        _nb_migrate()       # старый плоский конфиг бэкапа -> список профилей
+    except Exception:
+        pass
     threading.Thread(target=monitor_loop, daemon=True).start()
     srv = _Server(("0.0.0.0", PORT), H)
     ip = lan_ip()
@@ -7334,6 +7627,8 @@ if __name__ == "__main__":
     if len(sys.argv) > 2 and sys.argv[1] == "thumbs-sweep":
         print("thumbs-sweep: сгенерировано", thumbs_sweep(sys.argv[2:]), "превью")
     elif len(sys.argv) > 1 and sys.argv[1] == "backup-run":
-        nb_run_cli(dry=("dry" in sys.argv[2:]))
+        _args = sys.argv[2:]
+        _pid = next((a for a in _args if a != "dry"), NB_MAIN)
+        nb_run_cli(_pid, dry=("dry" in _args))
     else:
         main()
