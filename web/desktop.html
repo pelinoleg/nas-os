@@ -906,6 +906,9 @@
   .tr-empty{display:flex;flex-direction:column;align-items:center;text-align:center;gap:6px;padding:48px 20px;color:var(--dim)}
   @media(max-width:640px){.tc-s,.tc-w,.tr-cols .tc-s,.tr-cols .tc-w{display:none}}
   .fm-row{display:flex;align-items:center;gap:9px;padding:7px 8px;border-radius:var(--r-sm);cursor:pointer;font-size:12.5px}
+  /* размер шрифта названий следует за размером значков S/M/L (M — базовый) */
+  .fm-sz-s .fm-row{font-size:11px}.fm-sz-l .fm-row{font-size:14.5px;padding:9px 8px}
+  .fm-sz-s .fm-tile .tn{font-size:10px}.fm-sz-l .fm-tile .tn{font-size:13.5px}
   .fm-row:hover{background:var(--sel)}
   /* скрытые (показанные тумблером) — приглушены, чтобы отличать от обычных */
   .fm-row.fm-hid,.fm-tile.fm-hid{opacity:.5}
@@ -4669,7 +4672,7 @@ function filesTab(tc){
   </div>
   <div class="set-card"><div class="set-grp">Вид</div>
    ${row("Вид по умолчанию","",seg("fmView",[["list","Список"],["grid","Плитка"]],VW))}
-   ${row("Размер значков","",seg("fmIconSize",[["s","S"],["m","M"],["l","L"]],SZ),"Размер иконок и превью — мельче/крупнее. В режиме плитки заметнее всего.")}
+   ${row("Размер значков и подписей","",seg("fmIconSize",[["s","S"],["m","M"],["l","L"]],SZ),"Размер иконок, превью И шрифта названий папок/файлов — мельче/крупнее (S/M/L). В режиме плитки заметнее всего.")}
    ${pToggle("Миниатюры (превью)","Показывать превью картинок, видео, PDF и обложек аудио. Выключи ради экономии CPU на больших папках.","fmThumbs","эскизы вместо значков")}
   </div>
   <div class="set-card"><div class="set-grp">Кэш миниатюр</div>

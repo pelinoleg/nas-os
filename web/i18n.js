@@ -1400,6 +1400,8 @@ window.NAS_I18N = { en: {
 "пароль": "password",
 "задан": "set",
 "Моя служба": "My service",
+"Размер значков и подписей": "Icon and label size",
+"Размер иконок, превью И шрифта названий папок/файлов — мельче/крупнее (S/M/L). В режиме плитки заметнее всего.": "Size of icons, previews AND the file/folder name font — smaller/larger (S/M/L). Most noticeable in tile view.",
 "Папка бэкапа настроек": "Settings backup folder",
 "Куда складывать бэкап настроек. По умолчанию /mnt/storage/nas-settings-backup — на пуле, чтобы пережить переустановку ОС. Системные папки не рекомендуются: затрутся при переустановке.": "Where to store the settings backup. Default /mnt/storage/nas-settings-backup — on the pool, so it survives an OS reinstall. System folders are not recommended: they get wiped on reinstall.",
 "Скрывать эту папку в файловом менеджере": "Hide this folder in the file manager",
