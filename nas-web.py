@@ -5991,6 +5991,16 @@ def ensure_web_assets():
 # --------------------------------------------------------------------------- #
 #  HTTP
 # --------------------------------------------------------------------------- #
+class _Server(ThreadingHTTPServer):
+    def handle_error(self, request, client_address):
+        # браузер оборвал загрузку (закрыл вкладку, отменил картинку) — это норма,
+        # а не сбой: полный трейсбек в journal только зашумляет. Всё прочее — как было.
+        e = sys.exc_info()[1]
+        if isinstance(e, (BrokenPipeError, ConnectionResetError, TimeoutError)):
+            return
+        super().handle_error(request, client_address)
+
+
 class H(BaseHTTPRequestHandler):
     server_version = "nas-web"
     def log_message(self, *a):  # тихо
@@ -7012,7 +7022,7 @@ def main():
     except Exception:
         pass
     threading.Thread(target=monitor_loop, daemon=True).start()
-    srv = ThreadingHTTPServer(("0.0.0.0", PORT), H)
+    srv = _Server(("0.0.0.0", PORT), H)
     ip = lan_ip()
     print(f"nas-web запущен:  http://{ip}:{PORT}   (http://{socket.gethostname()}.local:{PORT})")
     print(f"  web/     : {WEB_DIR}")
