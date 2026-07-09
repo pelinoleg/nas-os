@@ -3971,25 +3971,42 @@ def prewarm_thumbs(path):
     threading.Thread(target=work, daemon=True).start()
 
 def video_meta(path):
-    """Длительность + кодеки (для плеера/транскода)."""
+    """Длительность + кодеки + список аудиодорожек и субтитров (для плеера/транскода)."""
     path = os.path.realpath(path)
     if not os.path.isfile(path) or not shutil.which("ffprobe"):
         return {"ok": False}
     dur, vc, ac = 0.0, "", ""
+    audios, subs = [], []
     try:
-        pr = subprocess.run(["ffprobe", "-v", "error",
-                             "-show_entries", "format=duration:stream=codec_name,codec_type",
+        pr = subprocess.run(["ffprobe", "-v", "error", "-show_entries",
+                             "format=duration:stream=codec_name,codec_type,channels:stream_tags=language,title",
                              "-of", "json", path], capture_output=True, text=True, timeout=12)
         j = json.loads(pr.stdout or "{}")
         dur = float(j.get("format", {}).get("duration") or 0)
+        ai = si = 0
         for s in j.get("streams", []):
-            if s.get("codec_type") == "video" and not vc:
+            ct = s.get("codec_type")
+            tg = s.get("tags", {}) or {}
+            lang = (tg.get("language") or "").strip()
+            title = (tg.get("title") or "").strip()
+            if ct == "video" and not vc:
                 vc = s.get("codec_name", "")
-            elif s.get("codec_type") == "audio" and not ac:
-                ac = s.get("codec_name", "")
+            elif ct == "audio":
+                if not ac:
+                    ac = s.get("codec_name", "")
+                audios.append({"i": ai, "codec": s.get("codec_name", ""), "lang": lang,
+                               "title": title, "ch": s.get("channels", 0)})
+                ai += 1
+            elif ct == "subtitle":
+                # только текстовые сабы можно отдать как WebVTT (картиночные pgs/dvdsub — нет)
+                cn = (s.get("codec_name") or "").lower()
+                subs.append({"i": si, "codec": cn, "lang": lang, "title": title,
+                             "text": cn in ("subrip", "srt", "ass", "ssa", "mov_text", "webvtt", "text")})
+                si += 1
     except Exception:
         pass
-    return {"ok": True, "duration": dur, "vcodec": vc, "acodec": ac}
+    return {"ok": True, "duration": dur, "vcodec": vc, "acodec": ac,
+            "audios": audios, "subs": subs}
 
 def thumbs_sweep(dirs):
     """Рекурсивный прогрев кэша превью (для ночного таймера)."""
@@ -6027,6 +6044,10 @@ class H(BaseHTTPRequestHandler):
             t = max(0.0, float((q.get("t") or ["0"])[0]))
         except ValueError:
             t = 0.0
+        try:
+            aidx = max(0, int((q.get("a") or ["0"])[0]))   # выбранная аудиодорожка (0:a:aidx)
+        except ValueError:
+            aidx = 0
         if not os.path.isfile(src) or not shutil.which("ffmpeg"):
             self.send_error(404); return
         vcodec = ""
@@ -6046,7 +6067,9 @@ class H(BaseHTTPRequestHandler):
         cmd = ["ffmpeg", "-v", "error"]
         if t > 0:
             cmd += ["-ss", "%.3f" % t]
-        cmd += ["-i", src] + vargs + ["-c:a", "aac", "-b:a", "128k", "-ac", "2",
+        # маппинг: видео + выбранная аудиодорожка ('?' — не падать, если её нет)
+        maps = ["-map", "0:v:0?", "-map", "0:a:%d?" % aidx]
+        cmd += ["-i", src] + maps + vargs + ["-c:a", "aac", "-b:a", "128k", "-ac", "2",
                 "-movflags", "frag_keyframe+empty_moov+default_base_moof", "-f", "mp4", "pipe:1"]
         try:
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
@@ -6073,6 +6096,34 @@ class H(BaseHTTPRequestHandler):
                 proc.stdout.close()
             except Exception:
                 pass
+
+    def _extract_sub(self):
+        """Извлечь встроенную ТЕКСТОВУЮ дорожку субтитров (0:s:idx) как WebVTT."""
+        q = parse_qs(urlparse(self.path).query)
+        src = os.path.realpath((q.get("path") or [""])[0])
+        try:
+            idx = max(0, int((q.get("idx") or ["0"])[0]))
+        except ValueError:
+            idx = 0
+        if not os.path.isfile(src) or not shutil.which("ffmpeg"):
+            self.send_error(404); return
+        try:
+            pr = subprocess.run(["ffmpeg", "-v", "error", "-i", src,
+                                 "-map", "0:s:%d" % idx, "-f", "webvtt", "pipe:1"],
+                                capture_output=True, timeout=90)
+            data = pr.stdout or b""
+        except Exception:
+            self.send_error(500); return
+        if not data.strip():
+            self.send_error(404); return
+        self.send_response(200)
+        self.send_header("Content-Type", "text/vtt; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        try:
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
 
     def _upload_raw(self):
         """Потоковая бинарная загрузка (без base64 — не роняет вкладку на больших файлах)."""
@@ -6285,6 +6336,8 @@ class H(BaseHTTPRequestHandler):
                 self._json(video_meta((q.get("path") or [""])[0]))
             elif p == "/api/fs/transcode":
                 self._transcode()
+            elif p == "/api/fs/sub":
+                self._extract_sub()
             elif p == "/api/fs/fetch/status":
                 self._json(fs_fetch_status((q.get("id") or [""])[0]))
             elif p == "/api/fm/favorites":

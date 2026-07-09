@@ -3423,7 +3423,7 @@ function viewerRender(w){const V=w._V,e=V.sibs[V.idx];if(!e)return;
  else if(!vid)tools=`<button data-a="full" title="Во весь экран (F)">${svg("expand",14)}</button>`;
  let media;
  if(img)media=`<img id="vwM" src="${raw}" draggable="false" class="grab">`;
- else if(vid)media=`<div class="vp" id="vp"><video id="vwM" src="${raw}" autoplay playsinline></video><div class="vp-ctl"><button data-v="play" title="Пауза/пуск (пробел)">${PLAY_SVG}</button><span class="vp-t" id="vpCur">0:00</span><div class="vp-seek" id="vpSeek"><div class="vp-buf" id="vpBuf"></div><div class="vp-prog" id="vpProg"></div></div><span class="vp-t" id="vpDur">0:00</span><button data-v="mute" title="Звук (M)">${VOL_SVG}</button><input type="range" class="vp-vol" id="vpVol" min="0" max="1" step="0.05" value="1"><button data-v="spd" class="vp-spd" title="Скорость">1×</button><button data-v="cc" title="Субтитры">CC</button><button data-v="pip" title="Картинка-в-картинке">⧉</button><button data-v="tc" title="Транскодировать (для несовместимых кодеков)">⚙</button><button data-v="full" title="Во весь экран (F)">${svg("expand",20)}</button></div></div>`;
+ else if(vid)media=`<div class="vp" id="vp"><video id="vwM" src="${raw}" autoplay playsinline></video><div class="vp-ctl"><button data-v="play" title="Пауза/пуск (пробел)">${PLAY_SVG}</button><span class="vp-t" id="vpCur">0:00</span><div class="vp-seek" id="vpSeek"><div class="vp-buf" id="vpBuf"></div><div class="vp-prog" id="vpProg"></div></div><span class="vp-t" id="vpDur">0:00</span><button data-v="mute" title="Звук (M)">${VOL_SVG}</button><input type="range" class="vp-vol" id="vpVol" min="0" max="1" step="0.05" value="1"><button data-v="spd" class="vp-spd" title="Скорость">1×</button><button data-v="aud" class="vp-spd" title="Аудиодорожка" style="display:none">A1</button><button data-v="cc" title="Субтитры">CC</button><button data-v="pip" title="Картинка-в-картинке">⧉</button><button data-v="tc" title="Транскодировать (для несовместимых кодеков)">⚙</button><button data-v="full" title="Во весь экран (F)">${svg("expand",20)}</button></div></div>`;
  else media=`<audio id="vwM" src="${raw}" controls autoplay></audio>`;
  body.innerHTML=`<div class="vw"><div class="vw-bar"><span class="vw-t">${esc(e.name)}</span><span class="vw-i">${multi?(V.idx+1)+" / "+V.sibs.length:""}</span>${tools}${dlA}</div><div class="vw-stage" id="vwStage">${nav}${media}</div></div>`;
  const stage=body.querySelector("#vwStage"),m=body.querySelector("#vwM");
@@ -3453,9 +3453,9 @@ function mountVideo(w,body,m,e,V){
  const vp=body.querySelector("#vp"),playB=body.querySelector('[data-v="play"]'),seek=body.querySelector("#vpSeek"),
    prog=body.querySelector("#vpProg"),buf=body.querySelector("#vpBuf"),cur=body.querySelector("#vpCur"),dur=body.querySelector("#vpDur"),
    muteB=body.querySelector('[data-v="mute"]'),vol=body.querySelector("#vpVol"),spdB=body.querySelector('[data-v="spd"]'),
-   ccB=body.querySelector('[data-v="cc"]'),pipB=body.querySelector('[data-v="pip"]'),tcB=body.querySelector('[data-v="tc"]'),fullB=body.querySelector('[data-v="full"]');
+   ccB=body.querySelector('[data-v="cc"]'),audB=body.querySelector('[data-v="aud"]'),pipB=body.querySelector('[data-v="pip"]'),tcB=body.querySelector('[data-v="tc"]'),fullB=body.querySelector('[data-v="full"]');
  const vpath=e.path,rawURL="/api/fs/raw?path="+encodeURIComponent(vpath);
- let transc=false,tbase=0,DUR=0,tcTried=false;
+ let transc=false,tbase=0,DUR=0,tcTried=false,curAidx=0,meta=null,curSub=null;
  const fmt=t=>{t=Math.max(0,t|0);const h=t/3600|0,mn=(t%3600)/60|0,s=t%60;return (h?h+":"+String(mn).padStart(2,"0"):mn)+":"+String(s).padStart(2,"0");};
  const curTime=()=>transc?tbase+m.currentTime:m.currentTime;
  const totDur=()=>transc?DUR:(isFinite(m.duration)&&m.duration?m.duration:DUR);
@@ -3465,8 +3465,8 @@ function mountVideo(w,body,m,e,V){
  m.addEventListener("timeupdate",setBar);
  m.addEventListener("progress",()=>{if(transc){buf.style.width="0";return;}try{if(m.buffered.length&&m.duration)buf.style.width=(m.buffered.end(m.buffered.length-1)/m.duration*100)+"%";}catch(x){}});
  m.addEventListener("play",setIcon);m.addEventListener("pause",setIcon);m.addEventListener("ended",setIcon);
- const startTrans=at=>{transc=true;tbase=Math.max(0,at||0);tcTried=true;if(tcB)tcB.classList.add("on");buf.style.width="0";
-   m.src="/api/fs/transcode?path="+encodeURIComponent(vpath)+"&t="+tbase.toFixed(2);m.load();m.play().catch(()=>{});};
+ const startTrans=(at,aidx)=>{if(aidx!=null)curAidx=aidx;transc=true;tbase=Math.max(0,at||0);tcTried=true;if(tcB)tcB.classList.add("on");buf.style.width="0";
+   m.src="/api/fs/transcode?path="+encodeURIComponent(vpath)+"&t="+tbase.toFixed(2)+"&a="+curAidx;m.load();m.play().catch(()=>{});};
  const stopTrans=()=>{transc=false;tbase=0;if(tcB)tcB.classList.remove("on");m.src=rawURL;m.load();m.play().catch(()=>{});};
  m.addEventListener("error",()=>{if(!transc&&!tcTried){toast("Кодек не поддержан браузером — транскодирую…");startTrans(0);}else if(transc)toast("Не удалось воспроизвести");});
  const toggle=()=>{m.paused?m.play().catch(()=>{}):m.pause();};
@@ -3483,15 +3483,43 @@ function mountVideo(w,body,m,e,V){
  const speeds=[1,1.25,1.5,2,0.5];let si=0;spdB.onclick=()=>{si=(si+1)%speeds.length;m.playbackRate=speeds[si];spdB.textContent=speeds[si]+"×";};
  pipB.onclick=()=>{if(document.pictureInPictureElement)document.exitPictureInPicture();else if(m.requestPictureInPicture)m.requestPictureInPicture().catch(()=>toast("PiP недоступен"));};
  tcB.onclick=()=>{if(transc)stopTrans();else{toast("Транскодирую…");startTrans(m.currentTime||0);}};
- const sub=V.ents.find(x=>{const b=e.name.replace(/\.[^.]+$/,"");return /\.(srt|vtt)$/i.test(x.name)&&(x.name.replace(/\.[^.]+$/,"")===b||x.name.toLowerCase().startsWith(b.toLowerCase()));});
- if(sub){ccB.onclick=async()=>{if(m.querySelector("track")){const t=m.textTracks[0];t.mode=t.mode==="showing"?"disabled":"showing";ccB.classList.toggle("on",t.mode==="showing");return;}
-   const r=await api("/api/fs/read?path="+encodeURIComponent(sub.path));let txt=(r&&r.content)||"";if(/\.srt$/i.test(sub.name))txt=srtToVtt(txt);
-   const url=URL.createObjectURL(new Blob([txt],{type:"text/vtt"}));const tr=document.createElement("track");tr.kind="subtitles";tr.default=true;tr.src=url;m.appendChild(tr);setTimeout(()=>{m.textTracks[0].mode="showing";ccB.classList.add("on");},60);toast("Субтитры загружены");};}
- else ccB.style.display="none";
+ // внешние субтитры рядом (.srt/.vtt с похожим именем)
+ const bname=e.name.replace(/\.[^.]+$/,"").toLowerCase();
+ const extSubs=(V.ents||[]).filter(x=>/\.(srt|vtt)$/i.test(x.name)&&(x.name.replace(/\.[^.]+$/,"").toLowerCase()===bname||x.name.toLowerCase().startsWith(bname)));
+ ccB.style.display="none";   // покажем в vmeta-хендлере, если есть внешние или встроенные текстовые
+ // попап-меню плеера (аудиодорожки/субтитры)
+ let vpm=null;const closeVpm=()=>{if(vpm){vpm.remove();vpm=null;}};
+ const vpMenu=(title,items)=>{closeVpm();const mn=el(`<div class="vp-menu"></div>`);
+   if(title)mn.appendChild(el(`<div class="vpm-h">${esc(title)}</div>`));
+   items.forEach(it=>{const b=el(`<button class="${it.on?"on":""}">${esc(it.label)}${it.on?`<span class="vpm-ck">✓</span>`:""}</button>`);b.onclick=()=>{closeVpm();it.act();};mn.appendChild(b);});
+   vp.appendChild(mn);show();
+   setTimeout(()=>{const off=ev=>{if(vpm&&!vpm.contains(ev.target)){document.removeEventListener("pointerdown",off,true);closeVpm();}};document.addEventListener("pointerdown",off,true);},0);vpm=mn;};
+ const audLabel=a=>(a.lang?a.lang.toUpperCase()+" ":"")+(a.title||("Дорожка "+(a.i+1)))+(a.ch?" · "+a.ch+"ch":"")+" · "+(a.codec||"");
+ const subLabel=s=>"💬 "+((s.lang?s.lang.toUpperCase()+" ":"")+(s.title||("Дорожка "+(s.i+1))));
+ // загрузить субтитры (внешние файлом или встроенные через ffmpeg) в <track>
+ async function setSub(sel){m.querySelectorAll("track").forEach(t=>t.remove());
+   for(let i=0;m.textTracks&&i<m.textTracks.length;i++)m.textTracks[i].mode="disabled";
+   curSub=null;ccB.classList.remove("on");
+   if(!sel)return;
+   let vtt="";
+   if(sel.type==="ext"){const r=await api("/api/fs/read?path="+encodeURIComponent(sel.path));vtt=(r&&r.content)||"";if(/\.srt$/i.test(sel.name))vtt=srtToVtt(vtt);curSub="ext:"+sel.path;}
+   else{const resp=await fetch("/api/fs/sub?path="+encodeURIComponent(vpath)+"&idx="+sel.i);if(!resp.ok){toast("Не удалось извлечь субтитры");return;}vtt=await resp.text();curSub="emb:"+sel.i;}
+   if(!vtt.trim()){toast("Пустые субтитры");return;}
+   const url=URL.createObjectURL(new Blob([vtt],{type:"text/vtt"}));const tr=document.createElement("track");tr.kind="subtitles";tr.default=true;tr.src=url;m.appendChild(tr);
+   setTimeout(()=>{if(m.textTracks[0])m.textTracks[0].mode="showing";ccB.classList.add("on");},80);}
+ ccB.onclick=()=>{const items=[{label:"Выключить",on:!curSub,act:()=>setSub(null)}];
+   extSubs.forEach(s=>items.push({label:"📄 "+s.name,on:curSub==="ext:"+s.path,act:()=>setSub({type:"ext",path:s.path,name:s.name})}));
+   ((meta&&meta.subs)||[]).filter(s=>s.text).forEach(s=>items.push({label:subLabel(s),on:curSub==="emb:"+s.i,act:()=>setSub({type:"emb",i:s.i})}));
+   vpMenu("Субтитры",items);};
+ // переключение аудиодорожки требует транскода (браузер играет только дорожку по умолчанию)
+ audB.onclick=()=>{if(!meta||!(meta.audios||[]).length)return;
+   vpMenu("Аудиодорожка",meta.audios.map(a=>({label:audLabel(a),on:a.i===curAidx,act:()=>{audB.textContent="A"+(a.i+1);toast("Аудио: "+audLabel(a));startTrans(curTime(),a.i);}})));};
  let hideT;const show=()=>{vp.classList.remove("hide");clearTimeout(hideT);hideT=setTimeout(()=>{if(!m.paused)vp.classList.add("hide");},2400);};
  vp.onpointermove=show;vp.onpointerleave=()=>{if(!m.paused)vp.classList.add("hide");};show();
- api("/api/fs/vmeta?path="+encodeURIComponent(vpath)).then(r=>{if(!r||!r.ok)return;if(r.duration)DUR=r.duration;dur.textContent=fmt(totDur());
+ api("/api/fs/vmeta?path="+encodeURIComponent(vpath)).then(r=>{if(!r||!r.ok)return;meta=r;if(r.duration)DUR=r.duration;dur.textContent=fmt(totDur());
    const vc=(r.vcodec||"").toLowerCase(),ac=(r.acodec||"").toLowerCase();
+   if((r.audios||[]).length>1){audB.style.display="";audB.textContent="A"+(curAidx+1);}   // выбор дорожки
+   if(extSubs.length||(r.subs||[]).some(s=>s.text))ccB.style.display="";                  // есть субтитры
    if(!transc&&!tcTried){
      if(TRANS_FORCE.includes(vc)){toast("Кодек "+vc+" не поддержан браузером — транскодирую");startTrans(0);}
      else if(AUDIO_BAD.includes(ac)){toast("Аудио "+ac+" не играет в браузере — включаю звук через транскод");startTrans(0);}
