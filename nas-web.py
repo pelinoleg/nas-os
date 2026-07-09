@@ -965,6 +965,9 @@ def stats():
         "load": list(os.getloadavg()),
         # идёт ли хоть один бэкап (индикатор на иконке; лёгкая проверка без systemctl)
         "nb_running": any(_nb_run_state_read(p["id"]).get("running") for p in nb_profiles()),
+        # USB-импорт идёт в фоне (udev), панель могла быть закрыта — показываем его
+        # в общем центре операций, а не только на вкладке настроек USB
+        "usb_import": _safe(lambda: usb_import_progress()["jobs"], []),
         "ts": int(time.time()),
     }
 
@@ -3336,6 +3339,10 @@ def _bk_sources():
 
 def settings_backup_make(auto=False):
     d = settings_backup_dir()
+    try:
+        os.chmod(d, 0o700)      # внутри архивов — пароль главного NAS и хеш пароля панели
+    except OSError:
+        pass
     name = "nas-settings-%s.tar.gz" % time.strftime("%Y%m%d-%H%M%S")
     path = os.path.join(d, name)
     added = []
@@ -3349,6 +3356,7 @@ def settings_backup_make(auto=False):
                             ensure_ascii=False).encode()
             ti = tarfile.TarInfo("manifest.json"); ti.size = len(mf); ti.mtime = int(time.time())
             tar.addfile(ti, io.BytesIO(mf))
+        os.chmod(path, 0o600)
     except OSError as e:
         try:
             os.remove(path)
@@ -3391,6 +3399,7 @@ def settings_backup_restore(path):
     # префиксы архива → куда восстанавливать (STACKS_DIR определяется ниже по файлу)
     restore_map = [("etc/nas-wizard/", "/etc/nas-wizard"),
                    ("etc/nas-os/webauth.json", "/etc/nas-os/webauth.json"),
+                   ("etc/nas-os/nas-backup.json", "/etc/nas-os/nas-backup.json"),
                    ("etc/samba/smb.conf", "/etc/samba/smb.conf"),
                    ("var/lib/samba/private/passdb.tdb", "/var/lib/samba/private/passdb.tdb"),
                    ("opt/stacks/", STACKS_DIR)]
@@ -3422,7 +3431,8 @@ def settings_backup_restore(path):
                 os.makedirs(os.path.dirname(dest), exist_ok=True)
                 with open(dest, "wb") as f:
                     shutil.copyfileobj(src, f)
-                if "webauth" in dest or "notify.conf" in dest:
+                # секреты: пароль панели, ключи Pushover, пароль главного NAS
+                if any(x in dest for x in ("webauth", "notify.conf", "nas-backup.json")):
                     os.chmod(dest, 0o600)
                 restored.append(nm)
     except (OSError, tarfile.TarError) as e:

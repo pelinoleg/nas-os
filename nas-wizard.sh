@@ -50,6 +50,8 @@ STACK_PACKAGES=(cockpit cockpit-storaged cockpit-networkmanager mergerfs snaprai
 UTIL_PACKAGES=(
   dialog
   libheif-examples   # heif-convert: HEIC с айфона нарезан плитками, ffmpeg берёт лишь одну
+  eject              # мягкое извлечение носителя после USB-импорта (power-off гасит весь ридер)
+  iputils-arping     # nas-netguard: запасная проверка шлюза, если он молчит на ICMP
   curl wget ca-certificates gnupg
   git rsync sshpass
   vim nano
@@ -2286,6 +2288,7 @@ GUARD
 
     # мгновенная реакция на смену линка. Звать nmcli прямо отсюда нельзя:
     # NM ждёт завершения dispatcher-скрипта, а nmcli ждёт ответа NM -> дедлок.
+    run mkdir -p /etc/NetworkManager/dispatcher.d   # write_file родителя не создаёт
     write_file /etc/NetworkManager/dispatcher.d/50-nas-netguard <<'DISP'
 #!/bin/bash
 # nas-wizard: дёрнуть сторож сети при смене состояния линка (асинхронно!)
@@ -2331,6 +2334,12 @@ SYSCTL
     run systemctl daemon-reload
     run systemctl enable --now nas-netguard.timer
     info "сторож сети включён: eth0 главный, wlan0 резерв, уведомления о смене IP"
+    # честно предупреждаем: если сейчас подняты оба линка, Wi-Fi будет отключён,
+    # и открытая по нему сессия (SSH/панель) оборвётся — надо зайти по адресу eth0
+    if [ "$(cat /sys/class/net/eth0/carrier 2>/dev/null || echo 0)" = "1" ] \
+       && nmcli -t -f DEVICE,STATE device 2>/dev/null | grep -q '^wlan0:connected$'; then
+        warn "кабель подключён — Wi-Fi будет отключён. Если вы зашли по Wi-Fi, сессия оборвётся; заходите заново по <хост>.local"
+    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -2341,6 +2350,7 @@ SYSCTL
 # ---------------------------------------------------------------------------
 install_motd() {
     # пользовательский текст создаём только если его ещё нет — не затирать правки
+    run mkdir -p /etc/nas-wizard
     if [ ! -f /etc/nas-wizard/motd.txt ]; then
         write_file /etc/nas-wizard/motd.txt <<'TXT'
 NAS-OS - home NAS on Raspberry Pi 5
@@ -2358,6 +2368,7 @@ MOTD_TEXT=1
 MOTD_INFO=1
 CONF
 
+    run mkdir -p /etc/update-motd.d
     write_file /etc/update-motd.d/20-nas-os <<'MOTD'
 #!/bin/bash
 # nas-wizard: приветствие при входе по SSH.
