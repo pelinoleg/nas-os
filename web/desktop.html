@@ -3568,6 +3568,8 @@ function fmIcon(name,type,size){const k=fmKind(name,type);
  const c=FM_ICO_C[k]||FM_ICO_C.file;
  return `<svg class="fmico" viewBox="0 0 24 24" width="${size}" height="${size}"><path fill="${c[0]}" d="M6 2.6h7L19 8.6V19a2.4 2.4 0 0 1-2.4 2.4H6A2.4 2.4 0 0 1 3.6 19V5A2.4 2.4 0 0 1 6 2.6z"/><path fill="${c[1]}" d="M13 2.6l6 6h-4.5A1.5 1.5 0 0 1 13 7.1z"/>${FM_GLYPH[k]||""}</svg>`;}
 const FM_CHIPS=[["Home","/home/oleg"],["Хранилище","/mnt/storage"],["Стеки","/opt/stacks"],["Конфиги","/etc"],["Логи","/var/log"],["Корень","/"]];
+// системный «мусор» — прячем в ФМ вместе со скрытыми (тумблер «скрытые» их покажет)
+const FM_SYS=new Set(["lost+found","$RECYCLE.BIN","System Volume Information","#recycle","@eaDir",".Trashes",".Spotlight-V100",".fseventsd"]);
 const fmDate=ts=>{if(!ts)return"";const d=new Date(ts*1000),p=n=>String(n).padStart(2,"0");
  const fmt=SET.fmDateFmt||"dmy_hm";
  if(fmt==="rel"){const s=Date.now()/1000-ts;
@@ -3697,7 +3699,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    const pb=body.querySelector("#fPaste");if(clip&&clip.items.length){pb.style.display="inline-flex";pb.textContent="Вставить ("+clip.items.length+")";}else pb.style.display="none";
    renderStatus();}
  function renderList(){const srcArr=searchRes||entries;let arr=srcArr.slice();
-   if(!showHidden&&!searchRes)arr=arr.filter(e=>!e.name.startsWith("."));
+   if(!showHidden&&!searchRes)arr=arr.filter(e=>!e.name.startsWith(".")&&!FM_SYS.has(e.name));
    if(filt&&!searchRes)arr=arr.filter(e=>e.name.toLowerCase().includes(filt));
    const foldersFirst=SET.fmFoldersFirst!==false;
    arr.sort((a,b)=>{if(foldersFirst&&a.type!==b.type)return a.type==="dir"?-1:1;
