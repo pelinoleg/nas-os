@@ -917,6 +917,74 @@ def save_snippets(d):
     with open(SNIPPETS_FILE, "w") as f:
         json.dump(d, f, ensure_ascii=False, indent=2)
 
+# --------------------------------------------------------------------------- #
+#  История операций (загрузки, копирования, USB-импорт).
+#  Раньше жила только в localStorage браузера: у телефона была своя, пустая.
+#  Клиент шлёт сюда завершённые операции; USB-импорт сервер записывает сам,
+#  даже если панель не открыта ни в одном браузере.
+# --------------------------------------------------------------------------- #
+OPS_HIST_FILE = os.path.join(NAS_CONFIG, "ops-history.json")
+OPS_HIST_KEEP = 300
+OPS_HIST_TTL  = 30 * 86400
+_ops_lock = threading.Lock()
+_OPS_STATES = ("done", "err", "cancel")
+
+def _ops_hist_read():
+    try:
+        with open(OPS_HIST_FILE) as f:
+            d = json.load(f)
+        return d if isinstance(d, list) else []
+    except (OSError, ValueError):
+        return []
+
+def _ops_hist_write(items):
+    try:
+        os.makedirs(NAS_CONFIG, exist_ok=True)
+        tmp = OPS_HIST_FILE + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(items, f, ensure_ascii=False)
+        os.replace(tmp, OPS_HIST_FILE)
+        _chown_user(OPS_HIST_FILE)
+    except OSError:
+        pass
+
+def _ops_clean(items, now=None):
+    now = now or time.time()
+    items = [x for x in items if isinstance(x, dict) and (now - (x.get("ts") or 0)) < OPS_HIST_TTL]
+    return items[-OPS_HIST_KEEP:]
+
+def ops_hist_list():
+    with _ops_lock:
+        return _ops_clean(_ops_hist_read())
+
+def ops_hist_add(e):
+    """Одна завершённая операция. uid — ключ дедупа (перезапуск панели, два браузера)."""
+    if not isinstance(e, dict):
+        return {"ok": False, "log": "неверная запись"}
+    uid = str(e.get("uid") or "")[:80]
+    state = e.get("state")
+    if not uid or state not in _OPS_STATES:
+        return {"ok": False, "log": "неверная запись"}
+    try:
+        ts = int(e.get("ts") or time.time())
+    except (TypeError, ValueError):
+        ts = int(time.time())
+    item = {"uid": uid, "state": state, "ts": ts,
+            "title": str(e.get("title") or "")[:120],
+            "label": str(e.get("label") or "")[:400]}
+    with _ops_lock:
+        items = _ops_hist_read()
+        if any(x.get("uid") == uid for x in items):
+            return {"ok": True, "dup": True}
+        items.append(item)
+        _ops_hist_write(_ops_clean(items))
+    return {"ok": True}
+
+def ops_hist_clear():
+    with _ops_lock:
+        _ops_hist_write([])
+    return {"ok": True}
+
 FAV_FILE = os.path.join(NAS_CONFIG, "fm-favorites.json")
 def load_favs():
     try:
@@ -3791,7 +3859,8 @@ def monitor_loop():
     while True:
         time.sleep(60)
         for fn in (history_sample, monitor_tick, maintenance_daily, _smart_selftest_tick,
-                   _nb_sched_tick, _automount_tick, _summary_tick, _thermal_tick):
+                   _nb_sched_tick, _automount_tick, _summary_tick, _thermal_tick,
+                   usb_ops_sync):
             try:
                 fn()
             except Exception:
@@ -6419,6 +6488,22 @@ def gen_view(src):
                 except OSError: pass
     return vp if ok else None
 
+def usb_ops_sync():
+    """Занести завершённые задания импорта в историю операций. Зовётся из
+    monitor_loop, поэтому история пополняется и с закрытой панелью."""
+    for j in usb_import_progress()["jobs"]:
+        if j["status"] == "running":
+            continue
+        bits = [j.get("label") or j.get("dev") or ""]
+        if j.get("bytes") is not None:
+            bits.append(fmt_bytes(j["bytes"]) + (" из " + fmt_bytes(j["total"]) if j.get("total") else ""))
+        if j.get("dest"):
+            bits.append(j["dest"])
+        ops_hist_add({"uid": "usb:%s:%s" % (j["dev"], j["started"]),
+                      "state": "done" if j["status"] == "done" else "err",
+                      "ts": j.get("finished") or j.get("started") or int(time.time()),
+                      "title": "Импорт с USB", "label": " · ".join(x for x in bits if x)})
+
 def _usb_sh_sync():
     """Перезаписать /usr/local/bin/nas-usb-import.sh, если он разошёлся с кодом.
     Раньше хелпер обновлялся только при сохранении настроек, поэтому после
@@ -7344,6 +7429,8 @@ class H(BaseHTTPRequestHandler):
                 self._json({"config": motd_load(), "preview": motd_preview()})
             elif p == "/api/usb-import/progress":
                 self._json(usb_import_progress())
+            elif p == "/api/ops":
+                self._json({"ops": ops_hist_list()})
             elif p == "/api/wallpaper/img":
                 wp = _wallpaper_path()
                 if wp:
@@ -7439,6 +7526,10 @@ class H(BaseHTTPRequestHandler):
                 self._json(usb_import_run(self._body().get("dev", "")))
             elif p == "/api/motd":
                 self._json(motd_save(self._body()))
+            elif p == "/api/ops":
+                self._json(ops_hist_add(self._body()))
+            elif p == "/api/ops/clear":
+                self._body(); self._json(ops_hist_clear())
             elif p == "/api/wallpaper/fetch":
                 self._json(wallpaper_fetch(self._body().get("url", "")))
             elif p == "/api/wallpaper/upload":

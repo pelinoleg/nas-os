@@ -6019,26 +6019,42 @@ function winNotif(){openWin("__notif","Уведомления",async body=>{
 /* ---- центр операций (очереди, прогресс, отмена) ---- */
 const OPS={list:[],seq:0,paintT:0,autoClosed:false,autoOpened:false};
 
-/* Operation history survives a page reload: the list lived only in memory, so the
-   menubar icon vanished together with everything the user had just copied.
-   Only finished entries are persisted: uploads die with the page, while backup and
-   USB import keep running and are re-created from the server on the next poll. */
-const OPS_KEY="nasops",OPS_KEEP=30,OPS_TTL=3*86400e3;
+/* Operation history now lives on the server (~/nas-config/ops-history.json), so it is
+   the same in every browser and survives a reinstall through the settings backup.
+   localStorage stays as an offline cache: if the API is unreachable we still show
+   something. Running operations are never persisted — an upload dies with the page,
+   while backup and USB import keep going and are re-created from the server. */
+const OPS_KEY="nasops",OPS_KEEP=60,OPS_TTL=30*86400e3;
+const opsUid=()=>Date.now().toString(36)+"-"+Math.random().toString(36).slice(2,8);
 function opsSave(){
  try{
   const keep=OPS.list.filter(o=>o.state!=="run").slice(-OPS_KEEP)
-    .map(o=>({id:o.id,title:o.title,state:o.state,label:o.label,t:o.t,k:o.k}));
+    .map(o=>({id:o.id,uid:o.uid,title:o.title,state:o.state,label:o.label,t:o.t}));
   localStorage.setItem(OPS_KEY,JSON.stringify(keep));
  }catch(e){}}
-function opsLoad(){
- let saved=[];
- try{saved=JSON.parse(localStorage.getItem(OPS_KEY)||"[]");}catch(e){saved=[];}
+function opsPush(o){                       // завершённую операцию отдаём серверу
+ if(!o.uid)return;
+ api("/api/ops",{method:"POST",body:JSON.stringify(
+   {uid:o.uid,state:o.state,ts:Math.round((o.t||Date.now())/1000),title:o.title,label:o.label||""})}).catch(()=>{});}
+function opsAdopt(items){
  const now=Date.now();
- OPS.list=(Array.isArray(saved)?saved:[]).filter(o=>o&&o.t&&now-o.t<OPS_TTL).slice(-OPS_KEEP);
- OPS.list.forEach(o=>{if(o.state==="run"){o.state="err";o.label="прервано перезагрузкой панели";}
-   if(o.k&&typeof USB_SEEN!=="undefined")USB_SEEN.add(o.k);});   // не заводить дубль по тому же импорту
- OPS.seq=OPS.list.reduce((a,o)=>Math.max(a,o.id||0),0);
+ OPS.list=items.filter(o=>o&&o.t&&now-o.t<OPS_TTL).sort((a,b)=>a.t-b.t).slice(-OPS_KEEP);
+ OPS.seq=0;
+ OPS.list.forEach(o=>{o.id=++OPS.seq;o.p=o.state==="done"?1:null;o.cancel=null;o.cancelled=false;
+   if(o.state==="run"){o.state="err";o.label="прервано перезагрузкой панели";}
+   // не заводить дубль по уже записанному импорту
+   if(o.uid&&o.uid.indexOf("usb:")===0&&typeof USB_SEEN!=="undefined")USB_SEEN.add(o.uid.slice(4));});
  paintOps(true);}
+async function opsLoad(){
+ let items=null;
+ try{const r=await api("/api/ops");
+   if(r&&Array.isArray(r.ops))items=r.ops.map(x=>({uid:x.uid,title:x.title,state:x.state,label:x.label,t:(x.ts||0)*1000}));
+ }catch(e){}
+ if(!items){                              // сервер недоступен — показываем локальный кэш
+   try{items=JSON.parse(localStorage.getItem(OPS_KEY)||"[]");}catch(e){items=[];}
+   if(!Array.isArray(items))items=[];
+ }
+ opsAdopt(items);opsSave();}
 const opAgo=t=>{if(!t)return "";const s=Math.max(0,(Date.now()-t)/1000);
  if(s<60)return "только что";
  if(s<3600)return Math.floor(s/60)+" мин назад";
@@ -6060,8 +6076,9 @@ function opAdd(title,opts){opts=opts||{};
  return o;}
 function opSet(o,p,label){o.p=p;if(label!=null)o.label=label;paintOps();}
 function opEnd(o,ok,label){if(o.state!=="run")return;o.state=o.cancelled?"cancel":ok?"done":"err";
- if(label!=null&&label!=="")o.label=label;if(o.state==="done")o.p=1;o.cancel=null;o.t=o.t||Date.now();
- paintOps(true);opsSave();
+ if(label!=null&&label!=="")o.label=label;if(o.state==="done")o.p=1;o.cancel=null;
+ o.t=Date.now();o.uid=o.uid||opsUid();
+ paintOps(true);opsSave();opsPush(o);
  if(!OPS.list.some(x=>x.state==="run")){OPS.autoClosed=false;
   // авто-открытый поповер сам прячется чуть после завершения всего
   if(OPS.autoOpened)setTimeout(()=>{const q=document.querySelector(".mbpop[data-ops]");
@@ -6099,7 +6116,8 @@ function renderOpsList(p){
   }).join(""):`<div class="mbp-empty">Нет операций</div>`);
  p.querySelectorAll(".op-x").forEach(x=>x.onclick=ev=>{ev.stopPropagation();
   const o=OPS.list.find(y=>y.id===+x.closest(".op-row").dataset.op);if(o)opCancel(o);});
- const clr=p.querySelector("#opsClr");if(clr)clr.onclick=()=>{OPS.list=OPS.list.filter(o=>o.state==="run");opsSave();paintOps(true);
+ const clr=p.querySelector("#opsClr");if(clr)clr.onclick=()=>{OPS.list=OPS.list.filter(o=>o.state==="run");
+  opsSave();api("/api/ops/clear",{method:"POST",body:"{}"}).catch(()=>{});paintOps(true);
   const q=document.querySelector(".mbpop[data-ops]");if(q){q._sig=null;renderOpsList(q);}};}
 function opsPop(){const b=document.getElementById("opsBtn");if(!b)return;
  mbPop(b,p=>{p.setAttribute("data-ops","1");renderOpsList(p);},
@@ -6143,15 +6161,16 @@ function syncUsbOps(jobs){
     if(USB_SEEN.has(key))return;
     USB_SEEN.add(key);
     const done=j.status==="done";
-    OPS.list.push({id:++OPS.seq,title:"Импорт с USB",state:done?"done":"err",p:done?1:null,
-      label:usbLabel(j)+(j.dest?" · "+j.dest:""),cancel:null,cancelled:false,k:key,
-      t:(j.finished||j.started||0)*1000||Date.now()});
+    const rec={id:++OPS.seq,uid:"usb:"+key,title:"Импорт с USB",state:done?"done":"err",p:done?1:null,
+      label:usbLabel(j)+(j.dest?" · "+j.dest:""),cancel:null,cancelled:false,
+      t:(j.finished||j.started||0)*1000||Date.now()};
+    OPS.list.push(rec);
     if(OPS.list.length>40)OPS.list=OPS.list.slice(-40);
-    opsSave();paintOps(true);
+    opsSave();opsPush(rec);paintOps(true);
     return;
    }
    USB_SEEN.add(key);
-   o=USB_OPS[j.dev]=opAdd("Импорт с USB");o.k=key;
+   o=USB_OPS[j.dev]=opAdd("Импорт с USB");o.uid="usb:"+key;
   }
   if(j.status==="running"){
    opSet(o,j.percent==null?null:Math.min(j.percent,100)/100,usbLabel(j));
@@ -6229,7 +6248,7 @@ function maybeOnboard(){let done=false;try{done=!!SET.onboarded||localStorage.ge
  if(!snInit){seedSnips();try{localStorage.setItem("nassnipinit","1");}catch(e){}saveSnips();}
  document.querySelectorAll("[title]").forEach(n=>{if(n.title)n.title=nasTr(n.title);});   // статические title из HTML
  renderRail();renderApps();renderDock();renderWinbar();renderPhoneNav();tickClock();
- try{opsLoad();}catch(e){paintOps(true);}   // иконка операций нужна в любом случае
+ opsLoad().catch(()=>paintOps(true));      // иконка операций нужна в любом случае
  poll();pollApps();pollDisks();maybeOnboard();
  refreshFmHideBk();
  pollStacks();pollTop();pollNet();
