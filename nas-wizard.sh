@@ -49,6 +49,7 @@ STACK_PACKAGES=(cockpit cockpit-storaged cockpit-networkmanager mergerfs snaprai
 # Утилиты общего назначения — то, что почти всегда нужно на сервере/NAS
 UTIL_PACKAGES=(
   dialog
+  libheif-examples   # heif-convert: HEIC с айфона нарезан плитками, ffmpeg берёт лишь одну
   curl wget ca-certificates gnupg
   git rsync sshpass
   vim nano

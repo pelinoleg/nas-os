@@ -928,7 +928,7 @@
   .fm-row.fm-hid:hover,.fm-tile.fm-hid:hover,.fm-row.fm-hid.sel,.fm-tile.fm-hid.sel{opacity:.85}
   .fm-row.sel{background:var(--accent-soft);color:var(--accent)}
   .fm-row .fi{flex:none;color:var(--dim);display:grid;place-items:center;width:28px;height:28px;position:relative}
-  .fm-row .fi .thumb{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:4px;background:#0c1119}
+  .fm-row .fi .thumb{position:absolute;inset:0;width:100%;height:100%;object-fit:var(--thumb-fit,contain);border-radius:4px;background:var(--card-2)}
   .fm-row.dir .fi{color:var(--accent-2)}
   .fm-row .fn{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .fm-row .fsz{font-family:var(--mono);font-size:10px;color:var(--mut);flex:none}
@@ -1106,7 +1106,7 @@
   .fm-tile:hover{background:var(--sel);border-color:var(--line)}
   .fm-tile.sel{background:var(--accent-soft);border-color:var(--accent-line)}
   .fm-tile .ti{position:relative;width:64px;height:64px;display:grid;place-items:center;color:var(--dim)}.fm-tile.dir .ti{color:var(--accent-2)}
-  .fm-tile .ti .thumb{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:6px;background:#0c1119}
+  .fm-tile .ti .thumb{position:absolute;inset:0;width:100%;height:100%;object-fit:var(--thumb-fit,contain);border-radius:6px;background:var(--card-2)}
   .fm-tile .tn{font-size:11px;text-align:center;line-height:1.25;word-break:break-word;max-height:2.6em;overflow:hidden;color:var(--text)}
   .fm-tile .fm-ck{position:absolute;top:6px;left:6px;opacity:0}
   .fm-tile:hover .fm-ck,.fm-tile.sel .fm-ck{opacity:1}
@@ -1634,7 +1634,7 @@ let SET={accent:"coral",accentHex:"#405e6d",theme:"light",wpType:"url",wpUrl:WP_
  wallpaper:"midnight",lang:"en",
  /* Файловый менеджер (общие для обеих тем, не в themeProfiles) */
  fmStart:"/mnt/storage",fmClick:"single",fmHidden:false,fmFoldersFirst:true,
- fmSortKey:"name",fmSortDir:1,fmIconSize:"m",fmThumbs:true,fmDateFmt:"dmy_hm",fmUpPar:2,fmTabSize:2,
+ fmSortKey:"name",fmSortDir:1,fmIconSize:"m",fmThumbs:true,fmThumbFit:"contain",fmDateFmt:"dmy_hm",fmUpPar:2,fmTabSize:2,
  themeProfiles:{
   light:{accent:"coral",accentHex:"#405e6d",radius:.65,shadow:"lg",winShadow:true,dockShadow:false,tileShadow:true,textContrast:1.35,elevStep:.28,elevLight:.05,mbOp:0,dockOp:3,wdgOp:15,mbBlur:0,dockBlur:0,wdgBlur:1,winBlur:60,mbSat:100,dockSat:100,wdgSat:90,winSat:100,winNoise:22,deskLc:"",deskShadow:false,autoContrast:true,dockTiles:true,dockLabels:true,fxDim:34,fxBlur:30,fxNoise:100,deskGlass:true,deskTileOp:85,deskTileBlur:2,mbGrad:false,mbGradH:80,mbGradInt:40,mbGradOp:100},
   dark:{accent:"green",accentHex:"#00fbff",radius:.65,shadow:"lg",winShadow:true,dockShadow:false,tileShadow:true,textContrast:1.4,elevStep:.06,elevLight:.06,mbOp:0,dockOp:16,wdgOp:11,mbBlur:0,dockBlur:39,wdgBlur:0,winBlur:60,mbSat:85,dockSat:90,wdgSat:90,winSat:100,winNoise:22,deskLc:"",deskShadow:false,autoContrast:true,dockTiles:true,dockLabels:true,fxDim:44,fxBlur:27,fxNoise:100,deskGlass:true,deskTileOp:58,deskTileBlur:8,mbGrad:false,mbGradH:110,mbGradInt:60,mbGradOp:100}
@@ -1720,6 +1720,8 @@ function cycleTheme(){SET.theme=(SET.theme==="dark"?"light":"dark");applySetting
 function paintWallRefresh(){const wr=document.getElementById("wallRefresh");if(!wr)return;if(!wr._wired){wr.onclick=refreshWall;wr._wired=1;}wr.innerHTML=svg("refresh",18);wr.style.display=(SET.wpType==="url"&&SET.wpVer)?"flex":"none";}
 function applySettings(){
  const root=document.documentElement;
+ // миниатюры: вписывать целиком (contain) или заполнять с обрезкой (cover)
+ root.style.setProperty("--thumb-fit",SET.fmThumbFit==="cover"?"cover":"contain");
  if(SET.theme==="auto")root.removeAttribute("data-theme");else root.setAttribute("data-theme",SET.theme);
  // смена активной темы → снять текущие значения в профиль старой, поднять профиль новой
  const th=isLight()?"light":"dark";
@@ -3430,7 +3432,11 @@ function cmMode(name){const e=(name.split(".").pop()||"").toLowerCase();
  if(e==="css")return "css";
  if(/^(conf|cfg|ini|properties|toml)$/.test(e))return "properties";
  return null;}
-const isImgName=n=>/\.(png|jpe?g|gif|webp|svg|bmp|ico|avif)$/i.test(n);
+const isImgName=n=>/\.(png|jpe?g|gif|webp|svg|bmp|ico|avif|heic|heif|tiff?)$/i.test(n);
+// HEIC/HEIF/TIFF браузер не рисует. Панель собирает их в JPEG (heic — через libheif,
+// иначе ffmpeg взял бы одну плитку из грида). Скачивание по-прежнему отдаёт оригинал.
+const needsConv=n=>/\.(heic|heif|tiff?)$/i.test(n);
+const imgSrc=e=>(needsConv(e.name)?"/api/fs/view?path=":"/api/fs/raw?path=")+encodeURIComponent(e.path);
 const THUMB_RE=/\.(png|jpe?g|gif|webp|bmp|ico|avif|tiff?|svg|heic|heif|mp4|mkv|avi|mov|webm|m4v|ogv|wmv|flv|3gp|mpe?g|mp3|flac|m4a|aac|ogg|opus|wma|pdf)$/i;
 const thumbable=n=>THUMB_RE.test(n);
 const isVidName=n=>/\.(mp4|webm|mov|m4v|ogv|mkv|avi|wmv|flv|3gp|mpe?g|ts)$/i.test(n);
@@ -3457,7 +3463,7 @@ function viewerRender(w){const V=w._V,e=V.sibs[V.idx];if(!e)return;
  if(img)tools=`<button data-a="zo" title="Отдалить (−)">−</button><button data-a="zr" title="Вписать (0)">⤢</button><button data-a="zi" title="Приблизить (+)">＋</button><button data-a="rot" title="Повернуть (R)">⟳</button><button data-a="full" title="Во весь экран (F)">${svg("expand",14)}</button>`;
  else if(!vid)tools=`<button data-a="full" title="Во весь экран (F)">${svg("expand",14)}</button>`;
  let media;
- if(img)media=`<img id="vwM" src="${raw}" draggable="false" class="grab">`;
+ if(img)media=`<img id="vwM" src="${imgSrc(e)}" draggable="false" class="grab">`;
  else if(vid)media=`<div class="vp" id="vp"><video id="vwM" src="${raw}" autoplay playsinline></video><div class="vp-ctl"><button data-v="play" title="Пауза/пуск (пробел)">${PLAY_SVG}</button><span class="vp-t" id="vpCur">0:00</span><div class="vp-seek" id="vpSeek"><div class="vp-buf" id="vpBuf"></div><div class="vp-prog" id="vpProg"></div></div><span class="vp-t" id="vpDur">0:00</span><button data-v="mute" title="Звук (M)">${VOL_SVG}</button><input type="range" class="vp-vol" id="vpVol" min="0" max="1" step="0.05" value="1"><button data-v="spd" class="vp-spd" title="Скорость">1×</button><button data-v="aud" class="vp-spd" title="Аудиодорожка" style="display:none">A1</button><button data-v="cc" title="Субтитры">CC</button><button data-v="pip" title="Картинка-в-картинке">⧉</button><button data-v="tc" title="Транскодировать (для несовместимых кодеков)">⚙</button><button data-v="full" title="Во весь экран (F)">${svg("expand",20)}</button></div></div>`;
  else media=`<audio id="vwM" src="${raw}" controls autoplay></audio>`;
  body.innerHTML=`<div class="vw"><div class="vw-bar"><span class="vw-t">${esc(e.name)}</span><span class="vw-i">${multi?(V.idx+1)+" / "+V.sibs.length:""}</span>${tools}${dlA}</div><div class="vw-stage" id="vwStage">${nav}${media}</div></div>`;
@@ -3880,7 +3886,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
      else if(ev.key==="ArrowLeft"){ev.preventDefault();ev.stopPropagation();step(-1);}
      else if(ev.key==="Enter"){ev.preventDefault();ev.stopPropagation();const e=curArr[i];close();if(e)openEntry(e);}};
    async function draw(){const e=curArr[i];if(!e){close();return;}const raw="/api/fs/raw?path="+encodeURIComponent(e.path);let inner;
-     if(isImgName(e.name))inner=`<img src="${raw}">`;
+     if(isImgName(e.name))inner=`<img src="${imgSrc(e)}">`;
      else if(isVidName(e.name))inner=`<video src="${raw}" controls autoplay></video>`;
      else if(isAudName(e.name))inner=`<audio src="${raw}" controls autoplay style="width:70%"></audio>`;
      else{const r=await api("/api/fs/read?path="+encodeURIComponent(e.path));
@@ -4307,7 +4313,7 @@ function openFileWin(e){openWin("ed:"+e.path,e.name,body=>{
  const draw=async()=>{const r=await api("/api/fs/read?path="+encodeURIComponent(e.path));
    if(!r||!r.ok){body.innerHTML=`<div class="fm-empty">${esc((r&&r.log)||"не удалось открыть")}</div>`;return;}
    if(r.binary){const raw="/api/fs/raw?path="+encodeURIComponent(e.path);let media;
-     if(isImgName(e.name))media=`<img src="${raw}" alt="">`;
+     if(isImgName(e.name))media=`<img src="${imgSrc(e)}" alt="">`;
      else if(/\.pdf$/i.test(e.name))media=`<iframe src="${raw}" style="width:100%;height:100%;border:0;background:#fff"></iframe>`;
      else if(/\.(mp4|webm|mov|m4v|ogv)$/i.test(e.name))media=`<video src="${raw}" controls style="max-width:100%;max-height:100%"></video>`;
      else if(/\.(mp3|wav|ogg|flac|m4a|aac)$/i.test(e.name))media=`<audio src="${raw}" controls style="width:92%"></audio>`;
@@ -4806,7 +4812,7 @@ function wireLook(lb){
 }
 function filesTab(tc){
  const SZ=SET.fmIconSize||"m",CL=SET.fmClick||"single",SK=SET.fmSortKey||"name",SD=SET.fmSortDir===-1?-1:1,
-   VW=SET.fmView||"list",DF=SET.fmDateFmt||"dmy_hm",UP=Math.max(1,Math.min(4,+SET.fmUpPar||2)),TS=[2,4,8].includes(+SET.fmTabSize)?+SET.fmTabSize:2;
+   VW=SET.fmView||"list",FIT=SET.fmThumbFit==="cover"?"cover":"contain",DF=SET.fmDateFmt||"dmy_hm",UP=Math.max(1,Math.min(4,+SET.fmUpPar||2)),TS=[2,4,8].includes(+SET.fmTabSize)?+SET.fmTabSize:2;
  const seg=(id,opts,cur)=>`<div class="seg" id="${id}">${opts.map(([v,t])=>`<button data-v="${v}" class="${String(cur)===String(v)?"on":""}">${t}</button>`).join("")}</div>`;
  const row=(t,d,ctl,tip)=>`<div class="srow"><div class="srow-l"><div class="srow-t">${t}${tip?tipHTML(tip):""}</div>${d?`<div class="srow-d">${d}</div>`:""}</div><div class="srow-c">${ctl}</div></div>`;
  tc.innerHTML=`
@@ -4826,6 +4832,7 @@ function filesTab(tc){
    ${row("Вид по умолчанию","",seg("fmView",[["list","Список"],["grid","Плитка"]],VW))}
    ${row("Размер значков и подписей","",seg("fmIconSize",[["s","S"],["m","M"],["l","L"]],SZ),"Размер иконок, превью И шрифта названий папок/файлов — мельче/крупнее (S/M/L). В режиме плитки заметнее всего.")}
    ${pToggle("Миниатюры (превью)","Показывать превью картинок, видео, PDF и обложек аудио. Выключи ради экономии CPU на больших папках.","fmThumbs","эскизы вместо значков")}
+   ${row("Кадрирование миниатюр","",seg("fmThumbFit",[["contain","Вписать"],["cover","Заполнить"]],FIT),"«Вписать» — видно всю картинку целиком. «Заполнить» — превью растянуто на всю плитку, края обрезаются.")}
   </div>
   <div class="set-card"><div class="set-grp">Кэш миниатюр</div>
    <div class="mon-note" style="margin:0 0 8px">Превью хранятся в <span class="mono">/var/cache/nas-thumbs</span>. Сейчас: <b id="fmCacheStat">…</b></div>
@@ -4845,7 +4852,7 @@ function filesTab(tc){
  const setK=(k,cast)=>v=>{SET[k]=cast?cast(v):v;saveSettings();apply();};
  wireSeg("fmClick",setK("fmClick"));wireSeg("fmSortKey",setK("fmSortKey"));wireSeg("fmSortDir",setK("fmSortDir",v=>+v));
  wireSeg("fmView",setK("fmView"));wireSeg("fmIconSize",setK("fmIconSize"));wireSeg("fmDateFmt",setK("fmDateFmt"));
- wireSeg("fmUpPar",setK("fmUpPar",v=>+v));wireSeg("fmTabSize",setK("fmTabSize",v=>+v));
+ wireSeg("fmThumbFit",v=>{SET.fmThumbFit=v;saveSettings();document.documentElement.style.setProperty("--thumb-fit",v==="cover"?"cover":"contain");});wireSeg("fmUpPar",setK("fmUpPar",v=>+v));wireSeg("fmTabSize",setK("fmTabSize",v=>+v));
  const st=tc.querySelector("#fmStart");st.onchange=()=>{SET.fmStart=st.value.trim()||"/mnt/storage";saveSettings();};
  const statEl=tc.querySelector("#fmCacheStat");
  const refreshStat=async()=>{const s=await api("/api/fs/thumbcache");if(statEl&&s)statEl.textContent=fmtB(s.bytes||0)+" · "+(s.count||0)+" файлов";};

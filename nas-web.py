@@ -3962,7 +3962,27 @@ _THUMB_IMG = {"png","jpg","jpeg","gif","webp","bmp","ico","avif","tif","tiff","s
 _THUMB_VID = {"mp4","mkv","avi","mov","webm","m4v","ogv","wmv","flv","3gp","mpg","mpeg"}
 _THUMB_AUD = {"mp3","flac","m4a","aac","ogg","opus","wma"}
 _THUMB_PDF = {"pdf"}
+# HEIC с айфона нарезан плитками 512×512 (напр. 8×6 для 4032×3024). ffmpeg читает
+# его mov-демуксером и отдаёт ПЕРВУЮ ПЛИТКУ — миниатюра получалась куском угла.
+# libheif (heif-convert) собирает картинку целиком. TIFF браузеры не рисуют вовсе.
+_HEIF_EXT  = {"heic","heif"}
+_VIEW_CONV = {"heic","heif","tif","tiff"}   # что нужно перегнать в JPEG для показа
+VIEW_PX    = 2560
 _thumb_sem = threading.Semaphore(3)   # ограничить одновременный ffmpeg
+
+def _ext(name):
+    return name.rsplit(".", 1)[-1].lower() if "." in name else ""
+
+def _heif_decode(src, out_png):
+    """HEIC/HEIF → PNG через libheif. True, если получилось."""
+    if not shutil.which("heif-convert"):
+        return False
+    try:
+        r = subprocess.run(["heif-convert", src, out_png],
+                           capture_output=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return r.returncode == 0 and os.path.isfile(out_png) and os.path.getsize(out_png) > 0
 
 def thumb_kind(name):
     e = name.rsplit(".", 1)[-1].lower() if "." in name else ""
@@ -4007,8 +4027,16 @@ def gen_thumb(src):
     with _thumb_sem:
         try:
             if kind == "img":
+                # HEIC/HEIF сначала собираем через libheif — иначе ffmpeg возьмёт одну плитку
+                if _ext(src) in _HEIF_EXT:
+                    heif_png = tp + "." + uniq + ".heif.png"
+                    if not _heif_decode(src, heif_png):
+                        raise RuntimeError("heif-convert не смог")
+                    ff_in = heif_png
+                else:
+                    ff_in = src
                 # прозрачность PNG/WebP → подкладываем белый фон (иначе JPEG рисует мусор на месте альфы)
-                cmd = ["ffmpeg","-y","-v","error","-i",src,"-filter_complex",
+                cmd = ["ffmpeg","-y","-v","error","-i",ff_in,"-filter_complex",
                        "color=c=white:s=2x2[bg];[0:v]%s[fg];[bg][fg]scale2ref[bg2][fg2];[bg2][fg2]overlay=format=auto[o]" % scale,
                        "-map","[o]","-frames:v","1",tmp]
             elif kind == "vid":
@@ -4041,7 +4069,7 @@ def gen_thumb(src):
         finally:
             # подчистить все временные файлы этого вызова (в т.ч. варианты pdftoppm base-*.jpg)
             try:
-                for leftover in glob.glob(tp + "." + uniq + ".tmp.jpg") + glob.glob(tp[:-4] + "." + uniq + "*.jpg"):
+                for leftover in glob.glob(tp + "." + uniq + "*") + glob.glob(tp[:-4] + "." + uniq + "*.jpg"):
                     try: os.remove(leftover)
                     except OSError: pass
             except OSError:
@@ -5895,8 +5923,19 @@ if [ "${IMPORT_EJECT:-0}" = "1" ] && [ -n "$pk" ]; then
       umount "$mp" 2>>"$LOG" || udisksctl unmount -b "$part" >>"$LOG" 2>&1 || true
     done
   done
-  udisksctl power-off -b "/dev/$pk" >>"$LOG" 2>&1 || eject "/dev/$pk" >>"$LOG" 2>&1 || true
-  log "eject /dev/$pk"
+  sync
+  # Сначала мягко извлекаем НОСИТЕЛЬ, и только если не вышло — обесточиваем УСТРОЙСТВО.
+  # У картридера power-off убирает с шины сам ридер: вставлять карту потом некуда,
+  # пока не передёрнешь кабель. eject же выбрасывает карту, ридер остаётся живым и
+  # следующая вставка снова запускает импорт. Для флешки eject останавливает
+  # устройство — данные сброшены, вынимать безопасно.
+  if eject "/dev/$pk" >>"$LOG" 2>&1; then
+    log "eject media /dev/$pk"
+  elif udisksctl power-off -b "/dev/$pk" >>"$LOG" 2>&1; then
+    log "power-off /dev/$pk"
+  else
+    log "eject /dev/$pk не удался"
+  fi
 fi
 '''
 # матчим по ID_USB_DRIVER (usb-storage/uas), а не ID_BUS==usb — иначе USB-SATA
@@ -5964,6 +6003,50 @@ def usb_import_progress():
             job["speed"], job["eta"] = m.group(3), m.group(4)
         jobs.append(job)
     return {"jobs": jobs}
+
+def _view_path(src):
+    h = hashlib.md5(src.encode("utf-8", "surrogatepass")).hexdigest()
+    return os.path.join(THUMBS_DIR, h[:2], h + ".view.jpg")
+
+def gen_view(src):
+    """Крупный JPEG для просмотрщика: HEIC/HEIF и TIFF браузеры не рисуют.
+    Кэшируется рядом с миниатюрами, чистится тем же GC."""
+    if not os.path.isfile(src) or _ext(src) not in _VIEW_CONV:
+        return None
+    vp = _view_path(src)
+    if os.path.isfile(vp) and _thumb_fresh(src, vp):
+        return vp
+    if not shutil.which("ffmpeg"):
+        return None
+    try:
+        os.makedirs(os.path.dirname(vp), exist_ok=True)
+    except OSError:
+        return None
+    uniq = "%d.%s" % (os.getpid(), secrets.token_hex(4))
+    tmp = vp + "." + uniq + ".tmp.jpg"
+    heif_png = vp + "." + uniq + ".heif.png"
+    ok = False
+    with _thumb_sem:
+        try:
+            ff_in = src
+            if _ext(src) in _HEIF_EXT:
+                if not _heif_decode(src, heif_png):
+                    raise RuntimeError("heif-convert не смог")
+                ff_in = heif_png
+            scale = ("scale='min(%d,iw)':'min(%d,ih)'"
+                     ":force_original_aspect_ratio=decrease" % (VIEW_PX, VIEW_PX))
+            r = subprocess.run(["ffmpeg","-y","-v","error","-i",ff_in,"-vf",scale,
+                                "-frames:v","1","-q:v","3",tmp],
+                               capture_output=True, timeout=90)
+            if r.returncode == 0 and os.path.isfile(tmp) and os.path.getsize(tmp) > 0:
+                os.replace(tmp, vp); ok = True
+        except Exception:
+            ok = False
+        finally:
+            for leftover in glob.glob(vp + "." + uniq + "*"):
+                try: os.remove(leftover)
+                except OSError: pass
+    return vp if ok else None
 
 def _usb_sh_sync():
     """Перезаписать /usr/local/bin/nas-usb-import.sh, если он разошёлся с кодом.
@@ -6788,6 +6871,10 @@ class H(BaseHTTPRequestHandler):
                               (q.get("dl") or ["0"])[0] == "1")
             elif p == "/api/fs/thumb":
                 self._send_thumb((q.get("path") or [""])[0])
+            elif p == "/api/fs/view":
+                vp = gen_view(os.path.realpath((q.get("path") or [""])[0]))
+                if vp: self._sendraw(vp)
+                else: self.send_error(404)
             elif p == "/api/fs/thumbcache":
                 b, n = thumbs_cache_stat()
                 self._json({"bytes": b, "count": n})
