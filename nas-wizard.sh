@@ -2368,6 +2368,10 @@ TXT
 # nas-wizard: что показывать при входе по SSH
 MOTD_TEXT=1
 MOTD_INFO=1
+# чужие куски приветствия (применяет nas-web при старте и при сохранении):
+MOTD_UNAME=1
+MOTD_COCKPIT=1
+MOTD_LASTLOG=1
 CONF
 
     run mkdir -p /etc/update-motd.d

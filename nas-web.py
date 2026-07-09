@@ -6178,22 +6178,78 @@ def wallpaper_upload(b64):
 #  через `cat` — не исполняется, поэтому экранировать нечего.
 # --------------------------------------------------------------------------- #
 MOTD_CONF   = "/etc/nas-wizard/motd.conf"
+# Приветствие складывается из нескольких источников, и наш скрипт — лишь один из них.
+# pam_motd выполняет ВСЁ из update-motd.d и печатает файлы из /etc/motd.d,
+# а «Last login» добавляет уже sshd. Дадим по тумблеру на каждый.
+MOTD_UNAME_SH   = "/etc/update-motd.d/10-uname"
+MOTD_COCKPIT_LN = "/etc/motd.d/cockpit"
+MOTD_COCKPIT_TARGET = "../../run/cockpit/issue"
+MOTD_SSHD_CONF  = "/etc/ssh/sshd_config.d/99-nas-motd.conf"
 MOTD_TXT    = "/etc/nas-wizard/motd.txt"
 MOTD_SCRIPT = "/etc/update-motd.d/20-nas-os"
 MOTD_MAX    = 4000
 
+_MOTD_FLAGS = {"MOTD_TEXT": "show_text", "MOTD_INFO": "show_info",
+               "MOTD_UNAME": "show_uname", "MOTD_COCKPIT": "show_cockpit",
+               "MOTD_LASTLOG": "show_lastlog"}
+
 def motd_load():
-    cfg = {"text": _read(MOTD_TXT), "show_text": True, "show_info": True,
-           "installed": os.path.isfile(MOTD_SCRIPT)}
+    cfg = {"text": _read(MOTD_TXT), "installed": os.path.isfile(MOTD_SCRIPT)}
+    for v in _MOTD_FLAGS.values():
+        cfg[v] = True
     for line in _read(MOTD_CONF).splitlines():
         line = line.strip()
         if line.startswith("#") or "=" not in line:
             continue
         k, _, v = line.partition("=")
-        v = v.strip().strip('"').strip("'")
-        if k.strip() == "MOTD_TEXT":   cfg["show_text"] = v == "1"
-        elif k.strip() == "MOTD_INFO": cfg["show_info"] = v == "1"
+        k = k.strip()
+        if k in _MOTD_FLAGS:
+            cfg[_MOTD_FLAGS[k]] = v.strip().strip('"').strip("'") == "1"
+    # состояние на диске важнее записанного: файлы мог поменять кто-то ещё
+    cfg["has_uname"] = os.path.isfile(MOTD_UNAME_SH)
+    cfg["has_cockpit"] = os.path.isdir(os.path.dirname(MOTD_COCKPIT_LN))
     return cfg
+
+def _motd_extras_apply(cfg):
+    """Погасить/вернуть чужие куски приветствия. Зовётся из motd_save и при старте,
+    чтобы настройка пережила переустановку (motd.conf лежит в бэкапе настроек)."""
+    # 1) строка ядра: снимаем бит исполнения, pam_motd её пропустит
+    if os.path.isfile(MOTD_UNAME_SH):
+        try:
+            os.chmod(MOTD_UNAME_SH, 0o755 if cfg.get("show_uname", True) else 0o644)
+        except OSError:
+            pass
+    # 2) баннер Cockpit: симлинк в /etc/motd.d
+    try:
+        d = os.path.dirname(MOTD_COCKPIT_LN)
+        if cfg.get("show_cockpit", True):
+            if os.path.isdir(d) and not os.path.lexists(MOTD_COCKPIT_LN):
+                os.symlink(MOTD_COCKPIT_TARGET, MOTD_COCKPIT_LN)
+        elif os.path.lexists(MOTD_COCKPIT_LN):
+            os.remove(MOTD_COCKPIT_LN)
+    except OSError:
+        pass
+    # 3) «Last login» печатает sshd, не pam_motd
+    try:
+        want = not cfg.get("show_lastlog", True)
+        have = os.path.isfile(MOTD_SSHD_CONF)
+        if want and not have:
+            os.makedirs(os.path.dirname(MOTD_SSHD_CONF), exist_ok=True)
+            with open(MOTD_SSHD_CONF, "w") as f:
+                f.write("# nas-wizard: строку «Last login» отключили в панели\nPrintLastLog no\n")
+        elif not want and have:
+            os.remove(MOTD_SSHD_CONF)
+        else:
+            return
+        if _run(["sshd", "-t"], timeout=8)["ok"]:          # не перезагружать битый конфиг
+            _run(["systemctl", "reload", "ssh"], timeout=10)
+        elif have and not want:
+            pass
+        else:                                              # конфиг не принят — откатываем
+            try: os.remove(MOTD_SSHD_CONF)
+            except OSError: pass
+    except OSError:
+        pass
 
 def motd_preview():
     if not os.path.isfile(MOTD_SCRIPT):
@@ -6213,10 +6269,11 @@ def motd_save(b):
             f.write(text if text.endswith("\n") or not text else text + "\n")
         with open(MOTD_CONF, "w") as f:
             f.write("# nas-wizard: что показывать при входе по SSH\n")
-            f.write("MOTD_TEXT=%d\n" % (1 if b.get("show_text", True) else 0))
-            f.write("MOTD_INFO=%d\n" % (1 if b.get("show_info", True) else 0))
+            for key, name in _MOTD_FLAGS.items():
+                f.write("%s=%d\n" % (key, 1 if b.get(name, True) else 0))
     except OSError as e:
         return {"ok": False, "log": str(e)}
+    _motd_extras_apply(motd_load())
     return {"ok": True, "log": "сохранено", "preview": motd_preview()}
 
 USB_IMPORT_CONF = "/etc/nas-wizard/usb-import.conf"
@@ -7944,6 +8001,10 @@ def main():
         pass
     try:
         _nb_migrate()       # старый плоский конфиг бэкапа -> список профилей
+    except Exception:
+        pass
+    try:
+        _motd_extras_apply(motd_load())   # чужие куски приветствия — по настройке
     except Exception:
         pass
     threading.Thread(target=monitor_loop, daemon=True).start()

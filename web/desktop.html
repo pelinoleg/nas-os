@@ -5711,18 +5711,22 @@ function systemTab(tc){withSysc(tc,()=>{const s=SYSC.system||{};
   <div class="set-grp">Приветствие в SSH${tipHTML("Что видно в терминале при входе по SSH. Рисует pam_motd через /etc/update-motd.d/20-nas-os.")}</div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Свой текст</div><div class="srow-d">произвольная шапка перед сводкой</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="moT"><span class="sl"></span></label></div></div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Сводка о системе</div><div class="srow-d">аптайм, температура, память, пул, адрес, контейнеры</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="moI"><span class="sl"></span></label></div></div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Строка ядра${tipHTML("Первая строка «Linux pi5 6.18… aarch64». Её печатает /etc/update-motd.d/10-uname — снимаем бит исполнения, файл остаётся на месте.")}</div><div class="srow-d">Linux pi5 … aarch64</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="moU"><span class="sl"></span></label></div></div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Баннер Cockpit${tipHTML("Строка «Web console: https://…:9090/». Её добавляет символическая ссылка /etc/motd.d/cockpit — убираем ссылку, сам Cockpit продолжает работать.")}</div><div class="srow-d">Web console: https://…:9090/</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="moC"><span class="sl"></span></label></div></div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Последний вход${tipHTML("Строку «Last login: …» печатает сам sshd, а не приветствие. Отключается через PrintLastLog no в /etc/ssh/sshd_config.d/, конфиг проверяется перед перезагрузкой службы.")}</div><div class="srow-d">Last login: … from …</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="moL"><span class="sl"></span></label></div></div>
   <textarea id="moTx" class="motd-ta" spellcheck="false" placeholder="Текст приветствия — только латиница"></textarea>
   <div class="mon-note">${svg("info",13)} Текст печатается буквально: команды и переменные внутри не выполняются. Пишите латиницей — кириллицу терминал показывает не везде.</div>
   <div class="usb-chips" style="margin-top:8px"><span class="usb-lbl">Подстановки:</span>${
     ["{host}","{uptime}","{load}","{temp}","{memory}","{system}","{pool}","{ip}","{iface}","{panel}","{containers}","{date}","{time}"]
       .map(t=>`<button class="usb-tok" data-mo="${att(t)}">${esc(t)}</button>`).join("")}</div>
-  <div class="set-grp">Предпросмотр</div>
+  <div class="set-grp">Предпросмотр${tipHTML("Показан только наш блок. Строку ядра, баннер Cockpit и «Last login» печатают другие компоненты — их видно лишь при настоящем входе по SSH.")}</div>
   <pre class="motd-pv" id="moPv"></pre>
   <div class="set-savebar"><span class="sb-left">Приветствие в SSH</span><button class="btn sm pri" id="moSave">${svg("save",13)} Сохранить</button></div>`;
  wireSc(tc);
  // SSH-приветствие. Предпросмотр ставим textContent'ом: через innerHTML его
  // перехватил бы i18n и начал переводить вывод терминала.
  {const tx=tc.querySelector("#moTx"),cbT=tc.querySelector("#moT"),cbI=tc.querySelector("#moI"),
+   cbU=tc.querySelector("#moU"),cbC=tc.querySelector("#moC"),cbL=tc.querySelector("#moL"),
    pv=tc.querySelector("#moPv"),sv=tc.querySelector("#moSave");
   pv.textContent="…";
   // вставка токена в позицию курсора
@@ -5731,12 +5735,18 @@ function systemTab(tc){withSysc(tc,()=>{const s=SYSC.system||{};
     tx.value=tx.value.slice(0,p)+b.dataset.mo+tx.value.slice(tx.selectionEnd||p);
     tx.focus();const np=p+b.dataset.mo.length;tx.setSelectionRange(np,np);});
   const fill=r=>{const c=(r&&r.config)||{};tx.value=c.text||"";cbT.checked=c.show_text!==false;
-    cbI.checked=c.show_info!==false;pv.textContent=(r&&r.preview)||"";
+    cbI.checked=c.show_info!==false;cbU.checked=c.show_uname!==false;
+    cbC.checked=c.show_cockpit!==false;cbL.checked=c.show_lastlog!==false;
+    // эти строки печатают чужие компоненты: нечего показывать — нечего и выключать
+    cbU.closest(".srow").style.display=c.has_uname===false?"none":"";
+    cbC.closest(".srow").style.display=c.has_cockpit===false?"none":"";
+    pv.textContent=(r&&r.preview)||"";
     sv.disabled=c.installed===false;};
   api("/api/motd").then(fill);
   sv.onclick=async()=>{
     const rr=await api("/api/motd",{method:"POST",body:JSON.stringify(
-      {text:tx.value,show_text:cbT.checked,show_info:cbI.checked})});
+      {text:tx.value,show_text:cbT.checked,show_info:cbI.checked,
+       show_uname:cbU.checked,show_cockpit:cbC.checked,show_lastlog:cbL.checked})});
     if(rr&&rr.ok&&rr.preview!=null)pv.textContent=rr.preview;
     if(rr&&rr.ok)flashSaved(sv);
     toast(LIVE?(rr&&rr.ok?"Сохранено ✓":"Ошибка: "+((rr&&rr.log)||"?")):"Демо");};}
