@@ -928,7 +928,8 @@
   .fm-row.fm-hid:hover,.fm-tile.fm-hid:hover,.fm-row.fm-hid.sel,.fm-tile.fm-hid.sel{opacity:.85}
   .fm-row.sel{background:var(--accent-soft);color:var(--accent)}
   .fm-row .fi{flex:none;color:var(--dim);display:grid;place-items:center;width:28px;height:28px;position:relative}
-  .fm-row .fi .thumb{position:absolute;inset:0;width:100%;height:100%;object-fit:var(--thumb-fit,contain);border-radius:4px}
+  .fm-row .fi .thumb{position:absolute;inset:0;width:100%;height:100%;object-fit:var(--thumb-fit,contain);border-radius:4px;opacity:0;transition:opacity .12s}
+  .fm-row .fi.thumbed .thumb{opacity:1}
   .fm-row.dir .fi{color:var(--accent-2)}
   .fm-row .fn{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
     display:flex;align-items:baseline;gap:0}
@@ -1110,7 +1111,8 @@
   .fm-tile:hover{background:var(--sel);border-color:var(--line)}
   .fm-tile.sel{background:var(--accent-soft);border-color:var(--accent-line)}
   .fm-tile .ti{position:relative;width:64px;height:64px;display:grid;place-items:center;color:var(--dim)}.fm-tile.dir .ti{color:var(--accent-2)}
-  .fm-tile .ti .thumb{position:absolute;inset:0;width:100%;height:100%;object-fit:var(--thumb-fit,contain);border-radius:6px}
+  .fm-tile .ti .thumb{position:absolute;inset:0;width:100%;height:100%;object-fit:var(--thumb-fit,contain);border-radius:6px;opacity:0;transition:opacity .12s}
+  .fm-tile .ti.thumbed .thumb{opacity:1}
   /* превью загрузилось — убираем типовой значок из-под него, иначе он торчит
      по краям вписанной картинки. Пока превью не пришло, значок виден. */
   .fi.thumbed>svg.fmico,.ti.thumbed>svg.fmico{visibility:hidden}
@@ -3531,7 +3533,7 @@ function thumbPause(v){
 function tqPump(){
  while(!TQ.paused&&TQ.active<TQ.max&&TQ.q.length){
   const it=TQ.q.shift();
-  if(!it.img.isConnected)continue;                  // строку уже перерисовали
+  if(!it.img.isConnected||it.img.src)continue;      // строку перерисовали или уже грузим
   TQ.active++;
   const done=()=>{TQ.active--;tqPump();};
   it.img.onload=()=>{it.img.parentNode&&it.img.parentNode.classList.add("thumbed");done();};
@@ -4018,9 +4020,10 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
          listBox.classList.remove("drop");
          const items=await dropItems(ev.dataTransfer);if(items.length)doUpload(items,e.path);});
      }
+     listBox.appendChild(node);
+     // ТОЛЬКО после вставки: до неё img.isConnected === false, и очередь его отбросит
      const th=node.querySelector(".thumb[data-th]");
-     if(th)thumbEnqueue(th,th.dataset.th);
-     listBox.appendChild(node);});
+     if(th)thumbEnqueue(th,th.dataset.th);});
    renderStatus();}
  const dirSig=es=>(es||[]).map(e=>e.name+"\u0000"+e.size+"\u0000"+e.mtime).join("\u0001");
  let lastSig="";
