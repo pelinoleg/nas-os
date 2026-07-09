@@ -2034,6 +2034,7 @@ echo "$(date '+%F %T') SMART ALERT: ${SMARTD_MESSAGE:-unknown} (${SMARTD_DEVICE:
 ALERT
     run chmod +x /usr/local/bin/nas-smart-alert.sh
     install_notify_helper
+    install_netguard
     if ! grep -qs 'nas-smart-alert' /etc/smartd.conf 2>/dev/null; then
         backup_file /etc/smartd.conf
         write_file /etc/smartd.conf <<'EOF'
@@ -2185,6 +2186,151 @@ curl -fsS -m 12 --retry 2 \
 NOTIFY
     run chmod +x /usr/local/bin/nas-notify.sh
 }
+# ---------------------------------------------------------------------------
+# Сторож сети: «один активный линк за раз» + уведомление о смене сети.
+#
+# Зачем. eth0 и wlan0 живут в одной подсети 192.168.1.0/24. Когда оба подняты,
+# Linux ломается предсказуемо: ARP-flux (оба интерфейса отвечают на ARP за чужой
+# адрес), NM снимает on-link маршрут подсети по ложному ACD-конфликту, ответы
+# соседям уходят через шлюз, путь становится асимметричным — и роутер, видя лишь
+# половину TCP-сессии, впрыскивает RST. Симптом: ping идёт, а HTTP висит.
+# Лечится тем, что активным держим ровно один интерфейс.
+# ---------------------------------------------------------------------------
+install_netguard() {
+    write_file /usr/local/bin/nas-netguard.sh <<'GUARD'
+#!/bin/bash
+# nas-wizard: один активный линк за раз + сторож сети.
+# Проводной eth0 — главный, Wi-Fi wlan0 — резерв. Пока eth0 реально рабочий
+# (есть carrier, адрес и отзывается шлюз) — Wi-Fi отключён. Как только провод
+# пропал или завис (у macb на Pi 5 бывает TX stall) — Wi-Fi возвращается.
+set -u
+ETH="${NAS_ETH:-eth0}"
+WIFI="${NAS_WIFI:-wlan0}"
+STATE="${NAS_NETGUARD_STATE:-/var/lib/nas-wizard/netguard.state}"
+LOCK="${NAS_NETGUARD_LOCK:-/run/nas-netguard.lock}"
+
+notify(){ [ -x /usr/local/bin/nas-notify.sh ] && /usr/local/bin/nas-notify.sh "$1" "$2" "${3:-0}" >/dev/null 2>&1 || true; }
+logj(){ logger -t nas-netguard -- "$*" 2>/dev/null || true; }
+
+# таймер и NM-dispatcher могут выстрелить одновременно
+exec 9>"$LOCK" 2>/dev/null || exit 0
+flock -n 9 || exit 0
+
+has_nm(){ command -v nmcli >/dev/null 2>&1; }
+dev_state(){ nmcli -t -f DEVICE,STATE device 2>/dev/null | awk -F: -v d="$1" '$1==d{print $2; exit}'; }
+ip4(){ ip -4 -o addr show dev "$1" scope global 2>/dev/null | awk '{print $4; exit}'; }
+
+eth_healthy(){
+  [ -e "/sys/class/net/$ETH" ] || return 1
+  [ "$(cat "/sys/class/net/$ETH/carrier" 2>/dev/null || echo 0)" = "1" ] || return 1
+  [ -n "$(ip4 "$ETH")" ] || return 1
+  local g
+  g="$(ip -4 route show default dev "$ETH" 2>/dev/null | awk '{print $3; exit}')"
+  [ -n "$g" ] || return 1
+  # шлюз может не отвечать на ICMP — тогда пробуем достучаться на канальном уровне
+  ping -c1 -W2 -I "$ETH" "$g" >/dev/null 2>&1 && return 0
+  arping -c1 -w2 -I "$ETH" "$g" >/dev/null 2>&1
+}
+
+# NM иногда снимает on-link маршрут подсети (ложный ACD-конфликт при двух
+# интерфейсах в одной сети). Без него ответы соседям уезжают через шлюз.
+fix_onlink(){
+  local dev="$1" cidr net
+  cidr="$(ip4 "$dev")"; [ -n "$cidr" ] || return 0
+  net="$(python3 -c 'import ipaddress,sys;print(ipaddress.ip_interface(sys.argv[1]).network)' "$cidr" 2>/dev/null)"
+  [ -n "$net" ] || return 0
+  ip -4 route show "$net" dev "$dev" scope link 2>/dev/null | grep -q . && return 0
+  ip -4 route add "$net" dev "$dev" proto kernel scope link src "${cidr%%/*}" 2>/dev/null \
+    && logj "восстановлен on-link маршрут $net dev $dev"
+}
+
+if eth_healthy; then
+  ACTIVE="$ETH"
+  if has_nm && [ "$(dev_state "$WIFI")" = "connected" ]; then
+    logj "провод рабочий — отключаю $WIFI"
+    nmcli device disconnect "$WIFI" >/dev/null 2>&1 || true
+  fi
+else
+  ACTIVE="$WIFI"
+  if has_nm && [ "$(dev_state "$WIFI")" != "connected" ]; then
+    logj "провода нет — поднимаю $WIFI"
+    nmcli device connect "$WIFI" >/dev/null 2>&1 || true
+    sleep 3
+  fi
+fi
+fix_onlink "$ACTIVE"
+
+# смена интерфейса/адреса -> Pushover. Первый прогон только запоминает состояние,
+# чтобы установка и перезагрузка не сыпали уведомлениями.
+CUR_IF="$ACTIVE"
+CUR_IP="$(ip4 "$ACTIVE")"; CUR_IP="${CUR_IP%%/*}"
+[ -n "$CUR_IP" ] || exit 0
+OLD_IF=""; OLD_IP=""
+[ -r "$STATE" ] && . "$STATE"
+if [ "$OLD_IF" != "$CUR_IF" ] || [ "$OLD_IP" != "$CUR_IP" ]; then
+  if [ -n "$OLD_IF" ] && [ "$OLD_IF" != "$CUR_IF" ]; then
+    notify "NAS: сеть переключилась" "Активный интерфейс: $OLD_IF → $CUR_IF"
+  fi
+  if [ -n "$OLD_IP" ] && [ "$OLD_IP" != "$CUR_IP" ]; then
+    notify "NAS: изменился IP" "Было $OLD_IP → стало $CUR_IP"
+  fi
+  mkdir -p "$(dirname "$STATE")" 2>/dev/null || true
+  printf 'OLD_IF=%s\nOLD_IP=%s\n' "$CUR_IF" "$CUR_IP" > "$STATE"
+  logj "активный линк $CUR_IF ($CUR_IP)"
+fi
+GUARD
+    run chmod +x /usr/local/bin/nas-netguard.sh
+    run mkdir -p /var/lib/nas-wizard
+
+    # мгновенная реакция на смену линка. Звать nmcli прямо отсюда нельзя:
+    # NM ждёт завершения dispatcher-скрипта, а nmcli ждёт ответа NM -> дедлок.
+    write_file /etc/NetworkManager/dispatcher.d/50-nas-netguard <<'DISP'
+#!/bin/bash
+# nas-wizard: дёрнуть сторож сети при смене состояния линка (асинхронно!)
+case "${2:-}" in up|down|carrier-up|carrier-down|dhcp4-change) ;; *) exit 0 ;; esac
+case "${1:-}" in eth0|wlan0) ;; *) exit 0 ;; esac
+systemctl start --no-block nas-netguard.service >/dev/null 2>&1 || true
+exit 0
+DISP
+    run chmod 755 /etc/NetworkManager/dispatcher.d/50-nas-netguard
+
+    write_file /etc/systemd/system/nas-netguard.service <<'UNIT'
+[Unit]
+Description=NAS: один активный линк + сторож сети
+After=NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/nas-netguard.sh
+UNIT
+
+    write_file /etc/systemd/system/nas-netguard.timer <<'UNIT'
+[Unit]
+Description=NAS: периодическая проверка сети
+
+[Timer]
+OnBootSec=45s
+OnUnitActiveSec=30s
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target
+UNIT
+
+    # Страховка на окно, пока оба интерфейса подняты: каждый отвечает ARP только
+    # за свой адрес и представляется своим (иначе ARP-flux травит кэш соседей).
+    write_file /etc/sysctl.d/99-nas-arp.conf <<'SYSCTL'
+# nas-wizard: два интерфейса в одной подсети — без этого возможен ARP-flux
+net.ipv4.conf.all.arp_ignore = 1
+net.ipv4.conf.all.arp_announce = 2
+SYSCTL
+    run sysctl -q --system
+
+    run systemctl daemon-reload
+    run systemctl enable --now nas-netguard.timer
+    info "сторож сети включён: eth0 главный, wlan0 резерв, уведомления о смене IP"
+}
+
 setup_snapraid_notify_noninteractive() { :; }   # уведомления настраиваются отдельно (api notify)
 
 # ---------------------------------------------------------------------------
@@ -2585,6 +2731,7 @@ run_api() {
         shares)         api_shares ;;
         backup)         api_keys_run bk ;;
         notify)         api_notify ;;
+        netguard)       install_netguard ;;
         comitup)        mod_comitup ;;
         tailscale)      mod_tailscale ;;
         staticip)       mod_staticip ;;
