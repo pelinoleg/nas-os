@@ -4134,7 +4134,8 @@ function winDiskUsage(initRoot){openWin("__duscan","Анализ места",(bo
  function renderChart(){const box=mainEl.querySelector("#duChart");if(!box)return;
    const ch=(node.ch||[]).filter(x=>x.s>0),total=ch.reduce((s,x)=>s+x.s,0)||node.s||1;
    const cx=130,cy=130,r0=44,r1=showL2?87:118,r2=122,TAU=Math.PI*2;
-   const arc=(ri,ro,a0,a1)=>{const P=(r,a)=>[cx+r*Math.cos(a),cy+r*Math.sin(a)];const laf=(a1-a0)>Math.PI?1:0;
+   const arc=(ri,ro,a0,a1)=>{if(a1-a0>=TAU-1e-4)a1=a0+TAU-1e-4;   // полный круг вырождается в пустую дугу — оставляем волосок
+     const P=(r,a)=>[cx+r*Math.cos(a),cy+r*Math.sin(a)];const laf=(a1-a0)>Math.PI?1:0;
      const A=P(ro,a0),B=P(ro,a1),C=P(ri,a1),D=P(ri,a0);
      return `M${A[0].toFixed(2)} ${A[1].toFixed(2)}A${ro} ${ro} 0 ${laf} 1 ${B[0].toFixed(2)} ${B[1].toFixed(2)}L${C[0].toFixed(2)} ${C[1].toFixed(2)}A${ri} ${ri} 0 ${laf} 0 ${D[0].toFixed(2)} ${D[1].toFixed(2)}Z`;};
    const segs=[];let a=-Math.PI/2;
@@ -4689,6 +4690,9 @@ function filesTab(tc){
  const seg=(id,opts,cur)=>`<div class="seg" id="${id}">${opts.map(([v,t])=>`<button data-v="${v}" class="${String(cur)===String(v)?"on":""}">${t}</button>`).join("")}</div>`;
  const row=(t,d,ctl,tip)=>`<div class="srow"><div class="srow-l"><div class="srow-t">${t}${tip?tipHTML(tip):""}</div>${d?`<div class="srow-d">${d}</div>`:""}</div><div class="srow-c">${ctl}</div></div>`;
  tc.innerHTML=`
+  <div class="set-card"><div class="set-grp">Анализ места</div>
+   ${row("Что занимает место","круговая карта диска (система / пул / USB), drill-down по папкам",`<button class="btn sm pri" id="fmDU">${svg("chartpie",14)} Открыть анализ</button>`)}
+  </div>
   <div class="set-card"><div class="set-grp">Поведение</div>
    ${row("Стартовая папка","куда открывается менеджер при запуске",`<input class="mono" id="fmStart" value="${att(SET.fmStart||"/mnt/storage")}" placeholder="/mnt/storage" style="width:210px">`,"С какой папки открывается окно «Файлы». По умолчанию — хранилище /mnt/storage.")}
    ${row("Открытие файлов","",seg("fmClick",[["single","Одинарный клик"],["double","Двойной клик"]],CL),"Одинарный — открывать сразу. Двойной — одиночный клик выделяет, открывает двойной (как в настольных ОС).")}
@@ -4711,9 +4715,6 @@ function filesTab(tc){
    ${row("Формат даты","",seg("fmDateFmt",[["dmy_hm","Дата и время"],["dmy","Только дата"],["rel","Относительно"]],DF))}
    ${row("Одновременных загрузок","",seg("fmUpPar",[["1","1"],["2","2"],["3","3"],["4","4"]],UP),"Сколько файлов заливать параллельно при загрузке с компьютера.")}
    ${row("Отступ в редакторе","",seg("fmTabSize",[["2","2"],["4","4"],["8","8"]],TS),"Ширина табуляции и отступа в текстовом редакторе файлов.")}
-  </div>
-  <div class="set-card"><div class="set-grp">Анализ места</div>
-   ${row("Что занимает место","круговая карта диска (система / пул / USB), drill-down по папкам",`<button class="btn sm pri" id="fmDU">${svg("chartpie",14)} Открыть анализ</button>`)}
   </div>`;
  tc.querySelector("#fmDU").onclick=()=>winDiskUsage("/mnt/storage");
  // применить к уже открытому окну «Файлы» на лету (без перезагрузки)
