@@ -3957,11 +3957,35 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
      }
      listBox.appendChild(node);});
    renderStatus();}
+ const dirSig=es=>(es||[]).map(e=>e.name+"\u0000"+e.size+"\u0000"+e.mtime).join("\u0001");
+ let lastSig="";
  async function load(d){const r=await api("/api/fs/list?path="+encodeURIComponent(d));
    if(!r||!r.ok){toast((r&&r.log)||"нет доступа");return;}
    cwd=r.path;tabs[tabI]=r.path;entries=r.entries||[];searchRes=null;sel.clear();filt="";lastIdx=-1;
+   lastSig=dirSig(entries);
    const si=body.querySelector("#fSearch");if(si)si.value="";
    cursor=-1;renderTabs();renderCrumb();renderFav();renderVols();renderList();selUpdate();listBox.focus();}
+
+ /* Auto-refresh: the folder can change under us (uploads, USB import, rsync, another
+    tab). Re-render only when the listing actually differs, and keep the selection and
+    scroll position — a blind load() would throw both away while the user works. */
+ async function refreshQuiet(){
+   if(searchRes)return;                                     // результаты поиска не трогаем
+   if(document.hidden)return;                               // вкладка в фоне — не дёргаем сервер
+   const w=OPEN.__files;if(!w||w.style.display==="none")return;
+   const s=document.getElementById("scrim");if(s&&s.classList.contains("show"))return;  // открыт диалог
+   if(dragPaths)return;                                     // идёт перетаскивание
+   const dir=cwd;
+   const r=await api("/api/fs/list?path="+encodeURIComponent(dir));
+   if(!r||!r.ok||cwd!==dir)return;                          // успели уйти в другую папку
+   const sig=dirSig(r.entries);
+   if(sig===lastSig)return;
+   lastSig=sig;entries=r.entries||[];
+   const top=listBox.scrollTop;
+   [...sel].forEach(p=>{if(!entries.some(e=>e.path===p))sel.delete(p);});  // удалённое снимаем с выделения
+   renderList();selUpdate();listBox.scrollTop=top;}
+ const fmTimer=setInterval(()=>{if(!document.body.contains(body)){clearInterval(fmTimer);return;}
+   refreshQuiet().catch(()=>{});},5000);
  function renderTabs(){const tb=body.querySelector("#fTabs");if(!tb)return;tb.innerHTML="";
    tabs.forEach((p,i)=>{const nm=p.split("/").filter(Boolean).pop()||"/";
      const t=el(`<div class="fm-tab${i===tabI?" on":""}" title="${att(p)}"><span class="fm-tabn">${esc(nm)}</span>${tabs.length>1?`<span class="fm-tabx">${svg("x",11)}</span>`:""}</div>`);
@@ -5975,9 +5999,32 @@ function pushHist(s){const cap=60;const add=(k,v)=>{HIST[k].push(v||0);if(HIST[k
 function sparkSVG(data,color,max){const w=120,h=28,d=(data||[]).slice(-40);if(d.length<2)return `<svg class="spark" viewBox="0 0 ${w} ${h}"></svg>`;
  const mx=max||Math.max(...d,1);const pts=d.map((v,i)=>`${(i/(d.length-1)*w).toFixed(1)},${(h-2-Math.min((v||0)/mx,1)*(h-4)).toFixed(1)}`).join(" ");
  return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none"><polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round"/></svg>`;}
+/* USB-import runs in the background (udev), the panel may be closed. Mirror its
+   jobs into the shared operations centre so the progress is visible everywhere,
+   not only on the USB settings tab. Keyed by device — one op per partition. */
+const USB_OPS={};
+function syncUsbOps(jobs){
+ (jobs||[]).forEach(j=>{
+  let o=USB_OPS[j.dev];
+  if(!o){
+   if(j.status!=="running")return;          // завершённое до открытия панели не воскрешаем
+   o=USB_OPS[j.dev]=opAdd("Импорт с USB");
+  }
+  if(j.status==="running"){
+   const bits=[j.label||j.dev];
+   if(j.bytes!=null)bits.push(fmtB(j.bytes)+(j.total?" из "+fmtB(j.total):""));
+   if(j.speed)bits.push(j.speed);
+   if(j.eta)bits.push("осталось "+j.eta);
+   opSet(o,j.percent==null?null:Math.min(j.percent,100)/100,bits.join(" · "));
+  }else{
+   opEnd(o,j.status==="done",j.status==="done"?("готово · "+(j.dest||"")):(j.status==="aborted"?"прервано":"ошибка"));
+   delete USB_OPS[j.dev];
+  }});}
+
 async function poll(){const s=await api("/api/stats");LAST=s;pushHist(s);paintTray(s);paintSys(s);
  const bn=document.getElementById("brandName");if(bn)bn.textContent=(s.host||location.hostname.split(".")[0]||"pi5")+".local";
  const nr=!!(s&&s.nb_running);if(nr!==NB_RUNNING){NB_RUNNING=nr;renderDock();}
+ syncUsbOps(s&&s.usb_import);
  if(OPEN.__sys&&OPEN.__sys._sub)OPEN.__sys._sub(s);}
 async function pollApps(){const d=await api("/api/desktop");APPS=(d&&d.apps)||[];VOLS=(d&&d.volumes)||[];APPS_LOADED=true;renderApps();paintVols();
  if(OPEN.__files&&OPEN.__files._vols)OPEN.__files._vols();}
