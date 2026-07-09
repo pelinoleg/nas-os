@@ -782,6 +782,10 @@
   .nb-pcrumb .sepc{color:var(--mut)}
   .nb-saved{font-size:12px;color:var(--good);font-weight:600;opacity:0;transition:opacity .2s;margin-left:4px}
   .nb-saved.show{opacity:1}
+  /* подтверждение рядом с кнопкой: тост улетает в угол, а тут видно на месте */
+  .saved-badge{font-size:12px;color:var(--good);font-weight:600;white-space:nowrap;
+    opacity:0;transition:opacity .18s;margin-right:6px;flex:none;pointer-events:none}
+  .saved-badge.show{opacity:1}
   .nb-prog{font-size:12px;padding:9px 12px;background:var(--accent-soft);border-radius:var(--r-sm)}
   .nb-prog-cur{display:flex;align-items:center;gap:5px;color:var(--accent);font-weight:600;min-width:0}
   .nb-prog-cur svg{flex:none}
@@ -5184,7 +5188,8 @@ function backupTab(tc){
  {const bd=tc.querySelector("#bkDir"),bdb=tc.querySelector("#bkDirB");
   if(bdb)bdb.onclick=()=>pickFolder({title:"Папка для бэкапов настроек",start:bd.value||"/mnt/storage",onPick:p=>{bd.value=p;}});}
  tc.querySelector("#bkDirSave").onclick=async()=>{const r=await api("/api/maintenance",{method:"POST",body:JSON.stringify({maintenance:{settings_backup_dir:dir.value.trim()}})});
-  if(r&&r.error){toast("Ошибка: "+r.error);return;}toast("Папка бэкапа сохранена");refreshFmHideBk();load();};
+  if(r&&r.error){toast("Ошибка: "+r.error);return;}
+  flashSaved(tc.querySelector("#bkDirSave"));toast("Папка бэкапа сохранена");refreshFmHideBk();load();};
  hide.onchange=async()=>{await api("/api/maintenance",{method:"POST",body:JSON.stringify({maintenance:{settings_backup_hide:hide.checked}})});toast(hide.checked?"Папка скрыта в файловом менеджере":"Папка видна в файловом менеджере");refreshFmHideBk();};
  const load=async()=>{const r=await api("/api/settings-backup");if(!r||!r.ok)return;
   if(document.activeElement!==days)days.value=r.days;
@@ -5624,7 +5629,7 @@ function notifyTab(tc){tc.innerHTML=`<div style="color:var(--mut);font-size:12px
   const saveMon=()=>api("/api/monitor",{method:"POST",body:JSON.stringify({monitor:collect()})});
   en.onchange=saveMon;cd.onchange=saveMon;
   items.forEach(m=>{tc.querySelector("#evon_"+m.k).onchange=saveMon;tc.querySelector("#evd_"+m.k).onchange=saveMon;tc.querySelector("#evp_"+m.k).onchange=saveMon;if(m.thr!==undefined)tc.querySelector("#ev_"+m.k).onchange=saveMon;});
-  tc.querySelector("#nfSave").onclick=async()=>{const rr=await api("/api/monitor",{method:"POST",body:JSON.stringify({notify:{user:tc.querySelector("#nfU").value.trim(),token:tc.querySelector("#nfT").value.trim()}})});const st=tc.querySelector("#nfStat");if(rr&&rr.notify){st.textContent=rr.notify.configured?"✓ ключи заданы":"не настроено";st.style.color=rr.notify.configured?"var(--good)":"var(--mut)";}toast(LIVE?"Ключи сохранены":"Демо");};
+  tc.querySelector("#nfSave").onclick=async()=>{const rr=await api("/api/monitor",{method:"POST",body:JSON.stringify({notify:{user:tc.querySelector("#nfU").value.trim(),token:tc.querySelector("#nfT").value.trim()}})});const st=tc.querySelector("#nfStat");if(rr&&rr.notify){st.textContent=rr.notify.configured?"✓ ключи заданы":"не настроено";st.style.color=rr.notify.configured?"var(--good)":"var(--mut)";}toast(LIVE?"Ключи сохранены":"Демо");flashSaved(tc.querySelector("#nfSave"));};
   tc.querySelector("#nfTest").onclick=async()=>{const rr=await api("/api/monitor",{method:"POST",body:JSON.stringify({test:true})});toast(LIVE?(rr&&rr.ok?"Тест отправлен в Pushover ✓":"Не отправлено: "+((rr&&rr.log)||"")):"Демо");};
  });}
 
@@ -5733,10 +5738,11 @@ function systemTab(tc){withSysc(tc,()=>{const s=SYSC.system||{};
     const rr=await api("/api/motd",{method:"POST",body:JSON.stringify(
       {text:tx.value,show_text:cbT.checked,show_info:cbI.checked})});
     if(rr&&rr.ok&&rr.preview!=null)pv.textContent=rr.preview;
+    if(rr&&rr.ok)flashSaved(sv);
     toast(LIVE?(rr&&rr.ok?"Сохранено ✓":"Ошибка: "+((rr&&rr.log)||"?")):"Демо");};}
  const H=tc.querySelector("#stHost"),Tz=tc.querySelector("#stTz"),J=tc.querySelector("#stJ");
- tc.querySelector("#stHostA").onclick=async()=>{await sconf("hostname",H.value.trim());refreshSysc(rerSet);};
- tc.querySelector("#stTzA").onclick=async()=>{await sconf("timezone",Tz.value.trim());refreshSysc(rerSet);};
+ tc.querySelector("#stHostA").onclick=async()=>{await sconf("hostname",H.value.trim());refreshSysc(rerSet);flashSaved(tc.querySelector("#stHostA"),"Применено ✓");};
+ tc.querySelector("#stTzA").onclick=async()=>{await sconf("timezone",Tz.value.trim());refreshSysc(rerSet);flashSaved(tc.querySelector("#stTzA"),"Применено ✓");};
  // псевдоним пула (симлинк): показать текущий и применить новый
  {const cur=tc.querySelector("#stAliasCur"),inp=tc.querySelector("#stAlias");
   api("/api/maintenance").then(m=>{const a=(m&&m.maintenance&&m.maintenance.pool_alias)||"";
@@ -5748,7 +5754,7 @@ function systemTab(tc){withSysc(tc,()=>{const s=SYSC.system||{};
     const a=md.pool_alias||"";
     if(cur)cur.textContent=a?`сейчас: ${a} → /mnt/storage`:"сейчас: отключён";
     toast(a?`Псевдоним ${a} создан`:"Псевдоним отключён");};}
- tc.querySelector("#stJA").onclick=async()=>{await sconf("journald_max",J.value.trim());refreshSysc(rerSet);};
+ tc.querySelector("#stJA").onclick=async()=>{await sconf("journald_max",J.value.trim());refreshSysc(rerSet);flashSaved(tc.querySelector("#stJA"),"Применено ✓");};
  tc.querySelector("#mChk").onclick=()=>updatesDlg();
  tc.querySelector("#mWeb").onclick=()=>confirmDlg("Перезапуск","Перезапустить веб-панель? Соединение ненадолго прервётся.",()=>sconf("restart_web",1));
 });}
@@ -5882,7 +5888,7 @@ function usbTab(tc){tc.innerHTML=`<div class="set-load">загрузка…</div
   saveBtn.onclick=async()=>{
    const cfg=formCfg();
    const rr=await api("/api/usb-import",{method:"POST",body:JSON.stringify(cfg)});
-   if(rr&&rr.ok){saved=norm(cfg);dirty();}
+   if(rr&&rr.ok){saved=norm(cfg);dirty();flashSaved(saveBtn,rr.warn||"Сохранено ✓");}
    toast(LIVE?(rr&&rr.ok?(rr.warn||"Сохранено ✓"):"Ошибка: "+((rr&&rr.log)||"?")):"Демо");};
  });}
 /* --- settings: Raspberry Pi --- */
@@ -6287,6 +6293,18 @@ let OPS_TICK=null;
 function opsTick(){if(OPS_TICK)return;
  OPS_TICK=setInterval(()=>{if(!OPS.list.some(o=>o.state==="run")){clearInterval(OPS_TICK);OPS_TICK=null;return;}
   paintOps();},300);}
+/* «Сохранено ✓» слева от кнопки. Тост исчезает в углу экрана, и в настройках его
+   легко пропустить — подтверждение должно быть там, куда смотрит глаз. */
+function flashSaved(btn,msg){
+ if(!btn||!btn.parentNode)return;
+ const p=btn.parentNode;
+ let b=[...p.children].find(x=>x.classList&&x.classList.contains("saved-badge"));
+ if(!b){b=el(`<span class="saved-badge"></span>`);p.insertBefore(b,btn);}
+ b.textContent=nasTr(msg||"Сохранено ✓");
+ b.classList.remove("show");void b.offsetWidth;   // перезапустить анимацию при повторном клике
+ b.classList.add("show");
+ clearTimeout(b._t);b._t=setTimeout(()=>b.classList.remove("show"),2200);}
+
 function opAdd(title,opts){opts=opts||{};
  const o={id:++OPS.seq,title,state:"run",p:null,label:"",cancel:opts.cancel||null,cancelled:false,t:Date.now()};
  OPS.list.push(o);if(OPS.list.length>40)OPS.list=OPS.list.slice(-40);

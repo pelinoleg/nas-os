@@ -2298,6 +2298,8 @@ systemctl start --no-block nas-netguard.service >/dev/null 2>&1 || true
 exit 0
 DISP
     run chmod 755 /etc/NetworkManager/dispatcher.d/50-nas-netguard
+    # та же ловушка: NM выполняет всё, что лежит в dispatcher.d
+    run rm -f /etc/NetworkManager/dispatcher.d/50-nas-netguard.bak.*
 
     write_file /etc/systemd/system/nas-netguard.service <<'UNIT'
 [Unit]
@@ -2456,6 +2458,9 @@ fi
 printf '\n'
 MOTD
     run chmod +x /etc/update-motd.d/20-nas-os
+    # write_file делает бэкап через `cp -a`, сохраняя бит исполнения, а pam_motd
+    # запускает ВСЕ файлы каталога — старая копия печатала приветствие второй раз.
+    run rm -f /etc/update-motd.d/20-nas-os.bak.*
 
     # юридическая простыня Debian поверх нашего блока — только шум
     write_file /etc/motd </dev/null
