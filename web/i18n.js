@@ -1217,6 +1217,7 @@ window.NAS_I18N = { en: {
 "Подключено через": "Connected via",
 "Подключите USB-диск или карту — он появится здесь": "Connect a USB disk or card — it will appear here",
 "Подключённые USB-накопители": "Connected USB drives",
+"Подстановки": "Placeholders",
 "Есть несохранённые изменения": "You have unsaved changes",
 "прервано перезагрузкой панели": "interrupted by a panel reload",
 "Импорт с USB": "USB import",

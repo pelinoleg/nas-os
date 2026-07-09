@@ -6197,7 +6197,16 @@ need="$(du -sb "$mp" 2>/dev/null | cut -f1)"; avail="$(df -PB1 "$base" 2>/dev/nu
 if [ -n "$need" ] && [ -n "$avail" ] && [ "$avail" -lt "$((need + need/20 + 10485760))" ]; then
   log "no space: need=$need avail=$avail"; notify "USB-импорт: мало места" "«$label» не поместится в $base"; cleanup; exit 1
 fi
-if [ -n "$sub" ]; then dest="$base/$sub"; stage="$base/.incomplete-$$-$sub"; else dest="$base"; stage="$dest"; fi
+# Стейджинг — ОДНА папка верхнего уровня. Раньше шаблон подставлялся прямо в имя
+# (.incomplete-$$-{year}/{month}/...), и при вложенном шаблоне mv падал: каталога
+# назначения ещё нет, а «.incomplete-123-2026/07/...» — это уже три уровня.
+if [ -n "$sub" ]; then
+  dest="$base/$sub"
+  stage="$base/.incomplete-$$-$label"
+else
+  dest="$base"
+  stage="$dest"
+fi
 mkdir -p "$stage" 2>>"$LOG"
 log "import $dev ($label) -> $dest"
 notify "USB-импорт начат" "Копирую «$label» в $dest"
@@ -6231,7 +6240,19 @@ LC_ALL=C rsync -a --info=progress2 --no-inc-recursive "${filter[@]}" "$mp"/ "$st
 rc=${PIPESTATUS[0]}
 own="$(getent passwd 1000 | cut -d: -f1)"; [ -n "$own" ] && chown -R "$own:$own" "$stage" 2>/dev/null
 if [ "$rc" = 0 ] || [ "$rc" = 23 ] || [ "$rc" = 24 ]; then
-  [ "$stage" != "$dest" ] && mv "$stage" "$dest" 2>>"$LOG"
+  if [ "$stage" != "$dest" ]; then
+    mkdir -p "$(dirname "$dest")" 2>>"$LOG"
+    # не сливаться с уже существующей папкой: mv положил бы стейджинг ВНУТРЬ неё
+    d="$dest"; n=2
+    while [ -e "$d" ]; do d="$dest ($n)"; n=$((n+1)); done
+    if mv "$stage" "$d" 2>>"$LOG"; then
+      dest="$d"
+    else
+      log "import FAIL $dev: не перенести $stage -> $d (данные остались в стейджинге)"
+      notify "USB-импорт: ошибка" "Не удалось разложить «$label» по папкам"
+      prog fail "mv"; cleanup; exit 1
+    fi
+  fi
   log "import OK -> $dest"; notify "USB-импорт готов" "«$label» скопирован в $dest"
   # сохранить последнюю строку rsync: иначе в «готово» пропадут байты и итог
   prog done "$(sed -n 's/^line=//p' "$PROG" 2>/dev/null | tail -1)"

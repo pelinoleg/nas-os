@@ -2388,50 +2388,71 @@ fi
 # метки латиницей: printf меряет байты, кириллица ломала бы выравнивание колонок
 row(){ printf '  %s%-12s%s %s\n' "$D" "$1" "$R" "$2"; }
 
-[ "${MOTD_TEXT:-1}" = "1" ] && [ -r "$TXT" ] && { printf '\n'; cat "$TXT"; }
+# ---- значения. Считаем один раз: их используют и свой текст (через токены), и сводка.
+V_HOST="$(hostname)"
+V_UPTIME="$(uptime -p 2>/dev/null | sed 's/^up //')"
+V_LOAD="$(awk '{printf "%s %s %s", $1, $2, $3}' /proc/loadavg 2>/dev/null)"
+V_TEMP=""; V_TEMPC=""
+t=$(cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null)
+[ -n "$t" ] && { V_TEMPC=$((t/1000)); V_TEMP="${V_TEMPC}C"; }
+V_MEM="$(free -h 2>/dev/null | awk '/^Mem:/{printf "%s of %s", $3, $2}')"
+V_DATE="$(date '+%Y-%m-%d')"
+V_TIME="$(date '+%H:%M')"
+
+usage(){ df -h --output=used,size,pcent "$1" 2>/dev/null | tail -1 | awk '{printf "%s of %s (%s)", $1, $2, $3}'; }
+V_SYSTEM="$(usage /)"
+V_POOL=""
+findmnt -n /mnt/storage >/dev/null 2>&1 && V_POOL="$(usage /mnt/storage)"
+
+# route get только читает таблицу маршрутов, в сеть не ходит. Разбираем по ключам:
+# у маршрута может не быть "via", зато в хвосте бывает "uid 1000".
+net="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++){if($i=="dev")d=$(i+1);if($i=="src")s=$(i+1)}}END{print s" "d}')"
+V_IP="${net%% *}"; V_IFACE="${net##* }"
+[ -n "$V_IP" ] && V_PANEL="http://$V_IP/" || V_PANEL=""
+
+need_containers=0
+[ "${MOTD_INFO:-1}" = "1" ] && need_containers=1
+[ "${MOTD_TEXT:-1}" = "1" ] && [ -r "$TXT" ] && grep -q '{containers}' "$TXT" 2>/dev/null && need_containers=1
+V_CONT=""
+if [ "$need_containers" = "1" ] && command -v docker >/dev/null 2>&1; then
+  V_CONT="$(timeout 3 docker ps -q 2>/dev/null | grep -c .)"
+fi
+
+# ---- свой текст: подставляем токены. Никакого eval — только замена подстрок,
+# поэтому команды и переменные внутри текста не выполняются.
+if [ "${MOTD_TEXT:-1}" = "1" ] && [ -r "$TXT" ]; then
+  txt="$(cat "$TXT")"
+  txt="${txt//\{host\}/$V_HOST}"
+  txt="${txt//\{uptime\}/$V_UPTIME}"
+  txt="${txt//\{load\}/$V_LOAD}"
+  txt="${txt//\{temp\}/$V_TEMP}"
+  txt="${txt//\{memory\}/$V_MEM}"
+  txt="${txt//\{system\}/$V_SYSTEM}"
+  txt="${txt//\{pool\}/$V_POOL}"
+  txt="${txt//\{ip\}/$V_IP}"
+  txt="${txt//\{iface\}/$V_IFACE}"
+  txt="${txt//\{panel\}/$V_PANEL}"
+  txt="${txt//\{containers\}/$V_CONT}"
+  txt="${txt//\{date\}/$V_DATE}"
+  txt="${txt//\{time\}/$V_TIME}"
+  printf '\n%s\n' "$txt"
+fi
 
 [ "${MOTD_INFO:-1}" = "1" ] || exit 0
-printf '\n%s%s%s\n' "$B" "$(hostname)" "$R"
-
-up="$(uptime -p 2>/dev/null | sed 's/^up //')"
-la="$(awk '{printf "%s %s %s", $1, $2, $3}' /proc/loadavg 2>/dev/null)"
-row "Uptime" "${up:-?}   ${D}load${R} ${la:-?}"
-
-t=$(cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null)
-if [ -n "$t" ]; then
-  c=$((t/1000))
-  col="$G"; [ "$c" -ge 70 ] && col="$Y"
-  row "Temp" "${col}${c}C${R}"
+printf '\n%s%s%s\n' "$B" "$V_HOST" "$R"
+row "Uptime" "${V_UPTIME:-?}   ${D}load${R} ${V_LOAD:-?}"
+if [ -n "$V_TEMPC" ]; then
+  col="$G"; [ "$V_TEMPC" -ge 70 ] && col="$Y"
+  row "Temp" "${col}${V_TEMP}${R}"
 fi
-
-mem="$(free -h 2>/dev/null | awk '/^Mem:/{printf "%s of %s", $3, $2}')"
-[ -n "$mem" ] && row "Memory" "$mem"
-
-# df по УЖЕ смонтированным ФС диски не будит
-for m in / /mnt/storage; do
-  [ -d "$m" ] || continue
-  findmnt -n "$m" >/dev/null 2>&1 || continue
-  df -h --output=used,size,pcent "$m" 2>/dev/null | tail -1 | {
-    read -r used size pc
-    p="${pc%\%}"; col="$G"; [ "${p:-0}" -ge 85 ] && col="$Y"
-    row "$([ "$m" = "/" ] && echo System || echo Pool)" "$used of $size (${col}${pc}${R})"
-  }
-done
-
-# активный интерфейс и адрес: route get — только просмотр таблицы, в сеть не ходит.
-# Разбираем по ключам, а не по позициям: у маршрута может не быть "via",
-# зато в хвосте бывает "uid 1000".
-net="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++){if($i=="dev")d=$(i+1);if($i=="src")s=$(i+1)}}END{print s" "d}')"
-ip4="${net%% *}"; dev="${net##* }"
-if [ -n "$ip4" ]; then
-  row "Network" "$ip4 (${dev:-?})"
-  row "Panel" "http://$ip4/"
+[ -n "$V_MEM" ] && row "Memory" "$V_MEM"
+[ -n "$V_SYSTEM" ] && row "System" "$V_SYSTEM"
+[ -n "$V_POOL" ]   && row "Pool"   "$V_POOL"
+if [ -n "$V_IP" ]; then
+  row "Network" "$V_IP (${V_IFACE:-?})"
+  row "Panel" "$V_PANEL"
 fi
-
-if command -v docker >/dev/null 2>&1; then
-  n="$(timeout 3 docker ps -q 2>/dev/null | grep -c .)"
-  [ -n "$n" ] && row "Containers" "$n running"
-fi
+[ -n "$V_CONT" ] && row "Containers" "$V_CONT running"
 printf '\n'
 MOTD
     run chmod +x /etc/update-motd.d/20-nas-os

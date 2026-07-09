@@ -5472,6 +5472,9 @@ function systemTab(tc){withSysc(tc,()=>{const s=SYSC.system||{};
   <div class="srow"><div class="srow-l"><div class="srow-t">Сводка о системе</div><div class="srow-d">аптайм, температура, память, пул, адрес, контейнеры</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="moI"><span class="sl"></span></label></div></div>
   <textarea id="moTx" class="motd-ta" spellcheck="false" placeholder="Текст приветствия — только латиница"></textarea>
   <div class="mon-note">${svg("info",13)} Текст печатается буквально: команды и переменные внутри не выполняются. Пишите латиницей — кириллицу терминал показывает не везде.</div>
+  <div class="usb-chips" style="margin-top:8px"><span class="usb-lbl">Подстановки:</span>${
+    ["{host}","{uptime}","{load}","{temp}","{memory}","{system}","{pool}","{ip}","{iface}","{panel}","{containers}","{date}","{time}"]
+      .map(t=>`<button class="usb-tok" data-mo="${att(t)}">${esc(t)}</button>`).join("")}</div>
   <div class="set-grp">Предпросмотр</div>
   <pre class="motd-pv" id="moPv"></pre>
   <div class="set-savebar"><span class="sb-left">Приветствие в SSH</span><button class="btn sm pri" id="moSave">${svg("save",13)} Сохранить</button></div>`;
@@ -5481,6 +5484,11 @@ function systemTab(tc){withSysc(tc,()=>{const s=SYSC.system||{};
  {const tx=tc.querySelector("#moTx"),cbT=tc.querySelector("#moT"),cbI=tc.querySelector("#moI"),
    pv=tc.querySelector("#moPv"),sv=tc.querySelector("#moSave");
   pv.textContent="…";
+  // вставка токена в позицию курсора
+  tc.querySelectorAll(".usb-tok[data-mo]").forEach(b=>b.onclick=()=>{
+    const p=tx.selectionStart||tx.value.length;
+    tx.value=tx.value.slice(0,p)+b.dataset.mo+tx.value.slice(tx.selectionEnd||p);
+    tx.focus();const np=p+b.dataset.mo.length;tx.setSelectionRange(np,np);});
   const fill=r=>{const c=(r&&r.config)||{};tx.value=c.text||"";cbT.checked=c.show_text!==false;
     cbI.checked=c.show_info!==false;pv.textContent=(r&&r.preview)||"";
     sv.disabled=c.installed===false;};
@@ -5962,7 +5970,7 @@ const OPS_KEY="nasops",OPS_KEEP=30,OPS_TTL=3*86400e3;
 function opsSave(){
  try{
   const keep=OPS.list.filter(o=>o.state!=="run").slice(-OPS_KEEP)
-    .map(o=>({id:o.id,title:o.title,state:o.state,label:o.label,t:o.t}));
+    .map(o=>({id:o.id,title:o.title,state:o.state,label:o.label,t:o.t,k:o.k}));
   localStorage.setItem(OPS_KEY,JSON.stringify(keep));
  }catch(e){}}
 function opsLoad(){
@@ -5970,7 +5978,8 @@ function opsLoad(){
  try{saved=JSON.parse(localStorage.getItem(OPS_KEY)||"[]");}catch(e){saved=[];}
  const now=Date.now();
  OPS.list=(Array.isArray(saved)?saved:[]).filter(o=>o&&o.t&&now-o.t<OPS_TTL).slice(-OPS_KEEP);
- OPS.list.forEach(o=>{if(o.state==="run"){o.state="err";o.label="прервано перезагрузкой панели";}});
+ OPS.list.forEach(o=>{if(o.state==="run"){o.state="err";o.label="прервано перезагрузкой панели";}
+   if(o.k&&typeof USB_SEEN!=="undefined")USB_SEEN.add(o.k);});   // не заводить дубль по тому же импорту
  OPS.seq=OPS.list.reduce((a,o)=>Math.max(a,o.id||0),0);
  paintOps(true);}
 const opAgo=t=>{if(!t)return "";const s=Math.max(0,(Date.now()-t)/1000);
@@ -6057,22 +6066,37 @@ function sparkSVG(data,color,max){const w=120,h=28,d=(data||[]).slice(-40);if(d.
 /* USB-import runs in the background (udev), the panel may be closed. Mirror its
    jobs into the shared operations centre so the progress is visible everywhere,
    not only on the USB settings tab. Keyed by device — one op per partition. */
-const USB_OPS={};
+const USB_OPS={},USB_SEEN=new Set();
+function usbLabel(j){
+ const bits=[j.label||j.dev];
+ if(j.bytes!=null)bits.push(fmtB(j.bytes)+(j.total?" из "+fmtB(j.total):""));
+ if(j.status==="running"){if(j.speed)bits.push(j.speed);if(j.eta)bits.push("осталось "+j.eta);}
+ return bits.join(" · ");}
 function syncUsbOps(jobs){
  (jobs||[]).forEach(j=>{
+  const key=j.dev+":"+j.started;
   let o=USB_OPS[j.dev];
   if(!o){
-   if(j.status!=="running")return;          // завершённое до открытия панели не воскрешаем
-   o=USB_OPS[j.dev]=opAdd("Импорт с USB");
+   if(j.status!=="running"){
+    // импорт мог начаться и кончиться, пока панель была закрыта: заносим в историю,
+    // иначе быстрые копирования (пара секунд) не видно вообще нигде
+    if(USB_SEEN.has(key))return;
+    USB_SEEN.add(key);
+    const done=j.status==="done";
+    OPS.list.push({id:++OPS.seq,title:"Импорт с USB",state:done?"done":"err",p:done?1:null,
+      label:usbLabel(j)+(j.dest?" · "+j.dest:""),cancel:null,cancelled:false,k:key,
+      t:(j.finished||j.started||0)*1000||Date.now()});
+    if(OPS.list.length>40)OPS.list=OPS.list.slice(-40);
+    opsSave();paintOps(true);
+    return;
+   }
+   USB_SEEN.add(key);
+   o=USB_OPS[j.dev]=opAdd("Импорт с USB");o.k=key;
   }
   if(j.status==="running"){
-   const bits=[j.label||j.dev];
-   if(j.bytes!=null)bits.push(fmtB(j.bytes)+(j.total?" из "+fmtB(j.total):""));
-   if(j.speed)bits.push(j.speed);
-   if(j.eta)bits.push("осталось "+j.eta);
-   opSet(o,j.percent==null?null:Math.min(j.percent,100)/100,bits.join(" · "));
+   opSet(o,j.percent==null?null:Math.min(j.percent,100)/100,usbLabel(j));
   }else{
-   opEnd(o,j.status==="done",j.status==="done"?("готово · "+(j.dest||"")):(j.status==="aborted"?"прервано":"ошибка"));
+   opEnd(o,j.status==="done",usbLabel(j)+(j.dest?" · "+j.dest:""));
    delete USB_OPS[j.dev];
   }});}
 
