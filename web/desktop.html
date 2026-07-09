@@ -1507,6 +1507,9 @@
   .ms-row{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12.5px;padding:3px 0}
   .ms-row .ms-l{display:flex;align-items:center;gap:7px;color:var(--wdg-dim,var(--dim))}
   .ms-row b{font-family:var(--mono);font-weight:600}
+  .ms-row .ms-dn{color:var(--good)}
+  .ms-row .ms-up{color:var(--accent-2)}
+  .ms-row .ms-l.ms-dn,.ms-row .ms-l.ms-up{opacity:.85}
   .ms-avg{font-size:11px;color:var(--wdg-dim,var(--mut));margin-top:5px}
   #opsBtn.mb-idle{opacity:.7}
   #opsBtn.mb-idle:hover{opacity:1}
@@ -5792,7 +5795,11 @@ async function pollMySpeed(){
  try{r=await api("/api/myspeed");}catch(e){}
  if(!r||!r.ok||r.download==null){hide();return;}
  if(wdg)wdg.style.display="";
- MS_URL=r.url||"";
+ /* r.url — это адрес, по которому ходит СЕРВЕР (обычно 127.0.0.1): в браузере он
+    ведёт на машину пользователя. Берём ссылку из web-desktop.url-лейбла контейнера,
+    а если ярлыка нет — подставляем текущий хост вместо loopback. */
+ const app=(APPS||[]).find(a=>/myspeed/i.test(a.name||"")||/:5216(\/|$)/.test(a.url||""));
+ MS_URL=(app&&app.url)||String(r.url||"").replace(/\/\/(127\.0\.0\.1|localhost)\b/,"//"+location.hostname);
  const mbit=v=>(v==null?"—":(+v>=100?Math.round(+v):(+v).toFixed(1))+" Мбит/с");
  const ago=t=>{const s=(Date.now()-Date.parse(t))/1000;
    if(!isFinite(s))return "";
@@ -5801,9 +5808,11 @@ async function pollMySpeed(){
    if(s<172800)return Math.round(s/3600)+" ч назад";
    return Math.round(s/86400)+" дн назад";};
  const a=r.avg||{};
- box.innerHTML=`<div class="ms-row"><span class="ms-l">${svg("download",13)} Загрузка</span><b>${esc(mbit(r.download))}</b></div>
-   <div class="ms-row"><span class="ms-l">${svg("upload",13)} Отдача</span><b>${esc(mbit(r.upload))}</b></div>
-   <div class="ms-row"><span class="ms-l">${svg("activity",13)} Пинг</span><b>${r.ping==null?"—":esc(r.ping+" мс")}</b></div>
+ // цвета берём из уже подогнанных по контрасту токенов поверхности виджета
+ const pingCol=r.ping==null?"var(--dim)":(r.ping<30?"var(--good)":r.ping<80?"var(--warn)":"var(--danger)");
+ box.innerHTML=`<div class="ms-row"><span class="ms-l ms-dn">${svg("download",13)} Загрузка</span><b class="ms-dn">${esc(mbit(r.download))}</b></div>
+   <div class="ms-row"><span class="ms-l ms-up">${svg("upload",13)} Отдача</span><b class="ms-up">${esc(mbit(r.upload))}</b></div>
+   <div class="ms-row"><span class="ms-l">${svg("activity",13)} Пинг</span><b style="color:${pingCol}">${r.ping==null?"—":esc(r.ping+" мс")}</b></div>
    ${a.download!=null?`<div class="ms-avg">в среднем ${esc(mbit(a.download))} / ${esc(mbit(a.upload))}${a.ping!=null?` · пинг ${esc(a.ping+" мс")}`:""}</div>`:""}
    <div class="ms-avg">${r.error?`<span style="color:var(--danger)">замер с ошибкой</span> · `:""}${esc(ago(r.created))}${r.count?` · ${r.count} замеров`:""}</div>`;
  const mm=document.getElementById("more-myspeed");
