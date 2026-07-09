@@ -792,7 +792,13 @@
   .nb-field>label{display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;margin-bottom:6px}
   .nb-field-row{display:flex;gap:8px}
   .nb-field-row input{flex:1;min-width:0}
-  .nb-excl{width:100%;min-height:150px;font-family:var(--mono);font-size:12px;line-height:1.6;resize:vertical}
+  .nb-excl{width:100%;min-height:150px;font-family:var(--mono);font-size:12px;line-height:1.6;resize:vertical;margin-top:8px}
+  .nb-det{margin-top:16px}
+  .nb-sum{cursor:pointer;list-style:none;display:flex;align-items:center;gap:6px;font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--mut);font-family:var(--mono);padding:4px 0;user-select:none}
+  .nb-sum::-webkit-details-marker{display:none}
+  .nb-sum::before{content:"▸";font-size:9px;transition:transform .15s}
+  .nb-det[open] .nb-sum::before{transform:rotate(90deg)}
+  .nb-sum:hover{color:var(--dim)}
   .nb-foot{display:flex;align-items:center;gap:9px;padding:14px 0;border-top:1px solid var(--line);margin-top:8px;flex-wrap:wrap}
   /* конструктор раскладки подпапок USB-импорта */
   .usb-sub{background:var(--card);border:1px solid var(--line);border-radius:var(--r-md);padding:12px 13px;margin:2px 0 4px}
@@ -4438,10 +4444,11 @@ function winBackup(){openWin("__nasbak","Бэкап главного NAS",(body,
    <div class="srow"><div class="srow-l"><div class="srow-t">Режим приёмника${tipHTML("Единая папка — всё в одну папку по подпапкам. Отдельно для каждой — у каждого источника своя папка-приёмник.")}</div><div class="srow-d">${per?"у каждого источника своя папка":"всё в одну папку по подпапкам"}</div></div><div class="srow-c"><div class="seg" id="sDm"><button data-v="single" class="${!per?"on":""}">Единая папка</button><button data-v="per" class="${per?"on":""}">Отдельно</button></div></div></div>
    <div style="display:flex;justify-content:space-between;align-items:center;margin:16px 0 6px"><span class="set-h" style="margin:0;padding:0;border:none">Что копировать</span><button class="btn sm pri" id="sAdd">${svg("plus",13)} Выбрать с NAS</button></div>
    <div id="sJobs"></div>
-   <div class="set-h">Исключения${tipHTML("Шаблоны rsync (по одному в строке): что не копировать — мусор, кэши, служебное.")}</div>
-   <textarea id="sExcl" class="nb-excl" spellcheck="false">${esc((c.excludes||[]).join("\n"))}</textarea>
-   <div style="display:flex;gap:8px;margin-top:6px"><button class="btn sm" id="sExDev">${svg("code",13)} Добавить шаблоны разработки</button><button class="btn sm" id="sExReset">Сбросить по умолчанию</button></div>
-   ${!per?`<div class="nb-field"><label>Общая папка-приёмник${tipHTML("Локальная папка на этом NAS, куда попадёт всё выбранное (каждый источник — своей подпапкой).")}</label><div class="nb-field-row"><input class="mono" id="sBase" value="${att(c.dest_base||"/mnt/storage/nas-backup")}"><button class="btn sm" id="sBaseB">${svg("folder",13)} Выбрать</button></div></div>`:""}`;
+   ${!per?`<div class="nb-field" style="margin-top:14px"><label>Общая папка-приёмник${tipHTML("Локальная папка на этом NAS, куда попадёт всё выбранное (каждый источник — своей подпапкой).")}</label><div class="nb-field-row"><input class="mono" id="sBase" value="${att(c.dest_base||"/mnt/storage/nas-backup")}"><button class="btn sm" id="sBaseB">${svg("folder",13)} Выбрать</button></div></div>`:""}
+   <details class="nb-det"><summary class="nb-sum">Исключения${tipHTML("Шаблоны rsync (по одному в строке): что не копировать — мусор, кэши, служебное.")}</summary>
+     <textarea id="sExcl" class="nb-excl" spellcheck="false">${esc((c.excludes||[]).join("\n"))}</textarea>
+     <div style="display:flex;gap:8px;margin-top:6px"><button class="btn sm" id="sExDev">${svg("code",13)} Добавить шаблоны разработки</button><button class="btn sm" id="sExReset">Сбросить по умолчанию</button></div>
+   </details>`;
   const g=s=>tc.querySelector(s);
   const drawJobs=()=>{const box=g("#sJobs");box.innerHTML=JOBS.length?"":'<div style="color:var(--mut);font-size:12px;padding:6px 0">Пусто — нажмите «Выбрать с NAS».</div>';
    JOBS.forEach((j,i)=>{const row=el(`<div class="nb-job"><span class="nb-src mono" title="${att(j.src)}">${svg("net",13)} ${esc(j.src)}</span><span class="nb-arr">→</span><span class="nb-dst mono" title="${att(j.dest)}">${esc(j.dest)}</span>${per?`<button class="iconbtn nb-jb" title="Папка-приёмник">${svg("folder",14)}</button>`:""}<button class="iconbtn dng nb-jx" title="Убрать">${svg("x",14)}</button></div>`);
