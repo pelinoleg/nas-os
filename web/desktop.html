@@ -1035,6 +1035,10 @@
   .fm-crumb a{color:var(--dim);cursor:pointer;padding:2px 4px;border-radius:5px;white-space:nowrap}
   .fm-crumb a:last-child{color:var(--text)}.fm-crumb a:hover{background:var(--sel);color:var(--accent)}
   .fm-crumb .sepc{color:var(--mut);flex:none}
+  .fm-crumb .fm-crumb-edit{flex:none;border:none;background:none;color:var(--mut);cursor:pointer;padding:2px 5px;border-radius:5px;display:inline-flex;align-items:center}
+  .fm-crumb .fm-crumb-edit:hover{background:var(--sel);color:var(--accent)}
+  .fm-crumb .fm-pathin{flex:1;min-width:0;font-family:var(--mono);font-size:11px;padding:4px 8px;border:1px solid var(--accent-line);border-radius:6px;background:var(--card);color:var(--text)}
+  .fm-crumb .fm-pathin:focus{outline:none;border-color:var(--accent)}
   .fm-chips{display:flex;gap:5px;flex-wrap:wrap}
   .fm-chip{font-size:11px;padding:5px 11px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--dim);cursor:pointer;font-family:var(--mono)}
   .fm-chip:hover{border-color:var(--accent-line);color:var(--accent)}
@@ -3364,7 +3368,7 @@ function winVault(){openWin("__vault","Хранилище доступов",body
   creds.forEach((c,i)=>{const row=el(`<div class="vrow"><div><div style="font-weight:600">${c.service}</div><div class="u">${c.url||""}</div></div><div class="mono">${c.login||"—"}</div><div class="mono pw">••••••••</div><div style="display:flex;gap:2px;justify-content:flex-end"></div></div>`);
    const pw=row.querySelector(".pw");let sh=false;const acts=row.lastElementChild;
    const e=el(`<button class="copy">${svg("eye",15)}</button>`);e.onclick=()=>{sh=!sh;pw.textContent=sh?(c.pass||"—"):"••••••••";};
-   const cp=el(`<button class="copy">${svg("copy",15)}</button>`);cp.onclick=()=>{navigator.clipboard&&navigator.clipboard.writeText(c.pass||"");toast("Скопировано");};
+   const cp=el(`<button class="copy">${svg("copy",15)}</button>`);cp.onclick=()=>{copyText(c.pass||"");toast("Скопировано");};
    const del=el(`<button class="copy" style="color:var(--danger)">${svg("trash",14)}</button>`);del.title="Удалить";del.onclick=async()=>{creds.splice(i,1);await save();render();};
    acts.appendChild(e);acts.appendChild(cp);acts.appendChild(del);list.appendChild(row);});
   body.querySelector("#add").onclick=addForm;};
@@ -3694,7 +3698,16 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
  function renderCrumb(){const c=body.querySelector("#fCrumb");c.innerHTML="";
    const root=el(`<a>/</a>`);root.onclick=()=>load("/");c.appendChild(root);
    let acc="";cwd.split("/").filter(Boolean).forEach(p=>{acc+="/"+p;const path=acc;
-     c.appendChild(el(`<span class="sepc">/</span>`));const a=el(`<a>${esc(p)}</a>`);a.onclick=()=>load(path);c.appendChild(a);});}
+     c.appendChild(el(`<span class="sepc">/</span>`));const a=el(`<a>${esc(p)}</a>`);a.onclick=()=>load(path);c.appendChild(a);});
+   // ✎ — редактировать путь; клик по пустому месту крошек тоже открывает ввод
+   const edb=el(`<button class="fm-crumb-edit" title="Редактировать/скопировать путь">${svg("edit",13)}</button>`);edb.onclick=e=>{e.stopPropagation();editPath();};c.appendChild(edb);
+   c.onclick=ev=>{if(ev.target===c)editPath();};}
+ function editPath(){const c=body.querySelector("#fCrumb");
+   const inp=el(`<input class="fm-pathin mono" spellcheck="false">`);inp.value=cwd;
+   c.innerHTML="";c.appendChild(inp);inp.focus();inp.select();
+   const done=()=>{inp.onblur=null;const v=inp.value.trim();if(v&&v!==cwd)load(v);else renderCrumb();};
+   inp.onkeydown=ev=>{if(ev.key==="Enter"){ev.preventDefault();done();}else if(ev.key==="Escape"){ev.preventDefault();inp.onblur=null;renderCrumb();}};
+   inp.onblur=done;}
  function saveFav(){api("/api/fm/favorites",{method:"POST",body:JSON.stringify({favorites:favs})});}
  function renderFav(){const c=body.querySelector("#fFav");c.innerHTML="";
    favs.forEach((f,i)=>{const it=el(`<div class="fm-fav-i${f.path===cwd?" on":""}"><span class="fi">${fmIcon(f.name,"dir",17)}</span><span class="fn" title="${att(f.path)}">${esc(f.name)}</span><button class="fx" title="Убрать">${svg("trash",12)}</button></div>`);
@@ -4034,7 +4047,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
  function rowMenu(e,x,y){const it=[{label:"Открыть",ic:svg(e.type==="dir"?"folder":"file",16),act:()=>openEntry(e)}];
    if(e.type==="file")it.push({label:"Скачать",ic:svg("download",16),act:()=>dl(e)});
    if(e.type==="dir")it.push({label:"Скачать как ZIP",ic:svg("download",16),act:()=>doZip([e.path])});
-   it.push({label:"Копировать путь",ic:svg("copy",16),act:()=>{try{navigator.clipboard.writeText(e.path);}catch(x){}toast("Путь скопирован");}});
+   it.push({label:"Копировать путь",ic:svg("copy",16),act:()=>{copyText(e.path);toast("Путь скопирован");}});
    it.push({label:"В избранное",ic:svg("folder",16),act:()=>{if(favs.some(f=>f.path===e.path)){toast("Уже в избранном");return;}favs.push({name:e.name,path:e.type==="dir"?e.path:cwd});saveFav();renderFav();toast("Добавлено");}});
    it.push({sep:1});
    it.push({label:"Копировать",ic:svg("copy",16),act:()=>{clip={mode:"copy",items:selOr(e)};toast("В буфер: "+clip.items.length);selUpdate();}});
@@ -5337,16 +5350,15 @@ function paintSys(s){const m=document.getElementById("wg-sys");if(!m)return;
 // тип подключения (Wi-Fi/кабель) + скорость линка + сигнал + мини-спидтест
 async function pollNet(){const box=document.getElementById("wg-netlink");if(!box)return;
  const n=await api("/api/net");if(!n)return;
- const wifi=n.type==="wifi",spd=n.link_mbit?n.link_mbit+" Мбит/с":"—";
+ const wifi=n.type==="wifi",mbs=n.link_mbit?Math.round(n.link_mbit/8):null,spd=mbs!=null?mbs+" МБ/с":"—";
  const name=wifi?((n.ssid||"Wi-Fi")+(n.band?" · "+n.band:"")):"Кабель (Ethernet)";
  const spdCol=wifi?(n.link_mbit>=800?"var(--good)":"var(--warn)"):"var(--good)";
- box.innerHTML=`<div class="krow"><span>${wifi?"📶":"🔌"} ${esc(name)}</span><b style="color:${spdCol}">${spd}</b></div>`
-  +(wifi&&n.signal!=null?`<div class="krow" style="margin-top:2px"><span style="color:var(--mut);font-size:11px">Сигнал</span><b style="font-size:11px">${n.signal_pct}% · ${n.signal} dBm</b></div>`:"")
-  +(wifi?`<div style="font-size:10.5px;color:var(--warn);margin-top:3px;line-height:1.35">Для NAS лучше кабель — быстрее и стабильнее. Воткни Ethernet — скорость сразу вырастет.</div>`:"");
+ box.innerHTML=`<div class="krow"><span style="display:inline-flex;align-items:center;gap:6px;min-width:0"><span style="flex:none;display:flex">${svg(wifi?"wifi":"net",13)}</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(name)}</span></span><b style="color:${spdCol};flex:none" title="${n.link_mbit||0} Мбит/с">${spd}</b></div>`
+  +(wifi&&n.signal!=null?`<div class="krow" style="margin-top:2px"><span style="color:var(--mut);font-size:11px">Сигнал</span><b style="font-size:11px">${n.signal_pct}% · ${n.signal} dBm</b></div>`:"");
  const btn=document.getElementById("wg-nstest"),res=document.getElementById("wg-nsres");
- if(btn&&!btn._wired){btn._wired=1;btn.onclick=async()=>{btn.disabled=true;const o=btn.textContent;btn.textContent="Тест…";if(res)res.textContent="скачиваю…";
+ if(btn&&!btn._wired){btn._wired=1;btn.onclick=async()=>{btn.disabled=true;const o=btn.textContent;btn.textContent="Тест… (~15 c)";if(res)res.textContent="меряю…";
    const r=await api("/api/net/speedtest");btn.disabled=false;btn.textContent=o;
-   if(r&&r.ok){if(res)res.innerHTML=`<b style="color:var(--good)">${r.MBs} МБ/с</b> · ${r.mbps} Мбит/с`;}
+   if(r&&r.ok){if(res)res.innerHTML=`<b style="color:var(--good)">↓ ${r.down_MBs!=null?r.down_MBs:"—"} МБ/с</b> · <b style="color:var(--accent)">↑ ${r.up_MBs!=null?r.up_MBs:"—"} МБ/с</b>`;}
    else if(res)res.textContent="Ошибка: "+((r&&r.log)||"?");};}
 }
 async function pollStacks(){const box=document.getElementById("wg-docker");if(!box)return;

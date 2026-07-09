@@ -148,26 +148,43 @@ def net_info():
     return info
 
 def net_speedtest():
-    """Мини-спидтест: скачивание с Cloudflare, реальная скорость канала (МБ/с и Мбит/с)."""
-    url = "https://speed.cloudflare.com/__down?bytes=30000000"   # до 30 МБ
+    """Мини-спидтест download+upload через Cloudflare. Крутится ~8-10 c ради точности."""
+    out = {"ok": False}
+    # --- DOWNLOAD: тянем до ~10 c (или 800 МБ), чтобы намерить стабильно ---
     try:
-        req = urllib.request.Request(url, headers={"User-Agent": "nas-os"})
+        req = urllib.request.Request("https://speed.cloudflare.com/__down?bytes=800000000",
+                                     headers={"User-Agent": "nas-os"})
         t0 = time.time(); n = 0
-        with urllib.request.urlopen(req, timeout=20) as r:
+        with urllib.request.urlopen(req, timeout=40) as r:
             while True:
                 chunk = r.read(262144)
                 if not chunk:
                     break
                 n += len(chunk)
-                if time.time() - t0 > 12:   # кап по времени
+                if time.time() - t0 > 10:
                     break
-        dt = max(0.05, time.time() - t0)
-        if n < 100000:
-            return {"ok": False, "log": "мало данных — проверьте интернет"}
-        return {"ok": True, "bytes": n, "secs": round(dt, 2),
-                "mbps": round(n * 8 / dt / 1e6, 1), "MBs": round(n / dt / 1048576, 1)}
+        dt = max(0.1, time.time() - t0)
+        if n >= 1000000:
+            out["ok"] = True
+            out["down_MBs"] = round(n / dt / 1048576, 1)
+            out["down_mbps"] = round(n * 8 / dt / 1e6, 1)
     except Exception as e:
-        return {"ok": False, "log": ("нет интернета?" if "urlopen" in str(type(e)) else str(e)[:120])}
+        out["log"] = ("нет интернета?" if "URLError" in str(type(e)) else str(e)[:100])
+    # --- UPLOAD: шлём фиксированный объём, замеряем время ---
+    try:
+        total = 60 * 1024 * 1024   # 60 МБ
+        data = b"\0" * total
+        req = urllib.request.Request("https://speed.cloudflare.com/__up", data=data,
+                                     headers={"User-Agent": "nas-os", "Content-Type": "application/octet-stream"})
+        t0 = time.time()
+        urllib.request.urlopen(req, timeout=40).read()
+        dt = max(0.1, time.time() - t0)
+        out["up_MBs"] = round(total / dt / 1048576, 1)
+        out["up_mbps"] = round(total * 8 / dt / 1e6, 1)
+        out["ok"] = True
+    except Exception:
+        pass
+    return out
 
 def uptime_s():
     try:
