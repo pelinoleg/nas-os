@@ -4187,13 +4187,13 @@ function winDiskUsage(initRoot){const existed=!!OPEN["__duscan"];const w=openWin
    const segs=[];let a=-Math.PI/2;
    ch.forEach((c,i)=>{const span=Math.max(0,(c.s/total)*TAU),a0=a,a1=a+span;a=a1;if(span<0.012)return;
      const col=DUCOL[i%DUCOL.length],full=span>=TAU-0.001;
-     segs.push({c,col,ring:1,key:i,full,a0,a1,path:full?null:arc(r0,r1,a0,a1)});
+     // полный круг тоже рисуем дугой (arc клампит до ~360°): у <circle> CSS .duseg
+     // перебивал бы инлайновый stroke/width → пустой невидимый круг
+     segs.push({c,col,ring:1,key:i,full,a0,a1,path:arc(r0,r1,a0,a1)});
      if(showL2&&c.d&&c.c&&c.c.length){const sub=c.c.filter(x=>x.s>0),st=sub.reduce((s,x)=>s+x.s,0)||c.s;let aa=a0;
        sub.forEach(sc=>{const sp=Math.max(0,(sc.s/st)*span),b0=aa,b1=aa+sp;aa=b1;if(sp<0.012)return;segs.push({c:sc,col,ring:2,key:i,a0:b0,a1:b1,path:arc(r1,r2,b0,b1)});});}});
    const inner=segs.map((s,idx)=>{const cls=`duseg${s.ring===2?" duseg2":""}`;
-     return s.ring===1&&s.full
-       ?`<circle cx="${cx}" cy="${cy}" r="${(r0+r1)/2}" fill="none" stroke="${s.col}" stroke-width="${r1-r0}" data-i="${idx}" data-key="${s.key}" class="${cls}"/>`
-       :`<path d="${s.path}" fill="${s.col}" data-i="${idx}" data-key="${s.key}" class="${cls}"/>`;}).join("");
+     return `<path d="${s.path}" fill="${s.col}" data-i="${idx}" data-key="${s.key}" class="${cls}"/>`;}).join("");
    // подписи папок прямо в кольце (где помещается по ширине сектора)
    const midR=(r0+r1)/2;
    const labels=segs.filter(s=>s.ring===1&&(s.full||(s.a1-s.a0)>=0.42)).map(s=>{
@@ -4211,11 +4211,11 @@ function winDiskUsage(initRoot){const existed=!!OPEN["__duscan"];const w=openWin
      elm.oncontextmenu=ev=>{if(!s.c.p)return;ev.preventDefault();ctxMenu(s.c,ev.clientX,ev.clientY);};});
    const hole=box.querySelector("#duHole");if(hole&&cur!==root)hole.onclick=()=>{const par=cur.replace(/\/[^/]+$/,"")||"/";drill(par.length<root.length?root:par);};}
  function renderList(){const box=mainEl.querySelector("#duList");if(!box)return;box.innerHTML="";
-   const ch=(node.ch||[]).filter(x=>x.s>0),max=ch.reduce((m,x)=>Math.max(m,x.s),1);
+   const ch=(node.ch||[]).filter(x=>x.s>0||x.d).sort((a,b)=>b.s-a.s),max=ch.reduce((m,x)=>Math.max(m,x.s),1);
    if(!ch.length){box.innerHTML=`<div class="du-empty2">Пусто</div>`;return;}
    ch.forEach((c,i)=>{const col=c.o?"var(--mut)":DUCOL[i%DUCOL.length];
      const ico=c.o?`<span class="du-ico du-agg">${svg("layers",16)}</span>`:`<span class="du-ico">${fmIcon(c.n,c.d?"dir":"file",20)}</span>`;
-     const row=el(`<div class="du-row${c.d?" isdir":""}" data-key="${i}"><span class="du-sw" style="background:${col}"></span>${ico}<span class="du-nm" title="${att(c.n)}">${esc(c.n)}</span><span class="du-bar"><i style="width:${Math.max(2,c.s/max*100).toFixed(1)}%;background:${col}"></i></span><span class="du-sz">${fmtB(c.s)}</span>${c.p?`<button class="du-x" title="В корзину">${svg("trash",13)}</button>`:""}</div>`);
+     const row=el(`<div class="du-row${c.d?" isdir":""}" data-key="${i}"><span class="du-sw" style="background:${col}"></span>${ico}<span class="du-nm" title="${att(c.n)}">${esc(c.n)}</span><span class="du-bar"><i style="width:${c.new?0:Math.max(2,c.s/max*100).toFixed(1)}%;background:${col}"></i></span>${c.new?`<span class="du-sz" style="color:var(--mut);font-size:10px" title="Папка добавлена после скана — пересканируйте">не сканир.</span>`:`<span class="du-sz">${fmtB(c.s)}</span>`}${c.p?`<button class="du-x" title="В корзину">${svg("trash",13)}</button>`:""}</div>`);
      if(c.d)row.onclick=ev=>{if(ev.target.closest(".du-x"))return;drill(c.p);};
      if(c.p)row.oncontextmenu=ev=>{ev.preventDefault();ctxMenu(c,ev.clientX,ev.clientY);};
      row.onmouseenter=()=>duHi(i,true);row.onmouseleave=()=>duHi(i,false);

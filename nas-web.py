@@ -4570,32 +4570,67 @@ def duscan_node(root, path, depth=1):
     if not data:
         return {"ok": False, "log": "нет данных — запустите скан"}
     nodes = data.get("nodes", {})
-    if path not in nodes:
+    # раньше падали, если пути нет в скане; теперь показываем живой листинг (новые папки после скана)
+    if path not in nodes and not os.path.isdir(path):
         return {"ok": False, "log": "нет данных по этому пути (пере-сканируйте)"}
     try:
         depth = max(1, min(3, int(depth)))
     except (ValueError, TypeError):
         depth = 1
+    # build СЛИВАЕТ реальные подпапки (os.listdir) с размерами из скана: новые папки
+    # помечаются new (нет размера), удалённые не показываются, файлы берём из скана.
     def build(p, dep):
         nd = nodes.get(p)
-        if not nd:
-            return []
+        scan_dirs, scan_rest = {}, []
+        if nd:
+            for c in nd.get("ch", []):
+                if c.get("d") and c.get("p"):
+                    scan_dirs[c["p"]] = c
+                else:
+                    scan_rest.append(c)   # файлы + агрегаты «… ещё/прочее»
+        try:
+            live = sorted(n for n in os.listdir(p) if os.path.isdir(os.path.join(p, n)))
+        except OSError:
+            live = None
         out = []
-        for c in nd["ch"]:
-            it = {"n": c["n"], "s": c["s"]}
-            if c.get("d"):
-                it["d"] = 1; it["p"] = c["p"]
-                if dep > 1:
-                    sub = build(c["p"], dep - 1)
-                    if sub:
-                        it["c"] = sub
-            elif c.get("o"):
-                it["o"] = 1
-            else:
-                it["p"] = c.get("p")
-            out.append(it)
+        if live is not None:
+            for name in live:
+                fp = os.path.join(p, name)
+                sc = scan_dirs.get(fp)
+                it = {"n": name, "d": 1, "p": fp}
+                if sc is not None:
+                    it["s"] = sc.get("s", 0)
+                    if dep > 1:
+                        sub = build(fp, dep - 1)
+                        if sub:
+                            it["c"] = sub
+                else:
+                    it["s"] = 0; it["new"] = 1   # папки нет в скане — не считана
+                out.append(it)
+            for c in scan_rest:
+                it = {"n": c["n"], "s": c.get("s", 0)}
+                if c.get("o"):
+                    it["o"] = 1
+                else:
+                    it["p"] = c.get("p")
+                out.append(it)
+        else:
+            for c in (nd.get("ch", []) if nd else []):
+                it = {"n": c["n"], "s": c.get("s", 0)}
+                if c.get("d"):
+                    it["d"] = 1; it["p"] = c["p"]
+                    if dep > 1:
+                        sub = build(c["p"], dep - 1)
+                        if sub:
+                            it["c"] = sub
+                elif c.get("o"):
+                    it["o"] = 1
+                else:
+                    it["p"] = c.get("p")
+                out.append(it)
         return out
-    return {"ok": True, "root": root, "path": path, "s": nodes[path]["s"],
+    return {"ok": True, "root": root, "path": path,
+            "s": (nodes.get(path) or {}).get("s", 0),
             "ch": build(path, depth), "scanTs": data.get("ts")}
 
 def fs_grep(path, query, limit=200):
