@@ -728,6 +728,36 @@
   .upd-con .er{color:var(--danger)}
   /* бэкап главного NAS */
   .nbwrap{padding:2px 18px 0}
+  /* Выбор папки в стиле файлового менеджера: слева диски и избранное, справа список. */
+  .pf-dlg{max-width:760px;width:min(92vw,760px)}
+  .pf-body{display:flex;gap:12px;min-height:0}
+  .pf-side{flex:0 0 190px;max-height:min(56vh,460px);overflow-y:auto;padding-right:2px}
+  .pf-grp{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);margin:10px 2px 5px}
+  .pf-grp:first-child{margin-top:0}
+  .pf-it{display:flex;align-items:center;gap:8px;padding:6px 9px;border-radius:8px;cursor:pointer;
+    font-size:12.5px;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pf-it:hover{background:var(--card-2)}
+  .pf-it.on{background:var(--sel);color:var(--accent);box-shadow:var(--sh-sm);font-weight:600}
+  .pf-it svg{flex:none;opacity:.8}
+  .pf-it .pf-sub{margin-left:auto;font-size:10.5px;color:var(--mut);font-family:var(--mono)}
+  .pf-main{flex:1;min-width:0;display:flex;flex-direction:column}
+  .pf-bar{display:flex;gap:6px;align-items:center;margin-bottom:6px}
+  .pf-bar input{flex:1;font-family:var(--mono);font-size:12px;padding:7px 10px}
+  .pf-list{flex:1;max-height:min(56vh,460px);overflow-y:auto;border:1px solid var(--line);border-radius:var(--r-md)}
+  .pf-row{display:flex;align-items:center;gap:9px;padding:8px 11px;border-top:1px solid var(--line);
+    cursor:pointer;font-size:12.5px}
+  .pf-list .pf-row:first-child{border-top:none}
+  .pf-row:hover{background:var(--card-2)}
+  .pf-empty{color:var(--mut);padding:14px;font-size:12px;text-align:center}
+  .pf-foot{display:flex;align-items:center;gap:8px;margin-top:10px}
+  .pf-cur{flex:1;min-width:0;font-family:var(--mono);font-size:11.5px;color:var(--dim);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;direction:rtl;text-align:left}
+  @media (max-width:760px){
+    .pf-body{flex-direction:column}
+    .pf-side{flex:none;max-height:120px;display:flex;gap:6px;overflow-x:auto;overflow-y:hidden}
+    .pf-grp{display:none}
+    .pf-it{flex:0 0 auto}
+  }
   .nb-crumb{font-size:11.5px;color:var(--mut);padding:6px 2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .nb-brl{max-height:300px;overflow-y:auto;border:1px solid var(--line);border-radius:var(--r-md);margin:2px 0 4px}
   .nb-bri{display:flex;align-items:center;gap:8px;padding:8px 11px;border-top:1px solid var(--line);cursor:pointer;font-size:12.5px}
@@ -4587,18 +4617,81 @@ const NB_EXCL_DEV=["node_modules/","__pycache__/","*.pyc","*.pyo",".venv/","venv
 const NB_EXCL_JUNK=[".DS_Store","._*","Thumbs.db","desktop.ini","@eaDir/","#recycle/","@Recycle/",".@__thumb/","$RECYCLE.BIN/","System Volume Information/",".Trashes",".Spotlight-V100",".fseventsd","*.tmp","*.temp","*.part","*.crdownload","~$*"];
 const NB_EXCL_DEFAULT=NB_EXCL_JUNK.concat(NB_EXCL_DEV);
 // модалка выбора ЛОКАЛЬНОЙ папки-приёмника (через файловый API)
-function nbPickLocal(start,onPick){const s=document.getElementById("scrim");let cur=start||"/mnt";
- const draw=async()=>{const r=await api("/api/fs/list?path="+encodeURIComponent(cur));const dirs=((r&&r.entries)||[]).filter(e=>e.type==="dir");cur=(r&&r.path)||cur;
-  s.innerHTML=`<div class="dialog" style="max-width:520px"><h3>${svg("folder",16)} Куда копировать</h3>
-   <div class="nb-crumb mono">${esc(cur)}</div>
-   <div class="nb-brl">${cur!=="/"?`<div class="nb-bri" data-up="1">${svg("arrowup",15)} …наверх</div>`:""}${dirs.map(d=>`<div class="nb-bri" data-p="${att(d.path)}">${svg("folder",15)} ${esc(d.name)}</div>`).join("")||'<div style="color:var(--mut);padding:8px">пусто</div>'}</div>
-   <div class="r"><button class="btn" id="nbpX">Отмена</button><button class="btn pri" id="nbpO">Выбрать эту папку</button></div></div>`;
+/* Выбор ЛОКАЛЬНОЙ папки в стиле файлового менеджера: слева быстрый доступ, избранное
+   и смонтированные диски (не надо помнить, куда примонтировался USB), справа список
+   подпапок. Можно создать папку на месте и вписать путь руками.
+   Используется для приёмника бэкапа, папки USB-импорта и бэкапа настроек. */
+const PF_CHIPS=[["Хранилище","/mnt/storage","hdd"],["Домашняя","/home/oleg","folder"],["Съёмные","/media","usb"],["Корень","/","disks"]];
+function pickFolder(opts){
+ opts=opts||{};
+ const s=document.getElementById("scrim");
+ let cur=opts.start||"/mnt/storage",favs=[],mk=false,busy=false;
+ const parent=p=>p.replace(/\/[^/]+$/,"")||"/";
+ api("/api/fm/favorites").then(r=>{favs=(r&&r.favorites)||[];draw();}).catch(()=>{});
+
+ const sideHTML=()=>{
+  const item=(name,path,ic)=>`<div class="pf-it${path===cur?" on":""}" data-go="${att(path)}" title="${att(path)}">${svg(ic,14)}<span>${esc(name)}</span></div>`;
+  let h=`<div class="pf-grp">Быстрый доступ</div>`+PF_CHIPS.map(c=>item(c[0],c[1],c[2])).join("");
+  // избранное по умолчанию повторяет быстрый доступ — дубли не показываем
+  const chipPaths=new Set(PF_CHIPS.map(c=>c[1]));
+  const fav=favs.filter(f=>f&&f.path&&!chipPaths.has(f.path));
+  if(fav.length)h+=`<div class="pf-grp">Избранное</div>`+fav.map(f=>item(f.name,f.path,"folder")).join("");
+  const mounted=(VOLS||[]).filter(v=>v.mounted&&v.mount);
+  if(mounted.length)h+=`<div class="pf-grp">Диски</div>`+mounted.map(v=>
+    `<div class="pf-it${v.mount===cur?" on":""}" data-go="${att(v.mount)}" title="${att(v.mount)}">${svg(volIcon(v),14)}<span>${esc(v.label||v.dev)}</span><span class="pf-sub">${esc(v.size||"")}</span></div>`).join("");
+  return h;};
+
+ const draw=async()=>{
+  if(busy)return;busy=true;
+  let r=null;
+  try{r=await api("/api/fs/list?path="+encodeURIComponent(cur));}catch(e){}
+  busy=false;
+  if(!r||!r.ok){toast((r&&r.log)||"нет доступа");if(cur!=="/"){cur=parent(cur);return draw();}return;}
+  cur=r.path||cur;
+  const dirs=(r.entries||[]).filter(e=>e.type==="dir"&&!fmNever(e.name)&&!e.name.startsWith("."));
+  s.innerHTML=`<div class="dialog pf-dlg"><h3>${svg("folder",16)} ${esc(opts.title||"Выберите папку")}</h3>
+    ${opts.note?`<div class="mon-note" style="margin:0 0 10px">${esc(opts.note)}</div>`:""}
+    <div class="pf-body">
+      <aside class="pf-side">${sideHTML()}</aside>
+      <div class="pf-main">
+        <div class="pf-bar">
+          <button class="iconbtn" id="pfUp" title="Наверх"${cur==="/"?" disabled":""}>${svg("arrowup",15)}</button>
+          <input class="mono" id="pfPath" value="${att(cur)}" spellcheck="false">
+          <button class="btn sm" id="pfMk" title="Создать папку здесь">${svg("plus",13)} Папка</button>
+        </div>
+        <div class="pf-list" id="pfList">
+          ${mk?`<div class="pf-row"><span>${svg("folder",15)}</span><input class="mono" id="pfMkName" placeholder="имя новой папки" style="flex:1"></div>`:""}
+          ${dirs.map(d=>`<div class="pf-row" data-go="${att(d.path)}">${svg("folder",15)}<span>${esc(d.name)}</span></div>`).join("")
+            ||(mk?"":`<div class="pf-empty">Здесь нет вложенных папок — можно выбрать эту</div>`)}
+        </div>
+      </div>
+    </div>
+    <div class="pf-foot"><span class="pf-cur" title="${att(cur)}">${esc(cur)}</span>
+      <button class="btn" id="pfX">Отмена</button>
+      <button class="btn pri" id="pfO">Выбрать эту папку</button></div></div>`;
   s.classList.add("show");
-  s.querySelector("#nbpX").onclick=()=>s.classList.remove("show");
-  s.querySelector("#nbpO").onclick=()=>{s.classList.remove("show");onPick(cur);};
-  const up=s.querySelector("[data-up]");if(up)up.onclick=()=>{cur=cur.replace(/\/[^/]+$/,"")||"/";draw();};
-  s.querySelectorAll("[data-p]").forEach(n=>n.onclick=()=>{cur=n.dataset.p;draw();});};
+  const $=q=>s.querySelector(q);
+  s.querySelectorAll("[data-go]").forEach(n=>n.onclick=()=>{cur=n.dataset.go;mk=false;draw();});
+  $("#pfUp").onclick=()=>{if(cur!=="/"){cur=parent(cur);mk=false;draw();}};
+  $("#pfX").onclick=()=>s.classList.remove("show");
+  $("#pfO").onclick=()=>{s.classList.remove("show");opts.onPick&&opts.onPick(cur);};
+  const pi=$("#pfPath");
+  pi.onkeydown=ev=>{if(ev.key==="Enter"){ev.preventDefault();const v=pi.value.trim();if(v){cur=v;mk=false;draw();}}};
+  $("#pfMk").onclick=()=>{mk=!mk;draw();};
+  const mn=$("#pfMkName");
+  if(mn){mn.focus();
+   mn.onkeydown=async ev=>{
+     if(ev.key==="Escape"){mk=false;draw();return;}
+     if(ev.key!=="Enter")return;
+     const name=mn.value.trim();if(!name)return;
+     const rr=await api("/api/fs/mkdir",{method:"POST",body:JSON.stringify({path:cur,name})});
+     if(!(rr&&rr.ok)){toast("Ошибка: "+((rr&&rr.log)||"не создать"));return;}
+     mk=false;cur=cur.replace(/\/$/,"")+"/"+name;draw();   // сразу заходим внутрь созданной
+   };}
+ };
  draw();}
+// старое имя — чтобы не переписывать все точки вызова
+const nbPickLocal=(start,onPick)=>pickFolder({start,onPick,title:"Куда копировать"});
 // модалка визуального выбора папок ИСТОЧНИКА (чекбоксы) — навигация по главному NAS
 function nbPickSource(preselected,onPick){const s=document.getElementById("scrim");
  const sel=new Set(preselected||[]),expanded=new Set(),kids={};   // kids[path]: массив | null(ошибка) | undefined(не грузили)
@@ -5014,7 +5107,7 @@ function backupTab(tc){
     <div class="field" style="margin:0"><label>Автобэкап, раз в N дней (0 — выкл)</label><input class="mono" id="bkDays" style="max-width:110px"></div>
     <div class="field" style="margin:0"><label>Хранить бэкапов, шт</label><input class="mono" id="bkKeep" style="max-width:110px"></div></div>
   <div class="field" style="margin:0 0 8px"><label>Папка бэкапа настроек${tipHTML("Куда складывать бэкап настроек. По умолчанию /mnt/storage/nas-settings-backup — на пуле, чтобы пережить переустановку ОС. Системные папки не рекомендуются: затрутся при переустановке.")}</label>
-    <div class="nb-field-row"><input class="mono" id="bkDir" placeholder="/mnt/storage/nas-settings-backup" autocomplete="off"><button class="btn sm" id="bkDirSave">Сохранить</button></div></div>
+    <div class="nb-field-row"><input class="mono" id="bkDir" placeholder="/mnt/storage/nas-settings-backup" autocomplete="off"><button class="btn sm" id="bkDirB">${svg("folder",13)} Выбрать</button><button class="btn sm" id="bkDirSave">Сохранить</button></div></div>
   <div class="srow" style="margin-bottom:8px"><div class="srow-l"><div class="srow-t">Скрывать эту папку в файловом менеджере${tipHTML("Папка бэкапа не будет мешать в файловом менеджере. Тумблер «скрытые» в окне ФМ её всё равно покажет.")}</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="bkHide"><span class="sl"></span></label></div></div>
   <div class="mon-note" id="bkNote">загрузка…</div>
   <div id="bkList"></div>`;
@@ -5025,6 +5118,8 @@ function backupTab(tc){
   const md=(r&&r.maintenance)||{};days.value=md.backup_days;keep.value=md.backup_keep;
   toast(+md.backup_days?`Автобэкап: раз в ${md.backup_days} дн`: "Автобэкап выключен");load();};
  days.onchange=saveCfg;keep.onchange=saveCfg;
+ {const bd=tc.querySelector("#bkDir"),bdb=tc.querySelector("#bkDirB");
+  if(bdb)bdb.onclick=()=>pickFolder({title:"Папка для бэкапов настроек",start:bd.value||"/mnt/storage",onPick:p=>{bd.value=p;}});}
  tc.querySelector("#bkDirSave").onclick=async()=>{const r=await api("/api/maintenance",{method:"POST",body:JSON.stringify({maintenance:{settings_backup_dir:dir.value.trim()}})});
   if(r&&r.error){toast("Ошибка: "+r.error);return;}toast("Папка бэкапа сохранена");refreshFmHideBk();load();};
  hide.onchange=async()=>{await api("/api/maintenance",{method:"POST",body:JSON.stringify({maintenance:{settings_backup_hide:hide.checked}})});toast(hide.checked?"Папка скрыта в файловом менеджере":"Папка видна в файловом менеджере");refreshFmHideBk();};
@@ -5655,7 +5750,7 @@ function usbTab(tc){tc.innerHTML=`<div class="set-load">загрузка…</div
   tc.innerHTML=`<h3 class="set-title">Авто-импорт с USB</h3><p class="set-sub">Копировать содержимое флешки в папку сразу при подключении (rsync — только копирование, с флешки ничего не удаляется).</p>
    ${c.rsync===false?`<div class="reboot-ban">${svg("power",16)} rsync не установлен — импорт не сработает. Поставится на этапе «Система» в Мастере.</div>`:""}
    <div class="srow"><div class="srow-l"><div class="srow-t">Включить авто-импорт${tipHTML("При вставке USB-накопителя его содержимое автоматически копируется в папку назначения. Срабатывает по udev при подключении.")}</div><div class="srow-d">${c.installed?"хук установлен":"будет установлен при сохранении"}</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="uEn"${c.enabled?" checked":""}><span class="sl"></span></label></div></div>
-   <div class="srow"><div class="srow-l"><div class="srow-t">Папка назначения${tipHTML("Куда копировать. Обычно на пул, напр. /mnt/storage/imports. Папка создаётся автоматически.")}</div></div><div class="srow-c"><input class="mono" id="uDest" style="min-width:230px" value="${att(c.dest||"/mnt/storage/imports")}"></div></div>
+   <div class="srow"><div class="srow-l"><div class="srow-t">Папка назначения${tipHTML("Куда копировать. Обычно на пул, напр. /mnt/storage/imports. Папка создаётся автоматически.")}</div></div><div class="srow-c"><input class="mono" id="uDest" style="min-width:200px" value="${att(c.dest||"/mnt/storage/imports")}"><button class="btn sm" id="uDestB">${svg("folder",13)} Выбрать</button></div></div>
    <div class="set-h">Раскладка подпапок${tipHTML("Шаблон имени папки, куда попадёт содержимое каждой вставленной флешки. Соберите его из токенов ниже. Косая черта «/» создаёт вложенные папки (напр. {year}/{month}). Пусто — копировать прямо в папку назначения.")}</div>
    <div class="usb-sub">
      <input id="uSubTpl" class="mono" value="${att(sub)}" placeholder="{label}-{date}">
@@ -5702,6 +5797,9 @@ function usbTab(tc){tc.innerHTML=`<div class="set-load">загрузка…</div
     tpl.value=tpl.value.slice(0,p)+b.dataset.t+tpl.value.slice(tpl.selectionEnd||p);tpl.focus();
     const np=p+b.dataset.t.length;tpl.setSelectionRange(np,np);upd();});
   tc.querySelectorAll(".usb-pre").forEach(b=>b.onclick=()=>{tpl.value=b.dataset.t;upd();});
+  {const ud=tc.querySelector("#uDest"),udb=tc.querySelector("#uDestB");
+   if(udb)udb.onclick=()=>pickFolder({title:"Папка для импорта с USB",start:ud.value||"/mnt/storage",
+     onPick:p=>{ud.value=p;dirty();}});}
   // отслеживаем несохранённые правки: кнопка внизу терялась, и настройки молча
   // откатывались к последнему сохранённому значению при переоткрытии вкладки
   const bar=tc.querySelector("#uBar"),saveBtn=tc.querySelector("#uSave"),resetBtn=tc.querySelector("#uReset");
@@ -5810,7 +5908,7 @@ async function pollMySpeed(){
  const a=r.avg||{};
  // цвета берём из уже подогнанных по контрасту токенов поверхности виджета
  const pingCol=r.ping==null?"var(--dim)":(r.ping<30?"var(--good)":r.ping<80?"var(--warn)":"var(--danger)");
- box.innerHTML=`<div class="ms-row"><span class="ms-l ms-dn">${svg("download",13)} Загрузка</span><b class="ms-dn">${esc(mbit(r.download))}</b></div>
+ box.innerHTML=`<div class="ms-row"><span class="ms-l ms-dn">${svg("download",13)} Скачивание</span><b class="ms-dn">${esc(mbit(r.download))}</b></div>
    <div class="ms-row"><span class="ms-l ms-up">${svg("upload",13)} Отдача</span><b class="ms-up">${esc(mbit(r.upload))}</b></div>
    <div class="ms-row"><span class="ms-l">${svg("activity",13)} Пинг</span><b style="color:${pingCol}">${r.ping==null?"—":esc(r.ping+" мс")}</b></div>
    ${a.download!=null?`<div class="ms-avg">в среднем ${esc(mbit(a.download))} / ${esc(mbit(a.upload))}${a.ping!=null?` · пинг ${esc(a.ping+" мс")}`:""}</div>`:""}
@@ -5859,15 +5957,17 @@ function paintSys(s){const m=document.getElementById("wg-sys");if(!m)return;
 // тип подключения (Wi-Fi/кабель) + скорость линка + сигнал + мини-спидтест
 async function pollNet(){const box=document.getElementById("wg-netlink");if(!box)return;
  const n=await api("/api/net");if(!n)return;
- const wifi=n.type==="wifi",mbs=n.link_mbit?Math.round(n.link_mbit/8):null,spd=mbs!=null?mbs+" МБ/с":"—";
+ // скорость сети измеряется в Мбит/с — так её называет провайдер, драйвер и MySpeed.
+ // Раньше делили на 8 и показывали МБ/с: цифры не сходились ни с чем.
+ const wifi=n.type==="wifi",spd=n.link_mbit?Math.round(n.link_mbit)+" Мбит/с":"—";
  const name=wifi?((n.ssid||"Wi-Fi")+(n.band?" · "+n.band:"")):"Кабель (Ethernet)";
  const spdCol=wifi?(n.link_mbit>=800?"var(--good)":"var(--warn)"):"var(--good)";
- box.innerHTML=`<div class="krow"><span style="display:inline-flex;align-items:center;gap:6px;min-width:0"><span style="flex:none;display:flex">${svg(wifi?"wifi":"net",13)}</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(name)}</span></span><b style="color:${spdCol};flex:none" title="${n.link_mbit||0} Мбит/с">${spd}</b></div>`
+ box.innerHTML=`<div class="krow"><span style="display:inline-flex;align-items:center;gap:6px;min-width:0"><span style="flex:none;display:flex">${svg(wifi?"wifi":"net",13)}</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(name)}</span></span><b style="color:${spdCol};flex:none" title="${n.link_mbit?Math.round(n.link_mbit/8)+" МБ/с":""}">${spd}</b></div>`
   +(wifi&&n.signal!=null?`<div class="krow" style="margin-top:2px"><span style="color:var(--mut);font-size:11px">Сигнал</span><b style="font-size:11px">${n.signal_pct}% · ${n.signal} dBm</b></div>`:"");
  const btn=document.getElementById("wg-nstest"),res=document.getElementById("wg-nsres");
  if(btn&&!btn._wired){btn._wired=1;btn.onclick=async()=>{btn.disabled=true;const o=btn.textContent;btn.textContent="Тест… (~15 c)";if(res)res.textContent="меряю…";
    const r=await api("/api/net/speedtest");btn.disabled=false;btn.textContent=o;
-   if(r&&r.ok){if(res)res.innerHTML=`<b style="color:var(--good)">↓ ${r.down_MBs!=null?r.down_MBs:"—"} МБ/с</b> · <b style="color:var(--accent)">↑ ${r.up_MBs!=null?r.up_MBs:"—"} МБ/с</b>`;}
+   if(r&&r.ok){if(res)res.innerHTML=`<b style="color:var(--good)" title="${r.down_MBs!=null?r.down_MBs+" МБ/с":""}">↓ ${r.down_mbps!=null?r.down_mbps:"—"} Мбит/с</b> · <b style="color:var(--accent)" title="${r.up_MBs!=null?r.up_MBs+" МБ/с":""}">↑ ${r.up_mbps!=null?r.up_mbps:"—"} Мбит/с</b>`;}
    else if(res)res.textContent="Ошибка: "+((r&&r.log)||"?");};}
 }
 async function pollStacks(){const box=document.getElementById("wg-docker");if(!box)return;
