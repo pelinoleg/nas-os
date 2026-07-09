@@ -1,0 +1,26 @@
+# MySpeed — автоматические замеры скорости интернета с историей и графиками.
+# http://<pi>:5216   Документация: https://myspeed.dev
+#
+# Заменил OpenSpeedTest: тот меряет скорость ЛОКАЛЬНОЙ сети между браузером и Pi
+# по нажатию кнопки, а MySpeed сам ходит наружу по расписанию и копит статистику
+# (скорость, пинг, потери). Расписание и порог оповещений — в самом веб-интерфейсе.
+#
+# Тег зафиксирован по соглашению services/README.md. Стабильный 1.0.9 собран под
+# arm64, а ветка `development` — только amd64, на Pi 5 она не запустится.
+# Данные (sqlite) — bind-mount, чтобы жили рядом с остальными стеками.
+services:
+  myspeed:
+    image: germannewsmaker/myspeed:1.0.9
+    container_name: myspeed
+    restart: unless-stopped
+    ports:
+      - "5216:5216"
+    environment:
+      - TZ=${TZ:-Europe/Madrid}
+    volumes:
+      - /opt/docker/myspeed/data:/myspeed/data
+    labels:
+      - "diun.enable=true"
+      - "web-desktop.name=MySpeed"
+      - "web-desktop.url=http://pi5.local:5216"
+      - "web-desktop.icon=https://cdn.jsdelivr.net/gh/selfhst/icons@main/png/myspeed.png"
