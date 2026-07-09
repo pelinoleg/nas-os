@@ -922,7 +922,7 @@
   .fm-row.fm-hid:hover,.fm-tile.fm-hid:hover,.fm-row.fm-hid.sel,.fm-tile.fm-hid.sel{opacity:.85}
   .fm-row.sel{background:var(--accent-soft);color:var(--accent)}
   .fm-row .fi{flex:none;color:var(--dim);display:grid;place-items:center;width:28px;height:28px;position:relative}
-  .fm-row .fi .thumb{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;border-radius:4px}
+  .fm-row .fi .thumb{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:4px;background:#0c1119}
   .fm-row.dir .fi{color:var(--accent-2)}
   .fm-row .fn{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .fm-row .fsz{font-family:var(--mono);font-size:10px;color:var(--mut);flex:none}
@@ -1083,7 +1083,7 @@
   .fm-tile:hover{background:var(--sel);border-color:var(--line)}
   .fm-tile.sel{background:var(--accent-soft);border-color:var(--accent-line)}
   .fm-tile .ti{position:relative;width:64px;height:64px;display:grid;place-items:center;color:var(--dim)}.fm-tile.dir .ti{color:var(--accent-2)}
-  .fm-tile .ti .thumb{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;border-radius:6px}
+  .fm-tile .ti .thumb{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:6px;background:#0c1119}
   .fm-tile .tn{font-size:11px;text-align:center;line-height:1.25;word-break:break-word;max-height:2.6em;overflow:hidden;color:var(--text)}
   .fm-tile .fm-ck{position:absolute;top:6px;left:6px;opacity:0}
   .fm-tile:hover .fm-ck,.fm-tile.sel .fm-ck{opacity:1}
@@ -1118,20 +1118,29 @@
   /* кастомный видеоплеер */
   .vp{position:absolute;inset:0;display:flex;align-items:center;justify-content:center}
   .vp video{max-width:100%;max-height:100%;background:#000;cursor:pointer}
-  .vp-ctl{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;gap:11px;padding:20px 16px 12px;background:linear-gradient(transparent,rgba(0,0,0,.8));transition:opacity .25s;z-index:3}
+  /* фуллскрин: видео тянется на весь экран (без него — оставалось нативного размера по центру) */
+  .vp:fullscreen,.vp:-webkit-full-screen{width:100vw;height:100vh;background:#000}
+  .vp:fullscreen video,.vp:-webkit-full-screen video{width:100%;height:100%;max-width:none;max-height:none;object-fit:contain}
+  .vp-ctl{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;gap:13px;padding:30px 18px 15px;font-size:13px;background:linear-gradient(transparent,rgba(0,0,0,.82));transition:opacity .25s;z-index:3}
   .vp.hide .vp-ctl{opacity:0;pointer-events:none}
-  .vp-ctl button{border:none;background:none;color:#fff;cursor:pointer;display:flex;align-items:center;padding:5px;border-radius:7px;flex:none}
-  .vp-ctl button:hover{background:rgba(255,255,255,.16)}
-  .vp-ctl button.on{color:var(--accent)}
-  .vp-seek{flex:1;height:5px;background:rgba(255,255,255,.22);border-radius:999px;position:relative;cursor:pointer;transition:height .1s}
-  .vp-seek:hover{height:8px}
+  .vp-ctl button{border:none;background:none;color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:7px;border-radius:9px;flex:none;min-width:34px;min-height:34px;font-size:15px}
+  .vp-ctl button:hover{background:rgba(255,255,255,.18)}
+  .vp-ctl button.on{color:var(--accent);background:rgba(255,255,255,.1)}
+  .vp-seek{flex:1;height:6px;background:rgba(255,255,255,.22);border-radius:999px;position:relative;cursor:pointer;transition:height .1s;margin:0 2px}
+  .vp-seek:hover{height:10px}
   .vp-buf{position:absolute;left:0;top:0;bottom:0;background:rgba(255,255,255,.32);border-radius:999px;width:0}
   .vp-prog{position:absolute;left:0;top:0;bottom:0;background:var(--accent);border-radius:999px;width:0}
-  .vp-prog::after{content:"";position:absolute;right:-6px;top:50%;transform:translateY(-50%);width:12px;height:12px;border-radius:50%;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.5);opacity:0;transition:opacity .1s}
+  .vp-prog::after{content:"";position:absolute;right:-7px;top:50%;transform:translateY(-50%);width:14px;height:14px;border-radius:50%;background:#fff;box-shadow:0 1px 5px rgba(0,0,0,.55);opacity:0;transition:opacity .1s}
   .vp-seek:hover .vp-prog::after{opacity:1}
-  .vp-t{color:#dfe7f2;font-size:11.5px;font-family:var(--mono);flex:none;min-width:42px;text-align:center}
-  .vp-vol{width:74px;accent-color:var(--accent);cursor:pointer}
-  .vp-spd{font-size:11.5px;font-weight:700;min-width:30px;justify-content:center}
+  .vp-t{color:#dfe7f2;font-size:12px;font-family:var(--mono);flex:none;min-width:44px;text-align:center}
+  .vp-vol{width:84px;accent-color:var(--accent);cursor:pointer}
+  .vp-spd{font-size:12.5px;font-weight:700;min-width:38px;justify-content:center}
+  /* меню плеера (дорожки/субтитры) */
+  .vp-menu{position:absolute;right:12px;bottom:64px;z-index:5;min-width:190px;max-height:50%;overflow:auto;background:rgba(18,22,30,.97);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,.12);border-radius:12px;padding:6px;box-shadow:0 10px 30px rgba(0,0,0,.5)}
+  .vp-menu .vpm-h{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#8fa0b8;padding:6px 9px 3px}
+  .vp-menu button{display:flex;width:100%;align-items:center;gap:8px;background:none;border:none;color:#e6edf7;font-size:12.5px;text-align:left;padding:8px 9px;border-radius:8px;cursor:pointer}
+  .vp-menu button:hover{background:rgba(255,255,255,.1)}
+  .vp-menu button.on{color:var(--accent)}.vp-menu button .vpm-ck{margin-left:auto;flex:none}
   .vw-nav{position:absolute;top:50%;transform:translateY(-50%);width:46px;height:70px;display:grid;place-items:center;background:rgba(0,0,0,.42);color:#fff;border:none;cursor:pointer;border-radius:12px;opacity:0;transition:opacity .15s;z-index:2}
   .vw:hover .vw-nav{opacity:.8}.vw-nav:hover{opacity:1!important;background:rgba(0,0,0,.62)}
   .vw-nav.prev{left:12px}.vw-nav.next{right:12px}.vw-nav svg{transform:rotate(-90deg)}.vw-nav.next svg{transform:rotate(90deg)}
@@ -3414,7 +3423,7 @@ function viewerRender(w){const V=w._V,e=V.sibs[V.idx];if(!e)return;
  else if(!vid)tools=`<button data-a="full" title="Во весь экран (F)">${svg("expand",14)}</button>`;
  let media;
  if(img)media=`<img id="vwM" src="${raw}" draggable="false" class="grab">`;
- else if(vid)media=`<div class="vp" id="vp"><video id="vwM" src="${raw}" autoplay playsinline></video><div class="vp-ctl"><button data-v="play" title="Пауза/пуск (пробел)">${PLAY_SVG}</button><span class="vp-t" id="vpCur">0:00</span><div class="vp-seek" id="vpSeek"><div class="vp-buf" id="vpBuf"></div><div class="vp-prog" id="vpProg"></div></div><span class="vp-t" id="vpDur">0:00</span><button data-v="mute" title="Звук (M)">${VOL_SVG}</button><input type="range" class="vp-vol" id="vpVol" min="0" max="1" step="0.05" value="1"><button data-v="spd" class="vp-spd" title="Скорость">1×</button><button data-v="cc" title="Субтитры">CC</button><button data-v="pip" title="Картинка-в-картинке">⧉</button><button data-v="tc" title="Транскодировать (для несовместимых кодеков)">⚙</button><button data-v="full" title="Во весь экран (F)">${svg("expand",16)}</button></div></div>`;
+ else if(vid)media=`<div class="vp" id="vp"><video id="vwM" src="${raw}" autoplay playsinline></video><div class="vp-ctl"><button data-v="play" title="Пауза/пуск (пробел)">${PLAY_SVG}</button><span class="vp-t" id="vpCur">0:00</span><div class="vp-seek" id="vpSeek"><div class="vp-buf" id="vpBuf"></div><div class="vp-prog" id="vpProg"></div></div><span class="vp-t" id="vpDur">0:00</span><button data-v="mute" title="Звук (M)">${VOL_SVG}</button><input type="range" class="vp-vol" id="vpVol" min="0" max="1" step="0.05" value="1"><button data-v="spd" class="vp-spd" title="Скорость">1×</button><button data-v="cc" title="Субтитры">CC</button><button data-v="pip" title="Картинка-в-картинке">⧉</button><button data-v="tc" title="Транскодировать (для несовместимых кодеков)">⚙</button><button data-v="full" title="Во весь экран (F)">${svg("expand",20)}</button></div></div>`;
  else media=`<audio id="vwM" src="${raw}" controls autoplay></audio>`;
  body.innerHTML=`<div class="vw"><div class="vw-bar"><span class="vw-t">${esc(e.name)}</span><span class="vw-i">${multi?(V.idx+1)+" / "+V.sibs.length:""}</span>${tools}${dlA}</div><div class="vw-stage" id="vwStage">${nav}${media}</div></div>`;
  const stage=body.querySelector("#vwStage"),m=body.querySelector("#vwM");
@@ -3433,11 +3442,13 @@ function viewerRender(w){const V=w._V,e=V.sibs[V.idx];if(!e)return;
    m.ondblclick=()=>{if(z>1)w._V.imgApi.zr();else zoom(2);};
  }else if(vid){mountVideo(w,body,m,e,V);}
 }
-const PLAY_SVG=`<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>`;
-const PAUSE_SVG=`<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>`;
-const VOL_SVG=`<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M3 10v4h4l5 4V6l-5 4H3z"/><path d="M16 8.5a4 4 0 0 1 0 7" fill="none" stroke="currentColor" stroke-width="2"/></svg>`;
-const MUTE_SVG=`<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M3 10v4h4l5 4V6l-5 4H3z"/><path d="M16 9l5 6M21 9l-5 6" stroke="currentColor" stroke-width="2" fill="none"/></svg>`;
+const PLAY_SVG=`<svg viewBox="0 0 24 24" width="23" height="23" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>`;
+const PAUSE_SVG=`<svg viewBox="0 0 24 24" width="23" height="23" fill="currentColor"><path d="M6 5h4v14H6zM14 5h4v14h-4z"/></svg>`;
+const VOL_SVG=`<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M3 10v4h4l5 4V6l-5 4H3z"/><path d="M16 8.5a4 4 0 0 1 0 7" fill="none" stroke="currentColor" stroke-width="2"/></svg>`;
+const MUTE_SVG=`<svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M3 10v4h4l5 4V6l-5 4H3z"/><path d="M16 9l5 6M21 9l-5 6" stroke="currentColor" stroke-width="2" fill="none"/></svg>`;
 const TRANS_FORCE=["hevc","h265","mpeg4","msmpeg4v3","msmpeg4v2","msmpeg4v1","wmv1","wmv2","wmv3","vc1","vp6f","rv40","rv30","mpeg2video","mpeg1video","flv1","dvvideo"];
+// аудиокодеки, которые браузер не декодирует нативно → нужен транскод, иначе видео без звука
+const AUDIO_BAD=["ac3","eac3","dts","dca","truehd","mlp","pcm_bluray","pcm_dvd","pcm_dvdaudio"];
 function mountVideo(w,body,m,e,V){
  const vp=body.querySelector("#vp"),playB=body.querySelector('[data-v="play"]'),seek=body.querySelector("#vpSeek"),
    prog=body.querySelector("#vpProg"),buf=body.querySelector("#vpBuf"),cur=body.querySelector("#vpCur"),dur=body.querySelector("#vpDur"),
@@ -3480,7 +3491,11 @@ function mountVideo(w,body,m,e,V){
  let hideT;const show=()=>{vp.classList.remove("hide");clearTimeout(hideT);hideT=setTimeout(()=>{if(!m.paused)vp.classList.add("hide");},2400);};
  vp.onpointermove=show;vp.onpointerleave=()=>{if(!m.paused)vp.classList.add("hide");};show();
  api("/api/fs/vmeta?path="+encodeURIComponent(vpath)).then(r=>{if(!r||!r.ok)return;if(r.duration)DUR=r.duration;dur.textContent=fmt(totDur());
-   const vc=(r.vcodec||"").toLowerCase();if(!transc&&!tcTried&&TRANS_FORCE.includes(vc)){toast("Кодек "+vc+" — транскодирую");startTrans(0);}});
+   const vc=(r.vcodec||"").toLowerCase(),ac=(r.acodec||"").toLowerCase();
+   if(!transc&&!tcTried){
+     if(TRANS_FORCE.includes(vc)){toast("Кодек "+vc+" не поддержан браузером — транскодирую");startTrans(0);}
+     else if(AUDIO_BAD.includes(ac)){toast("Аудио "+ac+" не играет в браузере — включаю звук через транскод");startTrans(0);}
+   }});
  w._V.vidApi={toggle,fs,show,seek:d=>{const T=Math.max(0,Math.min(totDur()||1e9,curTime()+d));if(transc)startTrans(T);else m.currentTime=T;show();},
    vol:d=>{m.volume=Math.max(0,Math.min(1,m.volume+d));vol.value=m.volume;m.muted=false;muteB.innerHTML=m.volume===0?MUTE_SVG:VOL_SVG;show();},
    mute:()=>{muteB.onclick();show();}};
