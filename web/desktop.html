@@ -771,6 +771,13 @@
   .nb-arr{color:var(--mut);flex:none}
   .nb-dst{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dim)}
   .nb-sz{flex:none;color:var(--mut);font-size:11px}
+  /* бейдж состояния приёмника у задачи + предупреждение */
+  .nb-warn{flex:none;font-family:var(--mono);font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;padding:1px 6px;border-radius:5px}
+  .nb-warn.dng{color:var(--danger);border:1px solid var(--danger)}
+  .nb-warn.wrn{color:var(--warn);border:1px solid var(--warn)}
+  .nb-dwarn{font-size:12px;line-height:1.45;border-radius:var(--r-sm);padding:8px 10px;margin-bottom:8px;color:var(--text);
+    background:color-mix(in srgb,var(--danger) 12%,transparent);border:1px solid color-mix(in srgb,var(--danger) 35%,transparent)}
+  .nb-dwarn.wrn{background:color-mix(in srgb,var(--warn) 12%,transparent);border-color:color-mix(in srgb,var(--warn) 35%,transparent)}
   .nb-hrun{display:flex;align-items:center;gap:8px;margin-top:12px;padding-top:8px;border-top:1px solid var(--line);font-size:12.5px}
   .nb-hrun:first-child{margin-top:0;border-top:none}
   .nb-hdate{font-weight:600}.nb-hmeta{margin-left:auto;color:var(--mut);font-size:11px}
@@ -4411,23 +4418,43 @@ function winBackup(){openWin("__nasbak","Бэкап главного NAS",(body,
      <div class="ovh-row"><span class="ovh-dot" style="background:var(--accent)"></span><span class="ovh-n">Папок в бэкапе</span><span class="ovh-v">${(c.jobs||[]).length}</span></div>
      <div class="ovh-row"><span class="ovh-dot" style="background:var(--accent-2)"></span><span class="ovh-n">Расписание</span><span class="ovh-v">${esc(sched)}</span></div>
      <div class="ovh-row"><span class="ovh-dot" style="background:var(--dim)"></span><span class="ovh-n">Удалённые</span><span class="ovh-v">${c.delete_mode==="mirror"?"зеркало":c.delete_mode==="add"?"не удалять":"архив"}</span></div>
+     <div class="ovh-row"><span class="ovh-dot" id="oRecvDot" style="background:var(--mut)"></span><span class="ovh-n">Приёмник</span><span class="ovh-v" id="oRecvV">проверка…</span></div>
    </div></div>
    <div class="set-h">Последний прогон</div>
    <div id="oStatus" style="font-size:12.5px;color:var(--dim);padding:2px 2px 6px">загрузка…</div>
    <div class="nb-foot"><button class="btn" id="oDry">Пробный прогон</button><button class="btn pri" id="oRun">${svg("sync",14)} Запустить бэкап</button><button class="btn sm dng" id="oCancel" style="display:none">${svg("x",13)} Остановить</button><button class="btn sm" id="oTest" style="margin-left:auto">${svg("refresh",13)} Проверить связь</button></div>
    <div class="nb-prog" id="oProg" style="display:none;margin-top:10px"></div>
    <div class="set-h">Папки</div>
+   <div id="oDwarn" class="nb-dwarn" style="display:none"></div>
    <div id="oJobs"></div>
    <div style="margin-top:12px"><button class="btn sm" id="oLog">${svg("logs",13)} <span id="oLogT">Показать журнал</span></button></div>
    <div class="upd-con" id="oCon" style="display:none;margin-top:8px"></div>`;
   const g=s=>tc.querySelector(s);
   // папки со статусом последнего прогона (перекрашиваем и после завершения бэкапа)
-  const paintStatus=()=>api("/api/backup/status").then(st=>{const jn=g("#oJobs");if(!jn)return;
+  const paintStatus=()=>Promise.all([api("/api/backup/status"),api("/api/backup/dest-state")]).then(([st,ds])=>{const jn=g("#oJobs");if(!jn)return;
    const byS={};((st&&st.jobs)||[]).forEach(j=>byS[j.src]=j);
+   const byD={};((ds&&ds.jobs)||[]).forEach(j=>byD[j.src]=j);
    if(!(c.jobs||[]).length){jn.innerHTML='<div style="color:var(--mut);font-size:12px;padding:4px 0">Источники не выбраны — добавьте на вкладке «Источники».</div>';}
    else jn.innerHTML="";
-   (c.jobs||[]).forEach(j=>{const r=byS[j.src];const dot=r?(r.ok?"var(--good)":"var(--danger)"):"var(--mut)";
-    jn.appendChild(el(`<div class="nb-job"><span class="ovh-dot" style="background:${dot};flex:none"></span><span class="nb-src mono" title="${att(j.src)}">${esc(j.src)}</span><span class="nb-arr">→</span><span class="nb-dst mono" title="${att(j.dest)}">${esc(j.dest)}</span>${r&&r.size?`<span class="nb-sz mono">${fmtB(r.size)}</span>`:""}</div>`));});
+   let miss=0,emptyN=0;
+   (c.jobs||[]).forEach(j=>{const r=byS[j.src],d=byD[j.src];let dot,badge="";
+    if(d&&!d.exists){dot="var(--danger)";badge=`<span class="nb-warn dng" title="Папки нет в приёмнике — удалена вручную? Запусти бэкап, чтобы восстановить.">нет папки</span>`;miss++;}
+    else if(d&&d.empty){dot="var(--warn)";badge=`<span class="nb-warn wrn" title="Папка в приёмнике есть, но пуста.">пусто</span>`;emptyN++;}
+    else dot=r?(r.ok?"var(--good)":"var(--danger)"):"var(--mut)";
+    jn.appendChild(el(`<div class="nb-job"><span class="ovh-dot" style="background:${dot};flex:none"></span><span class="nb-src mono" title="${att(j.src)}">${esc(j.src)}</span><span class="nb-arr">→</span><span class="nb-dst mono" title="${att(j.dest)}">${esc(j.dest)}</span>${badge}${r&&r.size?`<span class="nb-sz mono">${fmtB(r.size)}</span>`:""}</div>`));});
+   // предупреждение о приёмнике + строка «Приёмник» в сводке
+   const rd=g("#oRecvDot"),rv=g("#oRecvV"),dw=g("#oDwarn");
+   const notMnt=ds&&ds.base_mounted===false;
+   if(rd&&rv){if(notMnt){rd.style.background="var(--danger)";rv.textContent="не смонтирован";}
+    else if(miss){rd.style.background="var(--danger)";rv.textContent=miss+" без папки";}
+    else if(emptyN){rd.style.background="var(--warn)";rv.textContent=emptyN+" пусто";}
+    else if((c.jobs||[]).length){rd.style.background="var(--good)";rv.textContent="в порядке";}
+    else{rd.style.background="var(--mut)";rv.textContent="—";}}
+   if(dw){let m="",cls="nb-dwarn";
+    if(notMnt){m=`⚠ Приёмник не смонтирован (${esc(ds.base||"")}) — бэкап не запустится.`;}
+    else if(miss){m=`⚠ Папок нет в приёмнике: ${miss}. Похоже, удалены вручную. Запусти бэкап — они восстановятся.`;}
+    else if(emptyN){m=`Папок пусто в приёмнике: ${emptyN}.`;cls="nb-dwarn wrn";}
+    dw.className=cls;dw.style.display=m?"block":"none";dw.innerHTML=m;}
    const sn=g("#oStatus");if(sn){if(st&&st.running)sn.innerHTML=`<span style="color:var(--accent)">идёт сейчас…</span>`;
     else if(st&&st.ts){const ok=(st.jobs||[]).filter(x=>x.ok).length,tot=(st.jobs||[]).length;sn.innerHTML=`${fmDate(st.ts)} · <b style="color:${ok===tot?"var(--good)":"var(--warn)"}">${ok}/${tot}</b> задач успешно`;}
     else sn.textContent="ещё не запускался";}});

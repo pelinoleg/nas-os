@@ -2428,6 +2428,29 @@ def nb_status():
     st["line"] = ""
     return st
 
+def nb_dest_state():
+    """Реальное состояние приёмника СЕЙЧАС: существуют ли папки задач и не пусты ли.
+    Быстро (isdir/listdir, без du). Ловит ручное удаление папок из приёмника —
+    точки последнего прогона этого не видят."""
+    cfg = nb_load()
+    base = cfg.get("dest_base") or "/mnt/storage/nas-backup"
+    arch = nb_deleted_top(cfg)
+    jobs = []
+    for j in cfg.get("jobs", []):
+        dest = j.get("dest") or ""
+        exists = bool(dest) and os.path.isdir(dest)
+        empty = False
+        if exists:
+            try:
+                empty = not [n for n in os.listdir(dest) if n != arch]
+            except OSError:
+                pass
+        jobs.append({"src": j.get("src", ""), "dest": dest,
+                     "enabled": j.get("enabled", True) is not False,
+                     "exists": exists, "empty": empty})
+    return {"base": base, "base_mounted": os.path.ismount(STORAGE),
+            "base_exists": os.path.isdir(base), "jobs": jobs}
+
 def nb_log_tail(since):
     """Хвост лога текущего/последнего прогона (из файла) — для переподключения UI."""
     try:
@@ -6338,6 +6361,8 @@ class H(BaseHTTPRequestHandler):
                 self._json({"config": nb_public()})
             elif p == "/api/backup/status":
                 self._json(nb_status())
+            elif p == "/api/backup/dest-state":
+                self._json(nb_dest_state())
             elif p == "/api/backup/log":
                 self._json(nb_log_tail((q.get("since") or ["0"])[0]))
             elif p == "/api/backup/history":
