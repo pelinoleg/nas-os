@@ -2678,7 +2678,7 @@ def load_maintenance():
          "backup_days": 7,          # авто-бэкап настроек, раз в N дней
          "backup_keep": 10,         # сколько бэкапов хранить
          "settings_backup_dir": "",     # путь бэкапа настроек ("" = /mnt/storage/nas-settings-backup)
-         "settings_backup_hide": False, # скрывать эту папку в файловом менеджере
+         "settings_backup_hide": True,  # скрывать эту папку в файловом менеджере (по умолчанию да)
          "snap_sync_time": "03:00",   # SnapRAID: ежедневный sync
          "snap_scrub_dow": "Sun",     # SnapRAID: день недели scrub
          "snap_scrub_time": "05:00",  # SnapRAID: время scrub

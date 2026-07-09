@@ -907,6 +907,9 @@
   @media(max-width:640px){.tc-s,.tc-w,.tr-cols .tc-s,.tr-cols .tc-w{display:none}}
   .fm-row{display:flex;align-items:center;gap:9px;padding:7px 8px;border-radius:var(--r-sm);cursor:pointer;font-size:12.5px}
   .fm-row:hover{background:var(--sel)}
+  /* скрытые (показанные тумблером) — приглушены, чтобы отличать от обычных */
+  .fm-row.fm-hid,.fm-tile.fm-hid{opacity:.5}
+  .fm-row.fm-hid:hover,.fm-tile.fm-hid:hover,.fm-row.fm-hid.sel,.fm-tile.fm-hid.sel{opacity:.85}
   .fm-row.sel{background:var(--accent-soft);color:var(--accent)}
   .fm-row .fi{flex:none;color:var(--dim);display:grid;place-items:center;width:28px;height:28px;position:relative}
   .fm-row .fi .thumb{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;border-radius:4px}
@@ -3568,8 +3571,10 @@ function fmIcon(name,type,size){const k=fmKind(name,type);
  const c=FM_ICO_C[k]||FM_ICO_C.file;
  return `<svg class="fmico" viewBox="0 0 24 24" width="${size}" height="${size}"><path fill="${c[0]}" d="M6 2.6h7L19 8.6V19a2.4 2.4 0 0 1-2.4 2.4H6A2.4 2.4 0 0 1 3.6 19V5A2.4 2.4 0 0 1 6 2.6z"/><path fill="${c[1]}" d="M13 2.6l6 6h-4.5A1.5 1.5 0 0 1 13 7.1z"/>${FM_GLYPH[k]||""}</svg>`;}
 const FM_CHIPS=[["Home","/home/oleg"],["Хранилище","/mnt/storage"],["Стеки","/opt/stacks"],["Конфиги","/etc"],["Логи","/var/log"],["Корень","/"]];
-// системный «мусор» — прячем в ФМ вместе со скрытыми (тумблер «скрытые» их покажет)
-const FM_SYS=new Set(["lost+found","$RECYCLE.BIN","System Volume Information","#recycle","@eaDir",".Trashes",".Spotlight-V100",".fseventsd"]);
+// FM_NEVER — не показываем НИКОГДА, даже при «показать скрытые» (чистый системный балласт)
+const FM_NEVER=new Set(["lost+found"]);
+// FM_SYS — системный «мусор»: прячем как скрытые (тумблер «скрытые» их покажет, приглушёнными)
+const FM_SYS=new Set(["$RECYCLE.BIN","System Volume Information","#recycle","@eaDir",".Trashes",".Spotlight-V100",".fseventsd"]);
 let FM_HIDE_BK=null;   // имя папки бэкапа настроек, если включено «скрывать в ФМ» (из /api/maintenance)
 function refreshFmHideBk(){return api("/api/maintenance").then(r=>{const mm=(r&&r.maintenance)||{};
  FM_HIDE_BK=(mm.settings_backup_hide&&r&&r.settings_backup_path)?r.settings_backup_path.split("/").filter(Boolean).pop():null;}).catch(()=>{});}
@@ -3702,6 +3707,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    const pb=body.querySelector("#fPaste");if(clip&&clip.items.length){pb.style.display="inline-flex";pb.textContent="Вставить ("+clip.items.length+")";}else pb.style.display="none";
    renderStatus();}
  function renderList(){const srcArr=searchRes||entries;let arr=srcArr.slice();
+   arr=arr.filter(e=>!FM_NEVER.has(e.name));   // lost+found и т.п. — не показываем никогда
    if(!showHidden&&!searchRes)arr=arr.filter(e=>!e.name.startsWith(".")&&!FM_SYS.has(e.name)&&e.name!==FM_HIDE_BK);
    if(filt&&!searchRes)arr=arr.filter(e=>e.name.toLowerCase().includes(filt));
    const foldersFirst=SET.fmFoldersFirst!==false;
@@ -3719,17 +3725,18 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    const toggleSel=(e,i,shift)=>{if(shift&&lastIdx>=0){const a=Math.min(lastIdx,i),b=Math.max(lastIdx,i);for(let k=a;k<=b;k++)sel.add(arr[k].path);}else{if(sel.has(e.path))sel.delete(e.path);else sel.add(e.path);}lastIdx=i;renderList();selUpdate();};
    arr.forEach((e,i)=>{
      const isSel=sel.has(e.path),baseIco=fmIcon(e.name,e.type,isz);
+     const isHid=e.name.startsWith(".")||FM_SYS.has(e.name)||e.name===FM_HIDE_BK;   // приглушаем, когда показаны
      let ficon;
      if(e.type==="file"&&thumbsOn&&thumbable(e.name)){
        ficon=baseIco+`<img class="thumb" src="/api/fs/thumb?path=${encodeURIComponent(e.path)}" alt="" loading="lazy" onerror="this.remove()">`;}
      else ficon=baseIco;
      let node;
-     if(grid){node=el(`<div class="fm-tile ${e.type}${isSel?" sel":""}${i===cursor?" fm-cur":""}"><input type="checkbox" class="fm-ck"${isSel?" checked":""}><div class="ti">${ficon}</div><div class="tn" title="${att(searchRes?e.path:e.name)}">${esc(e.name)}</div></div>`);}
+     if(grid){node=el(`<div class="fm-tile ${e.type}${isSel?" sel":""}${i===cursor?" fm-cur":""}${isHid?" fm-hid":""}"><input type="checkbox" class="fm-ck"${isSel?" checked":""}><div class="ti">${ficon}</div><div class="tn" title="${att(searchRes?e.path:e.name)}">${esc(e.name)}</div></div>`);}
      else{let nmH=esc(e.name)+(e.match?` <small style="color:var(--mut);font-weight:400">— ${esc(e.match.slice(0,90))}${e.line?" :"+e.line:""}</small>`:"");
        let relDir="";
        if(searchRes){const par=e.path.replace(/\/[^/]+$/,"");relDir=(par.slice(cwd==="/"?0:cwd.length)||"/");
          nmH+=`<span class="fpath" title="${att(par)}">${svg("folder",11)} ${esc(relDir)}</span>`;}
-       node=el(`<div class="fm-row ${e.type}${searchRes?" srch":""}${isSel?" sel":""}${i===cursor?" fm-cur":""}"><input type="checkbox" class="fm-ck"${isSel?" checked":""}><span class="fi">${ficon}</span><span class="fn" title="${att(searchRes?e.path:e.name)}">${nmH}</span><span class="fsz">${e.type==="dir"?"":fmtB(e.size)}</span><span class="fdate">${fmDate(e.mtime)}</span></div>`);
+       node=el(`<div class="fm-row ${e.type}${searchRes?" srch":""}${isSel?" sel":""}${i===cursor?" fm-cur":""}${isHid?" fm-hid":""}"><input type="checkbox" class="fm-ck"${isSel?" checked":""}><span class="fi">${ficon}</span><span class="fn" title="${att(searchRes?e.path:e.name)}">${nmH}</span><span class="fsz">${e.type==="dir"?"":fmtB(e.size)}</span><span class="fdate">${fmDate(e.mtime)}</span></div>`);
        const pl=node.querySelector(".fpath");if(pl)pl.onclick=ev=>{ev.stopPropagation();load(e.path.replace(/\/[^/]+$/,"")||"/");};}
      node.querySelector(".fm-ck").onclick=ev=>{ev.stopPropagation();toggleSel(e,i,ev.shiftKey);};
      // клик по ВСЕЙ строке/плитке (кроме чекбокса), а не только по имени/иконке — иначе клик
