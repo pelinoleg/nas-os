@@ -6043,6 +6043,13 @@ function paintSys(s){const m=document.getElementById("wg-sys");if(!m)return;
  NETT.push(s.net.tx);if(NETT.length>60)NETT.shift();drawNet();
 }
 // тип подключения (Wi-Fi/кабель) + скорость линка + сигнал + мини-спидтест
+/* Результат мини-спидтеста ставится один раз по нажатию и больше не обновляется:
+   pollNet перерисовывает только строки линка. Без отметки времени старое число
+   стоит рядом со свежими данными MySpeed и выглядит расхождением. */
+let NS_AT=0, NS_HTML="";
+const nsPaint=()=>{const e=document.getElementById("wg-nsres");
+  if(!e||!NS_HTML)return;
+  e.innerHTML=NS_HTML+` · <span style="color:var(--mut)">${opAgo(NS_AT)}</span>`;};
 async function pollNet(){const box=document.getElementById("wg-netlink");if(!box)return;
  const n=await api("/api/net");if(!n)return;
  // скорость сети измеряется в Мбит/с — так её называет провайдер, драйвер и MySpeed.
@@ -6055,8 +6062,11 @@ async function pollNet(){const box=document.getElementById("wg-netlink");if(!box
  const btn=document.getElementById("wg-nstest"),res=document.getElementById("wg-nsres");
  if(btn&&!btn._wired){btn._wired=1;btn.onclick=async()=>{btn.disabled=true;const o=btn.textContent;btn.textContent="Тест… (~15 c)";if(res)res.textContent="меряю…";
    const r=await api("/api/net/speedtest");btn.disabled=false;btn.textContent=o;
-   if(r&&r.ok){if(res)res.innerHTML=`<b style="color:var(--good)" title="${r.down_MBs!=null?r.down_MBs+" МБ/с":""}">↓ ${r.down_mbps!=null?r.down_mbps:"—"} Мбит/с</b> · <b style="color:var(--accent)" title="${r.up_MBs!=null?r.up_MBs+" МБ/с":""}">↑ ${r.up_mbps!=null?r.up_mbps:"—"} Мбит/с</b>`;}
-   else if(res)res.textContent="Ошибка: "+((r&&r.log)||"?");};}
+   if(r&&r.ok){NS_AT=Date.now();
+     NS_HTML=`<b style="color:var(--good)" title="${r.down_MBs!=null?r.down_MBs+" МБ/с":""}">↓ ${r.down_mbps!=null?r.down_mbps:"—"} Мбит/с</b> · <b style="color:var(--accent)" title="${r.up_MBs!=null?r.up_MBs+" МБ/с":""}">↑ ${r.up_mbps!=null?r.up_mbps:"—"} Мбит/с</b>`;
+     nsPaint();}
+   else{NS_HTML="";if(res)res.textContent="Ошибка: "+((r&&r.log)||"?");}};}
+ nsPaint();
 }
 async function pollStacks(){const box=document.getElementById("wg-docker");if(!box)return;
  const r=await api("/api/stacks");const st=(r&&r.stacks)||[];
