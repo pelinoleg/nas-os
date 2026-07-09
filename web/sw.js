@@ -1,7 +1,7 @@
 /* Минимальный service worker для NAS-OS.
    Регистрируется только в secure context (HTTPS/localhost) — на LAN по http не активен.
    Сеть-первично; при офлайне отдаём кэш оболочки. API и не-GET не кэшируем. */
-const CACHE = "nasos-shell-v11";
+const CACHE = "nasos-shell-v12";
 const SHELL = ["/", "/desktop.html", "/setup.html", "/icon.svg", "/icon-192.png", "/manifest.webmanifest"];
 
 self.addEventListener("install", (e) => {

@@ -1504,7 +1504,7 @@
   .op-row .op-t2{font-size:12.3px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .op-row .op-s2{font-size:11px;color:var(--mut);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .op-row .op-when{color:var(--mut);opacity:.75;margin-left:6px}
-  #opsBtn.mb-idle{opacity:.55}
+  #opsBtn.mb-idle{opacity:.7}
   #opsBtn.mb-idle:hover{opacity:1}
   .op-row .op-bar{height:4px;border-radius:99px;background:var(--track,var(--card-2));overflow:hidden;margin-top:6px}
   .op-row .op-bf{height:100%;background:var(--accent);transition:width .2s;border-radius:99px}
@@ -6229,7 +6229,8 @@ function maybeOnboard(){let done=false;try{done=!!SET.onboarded||localStorage.ge
  if(!snInit){seedSnips();try{localStorage.setItem("nassnipinit","1");}catch(e){}saveSnips();}
  document.querySelectorAll("[title]").forEach(n=>{if(n.title)n.title=nasTr(n.title);});   // статические title из HTML
  renderRail();renderApps();renderDock();renderWinbar();renderPhoneNav();tickClock();
- opsLoad();poll();pollApps();pollDisks();maybeOnboard();
+ try{opsLoad();}catch(e){paintOps(true);}   // иконка операций нужна в любом случае
+ poll();pollApps();pollDisks();maybeOnboard();
  refreshFmHideBk();
  pollStacks();pollTop();pollNet();
  pollEvents();setTimeout(pollHealth,2500);
