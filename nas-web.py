@@ -6422,8 +6422,11 @@ def usb_import_save(cfg):
         os.makedirs("/etc/nas-wizard", exist_ok=True)
         with open(USB_IMPORT_CONF, "w") as f:
             f.write("IMPORT_ENABLED=%d\n" % (1 if cfg.get("enabled") else 0))
-            f.write("IMPORT_DEST=%s\n" % dest)
-            f.write("IMPORT_SUBDIR=%s\n" % subdir)
+            # ЗНАЧЕНИЯ В КАВЫЧКАХ: конфиг сорсится шеллом, а шаблон и путь могут
+            # содержать пробелы. Без кавычек bash видит «VAR=x cmd args» и переменная
+            # в шелл не попадает вовсе — молча включался дефолтный шаблон.
+            f.write('IMPORT_DEST="%s"\n' % dest)
+            f.write('IMPORT_SUBDIR="%s"\n' % subdir)
             f.write("IMPORT_NOTIFY=%d\n" % (1 if cfg.get("notify") else 0))
             f.write("IMPORT_EJECT=%d\n" % (1 if cfg.get("eject") else 0))
             f.write("IMPORT_MEDIA_ONLY=%d\n" % (1 if cfg.get("media_only") else 0))

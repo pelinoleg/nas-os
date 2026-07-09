@@ -1308,16 +1308,18 @@
   .nb-chk input{width:auto;margin:0}
   .set-nav button.nbdelbtn{margin-top:auto;color:var(--danger)}
   .set-nav button.nbdelbtn.on{background:transparent}
-  /* Sticky save bar: the button used to sit mid-page and was easy to miss,
-     so edits were silently lost when the tab was reopened. */
-  .set-savebar{position:sticky;bottom:-22px;z-index:2;display:flex;align-items:center;gap:10px;
-    justify-content:flex-end;margin:16px -26px -22px;padding:12px 26px;
-    background:var(--card);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
-    border-top:1px solid var(--win-line,var(--line))}
+  /* Save bar lives in a footer OUTSIDE the scroll area, so it is always on screen.
+     Tabs render it inside the pane; setFootAdopt() relocates it into .set-foot. */
+  .set-main{flex:1;min-width:0;display:flex;flex-direction:column}
+  .set-foot{flex:none;display:none}
+  .set-foot:not(:empty){display:block}
+  .set-savebar{display:flex;align-items:center;gap:10px;justify-content:flex-end;
+    padding:12px 26px;background:var(--card);border-top:1px solid var(--win-line,var(--line))}
   .set-savebar .sb-note{flex:1;font-size:12px;color:var(--warn);opacity:0;transition:.15s}
+  .set-savebar .sb-left{flex:1;font-size:11.5px;color:var(--mut);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .set-savebar.dirty .sb-note{opacity:1}
   .set-savebar button:disabled{opacity:.45;cursor:default}
-  @media (max-width:1024px){.set-savebar{margin:16px -18px -18px;padding:12px 18px;bottom:-18px}}
+  @media (max-width:1024px){.set-savebar{padding:12px 18px}}
   /* USB-импорт: прогресс копирования */
   .uprog{background:var(--card-2);border-radius:var(--r-sm);padding:11px 13px;margin-bottom:8px}
   .uprog-h{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:7px;font-size:13px}
@@ -4573,7 +4575,7 @@ function nbPickSource(preselected,onPick){const s=document.getElementById("scrim
    refresh();})();}
 function winBackup(){openWin("__nasbak","Бэкап главного NAS",(body,win)=>{
  body.style.display="flex";body.style.flexDirection="column";body.style.padding="0";
- let tab="overview",CFG={},JOBS=[],PROFS=[];
+ let tab="overview",CFG={},JOBS=[],PROFS=[],nbFootMo=null;
  let nbCursor=0,nbStarted=null;   // курсор лога: общий для окна, сбрасывается при смене профиля
  const CATS=[
   {id:"overview",name:"Обзор",ic:"gauge"},
@@ -4603,7 +4605,7 @@ function winBackup(){openWin("__nasbak","Бэкап главного NAS",(body,
    <div class="srow" id="cPortRow" style="${ssh?"":"display:none"}"><div class="srow-l"><div class="srow-t">SSH-порт</div></div><div class="srow-c"><input class="mono" id="cPort" style="max-width:90px" value="${c.ssh_port||22}"></div></div>
    <div class="srow" id="cSudoRow" style="${ssh?"":"display:none"}"><div class="srow-l"><div class="srow-t">Читать через sudo на источнике${tipHTML("Если часть файлов на главном NAS недоступна пользователю (ошибки «Permission denied») — rsync на источнике запускается через sudo и читает всё. Требуется беспарольный sudo для rsync на источнике: в /etc/sudoers.d добавить строку вида «"+(c.user||"oleg")+" ALL=(root) NOPASSWD: /usr/bin/rsync».")}</div><div class="srow-d">лечит «Permission denied» на части файлов</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="cSudo"${c.remote_sudo?" checked":""}><span class="sl"></span></label></div></div>
    <div class="srow"><div class="srow-l"><div class="srow-t">Ограничение скорости${tipHTML("Лимит скорости передачи в КБ/с (rsync --bwlimit), чтобы бэкап не забивал сеть и диск. 0 — без ограничения.")}</div><div class="srow-d">чтобы не забивать сеть/диск</div></div><div class="srow-c"><input class="mono" id="cBw" style="max-width:90px" value="${c.bwlimit||0}"><span style="color:var(--mut);font-size:12px">КБ/с</span></div></div>
-   <div class="srow"><div class="srow-l"></div><div class="srow-c"><button class="btn sm pri" id="cSave">${svg("save",13)} Сохранить</button><button class="btn sm" id="cTest">${svg("refresh",13)} Проверить связь</button><span id="cSaved" class="nb-saved"></span></div></div>
+   <div class="set-savebar"><span class="sb-left nb-saved" id="cSaved"></span><button class="btn sm" id="cTest">${svg("refresh",13)} Проверить связь</button><button class="btn sm pri" id="cSave">${svg("save",13)} Сохранить</button></div>
    <div class="nb-testr" id="cTestR"></div>`;
   const g=s=>tc.querySelector(s);
   wireSeg(tc,"#cTr",v=>{g("#cPortRow").style.display=v==="ssh"?"":"none";const hh=MHELP[v];g("#cHelp").innerHTML=`<b>${esc(hh.t)}</b><span>${esc(hh.d)}</span>`;saveCfg({transport:v}).then(()=>tabConn(tc));});
@@ -4879,15 +4881,17 @@ function winBackup(){openWin("__nasbak","Бэкап главного NAS",(body,
   CFG=(r&&r.config)||{};JOBS=(CFG.jobs||[]).slice();
   PROFS=(r&&r.profiles)||[];NB_PID=(r&&r.profile)||NB_PID;
   const multi=PROFS.length>1;
+  if(nbFootMo){nbFootMo.disconnect();nbFootMo=null;}
   body.innerHTML=`<div class="nbtabs" id="nbTabs"></div>
    <div class="nbmain"><div class="set-nav">${CATS.map(c=>`<button data-t="${c.id}" class="${tab===c.id?"on":""}">${svg(c.ic,17)}<span>${c.name}</span></button>`).join("")}
     ${multi?`<button data-t="__del" class="nbdelbtn">${svg("trash",17)}<span>Удалить профиль</span></button>`:""}</div>
-   <div class="set-pane" id="tc"></div></div>`;
+   <div class="set-main"><div class="set-pane" id="tc"></div><div class="set-foot" id="tf"></div></div></div>`;
   renderTabs();
   body.querySelectorAll(".set-nav button").forEach(b=>b.onclick=()=>{
     if(b.dataset.t==="__del"){delDlg();return;}
     tab=b.dataset.t;render();});
-  TABS[tab](body.querySelector("#tc"));};
+  TABS[tab](body.querySelector("#tc"));
+  nbFootMo=setFootAdopt(body.querySelector("#tc"),body.querySelector("#tf"));};
  render();body._reload=render;
 },{w:820,h:600});}
 
@@ -4999,14 +5003,29 @@ function winSettings(initTab){openWin("__set","Настройки",body=>{
   {id:"pi",name:"Raspberry Pi",ic:"cpu"},
  ];
  const FN={look:lookTab,files:filesTab,notify:notifyTab,system:systemTab,maint:maintTab,network:networkTab,security:securityTab,usb:usbTab,backup:backupTab,pi:piTab};
+ let footMo=null;
  const render=()=>{
-  body.innerHTML=`<div class="set-nav">${CATS.map(c=>`<button data-t="${c.id}" class="${tab===c.id?"on":""}">${svg(c.ic,17)}<span>${c.name}</span></button>`).join("")}</div><div class="set-pane" id="tc"></div>`;
+  if(footMo){footMo.disconnect();footMo=null;}
+  body.innerHTML=`<div class="set-nav">${CATS.map(c=>`<button data-t="${c.id}" class="${tab===c.id?"on":""}">${svg(c.ic,17)}<span>${c.name}</span></button>`).join("")}</div>`
+   +`<div class="set-main"><div class="set-pane" id="tc"></div><div class="set-foot" id="tf"></div></div>`;
   body.querySelectorAll(".set-nav button").forEach(b=>b.onclick=()=>{tab=b.dataset.t;render();});
   winSettings._render=render;
   FN[tab](body.querySelector("#tc"));
+  footMo=setFootAdopt(body.querySelector("#tc"),body.querySelector("#tf"));
  };
  render();
 },{w:880,h:640});}
+/* The save bar must sit outside the scrollable pane, otherwise it scrolls away and
+   users lose edits. Tabs still render it inline (they are async and rebuild the pane),
+   so we watch the pane and relocate any .set-savebar into the footer. */
+function setFootAdopt(tc,tf){
+ const move=()=>{const b=tc.querySelector(".set-savebar");
+   if(b){tf.innerHTML="";tf.appendChild(b);}};
+ move();
+ const mo=new MutationObserver(move);
+ mo.observe(tc,{childList:true,subtree:true});
+ return mo;}
+
 /* --- custom tooltips --- */
 function tipHTML(text){return `<span class="tip" data-tip="${att(text)}">${svg("info",13)}</span>`;}
 let _tipEl=null;
@@ -5342,7 +5361,7 @@ function notifyTab(tc){tc.innerHTML=`<div style="color:var(--mut);font-size:12px
    <div class="set-h" style="margin-top:0;padding-top:0;border:none">Аккаунт Pushover</div>
    <div class="field"><label>User key</label><input id="nfU" class="mono" value="${att(NTF.user||'')}" placeholder="u..."></div>
    <div class="field"><label>API token приложения</label><input id="nfT" class="mono" value="${att(NTF.token||'')}" placeholder="a..."></div>
-   <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px"><button class="btn sm pri" id="nfSave">${svg("save",13)} Сохранить ключи</button><button class="btn sm" id="nfTest">${svg("bell",13)} Тест</button><span id="nfStat" style="font-size:11px;color:${NTF.configured?'var(--good)':'var(--mut)'}">${NTF.configured?'✓ ключи заданы':'не настроено'}</span></div>
+   <div class="set-savebar"><span class="sb-left" id="nfStat" style="color:${NTF.configured?'var(--good)':'var(--mut)'}">${NTF.configured?'✓ ключи заданы':'не настроено'}</span><button class="btn sm" id="nfTest">${svg("bell",13)} Тест</button><button class="btn sm pri" id="nfSave">${svg("save",13)} Сохранить ключи</button></div>
    <div class="mon-note">Ключи хранятся на устройстве и защищены от чужого доступа. User key — в профиле pushover.net, token — создав «Application/API Token».</div>
    <div class="set-h">Оповещения</div>
    <div class="mon-row"><span>Слать push-уведомления на телефон (Pushover)</span><label class="tgl"><input type="checkbox" id="nfEn"><span class="sl"></span></label></div>
@@ -5453,9 +5472,9 @@ function systemTab(tc){withSysc(tc,()=>{const s=SYSC.system||{};
   <div class="srow"><div class="srow-l"><div class="srow-t">Сводка о системе</div><div class="srow-d">аптайм, температура, память, пул, адрес, контейнеры</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="moI"><span class="sl"></span></label></div></div>
   <textarea id="moTx" class="motd-ta" spellcheck="false" placeholder="Текст приветствия — только латиница"></textarea>
   <div class="mon-note">${svg("info",13)} Текст печатается буквально: команды и переменные внутри не выполняются. Пишите латиницей — кириллицу терминал показывает не везде.</div>
-  <div style="margin-top:12px"><button class="btn sm pri" id="moSave">${svg("save",13)} Сохранить</button></div>
   <div class="set-grp">Предпросмотр</div>
-  <pre class="motd-pv" id="moPv"></pre>`;
+  <pre class="motd-pv" id="moPv"></pre>
+  <div class="set-savebar"><span class="sb-left">Приветствие в SSH</span><button class="btn sm pri" id="moSave">${svg("save",13)} Сохранить</button></div>`;
  wireSc(tc);
  // SSH-приветствие. Предпросмотр ставим textContent'ом: через innerHTML его
  // перехватил бы i18n и начал переводить вывод терминала.
@@ -5549,7 +5568,6 @@ function usbTab(tc){tc.innerHTML=`<div class="set-load">загрузка…</div
   let sub=c.subdir||"";if(sub==="dated")sub="{label}-{date}-{time}";else if(sub==="label")sub="{label}";else if(sub==="flat")sub="";
   tc.innerHTML=`<h3 class="set-title">Авто-импорт с USB</h3><p class="set-sub">Копировать содержимое флешки в папку сразу при подключении (rsync — только копирование, с флешки ничего не удаляется).</p>
    ${c.rsync===false?`<div class="reboot-ban">${svg("power",16)} rsync не установлен — импорт не сработает. Поставится на этапе «Система» в Мастере.</div>`:""}
-   <div id="uProg"></div>
    <div class="srow"><div class="srow-l"><div class="srow-t">Включить авто-импорт${tipHTML("При вставке USB-накопителя его содержимое автоматически копируется в папку назначения. Срабатывает по udev при подключении.")}</div><div class="srow-d">${c.installed?"хук установлен":"будет установлен при сохранении"}</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="uEn"${c.enabled?" checked":""}><span class="sl"></span></label></div></div>
    <div class="srow"><div class="srow-l"><div class="srow-t">Папка назначения${tipHTML("Куда копировать. Обычно на пул, напр. /mnt/storage/imports. Папка создаётся автоматически.")}</div></div><div class="srow-c"><input class="mono" id="uDest" style="min-width:230px" value="${att(c.dest||"/mnt/storage/imports")}"></div></div>
    <div class="set-h">Раскладка подпапок${tipHTML("Шаблон имени папки, куда попадёт содержимое каждой вставленной флешки. Соберите его из токенов ниже. Косая черта «/» создаёт вложенные папки (напр. {year}/{month}). Пусто — копировать прямо в папку назначения.")}</div>
@@ -5574,26 +5592,6 @@ function usbTab(tc){tc.innerHTML=`<div class="set-load">загрузка…</div
   else drives.forEach(d=>{const row=el(`<div class="srow"><div class="srow-l"><div class="srow-t">${esc(d.label||d.path)}</div><div class="srow-d mono">${esc(d.path)} · ${esc(d.mount)}</div></div><div class="srow-c"><button class="btn sm">${svg("copy",13)} Импортировать</button></div></div>`);
     row.querySelector("button").onclick=async()=>{toast("Импорт запущен…");const rr=await api("/api/usb-import/run",{method:"POST",body:JSON.stringify({dev:d.path})});toast(LIVE?(rr&&rr.ok?"Импорт запущен ✓":"Ошибка: "+((rr&&rr.log)||"")):"Демо");};dv.appendChild(row);});
   let markDirty=()=>{};   // назначается ниже, когда собрана форма
-  // прогресс копирования: rsync пишет строку в /run, мы её опрашиваем.
-  // Таймер гасим, когда вкладку закрыли, иначе он тикает до перезагрузки страницы.
-  {const pw=tc.querySelector("#uProg");
-   const ST={running:"копируется",done:"готово",fail:"ошибка",aborted:"прервано"};
-   const draw=r=>{const jobs=(r&&r.jobs)||[];
-    if(!jobs.length){pw.innerHTML="";return;}
-    pw.innerHTML=`<div class="set-grp">Копирование</div>`+jobs.map(j=>{
-      const pct=Math.max(0,Math.min(100,j.percent==null?0:j.percent));
-      const run=j.status==="running";
-      const bits=[ST[j.status]||j.status];
-      if(j.bytes!=null)bits.push(fmtB(j.bytes)+(j.total?` из ${fmtB(j.total)}`:""));
-      if(run&&j.speed)bits.push(esc(j.speed));
-      if(run&&j.eta)bits.push(`осталось ${esc(j.eta)}`);
-      return `<div class="uprog ${esc(j.status)}"><div class="uprog-h"><b>${esc(j.label||j.dev||"")}</b><span class="mono">${pct}%</span></div>
-        <div class="bar"><i style="width:${pct}%"></i></div>
-        <div class="uprog-s">${bits.join(" · ")}</div>
-        <div class="uprog-s mono">${esc(j.dest||"")}</div></div>`;}).join("");};
-   const tick=()=>{if(!document.body.contains(pw)){clearInterval(iv);return;}
-     api("/api/usb-import/progress").then(draw).catch(()=>{});};
-   const iv=setInterval(tick,1500);tick();}
   // белый список: чекбоксы для воткнутых устройств + строки для разрешённых, но отключённых
   const av=tc.querySelector("#uAllow"),re=tc.querySelector("#uRe");
   const renderAllow=()=>{
