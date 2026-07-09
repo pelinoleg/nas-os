@@ -12,7 +12,7 @@ nas-web.py — веб-бэкенд мастера настройки NAS и ра
 Системные изменения выполняет проверенный движок nas-wizard.sh (api-режим), поэтому
 сервер нужно запускать от root (launcher nas-setup.sh это делает).
 """
-import json, os, re, subprocess, time, shutil, socket, threading, pwd, mimetypes, glob, errno, sys
+import json, os, re, subprocess, time, shutil, socket, threading, pwd, mimetypes, glob, errno, heapq, sys
 import pty, select, struct, hashlib, base64, signal, fcntl, termios, secrets, hmac
 import urllib.request, urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -150,26 +150,26 @@ def net_info():
 def net_speedtest():
     """Мини-спидтест download+upload через Cloudflare. Крутится ~8-10 c ради точности."""
     out = {"ok": False}
-    # --- DOWNLOAD: тянем до ~10 c (или 800 МБ), чтобы намерить стабильно ---
+    # --- DOWNLOAD: тянем до ~10 c; считаем по факту скачанного (даже если поток
+    #     оборвался — Cloudflare может закрыть соединение после части объёма) ---
+    n = 0.0; t0 = time.time()
     try:
-        req = urllib.request.Request("https://speed.cloudflare.com/__down?bytes=800000000",
+        req = urllib.request.Request("https://speed.cloudflare.com/__down?bytes=300000000",
                                      headers={"User-Agent": "nas-os"})
-        t0 = time.time(); n = 0
         with urllib.request.urlopen(req, timeout=40) as r:
-            while True:
+            while time.time() - t0 < 10:
                 chunk = r.read(262144)
                 if not chunk:
                     break
                 n += len(chunk)
-                if time.time() - t0 > 10:
-                    break
-        dt = max(0.1, time.time() - t0)
-        if n >= 1000000:
-            out["ok"] = True
-            out["down_MBs"] = round(n / dt / 1048576, 1)
-            out["down_mbps"] = round(n * 8 / dt / 1e6, 1)
     except Exception as e:
-        out["log"] = ("нет интернета?" if "URLError" in str(type(e)) else str(e)[:100])
+        if n < 1000000:
+            out["log"] = ("нет интернета?" if "URLError" in str(type(e)) else str(e)[:100])
+    dt = max(0.1, time.time() - t0)
+    if n >= 1000000:
+        out["ok"] = True
+        out["down_MBs"] = round(n / dt / 1048576, 1)
+        out["down_mbps"] = round(n * 8 / dt / 1e6, 1)
     # --- UPLOAD: шлём фиксированный объём, замеряем время ---
     try:
         total = 60 * 1024 * 1024   # 60 МБ
@@ -4498,6 +4498,9 @@ def fs_du(path):
 # --------------------------------------------------------------------------- #
 DUSCAN_TOPF = 12     # хранить топ-N крупнейших файлов на каталог
 DUSCAN_MAXCH = 60    # максимум детей в узле (остальное → «прочее»)
+DUSCAN_BIGN = 300    # глобальный топ-N крупнейших файлов тома
+DUSCAN_DUPMIN = 1024 * 1024      # кандидаты в дубликаты — от 1 МиБ (мелочь не интересна)
+DUSCAN_DUPCAP = 6000             # максимум файлов-кандидатов в кэше (защита от гигантских деревьев)
 _duscan = {}         # root -> статус/прогресс скана
 _duscache = {}       # root -> загруженное дерево {nodes, ts, size, files, dirs}
 _duscan_lock = threading.Lock()
@@ -4510,6 +4513,8 @@ def _duscan_build(root):
     dev = os.stat(root).st_dev
     own = {}; topf = {}; nfiles = {}; kids = {}; parent = {}; order = []
     tb = [0]
+    bigheap = []          # min-heap (size, path) — глобальный топ крупнейших файлов
+    dupmap = {}; dupn = [0]  # size -> [paths] для поиска дубликатов (>= DUPMIN)
     for dp, dns, fns in os.walk(root, topdown=True, onerror=lambda e: None, followlinks=False):
         keep = []
         for d in dns:                       # не выходим за пределы ФС и не идём по симлинкам
@@ -4533,6 +4538,14 @@ def _duscan_build(root):
             except OSError:
                 continue
             ob += sz; nf += 1; fl.append((sz, fn))
+            # глобальный топ крупнейших файлов
+            if len(bigheap) < DUSCAN_BIGN:
+                heapq.heappush(bigheap, (sz, fp))
+            elif sz > bigheap[0][0]:
+                heapq.heapreplace(bigheap, (sz, fp))
+            # кандидаты в дубликаты: группируем по размеру (только крупные)
+            if sz >= DUSCAN_DUPMIN and dupn[0] < DUSCAN_DUPCAP:
+                dupmap.setdefault(sz, []).append(fp); dupn[0] += 1
         fl.sort(reverse=True)
         own[dp] = ob; nfiles[dp] = nf; topf[dp] = fl[:DUSCAN_TOPF]; kids[dp] = []; order.append(dp)
         for d in dns:
@@ -4572,8 +4585,14 @@ def _duscan_build(root):
             rest = ch[DUSCAN_MAXCH:]; ch = ch[:DUSCAN_MAXCH]
             ch.append({"n": "… прочее (%d)" % len(rest), "s": sum(x["s"] for x in rest), "o": 1})
         nodes[d] = {"s": total.get(d, 0), "ch": ch}
+    bigfiles = [{"p": p, "s": s} for s, p in sorted(bigheap, reverse=True)]
+    # кандидаты-дубликаты: только размеры, встретившиеся >1 раза; топ по потенциальной экономии
+    dupcand = [{"s": sz, "paths": ps} for sz, ps in dupmap.items() if len(ps) > 1]
+    dupcand.sort(key=lambda g: g["s"] * (len(g["paths"]) - 1), reverse=True)
+    dupcand = dupcand[:500]
     return {"root": root, "ts": time.time(), "size": total.get(root, 0),
-            "files": sum(nfiles.values()), "dirs": len(order), "nodes": nodes}
+            "files": sum(nfiles.values()), "dirs": len(order), "nodes": nodes,
+            "bigfiles": bigfiles, "dupcand": dupcand}
 
 def _duscan_run(root):
     try:
@@ -4710,6 +4729,53 @@ def duscan_node(root, path, depth=1):
     return {"ok": True, "root": root, "path": path,
             "s": (nodes.get(path) or {}).get("s", 0),
             "ch": build(path, depth), "scanTs": data.get("ts")}
+
+def duscan_bigfiles(root):
+    """Глобальный топ крупнейших файлов тома (собран при скане)."""
+    data = _duscan_load_cache(os.path.realpath(root or "/"))
+    if not data:
+        return {"ok": False, "log": "нет данных — запустите скан"}
+    # фильтруем удалённые после скана
+    bf = [f for f in data.get("bigfiles", []) if os.path.isfile(f["p"])]
+    return {"ok": True, "root": root, "files": bf[:300], "scanTs": data.get("ts")}
+
+def _file_hash_partial(p, sz):
+    """Быстрый отпечаток: голова+хвост по 256 КБ + размер. При равном размере
+    практически исключает ложные совпадения (для дедуп-инструмента достаточно)."""
+    h = hashlib.md5()
+    with open(p, "rb") as f:
+        h.update(f.read(262144))
+        if sz > 524288:
+            f.seek(-262144, 2); h.update(f.read(262144))
+    h.update(str(sz).encode())
+    return h.hexdigest()
+
+def duscan_dups(root):
+    """Найти дубликаты среди кандидатов скана (равный размер → сверка отпечатка)."""
+    data = _duscan_load_cache(os.path.realpath(root or "/"))
+    if not data:
+        return {"ok": False, "log": "нет данных — запустите скан"}
+    cand = data.get("dupcand", [])
+    groups = []; t0 = time.time(); truncated = False
+    for g in cand:
+        if time.time() - t0 > 25:
+            truncated = True; break
+        byh = {}
+        for p in g["paths"]:
+            try:
+                if not os.path.isfile(p):
+                    continue
+                byh.setdefault(_file_hash_partial(p, g["s"]), []).append(p)
+            except OSError:
+                continue
+        for paths in byh.values():
+            if len(paths) > 1:
+                groups.append({"s": g["s"], "n": len(paths),
+                               "waste": g["s"] * (len(paths) - 1), "paths": sorted(paths)})
+    groups.sort(key=lambda x: x["waste"], reverse=True)
+    return {"ok": True, "root": root, "groups": groups[:300],
+            "waste": sum(x["waste"] for x in groups), "truncated": truncated,
+            "scanTs": data.get("ts")}
 
 def fs_grep(path, query, limit=200):
     path = os.path.realpath(path or "/")
@@ -6470,6 +6536,10 @@ class H(BaseHTTPRequestHandler):
             elif p == "/api/fs/duscan/node":
                 self._json(duscan_node((q.get("root") or ["/"])[0],
                                        (q.get("path") or [""])[0], (q.get("depth") or ["1"])[0]))
+            elif p == "/api/fs/duscan/bigfiles":
+                self._json(duscan_bigfiles((q.get("root") or ["/"])[0]))
+            elif p == "/api/fs/duscan/dups":
+                self._json(duscan_dups((q.get("root") or ["/"])[0]))
             elif p == "/api/fs/grep":
                 self._json(fs_grep((q.get("path") or ["/"])[0], (q.get("q") or [""])[0]))
             elif p == "/api/fs/trash":

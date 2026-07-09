@@ -1015,6 +1015,19 @@
   .du-ctext{fill:var(--text);font-family:var(--mono);font-weight:700;font-size:15px}
   .du-csub{fill:var(--mut);font-size:9.5px}
   .du-list{flex:1;min-width:0;overflow:auto}
+  /* списки «крупнейшие файлы» / «дубликаты» */
+  .du-big{flex:1;min-width:0;overflow:auto;padding:2px}
+  .du-frow{display:flex;align-items:center;gap:9px;padding:7px 8px;border-radius:var(--r-sm);font-size:12.5px}
+  .du-frow:hover{background:var(--sel)}
+  .du-frow .du-ico{flex:none;display:flex}
+  .du-frow .du-fnm{flex:1;min-width:0;display:flex;flex-direction:column}
+  .du-frow .du-fn{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:550}
+  .du-frow .du-fp{font-size:10.5px;color:var(--mut);font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .du-frow .du-sz{flex:none;font-family:var(--mono);color:var(--dim);font-size:11.5px}
+  .du-dgrp{margin-bottom:10px;border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden}
+  .du-dgh{font-size:11px;color:var(--dim);background:var(--card);padding:6px 10px;font-family:var(--mono)}
+  .du-dupsum{font-size:12.5px;margin-bottom:10px;color:var(--dim)}
+  .du-keep{flex:none;font-size:9.5px;color:var(--good);padding:2px 7px;border:1px solid var(--good);border-radius:5px;white-space:nowrap}
   .du-row{display:flex;align-items:center;gap:9px;padding:6px 6px;border-radius:var(--r-sm);font-size:12.5px}
   .du-row:hover{background:var(--sel)}
   .du-row.isdir .du-nm,.du-row.isdir .du-sw{cursor:pointer}
@@ -4151,8 +4164,8 @@ function winDiskUsage(initRoot){const existed=!!OPEN["__duscan"];const w=openWin
  let root=volFor(startP).p;
  // при открытии из папки — проваливаемся к ней (полный путь в крошках), иначе корень тома
  let cur=(startP===root||startP.startsWith(root==="/"?"/":root+"/"))?startP:root;
- let node=null,cache={},showL2=SET.duL2!==false;
- body.innerHTML=`<div class="du"><div class="du-top"><div class="seg du-roots" id="duRoots"></div><span class="grow"></span><span class="du-meta" id="duMeta"></span><button class="iconbtn" id="duL2" title="Показывать второй уровень колец">${svg("layers",15)}</button><button class="btn sm" id="duRescan">${svg("refresh",13)} Пересканировать</button></div><div class="du-main" id="duMain"></div></div>`;
+ let node=null,cache={},showL2=SET.duL2!==false,duView="chart";
+ body.innerHTML=`<div class="du"><div class="du-top"><div class="seg du-roots" id="duRoots"></div><span class="grow"></span><span class="du-meta" id="duMeta"></span><button class="iconbtn" id="duBig" title="Крупнейшие файлы">${svg("activity",15)}</button><button class="iconbtn" id="duDup" title="Найти дубликаты">${svg("copy",15)}</button><button class="iconbtn" id="duL2" title="Показывать второй уровень колец">${svg("layers",15)}</button><button class="btn sm" id="duRescan">${svg("refresh",13)} Пересканировать</button></div><div class="du-main" id="duMain"></div></div>`;
  const rootsEl=body.querySelector("#duRoots"),metaEl=body.querySelector("#duMeta"),mainEl=body.querySelector("#duMain");
  // палитра чуть приглушена, читается в обеих темах; 2-й уровень отделяем прозрачностью (см. CSS), а не осветлением в белый
  const DUCOL=["#4C8DF6","#33BE86","#E0913C","#8A7DFF","#E0669E","#2FB0BC","#E5544E","#5B9BD5","#46B98A","#B07A44","#7A6EE0","#D9A62E"];
@@ -4182,7 +4195,27 @@ function winDiskUsage(initRoot){const existed=!!OPEN["__duscan"];const w=openWin
  async function drill(path){let d=cache[path];
    if(!d){d=await api("/api/fs/duscan/node?root="+encodeURIComponent(root)+"&path="+encodeURIComponent(path)+"&depth=2");if(d&&d.ok)cache[path]=d;}
    if(!d||!d.ok){if(norm(path)!==root){drill(root);return;}toast((d&&d.log)||"нет данных");return;}
-   cur=path;node=d;renderView();}
+   cur=path;node=d;duView="chart";setViewBtns();renderView();}
+ function setViewBtns(){const b=body.querySelector("#duBig"),d=body.querySelector("#duDup");if(b)b.classList.toggle("pri",duView==="big");if(d)d.classList.toggle("pri",duView==="dups");}
+ async function trashFile(p,rowEl){const r=await api("/api/fs/trash",{method:"POST",body:JSON.stringify({path:p})});
+   if(r&&r.ok){if(rowEl)rowEl.remove();toast("В корзину. Размеры обновятся после пере-скана.");}else toast("Ошибка: "+((r&&r.log)||"?"));}
+ async function renderBig(){setViewBtns();mainEl.innerHTML=`<div class="du-crumb"><b>Крупнейшие файлы</b> · том ${esc(root)}</div><div id="duBigL" class="du-big">Загрузка…</div>`;
+   const r=await api("/api/fs/duscan/bigfiles?root="+encodeURIComponent(root));const box=mainEl.querySelector("#duBigL");if(!box)return;
+   if(!r||!r.ok){box.innerHTML=`<div class="du-empty2">${esc((r&&r.log)||"нет данных — отсканируйте том")}</div>`;return;}
+   const files=(r.files||[]);if(!files.length){box.innerHTML=`<div class="du-empty2">Файлы не найдены</div>`;return;}
+   box.innerHTML="";files.forEach(f=>{const nm=f.p.replace(/^.*\//,""),dir=f.p.replace(/\/[^/]+$/,"")||"/";
+     const row=el(`<div class="du-frow"><span class="du-ico">${fmIcon(nm,"file",20)}</span><span class="du-fnm"><span class="du-fn" title="${att(f.p)}">${esc(nm)}</span><span class="du-fp" title="${att(dir)}">${esc(dir)}</span></span><span class="du-sz">${fmtB(f.s)}</span><button class="iconbtn" data-a="open" title="Показать в Файлах">${svg("folder",14)}</button><button class="du-x" title="В корзину">${svg("trash",13)}</button></div>`);
+     row.querySelector('[data-a="open"]').onclick=()=>winFiles(dir);row.querySelector(".du-x").onclick=()=>trashFile(f.p,row);box.appendChild(row);});}
+ async function renderDups(){setViewBtns();mainEl.innerHTML=`<div class="du-crumb"><b>Дубликаты</b> · том ${esc(root)}</div><div id="duDupL" class="du-big">Ищу дубликаты — сверяю отпечатки файлов…</div>`;
+   const r=await api("/api/fs/duscan/dups?root="+encodeURIComponent(root));const box=mainEl.querySelector("#duDupL");if(!box)return;
+   if(!r||!r.ok){box.innerHTML=`<div class="du-empty2">${esc((r&&r.log)||"нет данных — отсканируйте том")}</div>`;return;}
+   const groups=(r.groups||[]);if(!groups.length){box.innerHTML=`<div class="du-empty2">Дубликаты не найдены</div>`;return;}
+   box.innerHTML=`<div class="du-dupsum">Групп: ${groups.length} · можно освободить ~<b>${fmtB(r.waste)}</b>${r.truncated?" · показаны не все (много кандидатов)":""}</div>`;
+   groups.forEach(g=>{const gd=el(`<div class="du-dgrp"><div class="du-dgh">${g.n} копии · ${fmtB(g.s)} каждая · лишнего ${fmtB(g.waste)}</div></div>`);
+     g.paths.forEach((p,i)=>{const nm=p.replace(/^.*\//,""),dir=p.replace(/\/[^/]+$/,"")||"/";
+       const row=el(`<div class="du-frow"><span class="du-ico">${fmIcon(nm,"file",18)}</span><span class="du-fnm"><span class="du-fn" title="${att(p)}">${esc(nm)}</span><span class="du-fp" title="${att(dir)}">${esc(dir)}</span></span><button class="iconbtn" data-a="open" title="Показать в Файлах">${svg("folder",13)}</button>${i>0?`<button class="du-x" title="В корзину (оставить одну копию)">${svg("trash",13)}</button>`:`<span class="du-keep">оставить</span>`}</div>`);
+       row.querySelector('[data-a="open"]').onclick=()=>winFiles(dir);const x=row.querySelector(".du-x");if(x)x.onclick=()=>trashFile(p,row);gd.appendChild(row);});
+     box.appendChild(gd);});}
  function renderView(){mainEl.innerHTML=`<div class="du-crumb" id="duCrumb"></div><div class="du-cols"><div class="du-chart" id="duChart"></div><div class="du-list" id="duList"></div></div>`;
    renderCrumb();renderChart();renderList();}
  function renderCrumb(){const c=mainEl.querySelector("#duCrumb");c.innerHTML="";
@@ -4240,6 +4273,8 @@ function winDiskUsage(initRoot){const existed=!!OPEN["__duscan"];const w=openWin
  function trashItem(c){confirmDlg("В корзину?",esc(c.n),async()=>{const r=await api("/api/fs/trash",{method:"POST",body:JSON.stringify({path:c.p})});
    if(r&&r.ok){node.ch=node.ch.filter(x=>x!==c);renderView();toast("В корзину. Размеры обновятся после пере-скана.");}else toast("Ошибка: "+((r&&r.log)||"?"));});}
  body.querySelector("#duRescan").onclick=startScan;
+ body.querySelector("#duBig").onclick=()=>{duView="big";renderBig();};
+ body.querySelector("#duDup").onclick=()=>{duView="dups";renderDups();};
  {const b=body.querySelector("#duL2");b.classList.toggle("pri",showL2);
   b.onclick=()=>{showL2=!showL2;SET.duL2=showL2;saveSettings();b.classList.toggle("pri",showL2);if(node)renderChart();};}
  // переход в конкретный путь (для повторного открытия из ФМ, когда окно уже открыто)
