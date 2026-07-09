@@ -1218,6 +1218,8 @@ window.NAS_I18N = { en: {
 "Подключите USB-диск или карту — он появится здесь": "Connect a USB disk or card — it will appear here",
 "Подключённые USB-накопители": "Connected USB drives",
 "Приветствие SSH": "SSH login message",
+"Логотип": "Logo",
+"баннер NAS-OS в цветах Raspberry Pi": "NAS-OS banner in Raspberry Pi colours",
 "Что показывать": "What to show",
 "Что видно в терминале при входе. Собирается из нескольких источников: наш блок, строка ядра, баннер Cockpit и «Last login» от sshd.": "What you see in the terminal when you log in. It is assembled from several sources: our block, the kernel line, the Cockpit banner and «Last login» from sshd.",
 "Строка ядра": "Kernel line",

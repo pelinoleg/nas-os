@@ -6189,7 +6189,7 @@ MOTD_TXT    = "/etc/nas-wizard/motd.txt"
 MOTD_SCRIPT = "/etc/update-motd.d/20-nas-os"
 MOTD_MAX    = 4000
 
-_MOTD_FLAGS = {"MOTD_TEXT": "show_text", "MOTD_INFO": "show_info",
+_MOTD_FLAGS = {"MOTD_LOGO": "show_logo", "MOTD_TEXT": "show_text", "MOTD_INFO": "show_info",
                "MOTD_UNAME": "show_uname", "MOTD_COCKPIT": "show_cockpit",
                "MOTD_LASTLOG": "show_lastlog"}
 

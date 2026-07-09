@@ -1366,7 +1366,7 @@
   .set-foot{flex:none;display:none}
   .set-foot:not(:empty){display:block}
   .set-savebar{display:flex;align-items:center;gap:10px;justify-content:flex-end;
-    padding:12px 26px;background:var(--card);border-top:1px solid var(--win-line,var(--line))}
+    padding:12px 26px}
   .set-savebar .sb-note{flex:1;font-size:12px;color:var(--warn);opacity:0;transition:.15s}
   .set-savebar .sb-left{flex:1;font-size:11.5px;color:var(--mut);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .set-savebar.dirty .sb-note{opacity:1}
@@ -5866,6 +5866,7 @@ function usbTab(tc){tc.innerHTML=`<div class="set-load">загрузка…</div
 function motdTab(tc){
  tc.innerHTML=`<h3 class="set-title">Приветствие в SSH</h3><p class="set-sub">Что видно в терминале при входе. Собирается из нескольких источников: наш блок, строка ядра, баннер Cockpit и «Last login» от sshd.</p>
   <div class="set-grp">Что показывать${tipHTML("Что видно в терминале при входе по SSH. Рисует pam_motd через /etc/update-motd.d/20-nas-os.")}</div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Логотип</div><div class="srow-d">баннер NAS-OS в цветах Raspberry Pi</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="moG"><span class="sl"></span></label></div></div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Свой текст</div><div class="srow-d">произвольная шапка перед сводкой</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="moT"><span class="sl"></span></label></div></div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Сводка о системе</div><div class="srow-d">аптайм, температура, память, пул, адрес, контейнеры</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="moI"><span class="sl"></span></label></div></div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Строка ядра${tipHTML("Первая строка «Linux pi5 6.18… aarch64». Её печатает /etc/update-motd.d/10-uname — снимаем бит исполнения, файл остаётся на месте.")}</div><div class="srow-d">Linux pi5 … aarch64</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="moU"><span class="sl"></span></label></div></div>
@@ -5883,6 +5884,7 @@ function motdTab(tc){
  // перехватил бы i18n и начал переводить вывод терминала.
  {const tx=tc.querySelector("#moTx"),cbT=tc.querySelector("#moT"),cbI=tc.querySelector("#moI"),
    cbU=tc.querySelector("#moU"),cbC=tc.querySelector("#moC"),cbL=tc.querySelector("#moL"),
+   cbG=tc.querySelector("#moG"),
    pv=tc.querySelector("#moPv"),sv=tc.querySelector("#moSave");
   pv.textContent="…";
   // вставка токена в позицию курсора
@@ -5891,6 +5893,7 @@ function motdTab(tc){
     tx.value=tx.value.slice(0,p)+b.dataset.mo+tx.value.slice(tx.selectionEnd||p);
     tx.focus();const np=p+b.dataset.mo.length;tx.setSelectionRange(np,np);});
   const fill=r=>{const c=(r&&r.config)||{};tx.value=c.text||"";cbT.checked=c.show_text!==false;
+    cbG.checked=c.show_logo!==false;
     cbI.checked=c.show_info!==false;cbU.checked=c.show_uname!==false;
     cbC.checked=c.show_cockpit!==false;cbL.checked=c.show_lastlog!==false;
     // эти строки печатают чужие компоненты: нечего показывать — нечего и выключать
@@ -5901,7 +5904,7 @@ function motdTab(tc){
   api("/api/motd").then(fill);
   sv.onclick=async()=>{
     const rr=await api("/api/motd",{method:"POST",body:JSON.stringify(
-      {text:tx.value,show_text:cbT.checked,show_info:cbI.checked,
+      {text:tx.value,show_logo:cbG.checked,show_text:cbT.checked,show_info:cbI.checked,
        show_uname:cbU.checked,show_cockpit:cbC.checked,show_lastlog:cbL.checked})});
     if(rr&&rr.ok&&rr.preview!=null)pv.textContent=rr.preview;
     if(rr&&rr.ok)flashSaved(sv);

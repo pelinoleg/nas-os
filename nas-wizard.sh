@@ -2366,6 +2366,7 @@ TXT
     fi
     [ -f /etc/nas-wizard/motd.conf ] || write_file /etc/nas-wizard/motd.conf <<'CONF'
 # nas-wizard: что показывать при входе по SSH
+MOTD_LOGO=1
 MOTD_TEXT=1
 MOTD_INFO=1
 # чужие куски приветствия (применяет nas-web при старте и при сохранении):
@@ -2422,6 +2423,23 @@ need_containers=0
 V_CONT=""
 if [ "$need_containers" = "1" ] && command -v docker >/dev/null 2>&1; then
   V_CONT="$(timeout 3 docker ps -q 2>/dev/null | grep -c .)"
+fi
+
+# ---- logo. Raspberry Pi brand colours: berry #C51A4A, leaves #75A928.
+# 24-bit codes only when the terminal announced them: ssh forwards TERM but not
+# COLORTERM, and Terminal.app cannot parse them. Otherwise nearest 256-palette.
+if [ "${MOTD_LOGO:-1}" = "1" ]; then
+  if [ -n "${NO_COLOR:-}" ]; then
+    PIR=""; PIG=""; PID=""
+  elif [ "${COLORTERM:-}" = "truecolor" ] || [ "${COLORTERM:-}" = "24bit" ]; then
+    PIR=$'\033[1;38;2;197;26;74m'; PIG=$'\033[1;38;2;117;169;40m'; PID=$'\033[2;37m'
+  else
+    PIR=$'\033[1;38;5;161m'; PIG=$'\033[1;38;5;106m'; PID=$'\033[2;37m'
+  fi
+  printf '\n'
+  printf '  %s╔╗╔╔═╗╔═╗%s    %s╔═╗╔═╗%s\n' "$PIR" "$R" "$PIG" "$R"
+  printf '  %s║║║╠═╣╚═╗%s%s────%s%s║ ║╚═╗%s\n' "$PIR" "$R" "$PID" "$R" "$PIG" "$R"
+  printf '  %s╝╚╝╩ ╩╚═╝%s    %s╚═╝╚═╝%s\n' "$PIR" "$R" "$PIG" "$R"
 fi
 
 # ---- свой текст: подставляем токены. Никакого eval — только замена подстрок,
