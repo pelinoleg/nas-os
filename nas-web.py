@@ -1396,16 +1396,38 @@ def _block_volumes():
         walk(d)
     return vols
 
+def _removable_devs():
+    """Пути съёмных носителей (флешки, SD) вместе с разделами: разделы наследуют
+    флаг rm родителя. USB-SATA мосты с постоянными дисками сюда НЕ попадают —
+    у них rm=0, и тревога по ним обязана срабатывать."""
+    out = set()
+    def walk(d, rm):
+        rm = rm or d.get("rm") in (True, "1", 1)
+        if rm and d.get("path"):
+            out.add(d["path"])
+        for c in d.get("children") or []:
+            walk(c, rm)
+    for d in _lsblk():
+        walk(d, False)
+    return out
+
 def _readonly_mounts():
+    """Смонтированное ro, что похоже на сбой ФС. Съёмные носители исключаем:
+    флешка/карта, поднятая автомонтом только на чтение (грязный ext4, vfat с
+    ошибкой), — обычное дело, а не поломка NAS."""
     out = []
+    rem = _safe(_removable_devs, set())
+    amb = (automount_state().get("base") or "/media/nas").rstrip("/") + "/"
     for line in _read("/proc/mounts").splitlines():
         p = line.split()
         if len(p) < 4:
             continue
-        mp, fstype, opts = p[1], p[2], p[3]
+        src, mp, fstype, opts = p[0], p[1], p[2], p[3]
         if fstype in ("iso9660", "squashfs", "tmpfs", "devtmpfs", "overlay", "proc", "sysfs", "cgroup2"):
             continue
         if not (mp.startswith("/mnt/") or mp.startswith("/media/")):
+            continue
+        if mp.startswith(amb) or src in rem:      # съёмное — не наша забота
             continue
         if re.search(r"(^|,)ro(,|$)", opts):
             out.append(mp)
@@ -5703,7 +5725,15 @@ base="${IMPORT_DEST:-/mnt/storage/imports}"
 case "$(readlink -f "$base")/" in "$(readlink -f "$mp")"/*) log "self-import guard: $mp внутри $base"; cleanup; exit 0;; esac
 # раскладка подпапок: шаблон с токенами {label}/{date}/{time}/{year}/{month}/
 # {month-name}/{day}/{hour}/{minute}/{datetime}. Легаси-ключи мапим на шаблоны.
-tpl="${IMPORT_SUBDIR:-{label}-{date}-{time}}"
+# ВНИМАНИЕ: фигурные скобки в значении по умолчанию ломают разбор ${VAR:-...} —
+# первая же '}' закрывает подстановку, а хвост приклеивается как текст. Поэтому
+# дефолт ставим отдельной строкой. Проверяем на «задана ли» (+set), а не на
+# «непуста»: пустой шаблон — это осознанный режим «без подпапки».
+if [ -z "${IMPORT_SUBDIR+set}" ]; then
+  tpl='{label}-{date}-{time}'
+else
+  tpl="$IMPORT_SUBDIR"
+fi
 case "$tpl" in
   dated) tpl='{label}-{date}-{time}';;
   label) tpl='{label}';;
@@ -5721,8 +5751,10 @@ if [ -n "$sub" ]; then
   sub="${sub//\{day\}/$(date '+%d')}"
   sub="${sub//\{hour\}/$(date '+%H')}"
   sub="${sub//\{minute\}/$(date '+%M')}"
-  # безопасность пути: убрать .., ведущие слэши, схлопнуть повторы, обрезать пробелы у сегментов
-  sub="$(printf '%s' "$sub" | sed 's#\.\.##g; s#^/*##; s#/*$##; s#/\{2,\}#/#g')"
+  # безопасность пути: убрать .., ведущие слэши, схлопнуть повторы, обрезать пробелы у сегментов.
+  # Фигурные скобки вычищаем: после подстановки их оставляет только опечатка в
+  # токене ({lable}) — пусть будет «lable», а не мусор в имени папки.
+  sub="$(printf '%s' "$sub" | tr -d '{}' | sed 's#\.\.##g; s#^/*##; s#/*$##; s#/\{2,\}#/#g')"
 fi
 # фильтр «только фото/видео» (регистронезависимо)
 filter=(); if [ "${IMPORT_MEDIA_ONLY:-0}" = "1" ]; then
