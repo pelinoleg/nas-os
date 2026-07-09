@@ -5257,7 +5257,11 @@ function usbSubPreview(tpl){
  s=s.replace(/\.\./g,"").replace(/^\/+/,"").replace(/\/+$/,"").replace(/\/{2,}/g,"/");
  return s?s:"(без подпапки — прямо в папку назначения)";}
 function usbTab(tc){tc.innerHTML=`<div class="set-load">загрузка…</div>`;
- api("/api/usb-import").then(r=>{const c=(r&&r.config)||{},drives=(r&&r.drives)||[];
+ Promise.all([api("/api/usb-import"),api("/api/usb-devices")]).then(([r,ud])=>{const c=(r&&r.config)||{},drives=(r&&r.drives)||[];
+  const devs=(ud&&ud.devices)||[];
+  // белый список живёт в JS-множестве: воткнутые устройства правятся чекбоксами,
+  // а разрешённые, но сейчас отключённые, обязаны пережить сохранение.
+  const allow=new Set(((ud&&ud.allow)||c.allow||[]).map(x=>String(x).toLowerCase()));
   let sub=c.subdir||"";if(sub==="dated")sub="{label}-{date}-{time}";else if(sub==="label")sub="{label}";else if(sub==="flat")sub="";
   tc.innerHTML=`<h3 class="set-title">Авто-импорт с USB</h3><p class="set-sub">Копировать содержимое флешки в папку сразу при подключении (rsync — только копирование, с флешки ничего не удаляется).</p>
    ${c.rsync===false?`<div class="reboot-ban">${svg("power",16)} rsync не установлен — импорт не сработает. Поставится на этапе «Система» в Мастере.</div>`:""}
@@ -5274,6 +5278,9 @@ function usbTab(tc){tc.innerHTML=`<div class="set-load">загрузка…</div
    <div class="srow"><div class="srow-l"><div class="srow-t">Только фото и видео${tipHTML("Копировать лишь снимки и ролики (jpg, heic, RAW: dng/cr2/nef/arw…, mp4, mov и т.п.), пропуская всё остальное. Удобно для карт памяти из фотоаппарата.")}</div><div class="srow-d">пропускать документы, приложения и прочее</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="uMo"${c.media_only?" checked":""}><span class="sl"></span></label></div></div>
    <div class="srow"><div class="srow-l"><div class="srow-t">Извлечь после копирования${tipHTML("Безопасно отключить питание накопителя по завершении — можно сразу вынимать.")}</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="uEj"${c.eject?" checked":""}><span class="sl"></span></label></div></div>
    <div class="mon-note" style="margin-top:6px">${svg("info",13)} Копирование безопасное: во время переноса папка помечается <span class="mono">.incomplete</span> и переименовывается только после успешного завершения — прерванный импорт не спутать с готовым. Владелец файлов выставляется автоматически.</div>
+   <div class="set-grp">Разрешённые устройства</div>
+   <div class="srow"><div class="srow-l"><div class="srow-t">Только разрешённые устройства${tipHTML("Автоимпорт сработает лишь с отмеченных ниже накопителей (сверка по VID:PID). Любая чужая флешка будет проигнорирована. Кнопка «Импортировать» вручную список не проверяет.")}</div><div class="srow-d">чужие флешки игнорируются</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="uRe"${c.restrict?" checked":""}><span class="sl"></span></label></div></div>
+   <div id="uAllow"></div>
    <div style="margin-top:14px"><button class="btn sm pri" id="uSave">${svg("save",13)} Сохранить</button></div>
    <div class="set-grp">Подключённые USB-накопители</div>
    <div id="uDrives"></div>`;
@@ -5281,6 +5288,22 @@ function usbTab(tc){tc.innerHTML=`<div class="set-load">загрузка…</div
   if(!drives.length)dv.innerHTML=`<div class="mon-note">Съёмных USB-накопителей сейчас нет. Вставьте флешку и обновите.</div>`;
   else drives.forEach(d=>{const row=el(`<div class="srow"><div class="srow-l"><div class="srow-t">${esc(d.label||d.path)}</div><div class="srow-d mono">${esc(d.path)} · ${esc(d.mount)}</div></div><div class="srow-c"><button class="btn sm">${svg("copy",13)} Импортировать</button></div></div>`);
     row.querySelector("button").onclick=async()=>{toast("Импорт запущен…");const rr=await api("/api/usb-import/run",{method:"POST",body:JSON.stringify({dev:d.path})});toast(LIVE?(rr&&rr.ok?"Импорт запущен ✓":"Ошибка: "+((rr&&rr.log)||"")):"Демо");};dv.appendChild(row);});
+  // белый список: чекбоксы для воткнутых устройств + строки для разрешённых, но отключённых
+  const av=tc.querySelector("#uAllow"),re=tc.querySelector("#uRe");
+  const renderAllow=()=>{
+   const on=re.checked,online=new Set(devs.map(d=>d.id).filter(Boolean));
+   const offline=[...allow].filter(id=>!online.has(id));
+   let h="";
+   if(!devs.length)h+=`<div class="mon-note">USB-накопителей сейчас не видно. Вставьте флешку и откройте вкладку заново, чтобы отметить её.</div>`;
+   h+=devs.map(d=>{const noid=!d.id;
+    const sub=[noid?"VID:PID не определён":`<span class="mono">${esc(d.id)}</span>`,d.size?esc(d.size):"",d.serial?`SN ${esc(d.serial)}`:""].filter(Boolean).join(" · ");
+    return `<div class="srow${noid?" srow-off":""}"><div class="srow-l"><div class="srow-t">${esc(d.model||d.label||d.dev)}</div><div class="srow-d">${sub}</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" data-id="${att(d.id)}"${allow.has(d.id)?" checked":""}${(noid||!on)?" disabled":""}><span class="sl"></span></label></div></div>`;}).join("");
+   h+=offline.map(id=>`<div class="srow"><div class="srow-l"><div class="srow-t mono">${esc(id)}</div><div class="srow-d">разрешено, сейчас не подключено</div></div><div class="srow-c"><button class="btn sm" data-rm="${att(id)}"${on?"":" disabled"}>${svg("trash",13)} Убрать</button></div></div>`).join("");
+   if(on&&!allow.size)h+=`<div class="reboot-ban">${svg("power",16)} Список пуст — автоимпорт не сработает ни с одной флешки.</div>`;
+   av.innerHTML=h;av.style.opacity=on?"":".55";
+   av.querySelectorAll("input[data-id]").forEach(cb=>cb.onchange=()=>{cb.checked?allow.add(cb.dataset.id):allow.delete(cb.dataset.id);renderAllow();});
+   av.querySelectorAll("button[data-rm]").forEach(b=>b.onclick=()=>{allow.delete(b.dataset.rm);renderAllow();});};
+  re.onchange=renderAllow;renderAllow();
   // конструктор раскладки: превью, вставка токенов, готовые шаблоны
   const tpl=tc.querySelector("#uSubTpl"),prev=tc.querySelector("#uSubPrev");
   const upd=()=>prev.textContent=usbSubPreview(tpl.value);upd();
@@ -5290,7 +5313,7 @@ function usbTab(tc){tc.innerHTML=`<div class="set-load">загрузка…</div
     const np=p+b.dataset.t.length;tpl.setSelectionRange(np,np);upd();});
   tc.querySelectorAll(".usb-pre").forEach(b=>b.onclick=()=>{tpl.value=b.dataset.t;upd();});
   tc.querySelector("#uSave").onclick=async()=>{
-   const cfg={enabled:tc.querySelector("#uEn").checked,dest:tc.querySelector("#uDest").value.trim(),subdir:tpl.value.trim(),notify:tc.querySelector("#uNo").checked,eject:tc.querySelector("#uEj").checked,media_only:tc.querySelector("#uMo").checked};
+   const cfg={enabled:tc.querySelector("#uEn").checked,dest:tc.querySelector("#uDest").value.trim(),subdir:tpl.value.trim(),notify:tc.querySelector("#uNo").checked,eject:tc.querySelector("#uEj").checked,media_only:tc.querySelector("#uMo").checked,restrict:re.checked,allow:[...allow]};
    const rr=await api("/api/usb-import",{method:"POST",body:JSON.stringify(cfg)});
    toast(LIVE?(rr&&rr.ok?(rr.warn||"Сохранено ✓"):"Ошибка: "+((rr&&rr.log)||"?")):"Демо");};
  });}

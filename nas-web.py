@@ -5656,7 +5656,8 @@ USB_IMPORT_CONF = "/etc/nas-wizard/usb-import.conf"
 USB_IMPORT_SH   = "/usr/local/bin/nas-usb-import.sh"
 USB_IMPORT_RULE = "/etc/udev/rules.d/98-nas-usb-import.rules"
 _USB_DEFAULT = {"enabled": False, "dest": "/mnt/storage/imports",
-                "subdir": "{label}-{date}-{time}", "notify": False, "eject": False, "media_only": False}
+                "subdir": "{label}-{date}-{time}", "notify": False, "eject": False,
+                "media_only": False, "restrict": False, "allow": []}
 _USB_SH = r'''#!/bin/bash
 # nas-wizard: авто-импорт содержимого вставленного USB в заданную папку.
 # Копирование only-forward: с флешки ничего не удаляется. Стейджинг в .incomplete
@@ -5669,6 +5670,24 @@ dev="$1"; [ -b "$dev" ] || exit 0
 LOG=/var/log/nas-usb-import.log
 log(){ echo "$(date '+%F %T') $*" >> "$LOG" 2>/dev/null; }
 notify(){ [ "${IMPORT_NOTIFY:-0}" = "1" ] && [ -x /usr/local/bin/nas-notify.sh ] && /usr/local/bin/nas-notify.sh "$1" "$2" 2>/dev/null || true; }
+# белый список: если ограничение включено — автоимпорт ТОЛЬКО с разрешённых устройств
+# (по VID:PID). Ручной «импорт сейчас» (IMPORT_FORCE=1) список игнорирует.
+# UAS-мосты не дают ID_VENDOR_ID — падаем на ID_USB_VENDOR_ID. Регистр нормализуем:
+# в конфиге VID:PID хранится строчными.
+if [ "${IMPORT_FORCE:-0}" != "1" ] && [ "${IMPORT_RESTRICT:-0}" = "1" ]; then
+  props="$(udevadm info -q property -n "$dev" 2>/dev/null)"
+  prop(){ printf '%s\n' "$props" | sed -n "s/^$1=//p" | head -1; }
+  vid="$(prop ID_VENDOR_ID)"; [ -n "$vid" ] || vid="$(prop ID_USB_VENDOR_ID)"
+  pid="$(prop ID_MODEL_ID)";  [ -n "$pid" ] || pid="$(prop ID_USB_MODEL_ID)"
+  did="$(printf '%s:%s' "$vid" "$pid" | tr 'A-Z' 'a-z')"
+  if [ -z "$vid" ] || [ -z "$pid" ]; then
+    log "skip $dev: не удалось определить VID:PID"; notify "USB пропущен" "Не удалось определить устройство"; exit 0
+  fi
+  case " $(printf '%s' "${IMPORT_ALLOW}" | tr 'A-Z' 'a-z') " in
+    *" $did "*) : ;;
+    *) log "skip $dev ($did): не в списке разрешённых устройств"; notify "USB пропущен" "Устройство $did не в списке автоимпорта"; exit 0 ;;
+  esac
+fi
 label="$(blkid -o value -s LABEL "$dev" 2>/dev/null)"; [ -n "$label" ] || label="usb-$(basename "$dev")"
 label="$(printf '%s' "$label" | tr -c 'A-Za-z0-9._-' '_')"
 mp="$(findmnt -n -o TARGET --source "$dev" 2>/dev/null | head -1)"
@@ -5755,6 +5774,8 @@ def usb_import_load():
         elif k == "IMPORT_NOTIFY": cfg["notify"] = v == "1"
         elif k == "IMPORT_EJECT":  cfg["eject"] = v == "1"
         elif k == "IMPORT_MEDIA_ONLY": cfg["media_only"] = v == "1"
+        elif k == "IMPORT_RESTRICT": cfg["restrict"] = v == "1"
+        elif k == "IMPORT_ALLOW":  cfg["allow"] = [x.lower() for x in v.split() if x]
     cfg["installed"] = os.path.isfile(USB_IMPORT_RULE)
     cfg["rsync"] = bool(shutil.which("rsync"))
     return cfg
@@ -5793,6 +5814,11 @@ def usb_import_save(cfg):
             f.write("IMPORT_NOTIFY=%d\n" % (1 if cfg.get("notify") else 0))
             f.write("IMPORT_EJECT=%d\n" % (1 if cfg.get("eject") else 0))
             f.write("IMPORT_MEDIA_ONLY=%d\n" % (1 if cfg.get("media_only") else 0))
+            # белый список устройств (VID:PID hex, через пробел) + флаг ограничения
+            allow = [str(x).lower() for x in (cfg.get("allow") or [])
+                     if re.match(r"^[0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}$", str(x))]
+            f.write("IMPORT_RESTRICT=%d\n" % (1 if cfg.get("restrict") else 0))
+            f.write('IMPORT_ALLOW="%s"\n' % " ".join(sorted(set(allow))))
     except OSError as e:
         return {"ok": False, "log": str(e)}
     err = _usb_install(bool(cfg.get("enabled")))
@@ -5822,6 +5848,46 @@ def usb_removable():
                 walk(n["children"], usb)
     walk(j.get("blockdevices", []))
     return out
+
+def _udev_props(dev):
+    try:
+        out = subprocess.run(["udevadm", "info", "-q", "property", "-n", dev],
+                             capture_output=True, text=True, timeout=6).stdout
+    except (OSError, subprocess.SubprocessError):
+        return {}
+    props = {}
+    for line in out.splitlines():
+        k, _, v = line.partition("=")
+        if k:
+            props[k] = v.strip()
+    return props
+
+def usb_devices():
+    """USB-накопители сейчас: VID:PID/модель/серийник — для белого списка автоимпорта."""
+    cfg = usb_import_load()
+    allow = set(cfg.get("allow", []))
+    out = []
+    for d in _lsblk():
+        if d.get("type") != "disk":
+            continue
+        dev = d.get("path", "")
+        if not dev:
+            continue
+        props = _udev_props(dev)
+        # UAS-мосты отдают ID_BUS=ata (и lsblk TRAN может быть не "usb") — ловим по
+        # ID_USB_DRIVER, он выставлен и для usb-storage, и для uas.
+        if not props.get("ID_USB_DRIVER") and d.get("tran") != "usb":
+            continue
+        vid = props.get("ID_VENDOR_ID") or props.get("ID_USB_VENDOR_ID") or ""
+        pid = props.get("ID_MODEL_ID") or props.get("ID_USB_MODEL_ID") or ""
+        umodel = (props.get("ID_MODEL") or "").replace("_", " ")
+        devid = ("%s:%s" % (vid, pid)).lower() if (vid and pid) else ""
+        out.append({"dev": dev, "vid": vid, "pid": pid, "id": devid,
+                    "serial": props.get("ID_SERIAL_SHORT", ""),
+                    "model": (d.get("model") or umodel or "").strip(), "size": d.get("size"),
+                    "label": d.get("label"), "removable": d.get("rm") in (True, "1", 1),
+                    "allowed": bool(devid) and devid in allow})
+    return {"devices": out, "restrict": cfg.get("restrict", False), "allow": sorted(allow)}
 
 def usb_import_run(dev):
     if not re.match(r"^/dev/[\w-]+$", dev or ""):
@@ -6584,6 +6650,8 @@ class H(BaseHTTPRequestHandler):
                 self._json(sysconf())
             elif p == "/api/usb-import":
                 self._json({"config": usb_import_load(), "drives": usb_removable()})
+            elif p == "/api/usb-devices":
+                self._json(usb_devices())
             elif p == "/api/wallpaper/img":
                 wp = _wallpaper_path()
                 if wp:
