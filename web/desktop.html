@@ -1272,6 +1272,10 @@
   input,textarea,select{font-family:var(--font);background:var(--card-2);border:1px solid transparent;border-radius:var(--r-sm);color:var(--text);padding:10px 13px;font-size:13px;width:100%;transition:.13s}
   input:hover,textarea:hover,select:hover{border-color:var(--line-2)}
   textarea{font-family:var(--mono);font-size:12.5px;line-height:1.65;resize:vertical;min-height:300px;white-space:pre;tab-size:2}
+  /* SSH-приветствие: невысокий редактор + предпросмотр «как в терминале» */
+  .motd-ta{min-height:150px;margin-top:10px}
+  .motd-pv{font-family:var(--mono);font-size:12.5px;line-height:1.6;white-space:pre;overflow-x:auto;
+    background:var(--card-2);border-radius:var(--r-sm);padding:12px 14px;margin:0;color:var(--text)}
   input:focus,textarea:focus,select:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
   .vrow{display:grid;grid-template-columns:1.3fr 1fr 1fr auto;gap:12px;align-items:center;padding:11px 0;border-bottom:1px solid var(--line);font-size:13px}
   .vrow .u{font-family:var(--mono);font-size:11.5px;color:var(--accent-2)}
@@ -5185,8 +5189,30 @@ function systemTab(tc){withSysc(tc,()=>{const s=SYSC.system||{};
   <div class="srow"><div class="srow-l"><div class="srow-t">Лимит журнала systemd${tipHTML("Максимум места под логи journald — защищает SD-карту от переполнения. Пусто = системное значение по умолчанию.")}</div><div class="srow-d">сейчас: ${esc(s.journald_max||"по умолчанию")}</div></div><div class="srow-c"><input class="mono" id="stJ" style="max-width:90px" value="${att(s.journald_max||"")}" placeholder="200M"><button class="btn sm" id="stJA">Применить</button></div></div>
   <div class="set-grp">Обслуживание</div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Обновления пакетов${tipHTML("Показывает список доступных обновлений apt (что и с какой на какую версию) и устанавливает их по кнопке «Обновить всё». Обновления безопасности помечены.")}</div><div class="srow-d">${s.updates!=null?(s.updates?s.updates+" доступно":"всё актуально"):"посмотреть и установить"}</div></div><div class="srow-c"><button class="btn sm" id="mChk">${svg("download",13)} Обновления</button></div></div>
-  <div class="srow"><div class="srow-l"><div class="srow-t">Перезапустить панель${tipHTML("Перезапускает службу nas-web (веб-интерфейс). Соединение ненадолго прервётся.")}</div></div><div class="srow-c"><button class="btn sm" id="mWeb">Перезапустить nas-web</button></div></div>`;
+  <div class="srow"><div class="srow-l"><div class="srow-t">Перезапустить панель${tipHTML("Перезапускает службу nas-web (веб-интерфейс). Соединение ненадолго прервётся.")}</div></div><div class="srow-c"><button class="btn sm" id="mWeb">Перезапустить nas-web</button></div></div>
+  <div class="set-grp">Приветствие в SSH${tipHTML("Что видно в терминале при входе по SSH. Рисует pam_motd через /etc/update-motd.d/20-nas-os.")}</div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Свой текст</div><div class="srow-d">произвольная шапка перед сводкой</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="moT"><span class="sl"></span></label></div></div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Сводка о системе</div><div class="srow-d">аптайм, температура, память, пул, адрес, контейнеры</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="moI"><span class="sl"></span></label></div></div>
+  <textarea id="moTx" class="motd-ta" spellcheck="false" placeholder="Текст приветствия — только латиница"></textarea>
+  <div class="mon-note">${svg("info",13)} Текст печатается буквально: команды и переменные внутри не выполняются. Пишите латиницей — кириллицу терминал показывает не везде.</div>
+  <div style="margin-top:12px"><button class="btn sm pri" id="moSave">${svg("save",13)} Сохранить</button></div>
+  <div class="set-grp">Предпросмотр</div>
+  <pre class="motd-pv" id="moPv"></pre>`;
  wireSc(tc);
+ // SSH-приветствие. Предпросмотр ставим textContent'ом: через innerHTML его
+ // перехватил бы i18n и начал переводить вывод терминала.
+ {const tx=tc.querySelector("#moTx"),cbT=tc.querySelector("#moT"),cbI=tc.querySelector("#moI"),
+   pv=tc.querySelector("#moPv"),sv=tc.querySelector("#moSave");
+  pv.textContent="…";
+  const fill=r=>{const c=(r&&r.config)||{};tx.value=c.text||"";cbT.checked=c.show_text!==false;
+    cbI.checked=c.show_info!==false;pv.textContent=(r&&r.preview)||"";
+    sv.disabled=c.installed===false;};
+  api("/api/motd").then(fill);
+  sv.onclick=async()=>{
+    const rr=await api("/api/motd",{method:"POST",body:JSON.stringify(
+      {text:tx.value,show_text:cbT.checked,show_info:cbI.checked})});
+    if(rr&&rr.ok&&rr.preview!=null)pv.textContent=rr.preview;
+    toast(LIVE?(rr&&rr.ok?"Сохранено ✓":"Ошибка: "+((rr&&rr.log)||"?")):"Демо");};}
  const H=tc.querySelector("#stHost"),Tz=tc.querySelector("#stTz"),J=tc.querySelector("#stJ");
  tc.querySelector("#stHostA").onclick=async()=>{await sconf("hostname",H.value.trim());refreshSysc(rerSet);};
  tc.querySelector("#stTzA").onclick=async()=>{await sconf("timezone",Tz.value.trim());refreshSysc(rerSet);};

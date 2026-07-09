@@ -2035,6 +2035,7 @@ ALERT
     run chmod +x /usr/local/bin/nas-smart-alert.sh
     install_notify_helper
     install_netguard
+    install_motd
     if ! grep -qs 'nas-smart-alert' /etc/smartd.conf 2>/dev/null; then
         backup_file /etc/smartd.conf
         write_file /etc/smartd.conf <<'EOF'
@@ -2329,6 +2330,103 @@ SYSCTL
     run systemctl daemon-reload
     run systemctl enable --now nas-netguard.timer
     info "сторож сети включён: eth0 главный, wlan0 резерв, уведомления о смене IP"
+}
+
+# ---------------------------------------------------------------------------
+# Приветствие при входе по SSH (MOTD).
+# sshd здесь с PrintMotd=no — текст рисует pam_motd из /etc/update-motd.d/,
+# поэтому свой блок кладём туда, а не правим /etc/motd (его гасим: юридическая
+# простыня Debian на NAS только мешает; бэкап делает write_file).
+# ---------------------------------------------------------------------------
+install_motd() {
+    # пользовательский текст создаём только если его ещё нет — не затирать правки
+    if [ ! -f /etc/nas-wizard/motd.txt ]; then
+        write_file /etc/nas-wizard/motd.txt <<'TXT'
+NAS-OS - home NAS on Raspberry Pi 5
+
+  Panel        http://pi5.local/
+  Data pool    /mnt/storage          Stacks  ~/services
+  Panel logs   journalctl -u nas-web -f
+
+  Always power off with `sudo poweroff` - SnapRAID hates sudden power loss.
+TXT
+    fi
+    [ -f /etc/nas-wizard/motd.conf ] || write_file /etc/nas-wizard/motd.conf <<'CONF'
+# nas-wizard: что показывать при входе по SSH
+MOTD_TEXT=1
+MOTD_INFO=1
+CONF
+
+    write_file /etc/update-motd.d/20-nas-os <<'MOTD'
+#!/bin/bash
+# nas-wizard: приветствие при входе по SSH.
+# ВНИМАНИЕ: выполняется на КАЖДОМ логине. Только дешёвые команды; ничего, что
+# будит спящие диски (никаких smartctl/hdparm) и ничего, что лезет в сеть.
+CONF=/etc/nas-wizard/motd.conf
+TXT=/etc/nas-wizard/motd.txt
+MOTD_TEXT=1; MOTD_INFO=1
+[ -r "$CONF" ] && . "$CONF"
+
+# NO_COLOR=1 — для предпросмотра в веб-панели
+if [ -n "${NO_COLOR:-}" ]; then
+  B=""; D=""; G=""; Y=""; R=""
+else
+  B=$'\033[1;36m'; D=$'\033[2;37m'; G=$'\033[1;32m'; Y=$'\033[1;33m'; R=$'\033[0m'
+fi
+# метки латиницей: printf меряет байты, кириллица ломала бы выравнивание колонок
+row(){ printf '  %s%-12s%s %s\n' "$D" "$1" "$R" "$2"; }
+
+[ "${MOTD_TEXT:-1}" = "1" ] && [ -r "$TXT" ] && { printf '\n'; cat "$TXT"; }
+
+[ "${MOTD_INFO:-1}" = "1" ] || exit 0
+printf '\n%s%s%s\n' "$B" "$(hostname)" "$R"
+
+up="$(uptime -p 2>/dev/null | sed 's/^up //')"
+la="$(awk '{printf "%s %s %s", $1, $2, $3}' /proc/loadavg 2>/dev/null)"
+row "Uptime" "${up:-?}   ${D}load${R} ${la:-?}"
+
+t=$(cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null)
+if [ -n "$t" ]; then
+  c=$((t/1000))
+  col="$G"; [ "$c" -ge 70 ] && col="$Y"
+  row "Temp" "${col}${c}C${R}"
+fi
+
+mem="$(free -h 2>/dev/null | awk '/^Mem:/{printf "%s of %s", $3, $2}')"
+[ -n "$mem" ] && row "Memory" "$mem"
+
+# df по УЖЕ смонтированным ФС диски не будит
+for m in / /mnt/storage; do
+  [ -d "$m" ] || continue
+  findmnt -n "$m" >/dev/null 2>&1 || continue
+  df -h --output=used,size,pcent "$m" 2>/dev/null | tail -1 | {
+    read -r used size pc
+    p="${pc%\%}"; col="$G"; [ "${p:-0}" -ge 85 ] && col="$Y"
+    row "$([ "$m" = "/" ] && echo System || echo Pool)" "$used of $size (${col}${pc}${R})"
+  }
+done
+
+# активный интерфейс и адрес: route get — только просмотр таблицы, в сеть не ходит.
+# Разбираем по ключам, а не по позициям: у маршрута может не быть "via",
+# зато в хвосте бывает "uid 1000".
+net="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++){if($i=="dev")d=$(i+1);if($i=="src")s=$(i+1)}}END{print s" "d}')"
+ip4="${net%% *}"; dev="${net##* }"
+if [ -n "$ip4" ]; then
+  row "Network" "$ip4 (${dev:-?})"
+  row "Panel" "http://$ip4/"
+fi
+
+if command -v docker >/dev/null 2>&1; then
+  n="$(timeout 3 docker ps -q 2>/dev/null | grep -c .)"
+  [ -n "$n" ] && row "Containers" "$n running"
+fi
+printf '\n'
+MOTD
+    run chmod +x /etc/update-motd.d/20-nas-os
+
+    # юридическая простыня Debian поверх нашего блока — только шум
+    write_file /etc/motd </dev/null
+    info "SSH-приветствие установлено (/etc/nas-wizard/motd.txt — свой текст)"
 }
 
 setup_snapraid_notify_noninteractive() { :; }   # уведомления настраиваются отдельно (api notify)
@@ -2732,6 +2830,7 @@ run_api() {
         backup)         api_keys_run bk ;;
         notify)         api_notify ;;
         netguard)       install_netguard ;;
+        motd)           install_motd ;;
         comitup)        mod_comitup ;;
         tailscale)      mod_tailscale ;;
         staticip)       mod_staticip ;;

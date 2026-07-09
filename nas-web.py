@@ -1338,6 +1338,8 @@ def _act_title(p, b):
         return "USB-импорт запущен вручную (%s)" % g("dev")
     if p == "/api/usb-import":
         return "Настройки USB-импорта изменены"
+    if p == "/api/motd":
+        return "SSH-приветствие изменено"
     return None
 
 _ACT_KIND = {"/api/disk/": "disk", "/api/fs/": "files", "/api/power": "svc",
@@ -5674,6 +5676,53 @@ def wallpaper_upload(b64):
 #  USB авто-импорт: при вставке флешки копировать её содержимое в заданную папку
 #  (udev-хук → helper-скрипт → rsync; только копирование, с флешки ничего не удаляется)
 # --------------------------------------------------------------------------- #
+# --------------------------------------------------------------------------- #
+#  SSH-приветствие (MOTD). Скрипт /etc/update-motd.d/20-nas-os ставит визард;
+#  здесь только правим пользовательский текст и два флага. Текст выводится
+#  через `cat` — не исполняется, поэтому экранировать нечего.
+# --------------------------------------------------------------------------- #
+MOTD_CONF   = "/etc/nas-wizard/motd.conf"
+MOTD_TXT    = "/etc/nas-wizard/motd.txt"
+MOTD_SCRIPT = "/etc/update-motd.d/20-nas-os"
+MOTD_MAX    = 4000
+
+def motd_load():
+    cfg = {"text": _read(MOTD_TXT), "show_text": True, "show_info": True,
+           "installed": os.path.isfile(MOTD_SCRIPT)}
+    for line in _read(MOTD_CONF).splitlines():
+        line = line.strip()
+        if line.startswith("#") or "=" not in line:
+            continue
+        k, _, v = line.partition("=")
+        v = v.strip().strip('"').strip("'")
+        if k.strip() == "MOTD_TEXT":   cfg["show_text"] = v == "1"
+        elif k.strip() == "MOTD_INFO": cfg["show_info"] = v == "1"
+    return cfg
+
+def motd_preview():
+    if not os.path.isfile(MOTD_SCRIPT):
+        return ""
+    env = dict(os.environ); env["NO_COLOR"] = "1"   # предпросмотр без ANSI-кодов
+    r = _run(["/bin/bash", MOTD_SCRIPT], timeout=15, env=env)
+    return r["log"]
+
+def motd_save(b):
+    if not os.path.isfile(MOTD_SCRIPT):
+        return {"ok": False, "log": "приветствие не установлено: nas-wizard.sh api motd"}
+    text = b.get("text", "")
+    if not isinstance(text, str) or len(text) > MOTD_MAX:
+        return {"ok": False, "log": "слишком длинный текст (макс. %d символов)" % MOTD_MAX}
+    try:
+        with open(MOTD_TXT, "w") as f:
+            f.write(text if text.endswith("\n") or not text else text + "\n")
+        with open(MOTD_CONF, "w") as f:
+            f.write("# nas-wizard: что показывать при входе по SSH\n")
+            f.write("MOTD_TEXT=%d\n" % (1 if b.get("show_text", True) else 0))
+            f.write("MOTD_INFO=%d\n" % (1 if b.get("show_info", True) else 0))
+    except OSError as e:
+        return {"ok": False, "log": str(e)}
+    return {"ok": True, "log": "сохранено", "preview": motd_preview()}
+
 USB_IMPORT_CONF = "/etc/nas-wizard/usb-import.conf"
 USB_IMPORT_SH   = "/usr/local/bin/nas-usb-import.sh"
 USB_IMPORT_RULE = "/etc/udev/rules.d/98-nas-usb-import.rules"
@@ -6694,6 +6743,8 @@ class H(BaseHTTPRequestHandler):
                 self._json({"config": usb_import_load(), "drives": usb_removable()})
             elif p == "/api/usb-devices":
                 self._json(usb_devices())
+            elif p == "/api/motd":
+                self._json({"config": motd_load(), "preview": motd_preview()})
             elif p == "/api/wallpaper/img":
                 wp = _wallpaper_path()
                 if wp:
@@ -6785,6 +6836,8 @@ class H(BaseHTTPRequestHandler):
                 self._json(usb_import_save(self._body()))
             elif p == "/api/usb-import/run":
                 self._json(usb_import_run(self._body().get("dev", "")))
+            elif p == "/api/motd":
+                self._json(motd_save(self._body()))
             elif p == "/api/wallpaper/fetch":
                 self._json(wallpaper_fetch(self._body().get("url", "")))
             elif p == "/api/wallpaper/upload":
