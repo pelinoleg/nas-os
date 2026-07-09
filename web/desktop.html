@@ -1504,6 +1504,10 @@
   .op-row .op-t2{font-size:12.3px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .op-row .op-s2{font-size:11px;color:var(--mut);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .op-row .op-when{color:var(--mut);opacity:.75;margin-left:6px}
+  .ms-row{display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12.5px;padding:3px 0}
+  .ms-row .ms-l{display:flex;align-items:center;gap:7px;color:var(--wdg-dim,var(--dim))}
+  .ms-row b{font-family:var(--mono);font-weight:600}
+  .ms-avg{font-size:11px;color:var(--wdg-dim,var(--mut));margin-top:5px}
   #opsBtn.mb-idle{opacity:.7}
   #opsBtn.mb-idle:hover{opacity:1}
   .op-row .op-bar{height:4px;border-radius:99px;background:var(--track,var(--card-2));overflow:hidden;margin-top:6px}
@@ -5759,8 +5763,9 @@ const WIDGET_DEFS={
  net:{name:"Сеть",ic:"net",extra:'<span id="wg-nets" style="margin-left:auto;letter-spacing:0;text-transform:none;font-family:var(--mono);font-size:11px;font-weight:600;display:flex;gap:9px"></span>',body:'<canvas id="wg-net" width="300" height="40" style="width:100%;height:40px;display:block"></canvas><div id="wg-netlink" style="margin-top:8px"></div><div id="wg-net2" style="margin-top:6px"></div><div style="margin-top:8px;display:flex;align-items:center;gap:8px"><button class="btn sm" id="wg-nstest">Спидтест</button><span id="wg-nsres" style="font-family:var(--mono);font-size:11px;color:var(--dim)"></span></div>'},
  docker:{name:"Контейнеры",ic:"cube",extra:'<span class="more" id="more-docker">все →</span>',body:'<div id="wg-docker"></div>'},
  top:{name:"Топ процессов",ic:"activity",def:false,extra:'<span class="more" id="more-top">все →</span>',body:'<div id="wg-top"></div>'},
+ myspeed:{name:"Скорость интернета",ic:"net",extra:'<span class="more" id="more-myspeed">открыть →</span>',body:'<div id="wg-myspeed"></div>'},
 };
-const WIDGET_ORDER=["vols","sys","disk","net","docker","top"];
+const WIDGET_ORDER=["vols","sys","disk","net","docker","top","myspeed"];
 function railWidgets(){let cfg=(SET.widgets&&SET.widgets.length)?SET.widgets.slice():WIDGET_ORDER.map(id=>({id,on:WIDGET_DEFS[id].def!==false}));
  cfg=cfg.filter(w=>WIDGET_DEFS[w.id]);
  WIDGET_ORDER.forEach(id=>{if(!cfg.find(w=>w.id===id))cfg.push({id,on:WIDGET_DEFS[id].def!==false});});
@@ -5772,7 +5777,37 @@ function renderRail(){const rail=document.getElementById("rail");if(!rail)return
  const md=document.getElementById("more-disks");if(md)md.onclick=()=>winDisks();
  const mdk=document.getElementById("more-docker");if(mdk)mdk.onclick=()=>winServices();
  const mt=document.getElementById("more-top");if(mt)mt.onclick=()=>winMon();
- paintVols();if(LAST){paintSys(LAST);}pollDisks();pollStacks();pollTop();pollNet();
+ paintVols();if(LAST){paintSys(LAST);}pollDisks();pollStacks();pollTop();pollNet();pollMySpeed();
+}
+
+/* MySpeed: последний замер скорости интернета. Сервис ставится отдельным стеком,
+   поэтому карточка исчезает целиком, если его нет или он молчит — пустая плашка
+   «нет данных» мозолила бы глаза тем, кто его не ставил. */
+let MS_URL="";
+async function pollMySpeed(){
+ const box=document.getElementById("wg-myspeed");if(!box)return;
+ const wdg=box.closest(".wdg");
+ const hide=()=>{if(wdg)wdg.style.display="none";};
+ let r=null;
+ try{r=await api("/api/myspeed");}catch(e){}
+ if(!r||!r.ok||r.download==null){hide();return;}
+ if(wdg)wdg.style.display="";
+ MS_URL=r.url||"";
+ const mbit=v=>(v==null?"—":(+v>=100?Math.round(+v):(+v).toFixed(1))+" Мбит/с");
+ const ago=t=>{const s=(Date.now()-Date.parse(t))/1000;
+   if(!isFinite(s))return "";
+   if(s<90)return "только что";
+   if(s<5400)return Math.round(s/60)+" мин назад";
+   if(s<172800)return Math.round(s/3600)+" ч назад";
+   return Math.round(s/86400)+" дн назад";};
+ const a=r.avg||{};
+ box.innerHTML=`<div class="ms-row"><span class="ms-l">${svg("download",13)} Загрузка</span><b>${esc(mbit(r.download))}</b></div>
+   <div class="ms-row"><span class="ms-l">${svg("upload",13)} Отдача</span><b>${esc(mbit(r.upload))}</b></div>
+   <div class="ms-row"><span class="ms-l">${svg("activity",13)} Пинг</span><b>${r.ping==null?"—":esc(r.ping+" мс")}</b></div>
+   ${a.download!=null?`<div class="ms-avg">в среднем ${esc(mbit(a.download))} / ${esc(mbit(a.upload))}${a.ping!=null?` · пинг ${esc(a.ping+" мс")}`:""}</div>`:""}
+   <div class="ms-avg">${r.error?`<span style="color:var(--danger)">замер с ошибкой</span> · `:""}${esc(ago(r.created))}${r.count?` · ${r.count} замеров`:""}</div>`;
+ const mm=document.getElementById("more-myspeed");
+ if(mm)mm.onclick=()=>{if(MS_URL)window.open(MS_URL,"_blank");};
 }
 function paintVols(){const box=document.getElementById("wg-vols");if(!box)return;box.innerHTML="";
  const wdg=box.closest(".wdg");   // нет томов → прячем всю карточку виджета, а не показываем пустую плашку
@@ -6268,7 +6303,7 @@ function maybeOnboard(){let done=false;try{done=!!SET.onboarded||localStorage.ge
  pollStacks();pollTop();pollNet();
  pollEvents();setTimeout(pollHealth,2500);
  setInterval(poll,3000);setInterval(pollApps,8000);setInterval(pollDisks,15000);setInterval(tickClock,10000);
- setInterval(pollStacks,15000);setInterval(pollTop,10000);setInterval(pollNet,15000);
+ setInterval(pollStacks,15000);setInterval(pollTop,10000);setInterval(pollNet,15000);setInterval(pollMySpeed,60000);
  setInterval(pollEvents,15000);setInterval(pollHealth,120000);
  if("serviceWorker" in navigator&&window.isSecureContext)navigator.serviceWorker.register("/sw.js").catch(()=>{});
  matchMedia("(prefers-color-scheme:light)").addEventListener("change",()=>{if(SET.theme==="auto")applySettings();});

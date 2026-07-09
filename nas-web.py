@@ -985,6 +985,56 @@ def ops_hist_clear():
         _ops_hist_write([])
     return {"ok": True}
 
+# --------------------------------------------------------------------------- #
+#  MySpeed — виджет с последним замером скорости интернета.
+#  Ходим за данными сами: браузеру мешал бы CORS, а пароль (если включён)
+#  передаётся заголовком и не должен светиться в клиенте.
+#  Сервиса нет или он молчит → {"ok": false}, и виджет прячется целиком.
+# --------------------------------------------------------------------------- #
+_ms_cache = {"t": 0, "data": {"ok": False}}
+_ms_lock = threading.Lock()
+MYSPEED_TTL = 20
+
+def _myspeed_get(base, path, password, timeout=3):
+    req = urllib.request.Request(base.rstrip("/") + path, headers={"Accept": "application/json"})
+    if password:
+        req.add_header("Password", password)
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        return json.loads(r.read().decode("utf-8", "replace"))
+
+def myspeed_state():
+    """Последний замер + краткая статистика. Кэш, чтобы виджет не долбил сервис."""
+    with _ms_lock:
+        if time.time() - _ms_cache["t"] < MYSPEED_TTL:
+            return _ms_cache["data"]
+    m = load_maintenance()
+    base = (m.get("myspeed_url") or "").strip()
+    out = {"ok": False}
+    if base.startswith(("http://", "https://")):
+        pw = m.get("myspeed_password") or ""
+        try:
+            tests = _myspeed_get(base, "/api/speedtests", pw)
+            if isinstance(tests, list) and tests:
+                # MySpeed отдаёт новые первыми, но полагаться на порядок незачем
+                last = max((x for x in tests if isinstance(x, dict)),
+                           key=lambda x: str(x.get("created") or ""), default={})
+                out = {"ok": True, "url": base, "count": len(tests),
+                       "download": last.get("download"), "upload": last.get("upload"),
+                       "ping": last.get("ping"), "created": last.get("created"),
+                       "error": last.get("error")}
+                try:                       # статистика необязательна — без неё виджет живёт
+                    st = _myspeed_get(base, "/api/speedtests/statistics", pw)
+                    out["avg"] = {"download": (st.get("download") or {}).get("avg"),
+                                  "upload": (st.get("upload") or {}).get("avg"),
+                                  "ping": (st.get("ping") or {}).get("avg")}
+                except Exception:
+                    pass
+        except Exception:
+            out = {"ok": False}
+    with _ms_lock:
+        _ms_cache["t"] = time.time(); _ms_cache["data"] = out
+    return out
+
 FAV_FILE = os.path.join(NAS_CONFIG, "fm-favorites.json")
 def load_favs():
     try:
@@ -3160,6 +3210,8 @@ def load_maintenance():
          "import_stale_hours": 24,  # снести брошенные .incomplete-* старше N часов (0 = не трогать)
          "import_keep_days": 0,     # удалять импорты старше N дней (0 = хранить вечно)
          "import_warm_thumbs": True,  # прогреть превью сразу после импорта
+         "myspeed_url": "http://127.0.0.1:5216",  # виджет MySpeed ("" = выключить)
+         "myspeed_password": "",                  # если в MySpeed включён пароль
          "smart_scan_min": 10,      # фоновый опрос SMART-статуса, минут
          "smart_short_days": 7,     # короткий самотест дисков, раз в N дней (ночью)
          "smart_long_days": 30,     # длинный самотест, раз в N дней (ночью)
@@ -7500,6 +7552,8 @@ class H(BaseHTTPRequestHandler):
                 self._json(usb_import_progress())
             elif p == "/api/ops":
                 self._json({"ops": ops_hist_list()})
+            elif p == "/api/myspeed":
+                self._json(myspeed_state())
             elif p == "/api/wallpaper/img":
                 wp = _wallpaper_path()
                 if wp:
