@@ -1487,6 +1487,7 @@
   .op-row .op-m{flex:1;min-width:0}
   .op-row .op-t2{font-size:12.3px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .op-row .op-s2{font-size:11px;color:var(--mut);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .op-row .op-when{color:var(--mut);opacity:.75;margin-left:6px}
   .op-row .op-bar{height:4px;border-radius:99px;background:var(--track,var(--card-2));overflow:hidden;margin-top:6px}
   .op-row .op-bf{height:100%;background:var(--accent);transition:width .2s;border-radius:99px}
   .op-row.ind .op-bf{width:40%!important;animation:opind 1.1s ease-in-out infinite alternate}
@@ -5926,6 +5927,31 @@ function winNotif(){openWin("__notif","Уведомления",async body=>{
 
 /* ---- центр операций (очереди, прогресс, отмена) ---- */
 const OPS={list:[],seq:0,paintT:0,autoClosed:false,autoOpened:false};
+
+/* Operation history survives a page reload: the list lived only in memory, so the
+   menubar icon vanished together with everything the user had just copied.
+   Only finished entries are persisted: uploads die with the page, while backup and
+   USB import keep running and are re-created from the server on the next poll. */
+const OPS_KEY="nasops",OPS_KEEP=30,OPS_TTL=3*86400e3;
+function opsSave(){
+ try{
+  const keep=OPS.list.filter(o=>o.state!=="run").slice(-OPS_KEEP)
+    .map(o=>({id:o.id,title:o.title,state:o.state,label:o.label,t:o.t}));
+  localStorage.setItem(OPS_KEY,JSON.stringify(keep));
+ }catch(e){}}
+function opsLoad(){
+ let saved=[];
+ try{saved=JSON.parse(localStorage.getItem(OPS_KEY)||"[]");}catch(e){saved=[];}
+ const now=Date.now();
+ OPS.list=(Array.isArray(saved)?saved:[]).filter(o=>o&&o.t&&now-o.t<OPS_TTL).slice(-OPS_KEEP);
+ OPS.list.forEach(o=>{if(o.state==="run"){o.state="err";o.label="прервано перезагрузкой панели";}});
+ OPS.seq=OPS.list.reduce((a,o)=>Math.max(a,o.id||0),0);
+ paintOps(true);}
+const opAgo=t=>{if(!t)return "";const s=Math.max(0,(Date.now()-t)/1000);
+ if(s<60)return "только что";
+ if(s<3600)return Math.floor(s/60)+" мин назад";
+ if(s<86400)return Math.floor(s/3600)+" ч назад";
+ return Math.floor(s/86400)+" дн назад";};
 let OPS_TICK=null;
 // Пока что-то выполняется — перерисовываем сами. Иначе полоса замирает: события
 // прогресса приходят редко (пакетные операции) или попап открыли уже после старта.
@@ -5942,7 +5968,8 @@ function opAdd(title,opts){opts=opts||{};
  return o;}
 function opSet(o,p,label){o.p=p;if(label!=null)o.label=label;paintOps();}
 function opEnd(o,ok,label){if(o.state!=="run")return;o.state=o.cancelled?"cancel":ok?"done":"err";
- if(label!=null&&label!=="")o.label=label;if(o.state==="done")o.p=1;o.cancel=null;paintOps(true);
+ if(label!=null&&label!=="")o.label=label;if(o.state==="done")o.p=1;o.cancel=null;o.t=o.t||Date.now();
+ paintOps(true);opsSave();
  if(!OPS.list.some(x=>x.state==="run")){OPS.autoClosed=false;
   // авто-открытый поповер сам прячется чуть после завершения всего
   if(OPS.autoOpened)setTimeout(()=>{const q=document.querySelector(".mbpop[data-ops]");
@@ -5953,7 +5980,7 @@ function paintOps(force){
  const now=Date.now();if(!force&&now-OPS.paintT<200)return;OPS.paintT=now;
  const b=document.getElementById("opsBtn");if(!b)return;
  const run=OPS.list.filter(o=>o.state==="run").length;
- b.style.display=OPS.list.length?"":"none";
+ b.style.display=OPS.list.length?"":"none";   // история тоже держит иконку видимой
  b.innerHTML=svg(run?"sync":"list",16)+(run?`<span class="mb-badge">${run}</span>`:"");
  b.title=nasTr(run?`Операции: ${run} выполняется`:"Операции");
  const p=document.querySelector(".mbpop[data-ops]");if(p)renderOpsList(p);}
@@ -5961,7 +5988,8 @@ function renderOpsList(p){
  // инкрементально: если состав/состояния не менялись — обновляем только прогресс и подписи
  const sig=OPS.list.map(o=>o.id+":"+o.state).join(",");
  if(p._sig===sig){
-  OPS.list.forEach(o=>{const row=p.querySelector(`[data-op="${o.id}"]`);if(!row)return;
+  OPS.list.forEach(o=>{if(o.state!=="run")return;   // завершённые не трогаем: в подписи <span class="op-when">
+   const row=p.querySelector(`[data-op="${o.id}"]`);if(!row)return;
    const bf=row.querySelector(".op-bf");if(bf&&o.p!=null)bf.style.width=Math.round(Math.min(o.p,1)*100)+"%";
    const s2=row.querySelector(".op-s2");if(s2){const l=nasTr(o.label);if(s2.textContent!==l){s2.textContent=l;s2.title=o.label||"";}}
    const t2=row.querySelector(".op-t2"),tt=nasTr(o.title);if(t2&&t2.textContent!==tt){t2.textContent=tt;t2.title=o.title;}});
@@ -5972,11 +6000,12 @@ function renderOpsList(p){
   +(items.length?items.map(o=>{
     const st=o.state==="run"?"":o.state==="done"?`<span class="op-st done" style="font-weight:800">✓</span>`:o.state==="cancel"?`<span class="op-st">⊘</span>`:`<span class="op-st err" style="font-weight:800">!</span>`;
     const bar=o.state==="run"?`<div class="op-bar"><div class="op-bf" style="width:${o.p==null?40:Math.round(Math.min(o.p,1)*100)}%"></div></div>`:"";
-    return `<div class="op-row${o.state==="run"&&o.p==null?" ind":""}" data-op="${o.id}"><div class="op-m"><div class="op-t2" title="${att(o.title)}">${esc(o.title)}</div><div class="op-s2" title="${att(o.label||"")}">${esc(o.label||"")}</div>${bar}</div>${st}${o.state==="run"?`<button class="op-x" title="Отменить">${svg("x",14)}</button>`:""}</div>`;
+    const when=o.state==="run"?"":`<span class="op-when">${esc(opAgo(o.t))}</span>`;
+    return `<div class="op-row${o.state==="run"&&o.p==null?" ind":""}" data-op="${o.id}"><div class="op-m"><div class="op-t2" title="${att(o.title)}">${esc(o.title)}</div><div class="op-s2" title="${att(o.label||"")}">${esc(o.label||"")}${when}</div>${bar}</div>${st}${o.state==="run"?`<button class="op-x" title="Отменить">${svg("x",14)}</button>`:""}</div>`;
   }).join(""):`<div class="mbp-empty">Нет операций</div>`);
  p.querySelectorAll(".op-x").forEach(x=>x.onclick=ev=>{ev.stopPropagation();
   const o=OPS.list.find(y=>y.id===+x.closest(".op-row").dataset.op);if(o)opCancel(o);});
- const clr=p.querySelector("#opsClr");if(clr)clr.onclick=()=>{OPS.list=OPS.list.filter(o=>o.state==="run");paintOps(true);const q=document.querySelector(".mbpop[data-ops]");if(q&&!OPS.list.length)closeMenu();else if(q){q._sig=null;renderOpsList(q);}};}
+ const clr=p.querySelector("#opsClr");if(clr)clr.onclick=()=>{OPS.list=OPS.list.filter(o=>o.state==="run");opsSave();paintOps(true);const q=document.querySelector(".mbpop[data-ops]");if(q&&!OPS.list.length)closeMenu();else if(q){q._sig=null;renderOpsList(q);}};}
 function opsPop(){const b=document.getElementById("opsBtn");if(!b||b.style.display==="none")return;
  mbPop(b,p=>{p.setAttribute("data-ops","1");renderOpsList(p);},
   ()=>{OPS.autoOpened=false;if(OPS.list.some(x=>x.state==="run"))OPS.autoClosed=true;});}
@@ -6090,7 +6119,7 @@ function maybeOnboard(){let done=false;try{done=!!SET.onboarded||localStorage.ge
  if(!snInit){seedSnips();try{localStorage.setItem("nassnipinit","1");}catch(e){}saveSnips();}
  document.querySelectorAll("[title]").forEach(n=>{if(n.title)n.title=nasTr(n.title);});   // статические title из HTML
  renderRail();renderApps();renderDock();renderWinbar();renderPhoneNav();tickClock();
- poll();pollApps();pollDisks();maybeOnboard();
+ opsLoad();poll();pollApps();pollDisks();maybeOnboard();
  refreshFmHideBk();
  pollStacks();pollTop();pollNet();
  pollEvents();setTimeout(pollHealth,2500);

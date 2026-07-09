@@ -269,7 +269,8 @@ def smart_info(dev):
     j = _smartctl_json(["-n", "standby", "-H", "-A"], dev, timeout=8)
     if not _smart_has_data(j):
         return None
-    return {"temp": (j.get("temperature") or {}).get("current"),
+    t = (j.get("temperature") or {}).get("current")
+    return {"temp": t if t else None,      # USB-мосты отдают 0 — это «не знаю», а не ноль градусов
             "healthy": (j.get("smart_status") or {}).get("passed"),
             "hours": (j.get("power_on_time") or {}).get("hours")}
 
@@ -277,6 +278,17 @@ def fs_tools():
     """Файловые системы, для которых есть mkfs (что реально можно создать)."""
     return [fs for fs in ("ext4", "xfs", "btrfs", "exfat", "ntfs", "vfat")
             if shutil.which("mkfs." + fs)]
+
+_SZ_MUL = {"B": 1, "K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4, "P": 1024**5}
+def _size_bytes(s):
+    """lsblk отдаёт размер строкой («238.8G»). Для выбора главного раздела нужен порядок."""
+    m = re.match(r"^\s*([\d.,]+)\s*([BKMGTP])?", str(s or ""))
+    if not m:
+        return 0
+    try:
+        return int(float(m.group(1).replace(",", ".")) * _SZ_MUL.get(m.group(2) or "B", 1))
+    except ValueError:
+        return 0
 
 def disks():
     res = []
@@ -313,13 +325,6 @@ def disks():
                     role = "removable"; break
         # для системного диска показываем корень «/», а не /boot/firmware (иначе «свободно»
         # берётся с крошечного boot-раздела); для остальных — точку в /mnt, затем /media
-        primary = (("/" if "/" in mounts else None)
-                   or next((mp for mp in mounts if mp.startswith("/mnt/")), None)
-                   or next((mp for mp in mounts if mp.startswith("/media/")), None)
-                   or (mounts[0] if mounts else None))
-        # ФС и метка смонтированного/первого раздела
-        fstype = d.get("fstype")
-        label = d.get("label")
         parts = []
         for ch in d.get("children", []) or []:
             cmp = ch.get("mountpoint")
@@ -329,9 +334,18 @@ def disks():
                 "mount": cmp, "mounted": bool(cmp),
                 "parttypename": ch.get("parttypename"),
             })
-            if cmp:
-                fstype = ch.get("fstype") or fstype
-                label = ch.get("label") or label
+        # Главный раздел — САМЫЙ БОЛЬШОЙ смонтированный, а не первый в списке.
+        # У флешки с остатками загрузочного образа первым идёт EFI на 200 МБ, и
+        # карточка показывала «197 МБ свободно» вместо честных 239 ГБ.
+        mparts = [x for x in parts if x["mount"]]
+        main = max(mparts, key=lambda x: _size_bytes(x["size"])) if mparts else None
+        primary = (("/" if "/" in mounts else None)
+                   or (main["mount"] if main else None)
+                   or (mounts[0] if mounts else None))
+        # ФС и метка — того же раздела, что и статистика (иначе заголовок от одного,
+        # цифры от другого)
+        fstype = (main.get("fstype") if main else None) or d.get("fstype")
+        label = (main.get("label") if main else None) or d.get("label")
         if label is None and parts:
             label = parts[0].get("label")
         fstab = _read("/etc/fstab")
