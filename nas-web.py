@@ -5369,7 +5369,8 @@ def fs_trash(path):
     if path == "/" or path.count("/") < 2:
         return {"ok": False, "log": "слишком опасный путь: " + path}
     if not os.path.lexists(path):
-        return {"ok": False, "log": "нет такого пути"}
+        # список в панели мог отстать: объект уже удалён или перемещён другим окном
+        return {"ok": False, "log": "уже удалён или перемещён"}
     if path == TRASH or path.startswith(TRASH + os.sep):
         return {"ok": False, "log": "уже в корзине"}
     store_dir = os.path.join(TRASH, "files")

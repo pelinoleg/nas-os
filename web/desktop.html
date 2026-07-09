@@ -1094,7 +1094,12 @@
   .fm-cur{outline:2px solid var(--accent);outline-offset:-2px}
   .fm-top{display:flex;flex-direction:column;gap:7px;margin-bottom:8px}
   .fm-bar2{display:flex;gap:5px;align-items:center;flex-wrap:wrap}
-  .fm-crumb{flex:1;min-width:0;display:flex;gap:1px;align-items:center;overflow:hidden;font-family:var(--mono);font-size:11px}
+  .fm-crumb{flex:1;min-width:0;display:flex;gap:1px;align-items:center;font-family:var(--mono);font-size:11px;
+    overflow-x:auto;overflow-y:hidden;scrollbar-width:none}
+  .fm-crumb::-webkit-scrollbar{height:0}
+  .fm-crumb .crumb-anchor{display:inline-flex;align-items:center;gap:5px;font-family:var(--font);
+    font-weight:600;color:var(--text);flex:none}
+  .fm-crumb .crumb-anchor svg{opacity:.85}
   .fm-crumb a{color:var(--dim);cursor:pointer;padding:2px 4px;border-radius:5px;white-space:nowrap}
   .fm-crumb a:last-child{color:var(--text)}.fm-crumb a:hover{background:var(--sel);color:var(--accent)}
   .fm-crumb .sepc{color:var(--mut);flex:none}
@@ -3770,6 +3775,12 @@ function opProgress(title){const o=opAdd(title);
 function logAct(title,msg,lvl,kind){api("/api/events/log",{method:"POST",body:JSON.stringify({title,msg:msg||"",lvl:lvl||"ok",kind:kind||"files"})});}
 const baseName=p=>String(p||"").replace(/\/+$/,"").split("/").pop()||String(p||"");
 const errShort=t=>String(t||"").trim().split("\n").pop().slice(0,90);
+/* В истории оставался только счётчик «3 / 3», и через час было не понять, что это
+   было. Перечисляем первые имена, остальное сворачиваем в «+N». */
+const namesSummary=(names,max)=>{max=max||3;
+ const a=names.filter(Boolean);if(!a.length)return "";
+ const head=a.slice(0,max).join(", ");
+ return head+(a.length>max?` +${a.length-max}`:"");};
 /* Колбэк возвращает true/false или {ok, log}. Раньше текст ошибки уходил только
    в тост и исчезал: в истории оставался голый счётчик «0 / 3». */
 async function runBatch(title,items,fn){
@@ -3782,8 +3793,11 @@ async function runBatch(title,items,fn){
     else if(r&&r.log)lastErr=errShort(r.log);
   }catch(e){lastErr=errShort(e&&e.message);}
   if(o)opSet(o,(i+1)/items.length,`${i+1} / ${items.length} · ${baseName(items[i])}`);}
+ const what=namesSummary(items.map(baseName));
  const why=(!o||o.cancelled||ok===i||!lastErr)?"":` · ${lastErr}`;
- if(o)opEnd(o,!o.cancelled&&ok===i,o.cancelled?`отменено · сделано ${ok} из ${items.length}`:`${ok} / ${items.length}${why}`);
+ if(o)opEnd(o,!o.cancelled&&ok===i,
+   o.cancelled?`отменено · сделано ${ok} из ${items.length}${what?` · ${what}`:""}`
+              :`${ok} / ${items.length}${what?` · ${what}`:""}${why}`);
  if(LIVE)logAct(`${title.replace(/…$/,"")}: ${ok} из ${items.length}`+(o&&o.cancelled?" (отменено)":""),"",(o&&o.cancelled)||ok<items.length?"warn":"ok");
  return ok;}
 function fileIcon(name,type){if(type==="dir")return "folder";const e=(name.split(".").pop()||"").toLowerCase();
@@ -3935,10 +3949,32 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
  const selOr=e=>(sel.has(e.path)&&sel.size>1)?[...sel]:[e.path];
  const dl=e=>{const a=document.createElement("a");a.href="/api/fs/raw?dl=1&path="+encodeURIComponent(e.path);a.download=e.name;document.body.appendChild(a);a.click();a.remove();};
 
+ /* Крошки начинались с голого «/», по которому не понять, что это корень. Теперь
+    корень подписан, а известные места (смонтированные диски, пул, домашняя папка)
+    показываются одним узнаваемым чипом вместо цепочки /media/nas/storage. */
+ function crumbAnchors(){
+   const a=(VOLS||[]).filter(v=>v.mounted&&v.mount).map(v=>({path:v.mount,name:v.label||v.dev,ic:volIcon(v)}));
+   a.push({path:"/mnt/storage",name:"Хранилище",ic:"hdd"});
+   a.push({path:"/home/oleg",name:"Домашняя",ic:"folder"});   // тот же путь, что в FM_CHIPS
+   return a.sort((x,y)=>y.path.length-x.path.length);   // самый длинный совпавший — точнее
+ }
  function renderCrumb(){const c=body.querySelector("#fCrumb");c.innerHTML="";
-   const root=el(`<a>/</a>`);root.onclick=()=>load("/");c.appendChild(root);
-   let acc="";cwd.split("/").filter(Boolean).forEach(p=>{acc+="/"+p;const path=acc;
-     c.appendChild(el(`<span class="sepc">/</span>`));const a=el(`<a>${esc(p)}</a>`);a.onclick=()=>load(path);c.appendChild(a);});
+   const anch=crumbAnchors().find(a=>cwd===a.path||cwd.startsWith(a.path+"/"));
+   let rest;
+   if(anch){
+     const r=el(`<a class="crumb-anchor" title="${att(anch.path)}">${svg(anch.ic,12)}<span>${esc(anch.name)}</span></a>`);
+     r.onclick=()=>load(anch.path);c.appendChild(r);
+     rest=cwd.slice(anch.path.length);
+   }else{
+     const root=el(`<a class="crumb-anchor" title="/">${svg("disks",12)}<span>Корень</span></a>`);
+     root.onclick=()=>load("/");c.appendChild(root);
+     rest=cwd;
+   }
+   let acc=anch?anch.path:"";
+   rest.split("/").filter(Boolean).forEach(p=>{acc+="/"+p;const path=acc;
+     c.appendChild(el(`<span class="sepc">/</span>`));
+     const a=el(`<a title="${att(path)}">${esc(p)}</a>`);a.onclick=()=>load(path);c.appendChild(a);});
+   c.scrollLeft=c.scrollWidth;   // длинный путь: показываем хвост, а не начало
    // ✎ — редактировать путь; клик по пустому месту крошек тоже открывает ввод
    const edb=el(`<button class="fm-crumb-edit" title="Редактировать/скопировать путь">${svg("edit",13)}</button>`);edb.onclick=e=>{e.stopPropagation();editPath();};c.appendChild(edb);
    c.onclick=ev=>{if(ev.target===c)editPath();};}
@@ -4308,8 +4344,9 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    const par=Math.max(1,Math.min(6,+SET.fmUpPar||2));
    await Promise.all(Array.from({length:par},()=>worker()));
    const okAll=!o.cancelled&&!fail;
-   opEnd(o,okAll,o.cancelled?`отменено · загружено ${done} из ${items.length}`
-     :`${done} / ${items.length}${fail?` · ошибок: ${fail}`:""}${fail&&lastErr?` · ${lastErr}`:""}`);
+   const what=namesSummary(items.map(x=>(x.rel?x.rel.split("/")[0]+"/":"")+x.file.name));
+   opEnd(o,okAll,o.cancelled?`отменено · загружено ${done} из ${items.length}${what?` · ${what}`:""}`
+     :`${done} / ${items.length}${what?` · ${what}`:""}${fail?` · ошибок: ${fail}`:""}${fail&&lastErr?` · ${lastErr}`:""}`);
    if(LIVE){notifyDone(o.cancelled?"Загрузка отменена":okAll?"Загрузка завершена":"Загрузка с ошибками",`${done} из ${items.length} · ${dir}`);
      logAct(items.length>1?`Загружено ${done} из ${items.length} файлов`+(o.cancelled?" (отменено)":""):`Загружен файл ${items[0].file.name}`,dir,okAll?"ok":"warn");}
    else toast("Демо");
