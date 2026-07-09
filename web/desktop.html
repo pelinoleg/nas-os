@@ -2113,6 +2113,7 @@ const INTERNAL=[
  {id:"__cron",name:"Cron",color:"linear-gradient(135deg,#6d7cff,#4b57d6)",ic:"clock",fn:()=>winCron()},
  {id:"__term",name:"Терминал",color:"linear-gradient(135deg,#2b3444,#1a2230)",ic:"term",fn:()=>winTerminal()},
  {id:"__files",name:"Файлы",color:"linear-gradient(135deg,#8a7dff,#6a5de0)",ic:"folder",fn:()=>winFiles()},
+ {id:"__duscan",name:"Анализ места",color:"linear-gradient(135deg,#33BE86,#2a9d6e)",ic:"chartpie",fn:()=>winDiskUsage()},
  {id:"__nasbak",name:"Бэкап NAS",color:"linear-gradient(135deg,#2f9d70,#1f7d78)",ic:"sync",fn:()=>winBackup()},
  {id:"__vault",name:"Доступы",color:"linear-gradient(135deg,#e0913c,#c96f22)",ic:"key",fn:()=>winVault()},
  {id:"__trash",name:"Корзина",color:"linear-gradient(135deg,#8592a6,#5f6b7d)",ic:"trash",fn:()=>winTrash()},
@@ -4074,7 +4075,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
  loadFav();renderVols();load(cwd);
 },{w:880,h:620});}
 /* ===== Анализ места (DaisyDisk-подобный): sunburst + drill-down ===== */
-function winDiskUsage(initRoot){openWin("__duscan","Анализ места",(body,win)=>{
+function winDiskUsage(initRoot){const existed=!!OPEN["__duscan"];const w=openWin("__duscan","Анализ места",(body,win)=>{
  body.style.padding="0";
  const norm=p=>((p||"").replace(/\/+$/,"")||"/");
  // Корни всегда одни и те же ТОМА (единые названия + иконки дисков): Хранилище, USB…, Система
@@ -4089,9 +4090,11 @@ function winDiskUsage(initRoot){openWin("__duscan","Анализ места",(bo
    rootList().forEach(v=>{if(path===v.p||path.startsWith(v.p==="/"?"/":v.p+"/")){if(!best||v.p.length>best.p.length)best=v;}});
    return best||{p:"/",l:"Система"};}
  let roots=rootList();
- let root=initRoot?volFor(initRoot).p:(roots[0]&&roots[0].p||"/mnt/storage");
+ // старт: путь из ФМ (initRoot), иначе дефолт из настроек (SET.duStart), иначе Хранилище
+ const startP=norm(initRoot||SET.duStart||"/mnt/storage");
+ let root=volFor(startP).p;
  // при открытии из папки — проваливаемся к ней (полный путь в крошках), иначе корень тома
- let cur=(initRoot&&(norm(initRoot)===root||norm(initRoot).startsWith(root==="/"?"/":root+"/")))?norm(initRoot):root;
+ let cur=(startP===root||startP.startsWith(root==="/"?"/":root+"/"))?startP:root;
  let node=null,cache={},showL2=SET.duL2!==false;
  body.innerHTML=`<div class="du"><div class="du-top"><div class="seg du-roots" id="duRoots"></div><span class="grow"></span><span class="du-meta" id="duMeta"></span><button class="iconbtn" id="duL2" title="Показывать второй уровень колец">${svg("layers",15)}</button><button class="btn sm" id="duRescan">${svg("refresh",13)} Пересканировать</button></div><div class="du-main" id="duMain"></div></div>`;
  const rootsEl=body.querySelector("#duRoots"),metaEl=body.querySelector("#duMeta"),mainEl=body.querySelector("#duMain");
@@ -4180,8 +4183,12 @@ function winDiskUsage(initRoot){openWin("__duscan","Анализ места",(bo
  body.querySelector("#duRescan").onclick=startScan;
  {const b=body.querySelector("#duL2");b.classList.toggle("pri",showL2);
   b.onclick=()=>{showL2=!showL2;SET.duL2=showL2;saveSettings();b.classList.toggle("pri",showL2);if(node)renderChart();};}
+ // переход в конкретный путь (для повторного открытия из ФМ, когда окно уже открыто)
+ win._duGo=p=>{p=norm(p);root=volFor(p).p;cur=(p===root||p.startsWith(root==="/"?"/":root+"/"))?p:root;cache={};paintRoots();refresh();};
  paintRoots();refresh();
-},{w:900,h:640});}
+},{w:900,h:640});
+ if(existed&&initRoot&&w&&w._duGo)w._duGo(initRoot);
+ return w;}
 /* Отдельное окно-редактор/просмотрщик файла (заголовок = имя, свои кнопки) */
 function openFileWin(e){openWin("ed:"+e.path,e.name,body=>{
  body.style.padding="0";
@@ -4692,6 +4699,7 @@ function filesTab(tc){
  tc.innerHTML=`
   <div class="set-card"><div class="set-grp">Анализ места</div>
    ${row("Что занимает место","круговая карта диска (система / пул / USB), drill-down по папкам",`<button class="btn sm pri" id="fmDU">${svg("chartpie",14)} Открыть анализ</button>`)}
+   ${row("Открывать по умолчанию","папка или диск, с которого стартует анализ (при запуске из дока)",`<input class="mono" id="duStart" value="${att(SET.duStart||"/mnt/storage")}" placeholder="/mnt/storage" style="width:210px">`)}
   </div>
   <div class="set-card"><div class="set-grp">Поведение</div>
    ${row("Стартовая папка","куда открывается менеджер при запуске",`<input class="mono" id="fmStart" value="${att(SET.fmStart||"/mnt/storage")}" placeholder="/mnt/storage" style="width:210px">`,"С какой папки открывается окно «Файлы». По умолчанию — хранилище /mnt/storage.")}
@@ -4716,7 +4724,8 @@ function filesTab(tc){
    ${row("Одновременных загрузок","",seg("fmUpPar",[["1","1"],["2","2"],["3","3"],["4","4"]],UP),"Сколько файлов заливать параллельно при загрузке с компьютера.")}
    ${row("Отступ в редакторе","",seg("fmTabSize",[["2","2"],["4","4"],["8","8"]],TS),"Ширина табуляции и отступа в текстовом редакторе файлов.")}
   </div>`;
- tc.querySelector("#fmDU").onclick=()=>winDiskUsage("/mnt/storage");
+ tc.querySelector("#fmDU").onclick=()=>winDiskUsage();
+ {const ds=tc.querySelector("#duStart");if(ds)ds.onchange=()=>{SET.duStart=ds.value.trim()||"/mnt/storage";saveSettings();};}
  // применить к уже открытому окну «Файлы» на лету (без перезагрузки)
  const apply=()=>{const w=OPEN.__files;if(w&&w._syncSettings)w._syncSettings();};
  const wireSeg=(id,fn)=>tc.querySelectorAll("#"+id+" button").forEach(b=>b.onclick=()=>{tc.querySelectorAll("#"+id+" button").forEach(x=>x.classList.toggle("on",x===b));fn(b.dataset.v);});

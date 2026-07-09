@@ -1400,6 +1400,8 @@ window.NAS_I18N = { en: {
 "пароль": "password",
 "задан": "set",
 "Моя служба": "My service",
+"Открывать по умолчанию": "Open by default",
+"папка или диск, с которого стартует анализ (при запуске из дока)": "folder or disk the analysis starts from (when launched from the dock)",
 "нет папки": "no folder",
 "без папки": "missing",
 "в порядке": "OK",
