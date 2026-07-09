@@ -3776,10 +3776,11 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
        <span class="fm-sep"></span>
        <button class="iconbtn" id="fNewF" title="Новый файл">${svg("file-plus",15)}</button>
        <button class="iconbtn" id="fNewD" title="Новая папка">${svg("folder-plus",15)}</button>
-       <button class="iconbtn" id="fUpl" title="Загрузить с компьютера">${svg("upload",15)}</button>
+       <button class="iconbtn" id="fUpl" title="Загрузить файлы или папку с компьютера">${svg("upload",15)}</button>
        <button class="iconbtn" id="fUrl" title="Загрузить по ссылке (URL)">${svg("globe",15)}</button>
        <button class="btn sm" id="fPaste" style="display:none"></button>
-       <input type="file" id="fInp" multiple style="display:none"></div>
+       <input type="file" id="fInp" multiple style="display:none">
+       <input type="file" id="fInpDir" webkitdirectory directory multiple style="display:none"></div>
      <div class="fm-selbar" id="fSel" style="display:none"></div></div>
    <div class="fm-cols" id="fCols"><span style="width:15px;flex:none"></span><span class="c-n on" data-k="name">Имя</span><span class="c-s" data-k="size">Размер</span><span class="c-d" data-k="mtime">Изменён</span></div>
    <div class="fm-list" id="fList" tabindex="0"></div><div class="fm-status" id="fStatus"></div></div></div>`;
@@ -3920,9 +3921,18 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
      node.addEventListener("dragstart",ev=>{dragPaths=(sel.has(e.path)&&sel.size>1)?[...sel]:[e.path];ev.dataTransfer.effectAllowed="move";ev.dataTransfer.setData("text/plain",e.path);});
      node.addEventListener("dragend",()=>{dragPaths=null;listBox.querySelectorAll(".dragover").forEach(n=>n.classList.remove("dragover"));renderFav();});
      if(e.type==="dir"){
-       node.addEventListener("dragover",ev=>{if(!dragPaths||dragPaths.includes(e.path))return;ev.preventDefault();ev.stopPropagation();ev.dataTransfer.dropEffect="move";node.classList.add("dragover");});
+       // dragPaths есть -> тащим изнутри (перенос); нет -> тянут файлы с компьютера (загрузка)
+       node.addEventListener("dragover",ev=>{
+         if(dragPaths&&dragPaths.includes(e.path))return;
+         ev.preventDefault();ev.stopPropagation();
+         ev.dataTransfer.dropEffect=dragPaths?"move":"copy";node.classList.add("dragover");});
        node.addEventListener("dragleave",()=>node.classList.remove("dragover"));
-       node.addEventListener("drop",ev=>{if(!dragPaths||dragPaths.includes(e.path))return;ev.preventDefault();ev.stopPropagation();const ps=dragPaths;dragPaths=null;node.classList.remove("dragover");doMoveInto(ps,e.path);});
+       node.addEventListener("drop",async ev=>{
+         if(dragPaths&&dragPaths.includes(e.path))return;
+         ev.preventDefault();ev.stopPropagation();node.classList.remove("dragover");
+         if(dragPaths){const ps=dragPaths;dragPaths=null;doMoveInto(ps,e.path);return;}
+         listBox.classList.remove("drop");
+         const items=await dropItems(ev.dataTransfer);if(items.length)doUpload(items,e.path);});
      }
      listBox.appendChild(node);});
    renderStatus();}
@@ -4094,30 +4104,55 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    s.classList.add("show");s.querySelector("#nf").focus();s.querySelector("#nx").onclick=()=>s.classList.remove("show");
    s.querySelector("#no").onclick=async()=>{const r=await api("/api/fs/newfile",{method:"POST",body:JSON.stringify({path:cwd,name:s.querySelector("#nf").value.trim()})});toast(LIVE?(r&&r.ok?"Создано":("Ошибка: "+((r&&r.log)||""))):"Демо");if(r&&r.ok){s.classList.remove("show");await load(cwd);const e=entries.find(x=>x.path===r.path);if(e)openFileWin(e);}};}
  // очередь загрузок: до 2 параллельных, сотни файлов, отмена через центр операций
- async function doUpload(files){files=[...files];if(!files.length)return;
-   const dir=cwd,total=files.reduce((a,f)=>a+(f.size||0),0);
+ /* Загрузка. items — File или {file, rel}, где rel — путь подпапок внутри dir
+    (загрузка папки целиком). dir по умолчанию — текущий каталог. */
+ async function doUpload(items,dir){
+   items=[...items].map(x=>x&&x.file?x:{file:x,rel:""}).filter(x=>x.file);
+   if(!items.length)return;
+   dir=dir||cwd;
+   const total=items.reduce((a,x)=>a+(x.file.size||0),0);
+   const dirs=new Set(items.map(x=>x.rel).filter(Boolean));
+   const title=dirs.size?`Загрузка папки: ${items.length} файлов`
+     :(items.length>1?`Загрузка ${items.length} файлов`:`Загрузка: ${items[0].file.name}`);
    let sent=0,done=0,fail=0,idx=0;const active=new Map(); // xhr → загружено байт
-   const o=opAdd(files.length>1?`Загрузка ${files.length} файлов`:`Загрузка: ${files[0].name}`,
-     {cancel:()=>{active.forEach((v,x)=>{try{x.abort();}catch(e){}});}});
+   const o=opAdd(title,{cancel:()=>{active.forEach((v,x)=>{try{x.abort();}catch(e){}});}});
    const upd=()=>{let cur=0;active.forEach(v=>cur+=v);
-     opSet(o,total?Math.min((sent+cur)/total,1):(done+fail)/files.length,
-       `${done+fail} / ${files.length}${fail?` · ошибок: ${fail}`:""} · ${fmtB(sent+cur)} из ${fmtB(total)}`);};
-   const one=f=>new Promise(res=>{const xhr=new XMLHttpRequest();active.set(xhr,0);
-     xhr.open("POST","/api/fs/upload-raw?path="+encodeURIComponent(dir)+"&name="+encodeURIComponent(f.name));
+     opSet(o,total?Math.min((sent+cur)/total,1):(done+fail)/items.length,
+       `${done+fail} / ${items.length}${fail?` · ошибок: ${fail}`:""} · ${fmtB(sent+cur)} из ${fmtB(total)}`);};
+   const one=it=>new Promise(res=>{const xhr=new XMLHttpRequest();active.set(xhr,0);
+     xhr.open("POST","/api/fs/upload-raw?path="+encodeURIComponent(dir)
+       +"&name="+encodeURIComponent(it.file.name)
+       +(it.rel?"&rel="+encodeURIComponent(it.rel):""));
      if(xhr.upload)xhr.upload.onprogress=e=>{if(e.lengthComputable){active.set(xhr,e.loaded);upd();}};
-     const fin=ok=>{active.delete(xhr);sent+=f.size||0;ok?done++:fail++;upd();res(ok);};
+     const fin=ok=>{active.delete(xhr);sent+=it.file.size||0;ok?done++:fail++;upd();res(ok);};
      xhr.onload=()=>{let ok=xhr.status===200;try{ok=ok&&JSON.parse(xhr.responseText).ok!==false;}catch(e){}fin(ok);};
      xhr.onerror=()=>fin(false);xhr.onabort=()=>fin(false);
-     xhr.send(f);});
-   const worker=async()=>{while(idx<files.length&&!o.cancelled)await one(files[idx++]);};
+     xhr.send(it.file);});
+   const worker=async()=>{while(idx<items.length&&!o.cancelled)await one(items[idx++]);};
    const par=Math.max(1,Math.min(6,+SET.fmUpPar||2));
    await Promise.all(Array.from({length:par},()=>worker()));
    const okAll=!o.cancelled&&!fail;
-   opEnd(o,okAll,o.cancelled?`отменено · загружено ${done} из ${files.length}`:`${done} / ${files.length}${fail?` · ошибок: ${fail}`:""}`);
-   if(LIVE){notifyDone(o.cancelled?"Загрузка отменена":okAll?"Загрузка завершена":"Загрузка с ошибками",`${done} из ${files.length} · ${dir}`);
-     logAct(files.length>1?`Загружено ${done} из ${files.length} файлов`+(o.cancelled?" (отменено)":""):`Загружен файл ${files[0].name}`,dir,okAll?"ok":"warn");}
+   opEnd(o,okAll,o.cancelled?`отменено · загружено ${done} из ${items.length}`:`${done} / ${items.length}${fail?` · ошибок: ${fail}`:""}`);
+   if(LIVE){notifyDone(o.cancelled?"Загрузка отменена":okAll?"Загрузка завершена":"Загрузка с ошибками",`${done} из ${items.length} · ${dir}`);
+     logAct(items.length>1?`Загружено ${done} из ${items.length} файлов`+(o.cancelled?" (отменено)":""):`Загружен файл ${items[0].file.name}`,dir,okAll?"ok":"warn");}
    else toast("Демо");
    load(cwd);}
+
+ /* Перетащенная папка приходит как DataTransferItem: раскрываем рекурсивно.
+    webkitGetAsEntry надо вызвать СИНХРОННО — после первого await dataTransfer пуст. */
+ const dtEntries=dt=>{try{return [...(dt.items||[])].map(i=>i.webkitGetAsEntry&&i.webkitGetAsEntry()).filter(Boolean);}catch(e){return [];}};
+ const entFile=en=>new Promise(r=>en.file(f=>r(f),()=>r(null)));
+ const entRead=rd=>new Promise(r=>{const out=[];const step=()=>rd.readEntries(es=>{if(!es.length)return r(out);out.push(...es);step();},()=>r(out));step();});
+ async function walkEntry(en,rel,out,depth){
+   if(depth>32||out.length>20000)return;
+   if(en.isFile){const f=await entFile(en);if(f)out.push({file:f,rel});}
+   else if(en.isDirectory){const sub=rel?rel+"/"+en.name:en.name;
+     for(const k of await entRead(en.createReader()))await walkEntry(k,sub,out,depth+1);}}
+ async function dropItems(dt){
+   const ents=dtEntries(dt);
+   if(ents.length){const out=[];for(const en of ents)await walkEntry(en,"",out,0);
+     if(out.length)return out;}
+   return [...(dt.files||[])].map(f=>({file:f,rel:""}));}
  function doFetchUrl(){const s=document.getElementById("scrim");
    s.innerHTML=`<div class="dialog"><h3>Загрузить по ссылке</h3>
      <div class="mon-note" style="margin:0 0 10px">Сервер сам скачает файл в текущую папку <span class="mono">${esc(cwd)}</span>.</div>
@@ -4178,10 +4213,16 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
  body.querySelector("#fDU").onclick=()=>winDiskUsage(cwd);
  body.querySelector("#fNewF").onclick=doNewFile;
  body.querySelector("#fNewD").onclick=doMkdir;
- body.querySelector("#fUpl").onclick=()=>inp.click();
+ body.querySelector("#fUpl").onclick=ev=>showMenu(ev.clientX,ev.clientY,[
+   {label:"Загрузить файлы…",ic:svg("upload",16),act:()=>inp.click()},
+   {label:"Загрузить папку…",ic:svg("folder",16),act:()=>inpDir.click()}]);
  body.querySelector("#fUrl").onclick=doFetchUrl;
  body.querySelector("#fPaste").onclick=doPaste;
  inp.onchange=()=>{const files=[...inp.files];inp.value="";if(files.length)doUpload(files);};
+ const inpDir=body.querySelector("#fInpDir");
+ // webkitRelativePath = "папка/подпапка/файл" -> rel это всё, кроме имени файла
+ inpDir.onchange=()=>{const items=[...inpDir.files].map(f=>({file:f,rel:(f.webkitRelativePath||"").split("/").slice(0,-1).join("/")}));
+   inpDir.value="";if(items.length)doUpload(items);};
  const si=body.querySelector("#fSearch"),findBtn=body.querySelector("#fFind"),smBtn=body.querySelector("#fSMode"),crumbEl=body.querySelector("#fCrumb");
  let searchOpen=false;
  function toggleFind(open){searchOpen=open;findBtn.classList.toggle("pri",open);
@@ -4204,11 +4245,12 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
  body.querySelectorAll("#fCols [data-k]").forEach(x=>x.classList.toggle("on",x.dataset.k===sortKey));  // начальная подсветка по сохранённой сортировке
  listBox.addEventListener("contextmenu",ev=>{if(ev.target.closest(".fm-row,.fm-tile"))return;ev.preventDefault();
    const it=[];if(clip&&clip.items.length)it.push({label:"Вставить ("+clip.items.length+")",ic:svg("download",16),act:doPaste});
-   it.push({label:"Новый файл",ic:svg("file",16),act:doNewFile},{label:"Новая папка",ic:svg("folder",16),act:doMkdir},{label:"Загрузить…",ic:svg("upload",16),act:()=>inp.click()},{sep:1},{label:"Терминал здесь",ic:svg("term",16),act:()=>terminalHere(cwd)},{label:"Корзина",ic:svg("trash",16),act:()=>winTrash()},{label:"Обновить",ic:svg("refresh",16),act:()=>load(cwd)});
+   it.push({label:"Новый файл",ic:svg("file",16),act:doNewFile},{label:"Новая папка",ic:svg("folder",16),act:doMkdir},{label:"Загрузить файлы…",ic:svg("upload",16),act:()=>inp.click()},{label:"Загрузить папку…",ic:svg("folder",16),act:()=>inpDir.click()},{sep:1},{label:"Терминал здесь",ic:svg("term",16),act:()=>terminalHere(cwd)},{label:"Корзина",ic:svg("trash",16),act:()=>winTrash()},{label:"Обновить",ic:svg("refresh",16),act:()=>load(cwd)});
    showMenu(ev.clientX,ev.clientY,it);});
  listBox.addEventListener("dragover",ev=>{if(dragPaths)return;ev.preventDefault();listBox.classList.add("drop");});
  listBox.addEventListener("dragleave",ev=>{if(ev.target===listBox)listBox.classList.remove("drop");});
- listBox.addEventListener("drop",ev=>{if(dragPaths)return;ev.preventDefault();listBox.classList.remove("drop");const files=[...(ev.dataTransfer.files||[])];if(files.length)doUpload(files);});
+ listBox.addEventListener("drop",async ev=>{if(dragPaths)return;ev.preventDefault();listBox.classList.remove("drop");
+   const items=await dropItems(ev.dataTransfer);if(items.length)doUpload(items,cwd);});
  /* rubber-band выделение по пустой области */
  listBox.style.position="relative";let band=null,bandStart=null,bandAdd=false;
  listBox.addEventListener("pointerdown",ev=>{if(ev.button!==0||(ev.pointerType&&ev.pointerType!=="mouse"))return;if(ev.target.closest(".fm-row,.fm-tile,.fm-ck"))return;

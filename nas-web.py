@@ -2229,9 +2229,9 @@ def nb_profiles():
     if isinstance(raw, dict) and isinstance(raw.get("profiles"), list):
         items = raw["profiles"]
     elif isinstance(raw, dict) and raw:
-        items = [dict(raw, id=NB_MAIN, name=raw.get("name") or "Основной")]
+        items = [dict(raw, id=NB_MAIN, name=raw.get("name") or "Default")]
     else:
-        items = [{"id": NB_MAIN, "name": "Основной"}]
+        items = [{"id": NB_MAIN, "name": "Default"}]
     out, seen = [], set()
     for it in items:
         if not isinstance(it, dict):
@@ -2243,10 +2243,10 @@ def nb_profiles():
         d = _nb_defaults()
         d.update(it)
         d["id"] = pid
-        d["name"] = (str(it.get("name") or "").strip() or "Бэкап")[:40]
+        d["name"] = (str(it.get("name") or "").strip() or "Backup")[:40]
         out.append(d)
     if not out:
-        d = _nb_defaults(); d.update({"id": NB_MAIN, "name": "Основной"}); out = [d]
+        d = _nb_defaults(); d.update({"id": NB_MAIN, "name": "Default"}); out = [d]
     return out
 
 def nb_load(pid=None):
@@ -2383,7 +2383,15 @@ def nb_profile_add(name="", clone_from=""):
     pid = _nb_new_pid({p["id"] for p in profs})
     if not pid:
         return {"ok": False, "log": "не удалось выделить id"}
-    name = (str(name or "").strip() or "Новый бэкап")[:40]
+    # имя по умолчанию нейтральное к языку: панель по умолчанию английская,
+    # а имя профиля — данные, через i18n они не проходят
+    name = str(name or "").strip()[:40]
+    if not name:
+        used = {p["name"] for p in profs}
+        n = 2
+        while ("Backup %d" % n) in used and n < 99:
+            n += 1
+        name = "Backup %d" % n
     if clone_from:
         src = next((p for p in profs if p["id"] == clone_from), None)
         if not src:
@@ -4215,6 +4223,29 @@ def _fs_entry(full):
             "type": "dir" if isdir else "file",
             "size": 0 if isdir else st.st_size, "mtime": int(st.st_mtime),
             "mode": oct(st.st_mode & 0o777)[2:], "link": os.path.islink(full)}
+
+def _chown_user(path, stop=None):
+    """Отдать созданное обычному пользователю: панель работает от root, иначе
+    загруженные файлы и папки остаются root:root и правятся только через sudo.
+    stop — каталог, выше которого не подниматься (владельца там не меняем)."""
+    try:
+        pw = pwd.getpwnam(TARGET_USER)
+    except KeyError:
+        return
+    cur = path
+    while True:
+        try:
+            os.chown(cur, pw.pw_uid, pw.pw_gid)
+        except OSError:
+            return
+        if not stop or cur == stop:
+            return
+        nxt = os.path.dirname(cur)
+        if nxt == cur or not nxt.startswith(stop):
+            return
+        if nxt == stop:
+            return
+        cur = nxt
 
 def _uniq(dst):
     if not os.path.exists(dst):
@@ -6940,7 +6971,8 @@ class H(BaseHTTPRequestHandler):
             pass
 
     def _upload_raw(self):
-        """Потоковая бинарная загрузка (без base64 — не роняет вкладку на больших файлах)."""
+        """Потоковая бинарная загрузка (без base64 — не роняет вкладку на больших файлах).
+        rel — путь подпапок внутри назначения (загрузка папки целиком)."""
         q = parse_qs(urlparse(self.path).query)
         d = os.path.realpath((q.get("path") or ["/"])[0])
         name = os.path.basename(((q.get("name") or [""])[0]).strip())
@@ -6948,6 +6980,22 @@ class H(BaseHTTPRequestHandler):
             return {"ok": False, "log": "не каталог назначения"}
         if not name:
             return {"ok": False, "log": "нет имени файла"}
+        # подпапки при загрузке папки. Каждый сегмент проверяем отдельно: «..» и
+        # абсолютные пути сюда не пролезут, symlink наружу тоже (сверяем realpath).
+        rel = ((q.get("rel") or [""])[0]).strip().replace("\\", "/")
+        if rel:
+            segs = [x for x in rel.split("/") if x not in ("", ".")]
+            if len(segs) > 32 or any(x == ".." or "/" in x or "\0" in x for x in segs):
+                return {"ok": False, "log": "недопустимый путь"}
+            sub = os.path.realpath(os.path.join(d, *segs))
+            if sub != d and not sub.startswith(d + os.sep):
+                return {"ok": False, "log": "путь вне каталога назначения"}
+            try:
+                os.makedirs(sub, exist_ok=True)
+            except OSError as e:
+                return {"ok": False, "log": str(e)}
+            _chown_user(sub, stop=os.path.realpath((q.get("path") or ["/"])[0]))
+            d = sub
         dest = _uniq(os.path.join(d, name))
         n = int(self.headers.get("Content-Length", 0) or 0)
         got = 0
@@ -6973,6 +7021,7 @@ class H(BaseHTTPRequestHandler):
             except OSError:
                 pass
             return {"ok": False, "log": "загрузка прервана"}
+        _chown_user(dest)
         if thumb_kind(name):
             threading.Thread(target=gen_thumb, args=(dest,), daemon=True).start()
         return {"ok": True, "path": dest, "size": got}
