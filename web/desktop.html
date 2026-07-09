@@ -1148,6 +1148,8 @@
   .vw-bar button.on{background:var(--sel);color:var(--text)}
   .vw-stage{flex:1;min-height:0;min-width:0;position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center}
   .vw-stage img{max-width:100%;max-height:100%;object-fit:contain;user-select:none;-webkit-user-drag:none;will-change:transform}
+  /* заглушка из миниатюры, пока грузится полная: размываем, чтобы не выглядело «мылом» */
+  .vw-stage img.vw-lo{filter:blur(6px);transform:scale(1.01)}
   .vw-stage img.grab{cursor:grab}.vw-stage img.grabbing{cursor:grabbing}
   .vw-stage video{max-width:100%;max-height:100%;background:#000;outline:none}
   .vw-stage audio{width:80%}
@@ -3505,10 +3507,38 @@ const splitExt=n=>{const i=n.lastIndexOf(".");return (i>0&&i<n.length-1)?[n.slic
 const nameHTML=(n,cls,noExt)=>{const [b,x]=noExt?[n,""]:splitExt(n);
   return `<span class="${cls}-b">${esc(b)}</span>`+(x?`<span class="${cls}-x">${esc(x)}</span>`:"");};
 const isImgName=n=>/\.(png|jpe?g|gif|webp|svg|bmp|ico|avif|heic|heif|tiff?)$/i.test(n);
-// HEIC/HEIF/TIFF браузер не рисует. Панель собирает их в JPEG (heic — через libheif,
-// иначе ffmpeg взял бы одну плитку из грида). Скачивание по-прежнему отдаёт оригинал.
-const needsConv=n=>/\.(heic|heif|tiff?)$/i.test(n);
-const imgSrc=e=>(needsConv(e.name)?"/api/fs/view?path=":"/api/fs/raw?path=")+encodeURIComponent(e.path);
+/* HEIC/HEIF/TIFF браузер не рисует вовсе. Крупные снимки (камера отдаёт 26 МП / 17 МБ)
+   тоже незачем гнать целиком: сервер уменьшает их до 2560px (~400 КБ) и кэширует.
+   gif/svg/ico не трогаем — потеряли бы анимацию и вектор. Скачивание отдаёт оригинал. */
+const VIEW_BIG_BYTES=2*1024*1024;   // тот же порог, что в nas-web.py
+const needsConv=(n,sz)=>/\.(heic|heif|tiff?)$/i.test(n)||
+  ((sz||0)>VIEW_BIG_BYTES&&/\.(jpe?g|png|webp|bmp|avif)$/i.test(n));
+const rawSrc=e=>"/api/fs/raw?path="+encodeURIComponent(e.path);
+const viewSrc=e=>"/api/fs/view?path="+encodeURIComponent(e.path);
+const thumbSrc=e=>"/api/fs/thumb?path="+encodeURIComponent(e.path);
+const imgSrc=e=>(needsConv(e.name,e.size)?viewSrc(e):rawSrc(e));
+/* Браузер держит ~6 соединений на origin. Папка с 485 снимками ставила в очередь
+   сотни запросов миниатюр, и открытие самой картинки ждало за ними — окно было
+   пустым по 10 секунд. Грузим миниатюры своей очередью и ставим её на паузу,
+   пока открыт просмотрщик: пользователю сейчас нужна картинка, а не эскизы. */
+const TQ={q:[],active:0,max:3,paused:false,unpauseT:null};
+function thumbPause(v){
+ TQ.paused=v;
+ clearTimeout(TQ.unpauseT);
+ // страховка: окно закрыли посреди загрузки — очередь не должна встать навсегда
+ if(v)TQ.unpauseT=setTimeout(()=>thumbPause(false),15000);
+ else tqPump();}
+function tqPump(){
+ while(!TQ.paused&&TQ.active<TQ.max&&TQ.q.length){
+  const it=TQ.q.shift();
+  if(!it.img.isConnected)continue;                  // строку уже перерисовали
+  TQ.active++;
+  const done=()=>{TQ.active--;tqPump();};
+  it.img.onload=()=>{it.img.parentNode&&it.img.parentNode.classList.add("thumbed");done();};
+  it.img.onerror=()=>{it.img.remove();done();};
+  it.img.src=it.url;
+ }}
+function thumbEnqueue(img,url){TQ.q.push({img,url});tqPump();}
 const THUMB_RE=/\.(png|jpe?g|gif|webp|bmp|ico|avif|tiff?|svg|heic|heif|mp4|mkv|avi|mov|webm|m4v|ogv|wmv|flv|3gp|mpe?g|mp3|flac|m4a|aac|ogg|opus|wma|pdf)$/i;
 const thumbable=n=>THUMB_RE.test(n);
 const isVidName=n=>/\.(mp4|webm|mov|m4v|ogv|mkv|avi|wmv|flv|3gp|mpe?g|ts)$/i.test(n);
@@ -3525,6 +3555,11 @@ async function viewerLoad(w,e){const V=w._V,dir=e.path.replace(/\/[^/]+$/,"")||"
    V.sibs=V.ents.filter(x=>x.type==="file"&&isMediaName(x.name)).sort((a,b)=>a.name.toLowerCase()<b.name.toLowerCase()?-1:1);V.dir=dir;}
  V.idx=V.sibs.findIndex(x=>x.path===e.path);if(V.idx<0){V.sibs=[e];V.idx=0;}
  viewerRender(w);}
+/* Предзагрузка соседей: сервер уже сгенерит и закэширует уменьшенную копию,
+   поэтому следующий кадр открывается мгновенно. */
+function viewerPrefetch(V){
+ [1,-1].forEach(d=>{const n=V.sibs[(V.idx+d+V.sibs.length)%V.sibs.length];
+   if(n&&n!==V.sibs[V.idx]&&isImgName(n.name)){const i=new Image();i.src=imgSrc(n);}});}
 function viewerStep(w,d){const V=w._V;if(V.sibs.length<2)return;V.idx=(V.idx+d+V.sibs.length)%V.sibs.length;viewerRender(w);}
 function viewerRender(w){const V=w._V,e=V.sibs[V.idx];if(!e)return;
  w._title=e.name;const tt=w.querySelector(".ttl");if(tt)tt.textContent=e.name;renderWinbar();
@@ -3535,11 +3570,26 @@ function viewerRender(w){const V=w._V,e=V.sibs[V.idx];if(!e)return;
  if(img)tools=`<button data-a="zo" title="Отдалить (−)">−</button><button data-a="zr" title="Вписать (0)">⤢</button><button data-a="zi" title="Приблизить (+)">＋</button><button data-a="rot" title="Повернуть (R)">⟳</button><button data-a="full" title="Во весь экран (F)">${svg("expand",14)}</button>`;
  else if(!vid)tools=`<button data-a="full" title="Во весь экран (F)">${svg("expand",14)}</button>`;
  let media;
- if(img)media=`<img id="vwM" src="${imgSrc(e)}" draggable="false" class="grab">`;
+ // сперва показываем миниатюру (она уже в кэше — мгновенно), полную догружаем следом
+ if(img)media=`<img id="vwM" src="${thumbSrc(e)}" draggable="false" class="grab vw-lo">`;
  else if(vid)media=`<div class="vp" id="vp"><video id="vwM" src="${raw}" autoplay playsinline></video><div class="vp-ctl"><button data-v="play" title="Пауза/пуск (пробел)">${PLAY_SVG}</button><span class="vp-t" id="vpCur">0:00</span><div class="vp-seek" id="vpSeek"><div class="vp-buf" id="vpBuf"></div><div class="vp-prog" id="vpProg"></div></div><span class="vp-t" id="vpDur">0:00</span><button data-v="mute" title="Звук (M)">${VOL_SVG}</button><input type="range" class="vp-vol" id="vpVol" min="0" max="1" step="0.05" value="1"><button data-v="spd" class="vp-spd" title="Скорость">1×</button><button data-v="aud" class="vp-spd" title="Аудиодорожка" style="display:none">A1</button><button data-v="cc" title="Субтитры">CC</button><button data-v="pip" title="Картинка-в-картинке">⧉</button><button data-v="tc" title="Транскодировать (для несовместимых кодеков)">⚙</button><button data-v="full" title="Во весь экран (F)">${svg("expand",20)}</button></div></div>`;
  else media=`<audio id="vwM" src="${raw}" controls autoplay></audio>`;
  body.innerHTML=`<div class="vw"><div class="vw-bar"><span class="vw-t">${esc(e.name)}</span><span class="vw-i">${multi?(V.idx+1)+" / "+V.sibs.length:""}</span>${tools}${dlA}</div><div class="vw-stage" id="vwStage">${nav}${media}</div></div>`;
  const stage=body.querySelector("#vwStage"),m=body.querySelector("#vwM");
+ if(img&&m){
+  // очередь миниатюр забивала браузеру соединения, и полная картинка ждала за ней
+  thumbPause(true);
+  const wanted=e.path,url=imgSrc(e);
+  const show=u=>{if(V.sibs[V.idx]&&V.sibs[V.idx].path===wanted){m.src=u;m.classList.remove("vw-lo");}
+    thumbPause(false);viewerPrefetch(V);};
+  const full=new Image();
+  full.onload=()=>show(url);
+  full.onerror=()=>{                       // /view не смог — отдаём оригинал
+    if(url===rawSrc(e)){thumbPause(false);return;}
+    const f2=new Image();f2.onload=()=>show(rawSrc(e));f2.onerror=()=>{thumbPause(false);};f2.src=rawSrc(e);};
+  full.src=url;
+  m.onerror=()=>{m.src=url;};              // миниатюры нет — сразу полную
+ }
  if(multi){body.querySelector(".vw-nav.prev").onclick=()=>viewerStep(w,-1);body.querySelector(".vw-nav.next").onclick=()=>viewerStep(w,1);}
  const topFull=body.querySelector('.vw-bar [data-a="full"]');if(topFull)topFull.onclick=()=>{(stage.requestFullscreen||stage.webkitRequestFullscreen).call(stage);};
  if(img){let z=1,rot=0,tx=0,ty=0,drag=false,sx,sy;
@@ -3928,7 +3978,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
      const isHid=e.name.startsWith(".")||e.name===FM_HIDE_BK;   // приглушаем, когда показаны
      let ficon;
      if(e.type==="file"&&thumbsOn&&thumbable(e.name)){
-       ficon=baseIco+`<img class="thumb" src="/api/fs/thumb?path=${encodeURIComponent(e.path)}" alt="" loading="lazy" onload="this.parentNode.classList.add('thumbed')" onerror="this.remove()">`;}
+       ficon=baseIco+`<img class="thumb" data-th="${att(thumbSrc(e))}" alt="" loading="lazy">`;}
      else ficon=baseIco;
      let node;
      if(grid){node=el(`<div class="fm-tile ${e.type}${isSel?" sel":""}${i===cursor?" fm-cur":""}${isHid?" fm-hid":""}"><input type="checkbox" class="fm-ck"${isSel?" checked":""}><div class="ti">${ficon}</div><div class="tn" title="${att(searchRes?e.path:e.name)}">${nameHTML(e.name,"tn",e.type==="dir")}</div></div>`);}
@@ -3968,6 +4018,8 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
          listBox.classList.remove("drop");
          const items=await dropItems(ev.dataTransfer);if(items.length)doUpload(items,e.path);});
      }
+     const th=node.querySelector(".thumb[data-th]");
+     if(th)thumbEnqueue(th,th.dataset.th);
      listBox.appendChild(node);});
    renderStatus();}
  const dirSig=es=>(es||[]).map(e=>e.name+"\u0000"+e.size+"\u0000"+e.mtime).join("\u0001");

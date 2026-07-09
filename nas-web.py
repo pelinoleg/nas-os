@@ -4293,8 +4293,14 @@ _THUMB_PDF = {"pdf"}
 # libheif (heif-convert) собирает картинку целиком. TIFF браузеры не рисуют вовсе.
 _HEIF_EXT  = {"heic","heif"}
 _VIEW_CONV = {"heic","heif","tif","tiff"}   # что нужно перегнать в JPEG для показа
+# Крупные снимки (камера отдаёт 26 МП / 17 МБ) тоже уменьшаем: гнать оригинал в
+# браузер бессмысленно — 40× трафика и тяжёлое декодирование на клиенте.
+# gif/svg/ico не трогаем: анимация и вектор потеряются.
+_VIEW_BIG_EXT = {"jpg","jpeg","png","webp","bmp","avif"}
+VIEW_BIG_BYTES = 2 * 1024 * 1024
 VIEW_PX    = 2560
-_thumb_sem = threading.Semaphore(3)   # ограничить одновременный ffmpeg
+_thumb_sem = threading.Semaphore(2)   # ограничить одновременный ffmpeg (миниатюры)
+_view_sem  = threading.Semaphore(2)   # просмотр не должен ждать очередь миниатюр
 
 def _ext(name):
     return name.rsplit(".", 1)[-1].lower() if "." in name else ""
@@ -6360,10 +6366,23 @@ def _view_path(src):
     h = hashlib.md5(src.encode("utf-8", "surrogatepass")).hexdigest()
     return os.path.join(THUMBS_DIR, h[:2], h + ".view.jpg")
 
+def view_needed(src):
+    """Нужна ли перекодировка для показа: браузер не умеет формат ИЛИ файл огромный."""
+    e = _ext(src)
+    if e in _VIEW_CONV:
+        return True
+    if e in _VIEW_BIG_EXT:
+        try:
+            return os.path.getsize(src) > VIEW_BIG_BYTES
+        except OSError:
+            return False
+    return False
+
 def gen_view(src):
-    """Крупный JPEG для просмотрщика: HEIC/HEIF и TIFF браузеры не рисуют.
+    """Крупный JPEG для просмотрщика: HEIC/HEIF и TIFF браузеры не рисуют,
+    а 17-мегабайтные снимки с камеры незачем гнать целиком.
     Кэшируется рядом с миниатюрами, чистится тем же GC."""
-    if not os.path.isfile(src) or _ext(src) not in _VIEW_CONV:
+    if not os.path.isfile(src) or not view_needed(src):
         return None
     vp = _view_path(src)
     if os.path.isfile(vp) and _thumb_fresh(src, vp):
@@ -6378,7 +6397,7 @@ def gen_view(src):
     tmp = vp + "." + uniq + ".tmp.jpg"
     heif_tmp = vp + "." + uniq + ".heif.jpg"
     ok = False
-    with _thumb_sem:
+    with _view_sem:
         try:
             ff_in = src
             if _ext(src) in _HEIF_EXT:
