@@ -3655,11 +3655,14 @@ function opProgress(title){const o=opAdd(title);
          done:ok=>opEnd(o,ok!==false),fail:m=>opEnd(o,false,m)};}
 // запись действия в журнал уведомлений (клиентская сторона — итоги пакетных операций)
 function logAct(title,msg,lvl,kind){api("/api/events/log",{method:"POST",body:JSON.stringify({title,msg:msg||"",lvl:lvl||"ok",kind:kind||"files"})});}
+const baseName=p=>String(p||"").replace(/\/+$/,"").split("/").pop()||String(p||"");
 async function runBatch(title,items,fn){
  const o=items.length?opAdd(title,{cancel:()=>{}}):null;let ok=0,i=0;
+ // подпись показывает текущий элемент: иначе на одном файле видно только «0 / 1»
  for(;i<items.length;i++){if(o&&o.cancelled)break;
-  if(o)opSet(o,i/items.length,`${i} / ${items.length}`);
-  try{if(await fn(items[i],i))ok++;}catch(e){}}
+  if(o)opSet(o,i/items.length,`${i+1} / ${items.length} · ${baseName(items[i])}`);
+  try{if(await fn(items[i],i))ok++;}catch(e){}
+  if(o)opSet(o,(i+1)/items.length,`${i+1} / ${items.length} · ${baseName(items[i])}`);}
  if(o)opEnd(o,!o.cancelled&&ok===i,o.cancelled?`отменено · сделано ${ok} из ${items.length}`:`${ok} / ${items.length}`);
  if(LIVE)logAct(`${title.replace(/…$/,"")}: ${ok} из ${items.length}`+(o&&o.cancelled?" (отменено)":""),"",(o&&o.cancelled)||ok<items.length?"warn":"ok");
  return ok;}
@@ -4071,13 +4074,13 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
  function openEntry(e){if(e.type==="dir")load(e.path);else if(isMediaName(e.name))openMediaWin(e);else openFileWin(e);}
  /* операции */
  async function doPaste(){if(!clip||!clip.items.length)return;const items=clip.items,cut=clip.mode==="cut";
-   const ok=await runBatch(cut?"Перемещение…":"Копирование…",items,async src=>{const r=await api(cut?"/api/fs/move":"/api/fs/copy",{method:"POST",body:JSON.stringify({src,dest:cwd})});if(r&&r.log&&!(r&&r.ok))toast("Ошибка: "+r.log);return r&&r.ok;});
+   const ok=await runBatch(cut?"Перемещение":"Копирование",items,async src=>{const r=await api(cut?"/api/fs/move":"/api/fs/copy",{method:"POST",body:JSON.stringify({src,dest:cwd})});if(r&&r.log&&!(r&&r.ok))toast("Ошибка: "+r.log);return r&&r.ok;});
    toast(LIVE?`Вставлено: ${ok}/${items.length}`:"Демо");if(cut)clip=null;load(cwd);}
  async function doMoveInto(paths,dir){const items=paths.filter(src=>!(src===dir||dir===src.replace(/\/[^/]+$/,"")));
-   const ok=await runBatch("Перемещение…",items,async src=>{const r=await api("/api/fs/move",{method:"POST",body:JSON.stringify({src,dest:dir})});if(r&&r.log&&!(r&&r.ok))toast("Ошибка: "+r.log);return r&&r.ok;});
+   const ok=await runBatch("Перемещение",items,async src=>{const r=await api("/api/fs/move",{method:"POST",body:JSON.stringify({src,dest:dir})});if(r&&r.log&&!(r&&r.ok))toast("Ошибка: "+r.log);return r&&r.ok;});
    toast(LIVE?`Перемещено: ${ok}`:"Демо");load(cwd);}
  async function doDelete(paths){if(!paths.length)return;
-   const ok=await runBatch("В корзину…",paths,async p=>{const r=await api("/api/fs/trash",{method:"POST",body:JSON.stringify({path:p})});if(r&&r.log&&!(r&&r.ok))toast("Ошибка: "+r.log);return r&&r.ok;});
+   const ok=await runBatch("В корзину",paths,async p=>{const r=await api("/api/fs/trash",{method:"POST",body:JSON.stringify({path:p})});if(r&&r.log&&!(r&&r.ok))toast("Ошибка: "+r.log);return r&&r.ok;});
    toast(LIVE?`В корзину: ${ok}`:"Демо");load(cwd);}
  function doDeleteForever(paths){if(!paths.length)return;
    confirmDlg("Удалить безвозвратно?",(paths.length>1?`${paths.length} объектов`:esc(paths[0]))+" — минуя корзину",async()=>{
@@ -4130,14 +4133,16 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    dir=dir||cwd;
    const total=items.reduce((a,x)=>a+(x.file.size||0),0);
    const dirs=new Set(items.map(x=>x.rel).filter(Boolean));
-   const title=dirs.size?`Загрузка папки: ${items.length} файлов`
-     :(items.length>1?`Загрузка ${items.length} файлов`:`Загрузка: ${items[0].file.name}`);
+   // имя файла держим в подписи, а не в заголовке: длинное имя обрезалось многоточием
+   const title=dirs.size?"Загрузка папки":(items.length>1?`Загрузка ${items.length} файлов`:"Загрузка файла");
+   let cur=items[0].file.name;
    let sent=0,done=0,fail=0,idx=0;const active=new Map(); // xhr → загружено байт
    const o=opAdd(title,{cancel:()=>{active.forEach((v,x)=>{try{x.abort();}catch(e){}});}});
-   const upd=()=>{let cur=0;active.forEach(v=>cur+=v);
-     opSet(o,total?Math.min((sent+cur)/total,1):(done+fail)/items.length,
-       `${done+fail} / ${items.length}${fail?` · ошибок: ${fail}`:""} · ${fmtB(sent+cur)} из ${fmtB(total)}`);};
+   const upd=()=>{let n=0;active.forEach(v=>n+=v);
+     opSet(o,total?Math.min((sent+n)/total,1):(done+fail)/items.length,
+       `${done+fail} / ${items.length}${fail?` · ошибок: ${fail}`:""} · ${fmtB(sent+n)} из ${fmtB(total)} · ${cur}`);};
    const one=it=>new Promise(res=>{const xhr=new XMLHttpRequest();active.set(xhr,0);
+     cur=(it.rel?it.rel+"/":"")+it.file.name;upd();
      xhr.open("POST","/api/fs/upload-raw?path="+encodeURIComponent(dir)
        +"&name="+encodeURIComponent(it.file.name)
        +(it.rel?"&rel="+encodeURIComponent(it.rel):""));
@@ -5897,10 +5902,16 @@ function winNotif(){openWin("__notif","Уведомления",async body=>{
 
 /* ---- центр операций (очереди, прогресс, отмена) ---- */
 const OPS={list:[],seq:0,paintT:0,autoClosed:false,autoOpened:false};
+let OPS_TICK=null;
+// Пока что-то выполняется — перерисовываем сами. Иначе полоса замирает: события
+// прогресса приходят редко (пакетные операции) или попап открыли уже после старта.
+function opsTick(){if(OPS_TICK)return;
+ OPS_TICK=setInterval(()=>{if(!OPS.list.some(o=>o.state==="run")){clearInterval(OPS_TICK);OPS_TICK=null;return;}
+  paintOps();},300);}
 function opAdd(title,opts){opts=opts||{};
  const o={id:++OPS.seq,title,state:"run",p:null,label:"",cancel:opts.cancel||null,cancelled:false,t:Date.now()};
  OPS.list.push(o);if(OPS.list.length>40)OPS.list=OPS.list.slice(-40);
- paintOps(true);
+ paintOps(true);opsTick();
  // сам открывается при старте операции (настройка SET.opsAuto); если пользователь
  // закрыл во время работы — не навязываемся до конца текущей пачки
  if(SET.opsAuto!==false&&!document.querySelector(".mbpop[data-ops]")&&!OPS.autoClosed){OPS.autoOpened=true;opsPop();}
@@ -5928,8 +5939,8 @@ function renderOpsList(p){
  if(p._sig===sig){
   OPS.list.forEach(o=>{const row=p.querySelector(`[data-op="${o.id}"]`);if(!row)return;
    const bf=row.querySelector(".op-bf");if(bf&&o.p!=null)bf.style.width=Math.round(Math.min(o.p,1)*100)+"%";
-   const s2=row.querySelector(".op-s2");if(s2)s2.textContent=nasTr(o.label);
-   const t2=row.querySelector(".op-t2"),tt=nasTr(o.title);if(t2&&t2.textContent!==tt)t2.textContent=tt;});
+   const s2=row.querySelector(".op-s2");if(s2){const l=nasTr(o.label);if(s2.textContent!==l){s2.textContent=l;s2.title=o.label||"";}}
+   const t2=row.querySelector(".op-t2"),tt=nasTr(o.title);if(t2&&t2.textContent!==tt){t2.textContent=tt;t2.title=o.title;}});
   return;}
  p._sig=sig;
  const items=OPS.list.slice().reverse();
@@ -5937,7 +5948,7 @@ function renderOpsList(p){
   +(items.length?items.map(o=>{
     const st=o.state==="run"?"":o.state==="done"?`<span class="op-st done" style="font-weight:800">✓</span>`:o.state==="cancel"?`<span class="op-st">⊘</span>`:`<span class="op-st err" style="font-weight:800">!</span>`;
     const bar=o.state==="run"?`<div class="op-bar"><div class="op-bf" style="width:${o.p==null?40:Math.round(Math.min(o.p,1)*100)}%"></div></div>`:"";
-    return `<div class="op-row${o.state==="run"&&o.p==null?" ind":""}" data-op="${o.id}"><div class="op-m"><div class="op-t2">${esc(o.title)}</div><div class="op-s2">${esc(o.label||"")}</div>${bar}</div>${st}${o.state==="run"?`<button class="op-x" title="Отменить">${svg("x",14)}</button>`:""}</div>`;
+    return `<div class="op-row${o.state==="run"&&o.p==null?" ind":""}" data-op="${o.id}"><div class="op-m"><div class="op-t2" title="${att(o.title)}">${esc(o.title)}</div><div class="op-s2" title="${att(o.label||"")}">${esc(o.label||"")}</div>${bar}</div>${st}${o.state==="run"?`<button class="op-x" title="Отменить">${svg("x",14)}</button>`:""}</div>`;
   }).join(""):`<div class="mbp-empty">Нет операций</div>`);
  p.querySelectorAll(".op-x").forEach(x=>x.onclick=ev=>{ev.stopPropagation();
   const o=OPS.list.find(y=>y.id===+x.closest(".op-row").dataset.op);if(o)opCancel(o);});

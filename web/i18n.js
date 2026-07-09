@@ -1217,6 +1217,8 @@ window.NAS_I18N = { en: {
 "Подключено через": "Connected via",
 "Подключите USB-диск или карту — он появится здесь": "Connect a USB disk or card — it will appear here",
 "Подключённые USB-накопители": "Connected USB drives",
+"Загрузка файла": "Uploading file",
+"Перемещение": "Moving",
 "Загрузить файлы": "Upload files",
 "Загрузить папку": "Upload folder",
 "Загрузить файлы или папку с компьютера": "Upload files or a folder from your computer",
