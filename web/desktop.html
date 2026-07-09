@@ -3570,6 +3570,9 @@ function fmIcon(name,type,size){const k=fmKind(name,type);
 const FM_CHIPS=[["Home","/home/oleg"],["Хранилище","/mnt/storage"],["Стеки","/opt/stacks"],["Конфиги","/etc"],["Логи","/var/log"],["Корень","/"]];
 // системный «мусор» — прячем в ФМ вместе со скрытыми (тумблер «скрытые» их покажет)
 const FM_SYS=new Set(["lost+found","$RECYCLE.BIN","System Volume Information","#recycle","@eaDir",".Trashes",".Spotlight-V100",".fseventsd"]);
+let FM_HIDE_BK=null;   // имя папки бэкапа настроек, если включено «скрывать в ФМ» (из /api/maintenance)
+function refreshFmHideBk(){return api("/api/maintenance").then(r=>{const mm=(r&&r.maintenance)||{};
+ FM_HIDE_BK=(mm.settings_backup_hide&&r&&r.settings_backup_path)?r.settings_backup_path.split("/").filter(Boolean).pop():null;}).catch(()=>{});}
 const fmDate=ts=>{if(!ts)return"";const d=new Date(ts*1000),p=n=>String(n).padStart(2,"0");
  const fmt=SET.fmDateFmt||"dmy_hm";
  if(fmt==="rel"){const s=Date.now()/1000-ts;
@@ -3699,7 +3702,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    const pb=body.querySelector("#fPaste");if(clip&&clip.items.length){pb.style.display="inline-flex";pb.textContent="Вставить ("+clip.items.length+")";}else pb.style.display="none";
    renderStatus();}
  function renderList(){const srcArr=searchRes||entries;let arr=srcArr.slice();
-   if(!showHidden&&!searchRes)arr=arr.filter(e=>!e.name.startsWith(".")&&!FM_SYS.has(e.name));
+   if(!showHidden&&!searchRes)arr=arr.filter(e=>!e.name.startsWith(".")&&!FM_SYS.has(e.name)&&e.name!==FM_HIDE_BK);
    if(filt&&!searchRes)arr=arr.filter(e=>e.name.toLowerCase().includes(filt));
    const foldersFirst=SET.fmFoldersFirst!==false;
    arr.sort((a,b)=>{if(foldersFirst&&a.type!==b.type)return a.type==="dir"?-1:1;
@@ -4521,17 +4524,27 @@ function backupTab(tc){
   <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:6px">
     <div class="field" style="margin:0"><label>Автобэкап, раз в N дней (0 — выкл)</label><input class="mono" id="bkDays" style="max-width:110px"></div>
     <div class="field" style="margin:0"><label>Хранить бэкапов, шт</label><input class="mono" id="bkKeep" style="max-width:110px"></div></div>
+  <div class="field" style="margin:0 0 8px"><label>Папка бэкапа настроек${tipHTML("Куда складывать бэкап настроек. По умолчанию /mnt/storage/nas-settings-backup — на пуле, чтобы пережить переустановку ОС. Системные папки не рекомендуются: затрутся при переустановке.")}</label>
+    <div class="nb-field-row"><input class="mono" id="bkDir" placeholder="/mnt/storage/nas-settings-backup" autocomplete="off"><button class="btn sm" id="bkDirSave">Сохранить</button></div></div>
+  <div class="srow" style="margin-bottom:8px"><div class="srow-l"><div class="srow-t">Скрывать эту папку в файловом менеджере${tipHTML("Папка бэкапа не будет мешать в файловом менеджере. Тумблер «скрытые» в окне ФМ её всё равно покажет.")}</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="bkHide"><span class="sl"></span></label></div></div>
   <div class="mon-note" id="bkNote">загрузка…</div>
   <div id="bkList"></div>`;
  const list=tc.querySelector("#bkList"),note=tc.querySelector("#bkNote");
  const days=tc.querySelector("#bkDays"),keep=tc.querySelector("#bkKeep");
+ const dir=tc.querySelector("#bkDir"),hide=tc.querySelector("#bkHide");
  const saveCfg=async()=>{const r=await api("/api/maintenance",{method:"POST",body:JSON.stringify({maintenance:{backup_days:+days.value||0,backup_keep:+keep.value||10}})});
   const md=(r&&r.maintenance)||{};days.value=md.backup_days;keep.value=md.backup_keep;
   toast(+md.backup_days?`Автобэкап: раз в ${md.backup_days} дн`: "Автобэкап выключен");load();};
  days.onchange=saveCfg;keep.onchange=saveCfg;
+ tc.querySelector("#bkDirSave").onclick=async()=>{const r=await api("/api/maintenance",{method:"POST",body:JSON.stringify({maintenance:{settings_backup_dir:dir.value.trim()}})});
+  if(r&&r.error){toast("Ошибка: "+r.error);return;}toast("Папка бэкапа сохранена");refreshFmHideBk();load();};
+ hide.onchange=async()=>{await api("/api/maintenance",{method:"POST",body:JSON.stringify({maintenance:{settings_backup_hide:hide.checked}})});toast(hide.checked?"Папка скрыта в файловом менеджере":"Папка видна в файловом менеджере");refreshFmHideBk();};
  const load=async()=>{const r=await api("/api/settings-backup");if(!r||!r.ok)return;
   if(document.activeElement!==days)days.value=r.days;
   if(document.activeElement!==keep)keep.value=r.keep;
+  const m=await api("/api/maintenance");const mm=(m&&m.maintenance)||{};
+  if(document.activeElement!==dir)dir.value=mm.settings_backup_dir||"";
+  hide.checked=!!mm.settings_backup_hide;
   note.textContent=`Папка: ${r.dir} · ${r.days?`автоматически раз в ${r.days} дн`:"автобэкап выключен"} · хранится ${r.keep} последних`;
   list.innerHTML=(r.list&&r.list.length)?"":`<div class="dempty">${svg("save",16)} Бэкапов ещё нет — нажмите «Создать»</div>`;
   (r.list||[]).forEach(b=>{
@@ -5570,6 +5583,7 @@ function maybeOnboard(){let done=false;try{done=!!SET.onboarded||localStorage.ge
  document.querySelectorAll("[title]").forEach(n=>{if(n.title)n.title=nasTr(n.title);});   // статические title из HTML
  renderRail();renderApps();renderDock();renderWinbar();renderPhoneNav();tickClock();
  poll();pollApps();pollDisks();maybeOnboard();
+ refreshFmHideBk();
  pollStacks();pollTop();
  pollEvents();setTimeout(pollHealth,2500);
  setInterval(poll,3000);setInterval(pollApps,8000);setInterval(pollDisks,15000);setInterval(tickClock,10000);

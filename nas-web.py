@@ -2677,6 +2677,8 @@ def load_maintenance():
          "smart_long_days": 30,     # длинный самотест, раз в N дней (ночью)
          "backup_days": 7,          # авто-бэкап настроек, раз в N дней
          "backup_keep": 10,         # сколько бэкапов хранить
+         "settings_backup_dir": "",     # путь бэкапа настроек ("" = /mnt/storage/nas-settings-backup)
+         "settings_backup_hide": False, # скрывать эту папку в файловом менеджере
          "snap_sync_time": "03:00",   # SnapRAID: ежедневный sync
          "snap_scrub_dow": "Sun",     # SnapRAID: день недели scrub
          "snap_scrub_time": "05:00",  # SnapRAID: время scrub
@@ -2788,6 +2790,15 @@ def save_maintenance(d):
                     except Exception:
                         pass
                 cur["pool_alias"] = v
+    # путь и скрытие папки бэкапа настроек
+    if "settings_backup_dir" in d:
+        v = str(d["settings_backup_dir"] or "").strip().rstrip("/")
+        if v == "" or (v.startswith("/") and len(v) > 1 and ".." not in v and v not in _ALIAS_RESERVED):
+            cur["settings_backup_dir"] = v
+        else:
+            err = err or "недопустимый путь: абсолютный, не системный корень"
+    if "settings_backup_hide" in d:
+        cur["settings_backup_hide"] = bool(d["settings_backup_hide"])
     # --- надёжность/отчёты/термозащита ---
     if "automount_recover" in d:
         cur["automount_recover"] = bool(d["automount_recover"])
@@ -2869,9 +2880,17 @@ _BK_NAME_RE = re.compile(r"^nas-settings-[\w.-]+\.tar\.gz$")
 # archive-префикс → (источник, восстанавливать ли автоматически)
 _BK_EXCLUDE = ("events.json", "history.json", "history-long.json", "sessions.json")
 
-def settings_backup_dir():
-    d = os.path.join(STORAGE, "backups", "settings") if os.path.ismount(STORAGE) \
+def settings_backup_path():
+    """Куда складывать бэкап настроек: свой путь из maintenance или дефолт.
+    Дефолт — на пуле (переживает переустановку), отдельная папка (не общая «backups»)."""
+    custom = (load_maintenance().get("settings_backup_dir") or "").strip().rstrip("/")
+    if custom and custom.startswith("/") and ".." not in custom:
+        return custom
+    return os.path.join(STORAGE, "nas-settings-backup") if os.path.ismount(STORAGE) \
         else "/var/backups/nas-os"
+
+def settings_backup_dir():
+    d = settings_backup_path()
     try:
         os.makedirs(d, exist_ok=True)
     except OSError:
@@ -6311,6 +6330,7 @@ class H(BaseHTTPRequestHandler):
                 self._json({"settings": load_settings()})
             elif p == "/api/maintenance":
                 self._json({"maintenance": load_maintenance(),
+                            "settings_backup_path": settings_backup_path(),
                             "snapraid_configured": os.path.isfile("/etc/snapraid.conf")})
             elif p == "/api/updates":
                 self._json(apt_updates(refresh=(q.get("refresh") or ["0"])[0] == "1"))
