@@ -4178,7 +4178,9 @@ function winDiskUsage(initRoot){const existed=!!OPEN["__duscan"];const w=openWin
    const rel=cur===root?"":cur.slice(root==="/"?0:root.length);let acc=root;
    rel.split("/").filter(Boolean).forEach(seg=>{acc=(acc==="/"?"":acc)+"/"+seg;const p=acc;c.appendChild(el(`<span class="sepc">/</span>`));mk(seg,p);});}
  function renderChart(){const box=mainEl.querySelector("#duChart");if(!box)return;
-   const ch=(node.ch||[]).filter(x=>x.s>0),total=ch.reduce((s,x)=>s+x.s,0)||node.s||1;
+   // и круг, и список идут в ОДНОМ порядке (по размеру убыв.) — иначе индекс-ключ подсветки
+   // и цвет не совпадают между кругом и списком (навёл на одну — подсветилась другая)
+   const ch=(node.ch||[]).slice().sort((a,b)=>b.s-a.s),total=ch.reduce((s,x)=>s+x.s,0)||node.s||1;
    const cx=130,cy=130,r0=44,r1=showL2?87:118,r2=122,TAU=Math.PI*2;
    const arc=(ri,ro,a0,a1)=>{if(a1-a0>=TAU-1e-4)a1=a0+TAU-1e-4;   // полный круг вырождается в пустую дугу — оставляем волосок
      const P=(r,a)=>[cx+r*Math.cos(a),cy+r*Math.sin(a)];const laf=(a1-a0)>Math.PI?1:0;
@@ -4211,9 +4213,10 @@ function winDiskUsage(initRoot){const existed=!!OPEN["__duscan"];const w=openWin
      elm.oncontextmenu=ev=>{if(!s.c.p)return;ev.preventDefault();ctxMenu(s.c,ev.clientX,ev.clientY);};});
    const hole=box.querySelector("#duHole");if(hole&&cur!==root)hole.onclick=()=>{const par=cur.replace(/\/[^/]+$/,"")||"/";drill(par.length<root.length?root:par);};}
  function renderList(){const box=mainEl.querySelector("#duList");if(!box)return;box.innerHTML="";
-   const ch=(node.ch||[]).filter(x=>x.s>0||x.d).sort((a,b)=>b.s-a.s),max=ch.reduce((m,x)=>Math.max(m,x.s),1);
-   if(!ch.length){box.innerHTML=`<div class="du-empty2">Пусто</div>`;return;}
-   ch.forEach((c,i)=>{const col=c.o?"var(--mut)":DUCOL[i%DUCOL.length];
+   const ch=(node.ch||[]).slice().sort((a,b)=>b.s-a.s),max=ch.reduce((m,x)=>Math.max(m,x.s),1);
+   if(!ch.some(x=>x.s>0||x.d)){box.innerHTML=`<div class="du-empty2">Пусто</div>`;return;}
+   ch.forEach((c,i)=>{if(!(c.s>0||c.d))return;   // size-0 файлы не показываем; индекс сохраняем для совпадения с кругом
+     const col=c.o?"var(--mut)":DUCOL[i%DUCOL.length];
      const ico=c.o?`<span class="du-ico du-agg">${svg("layers",16)}</span>`:`<span class="du-ico">${fmIcon(c.n,c.d?"dir":"file",20)}</span>`;
      const row=el(`<div class="du-row${c.d?" isdir":""}" data-key="${i}"><span class="du-sw" style="background:${col}"></span>${ico}<span class="du-nm" title="${att(c.n)}">${esc(c.n)}</span><span class="du-bar"><i style="width:${c.new?0:Math.max(2,c.s/max*100).toFixed(1)}%;background:${col}"></i></span>${c.new?`<span class="du-sz" style="color:var(--mut);font-size:10px" title="Папка добавлена после скана — пересканируйте">не сканир.</span>`:`<span class="du-sz">${fmtB(c.s)}</span>`}${c.p?`<button class="du-x" title="В корзину">${svg("trash",13)}</button>`:""}</div>`);
      if(c.d)row.onclick=ev=>{if(ev.target.closest(".du-x"))return;drill(c.p);};
@@ -5275,7 +5278,7 @@ const WIDGET_DEFS={
  vols:{name:"Носители",ic:"hdd",body:'<div id="wg-vols"></div>'},
  sys:{name:"Система",ic:"gauge",body:'<div id="wg-sys"></div>'},
  disk:{name:"Диски",ic:"disks",extra:'<span class="more" id="more-disks">все →</span>',body:'<div id="wg-disk"></div>'},
- net:{name:"Сеть",ic:"net",extra:'<span id="wg-nets" style="margin-left:auto;letter-spacing:0;text-transform:none;font-family:var(--mono);font-size:11px;font-weight:600;display:flex;gap:9px"></span>',body:'<canvas id="wg-net" width="300" height="40" style="width:100%;height:40px;display:block"></canvas><div id="wg-net2" style="margin-top:8px"></div>'},
+ net:{name:"Сеть",ic:"net",extra:'<span id="wg-nets" style="margin-left:auto;letter-spacing:0;text-transform:none;font-family:var(--mono);font-size:11px;font-weight:600;display:flex;gap:9px"></span>',body:'<canvas id="wg-net" width="300" height="40" style="width:100%;height:40px;display:block"></canvas><div id="wg-netlink" style="margin-top:8px"></div><div id="wg-net2" style="margin-top:6px"></div><div style="margin-top:8px;display:flex;align-items:center;gap:8px"><button class="btn sm" id="wg-nstest">Спидтест</button><span id="wg-nsres" style="font-family:var(--mono);font-size:11px;color:var(--dim)"></span></div>'},
  docker:{name:"Контейнеры",ic:"cube",extra:'<span class="more" id="more-docker">все →</span>',body:'<div id="wg-docker"></div>'},
  top:{name:"Топ процессов",ic:"activity",def:false,extra:'<span class="more" id="more-top">все →</span>',body:'<div id="wg-top"></div>'},
 };
@@ -5291,7 +5294,7 @@ function renderRail(){const rail=document.getElementById("rail");if(!rail)return
  const md=document.getElementById("more-disks");if(md)md.onclick=()=>winDisks();
  const mdk=document.getElementById("more-docker");if(mdk)mdk.onclick=()=>winServices();
  const mt=document.getElementById("more-top");if(mt)mt.onclick=()=>winMon();
- paintVols();if(LAST){paintSys(LAST);}pollDisks();pollStacks();pollTop();
+ paintVols();if(LAST){paintSys(LAST);}pollDisks();pollStacks();pollTop();pollNet();
 }
 function paintVols(){const box=document.getElementById("wg-vols");if(!box)return;box.innerHTML="";
  const wdg=box.closest(".wdg");   // нет томов → прячем всю карточку виджета, а не показываем пустую плашку
@@ -5330,6 +5333,21 @@ function paintSys(s){const m=document.getElementById("wg-sys");if(!m)return;
   `<div class="krow"><span>${esc(s.iface||"—")}</span><b>${esc(s.ip||"")}</b></div>`;
  NETH.push(s.net.rx);if(NETH.length>60)NETH.shift();
  NETT.push(s.net.tx);if(NETT.length>60)NETT.shift();drawNet();
+}
+// тип подключения (Wi-Fi/кабель) + скорость линка + сигнал + мини-спидтест
+async function pollNet(){const box=document.getElementById("wg-netlink");if(!box)return;
+ const n=await api("/api/net");if(!n)return;
+ const wifi=n.type==="wifi",spd=n.link_mbit?n.link_mbit+" Мбит/с":"—";
+ const name=wifi?((n.ssid||"Wi-Fi")+(n.band?" · "+n.band:"")):"Кабель (Ethernet)";
+ const spdCol=wifi?(n.link_mbit>=800?"var(--good)":"var(--warn)"):"var(--good)";
+ box.innerHTML=`<div class="krow"><span>${wifi?"📶":"🔌"} ${esc(name)}</span><b style="color:${spdCol}">${spd}</b></div>`
+  +(wifi&&n.signal!=null?`<div class="krow" style="margin-top:2px"><span style="color:var(--mut);font-size:11px">Сигнал</span><b style="font-size:11px">${n.signal_pct}% · ${n.signal} dBm</b></div>`:"")
+  +(wifi?`<div style="font-size:10.5px;color:var(--warn);margin-top:3px;line-height:1.35">Для NAS лучше кабель — быстрее и стабильнее. Воткни Ethernet — скорость сразу вырастет.</div>`:"");
+ const btn=document.getElementById("wg-nstest"),res=document.getElementById("wg-nsres");
+ if(btn&&!btn._wired){btn._wired=1;btn.onclick=async()=>{btn.disabled=true;const o=btn.textContent;btn.textContent="Тест…";if(res)res.textContent="скачиваю…";
+   const r=await api("/api/net/speedtest");btn.disabled=false;btn.textContent=o;
+   if(r&&r.ok){if(res)res.innerHTML=`<b style="color:var(--good)">${r.MBs} МБ/с</b> · ${r.mbps} Мбит/с`;}
+   else if(res)res.textContent="Ошибка: "+((r&&r.log)||"?");};}
 }
 async function pollStacks(){const box=document.getElementById("wg-docker");if(!box)return;
  const r=await api("/api/stacks");const st=(r&&r.stacks)||[];
@@ -5674,10 +5692,10 @@ function maybeOnboard(){let done=false;try{done=!!SET.onboarded||localStorage.ge
  renderRail();renderApps();renderDock();renderWinbar();renderPhoneNav();tickClock();
  poll();pollApps();pollDisks();maybeOnboard();
  refreshFmHideBk();
- pollStacks();pollTop();
+ pollStacks();pollTop();pollNet();
  pollEvents();setTimeout(pollHealth,2500);
  setInterval(poll,3000);setInterval(pollApps,8000);setInterval(pollDisks,15000);setInterval(tickClock,10000);
- setInterval(pollStacks,15000);setInterval(pollTop,10000);
+ setInterval(pollStacks,15000);setInterval(pollTop,10000);setInterval(pollNet,15000);
  setInterval(pollEvents,15000);setInterval(pollHealth,120000);
  if("serviceWorker" in navigator&&window.isSecureContext)navigator.serviceWorker.register("/sw.js").catch(()=>{});
  matchMedia("(prefers-color-scheme:light)").addEventListener("change",()=>{if(SET.theme==="auto")applySettings();});

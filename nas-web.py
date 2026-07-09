@@ -108,6 +108,67 @@ def net_rate(iface):
     dt = now - prev[0] or 1
     return {"rx": max(0, int((rx - prev[1]) / dt)), "tx": max(0, int((tx - prev[2]) / dt))}
 
+def net_info():
+    """Тип активного подключения (Wi-Fi/кабель), скорость линка (Мбит/с),
+    для Wi-Fi — SSID/диапазон/сигнал. Чтобы наглядно видеть эффект кабеля."""
+    iface = default_iface()
+    info = {"iface": iface or "", "ip": lan_ip(), "type": "", "ssid": "",
+            "band": "", "signal": None, "signal_pct": None, "link_mbit": None}
+    if not iface:
+        return info
+    is_wifi = os.path.isdir("/sys/class/net/%s/wireless" % iface) or iface.startswith(("wl", "wlan"))
+    if is_wifi:
+        info["type"] = "wifi"
+        try:
+            out = subprocess.run(["iw", "dev", iface, "link"],
+                                 capture_output=True, text=True, timeout=4).stdout
+            m = re.search(r"SSID:\s*(.+)", out)
+            if m:
+                info["ssid"] = m.group(1).strip()
+            m = re.search(r"freq:\s*(\d+)", out)
+            if m:
+                fr = int(m.group(1)); info["band"] = "5 ГГц" if fr >= 5000 else "2.4 ГГц"
+            m = re.search(r"signal:\s*(-?\d+)", out)
+            if m:
+                sig = int(m.group(1)); info["signal"] = sig
+                info["signal_pct"] = max(0, min(100, 2 * (sig + 100)))   # ~ -100..-50 dBm → 0..100
+            m = re.search(r"tx bitrate:\s*([\d.]+)", out)
+            if m:
+                info["link_mbit"] = int(float(m.group(1)))
+        except (OSError, subprocess.SubprocessError):
+            pass
+    else:
+        info["type"] = "eth"
+        sp = _read("/sys/class/net/%s/speed" % iface, "").strip()
+        try:
+            if sp and int(sp) > 0:
+                info["link_mbit"] = int(sp)
+        except ValueError:
+            pass
+    return info
+
+def net_speedtest():
+    """Мини-спидтест: скачивание с Cloudflare, реальная скорость канала (МБ/с и Мбит/с)."""
+    url = "https://speed.cloudflare.com/__down?bytes=30000000"   # до 30 МБ
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "nas-os"})
+        t0 = time.time(); n = 0
+        with urllib.request.urlopen(req, timeout=20) as r:
+            while True:
+                chunk = r.read(262144)
+                if not chunk:
+                    break
+                n += len(chunk)
+                if time.time() - t0 > 12:   # кап по времени
+                    break
+        dt = max(0.05, time.time() - t0)
+        if n < 100000:
+            return {"ok": False, "log": "мало данных — проверьте интернет"}
+        return {"ok": True, "bytes": n, "secs": round(dt, 2),
+                "mbps": round(n * 8 / dt / 1e6, 1), "MBs": round(n / dt / 1048576, 1)}
+    except Exception as e:
+        return {"ok": False, "log": ("нет интернета?" if "urlopen" in str(type(e)) else str(e)[:120])}
+
 def uptime_s():
     try:
         return int(float(_read("/proc/uptime").split()[0]))
@@ -6322,6 +6383,10 @@ class H(BaseHTTPRequestHandler):
         try:
             if p == "/api/stats":
                 self._json(stats())
+            elif p == "/api/net":
+                self._json(net_info())
+            elif p == "/api/net/speedtest":
+                self._json(net_speedtest())
             elif p == "/api/history":
                 self._json(history_snapshot((q.get("range") or ["24h"])[0]))
             elif p == "/api/events":
