@@ -732,9 +732,11 @@
   /* .dialog объявлен НИЖЕ и при равной специфичности перебивал max-width:440px —
      зажимал пикер в узкую колонку. Поэтому селектор из двух классов. */
   .dialog.pf-dlg{max-width:820px;width:min(94vw,820px)}
-  .pf-body{display:flex;gap:14px;min-height:0;align-items:stretch}
-  .pf-side{flex:0 0 200px;min-width:0;max-height:min(56vh,460px);overflow-y:auto;padding-right:2px;
-    border-right:1px solid var(--line);}
+  /* фиксированная высота: иначе диалог прыгал при переходе в папку с другим числом
+     подпапок — центрированная модалка «дышала» по вертикали */
+  .pf-body{display:flex;gap:14px;height:min(56vh,460px);align-items:stretch}
+  .pf-side{flex:0 0 200px;min-width:0;height:100%;overflow-y:auto;padding-right:2px;
+    border-right:1px solid var(--line)}
   .pf-grp{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);margin:10px 2px 5px}
   .pf-grp:first-child{margin-top:0}
   .pf-it{display:flex;align-items:center;gap:8px;padding:6px 9px;border-radius:8px;cursor:pointer;
@@ -743,11 +745,10 @@
   .pf-it.on{background:var(--sel);color:var(--accent);box-shadow:var(--sh-sm);font-weight:600}
   .pf-it svg{flex:none;opacity:.8}
   .pf-it .pf-sub{margin-left:auto;font-size:10.5px;color:var(--mut);font-family:var(--mono)}
-  .pf-main{flex:1;min-width:0;display:flex;flex-direction:column}
+  .pf-main{flex:1;min-width:0;height:100%;display:flex;flex-direction:column}
   .pf-bar{display:flex;gap:6px;align-items:center;margin-bottom:6px}
   .pf-bar input{flex:1;font-family:var(--mono);font-size:12px;padding:7px 10px}
-  .pf-list{flex:1;min-height:180px;max-height:min(56vh,460px);overflow-y:auto;
-    border:1px solid var(--line);border-radius:var(--r-md)}
+  .pf-list{flex:1;min-height:0;overflow-y:auto;border:1px solid var(--line);border-radius:var(--r-md)}
   .pf-row{display:flex;align-items:center;gap:9px;padding:8px 11px;border-top:1px solid var(--line);
     cursor:pointer;font-size:12.5px}
   .pf-list .pf-row:first-child{border-top:none}
@@ -763,7 +764,8 @@
     .pf-side::-webkit-scrollbar{height:0}
     .pf-grp{display:none}
     .pf-it{flex:0 0 auto}
-    .pf-list{max-height:44vh}
+    .pf-body{height:auto}
+    .pf-list{height:44vh;flex:none}
   }
   .nb-crumb{font-size:11.5px;color:var(--mut);padding:6px 2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .nb-brl{max-height:300px;overflow-y:auto;border:1px solid var(--line);border-radius:var(--r-md);margin:2px 0 4px}
@@ -4632,70 +4634,87 @@ const PF_CHIPS=[["Хранилище","/mnt/storage","hdd"],["Домашняя",
 function pickFolder(opts){
  opts=opts||{};
  const s=document.getElementById("scrim");
- let cur=opts.start||"/mnt/storage",favs=[],mk=false,busy=false;
+ let cur=opts.start||"/mnt/storage",favs=[],mk=false,busy=false,built=false;
  const parent=p=>p.replace(/\/[^/]+$/,"")||"/";
- api("/api/fm/favorites").then(r=>{favs=(r&&r.favorites)||[];draw();}).catch(()=>{});
+ const $=q=>s.querySelector(q);
 
  const sideHTML=()=>{
-  const item=(name,path,ic)=>`<div class="pf-it${path===cur?" on":""}" data-go="${att(path)}" title="${att(path)}">${svg(ic,14)}<span>${esc(name)}</span></div>`;
+  const item=(name,path,ic,sub)=>`<div class="pf-it${path===cur?" on":""}" data-go="${att(path)}" title="${att(path)}">${svg(ic,14)}<span>${esc(name)}</span>${sub?`<span class="pf-sub">${esc(sub)}</span>`:""}</div>`;
   let h=`<div class="pf-grp">Быстрый доступ</div>`+PF_CHIPS.map(c=>item(c[0],c[1],c[2])).join("");
   // избранное по умолчанию повторяет быстрый доступ — дубли не показываем
   const chipPaths=new Set(PF_CHIPS.map(c=>c[1]));
   const fav=favs.filter(f=>f&&f.path&&!chipPaths.has(f.path));
   if(fav.length)h+=`<div class="pf-grp">Избранное</div>`+fav.map(f=>item(f.name,f.path,"folder")).join("");
   const mounted=(VOLS||[]).filter(v=>v.mounted&&v.mount);
-  if(mounted.length)h+=`<div class="pf-grp">Диски</div>`+mounted.map(v=>
-    `<div class="pf-it${v.mount===cur?" on":""}" data-go="${att(v.mount)}" title="${att(v.mount)}">${svg(volIcon(v),14)}<span>${esc(v.label||v.dev)}</span><span class="pf-sub">${esc(v.size||"")}</span></div>`).join("");
+  if(mounted.length)h+=`<div class="pf-grp">Диски</div>`+mounted.map(v=>item(v.label||v.dev,v.mount,volIcon(v),v.size)).join("");
   return h;};
+
+ const build=()=>{
+  s.innerHTML=`<div class="dialog pf-dlg"><h3>${svg("folder",16)} ${esc(opts.title||"Выберите папку")}</h3>
+    ${opts.note?`<div class="mon-note" style="margin:0 0 10px">${esc(opts.note)}</div>`:""}
+    <div class="pf-body">
+      <aside class="pf-side" id="pfSide"></aside>
+      <div class="pf-main">
+        <div class="pf-bar">
+          <button class="iconbtn" id="pfUp" title="Наверх">${svg("arrowup",15)}</button>
+          <input class="mono" id="pfPath" spellcheck="false">
+          <button class="btn sm" id="pfMk" title="Создать папку здесь">${svg("plus",13)} Папка</button>
+        </div>
+        <div class="pf-list" id="pfList"></div>
+      </div>
+    </div>
+    <div class="pf-foot"><span class="pf-cur" id="pfCur"></span>
+      <button class="btn" id="pfX">Отмена</button>
+      <button class="btn pri" id="pfO">Выбрать эту папку</button></div></div>`;
+  s.classList.add("show");
+  $("#pfUp").onclick=()=>{if(cur!=="/"){cur=parent(cur);mk=false;draw();}};
+  $("#pfX").onclick=()=>s.classList.remove("show");
+  $("#pfO").onclick=()=>{s.classList.remove("show");opts.onPick&&opts.onPick(cur);};
+  $("#pfMk").onclick=()=>{mk=!mk;paintList(lastDirs);if(mk)focusMk();};
+  const pi=$("#pfPath");
+  pi.onkeydown=ev=>{if(ev.key==="Enter"){ev.preventDefault();const v=pi.value.trim();if(v){cur=v;mk=false;draw();}}};
+  built=true;};
+
+ const focusMk=()=>{const mn=$("#pfMkName");if(!mn)return;mn.focus();
+  mn.onkeydown=async ev=>{
+    if(ev.key==="Escape"){mk=false;paintList(lastDirs);return;}
+    if(ev.key!=="Enter")return;
+    const name=mn.value.trim();if(!name)return;
+    const rr=await api("/api/fs/mkdir",{method:"POST",body:JSON.stringify({path:cur,name})});
+    if(!(rr&&rr.ok)){toast("Ошибка: "+((rr&&rr.log)||"не создать"));return;}
+    mk=false;cur=cur.replace(/\/$/,"")+"/"+name;draw();};};   // сразу заходим внутрь созданной
+
+ let lastDirs=[];
+ const paintList=dirs=>{
+  lastDirs=dirs;
+  const box=$("#pfList");if(!box)return;
+  box.scrollTop=0;
+  box.innerHTML=(mk?`<div class="pf-row"><span>${svg("folder",15)}</span><input class="mono" id="pfMkName" placeholder="имя новой папки" style="flex:1"></div>`:"")
+   +(dirs.map(d=>`<div class="pf-row" data-go="${att(d.path)}">${svg("folder",15)}<span>${esc(d.name)}</span></div>`).join("")
+     ||(mk?"":`<div class="pf-empty">Здесь нет вложенных папок — можно выбрать эту</div>`));
+  box.querySelectorAll("[data-go]").forEach(n=>n.onclick=()=>{cur=n.dataset.go;mk=false;draw();});};
+
+ const paintChrome=()=>{
+  const side=$("#pfSide");
+  if(side){side.innerHTML=sideHTML();
+   side.querySelectorAll("[data-go]").forEach(n=>n.onclick=()=>{cur=n.dataset.go;mk=false;draw();});}
+  const pi=$("#pfPath");if(pi&&document.activeElement!==pi)pi.value=cur;
+  const cu=$("#pfCur");if(cu){cu.textContent=cur;cu.title=cur;}
+  const up=$("#pfUp");if(up)up.disabled=(cur==="/");};
 
  const draw=async()=>{
   if(busy)return;busy=true;
+  if(!built)build();
   let r=null;
   try{r=await api("/api/fs/list?path="+encodeURIComponent(cur));}catch(e){}
   busy=false;
   if(!r||!r.ok){toast((r&&r.log)||"нет доступа");if(cur!=="/"){cur=parent(cur);return draw();}return;}
   cur=r.path||cur;
-  const dirs=(r.entries||[]).filter(e=>e.type==="dir"&&!fmNever(e.name)&&!e.name.startsWith("."));
-  s.innerHTML=`<div class="dialog pf-dlg"><h3>${svg("folder",16)} ${esc(opts.title||"Выберите папку")}</h3>
-    ${opts.note?`<div class="mon-note" style="margin:0 0 10px">${esc(opts.note)}</div>`:""}
-    <div class="pf-body">
-      <aside class="pf-side">${sideHTML()}</aside>
-      <div class="pf-main">
-        <div class="pf-bar">
-          <button class="iconbtn" id="pfUp" title="Наверх"${cur==="/"?" disabled":""}>${svg("arrowup",15)}</button>
-          <input class="mono" id="pfPath" value="${att(cur)}" spellcheck="false">
-          <button class="btn sm" id="pfMk" title="Создать папку здесь">${svg("plus",13)} Папка</button>
-        </div>
-        <div class="pf-list" id="pfList">
-          ${mk?`<div class="pf-row"><span>${svg("folder",15)}</span><input class="mono" id="pfMkName" placeholder="имя новой папки" style="flex:1"></div>`:""}
-          ${dirs.map(d=>`<div class="pf-row" data-go="${att(d.path)}">${svg("folder",15)}<span>${esc(d.name)}</span></div>`).join("")
-            ||(mk?"":`<div class="pf-empty">Здесь нет вложенных папок — можно выбрать эту</div>`)}
-        </div>
-      </div>
-    </div>
-    <div class="pf-foot"><span class="pf-cur" title="${att(cur)}">${esc(cur)}</span>
-      <button class="btn" id="pfX">Отмена</button>
-      <button class="btn pri" id="pfO">Выбрать эту папку</button></div></div>`;
-  s.classList.add("show");
-  const $=q=>s.querySelector(q);
-  s.querySelectorAll("[data-go]").forEach(n=>n.onclick=()=>{cur=n.dataset.go;mk=false;draw();});
-  $("#pfUp").onclick=()=>{if(cur!=="/"){cur=parent(cur);mk=false;draw();}};
-  $("#pfX").onclick=()=>s.classList.remove("show");
-  $("#pfO").onclick=()=>{s.classList.remove("show");opts.onPick&&opts.onPick(cur);};
-  const pi=$("#pfPath");
-  pi.onkeydown=ev=>{if(ev.key==="Enter"){ev.preventDefault();const v=pi.value.trim();if(v){cur=v;mk=false;draw();}}};
-  $("#pfMk").onclick=()=>{mk=!mk;draw();};
-  const mn=$("#pfMkName");
-  if(mn){mn.focus();
-   mn.onkeydown=async ev=>{
-     if(ev.key==="Escape"){mk=false;draw();return;}
-     if(ev.key!=="Enter")return;
-     const name=mn.value.trim();if(!name)return;
-     const rr=await api("/api/fs/mkdir",{method:"POST",body:JSON.stringify({path:cur,name})});
-     if(!(rr&&rr.ok)){toast("Ошибка: "+((rr&&rr.log)||"не создать"));return;}
-     mk=false;cur=cur.replace(/\/$/,"")+"/"+name;draw();   // сразу заходим внутрь созданной
-   };}
- };
+  paintChrome();
+  paintList((r.entries||[]).filter(e=>e.type==="dir"&&!fmNever(e.name)&&!e.name.startsWith(".")));
+  if(mk)focusMk();};
+
+ api("/api/fm/favorites").then(r=>{favs=(r&&r.favorites)||[];if(built)paintChrome();}).catch(()=>{});
  draw();}
 // старое имя — чтобы не переписывать все точки вызова
 const nbPickLocal=(start,onPick)=>pickFolder({start,onPick,title:"Куда копировать"});
