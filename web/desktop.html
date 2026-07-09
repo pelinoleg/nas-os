@@ -1308,6 +1308,16 @@
   .nb-chk input{width:auto;margin:0}
   .set-nav button.nbdelbtn{margin-top:auto;color:var(--danger)}
   .set-nav button.nbdelbtn.on{background:transparent}
+  /* Sticky save bar: the button used to sit mid-page and was easy to miss,
+     so edits were silently lost when the tab was reopened. */
+  .set-savebar{position:sticky;bottom:-22px;z-index:2;display:flex;align-items:center;gap:10px;
+    justify-content:flex-end;margin:16px -26px -22px;padding:12px 26px;
+    background:var(--card);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+    border-top:1px solid var(--win-line,var(--line))}
+  .set-savebar .sb-note{flex:1;font-size:12px;color:var(--warn);opacity:0;transition:.15s}
+  .set-savebar.dirty .sb-note{opacity:1}
+  .set-savebar button:disabled{opacity:.45;cursor:default}
+  @media (max-width:1024px){.set-savebar{margin:16px -18px -18px;padding:12px 18px;bottom:-18px}}
   /* USB-импорт: прогресс копирования */
   .uprog{background:var(--card-2);border-radius:var(--r-sm);padding:11px 13px;margin-bottom:8px}
   .uprog-h{display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:7px;font-size:13px}
@@ -5556,13 +5566,14 @@ function usbTab(tc){tc.innerHTML=`<div class="set-load">загрузка…</div
    <div class="set-grp">Разрешённые устройства</div>
    <div class="srow"><div class="srow-l"><div class="srow-t">Только разрешённые устройства${tipHTML("Автоимпорт сработает лишь с отмеченных ниже накопителей (сверка по VID:PID). Любая чужая флешка будет проигнорирована. Кнопка «Импортировать» вручную список не проверяет.")}</div><div class="srow-d">чужие флешки игнорируются</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="uRe"${c.restrict?" checked":""}><span class="sl"></span></label></div></div>
    <div id="uAllow"></div>
-   <div style="margin-top:14px"><button class="btn sm pri" id="uSave">${svg("save",13)} Сохранить</button></div>
+   <div class="set-savebar" id="uBar"><span class="sb-note">Есть несохранённые изменения</span><button class="btn sm" id="uReset">Отменить</button><button class="btn sm pri" id="uSave" disabled>${svg("save",13)} Сохранить</button></div>
    <div class="set-grp">Подключённые USB-накопители</div>
    <div id="uDrives"></div>`;
   const dv=tc.querySelector("#uDrives");
   if(!drives.length)dv.innerHTML=`<div class="mon-note">Съёмных USB-накопителей сейчас нет. Вставьте флешку и обновите.</div>`;
   else drives.forEach(d=>{const row=el(`<div class="srow"><div class="srow-l"><div class="srow-t">${esc(d.label||d.path)}</div><div class="srow-d mono">${esc(d.path)} · ${esc(d.mount)}</div></div><div class="srow-c"><button class="btn sm">${svg("copy",13)} Импортировать</button></div></div>`);
     row.querySelector("button").onclick=async()=>{toast("Импорт запущен…");const rr=await api("/api/usb-import/run",{method:"POST",body:JSON.stringify({dev:d.path})});toast(LIVE?(rr&&rr.ok?"Импорт запущен ✓":"Ошибка: "+((rr&&rr.log)||"")):"Демо");};dv.appendChild(row);});
+  let markDirty=()=>{};   // назначается ниже, когда собрана форма
   // прогресс копирования: rsync пишет строку в /run, мы её опрашиваем.
   // Таймер гасим, когда вкладку закрыли, иначе он тикает до перезагрузки страницы.
   {const pw=tc.querySelector("#uProg");
@@ -5596,9 +5607,9 @@ function usbTab(tc){tc.innerHTML=`<div class="set-load">загрузка…</div
    h+=offline.map(id=>`<div class="srow"><div class="srow-l"><div class="srow-t mono">${esc(id)}</div><div class="srow-d">разрешено, сейчас не подключено</div></div><div class="srow-c"><button class="btn sm" data-rm="${att(id)}"${on?"":" disabled"}>${svg("trash",13)} Убрать</button></div></div>`).join("");
    if(on&&!allow.size)h+=`<div class="reboot-ban">${svg("power",16)} Список пуст — автоимпорт не сработает ни с одной флешки.</div>`;
    av.innerHTML=h;av.style.opacity=on?"":".55";
-   av.querySelectorAll("input[data-id]").forEach(cb=>cb.onchange=()=>{cb.checked?allow.add(cb.dataset.id):allow.delete(cb.dataset.id);renderAllow();});
-   av.querySelectorAll("button[data-rm]").forEach(b=>b.onclick=()=>{allow.delete(b.dataset.rm);renderAllow();});};
-  re.onchange=renderAllow;renderAllow();
+   av.querySelectorAll("input[data-id]").forEach(cb=>cb.onchange=()=>{cb.checked?allow.add(cb.dataset.id):allow.delete(cb.dataset.id);renderAllow();markDirty();});
+   av.querySelectorAll("button[data-rm]").forEach(b=>b.onclick=()=>{allow.delete(b.dataset.rm);renderAllow();markDirty();});};
+  re.onchange=()=>{renderAllow();markDirty();};renderAllow();
   // конструктор раскладки: превью, вставка токенов, готовые шаблоны
   const tpl=tc.querySelector("#uSubTpl"),prev=tc.querySelector("#uSubPrev");
   const upd=()=>prev.textContent=usbSubPreview(tpl.value);upd();
@@ -5607,9 +5618,26 @@ function usbTab(tc){tc.innerHTML=`<div class="set-load">загрузка…</div
     tpl.value=tpl.value.slice(0,p)+b.dataset.t+tpl.value.slice(tpl.selectionEnd||p);tpl.focus();
     const np=p+b.dataset.t.length;tpl.setSelectionRange(np,np);upd();});
   tc.querySelectorAll(".usb-pre").forEach(b=>b.onclick=()=>{tpl.value=b.dataset.t;upd();});
-  tc.querySelector("#uSave").onclick=async()=>{
-   const cfg={enabled:tc.querySelector("#uEn").checked,dest:tc.querySelector("#uDest").value.trim(),subdir:tpl.value.trim(),notify:tc.querySelector("#uNo").checked,eject:tc.querySelector("#uEj").checked,media_only:tc.querySelector("#uMo").checked,restrict:re.checked,allow:[...allow]};
+  // отслеживаем несохранённые правки: кнопка внизу терялась, и настройки молча
+  // откатывались к последнему сохранённому значению при переоткрытии вкладки
+  const bar=tc.querySelector("#uBar"),saveBtn=tc.querySelector("#uSave"),resetBtn=tc.querySelector("#uReset");
+  const formCfg=()=>({enabled:tc.querySelector("#uEn").checked,dest:tc.querySelector("#uDest").value.trim(),
+    subdir:tpl.value.trim(),notify:tc.querySelector("#uNo").checked,eject:tc.querySelector("#uEj").checked,
+    media_only:tc.querySelector("#uMo").checked,restrict:re.checked,allow:[...allow].sort()});
+  const norm=c=>{let sd=c.subdir||"";if(sd==="dated")sd="{label}-{date}-{time}";else if(sd==="label")sd="{label}";else if(sd==="flat")sd="";
+    return JSON.stringify({enabled:!!c.enabled,dest:c.dest||"/mnt/storage/imports",subdir:sd,notify:!!c.notify,
+      eject:!!c.eject,media_only:!!c.media_only,restrict:!!c.restrict,allow:[...(c.allow||[])].sort()});};
+  let saved=norm(c);
+  const dirty=()=>{const d=norm(formCfg())!==saved;bar.classList.toggle("dirty",d);saveBtn.disabled=!d;resetBtn.disabled=!d;};
+  dirty();
+  tc.addEventListener("input",dirty);tc.addEventListener("change",dirty);
+  tc.querySelectorAll(".usb-tok,.usb-pre").forEach(b=>b.addEventListener("click",()=>setTimeout(dirty,0)));
+  markDirty=dirty;                       // renderAllow дёргает после правки белого списка
+  resetBtn.onclick=()=>usbTab(tc);       // перечитать с сервера
+  saveBtn.onclick=async()=>{
+   const cfg=formCfg();
    const rr=await api("/api/usb-import",{method:"POST",body:JSON.stringify(cfg)});
+   if(rr&&rr.ok){saved=norm(cfg);dirty();}
    toast(LIVE?(rr&&rr.ok?(rr.warn||"Сохранено ✓"):"Ошибка: "+((rr&&rr.log)||"?")):"Демо");};
  });}
 /* --- settings: Raspberry Pi --- */
