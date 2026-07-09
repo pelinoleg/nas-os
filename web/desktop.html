@@ -1504,6 +1504,8 @@
   .op-row .op-t2{font-size:12.3px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .op-row .op-s2{font-size:11px;color:var(--mut);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .op-row .op-when{color:var(--mut);opacity:.75;margin-left:6px}
+  #opsBtn.mb-idle{opacity:.55}
+  #opsBtn.mb-idle:hover{opacity:1}
   .op-row .op-bar{height:4px;border-radius:99px;background:var(--track,var(--card-2));overflow:hidden;margin-top:6px}
   .op-row .op-bf{height:100%;background:var(--accent);transition:width .2s;border-radius:99px}
   .op-row.ind .op-bf{width:40%!important;animation:opind 1.1s ease-in-out infinite alternate}
@@ -1542,7 +1544,7 @@
   <div class="tray" id="tray"></div>
   <span class="mb-sep"></span>
   <button class="mb-theme mbi" id="healthBtn" title="Здоровье системы"></button>
-  <button class="mb-theme mbi" id="opsBtn" title="Операции" style="display:none"></button>
+  <button class="mb-theme mbi" id="opsBtn" title="Операции"></button>
   <button class="mb-theme mbi" id="bellBtn" title="Уведомления"></button>
   <span class="mb-sep"></span>
   <button class="mb-theme" id="themeBtn" title="Тема"></button>
@@ -6070,7 +6072,9 @@ function paintOps(force){
  const now=Date.now();if(!force&&now-OPS.paintT<200)return;OPS.paintT=now;
  const b=document.getElementById("opsBtn");if(!b)return;
  const run=OPS.list.filter(o=>o.state==="run").length;
- b.style.display=OPS.list.length?"":"none";   // история тоже держит иконку видимой
+ // иконка всегда на месте: по ней смотрят историю загрузок и копирований,
+ // а не только текущий прогресс. Пустой список — приглушённая иконка.
+ b.classList.toggle("mb-idle",!OPS.list.length);
  b.innerHTML=svg(run?"sync":"list",16)+(run?`<span class="mb-badge">${run}</span>`:"");
  b.title=nasTr(run?`Операции: ${run} выполняется`:"Операции");
  const p=document.querySelector(".mbpop[data-ops]");if(p)renderOpsList(p);}
@@ -6095,8 +6099,9 @@ function renderOpsList(p){
   }).join(""):`<div class="mbp-empty">Нет операций</div>`);
  p.querySelectorAll(".op-x").forEach(x=>x.onclick=ev=>{ev.stopPropagation();
   const o=OPS.list.find(y=>y.id===+x.closest(".op-row").dataset.op);if(o)opCancel(o);});
- const clr=p.querySelector("#opsClr");if(clr)clr.onclick=()=>{OPS.list=OPS.list.filter(o=>o.state==="run");opsSave();paintOps(true);const q=document.querySelector(".mbpop[data-ops]");if(q&&!OPS.list.length)closeMenu();else if(q){q._sig=null;renderOpsList(q);}};}
-function opsPop(){const b=document.getElementById("opsBtn");if(!b||b.style.display==="none")return;
+ const clr=p.querySelector("#opsClr");if(clr)clr.onclick=()=>{OPS.list=OPS.list.filter(o=>o.state==="run");opsSave();paintOps(true);
+  const q=document.querySelector(".mbpop[data-ops]");if(q){q._sig=null;renderOpsList(q);}};}
+function opsPop(){const b=document.getElementById("opsBtn");if(!b)return;
  mbPop(b,p=>{p.setAttribute("data-ops","1");renderOpsList(p);},
   ()=>{OPS.autoOpened=false;if(OPS.list.some(x=>x.state==="run"))OPS.autoClosed=true;});}
 
