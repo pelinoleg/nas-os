@@ -4244,16 +4244,21 @@ _thumb_sem = threading.Semaphore(3)   # ограничить одновреме�
 def _ext(name):
     return name.rsplit(".", 1)[-1].lower() if "." in name else ""
 
-def _heif_decode(src, out_png):
-    """HEIC/HEIF → PNG через libheif. True, если получилось."""
+def _heif_decode(src, out_jpg):
+    """HEIC/HEIF → JPEG через libheif. True, если получилось.
+    Промежуточный формат обязан быть JPEG, а не PNG: libheif декодирует
+    12-мегапиксельный снимок за доли секунды, но zlib-сжатие PNG (~14 МБ)
+    отнимало ещё ~4.7 с на каждое фото. JPEG q=92 отдаёт то же изображение
+    (PSNR 45 dB против PNG-пути) в 12 раз быстрее.
+    """
     if not shutil.which("heif-convert"):
         return False
     try:
-        r = subprocess.run(["heif-convert", src, out_png],
+        r = subprocess.run(["heif-convert", "-q", "92", src, out_jpg],
                            capture_output=True, timeout=60)
     except (OSError, subprocess.SubprocessError):
         return False
-    return r.returncode == 0 and os.path.isfile(out_png) and os.path.getsize(out_png) > 0
+    return r.returncode == 0 and os.path.isfile(out_jpg) and os.path.getsize(out_jpg) > 0
 
 def thumb_kind(name):
     e = name.rsplit(".", 1)[-1].lower() if "." in name else ""
@@ -4300,10 +4305,10 @@ def gen_thumb(src):
             if kind == "img":
                 # HEIC/HEIF сначала собираем через libheif — иначе ffmpeg возьмёт одну плитку
                 if _ext(src) in _HEIF_EXT:
-                    heif_png = tp + "." + uniq + ".heif.png"
-                    if not _heif_decode(src, heif_png):
+                    heif_tmp = tp + "." + uniq + ".heif.jpg"
+                    if not _heif_decode(src, heif_tmp):
                         raise RuntimeError("heif-convert не смог")
-                    ff_in = heif_png
+                    ff_in = heif_tmp
                 else:
                     ff_in = src
                 # прозрачность PNG/WebP → подкладываем белый фон (иначе JPEG рисует мусор на месте альфы)
@@ -6295,15 +6300,15 @@ def gen_view(src):
         return None
     uniq = "%d.%s" % (os.getpid(), secrets.token_hex(4))
     tmp = vp + "." + uniq + ".tmp.jpg"
-    heif_png = vp + "." + uniq + ".heif.png"
+    heif_tmp = vp + "." + uniq + ".heif.jpg"
     ok = False
     with _thumb_sem:
         try:
             ff_in = src
             if _ext(src) in _HEIF_EXT:
-                if not _heif_decode(src, heif_png):
+                if not _heif_decode(src, heif_tmp):
                     raise RuntimeError("heif-convert не смог")
-                ff_in = heif_png
+                ff_in = heif_tmp
             scale = ("scale='min(%d,iw)':'min(%d,ih)'"
                      ":force_original_aspect_ratio=decrease" % (VIEW_PX, VIEW_PX))
             r = subprocess.run(["ffmpeg","-y","-v","error","-i",ff_in,"-vf",scale,
