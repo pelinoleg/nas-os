@@ -928,9 +928,13 @@
   .fm-row.fm-hid:hover,.fm-tile.fm-hid:hover,.fm-row.fm-hid.sel,.fm-tile.fm-hid.sel{opacity:.85}
   .fm-row.sel{background:var(--accent-soft);color:var(--accent)}
   .fm-row .fi{flex:none;color:var(--dim);display:grid;place-items:center;width:28px;height:28px;position:relative}
-  .fm-row .fi .thumb{position:absolute;inset:0;width:100%;height:100%;object-fit:var(--thumb-fit,contain);border-radius:4px;background:var(--card-2)}
+  .fm-row .fi .thumb{position:absolute;inset:0;width:100%;height:100%;object-fit:var(--thumb-fit,contain);border-radius:4px}
   .fm-row.dir .fi{color:var(--accent-2)}
-  .fm-row .fn{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .fm-row .fn{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    display:flex;align-items:baseline;gap:0}
+  .fm-row .fn-b{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .fm-row .fn-x{flex:none;color:var(--mut)}
+  .fm-row .fn>small,.fm-row .fn>.fpath{flex:none}
   .fm-row .fsz{font-family:var(--mono);font-size:10px;color:var(--mut);flex:none}
   .fm-row .fx{display:none;gap:1px;flex:none}
   .fm-row:hover .fx{display:flex}.fm-row:hover .fsz{display:none}
@@ -1106,8 +1110,17 @@
   .fm-tile:hover{background:var(--sel);border-color:var(--line)}
   .fm-tile.sel{background:var(--accent-soft);border-color:var(--accent-line)}
   .fm-tile .ti{position:relative;width:64px;height:64px;display:grid;place-items:center;color:var(--dim)}.fm-tile.dir .ti{color:var(--accent-2)}
-  .fm-tile .ti .thumb{position:absolute;inset:0;width:100%;height:100%;object-fit:var(--thumb-fit,contain);border-radius:6px;background:var(--card-2)}
-  .fm-tile .tn{font-size:11px;text-align:center;line-height:1.25;word-break:break-word;max-height:2.6em;overflow:hidden;color:var(--text)}
+  .fm-tile .ti .thumb{position:absolute;inset:0;width:100%;height:100%;object-fit:var(--thumb-fit,contain);border-radius:6px}
+  /* превью загрузилось — убираем типовой значок из-под него, иначе он торчит
+     по краям вписанной картинки. Пока превью не пришло, значок виден. */
+  .fi.thumbed>svg.fmico,.ti.thumbed>svg.fmico{visibility:hidden}
+  /* в режиме «заполнить» превью закрывает плитку целиком, подложка не нужна;
+     в режиме «вписать» тёмная подложка проявила бы поля — поэтому её нет */
+  .fm-tile .ti .thumb,.fm-row .fi .thumb{background:transparent}
+  .fm-tile .tn{font-size:11px;text-align:center;line-height:1.25;color:var(--text);
+    display:flex;justify-content:center;align-items:baseline;max-width:100%;overflow:hidden}
+  .fm-tile .tn-b{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .fm-tile .tn-x{flex:none;color:var(--mut)}
   .fm-tile .fm-ck{position:absolute;top:6px;left:6px;opacity:0}
   .fm-tile:hover .fm-ck,.fm-tile.sel .fm-ck{opacity:1}
   /* размер значков/плиток ФМ (S/M/L; M — базовый, задаётся классом .fm-sz-* на .fm) */
@@ -3473,6 +3486,11 @@ function cmMode(name){const e=(name.split(".").pop()||"").toLowerCase();
  if(e==="css")return "css";
  if(/^(conf|cfg|ini|properties|toml)$/.test(e))return "properties";
  return null;}
+/* Имя файла: обрезаем многоточием только основу, расширение показываем всегда —
+   иначе у длинных имён не видно, что это за файл. */
+const splitExt=n=>{const i=n.lastIndexOf(".");return (i>0&&i<n.length-1)?[n.slice(0,i),n.slice(i)]:[n,""];};
+const nameHTML=(n,cls,noExt)=>{const [b,x]=noExt?[n,""]:splitExt(n);
+  return `<span class="${cls}-b">${esc(b)}</span>`+(x?`<span class="${cls}-x">${esc(x)}</span>`:"");};
 const isImgName=n=>/\.(png|jpe?g|gif|webp|svg|bmp|ico|avif|heic|heif|tiff?)$/i.test(n);
 // HEIC/HEIF/TIFF браузер не рисует. Панель собирает их в JPEG (heic — через libheif,
 // иначе ffmpeg взял бы одну плитку из грида). Скачивание по-прежнему отдаёт оригинал.
@@ -3894,11 +3912,11 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
      const isHid=e.name.startsWith(".")||e.name===FM_HIDE_BK;   // приглушаем, когда показаны
      let ficon;
      if(e.type==="file"&&thumbsOn&&thumbable(e.name)){
-       ficon=baseIco+`<img class="thumb" src="/api/fs/thumb?path=${encodeURIComponent(e.path)}" alt="" loading="lazy" onerror="this.remove()">`;}
+       ficon=baseIco+`<img class="thumb" src="/api/fs/thumb?path=${encodeURIComponent(e.path)}" alt="" loading="lazy" onload="this.parentNode.classList.add('thumbed')" onerror="this.remove()">`;}
      else ficon=baseIco;
      let node;
-     if(grid){node=el(`<div class="fm-tile ${e.type}${isSel?" sel":""}${i===cursor?" fm-cur":""}${isHid?" fm-hid":""}"><input type="checkbox" class="fm-ck"${isSel?" checked":""}><div class="ti">${ficon}</div><div class="tn" title="${att(searchRes?e.path:e.name)}">${esc(e.name)}</div></div>`);}
-     else{let nmH=esc(e.name)+(e.match?` <small style="color:var(--mut);font-weight:400">— ${esc(e.match.slice(0,90))}${e.line?" :"+e.line:""}</small>`:"");
+     if(grid){node=el(`<div class="fm-tile ${e.type}${isSel?" sel":""}${i===cursor?" fm-cur":""}${isHid?" fm-hid":""}"><input type="checkbox" class="fm-ck"${isSel?" checked":""}><div class="ti">${ficon}</div><div class="tn" title="${att(searchRes?e.path:e.name)}">${nameHTML(e.name,"tn",e.type==="dir")}</div></div>`);}
+     else{let nmH=nameHTML(e.name,"fn",e.type==="dir"||!!e.match)+(e.match?` <small style="color:var(--mut);font-weight:400">— ${esc(e.match.slice(0,90))}${e.line?" :"+e.line:""}</small>`:"");
        let relDir="";
        if(searchRes){const par=e.path.replace(/\/[^/]+$/,"");relDir=(par.slice(cwd==="/"?0:cwd.length)||"/");
          nmH+=`<span class="fpath" title="${att(par)}">${svg("folder",11)} ${esc(relDir)}</span>`;}
