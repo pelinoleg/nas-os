@@ -1,0 +1,35 @@
+# Speedtest Tracker — периодические замеры скорости интернета с историей и графиками.
+# http://<pi>:8440   Документация: https://docs.speedtest-tracker.dev
+#
+# Заменил OpenSpeedTest: тот меряет скорость ЛОКАЛЬНОЙ сети между браузером и Pi
+# по кнопке, а этот сам ходит на speedtest.net по расписанию и копит историю.
+#
+# APP_KEY обязателен (шифрование в Laravel). Сгенерировать:
+#   echo "base64:$(openssl rand -base64 32)"
+# и положить в .env рядом с этим файлом. Реальный ключ в репозиторий НЕ коммитим.
+#
+# База — sqlite в /config: для домашнего NAS отдельный postgres избыточен.
+# HTTPS-порт контейнера (443) не публикуем: панель и так в локалке по HTTP.
+services:
+  speedtest-tracker:
+    image: lscr.io/linuxserver/speedtest-tracker:v1.14.5-ls161
+    container_name: speedtest-tracker
+    restart: unless-stopped
+    ports:
+      - "8440:80"
+    environment:
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - TZ=${TZ:-Europe/Madrid}
+      - APP_KEY=${APP_KEY}
+      - APP_URL=${APP_URL:-http://pi5.local:8440}
+      - DB_CONNECTION=sqlite
+      # расписание в формате cron; по умолчанию — каждый час
+      - SPEEDTEST_SCHEDULE=${SPEEDTEST_SCHEDULE:-0 * * * *}
+    volumes:
+      - /opt/docker/speedtest-tracker/config:/config
+    labels:
+      - "diun.enable=true"
+      - "web-desktop.name=Speedtest Tracker"
+      - "web-desktop.url=http://pi5.local:8440"
+      - "web-desktop.icon=https://cdn.jsdelivr.net/gh/selfhst/icons@main/svg/speedtest-tracker.svg"
