@@ -470,6 +470,7 @@ window.NAS_I18N = { en: {
 "NAS: диск отключён": "NAS: disk disconnected",
 "NAS: диск перегрет": "NAS: disk overheated",
 "NAS: диск подключён": "NAS: disk connected",
+"NAS: диск переподключён": "NAS: disk reconnected",
 "NAS: диск только для чтения": "NAS: disk is read-only",
 "NAS: доступны обновления": "NAS: updates available",
 "NAS: задача по расписанию упала": "NAS: scheduled task failed",
