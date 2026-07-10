@@ -8323,6 +8323,8 @@ class H(BaseHTTPRequestHandler):
             ("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n"
              "Connection: Upgrade\r\nSec-WebSocket-Accept: " + _ws_accept(key) + "\r\n\r\n").encode())
         sock = self.connection
+        sock.settimeout(None)      # WS-терминал живёт долго и простаивает между нажатиями —
+                                   # общий timeout=30 (анти-slowloris) рвал бы его каждые 30с
         ex = (parse_qs(urlparse(self.path).query).get("exec") or [""])[0]
         ex = ex if re.match(r"^[a-zA-Z0-9_.-]+$", ex or "") else ""
         pid, master = pty.fork()
@@ -8350,9 +8352,15 @@ class H(BaseHTTPRequestHandler):
             os._exit(1)
         try:
             while True:
-                r, _, _ = select.select([master, sock], [], [], 300)
+                r, _, _ = select.select([master, sock], [], [], 30)
                 if not r:
-                    break
+                    # простой — не рвём соединение, а шлём WS-ping: это keepalive
+                    # (терминал не отваливается) и заодно детект мёртвого пира (send упадёт)
+                    try:
+                        _ws_send(sock, b"", 0x9)
+                        continue
+                    except OSError:
+                        break
                 if master in r:
                     try:
                         data = os.read(master, 8192)
