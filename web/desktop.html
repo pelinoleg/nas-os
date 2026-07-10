@@ -1568,6 +1568,9 @@
   .tm-space-bar{height:7px;border-radius:5px;background:var(--track,var(--card-2));overflow:hidden}
   .tm-space-bar i{display:block;height:100%;border-radius:5px;background:var(--accent);transition:width .3s}
   .tm-space-lbl{font-size:11px;color:var(--mut);margin-top:5px}
+  /* folder row: let the path input take the width instead of the label */
+  .tm-path-row .srow-l{flex:0 1 auto}
+  .tm-path-row .srow-c{flex:1;min-width:0}
   .tm-actions{display:flex;gap:9px;margin-top:12px;flex-wrap:wrap}
   .tm-bks{display:flex;flex-direction:column;gap:6px}
   .tm-bk{display:flex;align-items:center;gap:10px;padding:9px 11px;border-radius:var(--r-sm);background:var(--card)}
@@ -5609,7 +5612,7 @@ function timemachineTab(tc){
     ${sp?`<div class="tm-space"><div class="tm-space-bar"><i style="width:${usedPct}%"></i></div><div class="tm-space-lbl">Занято ${fmtB(sp.used)} из ${fmtB(sp.total)} · свободно ${fmtB(sp.free)}</div></div>`:""}
    </div>
    <div class="set-card"><div class="set-grp">Настройка</div>
-    <div class="srow"><div class="srow-l"><div class="srow-t">Папка для бэкапов${tipHTML("Куда Mac'и складывают резервные копии. Создастся автоматически, права 0700 у пользователя ниже. Лучше на пуле/отдельном диске.")}</div></div><div class="srow-c"><input class="mono" id="tmPath" value="${att(st.path||"")}" placeholder="/mnt/storage/TimeMachine" style="width:230px"></div></div>
+    <div class="srow tm-path-row"><div class="srow-l"><div class="srow-t">Папка для бэкапов${tipHTML("Куда Mac'и складывают резервные копии. Создастся автоматически, права 0700 у пользователя ниже. Лучше на пуле/отдельном диске.")}</div></div><div class="srow-c"><input class="mono" id="tmPath" value="${att(st.path||"")}" placeholder="/mnt/storage/TimeMachine" style="width:100%;min-width:280px"></div></div>
     <div class="srow"><div class="srow-l"><div class="srow-t">Пользователь Samba${tipHTML("Имя, под которым Mac подключается. Обычно системный пользователь NAS. Пароль — ниже (нужен для входа с Mac).")}</div></div><div class="srow-c"><input class="mono" id="tmUser" value="${att(st.user||"")}" placeholder="oleg" style="width:150px"></div></div>
     <div class="srow"><div class="srow-l"><div class="srow-t">Пароль Samba${tipHTML("Пароль для подключения с Mac. Оставь пустым, если пользователь уже заведён в Samba и пароль менять не нужно.")}</div></div><div class="srow-c"><input class="mono" type="password" id="tmPass" placeholder="не менять" style="width:150px"></div></div>
     <div class="srow"><div class="srow-l"><div class="srow-t">Лимит объёма, ГБ${tipHTML("Максимальный размер бэкапов Time Machine (мягкий лимит fruit). 0 — без лимита.")}</div></div><div class="srow-c"><input class="mono" type="number" min="0" id="tmQuota" value="${st.quota_gb||0}" style="width:90px"></div></div>
@@ -5708,7 +5711,6 @@ function winSettings(initTab){openWin("__set","Настройки",body=>{
   {id:"look",name:"Оформление",ic:"cog"},
   {id:"files",name:"Файлы",ic:"folder"},
   {id:"notify",name:"Уведомления",ic:"bell"},
-  {id:"timemachine",name:"Time Machine",ic:"sync"},
   {id:"system",name:"Система",ic:"activity"},
   {id:"motd",name:"Приветствие SSH",ic:"term"},
   {id:"maint",name:"Обслуживание",ic:"heart"},
@@ -5717,6 +5719,7 @@ function winSettings(initTab){openWin("__set","Настройки",body=>{
   {id:"usb",name:"USB-импорт",ic:"usb"},
   {id:"backup",name:"Бэкап настроек",ic:"save"},
   {id:"pi",name:"Raspberry Pi",ic:"cpu"},
+  {id:"timemachine",name:"Time Machine",ic:"sync"},
  ];
  const FN={look:lookTab,files:filesTab,notify:notifyTab,timemachine:timemachineTab,system:systemTab,motd:motdTab,maint:maintTab,network:networkTab,security:securityTab,usb:usbTab,backup:backupTab,pi:piTab};
  let footMo=null;
