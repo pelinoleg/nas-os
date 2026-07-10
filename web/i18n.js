@@ -142,7 +142,7 @@ window.NAS_I18N = { en: {
 "Как заходить в папку. Одинарный — сразу. Двойной — клик выделяет, вход по двойному (как в настольных ОС).": "How to enter a folder. Single — right away. Double — a click selects, entry on double (like desktop OSes).",
 "Как открывать файл. Одинарный — сразу. Двойной — клик выделяет, открытие по двойному (как в настольных ОС).": "How to open a file. Single — right away. Double — a click selects, opening on double (like desktop OSes).",
 "Прозрачность иконок": "Icon opacity",
-"Плотность иконок в доке. 100% — как есть, меньше — иконки полупрозрачные.": "Dock icon density. 100% — as is, less — semi-transparent icons.",
+"Плотность иконок и метрик в верхней панели. 100% — как есть, меньше — полупрозрачные.": "Density of icons and metrics in the top bar. 100% — as is, less — semi-transparent.",
 "Одинарный клик": "Single click",
 "Двойной клик": "Double click",
 "Одинарный — открывать сразу. Двойной — одиночный клик выделяет, открывает двойной (как в настольных ОС).": "Single — open right away. Double — a single click selects, a double click opens (like desktop OSes).",
