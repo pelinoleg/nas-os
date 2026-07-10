@@ -1207,6 +1207,44 @@ _SCR_ORDER = ["percentage_used", "available_spare", "data_units_written", "media
               "reallocated_sector_ct", "current_pending_sector", "offline_uncorrectable",
               "udma_crc_error_count", "unsafe_shutdowns", "power_cycles", "power_cycle_count"]
 
+# Вердикт по каждому показателю (good/warn/bad/info) + человеческая подсказка.
+# level(value) → уровень; чистые числа сами по себе не читаются, поэтому объясняем.
+_SCR_META = {
+    "percentage_used": ("Износ ресурса записи SSD. До ~80% спокойно, ближе к 100% — планируйте замену.",
+                        lambda v: "good" if v < 70 else "warn" if v < 90 else "bad"),
+    "available_spare": ("Запас резервных блоков SSD. 100% — идеально; падение к 10% — тревога.",
+                        lambda v: "good" if v > 20 else "warn" if v > 10 else "bad"),
+    "media_errors": ("Неисправимые ошибки носителя. Норма — 0.", lambda v: "good" if v == 0 else "bad"),
+    "num_err_log_entries": ("Записей в логе ошибок контроллера. Норма — 0.", lambda v: "good" if v == 0 else "warn"),
+    "critical_warning": ("Критические предупреждения NVMe. Норма — 0.", lambda v: "good" if v == 0 else "bad"),
+    "reallocated_sector_ct": ("Переназначенные сбойные секторы. Норма — 0; рост — износ поверхности.",
+                              lambda v: "good" if v == 0 else "warn"),
+    "current_pending_sector": ("Секторы, ждущие переназначения. Норма — 0; ненулевое — плохой признак.",
+                               lambda v: "good" if v == 0 else "bad"),
+    "offline_uncorrectable": ("Неисправимые секторы. Норма — 0.", lambda v: "good" if v == 0 else "bad"),
+    "udma_crc_error_count": ("Ошибки передачи по кабелю SATA — обычно виноват кабель/контакт, а не диск.",
+                             lambda v: "good" if v == 0 else "warn"),
+    "unsafe_shutdowns": ("Сколько раз диск обесточили без корректного отключения. Не поломка, но много — повод к ИБП.",
+                         lambda v: "info"),
+    "power_cycles": ("Число включений диска. Информационно.", lambda v: "info"),
+    "power_cycle_count": ("Число включений диска. Информационно.", lambda v: "info"),
+    "data_units_written": ("Всего записано на диск. Информационно (ресурс TBW зависит от модели).",
+                           lambda v: "info"),
+    "temperature": ("Текущая температура.", lambda v: "good" if v < 60 else "warn" if v < 70 else "bad"),
+}
+
+def _scr_verdict(key, value, status):
+    """Уровень показателя: сначала мнение Scrutiny (флаг status), затем наши пороги."""
+    hint, lvlfn = _SCR_META.get(key, ("", None))
+    if status:                              # Scrutiny сам пометил атрибут проблемным
+        return "bad", hint
+    if lvlfn is not None and isinstance(value, (int, float)):
+        try:
+            return lvlfn(value), hint
+        except Exception:
+            pass
+    return "info", hint
+
 def scrutiny_device(serial):
     """Детальные атрибуты одного диска из Scrutiny: износ, запас, ошибки, история
     температуры, помеченные проблемные атрибуты. Нет Scrutiny/данных → {ok:False}."""
@@ -1230,11 +1268,14 @@ def scrutiny_device(serial):
             if a is None or k in seen:
                 continue
             seen.add(k)
-            val = a.get("value")
-            if k == "data_units_written" and isinstance(val, (int, float)):
-                val = round(val * 512000 / 1e12, 2)          # NVMe: единицы по 512000 байт → TB
+            raw = a.get("value")
+            val = raw
+            if k == "data_units_written" and isinstance(raw, (int, float)):
+                val = round(raw * 512000 / 1e12, 2)          # NVMe: единицы по 512000 байт → TB
+            level, hint = _scr_verdict(k, raw, a.get("status", 0))
             nm, unit = _SCR_NAMES.get(k, (k, ""))
-            head.append({"name": nm, "value": val, "unit": unit, "status": a.get("status", 0)})
+            head.append({"name": nm, "value": val, "unit": unit, "status": a.get("status", 0),
+                         "level": level, "hint": hint})
         flagged = [{"name": _SCR_NAMES.get(k, (k, ""))[0], "value": v.get("value")}
                    for k, v in attrs.items() if v.get("status")]
         hist = [s.get("temp") for s in reversed(results) if isinstance(s.get("temp"), (int, float))][-60:]

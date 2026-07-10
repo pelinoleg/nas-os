@@ -1791,6 +1791,7 @@ window.NAS_I18N = { en: {
 "обновлений образов в стеке": "image updates in the stack",
 "Обновления образов": "Image updates",
 "Доступно обновление образа": "Image update available",
+"Нажмите для деталей.": "Click for details.",
 "Обновление образа": "Image update",
 "Обновление:": "Update:",
 "доступна новая версия образа.": "a newer image version is available.",

@@ -612,6 +612,9 @@
   /* чип «есть обновление образа» (WUD) — янтарный, компактный */
   .cupd{display:inline-flex;align-items:center;gap:2px;flex:none;font-size:10.5px;font-weight:600;color:var(--warn);background:var(--warn-soft,rgba(224,145,60,.15));padding:1px 6px;border-radius:8px;white-space:nowrap;margin-left:2px}
   .cupd svg{width:10px;height:10px}
+  .cupd b{font-weight:700}.cupd .uv-new{color:var(--warn)}
+  /* крупный чип в списке контейнеров стека */
+  .cupd-lg{font-size:12px;padding:3px 9px;gap:4px}.cupd-lg svg{width:12px;height:12px}
   .upd-vers{display:flex;align-items:center;gap:12px;justify-content:center;margin:6px 0 16px;font-family:var(--mono);font-size:15px}
   .upd-vers .uv-cur{color:var(--dim)}.upd-vers .uv-new{color:var(--warn);font-weight:700}
   .upd-vers .uv-arr{display:flex;color:var(--mut)}
@@ -699,10 +702,15 @@
   .dd-scr-h{display:flex;align-items:center;gap:7px;font-weight:600;font-size:13px;margin-bottom:11px}
   .dd-scr-sub{font-weight:500;font-size:11.5px;color:var(--dim);margin-left:auto}
   .dd-scr-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(108px,1fr));gap:8px}
-  .scr-cell{background:var(--glass);border-radius:var(--r-sm);padding:9px 10px;display:flex;flex-direction:column;gap:3px}
-  .scr-cell.bad{background:var(--danger-soft)}
+  .scr-cell{background:var(--glass);border-radius:var(--r-sm);padding:9px 10px;display:flex;flex-direction:column;gap:3px;cursor:default}
+  .scr-cell .sc-top{display:flex;align-items:center;justify-content:space-between;gap:6px}
+  .scr-cell .sc-ic{display:flex;flex:none}
   .scr-cell .sc-v{font-size:16px;font-weight:680;letter-spacing:-.01em}.scr-cell .sc-v i{font-size:11px;font-weight:600;color:var(--dim);font-style:normal;margin-left:1px}
   .scr-cell .sc-n{font-size:10.5px;color:var(--dim);line-height:1.2}
+  /* вердикт показателя: цвет иконки + лёгкая заливка на проблемных */
+  .scr-good .sc-ic{color:var(--good)} .scr-info .sc-ic{color:var(--mut)}
+  .scr-warn{background:var(--warn-soft,rgba(224,145,60,.13))} .scr-warn .sc-ic{color:var(--warn)}
+  .scr-bad{background:var(--danger-soft)} .scr-bad .sc-ic{color:var(--danger)} .scr-bad .sc-v{color:var(--danger)}
   .dd-scr-warn{margin-top:9px;font-size:11.5px;color:var(--danger);display:flex;align-items:center;gap:6px}
   .dd-head{display:flex;align-items:center;gap:13px;margin-bottom:16px}
   .dd-ic{width:44px;height:44px;border-radius:12px;display:grid;place-items:center;color:#fff;flex:none;box-shadow:inset 0 1px 0 rgba(255,255,255,.22)}
@@ -2742,7 +2750,11 @@ function diskDetail(x,reload){
      if(!d||!d.ok){sc.remove();return;}
      sub.textContent=d.status===0?"диск здоров":"внимание — есть риск";
      sub.style.color=d.status===0?"var(--good)":"var(--danger)";
-     const cell=(h)=>`<div class="scr-cell${h.status?" bad":""}"><span class="sc-v">${esc(""+(h.value!=null?h.value:"—"))}${h.unit?`<i>${esc(h.unit)}</i>`:""}</span><span class="sc-n">${esc(h.name)}</span></div>`;
+     const lvlIco={good:"ok",warn:"warn",bad:"warn",info:"info"};
+     const cell=(h)=>{const lv=h.level||"info";
+       return `<div class="scr-cell scr-${lv}"${h.hint?` title="${att(h.hint)}"`:""}>
+         <span class="sc-top"><span class="sc-v">${esc(""+(h.value!=null?h.value:"—"))}${h.unit?`<i>${esc(h.unit)}</i>`:""}</span><span class="sc-ic">${svg(lvlIco[lv]||"info",13)}</span></span>
+         <span class="sc-n">${esc(h.name)}</span></div>`;};
      grid.innerHTML=(d.headline||[]).map(cell).join("");
      if((d.flagged||[]).length)grid.insertAdjacentHTML("afterend",`<div class="dd-scr-warn">${svg("warn",12)} Проблемные атрибуты: ${d.flagged.map(f=>esc(f.name)).join(", ")}</div>`);
    });
@@ -3421,7 +3433,8 @@ function dkStackPane(tc,s,reload){
  (s.containers||[]).forEach(c=>{const run=c.state==="running";let cls=run?"run":"dead",txt=run?"работает":esc(c.state||"—");
    if(c.health==="unhealthy"){cls="fail";txt="нездоров";}else if(c.health==="starting"){txt="запуск…";}else if((c.health||"").indexOf("exit:")===0){txt="вышел ("+c.health.slice(5)+")";}
    const upd=WUD[c.name];
-   const row=el(`<div class="stk-cont"><span class="stbadge ${cls}" title="${att(c.status||'')}">${txt}</span><span class="cn" title="${att(c.image)}">${esc(c.name)}</span>${wudChip(c.name)}<span class="cstat" data-cname="${att(c.name)}"></span><span style="flex:none;display:flex;gap:6px">${portLinks(c.ports)}</span><button class="iconbtn" data-c="menu" title="Действия с контейнером">${svg("cog",14)}</button></div>`);
+   const row=el(`<div class="stk-cont"><span class="stbadge ${cls}" title="${att(c.status||'')}">${txt}</span><span class="cn" title="${att(c.image)}">${esc(c.name)}</span>${wudChip(c.name,true)}<span class="cstat" data-cname="${att(c.name)}"></span><span style="flex:none;display:flex;gap:6px">${portLinks(c.ports)}</span><button class="iconbtn" data-c="menu" title="Действия с контейнером">${svg("cog",14)}</button></div>`);
+   const uc=row.querySelector(".cupd");if(uc&&upd){uc.style.cursor="pointer";uc.onclick=e=>{e.stopPropagation();updateInfoDlg(c.name,upd);};}
    const menu=[{label:run?"Остановить":"Запустить",ic:svg(run?"stop":"play",16),act:()=>contAct(c.name,run?"stop":"start",reload)},
      {label:"Перезапустить",ic:svg("refresh",16),act:()=>contAct(c.name,"restart",reload)}];
    if(upd)menu.unshift({label:`Обновление: ${upd.current||"?"} → ${upd.latest||"?"}${upd.diff?" ("+upd.diff+")":""}`,ic:svg("arrowup",16),act:()=>updateInfoDlg(c.name,upd)},{sep:1});
@@ -6219,8 +6232,9 @@ async function refreshWud(){
  try{const r=await api("/api/wud");const m={};if(r&&r.ok)(r.updates||[]).forEach(u=>{if(u.name)m[u.name]=u;});WUD=m;}
  catch(e){WUD={};}
  return WUD;}
-function wudChip(name){const u=WUD[name];if(!u)return "";
- return `<span class="cupd" title="${att("Доступно обновление образа: "+(u.current||"?")+" → "+(u.latest||"?")+(u.diff?" ("+u.diff+")":""))}">${svg("arrowup",10)}${u.latest?" "+esc(u.latest):""}</span>`;}
+function wudChip(name,big){const u=WUD[name];if(!u)return "";
+ const tip="Доступно обновление образа"+(u.diff?" ("+u.diff+")":"")+". Нажмите для деталей.";
+ return `<span class="cupd${big?" cupd-lg":""}" title="${att(tip)}">${svg("arrowup",big?12:10)} <b>${esc(u.current||"?")}</b> → <b class="uv-new">${esc(u.latest||"?")}</b></span>`;}
 async function pollStacks(){const box=document.getElementById("wg-docker");if(!box)return;
  await refreshWud();
  const r=await api("/api/stacks");const st=(r&&r.stacks)||[];
