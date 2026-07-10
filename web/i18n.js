@@ -1771,6 +1771,7 @@ window.NAS_I18N = { en: {
 "шт.": "pcs.",
 "Ничего не удалено — проверьте источник (не стёрли/размонтировали ли его).": "Nothing was deleted — check the source (did you wipe or unmount it?).",
 "пул переподключён": "pool reconnected",
+"переподключён": "reconnected",
 "обновлён до текущей версии": "updated to the current version",
 "убран брошенный стейджинг": "abandoned staging removed",
 "конфиг переведён в формат профилей": "config migrated to the profiles format",

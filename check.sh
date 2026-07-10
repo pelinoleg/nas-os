@@ -144,7 +144,31 @@ for words, ex in bad[:12]:
     print("      осталось %s  ⟵ %s" % (", ".join(words), ex), file=sys.stderr)
 if len(bad) > 12:
     print("      … ещё %d" % (len(bad) - 12), file=sys.stderr)
-sys.exit(1 if bad else 0)
+
+# серверные строки уведомлений (fire/log_event/notify_event/push_notify) уходят в
+# Pushover через серверный tr() и в панель через клиентский — оба берут тот же
+# словарь, поэтому непереведённый фрагмент здесь = русская Pushover-нотификация.
+import ast
+NOTIFY = {"fire", "log_event", "notify_event", "push_notify"}
+nstr = set()
+for node in ast.walk(ast.parse(open("nas-web.py", encoding="utf-8").read())):
+    if isinstance(node, ast.Call) and isinstance(node.func, (ast.Name, ast.Attribute)):
+        nm = node.func.id if isinstance(node.func, ast.Name) else node.func.attr
+        if nm in NOTIFY:
+            for a in node.args:
+                for sub in ast.walk(a):
+                    if isinstance(sub, ast.Constant) and isinstance(sub.value, str):
+                        nstr.add(sub.value)
+nbad = []
+for s in nstr:
+    if CY.search(s):
+        left = CY.findall(tr(re.sub(r"%[sd]|«|»", "", s)))
+        if [w for w in left if len(w) > 1]:
+            nbad.append((sorted(set(left))[:4], s[:60].replace("\n", " ")))
+for words, ex in nbad[:12]:
+    print("      [уведомление] осталось %s  ⟵ %s" % (", ".join(words), ex), file=sys.stderr)
+
+sys.exit(1 if bad or nbad else 0)
 PY
 fi
 
