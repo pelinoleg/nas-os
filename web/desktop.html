@@ -260,7 +260,11 @@
     .clock small{display:none}
     .tray .pill:nth-child(3){display:none}
     .desk{inset:40px 0 calc(60px + env(safe-area-inset-bottom)) 0;overflow-y:auto}
-    .apps{position:static;inset:auto;padding:16px 16px 6px;grid-template-columns:repeat(auto-fill,78px);gap:14px 4px}
+    /* на телефоне иконки фиксированно мелкие и НЕ следуют desktop-настройке размера
+       (--desk-icon переопределяем на .apps → перебивает инлайн с html для этого
+       поддерева); сетка = ширина плитки, чтобы не налезали */
+    .apps{position:static;inset:auto;padding:16px 16px 6px;--desk-icon:44px;grid-template-columns:repeat(auto-fill,calc(var(--desk-icon,44px) + 26px));gap:14px 4px}
+    .app{width:calc(var(--desk-icon,44px) + 26px);padding:8px 3px}
     .rail{position:static;width:auto;overflow:visible;display:flex;flex-direction:column;gap:12px;padding:6px 16px 20px}
     .win{inset:40px 0 calc(60px + env(safe-area-inset-bottom)) 0!important;width:auto!important;height:auto!important;border-radius:0;max-width:100%}
     .win.max{inset:40px 0 calc(60px + env(safe-area-inset-bottom)) 0!important}
@@ -357,7 +361,7 @@
     .set-pane{padding:18px 18px}
     .desk{overflow-y:auto}
     /* мельче иконки рабочего стола на планшете */
-    .apps{position:static;inset:auto;padding:20px 20px 6px;--desk-icon:46px;grid-template-columns:repeat(auto-fill,72px);gap:14px 6px}
+    .apps{position:static;inset:auto;padding:20px 20px 6px;--desk-icon:46px;grid-template-columns:repeat(auto-fill,calc(var(--desk-icon,46px) + 26px));gap:14px 6px}
     .app{width:calc(var(--desk-icon,46px) + 26px);padding:8px 3px}
     .app .lbl{font-size:11px}
     .rail{position:static;width:auto;overflow:visible;display:grid;
