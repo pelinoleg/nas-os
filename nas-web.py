@@ -42,6 +42,42 @@ def _read(path, default=""):
     except OSError:
         return default
 
+def _json_save(path, obj, indent=None):
+    """Write JSON through a temp file + rename. A plain open("w") truncates the file
+    first, so a power cut mid-write leaves valid-looking garbage — and every loader
+    here answers a parse error with silent defaults, quietly wiping the user's
+    settings. Rename is atomic, so the old file survives until the new one is whole."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(obj, f, ensure_ascii=False, indent=indent)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+
+_BAD_CONFIGS = []      # basenames of corrupt config files, drained by monitor_tick
+
+def _json_load_strict(path, default):
+    """Missing file → default (normal). Corrupt file → keep it aside as .bad and
+    queue a warning: silently falling back to defaults is how settings appear to
+    'turn themselves off'. Reporting is deferred to monitor_tick because log_event
+    reads monitor.json through this very function — logging here would recurse."""
+    try:
+        with open(path) as f:
+            return json.load(f)
+    except OSError:
+        return default
+    except ValueError:
+        try:
+            os.replace(path, path + ".bad")
+        except OSError:
+            pass
+        name = os.path.basename(path)
+        if name not in _BAD_CONFIGS:
+            _BAD_CONFIGS.append(name)
+        sys.stderr.write("nas-web: %s повреждён, сохранён как %s.bad\n" % (name, name))
+        return default
+
 def cpu_percent(sample=0.20):
     def snap():
         parts = _read("/proc/stat").splitlines()[0].split()[1:]
@@ -1066,17 +1102,11 @@ def load_favs():
     except (OSError, json.JSONDecodeError):
         return []
 def save_favs(d):
-    os.makedirs(NAS_CONFIG, exist_ok=True)
-    with open(FAV_FILE, "w") as f:
-        json.dump(d, f, ensure_ascii=False, indent=2)
+    _json_save(FAV_FILE, d, indent=2)
 
 SETTINGS_FILE = os.path.join(NAS_CONFIG, "desktop.json")
 def load_settings():
-    try:
-        with open(SETTINGS_FILE) as f:
-            return json.load(f)
-    except (OSError, json.JSONDecodeError):
-        return {}
+    return _json_load_strict(SETTINGS_FILE, {})
 def save_settings(d):
     # MERGE, не перезапись: частичное обновление (например {lang} из мастера)
     # не должно стирать остальные настройки
@@ -1091,15 +1121,9 @@ def save_settings(d):
 
 WINPOS_FILE = os.path.join(NAS_CONFIG, "winpos.json")
 def load_winpos():
-    try:
-        with open(WINPOS_FILE) as f:
-            return json.load(f)
-    except (OSError, json.JSONDecodeError):
-        return {}
+    return _json_load_strict(WINPOS_FILE, {})
 def save_winpos(d):
-    os.makedirs(NAS_CONFIG, exist_ok=True)
-    with open(WINPOS_FILE, "w") as f:
-        json.dump(d, f, ensure_ascii=False, indent=2)
+    _json_save(WINPOS_FILE, d, indent=2)
 
 def stats():
     iface = default_iface()
@@ -1166,6 +1190,7 @@ def _def_monitor():
         "temp":        {"on": True,  "priority": 1, "threshold": 75},
         "throttle":    {"on": True,  "priority": 1},
         "undervolt":   {"on": True,  "priority": 2},
+        "cfg_corrupt": {"on": True,  "priority": 1},
         "mem":         {"on": False, "priority": 0, "threshold": 92},
         "swap":        {"on": False, "priority": 0, "threshold": 60},
         "load":        {"on": False, "priority": 0, "threshold": 8},
@@ -1234,9 +1259,8 @@ def _monitor_defaults_desk(d):
 
 def load_monitor():
     d = _def_monitor()
-    try:
-        with open(MONITOR_FILE) as f:
-            saved = json.load(f)
+    saved = _json_load_strict(MONITOR_FILE, {})
+    if isinstance(saved, dict):
         for k, v in saved.items():
             if k == "events" and isinstance(v, dict):
                 for ek, ev in v.items():
@@ -1244,8 +1268,6 @@ def load_monitor():
                         d["events"].setdefault(ek, {}).update(ev)
             else:
                 d[k] = v
-    except (OSError, ValueError):
-        pass
     return _monitor_defaults_desk(d)
 
 def save_monitor(d):
@@ -1265,9 +1287,7 @@ def save_monitor(d):
                 for bk in ("on", "desk"):
                     if bk in cur["events"][ek]:
                         cur["events"][ek][bk] = bool(cur["events"][ek][bk])
-    os.makedirs(NAS_CONFIG, exist_ok=True)
-    with open(MONITOR_FILE, "w") as f:
-        json.dump(cur, f)
+    _json_save(MONITOR_FILE, cur)
     return cur
 
 def load_notify():
@@ -1376,7 +1396,8 @@ for _k in ("temp", "throttle", "undervolt", "mem", "swap", "load", "sustained_he
            "fan_stall", "proc_hog", "thermal_guard"):
     _EVENT_KIND[_k] = "power"
 for _k in ("svcfail", "container", "container_loop", "cron_failed", "boot",
-           "reboot_req", "updates", "sec_updates", "time_drift", "weekly", "daily_summary"):
+           "reboot_req", "updates", "sec_updates", "time_drift", "weekly",
+           "daily_summary", "cfg_corrupt"):
     _EVENT_KIND[_k] = "svc"
 for _k in ("panel_new", "panel_fail", "ssh_login"):
     _EVENT_KIND[_k] = "access"
@@ -1915,6 +1936,14 @@ def monitor_tick():
         if cfg.get("enabled") and ev.get("boot", {}).get("on"):
             push_notify("NAS: система запущена", "%s снова в сети" % host, pri("boot"))
         _MON_BOOT_SENT = True
+
+    # --- повреждённые файлы настроек (очередь набита загрузчиком) ---
+    while _BAD_CONFIGS:
+        bad = _BAD_CONFIGS.pop(0)
+        fire("cfg_corrupt:%s" % bad, "NAS: файл настроек повреждён",
+             "%s не читается — сохранён как %s.bad, применены значения по умолчанию. "
+             "Проверьте настройки." % (bad, bad), pri("cfg_corrupt"),
+             ev_name="cfg_corrupt", lvl="warn")
 
     # --- USB авто-импорт: итоги копирования из журнала импорта ---
     imp = _safe(lambda: _usb_import_events(_MON_USBIMP))
@@ -3261,11 +3290,9 @@ def load_maintenance():
          "thermal_mode": "warn",      # off | warn | auto (активная термозащита)
          "thermal_hot": 80,           # порог «горячо», °C
          "thermal_crit": 85}          # порог «критично» (в auto — стоп контейнера)
-    try:
-        with open(MAINT_FILE) as f:
-            d.update(json.load(f))
-    except (OSError, ValueError):
-        pass
+    saved = _json_load_strict(MAINT_FILE, {})
+    if isinstance(saved, dict):
+        d.update(saved)
     return d
 
 _ALIAS_RESERVED = ("/bin", "/boot", "/dev", "/etc", "/home", "/lib", "/media", "/mnt",
@@ -3391,9 +3418,7 @@ def save_maintenance(d):
     if cur.get("thermal_crit", 85) <= cur.get("thermal_hot", 80):
         cur["thermal_crit"] = cur.get("thermal_hot", 80) + 3
     try:
-        os.makedirs(NAS_CONFIG, exist_ok=True)
-        with open(MAINT_FILE, "w") as f:
-            json.dump(cur, f)
+        _json_save(MAINT_FILE, cur)
     except OSError:
         pass
     out = dict(cur)

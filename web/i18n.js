@@ -1739,6 +1739,8 @@ window.NAS_I18N = { en: {
 "Троттлинг / просадка питания": "Throttling / power sag",
 "Троттлинг частоты": "Frequency throttling",
 "Просадка питания": "Undervoltage",
+"Файл настроек повреждён": "Settings file corrupted",
+"конфиг не читается — применены значения по умолчанию": "config unreadable — defaults applied",
 "Троттлинг был": "Throttling occurred",
 "Троттлинг сейчас": "Throttling now",
 "Тюнинг Pi": "Pi Tuning",
