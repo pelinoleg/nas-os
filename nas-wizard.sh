@@ -1794,7 +1794,7 @@ stage_pi() {
         "governor" "Адаптивный CPU governor по температуре" OFF \
         "eeprom"   "Обновить прошивку EEPROM (rpi-eeprom)" OFF \
         "wifips"   "Отключить Wi-Fi power-save (стабильность)" OFF \
-        "watchdog" "Watchdog: авто-ребут при зависании" OFF)" || { info "отменено"; return 0; }
+        "watchdog" "Watchdog: авто-ребут при зависании" ON)" || { info "отменено"; return 0; }
 
     local sel; sel="$(checklist_selected "$raw")"
     local need_reboot=0
@@ -2538,6 +2538,10 @@ stage_system_apply() {
     local svc
     for svc in cockpit.socket docker; do enable_service "$svc"; done
     systemctl list-unit-files fstrim.timer >/dev/null 2>&1 && enable_service fstrim.timer
+    # Hardware watchdog: if the kernel hangs, the Pi auto-reboots instead of sitting
+    # dead until someone hits the power button. Applied by default for reliability
+    # (still listed in pi-tuning so it can be toggled). Harmless without a watchdog device.
+    pi_watchdog
     id -nG "$TARGET_USER" 2>/dev/null | tr ' ' '\n' | grep -qx docker || run usermod -aG docker "$TARGET_USER"
     run mkdir -p "$STORAGE_MNT" "$DOCKER_ROOT" "$SERVICES_SRC"
     if [ ! -d "$NAS_CONFIG" ]; then run mkdir -p "$NAS_CONFIG/scripts"; run chown -R "$TARGET_USER:$TARGET_USER" "$NAS_CONFIG"; fi
