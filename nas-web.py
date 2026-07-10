@@ -1618,7 +1618,57 @@ def save_notify(user, token):
         return {"ok": False, "log": str(e)}
     return {"ok": True}
 
+# --------------------------------------------------------------------------- #
+#  Серверный перевод тем же словарём, что и клиент (web/i18n.js). Нужен для того,
+#  что уходит МИМО браузера — прежде всего Pushover: там строки формируются на
+#  сервере по-русски и клиентский nasTr к ним не применяется. Правило переноса
+#  один в один: перевод по «целым словам» (границы — не-кириллица), длинные ключи
+#  приоритетнее. Язык берём из настроек (desktop.json:lang), кэшируем словарь.
+# --------------------------------------------------------------------------- #
+_I18N = None
+_I18N_RX = None
+_i18n_lock = threading.Lock()
+
+def _i18n_load():
+    global _I18N, _I18N_RX
+    if _I18N is not None:
+        return
+    d = {}
+    try:
+        src = _read(os.path.join(WEB_DIR, "i18n.js"))
+        for m in re.finditer(r'"((?:\\.|[^"\\])*)"\s*:\s*"((?:\\.|[^"\\])*)"', src):
+            try:
+                k = json.loads('"' + m.group(1) + '"')
+                v = json.loads('"' + m.group(2) + '"')
+            except ValueError:
+                continue
+            if k and re.search(r"[А-Яа-яЁё]", k):      # ключ обязан быть русским (не шум из IIFE)
+                d[k] = v
+    except Exception:
+        d = {}
+    if d:
+        alts = "|".join(re.escape(k) for k in sorted(d, key=len, reverse=True))
+        try:
+            _I18N_RX = re.compile(r"(?<![А-Яа-яЁё])(?:" + alts + r")(?![А-Яа-яЁё])")
+        except re.error:
+            _I18N_RX = None
+    _I18N = d
+
+def tr(text, lang=None):
+    if not isinstance(text, str) or not text:
+        return text
+    if lang is None:
+        lang = (load_settings().get("lang") or "en")
+    if lang != "en" or not re.search(r"[А-Яа-яЁё]", text):
+        return text
+    with _i18n_lock:
+        _i18n_load()
+    if not _I18N_RX:
+        return text
+    return _I18N_RX.sub(lambda m: _I18N.get(m.group(0), m.group(0)), text)
+
 def push_notify(title, msg, priority=0):
+    title = tr(title); msg = tr(msg)      # Pushover идёт мимо клиента — переводим тут
     try:
         priority = max(-2, min(2, int(priority)))
     except (ValueError, TypeError):
