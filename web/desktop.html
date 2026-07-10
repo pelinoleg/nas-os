@@ -1303,14 +1303,23 @@
   .op-prog .op-track{height:6px;border-radius:999px;background:var(--card-2);overflow:hidden}
   .op-prog .op-fill{height:100%;background:var(--accent);width:0;transition:width .18s}
   /* terminal */
-  .term-wrap{display:flex;height:100%;background:var(--tbg,#0a0f17);overflow:hidden}
+  /* встроенные моноширинные шрифты для терминала (свои файлы, работают офлайн и на любом
+     устройстве); @font-face качает woff2 только когда шрифт реально выбран (font-display:swap) */
+  @font-face{font-family:"JetBrains Mono";src:url("/fonts/jetbrains-mono-400.woff2") format("woff2");font-weight:400;font-display:swap}
+  @font-face{font-family:"JetBrains Mono";src:url("/fonts/jetbrains-mono-700.woff2") format("woff2");font-weight:700;font-display:swap}
+  @font-face{font-family:"Fira Code";src:url("/fonts/fira-code-400.woff2") format("woff2");font-weight:400;font-display:swap}
+  @font-face{font-family:"Fira Code";src:url("/fonts/fira-code-700.woff2") format("woff2");font-weight:700;font-display:swap}
+  @font-face{font-family:"Ubuntu Mono";src:url("/fonts/ubuntu-mono-400.woff2") format("woff2");font-weight:400;font-display:swap}
+  @font-face{font-family:"Ubuntu Mono";src:url("/fonts/ubuntu-mono-700.woff2") format("woff2");font-weight:700;font-display:swap}
+  .term-wrap{display:flex;height:100%;background:#0a0f17;overflow:hidden}
   .term-main{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden}
   .term-tb{display:flex;align-items:center;gap:4px;padding:6px 12px;border-bottom:1px solid rgba(120,140,175,.14);background:rgba(255,255,255,.035)}
   .term-tb .t{font-family:var(--mono);font-size:11px;color:#8595ad;flex:1;display:flex;align-items:center;gap:8px}
   .term-tb .t .led{width:8px;height:8px;border-radius:50%;background:#43c08a;box-shadow:0 0 7px #43c08a}
   .term-tb button{border:none;background:none;color:#8595ad;padding:4px 9px;border-radius:7px;font-size:11px;font-family:var(--mono)}
   .term-tb button:hover{background:rgba(255,255,255,.08);color:#eaf0f8}
-  .term-stack{flex:1;min-height:0;position:relative;overflow:hidden}
+  /* только область терминала красится темой (вместе с внутренним паддингом) — не всё окно */
+  .term-stack{flex:1;min-height:0;position:relative;overflow:hidden;background:var(--tbg,#0a0f17)}
   .term-xt-wrap{position:relative;height:100%}
   .term-xt{height:100%;padding:8px 4px 8px 10px}
   .term-xt .xterm{height:100%}
@@ -3082,13 +3091,13 @@ const TERM_THEMES={
  matrix:{nm:"Matrix",background:"#001a08",foreground:"#3bff77",cursor:"#3bff77",cursorAccent:"#001a08",selectionBackground:"#0a3d1a",black:"#001a08",red:"#ff5555",green:"#3bff77",yellow:"#8bff8b",blue:"#33cc66",magenta:"#66ffaa",cyan:"#66ffcc",white:"#aaffbb",brightBlack:"#137a33"},
  slate:{nm:"Графит",background:"#1b1f27",foreground:"#d6deec",cursor:"#5aa9ff",cursorAccent:"#1b1f27",selectionBackground:"#31405688",black:"#1b1f27",red:"#e5544e",green:"#46b98a",yellow:"#e0a23b",blue:"#5aa9ff",magenta:"#8a7dff",cyan:"#34c6be",white:"#d6deec",brightBlack:"#5a6a84"},
 };
+// jetbrains/fira/ubuntu — встроены (см. @font-face), поэтому смена шрифта видна на любом
+// устройстве; sys/courier опираются на системные шрифты
 const TERM_FONTS={
- sys:{nm:"Системный моно",ff:'ui-monospace,"SF Mono","JetBrains Mono","Cascadia Code",Menlo,Consolas,monospace'},
- menlo:{nm:"Menlo / SF Mono",ff:'"SF Mono",Menlo,Monaco,monospace'},
- consolas:{nm:"Consolas / Cascadia",ff:'Consolas,"Cascadia Mono","Cascadia Code",monospace'},
- dejavu:{nm:"DejaVu Mono",ff:'"DejaVu Sans Mono","Liberation Mono",monospace'},
- ubuntu:{nm:"Ubuntu Mono",ff:'"Ubuntu Mono","DejaVu Sans Mono",monospace'},
- jetbrains:{nm:"JetBrains Mono",ff:'"JetBrains Mono","Fira Code",ui-monospace,monospace'},
+ sys:{nm:"Системный моно",ff:'ui-monospace,"SF Mono",Menlo,Consolas,"DejaVu Sans Mono",monospace'},
+ jetbrains:{nm:"JetBrains Mono",ff:'"JetBrains Mono",ui-monospace,monospace'},
+ fira:{nm:"Fira Code",ff:'"Fira Code",ui-monospace,monospace'},
+ ubuntu:{nm:"Ubuntu Mono",ff:'"Ubuntu Mono",ui-monospace,monospace'},
  courier:{nm:"Courier",ff:'"Courier New",Courier,monospace'},
 };
 const termTheme=()=>TERM_THEMES[SET.termTheme]||TERM_THEMES.midnight;
@@ -3137,7 +3146,7 @@ function winTerminal(initCmd,execC){openWin("__term","Терминал",(body,wi
    return true;}
  function newSession(initCmd,execC){const id=++seq;
    const holder=el(`<div class="term-xt-wrap" style="display:none"><div class="term-xt"></div></div>`);stack.appendChild(holder);
-   const tw=+SET.termWeight||400;const term=new Terminal({fontFamily:termFont(),fontSize:fs,fontWeight:tw,fontWeightBold:Math.min(tw+300,900),lineHeight:+SET.termLh||1.0,cursorBlink:true,scrollback:6000,theme:termTheme()});
+   const tw=+SET.termWeight||400;const term=new Terminal({fontFamily:termFont(),fontSize:fs,fontWeight:tw,fontWeightBold:(tw>=700?700:tw+300),lineHeight:+SET.termLh||1.0,cursorBlink:true,scrollback:6000,theme:termTheme()});
    let fit=null,search=null;try{fit=new FitAddon.FitAddon();term.loadAddon(fit);}catch(e){}try{search=new SearchAddon.SearchAddon();term.loadAddon(search);}catch(e){}
    try{term.loadAddon(new WebLinksAddon.WebLinksAddon((ev,uri)=>window.open(uri,"_blank")));}catch(e){}
    term.open(holder.querySelector(".term-xt"));
@@ -3164,10 +3173,14 @@ function winTerminal(initCmd,execC){openWin("__term","Терминал",(body,wi
  body.querySelector("#tfm").onclick=()=>setFs(fs-1);body.querySelector("#tfp").onclick=()=>setFs(fs+1);
  // оформление терминала: тема/шрифт/интервал/жирность — применяется на лету ко всем вкладкам.
  // --tbg красит всю обвязку (обёртка/тулбар/табы), поэтому старый фон не остаётся по бокам.
- function applyTermStyle(){const th=termTheme(),tw=+SET.termWeight||400;
-   body.style.setProperty("--tbg",th.background);body.style.background=th.background;
-   sessions.forEach(s=>{const o=s.term.options;o.theme=th;o.fontFamily=termFont();o.fontWeight=tw;o.fontWeightBold=Math.min(tw+300,900);o.lineHeight=+SET.termLh||1.0;
-     try{s.term.refresh(0,s.term.rows-1);}catch(e){}setTimeout(()=>refit(s),20);});}
+ function applyTermStyle(){const th=termTheme(),tw=+SET.termWeight||400,ff=termFont();
+   body.style.setProperty("--tbg",th.background);   // красит .term-stack (область терминала), не всё окно
+   const apply=()=>sessions.forEach(s=>{const o=s.term.options;o.theme=th;o.fontFamily=ff;o.fontWeight=tw;o.fontWeightBold=(tw>=700?700:tw+300);o.lineHeight=+SET.termLh||1.0;
+     try{s.term.refresh(0,s.term.rows-1);}catch(e){}setTimeout(()=>refit(s),20);});
+   apply();
+   // встроенный шрифт грузится асинхронно — после загрузки перемерить и перерисовать,
+   // иначе xterm остаётся на фолбэке (визуально «шрифт не сменился»)
+   try{if(document.fonts)document.fonts.load(`${tw} 16px ${ff}`).then(apply).catch(()=>{});}catch(e){}}
  // живой предпросмотр: та же тема/шрифт/жирность/интервал, что будут в терминале
  function termPrev(){const th=termTheme(),tw=+SET.termWeight||400,lh=+SET.termLh||1.15;
    const c=k=>th[k];
@@ -3188,7 +3201,7 @@ function winTerminal(initCmd,execC){openWin("__term","Терминал",(body,wi
      <div class="tcfg-themes" id="tcThemes">${sw}</div>
      <div class="tcfg-row"><label>Шрифт</label><select id="tcFont">${opt(TERM_FONTS,SET.termFont||"sys")}</select></div>
      <div class="tcfg-row"><label>Межстрочный</label><select id="tcLh">${[["1.0","плотно"],["1.15","обычно"],["1.3","просторно"],["1.5","широко"]].map(([v,l])=>`<option value="${v}"${clh===v?" selected":""}>${l}</option>`).join("")}</select></div>
-     <div class="tcfg-row"><label>Жирность</label><select id="tcW">${[["300","тонкий"],["400","обычный"],["500","средний"],["600","жирный"],["700","очень жирный"]].map(([v,l])=>`<option value="${v}"${cw===v?" selected":""}>${l}</option>`).join("")}</select></div>
+     <div class="tcfg-row"><label>Жирность</label><select id="tcW">${[["300","тонкий"],["400","обычный"],["700","жирный"]].map(([v,l])=>`<option value="${v}"${cw===v?" selected":""}>${l}</option>`).join("")}</select></div>
    </div>`);
    body.querySelector(".term-main").appendChild(pop);
    const upd=()=>{pop.querySelector("#tcPrev").innerHTML=termPrev();};

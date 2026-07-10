@@ -8028,7 +8028,7 @@ class H(BaseHTTPRequestHandler):
                  ".js": "application/javascript", ".svg": "image/svg+xml",
                  ".png": "image/png", ".ico": "image/x-icon",
                  ".webmanifest": "application/manifest+json", ".json": "application/json",
-                 ".webp": "image/webp"}.get(
+                 ".webp": "image/webp", ".woff2": "font/woff2"}.get(
                      os.path.splitext(full)[1], "application/octet-stream")
         with open(full, "rb") as f:
             data = f.read()
@@ -8042,6 +8042,8 @@ class H(BaseHTTPRequestHandler):
             self.send_header("Pragma", "no-cache")
         elif ext in (".js", ".css"):
             self.send_header("Cache-Control", "no-cache, must-revalidate")
+        elif ext == ".woff2":
+            self.send_header("Cache-Control", "public, max-age=31536000, immutable")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
