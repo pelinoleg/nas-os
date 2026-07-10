@@ -1827,6 +1827,7 @@ window.NAS_I18N = { en: {
 "каждые 12 ч": "every 12 h",
 "Авто-скан включён": "Auto-scan on",
 "Этот шаг уже настроен на системе. Повторный запуск обновит/дополнит — существующее не ломается.": "This step is already configured on the system. Running it again updates/extends it — nothing existing breaks.",
+"периодически пересканировать уже проанализированные тома, чтобы карта была свежей": "periodically rescan already-analyzed volumes so the map stays fresh",
 "Поставьте Scrutiny": "Install Scrutiny",
 "Оценка здоровья по Scrutiny": "Scrutiny health assessment",
 "диск здоров": "disk healthy",

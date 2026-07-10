@@ -5521,6 +5521,7 @@ function filesTab(tc){
   <div class="set-card"><div class="set-grp">Анализ места</div>
    ${row("Что занимает место","круговая карта диска (система / пул / USB), drill-down по папкам",`<button class="btn sm pri" id="fmDU">${svg("chartpie",14)} Открыть анализ</button>`)}
    ${row("Открывать по умолчанию","папка или диск, с которого стартует анализ (при запуске из дока)",`<input class="mono" id="duStart" value="${att(SET.duStart||"/mnt/storage")}" placeholder="/mnt/storage" style="width:210px">`)}
+   ${row("Авто-освежение в фоне","периодически пересканировать уже проанализированные тома, чтобы карта была свежей",`<select id="duAutoF" class="ev-prio"><option value="0">выкл</option><option value="6">каждые 6 ч</option><option value="12">каждые 12 ч</option><option value="24">ежедневно</option><option value="168">еженедельно</option><option value="720">ежемесячно</option></select>`)}
   </div>
   <div class="set-card"><div class="set-grp">Поведение</div>
    ${row("Стартовая папка","куда открывается менеджер при запуске",`<input class="mono" id="fmStart" value="${att(SET.fmStart||"/mnt/storage")}" placeholder="/mnt/storage" style="width:210px">`,"С какой папки открывается окно «Файлы». По умолчанию — хранилище /mnt/storage.")}
@@ -5548,6 +5549,8 @@ function filesTab(tc){
   </div>`;
  tc.querySelector("#fmDU").onclick=()=>winDiskUsage();
  {const ds=tc.querySelector("#duStart");if(ds)ds.onchange=()=>{SET.duStart=ds.value.trim()||"/mnt/storage";saveSettings();};}
+ {const da=tc.querySelector("#duAutoF");if(da){api("/api/maintenance").then(m=>{const h=((m&&m.maintenance)||{}).duscan_hours||0;da.value=[0,6,12,24,168,720].includes(h)?h:0;});
+  da.onchange=()=>{api("/api/maintenance",{method:"POST",body:JSON.stringify({maintenance:{duscan_hours:+da.value}})});toast(+da.value?"Авто-скан включён":"Авто-скан выключен");};}}
  // применить к уже открытому окну «Файлы» на лету (без перезагрузки)
  const apply=()=>{const w=OPEN.__files;if(w&&w._syncSettings)w._syncSettings();};
  const wireSeg=(id,fn)=>tc.querySelectorAll("#"+id+" button").forEach(b=>b.onclick=()=>{tc.querySelectorAll("#"+id+" button").forEach(x=>x.classList.toggle("on",x===b));fn(b.dataset.v);});
@@ -5851,8 +5854,6 @@ function maintTab(tc){
    <div class="srow" id="stThRow"><div class="srow-l"><div class="srow-t">Пороги температуры</div><div class="srow-d">«горячо» · «критично» (стоп в режиме Авто), °C</div></div><div class="srow-c"><input class="mono" id="stThHot" style="max-width:60px"><span style="color:var(--mut);font-size:12px">°C</span><input class="mono" id="stThCrit" style="max-width:60px"><span style="color:var(--mut);font-size:12px">°C</span></div></div>
    <div class="mon-row"><span>Сводка состояния${tipHTML("Раз в день или неделю NAS присылает короткую сводку (температура, память, место, здоровье, итог бэкапа). Доставка — через уведомления: вкл/выкл Pushover в Настройки → Уведомления → «Сводка состояния».")}</span><label class="tgl"><input type="checkbox" id="stSumOn"><span class="sl"></span></label></div>
    <div class="srow" id="stSumRow"><div class="srow-l"><div class="srow-t">Когда присылать</div></div><div class="srow-c"><div class="seg" id="stSumFreq"><button data-v="daily">Ежедневно</button><button data-v="weekly">Еженедельно</button></div><select id="stSumDow" class="ev-prio">${[["Mon","пн"],["Tue","вт"],["Wed","ср"],["Thu","чт"],["Fri","пт"],["Sat","сб"],["Sun","вс"]].map(([v,l])=>`<option value="${v}">${l}</option>`).join("")}</select><input class="mono" id="stSumTime" style="max-width:80px" placeholder="09:00"></div></div>
-   <div class="set-h">Анализ места (disk usage)</div>
-   <div class="srow"><div class="srow-l"><div class="srow-t">Авто-освежение в фоне${tipHTML("Периодически пересканировать УЖЕ проанализированные тома, чтобы карта места была свежей. Скан нагружает диск, поэтому реже суток обычно не нужно; один том за проход.")}</div><div class="srow-d">освежать тома, что вы уже сканировали</div></div><div class="srow-c"><select id="stDuAuto" class="ev-prio"><option value="0">выкл</option><option value="6">каждые 6 ч</option><option value="12">каждые 12 ч</option><option value="24">ежедневно</option><option value="168">еженедельно</option><option value="720">ежемесячно</option></select></div></div>
    <div class="set-h">Поведение панели</div>
    <div class="mon-row"><span>Автооткрывать центр операций${tipHTML("При старте загрузки/копирования поповер операций открывается сам. Выключите, если хотите открывать его только вручную с иконки в баре.")}</span><label class="tgl"><input type="checkbox" id="stOpsAuto"><span class="sl"></span></label></div>`;
   const sc=tc.querySelector("#stSmScan"),ss=tc.querySelector("#stSmShort"),sl=tc.querySelector("#stSmLong");
@@ -5897,9 +5898,6 @@ function maintTab(tc){
   sumFreq.querySelectorAll("button").forEach(b=>b.onclick=()=>{segSet(sumFreq,b.dataset.v);sumDow.style.display=(b.dataset.v==="weekly")?"":"none";saveRel();});
   const oa=tc.querySelector("#stOpsAuto");oa.checked=SET.opsAuto!==false;
   oa.onchange=()=>{SET.opsAuto=oa.checked;saveSettings();};
-  const du=tc.querySelector("#stDuAuto");
-  api("/api/maintenance").then(m=>{const h=((m&&m.maintenance)||{}).duscan_hours||0;if(du)du.value=[0,6,12,24,168,720].includes(h)?h:0;});
-  if(du)du.onchange=()=>{api("/api/maintenance",{method:"POST",body:JSON.stringify({maintenance:{duscan_hours:+du.value}})});toast(+du.value?"Авто-скан включён":"Авто-скан выключен");};
 }
 function systemTab(tc){withSysc(tc,()=>{const s=SYSC.system||{};
  tc.innerHTML=`${rebootBan()}

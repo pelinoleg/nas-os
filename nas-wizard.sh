@@ -2802,16 +2802,22 @@ mod_staticip() {
     echo "статический IP $ip назначен ($con)"
 }
 mod_cockpit_gui() {
-    # cockpit-machines есть в Debian; file-sharing/navigator — из репозитория 45drives
-    if ! dpkg -s cockpit-navigator >/dev/null 2>&1 && ! apt-cache show cockpit-navigator >/dev/null 2>&1; then
-        if [ "$DRY_RUN" -eq 1 ]; then
-            info "[DRY-RUN] подключить репозиторий 45drives (repo.45drives.com/setup)"
-        else
-            curl -fsSL https://repo.45drives.com/setup 2>>"$LOG" | bash >>"$LOG" 2>&1 || warn "не удалось подключить репозиторий 45drives"
+    # cockpit-machines/podman есть в Debian; file-sharing/navigator — из 45drives,
+    # но их сборок под arm64/trixie нет (репо отдаёт 404). Поэтому 45drives только
+    # если пакеты реально появятся, и ОБЯЗАТЕЛЬНО проверяем, что source-файл валиден
+    # (их setup-скрипт писал HTML-404 в .list и ломал весь apt).
+    local L45=/etc/apt/sources.list.d/45drives-enterprise-trixie.list
+    if [ "$DRY_RUN" -eq 0 ] && ! dpkg -s cockpit-navigator >/dev/null 2>&1; then
+        curl -fsSL https://repo.45drives.com/setup 2>>"$LOG" | bash >>"$LOG" 2>&1 || true
+        # если .list не начинается с "deb " — он битый (HTML/404), сносим, чтобы не ломать apt
+        if [ -f "$L45" ] && ! grep -qE '^\s*deb ' "$L45"; then
+            rm -f "$L45"; warn "45drives: сборок под эту платформу нет — репозиторий убран"
         fi
+        run apt-get update || true
     fi
-    install_packages "cockpit-gui" cockpit-machines cockpit-file-sharing cockpit-navigator
-    echo "Cockpit-модули установлены (доступные в репозитории)"
+    # ставим только то, что реально доступно в репозиториях (install_packages пропускает недоступное)
+    install_packages "cockpit-gui" cockpit-machines cockpit-podman cockpit-file-sharing cockpit-navigator
+    echo "Cockpit-модули: установлено доступное (storaged/networkmanager уже стоят)"
 }
 
 # (passwordless Cockpit убран: pam_permit пропускает без реальной аутентификации,
