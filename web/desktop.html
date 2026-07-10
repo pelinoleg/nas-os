@@ -694,6 +694,16 @@
   .dd-ic-pi{background:transparent!important;box-shadow:none!important}.dd-ic-pi img{width:100%;height:100%}
   .dm2-slots{font-size:11px;color:var(--mut);padding:10px 9px;line-height:1.5}
   .dm2-detail{flex:1;min-width:0;overflow-y:auto;padding:18px 20px}
+  /* Scrutiny: детальная сводка здоровья диска (сетка карточек) */
+  .dd-scr{margin:12px 0;padding:14px;border-radius:var(--r-md);background:var(--card);box-shadow:var(--sh-sm)}
+  .dd-scr-h{display:flex;align-items:center;gap:7px;font-weight:600;font-size:13px;margin-bottom:11px}
+  .dd-scr-sub{font-weight:500;font-size:11.5px;color:var(--dim);margin-left:auto}
+  .dd-scr-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(108px,1fr));gap:8px}
+  .scr-cell{background:var(--glass);border-radius:var(--r-sm);padding:9px 10px;display:flex;flex-direction:column;gap:3px}
+  .scr-cell.bad{background:var(--danger-soft)}
+  .scr-cell .sc-v{font-size:16px;font-weight:680;letter-spacing:-.01em}.scr-cell .sc-v i{font-size:11px;font-weight:600;color:var(--dim);font-style:normal;margin-left:1px}
+  .scr-cell .sc-n{font-size:10.5px;color:var(--dim);line-height:1.2}
+  .dd-scr-warn{margin-top:9px;font-size:11.5px;color:var(--danger);display:flex;align-items:center;gap:6px}
   .dd-head{display:flex;align-items:center;gap:13px;margin-bottom:16px}
   .dd-ic{width:44px;height:44px;border-radius:12px;display:grid;place-items:center;color:#fff;flex:none;box-shadow:inset 0 1px 0 rgba(255,255,255,.22)}
   .dd-hmain{flex:1;min-width:0}
@@ -2721,6 +2731,22 @@ function diskDetail(x,reload){
    if(poh!=null)facts.push(["Наработка",poh>=48?Math.round(poh/24)+" дн":poh+" ч"]);
    facts.push(["Scrutiny",x.scrutiny.status===0?"здоров":"внимание!"]);}
  box.appendChild(el(`<div class="dd-facts">${facts.map(([k,v])=>`<div><span>${k}</span><b>${esc(""+v)}</b></div>`).join("")}</div>`));
+ // Scrutiny: детальная сводка здоровья диска (износ, запас, ошибки, наработка) —
+ // грузим по серийнику, когда Scrutiny установлен. Это то, чего нет в базовом SMART.
+ if(x.scrutiny&&x.serial){
+   const sc=el(`<div class="dd-scr"><div class="dd-scr-h">${svg("heart",13)} Scrutiny <span class="dd-scr-sub">загрузка…</span></div><div class="dd-scr-grid"></div></div>`);
+   box.appendChild(sc);
+   api("/api/scrutiny/device?serial="+encodeURIComponent(x.serial)).then(d=>{
+     if(!document.body.contains(sc))return;
+     const sub=sc.querySelector(".dd-scr-sub"),grid=sc.querySelector(".dd-scr-grid");
+     if(!d||!d.ok){sc.remove();return;}
+     sub.textContent=d.status===0?"диск здоров":"внимание — есть риск";
+     sub.style.color=d.status===0?"var(--good)":"var(--danger)";
+     const cell=(h)=>`<div class="scr-cell${h.status?" bad":""}"><span class="sc-v">${esc(""+(h.value!=null?h.value:"—"))}${h.unit?`<i>${esc(h.unit)}</i>`:""}</span><span class="sc-n">${esc(h.name)}</span></div>`;
+     grid.innerHTML=(d.headline||[]).map(cell).join("");
+     if((d.flagged||[]).length)grid.insertAdjacentHTML("afterend",`<div class="dd-scr-warn">${svg("warn",12)} Проблемные атрибуты: ${d.flagged.map(f=>esc(f.name)).join(", ")}</div>`);
+   });
+ }
  // обслуживание: сон при простое (механические, не системный)
  if(x.rotational&&x.role!=="system"){
    const cur=x.spindown!=null?x.spindown:0;

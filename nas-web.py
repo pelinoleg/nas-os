@@ -1193,6 +1193,58 @@ def scrutiny_state():
         _scrutiny_cache["t"] = time.time(); _scrutiny_cache["data"] = out
     return out
 
+# Понятные имена ключевых SMART-атрибутов Scrutiny (NVMe + SATA) для крупной сводки.
+_SCR_NAMES = {
+    "percentage_used": ("Износ", "%"), "available_spare": ("Запас блоков", "%"),
+    "media_errors": ("Ошибки носителя", ""), "num_err_log_entries": ("Записей в логе ошибок", ""),
+    "critical_warning": ("Крит. предупреждений", ""), "unsafe_shutdowns": ("Небезопасных выключений", ""),
+    "power_cycles": ("Циклов питания", ""), "power_cycle_count": ("Циклов питания", ""),
+    "reallocated_sector_ct": ("Переназначено секторов", ""), "current_pending_sector": ("Ожидающих секторов", ""),
+    "offline_uncorrectable": ("Неисправимых секторов", ""), "udma_crc_error_count": ("Ошибок кабеля (CRC)", ""),
+    "data_units_written": ("Записано", "TB"), "temperature": ("Температура", "°C"),
+}
+_SCR_ORDER = ["percentage_used", "available_spare", "data_units_written", "media_errors",
+              "reallocated_sector_ct", "current_pending_sector", "offline_uncorrectable",
+              "udma_crc_error_count", "unsafe_shutdowns", "power_cycles", "power_cycle_count"]
+
+def scrutiny_device(serial):
+    """Детальные атрибуты одного диска из Scrutiny: износ, запас, ошибки, история
+    температуры, помеченные проблемные атрибуты. Нет Scrutiny/данных → {ok:False}."""
+    dev = scrutiny_state().get("devices", {}).get((serial or "").strip())
+    base = docker_service_url("scrutiny", 8080)
+    if not dev or not base:
+        return {"ok": False}
+    try:
+        req = urllib.request.Request(base + "/api/device/%s/details" % dev["uuid"],
+                                     headers={"Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=5) as r:
+            data = (json.loads(r.read().decode("utf-8", "replace")).get("data")) or {}
+        results = data.get("smart_results") or []
+        if not results:
+            return {"ok": False}
+        latest = results[0]
+        attrs = latest.get("attrs") or {}
+        head, seen = [], set()
+        for k in _SCR_ORDER:
+            a = attrs.get(k)
+            if a is None or k in seen:
+                continue
+            seen.add(k)
+            val = a.get("value")
+            if k == "data_units_written" and isinstance(val, (int, float)):
+                val = round(val * 512000 / 1e12, 2)          # NVMe: единицы по 512000 байт → TB
+            nm, unit = _SCR_NAMES.get(k, (k, ""))
+            head.append({"name": nm, "value": val, "unit": unit, "status": a.get("status", 0)})
+        flagged = [{"name": _SCR_NAMES.get(k, (k, ""))[0], "value": v.get("value")}
+                   for k, v in attrs.items() if v.get("status")]
+        hist = [s.get("temp") for s in reversed(results) if isinstance(s.get("temp"), (int, float))][-60:]
+        return {"ok": True, "status": dev.get("status", 0), "temp": latest.get("temp"),
+                "power_on_hours": latest.get("power_on_hours"),
+                "power_cycles": latest.get("power_cycle_count"),
+                "headline": head, "flagged": flagged, "temp_history": hist}
+    except Exception:
+        return {"ok": False}
+
 # --------------------------------------------------------------------------- #
 #  vnstat — счётчик трафика по основному интерфейсу (сегодня/месяц/всего).
 #  Системный пакет; нет бинаря/данных → {ok:False}, и виджет прячется.
@@ -8119,6 +8171,8 @@ class H(BaseHTTPRequestHandler):
                 self._json(vnstat_state())
             elif p == "/api/wud":
                 self._json(wud_state())
+            elif p == "/api/scrutiny/device":
+                self._json(scrutiny_device((q.get("serial") or [""])[0]))
             elif p == "/api/wallpaper/img":
                 wp = _wallpaper_path()
                 if wp:
