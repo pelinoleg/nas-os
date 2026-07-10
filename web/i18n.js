@@ -1840,6 +1840,7 @@ window.NAS_I18N = { en: {
 "Жирность": "Weight",
 "тонкий": "thin",
 "обычный": "regular",
+"очень жирный": "extra bold",
 "средний": "medium",
 "жирный": "bold",
 "Поставьте Scrutiny": "Install Scrutiny",

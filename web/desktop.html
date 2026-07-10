@@ -443,10 +443,13 @@
   .wdg h4 .more{margin-left:auto;color:var(--accent);cursor:pointer;font-size:11px;letter-spacing:0;text-transform:none;font-family:var(--font);font-weight:600}
   .wdg h4 .more:hover{text-decoration:underline}
   .gauges{display:flex;gap:10px}
-  .gauge{flex:1;display:flex;flex-direction:column;align-items:center}
-  .gauge .ring{width:70px;height:70px}.gauge .v{font-family:var(--mono);font-size:15px;font-weight:650;margin-top:-45px;margin-bottom:21px}
-  .gauge .l{font-size:10px;color:var(--mut);font-family:var(--mono);text-transform:uppercase;letter-spacing:.07em;margin-top:6px;display:inline-flex;align-items:center;gap:3px}
-  .gauge .l svg{opacity:.75}
+  .gauge{flex:1;display:flex;flex-direction:column;align-items:center;position:relative}
+  .gauge .ring{width:72px;height:72px}
+  /* иконка крупная по центру кольца, значение под ней — читается с одного взгляда */
+  .gauge .gc{position:absolute;top:0;width:72px;height:72px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;pointer-events:none}
+  .gauge .gc svg{opacity:.92;margin-bottom:1px}
+  .gauge .v{font-family:var(--mono);font-size:14px;font-weight:650}
+  .gauge .l{font-size:10px;color:var(--mut);font-family:var(--mono);text-transform:uppercase;letter-spacing:.07em;margin-top:7px}
   .bar{height:9px;border-radius:6px;background:var(--line);overflow:hidden}
   .bar i{display:block;height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent-2));transition:width .6s}
   .krow{display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:9px;gap:12px}.krow:last-child{margin-bottom:0}
@@ -1300,9 +1303,9 @@
   .op-prog .op-track{height:6px;border-radius:999px;background:var(--card-2);overflow:hidden}
   .op-prog .op-fill{height:100%;background:var(--accent);width:0;transition:width .18s}
   /* terminal */
-  .term-wrap{display:flex;height:100%;background:#0a0f17;overflow:hidden}
+  .term-wrap{display:flex;height:100%;background:var(--tbg,#0a0f17);overflow:hidden}
   .term-main{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden}
-  .term-tb{display:flex;align-items:center;gap:4px;padding:6px 12px;border-bottom:1px solid rgba(120,140,175,.14);background:#0d1522}
+  .term-tb{display:flex;align-items:center;gap:4px;padding:6px 12px;border-bottom:1px solid rgba(120,140,175,.14);background:rgba(255,255,255,.035)}
   .term-tb .t{font-family:var(--mono);font-size:11px;color:#8595ad;flex:1;display:flex;align-items:center;gap:8px}
   .term-tb .t .led{width:8px;height:8px;border-radius:50%;background:#43c08a;box-shadow:0 0 7px #43c08a}
   .term-tb button{border:none;background:none;color:#8595ad;padding:4px 9px;border-radius:7px;font-size:11px;font-family:var(--mono)}
@@ -1311,16 +1314,25 @@
   .term-xt-wrap{position:relative;height:100%}
   .term-xt{height:100%;padding:8px 4px 8px 10px}
   .term-xt .xterm{height:100%}
-  /* попап оформления терминала */
-  .tcfg-pop{position:absolute;top:70px;right:12px;z-index:20;background:var(--menu-bg,#1b2230);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,.1);border-radius:12px;box-shadow:0 14px 40px rgba(0,0,0,.5);padding:12px;min-width:230px;display:flex;flex-direction:column;gap:9px}
+  /* попап оформления терминала — в нашей стилистике (стекло), с предпросмотром */
+  .tcfg-pop{position:absolute;top:62px;right:12px;z-index:20;width:306px;background:var(--menu-bg,rgba(24,32,46,.94));backdrop-filter:blur(22px) saturate(1.3);-webkit-backdrop-filter:blur(22px) saturate(1.3);border:1px solid rgba(255,255,255,.13);border-radius:14px;box-shadow:0 18px 50px rgba(0,0,0,.55);padding:13px;display:flex;flex-direction:column;gap:12px;color:#e6edf6}
+  .tcfg-h{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#8fa0b8;font-weight:700;margin-bottom:-4px}
+  .tcfg-prev{border-radius:10px;padding:10px 12px;font-size:12px;overflow:hidden;border:1px solid rgba(255,255,255,.09);white-space:nowrap}
+  .tcfg-themes{display:grid;grid-template-columns:repeat(3,1fr);gap:7px}
+  .tcfg-sw{cursor:pointer;border-radius:9px;height:42px;position:relative;border:2px solid transparent;transition:.12s;overflow:hidden}
+  .tcfg-sw:hover{transform:translateY(-1px)}
+  .tcfg-sw.on{border-color:var(--accent,#34c6be)}
+  .tcfg-sw .snm{position:absolute;top:3px;left:6px;font-size:8px;font-family:var(--mono);opacity:.8}
+  .tcfg-sw .dots{position:absolute;bottom:5px;left:6px;display:flex;gap:3px}
+  .tcfg-sw .dots i{width:7px;height:7px;border-radius:50%}
   .tcfg-row{display:flex;align-items:center;justify-content:space-between;gap:12px}
-  .tcfg-row label{font-size:12.5px;color:var(--dim,#9fb0c8)}
-  .tcfg-row select{flex:none;width:130px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:#e6edf6;border-radius:7px;padding:6px 8px;font-size:12.5px}
+  .tcfg-row label{font-size:12.5px;color:#9fb0c8}
+  .tcfg-row select{flex:none;width:142px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.14);color:#e6edf6;border-radius:8px;padding:6px 9px;font-size:12.5px}
   .term-tb .grow{flex:1}
   .term-tb button.pri{background:rgba(53,201,192,.16);color:#35c9c0}
-  .term-find{background:#0a0f17;border:1px solid rgba(53,201,192,.4);border-radius:7px;color:#c7d3e6;font-family:var(--mono);font-size:11px;padding:4px 9px;width:180px}
+  .term-find{background:rgba(0,0,0,.25);border:1px solid rgba(53,201,192,.4);border-radius:7px;color:#c7d3e6;font-family:var(--mono);font-size:11px;padding:4px 9px;width:180px}
   .term-find:focus{outline:none;border-color:#35c9c0}
-  .term-tabs{display:flex;gap:2px;padding:6px 8px 0;background:#0d1522;overflow-x:auto;align-items:flex-end}
+  .term-tabs{display:flex;gap:2px;padding:6px 8px 0;background:rgba(255,255,255,.02);overflow-x:auto;align-items:flex-end}
   .term-tabs::-webkit-scrollbar{height:0}
   .ttab{display:flex;align-items:center;gap:7px;padding:6px 11px;border-radius:8px 8px 0 0;background:transparent;color:#8595ad;font-size:11px;font-family:var(--mono);cursor:pointer;white-space:nowrap;border:1px solid transparent;border-bottom:none;flex:none}
   .ttab:hover{color:#c7d3e6}
@@ -3071,8 +3083,12 @@ const TERM_THEMES={
  slate:{nm:"Графит",background:"#1b1f27",foreground:"#d6deec",cursor:"#5aa9ff",cursorAccent:"#1b1f27",selectionBackground:"#31405688",black:"#1b1f27",red:"#e5544e",green:"#46b98a",yellow:"#e0a23b",blue:"#5aa9ff",magenta:"#8a7dff",cyan:"#34c6be",white:"#d6deec",brightBlack:"#5a6a84"},
 };
 const TERM_FONTS={
- sys:{nm:"Системный моно",ff:'ui-monospace,"JetBrains Mono","Cascadia Code",Menlo,Consolas,monospace'},
- mono:{nm:"Классический",ff:'Menlo,Consolas,"DejaVu Sans Mono","Courier New",monospace'},
+ sys:{nm:"Системный моно",ff:'ui-monospace,"SF Mono","JetBrains Mono","Cascadia Code",Menlo,Consolas,monospace'},
+ menlo:{nm:"Menlo / SF Mono",ff:'"SF Mono",Menlo,Monaco,monospace'},
+ consolas:{nm:"Consolas / Cascadia",ff:'Consolas,"Cascadia Mono","Cascadia Code",monospace'},
+ dejavu:{nm:"DejaVu Mono",ff:'"DejaVu Sans Mono","Liberation Mono",monospace'},
+ ubuntu:{nm:"Ubuntu Mono",ff:'"Ubuntu Mono","DejaVu Sans Mono",monospace'},
+ jetbrains:{nm:"JetBrains Mono",ff:'"JetBrains Mono","Fira Code",ui-monospace,monospace'},
  courier:{nm:"Courier",ff:'"Courier New",Courier,monospace'},
 };
 const termTheme=()=>TERM_THEMES[SET.termTheme]||TERM_THEMES.midnight;
@@ -3121,7 +3137,7 @@ function winTerminal(initCmd,execC){openWin("__term","Терминал",(body,wi
    return true;}
  function newSession(initCmd,execC){const id=++seq;
    const holder=el(`<div class="term-xt-wrap" style="display:none"><div class="term-xt"></div></div>`);stack.appendChild(holder);
-   const term=new Terminal({fontFamily:termFont(),fontSize:fs,fontWeight:SET.termWeight||"400",fontWeightBold:"700",lineHeight:+SET.termLh||1.0,cursorBlink:true,scrollback:6000,theme:termTheme()});
+   const tw=+SET.termWeight||400;const term=new Terminal({fontFamily:termFont(),fontSize:fs,fontWeight:tw,fontWeightBold:Math.min(tw+300,900),lineHeight:+SET.termLh||1.0,cursorBlink:true,scrollback:6000,theme:termTheme()});
    let fit=null,search=null;try{fit=new FitAddon.FitAddon();term.loadAddon(fit);}catch(e){}try{search=new SearchAddon.SearchAddon();term.loadAddon(search);}catch(e){}
    try{term.loadAddon(new WebLinksAddon.WebLinksAddon((ev,uri)=>window.open(uri,"_blank")));}catch(e){}
    term.open(holder.querySelector(".term-xt"));
@@ -3146,22 +3162,40 @@ function winTerminal(initCmd,execC){openWin("__term","Терминал",(body,wi
  body.querySelector("#tclr").onclick=()=>{const s=cur();if(s){s.term.clear();s.term.focus();}};
  const setFs=v=>{fs=Math.max(9,Math.min(22,v));SET.termFs=fs;saveSettings();sessions.forEach(s=>{s.term.options.fontSize=fs;setTimeout(()=>refit(s),20);});};
  body.querySelector("#tfm").onclick=()=>setFs(fs-1);body.querySelector("#tfp").onclick=()=>setFs(fs+1);
- // оформление терминала: тема/шрифт/интервал/жирность — применяется на лету ко всем вкладкам
- function applyTermStyle(){body.style.background=termTheme().background;sessions.forEach(s=>{const o=s.term.options;o.theme=termTheme();o.fontFamily=termFont();o.fontWeight=SET.termWeight||"400";o.lineHeight=+SET.termLh||1.0;setTimeout(()=>refit(s),20);});}
+ // оформление терминала: тема/шрифт/интервал/жирность — применяется на лету ко всем вкладкам.
+ // --tbg красит всю обвязку (обёртка/тулбар/табы), поэтому старый фон не остаётся по бокам.
+ function applyTermStyle(){const th=termTheme(),tw=+SET.termWeight||400;
+   body.style.setProperty("--tbg",th.background);body.style.background=th.background;
+   sessions.forEach(s=>{const o=s.term.options;o.theme=th;o.fontFamily=termFont();o.fontWeight=tw;o.fontWeightBold=Math.min(tw+300,900);o.lineHeight=+SET.termLh||1.0;
+     try{s.term.refresh(0,s.term.rows-1);}catch(e){}setTimeout(()=>refit(s),20);});}
+ // живой предпросмотр: та же тема/шрифт/жирность/интервал, что будут в терминале
+ function termPrev(){const th=termTheme(),tw=+SET.termWeight||400,lh=+SET.termLh||1.15;
+   const c=k=>th[k];
+   return `<div class="tcfg-prev" style="background:${th.background};color:${th.foreground};font-family:${termFont()};font-weight:${tw};line-height:${lh}">`+
+     `<span style="color:${c("green")}">oleg@pi5</span><span style="color:${c("brightBlack")}">:</span><span style="color:${c("blue")}">~/nas-os</span>$ ls -l<br>`+
+     `<span style="color:${c("blue")}">web/</span>  <span style="color:${c("cyan")}">config/</span>  nas-web.py  <span style="color:${c("yellow")}">setup.sh</span>  <span style="color:${c("red")}">error.log</span>`+
+     `</div>`;}
+ function applyTbg(){body.style.setProperty("--tbg",termTheme().background);}applyTbg();
  const cfgBtn=body.querySelector("#tcfg");
  cfgBtn.onclick=()=>{const ex=body.querySelector("#tcfgPop");if(ex){ex.remove();return;}
    const opt=(sel,cur)=>Object.entries(sel).map(([k,v])=>`<option value="${k}"${k===cur?" selected":""}>${esc(v.nm||v)}</option>`).join("");
+   const cw=""+(+SET.termWeight||400),clh=""+(+SET.termLh||1);
+   const sw=Object.entries(TERM_THEMES).map(([k,t])=>`<div class="tcfg-sw${(SET.termTheme||"midnight")===k?" on":""}" data-th="${k}" title="${esc(t.nm)}" style="background:${t.background}"><span class="snm" style="color:${t.foreground}">${esc(t.nm)}</span><span class="dots"><i style="background:${t.red}"></i><i style="background:${t.green}"></i><i style="background:${t.blue}"></i><i style="background:${t.yellow}"></i></span></div>`).join("");
    const pop=el(`<div class="tcfg-pop" id="tcfgPop">
-     <div class="tcfg-row"><label>Тема</label><select id="tcTheme">${opt(TERM_THEMES,SET.termTheme||"midnight")}</select></div>
+     <div class="tcfg-h">Предпросмотр</div>
+     <div id="tcPrev">${termPrev()}</div>
+     <div class="tcfg-h">Тема</div>
+     <div class="tcfg-themes" id="tcThemes">${sw}</div>
      <div class="tcfg-row"><label>Шрифт</label><select id="tcFont">${opt(TERM_FONTS,SET.termFont||"sys")}</select></div>
-     <div class="tcfg-row"><label>Межстрочный</label><select id="tcLh">${[["1.0","плотно"],["1.15","обычно"],["1.3","просторно"],["1.5","широко"]].map(([v,l])=>`<option value="${v}"${(""+(SET.termLh||1))===v?" selected":""}>${l}</option>`).join("")}</select></div>
-     <div class="tcfg-row"><label>Жирность</label><select id="tcW">${[["300","тонкий"],["400","обычный"],["500","средний"],["600","жирный"]].map(([v,l])=>`<option value="${v}"${(SET.termWeight||"400")===v?" selected":""}>${l}</option>`).join("")}</select></div>
+     <div class="tcfg-row"><label>Межстрочный</label><select id="tcLh">${[["1.0","плотно"],["1.15","обычно"],["1.3","просторно"],["1.5","широко"]].map(([v,l])=>`<option value="${v}"${clh===v?" selected":""}>${l}</option>`).join("")}</select></div>
+     <div class="tcfg-row"><label>Жирность</label><select id="tcW">${[["300","тонкий"],["400","обычный"],["500","средний"],["600","жирный"],["700","очень жирный"]].map(([v,l])=>`<option value="${v}"${cw===v?" selected":""}>${l}</option>`).join("")}</select></div>
    </div>`);
    body.querySelector(".term-main").appendChild(pop);
-   pop.querySelector("#tcTheme").onchange=e=>{SET.termTheme=e.target.value;saveSettings();applyTermStyle();};
-   pop.querySelector("#tcFont").onchange=e=>{SET.termFont=e.target.value;saveSettings();applyTermStyle();};
-   pop.querySelector("#tcLh").onchange=e=>{SET.termLh=+e.target.value;saveSettings();applyTermStyle();};
-   pop.querySelector("#tcW").onchange=e=>{SET.termWeight=e.target.value;saveSettings();applyTermStyle();};
+   const upd=()=>{pop.querySelector("#tcPrev").innerHTML=termPrev();};
+   pop.querySelectorAll(".tcfg-sw").forEach(x=>x.onclick=()=>{SET.termTheme=x.dataset.th;saveSettings();pop.querySelectorAll(".tcfg-sw").forEach(y=>y.classList.toggle("on",y===x));applyTermStyle();upd();});
+   pop.querySelector("#tcFont").onchange=e=>{SET.termFont=e.target.value;saveSettings();applyTermStyle();upd();};
+   pop.querySelector("#tcLh").onchange=e=>{SET.termLh=+e.target.value;saveSettings();applyTermStyle();upd();};
+   pop.querySelector("#tcW").onchange=e=>{SET.termWeight=+e.target.value;saveSettings();applyTermStyle();upd();};
    const off=ev=>{if(!pop.contains(ev.target)&&ev.target!==cfgBtn){pop.remove();document.removeEventListener("pointerdown",off,true);}};
    setTimeout(()=>document.addEventListener("pointerdown",off,true),0);};
  const pBtn=body.querySelector("#tpaste");pBtn.onclick=()=>{pasteMode=!pasteMode;pBtn.classList.toggle("pri",pasteMode);toast(pasteMode?"Сниппеты вставляются без Enter":"Сниппеты запускаются сразу");};
@@ -6345,9 +6379,9 @@ function paintSys(s){const m=document.getElementById("wg-sys");if(!m)return;
  const thr=s.throttled&&s.throttled.raw&&s.throttled.raw!=="0x0";
  m.innerHTML=`
   <div class="gauges">
-   <div class="gauge">${ring(s.cpu,loadCol(s.cpu))}<div class="v" style="color:${loadCol(s.cpu)}">${s.cpu}%</div><div class="l">${svg("cpu",11)} CPU</div></div>
-   <div class="gauge">${ring(s.temp?Math.min(s.temp/85*100,100):0,s.temp?loadCol(tempLoad(s.temp)):"var(--mut)")}<div class="v" style="color:${s.temp?loadCol(tempLoad(s.temp)):"var(--mut)"}">${s.temp?s.temp+"°":"—"}</div><div class="l">${svg("thermo",11)} Темп.</div></div>
-   <div class="gauge">${ring(s.mem.pct,loadCol(s.mem.pct))}<div class="v" style="color:${loadCol(s.mem.pct)}">${s.mem.pct}%</div><div class="l">${svg("memchip",11)} RAM</div></div></div>
+   <div class="gauge">${ring(s.cpu,loadCol(s.cpu))}<div class="gc" style="color:${loadCol(s.cpu)}">${svg("cpu",17)}<div class="v">${s.cpu}%</div></div><div class="l">CPU</div></div>
+   <div class="gauge">${ring(s.temp?Math.min(s.temp/85*100,100):0,s.temp?loadCol(tempLoad(s.temp)):"var(--mut)")}<div class="gc" style="color:${s.temp?loadCol(tempLoad(s.temp)):"var(--mut)"}">${svg("thermo",17)}<div class="v">${s.temp?s.temp+"°":"—"}</div></div><div class="l">Темп.</div></div>
+   <div class="gauge">${ring(s.mem.pct,loadCol(s.mem.pct))}<div class="gc" style="color:${loadCol(s.mem.pct)}">${svg("memchip",17)}<div class="v">${s.mem.pct}%</div></div><div class="l">RAM</div></div></div>
   <div class="krow" style="margin-top:12px"><span>${svg("clock",13)} Аптайм</span><b>${fmtUp(s.uptime)}</b></div>
   <div class="krow"><span>${svg("activity",13)} Load 1м / 5м</span><b>${s.load?s.load[0].toFixed(2)+" / "+s.load[1].toFixed(2):"—"}</b></div>
   ${DISK_TEMP_MAX!=null?`<div class="krow"><span>${svg("thermo",13)} Температура дисков</span><b style="color:${diskTcol(DISK_TEMP_MAX)}">${DISK_TEMP_MAX}°C</b></div>`:""}
