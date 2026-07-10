@@ -5074,7 +5074,7 @@ const PF_CHIPS=[["Хранилище","/mnt/storage","hdd"],["Домашняя",
 function pickFolder(opts){
  opts=opts||{};
  const s=document.getElementById("scrim");
- let cur=opts.start||"/mnt/storage",favs=[],mk=false,busy=false,built=false;
+ let cur=opts.start||"/mnt/storage",favs=[],vols=(VOLS||[]).slice(),mk=false,busy=false,built=false;
  const parent=p=>p.replace(/\/[^/]+$/,"")||"/";
  const $=q=>s.querySelector(q);
 
@@ -5085,7 +5085,7 @@ function pickFolder(opts){
   const chipPaths=new Set(PF_CHIPS.map(c=>c[1]));
   const fav=favs.filter(f=>f&&f.path&&!chipPaths.has(f.path));
   if(fav.length)h+=`<div class="pf-grp">Избранное</div>`+fav.map(f=>item(f.name,f.path,"folder")).join("");
-  const mounted=(VOLS||[]).filter(v=>v.mounted&&v.mount);
+  const mounted=(vols||[]).filter(v=>v.mounted&&v.mount);
   if(mounted.length)h+=`<div class="pf-grp">Диски</div>`+mounted.map(v=>item(v.label||v.dev,v.mount,volIcon(v),v.size)).join("");
   return h;};
 
@@ -5155,6 +5155,9 @@ function pickFolder(opts){
   if(mk)focusMk();};
 
  api("/api/fm/favorites").then(r=>{favs=(r&&r.favorites)||[];if(built)paintChrome();}).catch(()=>{});
+ // подтягиваем диски сами (глобальный VOLS мог быть не загружен, если пикер открыт
+ // из окна Настроек без рабочего стола/ФМ) — иначе секция «Диски» пустует
+ api("/api/desktop").then(r=>{const v=(r&&r.volumes)||[];if(v.length){vols=v;VOLS=v;if(built)paintChrome();}}).catch(()=>{});
  draw();}
 // старое имя — чтобы не переписывать все точки вызова
 const nbPickLocal=(start,onPick)=>pickFolder({start,onPick,title:"Куда копировать"});
