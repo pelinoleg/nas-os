@@ -3198,8 +3198,9 @@ def _nb_prune(cfg):
             except OSError: pass
     return removed
 
-_NB_MONTHS = ["", "Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль",
-              "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"]
+# month names for {month-name} — ALWAYS English so folders never depend on locale
+_NB_MONTHS = ["", "January", "February", "March", "April", "May", "June", "July",
+              "August", "September", "October", "November", "December"]
 
 def _nb_render_tpl(tpl, t=None):
     """Раскрыть токены шаблона папки удалённых ({date}/{year}/{month}/… как в USB-импорте)."""
@@ -7274,7 +7275,7 @@ if [ -n "$sub" ]; then
   sub="${sub//\{date\}/$(date '+%Y-%m-%d')}"
   sub="${sub//\{time\}/$(date '+%H-%M-%S')}"
   sub="${sub//\{year\}/$(date '+%Y')}"
-  sub="${sub//\{month-name\}/$(date '+%B')}"
+  sub="${sub//\{month-name\}/$(LC_ALL=C date '+%B')}"
   sub="${sub//\{month\}/$(date '+%m')}"
   sub="${sub//\{day\}/$(date '+%d')}"
   sub="${sub//\{hour\}/$(date '+%H')}"
