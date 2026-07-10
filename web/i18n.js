@@ -560,6 +560,8 @@ window.NAS_I18N = { en: {
 "Windows, Mac, телефон": "Windows, Mac, phone",
 "[переподключение…]": "[reconnecting…]",
 "[соединение закрыто]": "[connection closed]",
+"связь потеряна, переподключаюсь…": "connection lost, reconnecting…",
+"[связь потеряна, переподключаюсь…]": "[connection lost, reconnecting…]",
 "\\r\\n\\x1b[38;5;203m[соединение закрыто]\\x1b[0m\\r\\n": "\\r\\n\\x1b[38;5;203m[connection closed]\\x1b[0m\\r\\n",
 "\\r\\n\\x1b[38;5;51m[переподключение…]\\x1b[0m\\r\\n": "\\r\\n\\x1b[38;5;51m[reconnecting…]\\x1b[0m\\r\\n",
 "chrony вместо timesyncd": "chrony instead of timesyncd",
