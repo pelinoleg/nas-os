@@ -1331,7 +1331,7 @@
      --tcur — полупрозрачный цвет курсора темы (ставится в applyTermStyle) */
   .term-xt .xterm-cursor.xterm-cursor-bar{box-shadow:none !important;
     background-image:linear-gradient(var(--tcur,#8bd0ff),var(--tcur,#8bd0ff));background-repeat:no-repeat;
-    background-position:left center;background-size:2px 58%;animation:tcurBlink 1.06s step-end infinite !important}
+    background-position:left center;background-size:2px 58%;animation:tcurBlink 1.5s step-end infinite !important}
   @keyframes tcurBlink{50%{background-size:2px 0}}
   /* попап оформления терминала — в нашей стилистике (стекло), с предпросмотром */
   .tcfg-pop{position:absolute;top:62px;right:12px;z-index:20;width:306px;background:var(--menu-bg,rgba(24,32,46,.94));backdrop-filter:blur(22px) saturate(1.3);-webkit-backdrop-filter:blur(22px) saturate(1.3);border:1px solid rgba(255,255,255,.13);border-radius:14px;box-shadow:0 18px 50px rgba(0,0,0,.55);padding:13px;display:flex;flex-direction:column;gap:12px;color:#e6edf6}
@@ -3196,7 +3196,7 @@ function winTerminal(initCmd,execC){openWin("__term","Терминал",(body,wi
  // --tbg красит всю обвязку (обёртка/тулбар/табы), поэтому старый фон не остаётся по бокам.
  function applyTermStyle(){const th=termTheme(),tw=+SET.termWeight||400,ff=termFont();
    body.style.setProperty("--tbg",th.background);   // красит .term-stack (область терминала), не всё окно
-   body.style.setProperty("--tcur",th.cursor+"bb"); // цвет курсора-черты (полупрозрачный)
+   body.style.setProperty("--tcur",th.cursor+"88"); // цвет курсора-черты (полупрозрачный)
    const apply=()=>sessions.forEach(s=>{const o=s.term.options;o.theme=termXtTheme();o.fontFamily=ff;o.fontWeight=tw;o.fontWeightBold=(tw>=700?700:tw+300);o.lineHeight=+SET.termLh||1.0;o.cursorStyle="bar";o.cursorBlink=true;o.cursorWidth=2;
      try{s.term.refresh(0,s.term.rows-1);}catch(e){}setTimeout(()=>refit(s),20);});
    apply();
@@ -3210,7 +3210,7 @@ function winTerminal(initCmd,execC){openWin("__term","Терминал",(body,wi
      `<span style="color:${c("green")}">oleg@pi5</span><span style="color:${c("brightBlack")}">:</span><span style="color:${c("blue")}">~/nas-os</span>$ ls -l<br>`+
      `<span style="color:${c("blue")}">web/</span>  <span style="color:${c("cyan")}">config/</span>  nas-web.py  <span style="color:${c("yellow")}">setup.sh</span>  <span style="color:${c("red")}">error.log</span>`+
      `</div>`;}
- function applyTbg(){const t=termTheme();body.style.setProperty("--tbg",t.background);body.style.setProperty("--tcur",t.cursor+"bb");}applyTbg();
+ function applyTbg(){const t=termTheme();body.style.setProperty("--tbg",t.background);body.style.setProperty("--tcur",t.cursor+"88");}applyTbg();
  const cfgBtn=body.querySelector("#tcfg");
  cfgBtn.onclick=()=>{const ex=body.querySelector("#tcfgPop");if(ex){ex.remove();return;}
    const opt=(sel,cur)=>Object.entries(sel).map(([k,v])=>`<option value="${k}"${k===cur?" selected":""}>${esc(v.nm||v)}</option>`).join("");
