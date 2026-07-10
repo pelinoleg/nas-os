@@ -2681,6 +2681,7 @@ ENABLED=1; BASE=/media/nas; AM_USER=""; OPTS_NATIVE="rw,noatime,nofail"
 [ -f "$CONF" ] && . "$CONF"
 LOG=/var/log/nas-automount.log
 log(){ printf '%s %s\n' "$(date '+%F %T')" "$*" >>"$LOG" 2>/dev/null; }
+poke(){ touch /run/nas-web-refresh 2>/dev/null; }   # разбудить панель: диски изменились
 ACTION="${1:-}"; KDEV="${2:-}"
 [ "$ENABLED" = "1" ] || { log "выключено — пропуск"; exit 0; }
 [ -n "$KDEV" ] || exit 0
@@ -2710,13 +2711,13 @@ do_add(){
     vfat|exfat|ntfs) opts="rw,noatime,nofail,uid=$uid,gid=$gid,umask=002" ;;
     *)               opts="$OPTS_NATIVE" ;;
   esac
-  if mount -o "$opts" "$DEV" "$target" 2>>"$LOG"; then log "смонтирован $DEV ($fs) -> $target"
-  else mount "$DEV" "$target" 2>>"$LOG" && log "смонтирован(деф.) $DEV -> $target" || { rmdir "$target" 2>/dev/null; log "ОШИБКА монтирования $DEV"; }
+  if mount -o "$opts" "$DEV" "$target" 2>>"$LOG"; then log "смонтирован $DEV ($fs) -> $target"; poke
+  else mount "$DEV" "$target" 2>>"$LOG" && { log "смонтирован(деф.) $DEV -> $target"; poke; } || { rmdir "$target" 2>/dev/null; log "ОШИБКА монтирования $DEV"; }
   fi
 }
 case "$ACTION" in
   add)    do_add ;;
-  remove) clean_stale ;;
+  remove) clean_stale; poke ;;
   *)      exit 0 ;;
 esac
 AM

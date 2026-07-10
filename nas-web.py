@@ -4393,13 +4393,35 @@ def _container_cpus(name):
     except (ValueError, TypeError):
         return 0
 
+# Файл-сигнал: udev-хуки (монтирование/извлечение USB) трогают его, вотчер будит
+# monitor_loop немедленно — вставка диска детектится за ~1-2с, а не на 60-сек тике.
+POKE_FILE = "/run/nas-web-refresh"
+_mon_wake = threading.Event()
+
+def _poke_watcher():
+    last = None
+    while True:
+        try:
+            m = os.path.getmtime(POKE_FILE)
+        except OSError:
+            m = None
+        if m != last:
+            if last is not None:      # первый заход только запоминает — не будим на старте
+                _mon_wake.set()
+            last = m
+        time.sleep(1.5)
+
 def monitor_loop():
     _safe(_therm_recover)      # снять контейнеры, осиротевшие термозащитой до краша/ребута
+    threading.Thread(target=_poke_watcher, daemon=True).start()
     while True:
-        time.sleep(60)
-        for fn in (history_sample, monitor_tick, maintenance_daily, _smart_selftest_tick,
-                   _nb_sched_tick, _automount_tick, _summary_tick, _thermal_tick,
-                   usb_ops_sync):
+        poked = _mon_wake.wait(60); _mon_wake.clear()
+        # на poke (вставка/извлечение диска) гоняем только про изменения — быстро и
+        # без лишнего: истории/расписаний/самотестов не трогаем, у них свой график.
+        funcs = ((monitor_tick, _automount_tick, usb_ops_sync) if poked else
+                 (history_sample, monitor_tick, maintenance_daily, _smart_selftest_tick,
+                  _nb_sched_tick, _automount_tick, _summary_tick, _thermal_tick, usb_ops_sync))
+        for fn in funcs:
             try:
                 fn()
             except Exception:
@@ -7091,6 +7113,7 @@ if [ "${IMPORT_EJECT:-0}" = "1" ] && [ -n "$pk" ]; then
   else
     log "eject /dev/$pk не удался"
   fi
+  touch /run/nas-web-refresh 2>/dev/null   # диск исчез — разбудить панель сразу
 fi
 '''
 # матчим по ID_USB_DRIVER (usb-storage/uas), а не ID_BUS==usb — иначе USB-SATA
