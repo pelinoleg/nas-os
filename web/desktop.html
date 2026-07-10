@@ -1200,10 +1200,8 @@
   .fm-fav-i .fx{border:none;background:none;color:var(--mut);display:flex;visibility:hidden;padding:2px;cursor:pointer}
   .fm-fav-i:hover .fx{visibility:visible}.fm-fav-i .fx:hover{color:var(--danger)}
   .fm-fav-i .fx.fx-eject{visibility:visible;color:var(--accent)}
-  /* перетаскивание избранного: полупрозрачный источник + линия-индикатор куда вставится */
+  /* перетаскивание избранного: элементы расступаются вживую, источник полупрозрачный */
   .fm-fav-i.fav-drag{opacity:.4}
-  .fm-fav-i.ins-before{box-shadow:inset 0 2px 0 0 var(--accent)}
-  .fm-fav-i.ins-after{box-shadow:inset 0 -2px 0 0 var(--accent)}
   .fm-fav-i .fav-edit{flex:1;min-width:0;font:inherit;font-size:12.5px;background:var(--glass);border:1px solid var(--accent);border-radius:5px;color:var(--text);padding:2px 6px;outline:none}
   /* плитки */
   .fm-list.fm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(108px,1fr));gap:6px;align-content:start;padding:6px 2px}
@@ -1328,6 +1326,13 @@
   .term-xt-wrap{position:relative;height:100%}
   .term-xt{height:100%;padding:8px 4px 8px 10px}
   .term-xt .xterm{height:100%}
+  /* курсор-черта: рисуем сами тонкой укороченной полоской с мягким миганием — штатная
+     анимация bar в xterm не мигает (её keyframe трогает border-bottom, которого у bar нет).
+     --tcur — полупрозрачный цвет курсора темы (ставится в applyTermStyle) */
+  .term-xt .xterm-cursor.xterm-cursor-bar{box-shadow:none !important;
+    background-image:linear-gradient(var(--tcur,#8bd0ff),var(--tcur,#8bd0ff));background-repeat:no-repeat;
+    background-position:left center;background-size:2px 58%;animation:tcurBlink 1.06s step-end infinite !important}
+  @keyframes tcurBlink{50%{background-size:2px 0}}
   /* попап оформления терминала — в нашей стилистике (стекло), с предпросмотром */
   .tcfg-pop{position:absolute;top:62px;right:12px;z-index:20;width:306px;background:var(--menu-bg,rgba(24,32,46,.94));backdrop-filter:blur(22px) saturate(1.3);-webkit-backdrop-filter:blur(22px) saturate(1.3);border:1px solid rgba(255,255,255,.13);border-radius:14px;box-shadow:0 18px 50px rgba(0,0,0,.55);padding:13px;display:flex;flex-direction:column;gap:12px;color:#e6edf6}
   .tcfg-h{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#8fa0b8;font-weight:700;margin-bottom:-4px}
@@ -3191,6 +3196,7 @@ function winTerminal(initCmd,execC){openWin("__term","Терминал",(body,wi
  // --tbg красит всю обвязку (обёртка/тулбар/табы), поэтому старый фон не остаётся по бокам.
  function applyTermStyle(){const th=termTheme(),tw=+SET.termWeight||400,ff=termFont();
    body.style.setProperty("--tbg",th.background);   // красит .term-stack (область терминала), не всё окно
+   body.style.setProperty("--tcur",th.cursor+"bb"); // цвет курсора-черты (полупрозрачный)
    const apply=()=>sessions.forEach(s=>{const o=s.term.options;o.theme=termXtTheme();o.fontFamily=ff;o.fontWeight=tw;o.fontWeightBold=(tw>=700?700:tw+300);o.lineHeight=+SET.termLh||1.0;o.cursorStyle="bar";o.cursorBlink=true;o.cursorWidth=2;
      try{s.term.refresh(0,s.term.rows-1);}catch(e){}setTimeout(()=>refit(s),20);});
    apply();
@@ -3204,7 +3210,7 @@ function winTerminal(initCmd,execC){openWin("__term","Терминал",(body,wi
      `<span style="color:${c("green")}">oleg@pi5</span><span style="color:${c("brightBlack")}">:</span><span style="color:${c("blue")}">~/nas-os</span>$ ls -l<br>`+
      `<span style="color:${c("blue")}">web/</span>  <span style="color:${c("cyan")}">config/</span>  nas-web.py  <span style="color:${c("yellow")}">setup.sh</span>  <span style="color:${c("red")}">error.log</span>`+
      `</div>`;}
- function applyTbg(){body.style.setProperty("--tbg",termTheme().background);}applyTbg();
+ function applyTbg(){const t=termTheme();body.style.setProperty("--tbg",t.background);body.style.setProperty("--tcur",t.cursor+"bb");}applyTbg();
  const cfgBtn=body.querySelector("#tcfg");
  cfgBtn.onclick=()=>{const ex=body.querySelector("#tcfgPop");if(ex){ex.remove();return;}
    const opt=(sel,cur)=>Object.entries(sel).map(([k,v])=>`<option value="${k}"${k===cur?" selected":""}>${esc(v.nm||v)}</option>`).join("");
@@ -4266,7 +4272,6 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    inp.onkeydown=ev=>{if(ev.key==="Enter"){ev.preventDefault();done();}else if(ev.key==="Escape"){ev.preventDefault();inp.onblur=null;renderCrumb();}};
    inp.onblur=done;}
  function saveFav(){api("/api/fm/favorites",{method:"POST",body:JSON.stringify({favorites:favs})});}
- function favClearIns(){body.querySelectorAll(".fm-fav-i.ins-before,.fm-fav-i.ins-after").forEach(n=>n.classList.remove("ins-before","ins-after"));}
  function renameFav(it,f){const fn=it.querySelector(".fn");if(!fn||it.querySelector(".fav-edit"))return;
    const inp=el(`<input class="fav-edit" value="${att(f.name)}">`);it.setAttribute("draggable","false");fn.replaceWith(inp);
    inp.focus();inp.select();let closed=false;
@@ -4274,8 +4279,19 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    inp.onclick=ev=>ev.stopPropagation();inp.ondblclick=ev=>ev.stopPropagation();
    inp.onkeydown=ev=>{ev.stopPropagation();if(ev.key==="Enter")done(true);else if(ev.key==="Escape")done(false);};
    inp.onblur=()=>done(true);}
+ // куда встать перетаскиваемому: ближайший элемент, ниже середины которого курсор
+ function favAfterEl(c,y){let best=null,bestOff=-Infinity;
+   c.querySelectorAll(".fm-fav-i:not(.fav-drag)").forEach(ch=>{const b=ch.getBoundingClientRect(),off=y-b.top-b.height/2;
+     if(off<0&&off>bestOff){bestOff=off;best=ch;}});return best;}
  function renderFav(){const c=body.querySelector("#fFav");c.innerHTML="";
+   if(!c._sortInit){c._sortInit=1;   // живое переупорядочивание: элемент двигается прямо под курсором
+     c.addEventListener("dragover",ev=>{if(favDragI==null)return;ev.preventDefault();ev.dataTransfer.dropEffect="move";
+       const dragEl=c.querySelector(".fav-drag");if(!dragEl)return;const after=favAfterEl(c,ev.clientY);
+       if(after==null){if(c.lastElementChild!==dragEl)c.appendChild(dragEl);}
+       else if(dragEl.nextElementSibling!==after)c.insertBefore(dragEl,after);});
+     c.addEventListener("drop",ev=>{if(favDragI!=null)ev.preventDefault();});}
    favs.forEach((f,i)=>{const it=el(`<div class="fm-fav-i${f.path===cwd?" on":""}" draggable="true"><span class="fi">${fmIcon(f.name,"dir",17)}</span><span class="fn" title="${att(f.path)}">${esc(f.name)}</span><button class="fx" title="Убрать">${svg("trash",12)}</button></div>`);
+     it._fav=f;
      it.onclick=ev=>{if(ev.target.closest(".fx"))return;load(f.path);};
      it.querySelector(".fn").ondblclick=ev=>{ev.stopPropagation();renameFav(it,f);};
      it.querySelector(".fx").onclick=ev=>{ev.stopPropagation();favs.splice(i,1);saveFav();renderFav();};
@@ -4284,19 +4300,14 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
        {label:"Переименовать",ic:svg("edit",16),act:()=>renameFav(it,f)},
        {label:"Убрать из избранного",ic:svg("trash",16),dng:1,act:()=>{const j=favs.indexOf(f);if(j>=0)favs.splice(j,1);saveFav();renderFav();}},
      ]);};
-     // перетаскивание самого избранного = смена порядка (плавный индикатор вставки)
      it.addEventListener("dragstart",ev=>{favDragI=i;dragPaths=null;ev.dataTransfer.effectAllowed="move";try{ev.dataTransfer.setData("text/plain","fav");}catch(e){}setTimeout(()=>it.classList.add("fav-drag"),0);});
-     it.addEventListener("dragend",()=>{favDragI=null;it.classList.remove("fav-drag");favClearIns();});
-     it.addEventListener("dragover",ev=>{
-       if(favDragI!=null){ev.preventDefault();ev.stopPropagation();ev.dataTransfer.dropEffect="move";
-         const r=it.getBoundingClientRect(),before=(ev.clientY-r.top)<r.height/2;
-         favClearIns();if(i!==favDragI)it.classList.add(before?"ins-before":"ins-after");it._before=before;return;}
-       if(!dragPaths||dragPaths.includes(f.path))return;ev.preventDefault();ev.stopPropagation();ev.dataTransfer.dropEffect="move";it.classList.add("dragover");});
-     it.addEventListener("dragleave",()=>it.classList.remove("dragover","ins-before","ins-after"));
-     it.addEventListener("drop",ev=>{
-       if(favDragI!=null){ev.preventDefault();ev.stopPropagation();const from=favDragI;favDragI=null;favClearIns();
-         if(from!==i){const moved=favs.splice(from,1)[0];let t=favs.indexOf(f);if(t<0)t=favs.length;favs.splice(it._before?t:t+1,0,moved);saveFav();renderFav();}return;}
-       if(!dragPaths)return;ev.preventDefault();ev.stopPropagation();const ps=dragPaths;dragPaths=null;it.classList.remove("dragover");doMoveInto(ps,f.path);});
+     it.addEventListener("dragend",()=>{it.classList.remove("fav-drag");
+       if(favDragI!=null){favDragI=null;const order=[...c.querySelectorAll(".fm-fav-i")].map(n=>n._fav).filter(Boolean);
+         if(order.length===favs.length){favs=order;saveFav();}renderFav();}});
+     // приём файлов В папку (только когда тащат файлы, не само избранное)
+     it.addEventListener("dragover",ev=>{if(favDragI!=null)return;if(!dragPaths||dragPaths.includes(f.path))return;ev.preventDefault();ev.stopPropagation();ev.dataTransfer.dropEffect="move";it.classList.add("dragover");});
+     it.addEventListener("dragleave",()=>it.classList.remove("dragover"));
+     it.addEventListener("drop",ev=>{if(favDragI!=null)return;if(!dragPaths)return;ev.preventDefault();ev.stopPropagation();const ps=dragPaths;dragPaths=null;it.classList.remove("dragover");doMoveInto(ps,f.path);});
      c.appendChild(it);});
    if(!favs.length)c.innerHTML=`<div style="color:var(--mut);font-size:11px;padding:6px">Пусто. Кнопка + добавит текущую папку.</div>`;}
  function addFav(){const nm=cwd.split("/").filter(Boolean).pop()||"Корень";
