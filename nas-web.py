@@ -1246,6 +1246,40 @@ def vnstat_state():
         _vnstat_cache["t"] = time.time(); _vnstat_cache["data"] = out
     return out
 
+# --------------------------------------------------------------------------- #
+#  What's Up Docker (WUD) — сколько контейнеров ждут обновления образа.
+#  REST /api/containers. Нет контейнера → {ok:False}, показываем лишь бейдж-совет.
+#  Опрос редкий: WUD сам ходит в реестры по cron (6ч), чаще дёргать незачем.
+# --------------------------------------------------------------------------- #
+_wud_cache = {"t": 0, "data": {"ok": False}}
+_wud_lock = threading.Lock()
+WUD_TTL = 120
+
+def wud_state():
+    with _wud_lock:
+        if time.time() - _wud_cache["t"] < WUD_TTL:
+            return _wud_cache["data"]
+    out = {"ok": False}
+    base = docker_service_url("wud", 3000)
+    if base:
+        try:
+            req = urllib.request.Request(base + "/api/containers",
+                                         headers={"Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=4) as r:
+                arr = json.loads(r.read().decode("utf-8", "replace"))
+            ups = []
+            for c in (arr if isinstance(arr, list) else []):
+                if c.get("updateAvailable"):
+                    img = c.get("image") or {}
+                    ups.append({"name": c.get("name"),
+                                "current": (img.get("tag") or {}).get("value")})
+            out = {"ok": True, "url": base, "count": len(ups), "updates": ups}
+        except Exception:
+            out = {"ok": False}
+    with _wud_lock:
+        _wud_cache["t"] = time.time(); _wud_cache["data"] = out
+    return out
+
 FAV_FILE = os.path.join(NAS_CONFIG, "fm-favorites.json")
 def load_favs():
     try:
@@ -4378,6 +4412,9 @@ def docker_overview():
     out["df"] = df
     r = _run(["docker", "--version"], timeout=10)
     out["version"] = (r.get("log") or "").strip().replace("Docker version ", "").split(",")[0]
+    _w = wud_state()      # обновления образов (если WUD установлен)
+    out["wud"] = {"ok": _w.get("ok", False), "count": _w.get("count", 0),
+                  "updates": _w.get("updates", []), "url": _w.get("url")}
     return out
 
 def docker_prune(what):

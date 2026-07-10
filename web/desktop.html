@@ -2703,6 +2703,7 @@ function diskDetail(x,reload){
    <div class="dd-hmain"><div class="dd-name">${headName} ${lbl}</div>
      <div class="dd-sub"><span class="rbadge ${x.role}">${roleName[x.role]||x.role}</span> ${dt.label} · <span class="mono">${x.path}</span></div></div>
    <div class="dd-health">${sm&&sm.healthy!=null?`<div class="hstat ${sm.healthy?"ok":"bad"}">${sm.healthy?"Исправно":"Сбой"}</div>`:`<div class="hstat na">SMART —</div>`}
+     ${x.scrutiny?`<div class="hstat ${x.scrutiny.status===0?"ok":"bad"}" title="Оценка здоровья по Scrutiny${x.scrutiny.power_on_hours!=null?" · наработка "+(x.scrutiny.power_on_hours>=48?Math.round(x.scrutiny.power_on_hours/24)+" дн":x.scrutiny.power_on_hours+" ч"):""}">${svg("heart",11)} Scrutiny: ${x.scrutiny.status===0?"здоров":"риск"}</div>`:""}
      <div class="htemp" data-dtemp="${x.path}" style="color:${sm&&sm.temp!=null?diskTcol(sm.temp):""}">${sm&&sm.temp!=null?sm.temp+"°C":""}</div></div></div>`));
  if(u)box.appendChild(el(`<div class="dd-usage"><div class="capbar"><span class="used" style="width:${Math.max(u.pct,.4)}%"></span></div>
    <div class="lbls"><span>${fmtB(u.used)} занято · ${u.pct}%</span><span>${fmtB(u.free!=null?u.free:u.total-u.used)} свободно · ${fmtB(u.total)}</span></div></div>`));
@@ -3296,11 +3297,22 @@ async function dkOverview(tc,reload){
  if(ver)ver.textContent="версия "+(d.version||"?");
  const c=d.containers||{},df=d.df||{},im=df.images||{},vo=df.volumes||{},ca=df.cache||{};
  const tile=(v,l,sub,col)=>`<div class="dk-tile"><b style="color:${col||"var(--text)"}">${v}</b><span>${l}</span>${sub?`<small>${sub}</small>`:""}</div>`;
+ const wud=d.wud||{};
+ const wtile=(wud.ok&&wud.count)?tile(wud.count,"обновлений образов",(wud.updates||[]).map(u=>u.name).slice(0,3).join(", "),"var(--warn)"):"";
  tiles.innerHTML=
   tile(`${c.running||0} <span style="font-size:12px;font-weight:600;color:var(--mut)">из ${c.total||0}</span>`,"контейнеров запущено",(c.exited?`${c.exited} остановлено`:"")+(c.restarting?` · ${c.restarting} в цикле рестарта`:""),c.restarting?"var(--danger)":c.running?"var(--good)":"var(--mut)")
   +tile(im.count||"0","образов",im.size?`занимают ${im.size}`:"")
   +tile(vo.count||"0","томов",vo.size?`занимают ${vo.size}`:"")
-  +tile(im.reclaim&&im.reclaim!=="0B"?im.reclaim:"0","можно освободить",ca.size&&ca.size!=="0B"?`+ кэш сборки ${ca.size}`:"", (im.reclaim||"").startsWith("0")?"var(--mut)":"var(--warn)");
+  +tile(im.reclaim&&im.reclaim!=="0B"?im.reclaim:"0","можно освободить",ca.size&&ca.size!=="0B"?`+ кэш сборки ${ca.size}`:"", (im.reclaim||"").startsWith("0")?"var(--mut)":"var(--warn)")
+  +wtile;
+ // WUD не установлен → ненавязчивая напоминалка (обновления образов — приятный бонус)
+ let wh=tc.querySelector("#dkWudHint");if(wh)wh.remove();
+ if(wud.ok===false){
+  const dk=(APPS||[]).find(a=>/dockge/i.test(a.name||"")||/:5001(\/|$)/.test(a.url||""));
+  const h=el(`<div class="svc-hint" id="dkWudHint">${svg("cube",15)}<div class="svc-hint-t"><b>Поставьте What's Up Docker</b> — панель покажет, когда для контейнеров вышли обновления образов. Compose готов в <span class="mono">/opt/stacks/wud</span>.</div>${dk?`<button class="btn sm" id="wudDk">Открыть Dockge →</button>`:""}</div>`);
+  const b=h.querySelector("#wudDk");if(b)b.onclick=()=>window.open(dk.url,"_blank");
+  tiles.parentNode.insertBefore(h,tiles.nextSibling);
+ }
 }
 function applyStats(box,stats){box.querySelectorAll("[data-cname]").forEach(n=>{const st=stats[n.dataset.cname];if(st)n.textContent=`${st.cpu} · ${st.mem}`;});}
 function imagesTab(tc){
