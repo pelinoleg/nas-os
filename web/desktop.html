@@ -6396,8 +6396,42 @@ const nico=e=>`<span class="nico ${e.lvl}">${svg(NKICON[e.kind]||"info",14)}</sp
 async function pollEvents(){
  if(pollEvents._busy)return;pollEvents._busy=true;   // без перекрытия опросов (медленный ответ → дубли)
  try{await _pollEvents();}finally{pollEvents._busy=false;}}
+/* long-poll цикл: запрос сам висит до 25с (или до события), затем сразу повторяем.
+   Ошибка/офлайн → пауза и ретрай, чтобы не молотить. Заменяет 15-сек setInterval. */
+let _evLoopOn=false;
+async function eventLoop(){
+ if(_evLoopOn)return;_evLoopOn=true;
+ for(;;){
+  let ok=true;
+  try{await _pollEvents();}catch(e){ok=false;}
+  await new Promise(r=>setTimeout(r,ok?150:4000));
+ }
+}
+/* Реакция на события: обновляем только затронутое, а не всю страницу. Диск
+   вставили/убрали → сразу перерисовать иконки/тома/диски; контейнер сменил
+   состояние → стеки; сменился IP/линк → сеть; импорт с USB завершился → ярлыки. */
+let _reactT=null;
+function reactToEvents(events){
+ const names=new Set(events.map(e=>e.event||"")),kinds=new Set(events.map(e=>e.kind||""));
+ const has=(...xs)=>xs.some(x=>names.has(x));
+ const jobs=new Set();
+ if(kinds.has("disk")||has("disk_add","disk_remove","disk_remount","readonly","fserror","usb_import")){jobs.add("disks");jobs.add("apps");}
+ if(has("container","container_loop","svcfail","cron_failed")||kinds.has("svc"))jobs.add("stacks");
+ if(has("ip_changed","link_changed","vpn_offline")||kinds.has("net"))jobs.add("net");
+ // лёгкий дебаунс: пачка событий за раз → один прогон обновлений
+ clearTimeout(_reactT);
+ _reactT=setTimeout(()=>{
+  if(jobs.has("disks"))pollDisks();
+  if(jobs.has("apps"))pollApps();
+  if(jobs.has("stacks"))pollStacks();
+  if(jobs.has("net"))pollNet();
+ },350);
+}
 async function _pollEvents(){
- const r=await api("/api/events?after="+EVQ.seq);if(!r||!Array.isArray(r.events))return;
+ // long-poll: сервер держит запрос до 25с, пока не появится событие (при after=0
+ // отдаёт сразу). Так панель узнаёт о происходящем мгновенно, без 15-сек опроса.
+ const r=await api("/api/events?after="+EVQ.seq+"&wait="+(EVQ.seq?25:0));if(!r||!Array.isArray(r.events))return;
+ if(r.events.length)reactToEvents(r.events);   // подтянуть затронутые данные без перезагрузки
  const first=!EVQ.init;EVQ.init=true;
  r.events.forEach(e=>EVQ.cache.push(e));
  if(EVQ.cache.length>800)EVQ.cache.splice(0,EVQ.cache.length-800);
@@ -6711,10 +6745,10 @@ function maybeOnboard(){let done=false;try{done=!!SET.onboarded||localStorage.ge
  poll();pollApps();pollDisks();maybeOnboard();
  refreshFmHideBk();
  pollStacks();pollTop();pollNet();
- pollEvents();setTimeout(pollHealth,2500);
+ eventLoop();setTimeout(pollHealth,2500);   // события — long-poll (мгновенно), не 15-сек опрос
  setInterval(poll,3000);setInterval(pollApps,8000);setInterval(pollDisks,15000);setInterval(tickClock,10000);
  setInterval(pollStacks,15000);setInterval(pollTop,10000);setInterval(pollNet,15000);setInterval(pollMySpeed,60000);setInterval(pollVnstat,60000);
- setInterval(pollEvents,15000);setInterval(pollHealth,120000);
+ setInterval(pollHealth,120000);
  if("serviceWorker" in navigator&&window.isSecureContext)navigator.serviceWorker.register("/sw.js").catch(()=>{});
  matchMedia("(prefers-color-scheme:light)").addEventListener("change",()=>{if(SET.theme==="auto")applySettings();});
 })();

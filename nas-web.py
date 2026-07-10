@@ -1346,7 +1346,8 @@ def vnstat_state():
 # --------------------------------------------------------------------------- #
 _wud_cache = {"t": 0, "data": {"ok": False}}
 _wud_lock = threading.Lock()
-WUD_TTL = 120
+WUD_TTL = 45      # WUD пересчитывает «есть обновление» на docker-событие мгновенно;
+                  # держим кэш недолго, чтобы плашка гасла быстро и после внешних апдейтов
 
 def wud_state():
     with _wud_lock:
@@ -1375,6 +1376,12 @@ def wud_state():
     with _wud_lock:
         _wud_cache["t"] = time.time(); _wud_cache["data"] = out
     return out
+
+def wud_invalidate():
+    """Сбросить кэш обновлений: после действия со стеком/контейнером (pull/up)
+    состояние «есть обновление» меняется, а иначе плашка висела бы до TTL."""
+    with _wud_lock:
+        _wud_cache["t"] = 0
 
 FAV_FILE = os.path.join(NAS_CONFIG, "fm-favorites.json")
 def load_favs():
@@ -1643,6 +1650,9 @@ EVENTS_CAP  = 3000
 EVENTS_DAYS = 31
 _events = None
 _events_lock = threading.Lock()
+# Условие на том же замке: long-poll /api/events спит на нём, log_event будит —
+# панель узнаёт о событии мгновенно, а не на следующем опросе.
+_events_cond = threading.Condition(_events_lock)
 
 def _events_load():
     global _events
@@ -1729,19 +1739,34 @@ def log_event(event, title, msg="", lvl=None, kind=None, desk=None):
         if len(items) > EVENTS_CAP or (items and items[0].get("t", 0) < cutoff):
             ev["items"] = [it for it in items if it.get("t", 0) >= cutoff][-EVENTS_CAP:]
         _events_save(ev)
+        _events_cond.notify_all()      # разбудить long-poll ожидающих /api/events
         return ev["seq"]
 
-def events_list(after=0, limit=400):
+def events_list(after=0, limit=400, wait=0):
+    """wait>0 (сек) — long-poll: если новых событий нет, держим запрос до wait
+    секунд, пока log_event не разбудит. Так панель реагирует мгновенно, а не
+    ждёт следующего опроса. wait капим ниже таймаута сокета обработчика."""
     try:
         after = int(after or 0); limit = max(1, min(3000, int(limit or 400)))
+        wait = max(0, min(25, int(wait or 0)))
     except (ValueError, TypeError):
-        after, limit = 0, 400
-    with _events_lock:
-        ev = _events_load()
+        after, limit, wait = 0, 400, 0
+    deadline = time.time() + wait
+    def snapshot(ev):
         items = ev["items"]
         out = [it for it in items if it["id"] > after] if after else list(items)
-        unseen = sum(1 for it in items if it["id"] > ev["seen"])
-        return {"events": out[-limit:], "seen": ev["seen"], "seq": ev["seq"], "unseen": unseen}
+        return {"events": out[-limit:], "seen": ev["seen"], "seq": ev["seq"],
+                "unseen": sum(1 for it in items if it["id"] > ev["seen"])}
+    with _events_cond:                          # тот же замок, что _events_lock
+        while True:
+            ev = _events_load()
+            # отдаём сразу: есть новое, либо это обычный опрос (не long-poll)
+            if ev["seq"] > after or not after or wait <= 0:
+                return snapshot(ev)
+            remain = deadline - time.time()
+            if remain <= 0:
+                return snapshot(ev)             # таймаут — пустой ответ с текущим seq
+            _events_cond.wait(min(remain, 10))  # спим; log_event разбудит раньше
 
 def events_seen(eid):
     try:
@@ -4593,6 +4618,7 @@ def stack_save(name, compose, env, create=False):
 def stack_action(name, action):
     if not _STACK_RE.match(name or ""):
         return {"ok": False, "log": "недопустимое имя"}
+    wud_invalidate()      # образы могли обновиться — плашка «есть обновление» пересчитается
     if action == "rebuild-nocache":
         r = _dc(name, "build", "--no-cache", timeout=900)
         if not r["ok"]:
@@ -4632,6 +4658,7 @@ def stack_logs(name, tail=200):
 def container_action(cid, action):
     if not re.match(r"^[a-zA-Z0-9_.-]+$", cid or ""):
         return {"ok": False, "log": "недопустимый контейнер"}
+    wud_invalidate()      # пересоздание/рестарт мог сменить образ — плашка пересчитается
     if action not in ("start", "stop", "restart", "rm"):
         return {"ok": False, "log": "недопустимое действие"}
     args = ["rm", "-f", cid] if action == "rm" else [action, cid]
@@ -8095,7 +8122,8 @@ class H(BaseHTTPRequestHandler):
                 self._json(history_snapshot((q.get("range") or ["24h"])[0]))
             elif p == "/api/events":
                 self._json(events_list((q.get("after") or ["0"])[0],
-                                       (q.get("limit") or ["400"])[0]))
+                                       (q.get("limit") or ["400"])[0],
+                                       (q.get("wait") or ["0"])[0]))
             elif p == "/api/settings-backup":
                 self._json(settings_backup_list())
             elif p == "/api/settings-backup/inspect":
