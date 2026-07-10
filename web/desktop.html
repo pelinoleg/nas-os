@@ -844,7 +844,8 @@
   .nb-load::before{content:"";width:18px;height:18px;border-radius:50%;border:2.5px solid var(--line);border-top-color:var(--accent);animation:wspin .8s linear infinite;flex:none}
   .nb-tchev.busy{opacity:1}
   .nb-tchev.busy svg{animation:wspin .8s linear infinite;color:var(--accent)}
-  .nb-tree{max-height:min(64vh,620px);overflow:auto;border:1px solid var(--line);border-radius:var(--r-md);padding:4px}
+  /* область дерева — слегка утоплена (var(--card)), чтобы папки не сливались с фоном диалога */
+  .nb-tree{max-height:min(64vh,620px);overflow:auto;border:1px solid var(--line-2);border-radius:var(--r-md);padding:4px;background:var(--card)}
   .nb-selc{margin-right:auto;font-size:12px;color:var(--mut)}
   .nb-trow{display:flex;align-items:center;gap:7px;padding:6px 10px;cursor:pointer;font-size:12.5px;border-radius:7px}
   .nb-trow:hover{background:var(--sel)}
@@ -1546,7 +1547,12 @@
   .set-nav button{display:flex;align-items:center;gap:10px;width:100%;border:none;background:none;color:var(--dim);padding:8px 10px;border-radius:var(--r-sm);font-size:12.5px;font-weight:550;text-align:left;transition:.12s}
   .set-nav button svg{flex:none;opacity:.85;color:var(--accent-2)}
   .set-nav button:hover:not(.on){background:var(--sel);color:var(--text)}
-  .set-nav button.on{background:var(--sel);color:var(--text);font-weight:650}
+  /* активный таб: мягкая белая плёнка (в светлой — чуть светлее фона, без тени;
+     в тёмной — приглушённая, не яркая). Значения по темам ниже. */
+  .set-nav button.on{background:rgba(255,255,255,.55);color:var(--text);font-weight:650;box-shadow:none}
+  @media (prefers-color-scheme:dark){.set-nav button.on{background:rgba(255,255,255,.05)}}
+  :root[data-theme="light"] .set-nav button.on{background:rgba(255,255,255,.55)}
+  :root[data-theme="dark"] .set-nav button.on{background:rgba(255,255,255,.05)}
   .set-nav button.on svg{opacity:1;color:var(--accent)}
   .set-pane{flex:1;min-width:0;overflow-y:auto;padding:22px 26px}
   .set-load{color:var(--mut);font-size:12px;padding:20px 0}
@@ -5160,6 +5166,7 @@ function winBackup(){openWin("__nasbak","Бэкап главного NAS",(body,
   {id:"sched",name:"Расписание",ic:"clock"},
   {id:"history",name:"История",ic:"activity"},
  ];
+ if(SET.nbTab&&CATS.some(c=>c.id===SET.nbTab))tab=SET.nbTab;   // запоминаем последний открытый таб
  const saveCfg=async patch=>{const r=await nbP("/api/backup/config",{config:patch});CFG=(r&&r.config)||CFG;JOBS=(CFG.jobs||[]).slice();return CFG;};
  const wireSeg=(tc,id,cb)=>{const seg=tc.querySelector(id);if(!seg)return;seg.querySelectorAll("button").forEach(b=>b.onclick=()=>{seg.querySelectorAll("button").forEach(x=>x.classList.toggle("on",x===b));cb(b.dataset.v);});};
  // единая папка: воссоздаём ВСЁ дерево источника под базой (Cloud/Desktop → base/Cloud/Desktop),
@@ -5476,7 +5483,7 @@ function winBackup(){openWin("__nasbak","Бэкап главного NAS",(body,
   renderTabs();
   body.querySelectorAll(".set-nav button").forEach(b=>b.onclick=()=>{
     if(b.dataset.t==="__del"){delDlg();return;}
-    tab=b.dataset.t;render();});
+    tab=b.dataset.t;SET.nbTab=tab;saveSettings();render();});
   TABS[tab](body.querySelector("#tc"));
   nbFootMo=setFootAdopt(body.querySelector("#tc"),body.querySelector("#tf"));};
  render();body._reload=render;
