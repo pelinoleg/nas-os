@@ -1247,6 +1247,7 @@ window.NAS_I18N = { en: {
 "в среднем": "average",
 "замеров": "tests",
 "замер с ошибкой": "test failed",
+"последний замер не удался": "last test failed",
 "открыть": "open",
 "Мбит/с": "Mbit/s",
 "Подстановки": "Placeholders",

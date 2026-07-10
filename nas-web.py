@@ -1002,8 +1002,15 @@ def _myspeed_get(base, path, password, timeout=3):
     with urllib.request.urlopen(req, timeout=timeout) as r:
         return json.loads(r.read().decode("utf-8", "replace"))
 
+def _myspeed_ok(t):
+    """A failed run is flagged with `error` and stored as -1/-1/-1, not as null."""
+    if not isinstance(t, dict) or t.get("error"):
+        return False
+    d = t.get("download")
+    return isinstance(d, (int, float)) and not isinstance(d, bool) and d >= 0
+
 def myspeed_state():
-    """Последний замер + краткая статистика. Кэш, чтобы виджет не долбил сервис."""
+    """Последний удачный замер + краткая статистика. Кэш, чтобы виджет не долбил сервис."""
     with _ms_lock:
         if time.time() - _ms_cache["t"] < MYSPEED_TTL:
             return _ms_cache["data"]
@@ -1014,13 +1021,19 @@ def myspeed_state():
         pw = m.get("myspeed_password") or ""
         try:
             tests = _myspeed_get(base, "/api/speedtests", pw)
-            if isinstance(tests, list) and tests:
+            rows = [x for x in tests if isinstance(x, dict)] if isinstance(tests, list) else []
+            if rows:
                 # MySpeed отдаёт новые первыми, но полагаться на порядок незачем
-                last = max((x for x in tests if isinstance(x, dict)),
-                           key=lambda x: str(x.get("created") or ""), default={})
-                out = {"ok": True, "url": base, "count": len(tests),
-                       "download": last.get("download"), "upload": last.get("upload"),
-                       "ping": last.get("ping"), "created": last.get("created"),
+                newest = lambda seq: max(seq, key=lambda x: str(x.get("created") or ""),
+                                         default=None)
+                last = newest(rows)
+                # Провалившийся замер записывается как -1/-1/-1 — показывать эти числа
+                # нельзя. Цифры берём из последнего удачного, а про сбой говорим отдельно.
+                good = newest([x for x in rows if _myspeed_ok(x)]) or {}
+                out = {"ok": True, "url": base, "count": len(rows),
+                       "download": good.get("download"), "upload": good.get("upload"),
+                       "ping": good.get("ping"), "created": good.get("created"),
+                       "failed": not _myspeed_ok(last), "failed_at": last.get("created"),
                        "error": last.get("error")}
                 try:                       # статистика необязательна — без неё виджет живёт
                     st = _myspeed_get(base, "/api/speedtests/statistics", pw)

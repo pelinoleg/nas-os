@@ -5979,14 +5979,17 @@ async function pollMySpeed(){
  const hide=()=>{if(wdg)wdg.style.display="none";};
  let r=null;
  try{r=await api("/api/myspeed");}catch(e){}
- if(!r||!r.ok||r.download==null){hide();return;}
+ if(!r||!r.ok){hide();return;}   /* ok=false — сервиса нет или он молчит; замеры при ok=true есть всегда */
  if(wdg)wdg.style.display="";
  /* r.url — это адрес, по которому ходит СЕРВЕР (обычно 127.0.0.1): в браузере он
     ведёт на машину пользователя. Берём ссылку из web-desktop.url-лейбла контейнера,
     а если ярлыка нет — подставляем текущий хост вместо loopback. */
  const app=(APPS||[]).find(a=>/myspeed/i.test(a.name||"")||/:5216(\/|$)/.test(a.url||""));
  MS_URL=(app&&app.url)||String(r.url||"").replace(/\/\/(127\.0\.0\.1|localhost)\b/,"//"+location.hostname);
- const mbit=v=>(v==null?"—":(+v>=100?Math.round(+v):(+v).toFixed(1))+" Мбит/с");
+ /* провальный замер MySpeed хранит как -1 — такие числа не показываем.
+    null проверяем отдельно: +null===0, а null>=0 — true, оба прошли бы как валидные. */
+ const num=v=>(v!=null&&+v>=0);
+ const mbit=v=>(!num(v)?"—":(+v>=100?Math.round(+v):(+v).toFixed(1))+" Мбит/с");
  const ago=t=>{const s=(Date.now()-Date.parse(t))/1000;
    if(!isFinite(s))return "";
    if(s<90)return "только что";
@@ -5995,12 +5998,14 @@ async function pollMySpeed(){
    return Math.round(s/86400)+" дн назад";};
  const a=r.avg||{};
  // цвета берём из уже подогнанных по контрасту токенов поверхности виджета
- const pingCol=r.ping==null?"var(--dim)":(r.ping<30?"var(--good)":r.ping<80?"var(--warn)":"var(--danger)");
+ const pingCol=!num(r.ping)?"var(--dim)":(r.ping<30?"var(--good)":r.ping<80?"var(--warn)":"var(--danger)");
+ const foot=[ago(r.created),r.count?r.count+" замеров":""].filter(Boolean).join(" · ");
  box.innerHTML=`<div class="ms-row"><span class="ms-l ms-dn">${svg("download",13)} Скачивание</span><b class="ms-dn">${esc(mbit(r.download))}</b></div>
    <div class="ms-row"><span class="ms-l ms-up">${svg("upload",13)} Отдача</span><b class="ms-up">${esc(mbit(r.upload))}</b></div>
-   <div class="ms-row"><span class="ms-l">${svg("activity",13)} Пинг</span><b style="color:${pingCol}">${r.ping==null?"—":esc(r.ping+" мс")}</b></div>
+   <div class="ms-row"><span class="ms-l">${svg("activity",13)} Пинг</span><b style="color:${pingCol}">${!num(r.ping)?"—":esc(r.ping+" мс")}</b></div>
    ${a.download!=null?`<div class="ms-avg">в среднем ${esc(mbit(a.download))} / ${esc(mbit(a.upload))}${a.ping!=null?` · пинг ${esc(a.ping+" мс")}`:""}</div>`:""}
-   <div class="ms-avg">${r.error?`<span style="color:var(--danger)">замер с ошибкой</span> · `:""}${esc(ago(r.created))}${r.count?` · ${r.count} замеров`:""}</div>`;
+   ${foot?`<div class="ms-avg">${esc(foot)}</div>`:""}
+   ${r.failed?`<div class="ms-avg" style="color:var(--danger)">последний замер не удался · ${esc(ago(r.failed_at))}</div>`:""}`;
  const mm=document.getElementById("more-myspeed");
  if(mm)mm.onclick=()=>{if(MS_URL)window.open(MS_URL,"_blank");};
 }
