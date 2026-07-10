@@ -5595,9 +5595,9 @@ function timemachineTab(tc){
    <h3 class="set-title">Time Machine</h3>
    <p class="set-sub">Этот NAS как приёмник macOS Time Machine. Укажи папку и пользователя — панель сама поднимет отдельную Samba-шару (vfs_fruit) и анонс по сети (Avahi). Твой Mac увидит NAS в «Системные настройки → Time Machine → Выбрать диск».</p>
    <div class="set-card"><div class="set-grp">Настройка</div>
-    <div class="srow"><div class="srow-l"><div class="srow-t">Папка для бэкапов${tipHTML("Куда Mac'и складывают резервные копии. Создастся автоматически, права 0700 у пользователя ниже. Лучше на пуле/отдельном диске.")}</div></div><div class="srow-c"><input class="mono" id="tmPath" value="${att(st.path||"")}" placeholder="/mnt/storage/TimeMachine" style="min-width:210px"><button class="btn sm" id="tmPathB">${svg("folder",13)} Выбрать</button></div></div>
-    <div class="srow"><div class="srow-l"><div class="srow-t">Пользователь Samba${tipHTML("Имя, под которым Mac подключается. Обычно системный пользователь NAS. Пароль — ниже (нужен для входа с Mac).")}</div></div><div class="srow-c"><input class="mono" id="tmUser" value="${att(st.user||"")}" placeholder="oleg" style="width:150px"></div></div>
-    <div class="srow"><div class="srow-l"><div class="srow-t">Пароль Samba${tipHTML("Пароль для подключения с Mac. Оставь пустым, если пользователь уже заведён в Samba и пароль менять не нужно.")}</div></div><div class="srow-c"><input class="mono" type="password" id="tmPass" placeholder="не менять" style="width:150px"></div></div>
+    <div class="srow"><div class="srow-l"><div class="srow-t">Папка для бэкапов${tipHTML("Куда Mac'и складывают резервные копии. Создастся автоматически, права 0700 у отдельного пользователя Time Machine. Лучше на пуле/отдельном диске.")}</div></div><div class="srow-c"><input class="mono" id="tmPath" value="${att(st.path||"")}" placeholder="/mnt/storage/TimeMachine" style="min-width:400px"><button class="btn sm" id="tmPathB">${svg("folder",13)} Выбрать</button></div></div>
+    <div class="srow"><div class="srow-l"><div class="srow-t">Пользователь Time Machine${tipHTML("Отдельный служебный пользователь ТОЛЬКО для Time Machine — создаётся автоматически, без входа в систему, к другим шарам доступа не даёт. Под этим именем Mac подключается к бэкапу.")}</div></div><div class="srow-c"><input class="mono" id="tmUser" value="${att(st.user||"")}" placeholder="timemachine" style="width:170px"></div></div>
+    <div class="srow"><div class="srow-l"><div class="srow-t">Пароль Time Machine${tipHTML("Пароль этого отдельного пользователя (его Mac спросит при подключении). Оставь пустым, если пользователь уже создан и пароль менять не нужно.")}</div></div><div class="srow-c"><input class="mono" type="password" id="tmPass" placeholder="не менять" style="width:170px"></div></div>
     <div class="srow"><div class="srow-l"><div class="srow-t">Лимит объёма, ГБ${tipHTML("Максимальный размер бэкапов Time Machine (мягкий лимит fruit). 0 — без лимита.")}</div></div><div class="srow-c"><input class="mono" type="number" min="0" id="tmQuota" value="${st.quota_gb||0}" style="width:90px"></div></div>
     <div class="tm-actions">
      <button class="btn pri" id="tmApply">${svg("check",14)} ${st.enabled?"Применить":"Включить Time Machine"}</button>
@@ -5606,7 +5606,7 @@ function timemachineTab(tc){
    </div>
    <div class="set-card"><div class="set-grp">Бэкапы Mac</div>
     ${bks.length?`<div class="tm-bks">${bks.map(b=>`<div class="tm-bk"><span class="tm-bk-i">${svg("hdd",16)}</span><span class="tm-bk-n">${esc(b.host)}</span><span class="tm-bk-m mono">${fmtB(b.size)}${b.mtime?" · "+fmDate(b.mtime):""}</span></div>`).join("")}</div>`
-      :`<div class="mon-note" style="margin:0">Пока нет ни одного бэкапа. На Mac открой «Системные настройки → Time Machine → Выбрать резервный диск», выбери этот NAS и войди под пользователем Samba.</div>`}
+      :`<div class="mon-note" style="margin:0">Пока нет ни одного бэкапа. На Mac открой «Системные настройки → Time Machine → Выбрать резервный диск», выбери этот NAS и войди под пользователем Time Machine.</div>`}
    </div>`;
   const q=s=>tc.querySelector(s);
   q("#tmPathB").onclick=()=>pickFolder({title:"Папка для бэкапов Time Machine",start:q("#tmPath").value||"/mnt/storage",onPick:p=>{q("#tmPath").value=p;}});

@@ -2737,7 +2737,7 @@ def tm_status():
     место и список бэкапов Mac (sparsebundle)."""
     conf = _tm_read_conf()
     path = conf.get("path") or (STORAGE + "/TimeMachine")
-    user = conf.get("user") or TARGET_USER
+    user = conf.get("user") or "timemachine"      # dedicated TM-only account (not the system user)
     try:
         quota = int(conf.get("quota") or 0)
     except ValueError:

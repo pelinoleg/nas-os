@@ -2115,7 +2115,7 @@ EOF
 
 tm_apply() {
     local path="${NASW_TM_PATH:-$STORAGE_MNT/TimeMachine}"
-    local user="${NASW_TM_USER:-$TARGET_USER}"
+    local user="${NASW_TM_USER:-timemachine}"
     local quota="${NASW_TM_QUOTA:-0}"
     local pass="${NASW_TM_PASS:-}"
     case "$path" in /*) : ;; *) warn "путь должен быть абсолютным"; return 2 ;; esac
@@ -2123,8 +2123,17 @@ tm_apply() {
     install_packages "samba" samba
     install_packages "avahi" avahi-daemon
 
+    # Dedicated Time-Machine-only account: a system user with no login shell,
+    # not the admin user. It only owns the TM folder + is the sole valid user of
+    # the TM share, so it gives no access to anything else on the box.
+    if ! id "$user" >/dev/null 2>&1; then
+        run useradd --system --no-create-home --shell /usr/sbin/nologin "$user" \
+            && info "создан отдельный пользователь Time Machine: $user" \
+            || warn "не удалось создать пользователя $user"
+    fi
+
     run mkdir -p "$path"
-    run chown "$user:$user" "$path"
+    run chown "$user" "$path"          # owner only; group left as-is, 0700 keeps it private
     run chmod 0700 "$path"
 
     tm_ensure_include
