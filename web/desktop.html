@@ -445,11 +445,12 @@
   .gauges{display:flex;gap:10px}
   .gauge{flex:1;display:flex;flex-direction:column;align-items:center}
   .gauge .ring{width:70px;height:70px}.gauge .v{font-family:var(--mono);font-size:15px;font-weight:650;margin-top:-45px;margin-bottom:21px}
-  .gauge .l{font-size:10px;color:var(--mut);font-family:var(--mono);text-transform:uppercase;letter-spacing:.07em;margin-top:6px}
+  .gauge .l{font-size:10px;color:var(--mut);font-family:var(--mono);text-transform:uppercase;letter-spacing:.07em;margin-top:6px;display:inline-flex;align-items:center;gap:3px}
+  .gauge .l svg{opacity:.75}
   .bar{height:9px;border-radius:6px;background:var(--line);overflow:hidden}
   .bar i{display:block;height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent-2));transition:width .6s}
   .krow{display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:9px;gap:12px}.krow:last-child{margin-bottom:0}
-  .krow span{color:var(--dim)}.krow b{font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .krow span{color:var(--dim);display:inline-flex;align-items:center;gap:6px}.krow span svg{opacity:.65;flex:none}.krow b{font-family:var(--mono);font-variant-numeric:tabular-nums}
   .dline{display:flex;align-items:center;gap:9px;font-size:12.5px;padding:6px 0}
   .dline.sys{opacity:.8}
   .dline .ddot{width:7px;height:7px;border-radius:50%;flex:none}
@@ -1749,6 +1750,8 @@ const P={
  term:'<path d="m7 11 2-2-2-2"/><path d="M11 13h4"/><rect width="18" height="18" x="3" y="3" rx="2"/>',
  info:'<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
  check:'<path d="M20 6 9 17l-5-5"/>',
+ thermo:'<path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"/>',
+ memchip:'<rect x="4" y="8" width="16" height="8" rx="1.5"/><path d="M8 8V6"/><path d="M12 8V6"/><path d="M16 8V6"/><path d="M8 18v-2"/><path d="M12 18v-2"/><path d="M16 18v-2"/>',
  warn:'<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
  wifi:'<path d="M12 20h.01"/><path d="M2 8.82a15 15 0 0 1 20 0"/><path d="M5 12.859a10 10 0 0 1 14 0"/><path d="M8.5 16.429a5 5 0 0 1 7 0"/>',
  globe:'<circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/>',
@@ -6304,12 +6307,12 @@ function paintSys(s){const m=document.getElementById("wg-sys");if(!m)return;
  const thr=s.throttled&&s.throttled.raw&&s.throttled.raw!=="0x0";
  m.innerHTML=`
   <div class="gauges">
-   <div class="gauge">${ring(s.cpu,loadCol(s.cpu))}<div class="v" style="color:${loadCol(s.cpu)}">${s.cpu}%</div><div class="l">CPU</div></div>
-   <div class="gauge">${ring(s.temp?Math.min(s.temp/85*100,100):0,s.temp?loadCol(tempLoad(s.temp)):"var(--mut)")}<div class="v" style="color:${s.temp?loadCol(tempLoad(s.temp)):"var(--mut)"}">${s.temp?s.temp+"°":"—"}</div><div class="l">°C</div></div>
-   <div class="gauge">${ring(s.mem.pct,loadCol(s.mem.pct))}<div class="v" style="color:${loadCol(s.mem.pct)}">${s.mem.pct}%</div><div class="l">RAM</div></div></div>
-  <div class="krow" style="margin-top:12px"><span>Аптайм</span><b>${fmtUp(s.uptime)}</b></div>
-  <div class="krow"><span>Load 1м / 5м</span><b>${s.load?s.load[0].toFixed(2)+" / "+s.load[1].toFixed(2):"—"}</b></div>
-  ${DISK_TEMP_MAX!=null?`<div class="krow"><span>Температура дисков</span><b style="color:${diskTcol(DISK_TEMP_MAX)}">${DISK_TEMP_MAX}°C</b></div>`:""}
+   <div class="gauge">${ring(s.cpu,loadCol(s.cpu))}<div class="v" style="color:${loadCol(s.cpu)}">${s.cpu}%</div><div class="l">${svg("cpu",11)} CPU</div></div>
+   <div class="gauge">${ring(s.temp?Math.min(s.temp/85*100,100):0,s.temp?loadCol(tempLoad(s.temp)):"var(--mut)")}<div class="v" style="color:${s.temp?loadCol(tempLoad(s.temp)):"var(--mut)"}">${s.temp?s.temp+"°":"—"}</div><div class="l">${svg("thermo",11)} Темп.</div></div>
+   <div class="gauge">${ring(s.mem.pct,loadCol(s.mem.pct))}<div class="v" style="color:${loadCol(s.mem.pct)}">${s.mem.pct}%</div><div class="l">${svg("memchip",11)} RAM</div></div></div>
+  <div class="krow" style="margin-top:12px"><span>${svg("clock",13)} Аптайм</span><b>${fmtUp(s.uptime)}</b></div>
+  <div class="krow"><span>${svg("activity",13)} Load 1м / 5м</span><b>${s.load?s.load[0].toFixed(2)+" / "+s.load[1].toFixed(2):"—"}</b></div>
+  ${DISK_TEMP_MAX!=null?`<div class="krow"><span>${svg("thermo",13)} Температура дисков</span><b style="color:${diskTcol(DISK_TEMP_MAX)}">${DISK_TEMP_MAX}°C</b></div>`:""}
   ${thr?`<div class="krow" style="color:var(--warn)"><span>⚠ троттлинг</span><b>${esc(s.throttled.raw)}</b></div>`:""}`;
  const ns=document.getElementById("wg-nets");if(ns)ns.innerHTML=
   `<span style="color:var(--good)">↓ ${fmtR(s.net.rx)}</span><span style="color:var(--danger)">↑ ${fmtR(s.net.tx)}</span>`;
