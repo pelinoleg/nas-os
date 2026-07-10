@@ -3136,6 +3136,12 @@ def nb_test(cfg=None):
     mods = [l.split("\t")[0].split()[0] for l in out.splitlines() if l.strip() and not l.startswith("@")]
     return {"ok": True, "modules": [m for m in mods if m], "log": "подключение работает"}
 
+_NB_JUNK = {".DS_Store", "Thumbs.db", "desktop.ini", ".localized",
+            ".Spotlight-V100", ".Trashes", ".fseventsd", ".TemporaryItems", ".apdisk"}
+def _nb_is_junk(name):
+    # мусорные служебные файлы ОС — не показываем в пикере (AppleDouble ._*, .DS_Store и пр.)
+    return name in _NB_JUNK or name.startswith("._")
+
 def nb_browse(cfg, path):
     """Список папок/файлов источника для визуального выбора (path='' → корень)."""
     cfg = cfg or nb_load()
@@ -3158,6 +3164,7 @@ def nb_browse(cfg, path):
         if not m: continue
         name = m.group(2)
         if name in (".", ""): continue
+        if _nb_is_junk(name): continue        # не засорять пикер мусором (.DS_Store, ._*, Thumbs.db…)
         entries.append({"name": name, "dir": m.group(1) == "d"})
     entries.sort(key=lambda e: (not e["dir"], e["name"].lower()))
     return {"ok": True, "path": path, "entries": entries}

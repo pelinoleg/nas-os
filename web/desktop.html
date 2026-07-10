@@ -834,15 +834,20 @@
   .nb-pbar i{display:block;height:100%;background:var(--accent);border-radius:999px;transition:width .4s}
   .nb-prog-l{color:var(--mut);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   /* дерево-выбор источников */
-  .nb-pick{max-width:660px;width:min(660px,94vw)}
+  .nb-pick{max-width:880px;width:min(880px,95vw)}
+  /* заметный индикатор загрузки в пикере — спиннер + текст, чтобы не казалось «сломалось» */
+  .nb-load{display:flex;align-items:center;gap:10px;padding:22px 14px;color:var(--dim);font-size:13px}
+  .nb-load::before{content:"";width:18px;height:18px;border-radius:50%;border:2.5px solid var(--line);border-top-color:var(--accent);animation:wspin .8s linear infinite;flex:none}
+  .nb-tchev.busy{opacity:1}
+  .nb-tchev.busy svg{animation:wspin .8s linear infinite;color:var(--accent)}
   .nb-tree{max-height:min(64vh,620px);overflow:auto;border:1px solid var(--line);border-radius:var(--r-md);padding:4px}
   .nb-selc{margin-right:auto;font-size:12px;color:var(--mut)}
   .nb-trow{display:flex;align-items:center;gap:7px;padding:6px 10px;cursor:pointer;font-size:12.5px;border-radius:7px}
   .nb-trow:hover{background:var(--sel)}
   .nb-trow.checked>.nb-tn,.nb-trow.covered>.nb-tn{color:var(--accent);font-weight:600}
   .nb-trow.indet>.nb-tn{color:var(--text);font-weight:600}
-  /* исключённая вложенная папка (сняли внутри выбранного родителя) — зачёркнута и приглушена */
-  .nb-trow.excluded>.nb-tn{color:var(--danger);text-decoration:line-through;opacity:.8}
+  /* исключённая вложенная папка (сняли внутри выбранного родителя) — зачёркнута и чуть приглушена */
+  .nb-trow.excluded>.nb-tn{text-decoration:line-through;opacity:.55}
   .nb-trow.exout{opacity:.45}.nb-trow.exout>.nb-tn{text-decoration:line-through}
   .nb-trow.locked{cursor:default;opacity:.75}
   .nb-tw{width:18px;flex:none;display:flex;justify-content:center}
@@ -854,7 +859,7 @@
   .nb-job{display:flex;align-items:center;gap:8px;padding:7px 0;border-top:1px solid var(--line);font-size:12px}
   .nb-job:first-child{border-top:none}
   .nb-src{flex:none;max-width:38%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--accent)}
-  .nb-exc{flex:none;font-size:10.5px;color:var(--danger);background:var(--danger-soft);border-radius:6px;padding:1px 6px;cursor:help;white-space:nowrap}
+  .nb-exc{flex:none;font-size:10.5px;color:var(--dim);background:var(--sel);border-radius:6px;padding:1px 6px;cursor:help;white-space:nowrap}
   .nb-arr{color:var(--mut);flex:none}
   .nb-dst{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dim)}
   .nb-sz{flex:none;color:var(--mut);font-size:11px}
@@ -5088,7 +5093,7 @@ function nbPickSource(preselected,preExcl,onPick){const s=document.getElementByI
    for(const x of sel){if(x.startsWith(full+"/"))return"indet";}return"none";};
  s.innerHTML=`<div class="dialog nb-pick"><h3>${svg("net",16)} Что копировать с главного NAS</h3>
    <div class="mon-note" style="margin:0 0 8px">Разворачивайте папки ▸ и отмечайте нужное на любом уровне. Галочка на папке — копируется вся папка целиком (в т.ч. что появится позже). Снятая галочка с вложенной папки исключает только её — остальное копируется.</div>
-   <div class="nb-tree" id="nbTree"><div style="color:var(--mut);padding:10px">загрузка…</div></div>
+   <div class="nb-tree" id="nbTree"><div class="nb-load">Читаю папки с главного NAS…</div></div>
    <div class="r"><span class="nb-selc" id="nbSelInfo"></span><button class="btn" id="nbsX">Отмена</button><button class="btn pri" id="nbsO">Сохранить выбор (<span id="nbsC">${sel.size}</span>)</button></div></div>`;
  s.classList.add("show");
  const treeEl=s.querySelector("#nbTree");
