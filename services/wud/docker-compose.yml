@@ -1,0 +1,22 @@
+# What's Up Docker (WUD) — следит за обновлениями образов Docker. http://<pi>:3005
+# REST API (/api/containers) панель опрашивает и показывает бейдж «есть обновления».
+# Панель находит WUD по имени контейнера и фактическому порту — порт можно менять.
+services:
+  wud:
+    image: ghcr.io/getwud/wud:latest
+    container_name: wud
+    restart: unless-stopped
+    labels:
+      - "web-desktop.name=What's Up Docker"
+      - "web-desktop.url=http://pi5.local:3005"
+      - "web-desktop.icon=https://cdn.jsdelivr.net/gh/selfhst/icons@main/svg/whats-up-docker.svg"
+    environment:
+      # следим за локальным docker через сокет (только чтение)
+      - WUD_WATCHER_LOCAL_SOCKETPATH=/var/run/docker.sock
+      # опрос раз в 6 часов (cron); образы не трогаем — только сообщаем
+      - WUD_WATCHER_LOCAL_CRON=0 0 */6 * * *
+    ports:
+      - "3005:3000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /opt/docker/wud/store:/store

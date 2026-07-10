@@ -5763,22 +5763,42 @@ def fs_trash_list():
     items.sort(key=lambda x: x.get("deleted", 0), reverse=True)
     return {"ok": True, "items": items}
 
-def fs_trash_restore(tid):
+def fs_trash_restore(tid, dest_dir=""):
+    """Восстановить из корзины. dest_dir пуст → в исходную папку (orig); задан →
+    в выбранную. Осиротевшие (orig неизвестен) можно вернуть только выбором папки."""
     items = _trash_load()
     hit = next((i for i in items if i.get("id") == tid), None)
+    orphan = False
+    if not hit:                                  # не в индексе — ищем среди осиротевших
+        hit = next((o for o in _trash_orphans({i.get("id") for i in items})
+                    if o.get("id") == tid), None)
+        orphan = bool(hit)
     if not hit:
         return {"ok": False, "log": "не найдено в корзине"}
     store = hit.get("store")
     if not store or not os.path.lexists(store):
-        _trash_save([i for i in items if i.get("id") != tid])
+        if not orphan:
+            _trash_save([i for i in items if i.get("id") != tid])
         return {"ok": False, "log": "файл отсутствует в хранилище"}
-    dest = _uniq(hit["orig"])
+    if dest_dir:
+        d, err = _fs_guard(dest_dir)
+        if err:
+            return {"ok": False, "log": err}
+        if not os.path.isdir(d):
+            return {"ok": False, "log": "цель не каталог"}
+        target = os.path.join(d, hit.get("name") or os.path.basename(store))
+    elif hit.get("orig"):
+        target = hit["orig"]
+    else:
+        return {"ok": False, "log": "исходный путь неизвестен — выберите папку"}
+    dest = _uniq(target)
     try:
         os.makedirs(os.path.dirname(dest), exist_ok=True)
         shutil.move(store, dest)
     except (OSError, shutil.Error) as e:
         return {"ok": False, "log": str(e)}
-    _trash_save([i for i in items if i.get("id") != tid])
+    if not orphan:
+        _trash_save([i for i in items if i.get("id") != tid])
     return {"ok": True, "path": dest}
 
 def fs_trash_delete(tid):
@@ -8350,7 +8370,7 @@ class H(BaseHTTPRequestHandler):
             elif p == "/api/fs/trash":
                 b = self._body(); self._json(fs_trash(b.get("path", "")))
             elif p == "/api/fs/trash/restore":
-                b = self._body(); self._json(fs_trash_restore(b.get("id", "")))
+                b = self._body(); self._json(fs_trash_restore(b.get("id", ""), b.get("dest", "")))
             elif p == "/api/fs/trash/delete":
                 b = self._body(); self._json(fs_trash_delete(b.get("id", "")))
             elif p == "/api/fs/trash/empty":

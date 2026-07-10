@@ -1728,7 +1728,9 @@ function appIconHTML(app){
  if(!src){try{const h=new URL(app.url).hostname;
    const lan=!h||h==="localhost"||/^[\d.]+$/.test(h)||h.endsWith(".local")||h.endsWith(".lan")||h.endsWith(".home");
    if(h&&!lan)src=`https://www.google.com/s2/favicons?domain=${h}&sz=64`;}catch(e){}}
- return letter+(src?`<img class="tico" src="${iconSrc(src)}" alt="" onerror="this.remove()">`:"");}
+ // буква — запасной вариант; когда иконка ЗАГРУЗИЛАСЬ, прячем букву, чтобы она не
+ // просвечивала сквозь прозрачные места логотипа. Ошибка загрузки → убираем картинку, буква остаётся.
+ return letter+(src?`<img class="tico" src="${iconSrc(src)}" alt="" onload="this.previousElementSibling&&(this.previousElementSibling.style.display='none')" onerror="this.remove()">`:"");}
 
 /* wallpapers + accents */
 const WALLS=[
@@ -5198,16 +5200,19 @@ function winTrash(){openWin("__trash","Корзина",body=>{
      <div class="tr-list"></div></div>`;
    const list=body.querySelector("#trList")||body.querySelector(".tr-list");
    if(!items.length){list.innerHTML=`<div class="tr-empty"><div class="pe-icon">${svg("trash",26)}</div><div class="pe-title">Корзина пуста</div><div class="pe-desc">Удалённые в файловом менеджере файлы попадают сюда, и их можно восстановить.</div></div>`;return;}
-   items.forEach(it=>{const dir=it.orig.replace(/\/[^/]+$/,"")||"/";
-     const row=el(`<div class="tr-row ${it.isdir?"dir":""}${it.exists?"":" lost"}" title="${att(it.orig)}">
+   items.forEach(it=>{const dir=it.orig?(it.orig.replace(/\/[^/]+$/,"")||"/"):"";
+     const restore=async(dest)=>{const w=await api("/api/fs/trash/restore",{method:"POST",body:JSON.stringify(dest?{id:it.id,dest}:{id:it.id})});toast(LIVE?(w&&w.ok?"Восстановлено в "+(w.path||dest||dir):("Ошибка: "+((w&&w.log)||""))):"Демо");draw();};
+     const row=el(`<div class="tr-row ${it.isdir?"dir":""}${it.exists?"":" lost"}" title="${att(it.orig||"путь неизвестен — индекс был повреждён")}">
        <span class="tc-n"><span class="fi">${svg(it.isdir?"folder":fileIcon(it.name),16)}</span><span class="tn">${esc(it.name)}</span></span>
-       <span class="tc-s mono">${esc(dir)}</span>
+       <span class="tc-s mono${it.orig?"":" tr-unk"}">${it.orig?esc(dir):"путь неизвестен"}</span>
        <span class="tc-w">${fmDate(it.deleted)}</span>
        <span class="tc-z">${it.isdir?"—":fmtB(it.size)}</span>
        <span class="tc-a">
-         <button class="iconbtn" data-a="restore" title="Восстановить в исходную папку">${svg("arrowup",14)}</button>
+         ${it.orig?`<button class="iconbtn" data-a="restore" title="Восстановить в исходную папку">${svg("arrowup",14)}</button>`:""}
+         <button class="iconbtn" data-a="restoreTo" title="Восстановить в выбранную папку…">${svg("folder",14)}</button>
          <button class="iconbtn dng" data-a="del" title="Удалить навсегда">${svg("trash",14)}</button></span></div>`);
-     row.querySelector('[data-a="restore"]').onclick=async e=>{e.stopPropagation();const w=await api("/api/fs/trash/restore",{method:"POST",body:JSON.stringify({id:it.id})});toast(LIVE?(w&&w.ok?"Восстановлено в "+dir:("Ошибка: "+((w&&w.log)||""))):"Демо");draw();};
+     const rb=row.querySelector('[data-a="restore"]');if(rb)rb.onclick=e=>{e.stopPropagation();restore("");};
+     row.querySelector('[data-a="restoreTo"]').onclick=e=>{e.stopPropagation();pickFolder({title:"Восстановить в папку",start:it.orig?dir:"/mnt/storage",onPick:p=>restore(p)});};
      row.querySelector('[data-a="del"]').onclick=e=>{e.stopPropagation();confirmDlg("Удалить навсегда?",esc(it.name)+" будет удалён безвозвратно.",async()=>{const w=await api("/api/fs/trash/delete",{method:"POST",body:JSON.stringify({id:it.id})});toast(LIVE?(w&&w.ok?"Удалено":"Ошибка"):"Демо");draw();},true);};
      list.appendChild(row);});
    const eb=body.querySelector("#trEmpty");if(eb)eb.onclick=()=>confirmDlg("Очистить корзину?",`${items.length} объектов будут удалены безвозвратно.`,async()=>{const w=await api("/api/fs/trash/empty",{method:"POST",body:JSON.stringify({})});toast(LIVE?`Очищено: ${(w&&w.count)||0}`:"Демо");draw();},true);
