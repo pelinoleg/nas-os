@@ -3642,6 +3642,7 @@ _maint_last = 0
 def load_maintenance():
     # 0 = выключено (для *_days); все значения попадают в бэкап настроек вместе с файлом
     d = {"trash_days": 30, "pool_alias": "",
+         "duscan_days": 0,          # авто-освежение анализатора места: пересканить тома с кэшем старше N дней (0 = выкл)
          "thumb_cache_mb": 512,     # лимит кэша миниатюр ФМ, МБ (0 = без лимита)
          "import_stale_hours": 24,  # снести брошенные .incomplete-* старше N часов (0 = не трогать)
          "import_keep_days": 0,     # удалять импорты старше N дней (0 = хранить вечно)
@@ -3725,6 +3726,7 @@ def save_maintenance(d):
     err = ""
     # числовые настройки: ключ → (мин, макс)
     for k, (lo, hi) in {"trash_days": (0, 365), "smart_scan_min": (5, 120),
+                        "duscan_days": (0, 365),
                         "thumb_cache_mb": (0, 100000),
                         "import_stale_hours": (0, 720), "import_keep_days": (0, 3650),
                         "smart_short_days": (0, 90), "smart_long_days": (0, 365),
@@ -3839,6 +3841,10 @@ def maintenance_daily():
     try:
         m = load_maintenance()
         usb_import_gc(m.get("import_stale_hours", 24), m.get("import_keep_days", 0))
+    except Exception:
+        pass
+    try:
+        _duscan_auto(load_maintenance().get("duscan_days", 0))
     except Exception:
         pass
     try:
@@ -5724,6 +5730,27 @@ def _duscan_run(root):
         _duscache[root] = data
         _duscan[root] = {"status": "done", "root": root, "ts": data["ts"],
                          "size": data["size"], "files": data["files"], "dirs": data["dirs"]}
+
+def _duscan_auto(days):
+    """Периодически освежать УЖЕ сканированные тома (кэш старше N дней). 0 = выкл.
+    Один скан за проход (сутки) — du нагружает диск, пачкой гонять незачем."""
+    if not days or days <= 0:
+        return
+    now = time.time()
+    for f in sorted(glob.glob(os.path.join(NAS_CONFIG, "duscan-*.json"))):
+        try:
+            with open(f) as fh:
+                d = json.load(fh)
+        except (OSError, ValueError):
+            continue
+        root, ts = d.get("root"), d.get("ts", 0)
+        if not root or not os.path.isdir(root) or now - ts < days * 86400:
+            continue
+        with _duscan_lock:
+            if (_duscan.get(root) or {}).get("status") == "scanning":
+                continue
+        duscan_start(root)      # фоновый; освежит кэш и его ts
+        break                   # по одному за проход — остальные освежатся в следующие сутки
 
 def duscan_start(root):
     root = os.path.realpath(root or "/")
