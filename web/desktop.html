@@ -1311,6 +1311,11 @@
   .term-xt-wrap{position:relative;height:100%}
   .term-xt{height:100%;padding:8px 4px 8px 10px}
   .term-xt .xterm{height:100%}
+  /* попап оформления терминала */
+  .tcfg-pop{position:absolute;top:70px;right:12px;z-index:20;background:var(--menu-bg,#1b2230);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,.1);border-radius:12px;box-shadow:0 14px 40px rgba(0,0,0,.5);padding:12px;min-width:230px;display:flex;flex-direction:column;gap:9px}
+  .tcfg-row{display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .tcfg-row label{font-size:12.5px;color:var(--dim,#9fb0c8)}
+  .tcfg-row select{flex:none;width:130px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.12);color:#e6edf6;border-radius:7px;padding:6px 8px;font-size:12.5px}
   .term-tb .grow{flex:1}
   .term-tb button.pri{background:rgba(53,201,192,.16);color:#35c9c0}
   .term-find{background:#0a0f17;border:1px solid rgba(53,201,192,.4);border-radius:7px;color:#c7d3e6;font-family:var(--mono);font-size:11px;padding:4px 9px;width:180px}
@@ -3056,10 +3061,24 @@ function renderSnips(side,run){const rr=()=>renderSnips(side,run);let dragIdx=nu
  side.querySelector("#snadd").onclick=()=>snipDialog(null,rr);
  side.querySelector("#snReset").onclick=()=>restoreDefaults(rr);
 }
-const TERM_THEME={background:"#0a0f17",foreground:"#c7d3e6",cursor:"#34C6BE",cursorAccent:"#0a0f17",selectionBackground:"#26405688",
- black:"#0a0f17",red:"#e5544e",green:"#46b98a",yellow:"#e0a23b",blue:"#5aa9ff",magenta:"#8a7dff",cyan:"#34c6be",white:"#c7d3e6",brightBlack:"#5a6a84"};
+/* тёмные темы терминала (светлых не делаем — терминал читается на тёмном) */
+const TERM_THEMES={
+ midnight:{nm:"Полночь",background:"#0a0f17",foreground:"#c7d3e6",cursor:"#34C6BE",cursorAccent:"#0a0f17",selectionBackground:"#26405688",black:"#0a0f17",red:"#e5544e",green:"#46b98a",yellow:"#e0a23b",blue:"#5aa9ff",magenta:"#8a7dff",cyan:"#34c6be",white:"#c7d3e6",brightBlack:"#5a6a84"},
+ carbon:{nm:"Уголь",background:"#161616",foreground:"#d0d0d0",cursor:"#e0913c",cursorAccent:"#161616",selectionBackground:"#3a3a3a",black:"#161616",red:"#e06c75",green:"#98c379",yellow:"#e5c07b",blue:"#61afef",magenta:"#c678dd",cyan:"#56b6c2",white:"#d0d0d0",brightBlack:"#5c6370"},
+ dracula:{nm:"Dracula",background:"#282a36",foreground:"#f8f8f2",cursor:"#f8f8f2",cursorAccent:"#282a36",selectionBackground:"#44475a",black:"#21222c",red:"#ff5555",green:"#50fa7b",yellow:"#f1fa8c",blue:"#bd93f9",magenta:"#ff79c6",cyan:"#8be9fd",white:"#f8f8f2",brightBlack:"#6272a4"},
+ nord:{nm:"Nord",background:"#2e3440",foreground:"#d8dee9",cursor:"#88c0d0",cursorAccent:"#2e3440",selectionBackground:"#434c5e",black:"#3b4252",red:"#bf616a",green:"#a3be8c",yellow:"#ebcb8b",blue:"#81a1c1",magenta:"#b48ead",cyan:"#88c0d0",white:"#e5e9f0",brightBlack:"#4c566a"},
+ matrix:{nm:"Matrix",background:"#001a08",foreground:"#3bff77",cursor:"#3bff77",cursorAccent:"#001a08",selectionBackground:"#0a3d1a",black:"#001a08",red:"#ff5555",green:"#3bff77",yellow:"#8bff8b",blue:"#33cc66",magenta:"#66ffaa",cyan:"#66ffcc",white:"#aaffbb",brightBlack:"#137a33"},
+ slate:{nm:"Графит",background:"#1b1f27",foreground:"#d6deec",cursor:"#5aa9ff",cursorAccent:"#1b1f27",selectionBackground:"#31405688",black:"#1b1f27",red:"#e5544e",green:"#46b98a",yellow:"#e0a23b",blue:"#5aa9ff",magenta:"#8a7dff",cyan:"#34c6be",white:"#d6deec",brightBlack:"#5a6a84"},
+};
+const TERM_FONTS={
+ sys:{nm:"Системный моно",ff:'ui-monospace,"JetBrains Mono","Cascadia Code",Menlo,Consolas,monospace'},
+ mono:{nm:"Классический",ff:'Menlo,Consolas,"DejaVu Sans Mono","Courier New",monospace'},
+ courier:{nm:"Courier",ff:'"Courier New",Courier,monospace'},
+};
+const termTheme=()=>TERM_THEMES[SET.termTheme]||TERM_THEMES.midnight;
+const termFont=()=>(TERM_FONTS[SET.termFont]||TERM_FONTS.sys).ff;
 function winTerminal(initCmd,execC){openWin("__term","Терминал",(body,win)=>{
- body.style.padding="0";body.style.background="#0a0f17";body.style.overflow="hidden";
+ body.style.padding="0";body.style.background=termTheme().background;body.style.overflow="hidden";
  let fs=13;try{fs=+(SET.termFs??localStorage.getItem("nastermfs"))||13;}catch(e){}
  let sideHidden=false;try{sideHidden=SET.termSide!=null?!!SET.termSide:localStorage.getItem("nastermside")==="1";}catch(e){}
  if(!isPhone())sideHidden=false;   // на десктопе/планшете боковая панель всегда открыта при открытии окна
@@ -3073,6 +3092,7 @@ function winTerminal(initCmd,execC){openWin("__term","Терминал",(body,wi
        <button id="tpaste" title="Вставлять сниппет без Enter (дописать и нажать Enter самому)">${svg("edit",14)}</button>
        <button id="tclr" title="Очистить">${svg("eraser",14)}</button>
        <button id="tfm" title="Меньше">A−</button><button id="tfp" title="Больше">A+</button>
+       <button id="tcfg" title="Оформление терминала">${svg("cog",14)}</button>
        <button id="tside" title="Показать/скрыть панель сниппетов">${svg("sidebar",14)}</button>
        <button id="tfull" title="Во весь экран">${svg("expand",14)}</button></div>
      <div class="term-stack" id="tstack"></div></div>
@@ -3101,7 +3121,7 @@ function winTerminal(initCmd,execC){openWin("__term","Терминал",(body,wi
    return true;}
  function newSession(initCmd,execC){const id=++seq;
    const holder=el(`<div class="term-xt-wrap" style="display:none"><div class="term-xt"></div></div>`);stack.appendChild(holder);
-   const term=new Terminal({fontFamily:'ui-monospace,"JetBrains Mono","Cascadia Code",Menlo,Consolas,monospace',fontSize:fs,cursorBlink:true,scrollback:6000,theme:TERM_THEME});
+   const term=new Terminal({fontFamily:termFont(),fontSize:fs,fontWeight:SET.termWeight||"400",fontWeightBold:"700",lineHeight:+SET.termLh||1.0,cursorBlink:true,scrollback:6000,theme:termTheme()});
    let fit=null,search=null;try{fit=new FitAddon.FitAddon();term.loadAddon(fit);}catch(e){}try{search=new SearchAddon.SearchAddon();term.loadAddon(search);}catch(e){}
    try{term.loadAddon(new WebLinksAddon.WebLinksAddon((ev,uri)=>window.open(uri,"_blank")));}catch(e){}
    term.open(holder.querySelector(".term-xt"));
@@ -3126,6 +3146,24 @@ function winTerminal(initCmd,execC){openWin("__term","Терминал",(body,wi
  body.querySelector("#tclr").onclick=()=>{const s=cur();if(s){s.term.clear();s.term.focus();}};
  const setFs=v=>{fs=Math.max(9,Math.min(22,v));SET.termFs=fs;saveSettings();sessions.forEach(s=>{s.term.options.fontSize=fs;setTimeout(()=>refit(s),20);});};
  body.querySelector("#tfm").onclick=()=>setFs(fs-1);body.querySelector("#tfp").onclick=()=>setFs(fs+1);
+ // оформление терминала: тема/шрифт/интервал/жирность — применяется на лету ко всем вкладкам
+ function applyTermStyle(){body.style.background=termTheme().background;sessions.forEach(s=>{const o=s.term.options;o.theme=termTheme();o.fontFamily=termFont();o.fontWeight=SET.termWeight||"400";o.lineHeight=+SET.termLh||1.0;setTimeout(()=>refit(s),20);});}
+ const cfgBtn=body.querySelector("#tcfg");
+ cfgBtn.onclick=()=>{const ex=body.querySelector("#tcfgPop");if(ex){ex.remove();return;}
+   const opt=(sel,cur)=>Object.entries(sel).map(([k,v])=>`<option value="${k}"${k===cur?" selected":""}>${esc(v.nm||v)}</option>`).join("");
+   const pop=el(`<div class="tcfg-pop" id="tcfgPop">
+     <div class="tcfg-row"><label>Тема</label><select id="tcTheme">${opt(TERM_THEMES,SET.termTheme||"midnight")}</select></div>
+     <div class="tcfg-row"><label>Шрифт</label><select id="tcFont">${opt(TERM_FONTS,SET.termFont||"sys")}</select></div>
+     <div class="tcfg-row"><label>Межстрочный</label><select id="tcLh">${[["1.0","плотно"],["1.15","обычно"],["1.3","просторно"],["1.5","широко"]].map(([v,l])=>`<option value="${v}"${(""+(SET.termLh||1))===v?" selected":""}>${l}</option>`).join("")}</select></div>
+     <div class="tcfg-row"><label>Жирность</label><select id="tcW">${[["300","тонкий"],["400","обычный"],["500","средний"],["600","жирный"]].map(([v,l])=>`<option value="${v}"${(SET.termWeight||"400")===v?" selected":""}>${l}</option>`).join("")}</select></div>
+   </div>`);
+   body.querySelector(".term-main").appendChild(pop);
+   pop.querySelector("#tcTheme").onchange=e=>{SET.termTheme=e.target.value;saveSettings();applyTermStyle();};
+   pop.querySelector("#tcFont").onchange=e=>{SET.termFont=e.target.value;saveSettings();applyTermStyle();};
+   pop.querySelector("#tcLh").onchange=e=>{SET.termLh=+e.target.value;saveSettings();applyTermStyle();};
+   pop.querySelector("#tcW").onchange=e=>{SET.termWeight=e.target.value;saveSettings();applyTermStyle();};
+   const off=ev=>{if(!pop.contains(ev.target)&&ev.target!==cfgBtn){pop.remove();document.removeEventListener("pointerdown",off,true);}};
+   setTimeout(()=>document.addEventListener("pointerdown",off,true),0);};
  const pBtn=body.querySelector("#tpaste");pBtn.onclick=()=>{pasteMode=!pasteMode;pBtn.classList.toggle("pri",pasteMode);toast(pasteMode?"Сниппеты вставляются без Enter":"Сниппеты запускаются сразу");};
  const sideBtn=body.querySelector("#tside");const applySide=()=>{wrap.classList.toggle("nosd",sideHidden);sideBtn.classList.toggle("pri",!sideHidden);setTimeout(()=>refit(cur()),30);};
  sideBtn.onclick=()=>{sideHidden=!sideHidden;SET.termSide=sideHidden;saveSettings();applySide();};
