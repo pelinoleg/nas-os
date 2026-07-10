@@ -5817,9 +5817,7 @@ def _duscan_run(root):
                 _duscan[root] = {"status": "error", "root": root, "error": str(e)[:200]}
         return
     try:
-        os.makedirs(NAS_CONFIG, exist_ok=True)
-        with open(_duscan_cache_path(root), "w") as f:
-            json.dump(data, f)
+        _json_save(_duscan_cache_path(root), data)   # atomic: a power cut mid-write mustn't leave a corrupt scan cache
     except OSError:
         pass
     with _duscan_lock:
