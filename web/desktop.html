@@ -6291,8 +6291,6 @@ async function pollStacks(){const box=document.getElementById("wg-docker");if(!b
  const act=st.filter(x=>x.total>0);
  const run=act.reduce((s,x)=>s+x.running,0),tot=act.reduce((s,x)=>s+x.total,0);
  let h=`<div class="krow"><span>Запущено контейнеров</span><b>${run} из ${tot}</b></div>`;
- const totUpd=st.reduce((s,x)=>s+(x.containers||[]).filter(c=>WUD[c.name]).length,0);
- if(totUpd)h=`<div class="krow"><span>${svg("arrowup",12)} Обновления образов</span><b style="color:var(--warn)">${totUpd}</b></div>`+h;
  act.slice(0,5).forEach(x=>{
   const bad=x.containers.some(c=>c.health==="unhealthy"),part=x.running<x.total;
   const col=bad?"var(--danger)":part?"var(--warn)":x.running?"var(--good)":"var(--mut)";
