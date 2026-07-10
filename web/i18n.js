@@ -788,6 +788,7 @@ window.NAS_I18N = { en: {
 "Добавить в категорию": "Add to category",
 "Добавить заметку": "Add note",
 "Добавить текущую папку в избранное": "Add the current folder to favorites",
+"Убрать из избранного": "Remove from favorites",
 "Добавлено": "Added",
 "Добавлено в избранное": "Added to favorites",
 "Добавьте контейнеру метки": "Add the container labels",

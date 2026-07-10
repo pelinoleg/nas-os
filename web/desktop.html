@@ -1192,7 +1192,7 @@
   .fm-fav-h{display:flex;align-items:center;justify-content:space-between;font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--mut);font-family:var(--mono);margin-bottom:6px;padding:2px 4px}
   .fm-fav-h .iconbtn{padding:1px 7px;font-size:15px;line-height:1}
   .fm-fav-list{flex:1;overflow:auto;margin:0 -4px}
-  .fm-fav-i{display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:var(--r-sm);cursor:pointer;font-size:12.5px;color:var(--dim)}
+  .fm-fav-i{display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:var(--r-sm);cursor:pointer;font-size:12.5px;color:var(--dim);transition:background .12s,box-shadow .12s,opacity .12s}
   .fm-fav-i:hover{background:var(--sel);color:var(--text)}
   .fm-fav-i.on{background:var(--sel);color:var(--accent)}
   .fm-fav-i .fi{flex:none;color:var(--accent-2);display:flex}
@@ -1200,6 +1200,11 @@
   .fm-fav-i .fx{border:none;background:none;color:var(--mut);display:flex;visibility:hidden;padding:2px;cursor:pointer}
   .fm-fav-i:hover .fx{visibility:visible}.fm-fav-i .fx:hover{color:var(--danger)}
   .fm-fav-i .fx.fx-eject{visibility:visible;color:var(--accent)}
+  /* перетаскивание избранного: полупрозрачный источник + линия-индикатор куда вставится */
+  .fm-fav-i.fav-drag{opacity:.4}
+  .fm-fav-i.ins-before{box-shadow:inset 0 2px 0 0 var(--accent)}
+  .fm-fav-i.ins-after{box-shadow:inset 0 -2px 0 0 var(--accent)}
+  .fm-fav-i .fav-edit{flex:1;min-width:0;font:inherit;font-size:12.5px;background:var(--glass);border:1px solid var(--accent);border-radius:5px;color:var(--text);padding:2px 6px;outline:none}
   /* плитки */
   .fm-list.fm-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(108px,1fr));gap:6px;align-content:start;padding:6px 2px}
   .fm-tile{position:relative;display:flex;flex-direction:column;align-items:center;gap:6px;padding:12px 6px 10px;border-radius:var(--r-md);cursor:pointer;border:1px solid transparent}
@@ -3186,7 +3191,7 @@ function winTerminal(initCmd,execC){openWin("__term","Терминал",(body,wi
  // --tbg красит всю обвязку (обёртка/тулбар/табы), поэтому старый фон не остаётся по бокам.
  function applyTermStyle(){const th=termTheme(),tw=+SET.termWeight||400,ff=termFont();
    body.style.setProperty("--tbg",th.background);   // красит .term-stack (область терминала), не всё окно
-   const apply=()=>sessions.forEach(s=>{const o=s.term.options;o.theme=termXtTheme();o.fontFamily=ff;o.fontWeight=tw;o.fontWeightBold=(tw>=700?700:tw+300);o.lineHeight=+SET.termLh||1.0;
+   const apply=()=>sessions.forEach(s=>{const o=s.term.options;o.theme=termXtTheme();o.fontFamily=ff;o.fontWeight=tw;o.fontWeightBold=(tw>=700?700:tw+300);o.lineHeight=+SET.termLh||1.0;o.cursorStyle="bar";o.cursorBlink=true;o.cursorWidth=2;
      try{s.term.refresh(0,s.term.rows-1);}catch(e){}setTimeout(()=>refit(s),20);});
    apply();
    // встроенный шрифт грузится асинхронно — после загрузки перемерить и перерисовать,
@@ -4179,7 +4184,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
  body.style.padding="4px 16px 12px";   // файлменеджеру большой верхний отступ ни к чему
  let cwd=initPath||SET.fmStart||"/mnt/storage",entries=[],searchRes=null;
  let tabs=[cwd],tabI=0;
- const sel=new Set();let clip=null,showHidden=SET.fmHidden===true,filt="",sortKey=SET.fmSortKey||"name",sortDir=SET.fmSortDir===-1?-1:1,lastIdx=-1,favs=[],dragPaths=null,searchMode="name";
+ const sel=new Set();let clip=null,showHidden=SET.fmHidden===true,filt="",sortKey=SET.fmSortKey||"name",sortDir=SET.fmSortDir===-1?-1:1,lastIdx=-1,favs=[],dragPaths=null,favDragI=null,searchMode="name";
  let viewMode="list";try{viewMode=SET.fmView||localStorage.getItem("fmview")||"list";}catch(e){}
  let dblOpen=(SET.fmClick||"single")==="double";   // открывать двойным кликом
  body.innerHTML=`<div class="fm fm-sz-${(SET.fmIconSize||"m").replace(/[^slm]/g,"")||"m"}"><div class="fm-fav">
@@ -4261,13 +4266,37 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    inp.onkeydown=ev=>{if(ev.key==="Enter"){ev.preventDefault();done();}else if(ev.key==="Escape"){ev.preventDefault();inp.onblur=null;renderCrumb();}};
    inp.onblur=done;}
  function saveFav(){api("/api/fm/favorites",{method:"POST",body:JSON.stringify({favorites:favs})});}
+ function favClearIns(){body.querySelectorAll(".fm-fav-i.ins-before,.fm-fav-i.ins-after").forEach(n=>n.classList.remove("ins-before","ins-after"));}
+ function renameFav(it,f){const fn=it.querySelector(".fn");if(!fn||it.querySelector(".fav-edit"))return;
+   const inp=el(`<input class="fav-edit" value="${att(f.name)}">`);it.setAttribute("draggable","false");fn.replaceWith(inp);
+   inp.focus();inp.select();let closed=false;
+   const done=save=>{if(closed)return;closed=true;if(save){const v=inp.value.trim();if(v&&v!==f.name){f.name=v;saveFav();}}renderFav();};
+   inp.onclick=ev=>ev.stopPropagation();inp.ondblclick=ev=>ev.stopPropagation();
+   inp.onkeydown=ev=>{ev.stopPropagation();if(ev.key==="Enter")done(true);else if(ev.key==="Escape")done(false);};
+   inp.onblur=()=>done(true);}
  function renderFav(){const c=body.querySelector("#fFav");c.innerHTML="";
-   favs.forEach((f,i)=>{const it=el(`<div class="fm-fav-i${f.path===cwd?" on":""}"><span class="fi">${fmIcon(f.name,"dir",17)}</span><span class="fn" title="${att(f.path)}">${esc(f.name)}</span><button class="fx" title="Убрать">${svg("trash",12)}</button></div>`);
+   favs.forEach((f,i)=>{const it=el(`<div class="fm-fav-i${f.path===cwd?" on":""}" draggable="true"><span class="fi">${fmIcon(f.name,"dir",17)}</span><span class="fn" title="${att(f.path)}">${esc(f.name)}</span><button class="fx" title="Убрать">${svg("trash",12)}</button></div>`);
      it.onclick=ev=>{if(ev.target.closest(".fx"))return;load(f.path);};
+     it.querySelector(".fn").ondblclick=ev=>{ev.stopPropagation();renameFav(it,f);};
      it.querySelector(".fx").onclick=ev=>{ev.stopPropagation();favs.splice(i,1);saveFav();renderFav();};
-     it.addEventListener("dragover",ev=>{if(!dragPaths||dragPaths.includes(f.path))return;ev.preventDefault();ev.stopPropagation();ev.dataTransfer.dropEffect="move";it.classList.add("dragover");});
-     it.addEventListener("dragleave",()=>it.classList.remove("dragover"));
-     it.addEventListener("drop",ev=>{if(!dragPaths)return;ev.preventDefault();ev.stopPropagation();const ps=dragPaths;dragPaths=null;it.classList.remove("dragover");doMoveInto(ps,f.path);});
+     it.oncontextmenu=ev=>{ev.preventDefault();ev.stopPropagation();showMenu(ev.clientX,ev.clientY,[
+       {label:"Открыть",ic:svg("folder",16),act:()=>load(f.path)},
+       {label:"Переименовать",ic:svg("edit",16),act:()=>renameFav(it,f)},
+       {label:"Убрать из избранного",ic:svg("trash",16),dng:1,act:()=>{const j=favs.indexOf(f);if(j>=0)favs.splice(j,1);saveFav();renderFav();}},
+     ]);};
+     // перетаскивание самого избранного = смена порядка (плавный индикатор вставки)
+     it.addEventListener("dragstart",ev=>{favDragI=i;dragPaths=null;ev.dataTransfer.effectAllowed="move";try{ev.dataTransfer.setData("text/plain","fav");}catch(e){}setTimeout(()=>it.classList.add("fav-drag"),0);});
+     it.addEventListener("dragend",()=>{favDragI=null;it.classList.remove("fav-drag");favClearIns();});
+     it.addEventListener("dragover",ev=>{
+       if(favDragI!=null){ev.preventDefault();ev.stopPropagation();ev.dataTransfer.dropEffect="move";
+         const r=it.getBoundingClientRect(),before=(ev.clientY-r.top)<r.height/2;
+         favClearIns();if(i!==favDragI)it.classList.add(before?"ins-before":"ins-after");it._before=before;return;}
+       if(!dragPaths||dragPaths.includes(f.path))return;ev.preventDefault();ev.stopPropagation();ev.dataTransfer.dropEffect="move";it.classList.add("dragover");});
+     it.addEventListener("dragleave",()=>it.classList.remove("dragover","ins-before","ins-after"));
+     it.addEventListener("drop",ev=>{
+       if(favDragI!=null){ev.preventDefault();ev.stopPropagation();const from=favDragI;favDragI=null;favClearIns();
+         if(from!==i){const moved=favs.splice(from,1)[0];let t=favs.indexOf(f);if(t<0)t=favs.length;favs.splice(it._before?t:t+1,0,moved);saveFav();renderFav();}return;}
+       if(!dragPaths)return;ev.preventDefault();ev.stopPropagation();const ps=dragPaths;dragPaths=null;it.classList.remove("dragover");doMoveInto(ps,f.path);});
      c.appendChild(it);});
    if(!favs.length)c.innerHTML=`<div style="color:var(--mut);font-size:11px;padding:6px">Пусто. Кнопка + добавит текущую папку.</div>`;}
  function addFav(){const nm=cwd.split("/").filter(Boolean).pop()||"Корень";
