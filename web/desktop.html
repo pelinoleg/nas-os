@@ -84,6 +84,8 @@
   .mb-sep{width:1px;height:16px;flex:none;background:var(--line,rgba(0,0,0,.14))}
   .winbar{flex:1;min-width:0;display:flex;align-items:center;gap:6px;overflow-x:auto;padding:0 6px;height:100%;scrollbar-width:none}
   .winbar:empty+.mb-sep{display:none}
+  /* metrics tray emptied → drop the divider before it so no orphan line shows */
+  .mb-sep:has(+ .tray:empty){display:none}
   .winbar::-webkit-scrollbar{height:0}
   .wb-pill{display:inline-flex;align-items:center;gap:7px;max-width:170px;padding:5px 12px 6px;border:none;border-radius:999px;background:transparent;color:var(--mut);font-size:12px;font-weight:550;cursor:pointer;transition:.13s;flex:none}
   .wb-pill:hover{background:var(--sel);color:var(--text)}
@@ -499,7 +501,7 @@
   .dock button{border:none;background:transparent;display:flex;flex-direction:column;align-items:center;gap:5px;padding:5px 8px 4px;border-radius:14px;color:#fff;transition:transform .18s cubic-bezier(.2,.8,.3,1.4);flex:none}
   .dock button:hover{transform:translateY(-4px)}
   .dock button:hover .dl{color:var(--text)}
-  .dock .di{position:relative;width:calc(40px*var(--dock-icon,1));height:calc(40px*var(--dock-icon,1));border-radius:13px;display:grid;place-items:center}
+  .dock .di{position:relative;width:calc(40px*var(--dock-icon,1));height:calc(40px*var(--dock-icon,1));border-radius:13px;display:grid;place-items:center;opacity:var(--dock-icon-op,1)}
   .dock .di svg{width:calc(26px*var(--dock-icon,1));height:calc(26px*var(--dock-icon,1))}
   /* an icon that IS the tile (Files): no square behind it, glyph fills the box */
   .dock .di.di-bare{background:none!important;box-shadow:none!important}
@@ -1503,7 +1505,7 @@
   .dot:hover{transform:scale(1.08)}
   .dot.sel{border-color:var(--surface);box-shadow:0 0 0 2px var(--accent)}
   .seg{display:inline-flex;background:transparent;border:1px solid var(--line-2);border-radius:var(--r-md);padding:3px;gap:3px}
-  .seg button{border:none;background:transparent;color:var(--dim);padding:8px 15px;border-radius:9px;font-size:12.5px;font-weight:600;transition:.12s}
+  .seg button{border:none;background:transparent;color:var(--dim);padding:8px 15px;border-radius:var(--r-sm);font-size:12.5px;font-weight:600;transition:.12s}
   .seg button:hover{color:var(--text)}
   .seg button.on{background:var(--sel);color:var(--text);box-shadow:inset 0 0 0 1px var(--line)}
   .set-h{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);font-family:var(--mono);margin:18px 0 12px;padding-top:16px;border-top:1px solid var(--line)}
@@ -1922,7 +1924,7 @@ const hexRgb=h=>{const n=parseInt(h.slice(1),16);return `${n>>16&255},${n>>8&255
 const THEMED_KEYS=["accent","accentHex","radius","shadow","winShadow","dockShadow","tileShadow",
  "textContrast","elevStep","elevLight","mbOp","dockOp","wdgOp","mbBlur","dockBlur","wdgBlur","winBlur",
  "mbSat","dockSat","wdgSat","winSat","popOp","popBlur","popSat","winNoise","deskLc","deskShadow","autoContrast",
- "dockTiles","dockLabels","fxDim","fxBlur","fxNoise","deskGlass","deskTileOp","deskTileBlur",
+ "dockTiles","dockIconOp","dockLabels","fxDim","fxBlur","fxNoise","deskGlass","deskTileOp","deskTileBlur",
  "mbGrad","mbGradH","mbGradInt","mbGradOp"];
 let CUR_THEME=null;
 function themeSnapshot(theme){
@@ -2067,6 +2069,7 @@ function applySettings(){
   root.style.setProperty("--desk-lc",darkBg?"#ffffff":"#10151d");
   root.style.setProperty("--desk-shadow",SET.deskShadow===false?"none":(darkBg?"0 1px 4px rgba(0,0,0,.6)":"0 1px 3px rgba(255,255,255,.75)"));}
  root.style.setProperty("--dock-icon",(SET.dockIcon??1));
+ root.style.setProperty("--dock-icon-op",clampf((SET.dockIconOp==null||SET.dockIconOp==="")?100:+SET.dockIconOp,0,100)/100);
  // ширина бокового дока: компактно без подписей, шире — с подписями (масштаб от размера иконок)
  root.style.setProperty("--dockw",Math.round((SET.dockLabels===false?66:98)*(SET.dockIcon??1))+"px");
  // вторичный текст: белый (тёмная) / чёрный (светлая) с прозрачностью — читаем на любом фоне; контраст регулируется
@@ -2122,7 +2125,7 @@ function applySettings(){
  // (blur 0 и saturate 100% = выкл); «Производительный режим» гасит всё разом
  const bfOn=!SET.perf;
  const bf=(blurKey,satKey)=>{if(!bfOn)return "none";
-  const px=clampf(SET[blurKey]??0,0,60),sat=clampf(SET[satKey]??100,0,200);
+  const px=clampf(SET[blurKey]??0,0,100),sat=clampf(SET[satKey]??100,0,200);
   const parts=[];if(px>0)parts.push(`blur(${px}px)`);if(sat!==100)parts.push(`saturate(${(sat/100).toFixed(2)})`);
   return parts.length?parts.join(" "):"none";};
  // pop blur/sat: пустой ключ → наследуем виджетный
@@ -2132,7 +2135,7 @@ function applySettings(){
  root.style.setProperty("--wdg-bf",bf("wdgBlur","wdgSat"));
  root.style.setProperty("--win-bf",bf("winBlur","winSat"));
  root.style.setProperty("--pop-bf",bfOn?(()=>{
-   const px=clampf(bfInherit("popBlur","wdgBlur",0),0,60),sat=clampf(bfInherit("popSat","wdgSat",100),0,200);
+   const px=clampf(bfInherit("popBlur","wdgBlur",0),0,100),sat=clampf(bfInherit("popSat","wdgSat",100),0,200);
    const parts=[];if(px>0)parts.push(`blur(${px}px)`);if(sat!==100)parts.push(`saturate(${(sat/100).toFixed(2)})`);
    return parts.length?parts.join(" "):"none";})():"none");
  // доп. тёмный градиент-скрим под верхней панелью (раздельно по теме)
@@ -2149,7 +2152,7 @@ function applySettings(){
  root.style.setProperty("--desk-tile-bf",bf("deskTileBlur","deskTileSat"));
  // меню и поповеры — стекло как у окон (чуть плотнее), а не солид lvl(4);
  // если блюр окон выключен, держим плотность выше ради читаемости
- const menuGlass=bfOn&&clampf(SET.winBlur??0,0,60)>0;
+ const menuGlass=bfOn&&clampf(SET.winBlur??0,0,100)>0;
  root.style.setProperty("--menu-bg",`rgba(${lvlRgb(4)},${(menuGlass?clampf(lvlA(2)+.08,.55,.92):Math.max(lvlA(4),.9)).toFixed(3)})`);
  root.classList.toggle("perf",!!SET.perf);
  document.body.classList.toggle("rail-off",!!SET.railHidden);
@@ -4265,7 +4268,8 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
  let tabs=[cwd],tabI=0;
  const sel=new Set();let clip=null,showHidden=SET.fmHidden===true,filt="",sortKey=SET.fmSortKey||"name",sortDir=SET.fmSortDir===-1?-1:1,lastIdx=-1,favs=[],dragPaths=null,favDragI=null,searchMode="name";
  let viewMode="list";try{viewMode=SET.fmView||localStorage.getItem("fmview")||"list";}catch(e){}
- let dblOpen=(SET.fmClick||"single")==="double";   // открывать двойным кликом
+ let dblDir=(SET.fmClickDir||SET.fmClick||"single")==="double";    // папки: двойной клик?
+ let dblFile=(SET.fmClickFile||SET.fmClick||"single")==="double"; // файлы: двойной клик?
  body.innerHTML=`<div class="fm fm-sz-${(SET.fmIconSize||"m").replace(/[^slm]/g,"")||"m"}"><div class="fm-fav">
    <div class="fm-fav-h"><span>Избранное</span><button class="iconbtn" id="fFavAdd" title="Добавить текущую папку в избранное">+</button></div>
    <div class="fm-fav-list" id="fFav"></div>
@@ -4412,7 +4416,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
  function syncSettings(){
    showHidden=SET.fmHidden===true;
    sortKey=SET.fmSortKey||"name";sortDir=SET.fmSortDir===-1?-1:1;
-   viewMode=SET.fmView||"list";dblOpen=(SET.fmClick||"single")==="double";
+   viewMode=SET.fmView||"list";dblDir=(SET.fmClickDir||SET.fmClick||"single")==="double";dblFile=(SET.fmClickFile||SET.fmClick||"single")==="double";
    const fm=body.querySelector(".fm");
    if(fm){fm.classList.remove("fm-sz-s","fm-sz-m","fm-sz-l");
      fm.classList.add("fm-sz-"+((SET.fmIconSize||"m").replace(/[^slm]/g,"")||"m"));}
@@ -4474,7 +4478,8 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
      // клик по ВСЕЙ строке/плитке (кроме чекбокса), а не только по имени/иконке — иначе клик
      // по колонке размера/даты или по отступам «проваливался» и папка не открывалась
      const inCk=ev=>ev.target.closest&&ev.target.closest(".fm-ck");
-     if(dblOpen){
+     const dbl=(e.type==="dir")?dblDir:dblFile;   // папки и файлы могут открываться по-разному
+     if(dbl){
        node.onclick=ev=>{if(inCk(ev))return;cursor=i;
          if(ev.ctrlKey||ev.metaKey||ev.shiftKey){toggleSel(e,i,ev.shiftKey);return;}
          sel.clear();sel.add(e.path);lastIdx=i;renderList();selUpdate();};
@@ -5775,7 +5780,8 @@ function filesTab(tc){
   </div>
   <div class="set-card"><div class="set-grp">Поведение</div>
    ${row("Стартовая папка","куда открывается менеджер при запуске",`<input class="mono" id="fmStart" value="${att(SET.fmStart||"/mnt/storage")}" placeholder="/mnt/storage" style="width:210px">`,"С какой папки открывается окно «Файлы». По умолчанию — хранилище /mnt/storage.")}
-   ${row("Открытие файлов","",seg("fmClick",[["single","Одинарный клик"],["double","Двойной клик"]],CL),"Одинарный — открывать сразу. Двойной — одиночный клик выделяет, открывает двойной (как в настольных ОС).")}
+   ${row("Открытие папок","",seg("fmClickDir",[["single","Одинарный клик"],["double","Двойной клик"]],SET.fmClickDir||CL),"Как заходить в папку. Одинарный — сразу. Двойной — клик выделяет, вход по двойному (как в настольных ОС).")}
+   ${row("Открытие файлов","",seg("fmClickFile",[["single","Одинарный клик"],["double","Двойной клик"]],SET.fmClickFile||CL),"Как открывать файл. Одинарный — сразу. Двойной — клик выделяет, открытие по двойному (как в настольных ОС).")}
    ${pToggle("Показывать скрытые файлы","Файлы и папки, начинающиеся с точки (.config и т.п.). Тумблер в самом окне остаётся.","fmHidden","дотфайлы видны сразу")}
    ${pToggle("Папки в начале списка","Каталоги всегда идут перед файлами при любой сортировке. Выключи — сортировать вперемешку.","fmFoldersFirst","каталоги перед файлами")}
    ${row("Сортировка по умолчанию","",seg("fmSortKey",[["name","Имя"],["size","Размер"],["mtime","Дата"]],SK))}
@@ -5805,7 +5811,7 @@ function filesTab(tc){
  const apply=()=>{const w=OPEN.__files;if(w&&w._syncSettings)w._syncSettings();};
  const wireSeg=(id,fn)=>tc.querySelectorAll("#"+id+" button").forEach(b=>b.onclick=()=>{tc.querySelectorAll("#"+id+" button").forEach(x=>x.classList.toggle("on",x===b));fn(b.dataset.v);});
  const setK=(k,cast)=>v=>{SET[k]=cast?cast(v):v;saveSettings();apply();};
- wireSeg("fmClick",setK("fmClick"));wireSeg("fmSortKey",setK("fmSortKey"));wireSeg("fmSortDir",setK("fmSortDir",v=>+v));
+ wireSeg("fmClickDir",setK("fmClickDir"));wireSeg("fmClickFile",setK("fmClickFile"));wireSeg("fmSortKey",setK("fmSortKey"));wireSeg("fmSortDir",setK("fmSortDir",v=>+v));
  wireSeg("fmView",setK("fmView"));wireSeg("fmIconSize",setK("fmIconSize"));wireSeg("fmDateFmt",setK("fmDateFmt"));
  wireSeg("fmThumbFit",v=>{SET.fmThumbFit=v;saveSettings();document.documentElement.style.setProperty("--thumb-fit",v==="cover"?"cover":"contain");});wireSeg("fmUpPar",setK("fmUpPar",v=>+v));wireSeg("fmTabSize",setK("fmTabSize",v=>+v));
  const st=tc.querySelector("#fmStart");st.onchange=()=>{SET.fmStart=st.value.trim()||"/mnt/storage";saveSettings();};
@@ -5853,7 +5859,7 @@ function lsWall(lb){lb.innerHTML=`
   </div>
   <div class="set-card"><div class="set-grp">Эффекты — поверх обоев, независимо от картинки</div>
    ${fxSlider("Затемнение","fxDim",0,80,"%","Тёмный слой поверх обоев — делает окна и текст читаемее.")}
-   ${fxSlider("Размытие","fxBlur",0,30,"px","Размывает фон (blur) — акцент на окнах.")}
+   ${fxSlider("Размытие","fxBlur",0,100,"px","Размывает фон (blur) — акцент на окнах.")}
    ${fxSlider("Зерно / шум","fxNoise",0,100,"%","Плёночное зерно — приглушает полосы градиента.")}
   </div>`;
  paintWpPrev(lb.querySelector("#wpPrev"));
@@ -5872,7 +5878,7 @@ function lsBar(lb){lb.innerHTML=`
    ${pSlider("Размер иконок","mbIcon",.8,1.5,.05,"pct","Масштаб иконок в верхней панели.")}
    ${pSlider("Размер шрифта","mbFs",.8,1.4,.05,"pct","Масштаб текста (часы, метрики).")}
    ${opSlider("Прозрачность фона","mbOp","Своя плотность фона верхней панели. По умолчанию — общая, как у окон (вкладка «Материал»).")}
-   ${pSlider("Размытие под панелью","mbBlur",0,50,1,"px","Матовое размытие обоев под панелью. 0 — без размытия.")}
+   ${pSlider("Размытие под панелью","mbBlur",0,100,1,"px","Матовое размытие обоев под панелью. 0 — без размытия.")}
    ${pSlider("Насыщенность под панелью","mbSat",0,200,5,"pctn","Сочность фона, просвечивающего сквозь панель: 100% — без изменений, меньше — обесцвечивает, больше — сочнее. Видно при полупрозрачном фоне.")}
   </div>
   <div class="set-card"><div class="set-grp">Тёмный градиент сверху</div>
@@ -5891,7 +5897,7 @@ function lsWidgets(lb){const cl=/^#[0-9a-f]{6}$/i;lb.innerHTML=`
   </div>
   <div class="set-card"><div class="set-grp">Фон виджетов</div>
    ${opSlider("Прозрачность фона","wdgOp","Своя плотность подложек виджетов. По умолчанию — общая, как у окон (вкладка «Материал»).")}
-   ${pSlider("Размытие под виджетами","wdgBlur",0,50,1,"px","Матовое размытие обоев под виджетами. 0 — без размытия.")}
+   ${pSlider("Размытие под виджетами","wdgBlur",0,100,1,"px","Матовое размытие обоев под виджетами. 0 — без размытия.")}
    ${pSlider("Насыщенность под виджетами","wdgSat",0,200,5,"pctn","Сочность фона под виджетами: 100% — без изменений, меньше — обесцвечивает, больше — сочнее.")}
    ${(()=>{const k=isLight()?"wdgLight":"wdgDark",def=isLight()?"#ffffff":"#161e2a";
      return `<div class="srow"><div class="srow-l"><div class="srow-t">Цвет фона${tipHTML("Свой цвет подложки виджетов для текущей темы. Правится отдельно в светлой и тёмной.")}</div></div><div class="srow-c"><input type="color" id="wdgC" value="${cl.test(SET[k]||"")?SET[k]:def}" class="ccell"><button class="btn sm" data-wreset="${k}">Сброс</button></div></div>`;})()}
@@ -5908,7 +5914,7 @@ function lsPop(lb){const cl=/^#[0-9a-f]{6}$/i;lb.innerHTML=`
   </div>
   <div class="set-card"><div class="set-grp">Фон поповеров</div>
    ${opSlider("Прозрачность фона","popOp","Своя плотность подложки поповеров. По умолчанию — как у виджетов.")}
-   ${pSlider("Размытие под поповером","popBlur",0,60,1,"px","Матовое размытие обоев/окон под поповером. Пусто — как у виджетов. 0 — без размытия.")}
+   ${pSlider("Размытие под поповером","popBlur",0,100,1,"px","Матовое размытие обоев/окон под поповером. Пусто — как у виджетов. 0 — без размытия.")}
    ${pSlider("Насыщенность под поповером","popSat",0,200,5,"pctn","Сочность фона под поповером: 100% — без изменений, меньше — обесцвечивает, больше — сочнее. Пусто — как у виджетов.")}
    ${(()=>{const k=isLight()?"popLight":"popDark",def=isLight()?"#ffffff":"#161e2a";
      return `<div class="srow"><div class="srow-l"><div class="srow-t">Цвет фона${tipHTML("Свой цвет подложки поповеров для текущей темы. Пусто — как у виджетов. Правится отдельно в светлой и тёмной.")}</div></div><div class="srow-c"><input type="color" id="popC" value="${cl.test(SET[k]||"")?SET[k]:def}" class="ccell"><button class="btn sm" data-preset="${k}">Сброс</button></div></div>`;})()}
@@ -5924,11 +5930,11 @@ function lsDock(lb){lb.innerHTML=`
     <button data-d="left" class="${SET.dockPos==="left"?"on":""}">Слева</button>
     <button data-d="right" class="${SET.dockPos==="right"?"on":""}">Справа</button></div></div>
    ${pSlider("Размер иконок","dockIcon",.7,1.5,.05,"pct","Размер иконок в доке.")}
+   ${pSlider("Прозрачность иконок","dockIconOp",20,100,1,"pctn","Плотность иконок в доке. 100% — как есть, меньше — иконки полупрозрачные.")}
    ${opSlider("Прозрачность фона","dockOp","Своя плотность подложки дока. По умолчанию — общая, как у окон (вкладка «Материал»).")}
-   ${pSlider("Размытие под доком","dockBlur",0,50,1,"px","Матовое размытие обоев под доком. 0 — без размытия.")}
+   ${pSlider("Размытие под доком","dockBlur",0,100,1,"px","Матовое размытие обоев под доком. 0 — без размытия.")}
    ${pSlider("Насыщенность под доком","dockSat",0,200,5,"pctn","Сочность фона под доком: 100% — без изменений, меньше — обесцвечивает, больше — сочнее.")}
    ${pToggle("Тень дока","Мягкая тень под доком и иконками в нём.","dockShadow","глубина у панели дока")}
-   ${pToggle("Плитки под иконками","Цветная подложка под иконками. Выключи — чистые иконки.","dockTiles","цветной фон под каждой иконкой")}
    ${pToggle("Подписи у иконок","Названия под иконками. Выключи — компактный док только из иконок (уже, когда сбоку).","dockLabels","показывать названия приложений")}
    <div class="mon-note" style="margin-top:2px">Порядок иконок меняется перетаскиванием прямо в доке (и когда док сбоку).</div>
   </div>`;
@@ -5967,7 +5973,7 @@ function lsWindows(lb){const cl=/^#[0-9a-f]{6}$/i;lb.innerHTML=`
    ${pSlider("Осветление на уровень","elevLight",0,.22,.01,"pct","Насколько каждый слой выше светлее. Даёт ощущение глубины.")}
   </div>
   <div class="set-card"><div class="set-grp">Стекло и интенсивность</div>
-   ${pSlider("Размытие фона окон","winBlur",0,60,1,"px","Сила матового размытия под окнами, меню и диалогами. 0 — без размытия.")}
+   ${pSlider("Размытие фона окон","winBlur",0,100,1,"px","Сила матового размытия под окнами, меню и диалогами. 0 — без размытия.")}
    ${pSlider("Насыщенность под окнами","winSat",0,200,5,"pctn","Сочность фона, просвечивающего сквозь окна и диалоги: 100% — без изменений, меньше — обесцвечивает, больше — сочнее.")}
    ${pSlider("Зерно / шум в окнах","winNoise",0,100,1,"pctn","Плёночная текстура на материале окон. Работает вместе с размытием.")}
   </div>
