@@ -4824,6 +4824,27 @@ def fs_list(path):
             "parent": (os.path.dirname(path) if path != "/" else None),
             "entries": entries}
 
+# Деревья, которые НИКОГДА не должны быть целью разрушительной операции файлового
+# менеджера — даже для авторизованного админа: сам движок, корень ОС, системные
+# каталоги. Острый край — пустой путь: os.path.realpath("") — это рабочий каталог
+# процесса (/opt/nas-os), он проскакивал наивную проверку глубины и однажды унёс
+# движок в корзину при пустом теле запроса. Чтение НЕ ограничиваем (это админ-панель).
+_FS_PROTECTED = (HERE, "/etc", "/usr", "/bin", "/sbin", "/lib", "/lib64",
+                 "/boot", "/proc", "/sys", "/dev", "/run", "/var")
+
+def _fs_guard(path):
+    """Нормализовать пользовательский путь для МУТИРУЮЩЕЙ операции.
+    Возвращает (realpath, None) если можно, иначе (None, сообщение об ошибке)."""
+    if not path or not str(path).strip():
+        return None, "пустой путь"
+    rp = os.path.realpath(path)
+    if rp == "/" or rp.count("/") < 2:
+        return None, "слишком опасный путь: " + rp
+    for prot in _FS_PROTECTED:
+        if rp == prot or rp.startswith(prot.rstrip("/") + os.sep):
+            return None, "защищённый системный путь: " + rp
+    return rp, None
+
 def fs_read(path):
     path = os.path.realpath(path)
     if not os.path.isfile(path):
@@ -4843,7 +4864,11 @@ def fs_read(path):
         return {"ok": True, "path": path, "binary": True, "size": size}
 
 def fs_write(path, content):
-    path = os.path.realpath(path)
+    # защита от перезаписи движка/системных файлов через редактор ФМ (для этого
+    # есть отдельные потоки; пустой путь тут — это realpath("")=/opt/nas-os)
+    path, err = _fs_guard(path)
+    if err:
+        return {"ok": False, "log": err}
     if not os.path.isdir(os.path.dirname(path)):
         return {"ok": False, "log": "каталог не существует"}
     if os.path.isdir(path):
@@ -4946,7 +4971,10 @@ def fs_fetch_cancel(jid):
     return {"ok": True}
 
 def fs_mkdir(path, name):
-    d = _child(path, name)
+    parent, err = _fs_guard(path)     # не даём создавать каталоги в системных деревьях/движке
+    if err:
+        return {"ok": False, "log": err}
+    d = _child(parent, name)
     if not os.path.basename(d):
         return {"ok": False, "log": "пустое имя"}
     try:
@@ -4958,7 +4986,9 @@ def fs_mkdir(path, name):
     return {"ok": True, "path": d}
 
 def fs_rename(src, name):
-    src = os.path.realpath(src)
+    src, err = _fs_guard(src)
+    if err:
+        return {"ok": False, "log": err}
     base = os.path.basename((name or "").strip())
     if not base:
         return {"ok": False, "log": "пустое имя"}
@@ -4972,9 +5002,9 @@ def fs_rename(src, name):
     return {"ok": True, "path": dst}
 
 def fs_delete(path):
-    path = os.path.realpath(path)
-    if path == "/" or path.count("/") < 2:   # защита от / и каталогов верхнего уровня (/etc, /usr…)
-        return {"ok": False, "log": "слишком опасный путь: " + path}
+    path, err = _fs_guard(path)
+    if err:
+        return {"ok": False, "log": err}
     try:
         if os.path.isdir(path) and not os.path.islink(path):
             shutil.rmtree(path)
@@ -5030,7 +5060,10 @@ def fs_copy(src, dst_dir):
     return {"ok": True, "path": dst}
 
 def fs_move(src, dst_dir):
-    src = os.path.realpath(src); dst_dir = os.path.realpath(dst_dir)
+    src, err = _fs_guard(src)          # источник уносится — защищаем от системных деревьев
+    if err:
+        return {"ok": False, "log": err}
+    dst_dir = os.path.realpath(dst_dir)
     if not os.path.exists(src):
         return {"ok": False, "log": "нет источника"}
     if not os.path.isdir(dst_dir):
@@ -5492,9 +5525,9 @@ def _trash_rm(store):
             os.remove(store)
 
 def fs_trash(path):
-    path = os.path.realpath(path)
-    if path == "/" or path.count("/") < 2:
-        return {"ok": False, "log": "слишком опасный путь: " + path}
+    path, err = _fs_guard(path)
+    if err:
+        return {"ok": False, "log": err}
     if not os.path.lexists(path):
         # список в панели мог отстать: объект уже удалён или перемещён другим окном
         return {"ok": False, "log": "уже удалён или перемещён"}
