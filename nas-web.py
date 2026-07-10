@@ -344,6 +344,7 @@ def disks():
     am_base = automount_state().get("base", "/media/nas")
     spin = _load_spindown()
     spd = _speedtest_load()
+    scr = scrutiny_state().get("devices", {})   # {} если Scrutiny не установлен
     for d in _lsblk():
         if d.get("type") != "disk":
             continue
@@ -414,6 +415,7 @@ def disks():
             "smart": smart_info(d.get("path")),
             "spindown": spin.get(d.get("path")),
             "speedtest": spd.get((d.get("serial") or "").strip() or "\0") or spd.get(d.get("path")),
+            "scrutiny": scr.get((d.get("serial") or "").strip()),   # None, если Scrutiny нет/нет данных
         })
     return res
 
@@ -1095,6 +1097,83 @@ def myspeed_state():
             out = {"ok": False}
     with _ms_lock:
         _ms_cache["t"] = time.time(); _ms_cache["data"] = out
+    return out
+
+# --------------------------------------------------------------------------- #
+#  Автоопределение URL сервиса по имени контейнера и его ВНУТРЕННЕМУ порту.
+#  Читаем фактический проброс из живого Docker, поэтому порт в compose можно
+#  менять свободно — панель всегда возьмёт актуальный. Контейнера нет или он
+#  остановлен → None, и вызывающий просто ничего не показывает (без ошибок).
+# --------------------------------------------------------------------------- #
+_svc_url_cache = {}
+_svc_url_lock = threading.Lock()
+SVC_URL_TTL = 30
+
+def docker_service_url(name, internal_port):
+    key = (name, internal_port)
+    now = time.time()
+    with _svc_url_lock:
+        c = _svc_url_cache.get(key)
+        if c and now - c[0] < SVC_URL_TTL:
+            return c[1]
+    url = None
+    try:
+        r = subprocess.run(
+            ["docker", "inspect", "-f",
+             "{{.State.Running}}\x1f{{json .NetworkSettings.Ports}}", name],
+            capture_output=True, text=True, timeout=8)
+        if r.returncode == 0:
+            running, _, ports_json = r.stdout.strip().partition("\x1f")
+            if running == "true":
+                ports = json.loads(ports_json or "{}") or {}
+                for b in (ports.get("%d/tcp" % internal_port) or []):
+                    if b.get("HostPort"):
+                        url = "http://127.0.0.1:%s" % b["HostPort"]
+                        break
+    except (OSError, subprocess.SubprocessError, ValueError):
+        url = None
+    with _svc_url_lock:
+        _svc_url_cache[key] = (now, url)
+    return url
+
+# --------------------------------------------------------------------------- #
+#  Scrutiny — здоровье дисков (device_status), температура и наработка по данным
+#  его collector'а. Ключ сопоставления с нашими дисками — серийник. Контейнера
+#  нет → {ok:False}, и диски работают как раньше, на прямом SMART.
+# --------------------------------------------------------------------------- #
+_scrutiny_cache = {"t": 0, "data": {"ok": False}}
+_scrutiny_lock = threading.Lock()
+SCRUTINY_TTL = 60
+
+def scrutiny_state():
+    with _scrutiny_lock:
+        if time.time() - _scrutiny_cache["t"] < SCRUTINY_TTL:
+            return _scrutiny_cache["data"]
+    out = {"ok": False}
+    base = docker_service_url("scrutiny", 8080)
+    if base:
+        try:
+            req = urllib.request.Request(base + "/api/summary",
+                                         headers={"Accept": "application/json"})
+            with urllib.request.urlopen(req, timeout=4) as r:
+                j = json.loads(r.read().decode("utf-8", "replace"))
+            summ = ((j.get("data") or {}).get("summary")) or {}
+            by_serial = {}
+            for uuid, x in summ.items():
+                dev = x.get("device") or {}
+                sm = x.get("smart") or {}
+                serial = (dev.get("serial_number") or "").strip()
+                if serial:
+                    by_serial[serial] = {
+                        "status": dev.get("device_status", 0),   # 0 = здоров
+                        "temp": sm.get("temp"),
+                        "power_on_hours": sm.get("power_on_hours"),
+                        "uuid": dev.get("scrutiny_uuid") or uuid}
+            out = {"ok": True, "url": base, "devices": by_serial}
+        except Exception:
+            out = {"ok": False}
+    with _scrutiny_lock:
+        _scrutiny_cache["t"] = time.time(); _scrutiny_cache["data"] = out
     return out
 
 FAV_FILE = os.path.join(NAS_CONFIG, "fm-favorites.json")
@@ -7812,8 +7891,10 @@ class H(BaseHTTPRequestHandler):
             elif p == "/api/fs/zip":
                 self._send_zip(q.get("item") or [], (q.get("name") or ["archive.zip"])[0])
             elif p == "/api/disks":
+                _scr = scrutiny_state()
                 self._json({"disks": disks(), "fs": fs_tools(), "snapraid": snapraid_status(),
-                            "pool": _pool_recovery()})
+                            "pool": _pool_recovery(),
+                            "scrutiny": {"ok": _scr.get("ok", False), "url": _scr.get("url")}})
             elif p == "/api/disk/smart":
                 self._json(smart_detail((q.get("dev") or [""])[0]))
             elif p == "/api/processes":

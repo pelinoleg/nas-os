@@ -879,6 +879,11 @@
   .ovh-v{font-family:var(--mono);font-size:11px;font-weight:600;flex:none;max-width:52%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .caplbls{display:flex;justify-content:space-between;font-size:12px;color:var(--mut);margin-top:10px}
   .caplbls b{color:var(--text);font-weight:650;font-family:var(--mono)}
+  /* Ненавязчивая напоминалка «поставь сервис» (Scrutiny/WUD) — стекло, не солид */
+  .svc-hint{display:flex;align-items:center;gap:11px;margin:10px 0 0;padding:11px 14px;border-radius:var(--r-md);background:var(--card);box-shadow:var(--sh-sm);color:var(--dim);font-size:12.5px;line-height:1.45}
+  .svc-hint svg{flex:none;opacity:.7}
+  .svc-hint-t{flex:1}.svc-hint-t b{color:var(--fg,var(--ink))}
+  .svc-hint .btn{flex:none}
   .pool-empty{font-size:13px;color:var(--dim);line-height:1.5;margin-bottom:14px}
   .pool-empty-card{background:var(--card);text-align:center;display:flex;flex-direction:column;align-items:center;gap:6px;padding:26px 22px}
   .pe-icon{width:52px;height:52px;border-radius:15px;display:grid;place-items:center;color:var(--accent);background:var(--accent-soft);margin-bottom:6px}
@@ -2587,6 +2592,13 @@ function winDisks(){openWin("__disks","Хранилище",(body,win)=>{
   body.innerHTML="";
   const root=el(`<div class="dmroot"></div>`);
   root.appendChild(poolStrip(disks,am,load,(d&&d.snapraid)||{},(d&&d.pool)||null));
+  // Scrutiny не установлен → ненавязчивая напоминалка (данные полезны, но не обязательны)
+  if(d&&d.scrutiny&&d.scrutiny.ok===false){
+   const dk=(APPS||[]).find(a=>/dockge/i.test(a.name||"")||/:5001(\/|$)/.test(a.url||""));
+   const h=el(`<div class="svc-hint">${svg("heart",15)}<div class="svc-hint-t"><b>Поставьте Scrutiny</b> — прогноз отказа диска, история температуры и наработки прямо здесь. Compose готов в <span class="mono">/opt/stacks/scrutiny</span>.</div>${dk?`<button class="btn sm" id="scrDk">Открыть Dockge →</button>`:""}</div>`);
+   const b=h.querySelector("#scrDk");if(b)b.onclick=()=>window.open(dk.url,"_blank");
+   root.appendChild(h);
+  }
   const split=el(`<div class="dm2"></div>`);
   const side=el(`<aside class="dm2-side"></aside>`);
   // группируем: система (всегда сверху) · пул (данные/чётность/pool) · вне пула (внешние/свободные)
@@ -2692,6 +2704,10 @@ function diskDetail(x,reload){
  // краткие факты
  const facts=[["Размер",x.size||"—"],["Файловая система",x.fstype?(""+x.fstype).toUpperCase():(hasParts?"таблица разделов":"не отформатирован")],
    ["Точка монтирования",x.mount||"не смонтирован"],["В fstab",x.in_fstab?"да":"нет"]];
+ // данные Scrutiny (если установлен): наработка и его вердикт по здоровью
+ if(x.scrutiny){const poh=x.scrutiny.power_on_hours;
+   if(poh!=null)facts.push(["Наработка",poh>=48?Math.round(poh/24)+" дн":poh+" ч"]);
+   facts.push(["Scrutiny",x.scrutiny.status===0?"здоров":"внимание!"]);}
  box.appendChild(el(`<div class="dd-facts">${facts.map(([k,v])=>`<div><span>${k}</span><b>${esc(""+v)}</b></div>`).join("")}</div>`));
  // обслуживание: сон при простое (механические, не системный)
  if(x.rotational&&x.role!=="system"){

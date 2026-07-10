@@ -1,5 +1,7 @@
 # Scrutiny — мониторинг SMART-состояния дисков (omnibus: web+InfluxDB). http://<pi>:8084
 # ВАЖНО: перечислите свои диски в devices. Для NVMe нужен cap SYS_ADMIN.
+# Панель находит Scrutiny сама по имени контейнера и фактическому порту — так что
+# порт web можно менять здесь свободно, ничего в панели править не нужно.
 services:
   scrutiny:
     image: ghcr.io/analogj/scrutiny:v0.9.2-omnibus
@@ -14,12 +16,20 @@ services:
       - SYS_ADMIN            # нужно для NVMe-дисков
     ports:
       - "8084:8080"          # web (8080 занят Dozzle -> вынесен на 8084)
-      - "8086:8086"          # InfluxDB
+      # InfluxDB (8086) наружу не публикуем: в omnibus она нужна только внутри
+      # контейнера, а на 0.0.0.0 это была бы открытая база в локальной сети.
     volumes:
       - /run/udev:/run/udev:ro
       - /opt/docker/scrutiny/config:/opt/scrutiny/config
       - /opt/docker/scrutiny/influxdb:/opt/scrutiny/influxdb
+    # Пробрасываем char-КОНТРОЛЛЕРЫ (/dev/nvmeN), а не namespace (/dev/nvmeNn1):
+    # smartctl --scan находит именно контроллеры, и тогда Scrutiny видит диски сам,
+    # без ручного collector.yaml. Список — под ваши диски (Docker требует, чтобы
+    # устройство существовало на старте; лишние строки уберите).
     devices:
-      - "/dev/nvme0n1"       # системный NVMe (у вас — Samsung 970 EVO)
-      # - "/dev/sda"         # раскомментируйте по мере добавления USB-дисков
+      - "/dev/nvme0"         # Crucial CT500P3P (пул disk2)
+      - "/dev/nvme1"         # Samsung 970 EVO Plus 1TB (пул disk1)
+      - "/dev/nvme2"         # Kioxia 256G (системный)
+      # USB/SATA-диски (char-девайс = сам диск): раскомментируйте по мере надобности
+      # - "/dev/sda"
       # - "/dev/sdb"
