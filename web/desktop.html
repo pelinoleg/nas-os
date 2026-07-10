@@ -3547,7 +3547,7 @@ function editStack(name,after){const isNew=!name,wid=isNew?"snew":"sed:"+name;op
    <div style="flex:none">
      <button class="dd-grp dd-coll" id="seEnvTog" style="width:100%;margin:0">${svg("cog",12)} .env — переменные и секреты <span class="dd-chev">▸</span></button>
      <div id="seEnvBox" style="display:none;margin-top:6px">
-       <div id="seE" class="ed-dark" style="height:150px;border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden"></div>
+       <div id="seE" class="ed-dark" style="height:150px;min-height:70px;resize:vertical;border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden"></div>
      </div>
    </div></div>`;
  if(isNew){const ni=body.querySelector("#seName");ni.oninput=()=>{const v=ni.value.trim();body.querySelector("#sePath").textContent="/opt/stacks/"+(v||"…")+"/";};ni.focus();}
@@ -4683,11 +4683,8 @@ function winDiskUsage(initRoot){const existed=!!OPEN["__duscan"];const w=openWin
  // при открытии из папки — проваливаемся к ней (полный путь в крошках), иначе корень тома
  let cur=(startP===root||startP.startsWith(root==="/"?"/":root+"/"))?startP:root;
  let node=null,cache={},showL2=SET.duL2!==false,duView="chart";
- body.innerHTML=`<div class="du"><div class="du-top"><div class="seg du-roots" id="duRoots"></div><span class="grow"></span><span class="du-meta" id="duMeta"></span><button class="iconbtn" id="duBig" title="Крупнейшие файлы">${svg("activity",15)}</button><button class="iconbtn" id="duDup" title="Найти дубликаты">${svg("copy",15)}</button><button class="iconbtn" id="duL2" title="Показывать второй уровень колец">${svg("layers",15)}</button><span class="du-auto-wrap" title="Периодически освежать в фоне уже сканированные тома, если их данные старше выбранного срока">${svg("clock",13)} авто-скан <select class="ev-prio" id="duAuto"><option value="0">выкл</option><option value="1">ежедневно</option><option value="7">еженедельно</option><option value="30">ежемесячно</option></select></span><button class="btn sm" id="duRescan">${svg("refresh",13)} Пересканировать</button></div><div class="du-main" id="duMain"></div></div>`;
- // авто-скан: читаем/пишем maintenance.duscan_days
- {const sel=body.querySelector("#duAuto");
-  api("/api/maintenance").then(r=>{const dv=((r&&r.maintenance)||{}).duscan_days||0;if(sel)sel.value=[0,1,7,30].includes(dv)?dv:0;});
-  if(sel)sel.onchange=()=>{api("/api/maintenance",{method:"POST",body:JSON.stringify({maintenance:{duscan_days:+sel.value}})});toast(+sel.value?("Авто-скан: раз в "+sel.value+" дн"):"Авто-скан выключен");};}
+ body.innerHTML=`<div class="du"><div class="du-top"><div class="seg du-roots" id="duRoots"></div><span class="grow"></span><span class="du-meta" id="duMeta"></span><button class="iconbtn" id="duBig" title="Крупнейшие файлы">${svg("activity",15)}</button><button class="iconbtn" id="duDup" title="Найти дубликаты">${svg("copy",15)}</button><button class="iconbtn" id="duL2" title="Показывать второй уровень колец">${svg("layers",15)}</button><button class="btn sm" id="duRescan">${svg("refresh",13)} Пересканировать</button></div><div class="du-main" id="duMain"></div></div>`;
+ // (авто-скан вынесен в Настройки → Обслуживание)
  const rootsEl=body.querySelector("#duRoots"),metaEl=body.querySelector("#duMeta"),mainEl=body.querySelector("#duMain");
  // палитра чуть приглушена, читается в обеих темах; 2-й уровень отделяем прозрачностью (см. CSS), а не осветлением в белый
  const DUCOL=["#4C8DF6","#33BE86","#E0913C","#8A7DFF","#E0669E","#2FB0BC","#E5544E","#5B9BD5","#46B98A","#B07A44","#7A6EE0","#D9A62E"];
@@ -5854,6 +5851,8 @@ function maintTab(tc){
    <div class="srow" id="stThRow"><div class="srow-l"><div class="srow-t">Пороги температуры</div><div class="srow-d">«горячо» · «критично» (стоп в режиме Авто), °C</div></div><div class="srow-c"><input class="mono" id="stThHot" style="max-width:60px"><span style="color:var(--mut);font-size:12px">°C</span><input class="mono" id="stThCrit" style="max-width:60px"><span style="color:var(--mut);font-size:12px">°C</span></div></div>
    <div class="mon-row"><span>Сводка состояния${tipHTML("Раз в день или неделю NAS присылает короткую сводку (температура, память, место, здоровье, итог бэкапа). Доставка — через уведомления: вкл/выкл Pushover в Настройки → Уведомления → «Сводка состояния».")}</span><label class="tgl"><input type="checkbox" id="stSumOn"><span class="sl"></span></label></div>
    <div class="srow" id="stSumRow"><div class="srow-l"><div class="srow-t">Когда присылать</div></div><div class="srow-c"><div class="seg" id="stSumFreq"><button data-v="daily">Ежедневно</button><button data-v="weekly">Еженедельно</button></div><select id="stSumDow" class="ev-prio">${[["Mon","пн"],["Tue","вт"],["Wed","ср"],["Thu","чт"],["Fri","пт"],["Sat","сб"],["Sun","вс"]].map(([v,l])=>`<option value="${v}">${l}</option>`).join("")}</select><input class="mono" id="stSumTime" style="max-width:80px" placeholder="09:00"></div></div>
+   <div class="set-h">Анализ места (disk usage)</div>
+   <div class="srow"><div class="srow-l"><div class="srow-t">Авто-освежение в фоне${tipHTML("Периодически пересканировать УЖЕ проанализированные тома, чтобы карта места была свежей. Скан нагружает диск, поэтому реже суток обычно не нужно; один том за проход.")}</div><div class="srow-d">освежать тома, что вы уже сканировали</div></div><div class="srow-c"><select id="stDuAuto" class="ev-prio"><option value="0">выкл</option><option value="6">каждые 6 ч</option><option value="12">каждые 12 ч</option><option value="24">ежедневно</option><option value="168">еженедельно</option><option value="720">ежемесячно</option></select></div></div>
    <div class="set-h">Поведение панели</div>
    <div class="mon-row"><span>Автооткрывать центр операций${tipHTML("При старте загрузки/копирования поповер операций открывается сам. Выключите, если хотите открывать его только вручную с иконки в баре.")}</span><label class="tgl"><input type="checkbox" id="stOpsAuto"><span class="sl"></span></label></div>`;
   const sc=tc.querySelector("#stSmScan"),ss=tc.querySelector("#stSmShort"),sl=tc.querySelector("#stSmLong");
@@ -5898,6 +5897,9 @@ function maintTab(tc){
   sumFreq.querySelectorAll("button").forEach(b=>b.onclick=()=>{segSet(sumFreq,b.dataset.v);sumDow.style.display=(b.dataset.v==="weekly")?"":"none";saveRel();});
   const oa=tc.querySelector("#stOpsAuto");oa.checked=SET.opsAuto!==false;
   oa.onchange=()=>{SET.opsAuto=oa.checked;saveSettings();};
+  const du=tc.querySelector("#stDuAuto");
+  api("/api/maintenance").then(m=>{const h=((m&&m.maintenance)||{}).duscan_hours||0;if(du)du.value=[0,6,12,24,168,720].includes(h)?h:0;});
+  if(du)du.onchange=()=>{api("/api/maintenance",{method:"POST",body:JSON.stringify({maintenance:{duscan_hours:+du.value}})});toast(+du.value?"Авто-скан включён":"Авто-скан выключен");};
 }
 function systemTab(tc){withSysc(tc,()=>{const s=SYSC.system||{};
  tc.innerHTML=`${rebootBan()}
@@ -5993,13 +5995,13 @@ function securityTab(tc){withSysc(tc,()=>{const s=SYSC.security||{};const u=s.uf
  // настройки fail2ban: порог, время бана, забаненные IP
  const fb=tc.querySelector("#f2bBox"),f=s.fail2ban||{};
  if(fb){const banned=f.banned||[];
-  fb.innerHTML=`<div class="mon-grid" style="grid-template-columns:1fr 1fr;margin-top:2px">
-    <div class="f2"><label>Порог: банить после N неудач${tipHTML("Сколько неудачных попыток входа по SSH с одного IP до бана.")}</label><input class="mono" id="f2bR" value="${att(f.maxretry||"5")}" placeholder="5"></div>
-    <div class="f2"><label>Время бана${tipHTML("Насколько банить IP: 30m, 1h, 1d, -1 = навсегда.")}</label><input class="mono" id="f2bT" value="${att(f.bantime||"1h")}" placeholder="1h"></div>
+  fb.innerHTML=`<div style="display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;margin-top:2px">
+    <div class="f2" style="width:auto;margin:0"><label style="font-size:11px">Банить после N неудач${tipHTML("Сколько неудачных попыток входа по SSH с одного IP до бана.")}</label><input class="mono" id="f2bR" value="${att(f.maxretry||"5")}" placeholder="5" style="width:64px"></div>
+    <div class="f2" style="width:auto;margin:0"><label style="font-size:11px">Время бана${tipHTML("Насколько банить IP: 30m, 1h, 1d, -1 = навсегда.")}</label><input class="mono" id="f2bT" value="${att(f.bantime||"1h")}" placeholder="1h" style="width:80px"></div>
+    <button class="btn sm pri" id="f2bSave">${svg("save",13)} Сохранить</button>
    </div>
-   <button class="btn sm pri" id="f2bSave">Сохранить</button>
-   <div class="srow-d" style="margin-top:10px">Забанены сейчас: ${banned.length?"":"—"}</div>
-   <div class="ev-chips" id="f2bBanned">${banned.map(ip=>`<span class="ev-chip">${esc(ip)}<i data-unban="${att(ip)}" title="Разбанить">✕</i></span>`).join("")}</div>`;
+   ${banned.length?`<div class="srow-d" style="margin-top:10px">Забанены сейчас:</div>
+   <div class="ev-chips" id="f2bBanned" style="margin-top:5px">${banned.map(ip=>`<span class="ev-chip">${esc(ip)}<i data-unban="${att(ip)}" title="Разбанить">✕</i></span>`).join("")}</div>`:""}`;
   fb.querySelector("#f2bSave").onclick=async()=>{const r=await api("/api/security/fail2ban",{method:"POST",body:JSON.stringify({maxretry:fb.querySelector("#f2bR").value.trim(),bantime:fb.querySelector("#f2bT").value.trim()})});toast(LIVE?((r&&r.ok)?"Сохранено":"Ошибка: "+((r&&r.log)||"")):"Демо");refreshSysc(rerSet);};
   fb.querySelectorAll("[data-unban]").forEach(i=>i.onclick=async()=>{const r=await api("/api/security/unban",{method:"POST",body:JSON.stringify({ip:i.dataset.unban})});toast(LIVE?((r&&r.ok)?"Разбанен":"Ошибка"):"Демо");refreshSysc(rerSet);});}
 });}
