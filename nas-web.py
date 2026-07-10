@@ -6294,6 +6294,22 @@ dev="$1"; [ -b "$dev" ] || exit 0
 LOG=/var/log/nas-usb-import.log
 log(){ echo "$(date '+%F %T') $*" >> "$LOG" 2>/dev/null; }
 notify(){ [ "${IMPORT_NOTIFY:-0}" = "1" ] && [ -x /usr/local/bin/nas-notify.sh ] && /usr/local/bin/nas-notify.sh "$1" "$2" 2>/dev/null || true; }
+# At boot udev replays ACTION=add for every medium that is already plugged in
+# (coldplug). Importing those is a duplicate of the import done when the card was
+# first inserted, so auto-import must fire on hot-plug only. USEC_INITIALIZED is
+# the monotonic time (µs since kernel start) at which udev first saw the device:
+# coldplug lands in the first seconds of uptime, a hand-inserted card lands far
+# later. Manual "import now" (IMPORT_FORCE=1) bypasses the guard.
+COLDPLUG_US=${IMPORT_COLDPLUG_US:-120000000}
+if [ "${IMPORT_FORCE:-0}" != "1" ]; then
+  seen_us="$(udevadm info -q property -n "$dev" 2>/dev/null | sed -n 's/^USEC_INITIALIZED=//p' | head -1)"
+  # no property (odd bridge, udevadm unavailable) → fall back to plain uptime
+  case "$seen_us" in ''|*[!0-9]*) seen_us="$(awk '{printf "%d", $1*1000000}' /proc/uptime)" ;; esac
+  if [ "$seen_us" -lt "$COLDPLUG_US" ]; then
+    log "skip $dev: носитель был вставлен до загрузки — автоимпорт только на «горячую» вставку"
+    exit 0
+  fi
+fi
 # udev дёргает нас отдельно на КАЖДЫЙ раздел диска. Регистрируем задание, чтобы
 # извлечение в конце не вырвало устройство из-под ещё копирующегося соседа.
 # Через pgrep это делать нельзя: подоболочка скрипта имеет ту же командную
