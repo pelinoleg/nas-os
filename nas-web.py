@@ -267,6 +267,60 @@ def _lsblk():
         return []
 
 AUTOMOUNT_CONF = "/etc/nas-wizard/automount.conf"
+COMITUP_CONF = "/etc/comitup.conf"
+
+def comitup_state():
+    """comitup — Wi-Fi точка доступа + captive-портал для первичной настройки без
+    монитора. Статус берём из лога (D-Bus у comitup подвисает), настройки из conf.
+    Не установлен → {installed:false}."""
+    out = {"installed": bool(shutil.which("comitup")), "mode": None, "ssid": None,
+           "ap_name": "comitup-<nnn>", "ap_password": ""}
+    if not out["installed"]:
+        return out
+    # настройки: раскомментированные ap_name/ap_password
+    for l in _read(COMITUP_CONF).splitlines():
+        l = l.strip()
+        if l.startswith("ap_name:"):
+            out["ap_name"] = l.split(":", 1)[1].strip()
+        elif l.startswith("ap_password:"):
+            out["ap_password"] = l.split(":", 1)[1].strip()
+    # режим/SSID из последних строк журнала comitup
+    log = _read("/var/log/comitup.log")
+    for l in reversed(log.splitlines()[-80:]):
+        if "Setting state to" in l and out["mode"] is None:
+            out["mode"] = l.rsplit("Setting state to", 1)[1].strip()
+        if "Attempting connection to" in l and out["ssid"] is None:
+            out["ssid"] = l.rsplit("Attempting connection to", 1)[1].strip()
+        if out["mode"] and out["ssid"]:
+            break
+    return out
+
+def comitup_save(ap_name, ap_password):
+    """Записать имя/пароль точки доступа comitup. Пустое поле → строка убирается
+    (возврат к дефолту). Пароль 8–63 символа (требование WPA) или пусто (открытая)."""
+    if not shutil.which("comitup"):
+        return {"ok": False, "log": "comitup не установлен"}
+    ap_name = (ap_name or "").strip()
+    ap_password = (ap_password or "").strip()
+    if ap_password and not (8 <= len(ap_password) <= 63):
+        return {"ok": False, "log": "пароль точки доступа: 8–63 символа (или пусто)"}
+    try:
+        lines = _read(COMITUP_CONF).splitlines()
+    except Exception:
+        lines = []
+    # выкидываем прежние (в т.ч. закомментированные-активные) строки настроек
+    keep = [l for l in lines if not re.match(r"^\s*(ap_name|ap_password)\s*:", l)]
+    if ap_name:
+        keep.append("ap_name: " + ap_name)
+    if ap_password:
+        keep.append("ap_password: " + ap_password)
+    try:
+        with open(COMITUP_CONF, "w") as f:
+            f.write("\n".join(keep).rstrip("\n") + "\n")
+    except OSError as e:
+        return {"ok": False, "log": str(e)}
+    return {"ok": True, "log": "сохранено — применится после перезапуска comitup или ребута"}
+
 def automount_state():
     """Состояние автомонтирования: включено ли, база, пользователь."""
     conf = _read(AUTOMOUNT_CONF)
@@ -8341,6 +8395,8 @@ class H(BaseHTTPRequestHandler):
                 self._json(docker_volumes())
             elif p == "/api/automount":
                 self._json(automount_state())
+            elif p == "/api/comitup":
+                self._json(comitup_state())
             elif p == "/api/sysconf":
                 self._json(sysconf())
             elif p == "/api/usb-import":
@@ -8623,6 +8679,9 @@ class H(BaseHTTPRequestHandler):
                     if target:
                         params["target"] = target
                     self._json(engine("mount-dev", params))
+            elif p == "/api/comitup/save":
+                b = self._body()
+                self._json(comitup_save(b.get("ap_name", ""), b.get("ap_password", "")))
             elif p == "/api/automount":
                 b = self._body()
                 user = b.get("user", TARGET_USER); base = b.get("base", "/media/nas")

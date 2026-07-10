@@ -5437,7 +5437,11 @@ function hideTip(){clearTimeout(_tipT);_tipCur=null;if(_tipEl)_tipEl.classList.r
 /* Глобально: ЛЮБОЙ элемент с title или data-tip получает наш пузырь. Нативный
    title сразу переносим в data-tip и удаляем — иначе поверх показался бы системный
    тултип (медленный, мелкий, некрасивый). Так все подсказки в панели одинаковые. */
-function _tipFind(n){return n&&n.closest?n.closest("[data-tip],[title]"):null;}
+function _tipFind(n){if(!n||!n.closest)return null;
+ const t=n.closest("[data-tip],[title]");
+ // в доке подсказка просто дублирует имя приложения — не показываем
+ if(t&&t.closest(".dock"))return null;
+ return t;}
 document.addEventListener("pointerover",e=>{const t=_tipFind(e.target);if(!t)return;
  if(!t.hasAttribute("data-tip")){const ti=t.getAttribute("title");if(ti!=null){t.setAttribute("data-tip",ti);t.removeAttribute("title");}}
  if(t.getAttribute("data-tip"))showTip(t);});
@@ -5921,8 +5925,21 @@ function networkTab(tc){withSysc(tc,()=>{const n=SYSC.network||{};const manual=n
   <div class="set-grp">Беспроводная сеть</div>
   ${n.wifi?tglRow("Отключить энергосбережение Wi-Fi","РЕКОМЕНДУЕТСЯ. Wi-Fi-чип Pi при простое засыпает между беконами → периодические обрывы SSH/веб. Отключение убирает обрывы ценой ~0.1 Вт. Именно это чинило разрывы связи.","wifi_ps_off",n.wifi_ps_off,"убирает периодические обрывы связи"):`<div class="srow"><div class="srow-l"><div class="srow-d">Подключение по кабелю (${esc(n.iface||"")}) — энергосбережение Wi-Fi не применимо.</div></div></div>`}
   <div class="set-grp">Обнаружение в сети</div>
-  ${svcRow("mDNS / .local (Avahi)","Позволяет обращаться к серверу по имени <хост>.local без запоминания IP. Удобно для доступа с телефонов и Mac.","avahi",n.avahi,"доступ по имени "+host+".local")}`;
+  ${svcRow("mDNS / .local (Avahi)","Позволяет обращаться к серверу по имени <хост>.local без запоминания IP. Удобно для доступа с телефонов и Mac.","avahi",n.avahi,"доступ по имени "+host+".local")}
+   <div id="comitupBox"></div>`;
  wireSc(tc);
+ // comitup: точка доступа для первичной настройки без монитора (грузим отдельно)
+ api("/api/comitup").then(c=>{const box=tc.querySelector("#comitupBox");if(!box||!c||!c.installed)return;
+  const modeTxt={HOTSPOT:"режим точки доступа",CONNECTING:"подключается",CONNECTED:"подключено к Wi-Fi"}[c.mode]||c.mode||"—";
+  box.innerHTML=`<div class="set-grp">Точка доступа (comitup)</div>
+   <p class="set-sub">Если NAS не может подключиться к Wi-Fi, comitup поднимает свою точку доступа и портал настройки — так первый раз можно настроить сеть без монитора. Сейчас: <b>${esc(modeTxt)}</b>${c.ssid&&c.mode==="CONNECTED"?" ("+esc(c.ssid)+")":""}.</p>
+   <div class="mon-grid" style="grid-template-columns:1fr 1fr">
+    <div class="f2"><label>Имя точки доступа${tipHTML("SSID точки доступа comitup, которую видно, когда NAS не подключён к Wi-Fi. «<nnn>» заменяется на уникальное число, «<hostname>» — на имя хоста.")}</label><input class="mono" id="cuName" value="${att(c.ap_name||"")}" placeholder="comitup-<nnn>"></div>
+    <div class="f2"><label>Пароль точки доступа${tipHTML("8–63 символа — точка доступа с паролем (WPA). Пусто — открытая сеть. Применяется после перезапуска comitup или перезагрузки.")}</label><input class="mono" id="cuPass" value="${att(c.ap_password||"")}" placeholder="пусто = открытая"></div>
+   </div>
+   <button class="btn sm pri" id="cuSave">Сохранить точку доступа</button>`;
+  box.querySelector("#cuSave").onclick=async()=>{const r=await api("/api/comitup/save",{method:"POST",body:JSON.stringify({ap_name:box.querySelector("#cuName").value.trim(),ap_password:box.querySelector("#cuPass").value.trim()})});toast(LIVE?((r&&r.ok)?r.log:("Ошибка: "+((r&&r.log)||""))):"Демо");};
+ });
  tc.querySelectorAll("#nMethod button").forEach(b=>b.onclick=()=>{const m=b.dataset.m;if(m==="manual"){tc.querySelector("#nManual").style.display="";tc.querySelectorAll("#nMethod button").forEach(x=>x.classList.toggle("on",x.dataset.m==="manual"));}else{confirmDlg("DHCP","Переключить на автоматический IP (DHCP)?",async()=>{await sconf("net_method","auto");refreshSysc(rerSet);});}});
  const ap=tc.querySelector("#nApply");if(ap)ap.onclick=()=>confirmDlg("Статический IP","Применить статический адрес? Сервер сменит IP и текущая страница может перестать отвечать — переоткройте по новому адресу.",async()=>{await sconf("net_method","manual",{ip:tc.querySelector("#nIp").value.trim(),prefix:tc.querySelector("#nPfx").value.trim()||"24",gw:tc.querySelector("#nGw").value.trim(),dns:tc.querySelector("#nDns").value.trim()});},true);
 });}
