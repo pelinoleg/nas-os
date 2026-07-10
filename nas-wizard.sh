@@ -1893,12 +1893,16 @@ sec_ufw() {
     run ufw default deny incoming
     run ufw default allow outgoing
     if ufw app list 2>/dev/null | grep -q OpenSSH; then run ufw allow OpenSSH; else run ufw allow 22/tcp; fi
+    # КРИТИЧНО: порт самой веб-панели (nas-web) — иначе включение firewall закрывает
+    # доступ к панели, из которой его и включили. Порт из юнита, дефолт 80.
+    local WEBPORT="${NAS_WEB_PORT:-80}"
+    run ufw allow "${WEBPORT}/tcp"
     run ufw allow 9090/tcp    # Cockpit
     # Открыть порты шар, если они установлены
     if dpkg -s samba >/dev/null 2>&1; then run ufw allow Samba 2>/dev/null || run ufw allow 445/tcp; fi
     if dpkg -s nfs-kernel-server >/dev/null 2>&1; then run ufw allow 2049/tcp; run ufw allow 111/tcp; fi
     run ufw --force enable
-    info "ufw включён (SSH, Cockpit 9090, шары — если есть)"
+    info "ufw включён (панель :${WEBPORT}, SSH, Cockpit 9090, шары — если есть)"
     warn "docker публикует порты в обход ufw (iptables) — учитывайте это"
 }
 sec_fail2ban() {
