@@ -85,6 +85,8 @@
   .eyebrow{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.14em;color:var(--mut);margin-bottom:10px}
   h1{font-size:1.7rem;line-height:1.2;margin:0 0 10px;letter-spacing:-.02em;color:var(--ink)}
   .lead{color:var(--dim);margin:0 0 22px;max-width:62ch;line-height:1.55}
+  .okban{display:flex;align-items:center;gap:9px;margin:0 0 18px;padding:11px 14px;border-radius:var(--r-md);background:var(--good-soft);color:var(--good);font-size:13px;line-height:1.45}
+  .okban svg{flex:none}
   .card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);padding:8px 20px;margin-bottom:14px;box-shadow:var(--sh-sm)}
   .card+.eyebrow{margin-top:24px}
   .opt{display:flex;align-items:center;gap:14px;padding:14px 0;border-top:1px solid var(--line)}.opt:first-child{border-top:none}
@@ -305,7 +307,11 @@ const R={
    </div><div class="console" id="con"></div>`;
   p.querySelectorAll("[data-a]").forEach(b=>b.onclick=()=>run(b.dataset.a));},
 };
-function renderPanel(){document.getElementById("panel").innerHTML="";const p=document.getElementById("panel");(R[cur]||R.system)(p);}
+function renderPanel(){const p=document.getElementById("panel");p.innerHTML="";(R[cur]||R.system)(p);
+ // если шаг уже настроен — сверху зелёная плашка «уже установлено», чтобы не гадать
+ if(DONE[cur]){const b=document.createElement("div");b.className="okban";
+  b.innerHTML=`${svg("shield",15)} Этот шаг уже настроен на системе. Повторный запуск обновит/дополнит — существующее не ломается.`;
+  p.insertBefore(b,p.firstChild.nextSibling||null);}}
 
 function fmtModal(dev,ok){const s=document.getElementById("scrim");
  s.innerHTML=`<div class="modal"><h3>Отформатировать ${dev}?</h3><p>Все данные на диске будут удалены безвозвратно. Введите путь устройства для подтверждения.</p>
@@ -335,6 +341,14 @@ try{applyDeskTheme(JSON.parse(localStorage.getItem("nasdesk")||"{}"));}catch(e){
  const sv=await api("/api/settings");if(sv&&sv.settings&&Object.keys(sv.settings).length)applyDeskTheme(sv.settings);
  const raw=await api("/api/setup/state");let st=null;
  try{st=raw&&typeof raw.log==="string"?JSON.parse(raw.log):raw;}catch(e){st=null;}
- if(st&&st.host){STATE=st;document.getElementById("hostlbl").textContent=st.host+" · "+(st.iface||"");}
+ if(st&&st.host){STATE=st;document.getElementById("hostlbl").textContent=st.host+" · "+(st.iface||"");
+   // уже установленное/настроенное показываем как готовое (галочки в списке шагов)
+   DONE.system=!!(STATE.docker&&STATE.cockpit);
+   DONE.disks=(STATE.data_disks||0)>0;
+   DONE.mergerfs=!!STATE.pool;
+   DONE.snapraid=!!STATE.snapraid;
+   DONE.services=!!STATE.docker;
+   DONE.shares=!!(STATE.samba||STATE.nfs);
+   DONE.security=!!(STATE.ufw||STATE.fail2ban);}
  else document.getElementById("hostlbl").textContent="демо (нет бэкенда)";renderRail();renderPanel();})();
 </script></body></html>
