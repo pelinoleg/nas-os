@@ -3152,7 +3152,15 @@ function svcTab(tc,win){
    if(flt)u=u.filter(x=>x.unit.toLowerCase().includes(flt)||(x.desc||"").toLowerCase().includes(flt));
    box.innerHTML="";
    u.slice(0,200).forEach(x=>{const st=x.active==="active"?"run":x.active==="failed"?"fail":"dead",mine=isNas(x.unit);
-     const r=el(`<div class="row2" style="padding:9px 12px;margin-bottom:6px"><div class="m"><div class="t ${mine?"svc-mine":""}" style="font-size:13px">${esc(x.unit.replace(".service",""))}</div><div class="s">${esc((x.desc||"").slice(0,50))}</div></div><span class="stbadge ${st}">${x.sub}</span></div>`);
+     // «dead» пугает, хотя для oneshot+timer/сокет-юнитов это норма (спят до триггера).
+     // Показываем понятную подпись и подсказку, красный — только у настоящего сбоя.
+     let lbl=x.sub,tip="";
+     if(x.active==="active")lbl={running:"работает",waiting:"ожидает",listening:"слушает",mounted:"смонтирован",exited:"активен"}[x.sub]||x.sub;
+     else if(x.active==="failed"){lbl="сбой";tip="служба завершилась с ошибкой";}
+     else if(x.trigger==="timer"){lbl="по расписанию";tip="запускается таймером по расписанию, между запусками — покой (это норма)";}
+     else if(x.trigger==="socket"){lbl="по запросу";tip="запускается при обращении к сокету (напр. открыли Cockpit), простаивает до этого (это норма)";}
+     else lbl={dead:"остановлен",exited:"отработал"}[x.sub]||x.sub;
+     const r=el(`<div class="row2" style="padding:9px 12px;margin-bottom:6px"><div class="m"><div class="t ${mine?"svc-mine":""}" style="font-size:13px">${esc(x.unit.replace(".service",""))}</div><div class="s">${esc((x.desc||"").slice(0,50))}</div></div><span class="stbadge ${st}"${tip?` title="${att(tip)}"`:""}>${esc(lbl)}</span></div>`);
      const a=el(`<div style="display:flex;gap:4px;margin-left:8px"></div>`);
      const mk=(ic,act,ttl,cls)=>{const b=el(`<button class="iconbtn ${cls||""}" title="${ttl}">${svg(ic,14)}</button>`);b.onclick=()=>svcAct(x.unit,act,draw);return b;};
      const jb=el(`<button class="iconbtn" title="Журнал">${svg("logs",14)}</button>`);jb.onclick=()=>svcJournal(x.unit);a.appendChild(jb);

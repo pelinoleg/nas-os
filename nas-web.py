@@ -853,16 +853,33 @@ def _track_unit(name, add=True):
     elif not add and name in lst:
         lst.remove(name); _save_created_units(lst)
 
+def _units_by_trigger(kind):
+    """Имена сервисов, за которыми стоит .timer или .socket — чтобы их «dead»
+    показывать как «по расписанию»/«по запросу», а не как поломку."""
+    names = set()
+    r = _run(["systemctl", "list-units", f"--type={kind}", "--all", "--no-legend",
+              "--plain", "--no-pager"], timeout=8)
+    for line in (r.get("log") or "").splitlines():
+        u = line.split(None, 1)[0] if line.split() else ""
+        if u.endswith("." + kind):
+            names.add(u.rsplit(".", 1)[0] + ".service")   # foo.timer → foo.service
+    return names
+
 def systemd_units(kind="service"):
     r = _run(["systemctl", "list-units", f"--type={kind}", "--all", "--no-legend",
               "--plain", "--no-pager"], timeout=10)
+    timers = _units_by_trigger("timer") if kind == "service" else set()
+    sockets = _units_by_trigger("socket") if kind == "service" else set()
     out = []
     for line in (r.get("log") or "").splitlines():
         parts = line.split(None, 4)
         if len(parts) < 4 or not parts[0].endswith("." + kind):
             continue
+        # чем «разбудят» неактивный юнит: таймер по расписанию или сокет по запросу
+        trig = "timer" if parts[0] in timers else ("socket" if parts[0] in sockets else None)
         out.append({"unit": parts[0], "load": parts[1], "active": parts[2],
-                    "sub": parts[3], "desc": parts[4] if len(parts) > 4 else ""})
+                    "sub": parts[3], "desc": parts[4] if len(parts) > 4 else "",
+                    "trigger": trig})
     return {"units": out, "created": load_created_units()}
 
 def systemd_action(unit, action):
