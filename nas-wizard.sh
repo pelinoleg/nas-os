@@ -1838,15 +1838,40 @@ EOF
 }
 sec_journald() {
     run mkdir -p /etc/systemd/journald.conf.d
-    write_file /etc/systemd/journald.conf.d/00-nas.conf <<'EOF'
+    # Drop-ins are merged in filename order across /usr/lib and /etc, last wins.
+    # Raspberry Pi OS ships 40-rpi-volatile-storage.conf (Storage=volatile) to spare
+    # the SD card, so ours must sort after it — hence the 99- prefix, not 00-.
+    run rm -f /etc/systemd/journald.conf.d/00-nas.conf
+    write_file /etc/systemd/journald.conf.d/99-nas.conf <<'EOF'
 [Journal]
+# Persistent journal. Without it the log lives in /run and evaporates on power
+# loss — exactly the case where the log is the only way to learn what happened.
+Storage=persistent
 SystemMaxUse=200M
 SystemMaxFileSize=50M
 EOF
+    run mkdir -p /var/log/journal
+    run systemd-tmpfiles --create --prefix /var/log/journal
+    # log2ram keeps /var/log on tmpfs, so the journal would never reach the disk
+    if systemctl is-enabled log2ram >/dev/null 2>&1; then
+        warn "log2ram держит /var/log в оперативке — журнал не переживёт выключение"
+        run systemctl disable --now log2ram
+        info "log2ram отключён ради постоянного журнала"
+    fi
     run systemctl restart systemd-journald
-    info "journald ограничен 200M"
+    info "journald: постоянный журнал, лимит 200M"
 }
 sec_log2ram() {
+    # log2ram spares an SD card from write wear. On an NVMe/SSD root it buys nothing
+    # and costs every log written since the last sync whenever power is cut — which
+    # is precisely when the logs matter. Refuse instead of silently losing them.
+    local rootdev
+    rootdev="$(findmnt -no SOURCE / 2>/dev/null | sed 's|^/dev/||')"
+    case "$rootdev" in
+        mmcblk*) ;;
+        *) warn "корень не на SD-карте (/dev/${rootdev:-?}) — log2ram не нужен и лишает вас логов при аварийном выключении"
+           return 0 ;;
+    esac
     if dpkg -s log2ram >/dev/null 2>&1; then info "log2ram уже установлен"; return 0; fi
     info "подключаю внешний репозиторий azlux для log2ram"
     run mkdir -p /usr/share/keyrings

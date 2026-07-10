@@ -193,14 +193,24 @@ def uptime_s():
     except (ValueError, IndexError):
         return 0
 
+# get_throttled: bits 0-3 say "right now", bits 16-19 say "happened since boot".
+# Undervoltage and frequency capping are different faults with different fixes, so
+# they are reported apart. The flags live in firmware RAM and are wiped when power
+# is cut, hence a sag must reach the event log (which survives a reboot) while the
+# board is still up: after a brownout-triggered power-off nothing is left to read.
+_UV_MASK  = (1 << 0) | (1 << 16)                        # under-voltage
+_THR_MASK = sum(1 << b for b in (1, 2, 3, 17, 18, 19))  # freq cap / throttling / soft temp limit
+
 def throttled():
     try:
         out = subprocess.run(["vcgencmd", "get_throttled"], capture_output=True,
                              text=True, timeout=3).stdout.strip()
         val = out.split("=")[-1]
-        return {"raw": val, "ok": val in ("0x0", "0x0\n", "")}
-    except (OSError, subprocess.SubprocessError):
-        return {"raw": None, "ok": True}
+        v = int(val, 16)
+    except (OSError, subprocess.SubprocessError, ValueError, IndexError):
+        return {"raw": None, "ok": True, "undervolt": False, "throttle": False}
+    return {"raw": val, "ok": v == 0,
+            "undervolt": bool(v & _UV_MASK), "throttle": bool(v & _THR_MASK)}
 
 def lan_ip():
     try:
@@ -1155,6 +1165,7 @@ def _def_monitor():
         # --- Pi: питание/температура/ресурсы ---
         "temp":        {"on": True,  "priority": 1, "threshold": 75},
         "throttle":    {"on": True,  "priority": 1},
+        "undervolt":   {"on": True,  "priority": 2},
         "mem":         {"on": False, "priority": 0, "threshold": 92},
         "swap":        {"on": False, "priority": 0, "threshold": 60},
         "load":        {"on": False, "priority": 0, "threshold": 8},
@@ -1361,8 +1372,8 @@ for _k in ("disk_add", "disk_remove", "readonly", "fserror", "smart", "smart_wea
     _EVENT_KIND[_k] = "disk"
 for _k in ("pool", "diskfull", "root_full", "inodes", "docker_space"):
     _EVENT_KIND[_k] = "space"
-for _k in ("temp", "throttle", "mem", "swap", "load", "sustained_heat", "fan_stall",
-           "proc_hog", "thermal_guard"):
+for _k in ("temp", "throttle", "undervolt", "mem", "swap", "load", "sustained_heat",
+           "fan_stall", "proc_hog", "thermal_guard"):
     _EVENT_KIND[_k] = "power"
 for _k in ("svcfail", "container", "container_loop", "cron_failed", "boot",
            "reboot_req", "updates", "sec_updates", "time_drift", "weekly", "daily_summary"):
@@ -1943,8 +1954,15 @@ def monitor_tick():
     if on("temp") and t and t >= thr("temp", 75):
         fire("temp", "NAS: перегрев", "Температура %s°C (порог %s°C)" % (t, thr("temp", 75)), pri("temp"))
     tr = s.get("throttled") or {}
-    if on("throttle") and not tr.get("ok", True):
-        fire("throttle", "NAS: троттлинг", "Просадка питания/троттлинг: %s" % tr.get("raw", ""), pri("throttle"))
+    # Просадка — это про блок питания, троттлинг — про охлаждение. Разные события:
+    # флаг просадки гаснет только при снятии питания, так что сообщить надо сразу.
+    if on("undervolt") and tr.get("undervolt"):
+        fire("undervolt", "NAS: просадка питания",
+             "Блоку питания не хватает тока (флаги %s) — плата может внезапно выключиться. "
+             "Проверьте БП и кабель." % tr.get("raw", ""), pri("undervolt"), lvl="warn")
+    if on("throttle") and tr.get("throttle"):
+        fire("throttle", "NAS: троттлинг частоты",
+             "CPU снизил частоту (флаги %s)" % tr.get("raw", ""), pri("throttle"))
     m = (s.get("mem") or {}).get("pct", 0)
     if on("mem") and m >= thr("mem", 92):
         fire("mem", "NAS: мало памяти", "RAM занята на %s%%" % m, pri("mem"))
