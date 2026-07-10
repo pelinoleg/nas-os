@@ -2924,7 +2924,20 @@ def nb_save(patch, pid=None):
             src = str(j.get("src", "")).strip().rstrip("/")   # ведущий / сохраняем (SSH abs-пути)
             dst = os.path.normpath(str(j.get("dest", "")).strip())
             if not src or not _nb_valid_dest(dst): continue
-            jobs.append({"src": src, "dest": dst, "enabled": bool(j.get("enabled", True))})
+            job = {"src": src, "dest": dst, "enabled": bool(j.get("enabled", True))}
+            # per-job исключения: анкорные rsync-паттерны относительно src (ведущий /).
+            # так снятие галочки с вложенной папки исключает её, а родитель копирует
+            # всё остальное — включая то, что появится в нём позже.
+            if isinstance(j.get("excludes"), list):
+                ex = []
+                for x in j["excludes"]:
+                    x = str(x).strip()
+                    if not x or ".." in x: continue
+                    if not x.startswith("/"): x = "/" + x
+                    ex.append(x[:300])
+                if ex:
+                    job["excludes"] = ex[:200]
+            jobs.append(job)
         cur["jobs"] = jobs
     if isinstance(patch.get("excludes"), list):
         cur["excludes"] = [str(x)[:150] for x in patch["excludes"] if str(x).strip()][:100]
@@ -3235,6 +3248,8 @@ def nb_build_cmd(cfg, job, dry, prev_files=0):
         args.append("--exclude=/" + nb_deleted_top(cfg)) # не бэкапить сам архив удалённых
     for ex in cfg.get("excludes", []):
         args.append("--exclude=" + ex)
+    for ex in job.get("excludes", []):          # per-job: снятые в дереве вложенные папки
+        args.append("--exclude=" + str(ex))
     bw = int(cfg.get("bwlimit", 0) or 0)
     if bw > 0:
         args.append("--bwlimit=%d" % bw)                 # КБ/с

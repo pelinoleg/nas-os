@@ -841,6 +841,9 @@
   .nb-trow:hover{background:var(--sel)}
   .nb-trow.checked>.nb-tn,.nb-trow.covered>.nb-tn{color:var(--accent);font-weight:600}
   .nb-trow.indet>.nb-tn{color:var(--text);font-weight:600}
+  /* исключённая вложенная папка (сняли внутри выбранного родителя) — зачёркнута и приглушена */
+  .nb-trow.excluded>.nb-tn{color:var(--danger);text-decoration:line-through;opacity:.8}
+  .nb-trow.exout{opacity:.45}.nb-trow.exout>.nb-tn{text-decoration:line-through}
   .nb-trow.locked{cursor:default;opacity:.75}
   .nb-tw{width:18px;flex:none;display:flex;justify-content:center}
   .nb-tchev{border:none;background:none;color:var(--mut);padding:0;cursor:pointer;display:flex;transition:transform .12s}
@@ -851,6 +854,7 @@
   .nb-job{display:flex;align-items:center;gap:8px;padding:7px 0;border-top:1px solid var(--line);font-size:12px}
   .nb-job:first-child{border-top:none}
   .nb-src{flex:none;max-width:38%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--accent)}
+  .nb-exc{flex:none;font-size:10.5px;color:var(--danger);background:var(--danger-soft);border-radius:6px;padding:1px 6px;cursor:help;white-space:nowrap}
   .nb-arr{color:var(--mut);flex:none}
   .nb-dst{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dim)}
   .nb-sz{flex:none;color:var(--mut);font-size:11px}
@@ -5073,14 +5077,17 @@ function pickFolder(opts){
 // старое имя — чтобы не переписывать все точки вызова
 const nbPickLocal=(start,onPick)=>pickFolder({start,onPick,title:"Куда копировать"});
 // модалка визуального выбора папок ИСТОЧНИКА (чекбоксы) — навигация по главному NAS
-function nbPickSource(preselected,onPick){const s=document.getElementById("scrim");
- const sel=new Set(preselected||[]),expanded=new Set(),kids={};   // kids[path]: массив | null(ошибка) | undefined(не грузили)
- // состояние узла: checked=выбран сам; covered=внутри выбранного родителя; indet=выбран кто-то внутри; none
+function nbPickSource(preselected,preExcl,onPick){const s=document.getElementById("scrim");
+ const sel=new Set(preselected||[]),excl=new Set(preExcl||[]),expanded=new Set(),kids={};   // kids[path]: массив | null(ошибка) | undefined(не грузили)
+ // состояние узла: checked=выбран сам; excluded=явно исключён; exout=внутри исключённой папки;
+ // covered=внутри выбранного родителя; indet=выбран кто-то внутри; none
  const state=full=>{if(sel.has(full))return"checked";
+   if(excl.has(full))return"excluded";
+   for(const x of excl){if(full.startsWith(x+"/"))return"exout";}
    for(const x of sel){if(full.startsWith(x+"/"))return"covered";}
    for(const x of sel){if(x.startsWith(full+"/"))return"indet";}return"none";};
  s.innerHTML=`<div class="dialog nb-pick"><h3>${svg("net",16)} Что копировать с главного NAS</h3>
-   <div class="mon-note" style="margin:0 0 8px">Разворачивайте папки ▸ и отмечайте нужное на любом уровне. Галочка на папке — копируется вся папка; частичный выбор внутри показан значком «−».</div>
+   <div class="mon-note" style="margin:0 0 8px">Разворачивайте папки ▸ и отмечайте нужное на любом уровне. Галочка на папке — копируется вся папка целиком (в т.ч. что появится позже). Снятая галочка с вложенной папки исключает только её — остальное копируется.</div>
    <div class="nb-tree" id="nbTree"><div style="color:var(--mut);padding:10px">загрузка…</div></div>
    <div class="r"><span class="nb-selc" id="nbSelInfo"></span><button class="btn" id="nbsX">Отмена</button><button class="btn pri" id="nbsO">Сохранить выбор (<span id="nbsC">${sel.size}</span>)</button></div></div>`;
  s.classList.add("show");
@@ -5095,7 +5102,7 @@ function nbPickSource(preselected,onPick){const s=document.getElementById("scrim
      if(e.dir&&expanded.has(full))buildRows(full,depth+1,out);});};
  function refresh(){
    s.querySelector("#nbsC").textContent=sel.size;
-   const info=s.querySelector("#nbSelInfo");if(info)info.textContent=sel.size?(sel.size+" выбрано"):"ничего не выбрано";
+   const info=s.querySelector("#nbSelInfo");if(info)info.textContent=(sel.size?(sel.size+" выбрано"):"ничего не выбрано")+(excl.size?(" · "+excl.size+" исключено"):"");
    if(kids[""]===null){treeEl.innerHTML=`<div class="er" style="padding:10px">нет связи с источником — проверьте подключение</div>`;return;}
    const out=[];buildRows("",0,out);
    if(!out.length){treeEl.innerHTML='<div style="color:var(--mut);padding:10px">пусто</div>';return;}
@@ -5105,23 +5112,28 @@ function nbPickSource(preselected,onPick){const s=document.getElementById("scrim
      const {e,full,depth}=row,st=state(full),exp=expanded.has(full);
      const n=el(`<div class="nb-trow ${st}" style="padding-left:${depth*18+10}px"><span class="nb-tw">${e.dir?`<button class="nb-tchev ${exp?"open":""}" title="Развернуть">${svg("chev",14)}</button>`:""}</span><input type="checkbox" class="nb-tck" style="pointer-events:none">${svg(e.dir?"folder":"file",15)}<span class="nb-tn">${esc(e.name)}</span></div>`);
      const ck=n.querySelector(".nb-tck");ck.checked=(st==="checked"||st==="covered");ck.indeterminate=(st==="indet");
-     if(st==="covered")n.title="входит в выбранную родительскую папку";
+     if(st==="covered")n.title="входит в выбранную папку — снимите галочку, чтобы исключить только её";
+     else if(st==="excluded")n.title="исключено из копирования — нажмите, чтобы вернуть";
+     else if(st==="exout")n.title="внутри исключённой папки — сначала верните её";
      const chev=n.querySelector(".nb-tchev");
      if(chev)chev.onclick=async ev=>{ev.stopPropagation();
        if(expanded.has(full))expanded.delete(full);
        else{expanded.add(full);if(kids[full]===undefined){chev.classList.add("busy");await browse(full);}}
        refresh();};
      n.onclick=ev=>{if(ev.target.closest(".nb-tchev"))return;
-       const cs=state(full);if(cs==="covered")return;
-       if(cs==="checked")sel.delete(full);
-       else{for(const x of [...sel])if(x.startsWith(full+"/"))sel.delete(x);sel.add(full);}   // выбрать папку → снять вложенные (входят в неё)
+       const cs=state(full);
+       if(cs==="checked"){sel.delete(full);[...excl].forEach(x=>{if(x===full||x.startsWith(full+"/"))excl.delete(x);});}
+       else if(cs==="covered")excl.add(full);                 // исключить эту вложенную папку
+       else if(cs==="excluded")excl.delete(full);             // вернуть исключённую
+       else if(cs==="exout")return;                           // под исключённым предком — сначала вернуть предок
+       else{[...sel].forEach(x=>{if(x.startsWith(full+"/"))sel.delete(x);});[...excl].forEach(x=>{if(x===full||x.startsWith(full+"/"))excl.delete(x);});sel.add(full);}
        refresh();};
      treeEl.appendChild(n);});}
  s.querySelector("#nbsX").onclick=()=>s.classList.remove("show");
- s.querySelector("#nbsO").onclick=()=>{s.classList.remove("show");onPick([...sel]);};
+ s.querySelector("#nbsO").onclick=()=>{s.classList.remove("show");onPick([...sel],[...excl]);};
  (async()=>{await browse("");
-   // авто-раскрытие веток к уже выбранным (чтобы сразу были видны)
-   const anc=new Set();sel.forEach(p=>{const pr=p.split("/");let acc="";for(let i=0;i<pr.length-1;i++){acc=(acc?acc+"/":"")+pr[i];anc.add(acc);}});
+   // авто-раскрытие веток к уже выбранным И к исключённым (чтобы сразу были видны)
+   const anc=new Set();[...sel,...excl].forEach(p=>{const pr=p.split("/");let acc="";for(let i=0;i<pr.length-1;i++){acc=(acc?acc+"/":"")+pr[i];anc.add(acc);}});
    for(const p of [...anc].sort((a,b)=>a.split("/").length-b.split("/").length)){expanded.add(p);if(kids[p]===undefined)await browse(p);}
    refresh();})();}
 function winBackup(){openWin("__nasbak","Бэкап главного NAS",(body,win)=>{
@@ -5189,7 +5201,8 @@ function winBackup(){openWin("__nasbak","Бэкап главного NAS",(body,
    </details>`;
   const g=s=>tc.querySelector(s);
   const drawJobs=()=>{const box=g("#sJobs");box.innerHTML=JOBS.length?"":'<div style="color:var(--mut);font-size:12px;padding:6px 0">Пусто — нажмите «Выбрать с NAS».</div>';
-   JOBS.forEach((j,i)=>{const row=el(`<div class="nb-job"><span class="nb-src mono" title="${att(j.src)}">${svg("net",13)} ${esc(j.src)}</span><span class="nb-arr">→</span><span class="nb-dst mono" title="${att(j.dest)}">${esc(j.dest)}</span>${per?`<button class="iconbtn nb-jb" title="Папка-приёмник">${svg("folder",14)}</button>`:""}<button class="iconbtn dng nb-jx" title="Убрать">${svg("x",14)}</button></div>`);
+   JOBS.forEach((j,i)=>{const exc=(j.excludes&&j.excludes.length)?`<span class="nb-exc" title="${att("Исключено из этой папки:\n"+j.excludes.join("\n"))}">−${j.excludes.length} искл.</span>`:"";
+    const row=el(`<div class="nb-job"><span class="nb-src mono" title="${att(j.src)}">${svg("net",13)} ${esc(j.src)}</span>${exc}<span class="nb-arr">→</span><span class="nb-dst mono" title="${att(j.dest)}">${esc(j.dest)}</span>${per?`<button class="iconbtn nb-jb" title="Папка-приёмник">${svg("folder",14)}</button>`:""}<button class="iconbtn dng nb-jx" title="Убрать">${svg("x",14)}</button></div>`);
     row.querySelector(".nb-jx").onclick=()=>{JOBS.splice(i,1);saveCfg({jobs:JOBS});drawJobs();};
     const jb=row.querySelector(".nb-jb");if(jb)jb.onclick=()=>nbPickLocal(j.dest.replace(/\/[^/]+$/,"")||"/mnt",p=>{JOBS[i].dest=p.replace(/\/$/,"")+"/"+j.src.split("/").pop();saveCfg({jobs:JOBS});drawJobs();});
     box.appendChild(row);});};
@@ -5197,11 +5210,18 @@ function winBackup(){openWin("__nasbak","Бэкап главного NAS",(body,
   wireSeg(tc,"#sDm",v=>saveCfg({dest_mode:v}).then(()=>tabSources(tc)));
   const bb=g("#sBase");if(bb)bb.onchange=()=>saveCfg({dest_base:bb.value.trim()});
   const bbB=g("#sBaseB");if(bbB)bbB.onclick=()=>nbPickLocal(bb.value||"/mnt",p=>{bb.value=p;saveCfg({dest_base:p});});
-  g("#sAdd").onclick=()=>nbPickSource(JOBS.map(j=>j.src),list=>{const chosen=new Set(list);
+  g("#sAdd").onclick=()=>{
+    // существующие per-job исключения → абсолютные пути для преселекта дерева
+    const preExcl=[];JOBS.forEach(j=>{const base=j.src.replace(/\/$/,"");(j.excludes||[]).forEach(rel=>preExcl.push(base+rel));});
+    nbPickSource(JOBS.map(j=>j.src),preExcl,(list,exl)=>{const chosen=new Set(list);
     JOBS=JOBS.filter(j=>chosen.has(j.src));                                   // снятые — убрать
     list.forEach(src=>{if(!JOBS.some(j=>j.src===src))JOBS.push({src,dest:destFor(src),enabled:true});});
     if(!per)JOBS.forEach(j=>{j.dest=destFor(j.src);});                        // единая папка: выровнять дерево у всех (в т.ч. старых)
-    saveCfg({jobs:JOBS}).then(()=>tabSources(tc));});
+    // разложить исключения по задачам: анкорный путь относительно src (ведущий /)
+    JOBS.forEach(j=>{const base=j.src.replace(/\/$/,"");
+      const ex=(exl||[]).filter(p=>p.startsWith(base+"/")).map(p=>p.slice(base.length));
+      if(ex.length)j.excludes=ex;else delete j.excludes;});
+    saveCfg({jobs:JOBS}).then(()=>tabSources(tc));});};
   const exList=()=>g("#sExcl").value.split("\n").map(x=>x.trim()).filter(Boolean);
   const exSet=arr=>{const uniq=[...new Set(arr)];g("#sExcl").value=uniq.join("\n");saveCfg({excludes:uniq});};
   g("#sExcl").onchange=()=>exSet(exList());
