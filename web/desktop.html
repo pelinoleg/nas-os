@@ -3102,8 +3102,10 @@ const TERM_FONTS={
 };
 const termTheme=()=>TERM_THEMES[SET.termTheme]||TERM_THEMES.midnight;
 const termFont=()=>(TERM_FONTS[SET.termFont]||TERM_FONTS.sys).ff;
+// курсор терминала — тонкая полупрозрачная черта: bar-стиль + альфа "88" (~53%) на цвете курсора
+const termXtTheme=()=>{const t=termTheme();return {...t,cursor:t.cursor+"88"};};
 function winTerminal(initCmd,execC){openWin("__term","Терминал",(body,win)=>{
- body.style.padding="0";body.style.background=termTheme().background;body.style.overflow="hidden";
+ body.style.padding="0";body.style.background="#0a0f17";body.style.overflow="hidden";
  let fs=13;try{fs=+(SET.termFs??localStorage.getItem("nastermfs"))||13;}catch(e){}
  let sideHidden=false;try{sideHidden=SET.termSide!=null?!!SET.termSide:localStorage.getItem("nastermside")==="1";}catch(e){}
  if(!isPhone())sideHidden=false;   // на десктопе/планшете боковая панель всегда открыта при открытии окна
@@ -3146,7 +3148,7 @@ function winTerminal(initCmd,execC){openWin("__term","Терминал",(body,wi
    return true;}
  function newSession(initCmd,execC){const id=++seq;
    const holder=el(`<div class="term-xt-wrap" style="display:none"><div class="term-xt"></div></div>`);stack.appendChild(holder);
-   const tw=+SET.termWeight||400;const term=new Terminal({fontFamily:termFont(),fontSize:fs,fontWeight:tw,fontWeightBold:(tw>=700?700:tw+300),lineHeight:+SET.termLh||1.0,cursorBlink:true,scrollback:6000,theme:termTheme()});
+   const tw=+SET.termWeight||400;const term=new Terminal({fontFamily:termFont(),fontSize:fs,fontWeight:tw,fontWeightBold:(tw>=700?700:tw+300),lineHeight:+SET.termLh||1.0,cursorBlink:true,cursorStyle:"bar",cursorWidth:2,scrollback:6000,theme:termXtTheme()});
    let fit=null,search=null;try{fit=new FitAddon.FitAddon();term.loadAddon(fit);}catch(e){}try{search=new SearchAddon.SearchAddon();term.loadAddon(search);}catch(e){}
    try{term.loadAddon(new WebLinksAddon.WebLinksAddon((ev,uri)=>window.open(uri,"_blank")));}catch(e){}
    term.open(holder.querySelector(".term-xt"));
@@ -3175,7 +3177,7 @@ function winTerminal(initCmd,execC){openWin("__term","Терминал",(body,wi
  // --tbg красит всю обвязку (обёртка/тулбар/табы), поэтому старый фон не остаётся по бокам.
  function applyTermStyle(){const th=termTheme(),tw=+SET.termWeight||400,ff=termFont();
    body.style.setProperty("--tbg",th.background);   // красит .term-stack (область терминала), не всё окно
-   const apply=()=>sessions.forEach(s=>{const o=s.term.options;o.theme=th;o.fontFamily=ff;o.fontWeight=tw;o.fontWeightBold=(tw>=700?700:tw+300);o.lineHeight=+SET.termLh||1.0;
+   const apply=()=>sessions.forEach(s=>{const o=s.term.options;o.theme=termXtTheme();o.fontFamily=ff;o.fontWeight=tw;o.fontWeightBold=(tw>=700?700:tw+300);o.lineHeight=+SET.termLh||1.0;
      try{s.term.refresh(0,s.term.rows-1);}catch(e){}setTimeout(()=>refit(s),20);});
    apply();
    // встроенный шрифт грузится асинхронно — после загрузки перемерить и перерисовать,
