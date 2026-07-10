@@ -29,6 +29,7 @@ CREDS_FILE  = os.path.join(NAS_CONFIG, "credentials.json")
 TRASH       = os.path.join(HOME, ".nas-trash")
 PORT        = int(os.environ.get("NAS_WEB_PORT", "8080"))
 STORAGE     = "/mnt/storage"
+BODY_MAX    = 32 * 1024 * 1024   # потолок JSON-тела запроса (обои/base64 влезают; больше — через _upload_raw)
 COMPOSE_NAMES = ("docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml")
 CRON_URL    = os.environ.get("CRONMASTER_URL", "http://127.0.0.1:8123")  # опубликованный порт cronmaster
 
@@ -294,6 +295,8 @@ def _smart_has_data(j):
 def _smartctl_json(extra, dev, timeout=12):
     """smartctl -j с фолбэком типа устройства: голый → -d sat → -d scsi
     (USB-мосты без -d sat отдают только баннер версии)."""
+    if not re.match(r"^/dev/[\w-]+$", dev or ""):   # как у соседей: не даём dev вида "-x…" стать флагом
+        return {}
     # для типа устройства подбираем варианты; NVMe работает напрямую
     variants = [[]] if dev.startswith("/dev/nvme") else [[], ["-d", "sat"], ["-d", "scsi"]]
     last = {}
@@ -2688,8 +2691,8 @@ def nb_test(cfg=None):
     cfg = cfg or nb_load()
     if not cfg.get("host") or not cfg.get("user"):
         return {"ok": False, "log": "не заданы адрес/пользователь"}
-    if subprocess.run(["ping", "-c", "1", "-W", "3", cfg["host"]],
-                      capture_output=True).returncode != 0:
+    if subprocess.run(["ping", "-c", "1", "-W", "3", "--", cfg["host"]],
+                      capture_output=True, timeout=10).returncode != 0:
         return {"ok": False, "log": "%s не отвечает на ping" % cfg["host"]}
     remote, env, rsh = _nb_remote_env(cfg)
     if cfg.get("transport") == "ssh":
@@ -3828,7 +3831,10 @@ def _fstab_targets():
     return out
 
 def _mounted(mp):
-    return subprocess.run(["mountpoint", "-q", mp]).returncode == 0
+    try:
+        return subprocess.run(["mountpoint", "-q", mp], timeout=8).returncode == 0
+    except subprocess.SubprocessError:
+        return False   # зависший/мёртвый mount не должен держать поток запроса вечно
 
 def _stale_endpoint(mp):
     """Мёртвый FUSE-эндпоинт (mergerfs упал): stat() даёт ENOTCONN «Transport endpoint
@@ -3955,6 +3961,24 @@ def _summary_tick():
 
 # ---- активная термозащита ----
 _THERM = {"hot": 0, "cool": 0, "acted": {}}   # acted: name -> {"cpus": orig, "paused": bool}
+# Что термозащита остановила/придушила — на диск. Иначе краш/ребут службы, пока
+# контейнер на паузе, терял бы этот список: контейнер остался бы на паузе НАВСЕГДА,
+# а панель бы «забыла», что сама его остановила. При старте осиротевшее снимаем.
+THERM_FILE = os.path.join(NAS_CONFIG, "thermal-acted.json")
+
+def _therm_save():
+    try:
+        _json_save(THERM_FILE, _THERM["acted"])
+    except OSError:
+        pass
+
+def _therm_recover():
+    """Разовое восстановление при старте: снять то, что термозащита оставила
+    остановленным до краша/ребута. Если всё ещё горячо — тик снова среагирует."""
+    acted = _json_load_strict(THERM_FILE, {})
+    if isinstance(acted, dict) and acted:
+        _THERM["acted"] = acted
+        _therm_restore()   # разпаузит/вернёт cpus и очистит файл
 
 def _hottest_container():
     """(имя, %CPU) самого нагружающего CPU контейнера, или (None, 0)."""
@@ -3982,6 +4006,7 @@ def _therm_restore():
             pass
     if _THERM["acted"]:
         _THERM["acted"] = {}
+        _therm_save()
         return True
     return False
 
@@ -4024,6 +4049,7 @@ def _thermal_tick():
         try:
             _run(["docker", "pause", victim], timeout=15)
             _THERM["acted"].setdefault(victim, {"cpus": _container_cpus(victim)})["paused"] = True
+            _therm_save()
         except Exception:
             pass
         notify_event("thermal_guard", "therm:auto",
@@ -4032,6 +4058,7 @@ def _thermal_tick():
     else:
         if victim not in _THERM["acted"]:
             _THERM["acted"][victim] = {"cpus": _container_cpus(victim), "paused": False}
+            _therm_save()
             _run(["docker", "update", "--cpus=0.5", victim], timeout=15)
             notify_event("thermal_guard", "therm:auto", "NAS: перегрев %d°C" % t,
                          "нагрузка %s ограничена (0.5 CPU) до охлаждения" % victim, "warn", cooldown=900)
@@ -4044,6 +4071,7 @@ def _container_cpus(name):
         return 0
 
 def monitor_loop():
+    _safe(_therm_recover)      # снять контейнеры, осиротевшие термозащитой до краша/ребута
     while True:
         time.sleep(60)
         for fn in (history_sample, monitor_tick, maintenance_daily, _smart_selftest_tick,
@@ -4894,7 +4922,9 @@ def fs_fetch_start(path, url, name=""):
     url = (url or "").strip()
     if not re.match(r"^https?://", url):
         return {"ok": False, "log": "нужен http(s) URL"}
-    d = os.path.realpath(path or "/")
+    d, err = _fs_guard(path)          # не качать в системные деревья/движок
+    if err:
+        return {"ok": False, "log": err}
     if not os.path.isdir(d):
         return {"ok": False, "log": "не каталог назначения"}
     fname = os.path.basename((name or "").strip()) or os.path.basename(unquote(_up(url).path)) or ""
@@ -7107,6 +7137,7 @@ def ensure_web_assets():
 #  HTTP
 # --------------------------------------------------------------------------- #
 class _Server(ThreadingHTTPServer):
+    daemon_threads = True          # рабочие потоки не держат остановку службы
     def handle_error(self, request, client_address):
         # браузер оборвал загрузку (закрыл вкладку, отменил картинку) — это норма,
         # а не сбой: полный трейсбек в journal только зашумляет. Всё прочее — как было.
@@ -7118,6 +7149,9 @@ class _Server(ThreadingHTTPServer):
 
 class H(BaseHTTPRequestHandler):
     server_version = "nas-web"
+    # Таймаут сокета: без него зависшее/медленное соединение (slowloris) держит
+    # поток вечно. Пул потоков не ограничен, так что вечные потоки = падение.
+    timeout = 30
     def log_message(self, *a):  # тихо
         pass
 
@@ -7289,8 +7323,16 @@ class H(BaseHTTPRequestHandler):
             pass
 
     def _body(self):
-        n = int(self.headers.get("Content-Length", 0) or 0)
-        raw = self.rfile.read(n) if n else b""
+        # Потолок ДО чтения: иначе Content-Length: 2000000000 (даже до авторизации,
+        # на /api/auth/login) заставил бы прочитать 2 ГБ в один поток и убить службу
+        # по OOM на Pi. Большие бинарные загрузки идут через потоковый _upload_raw.
+        try:
+            n = int(self.headers.get("Content-Length", 0) or 0)
+        except ValueError:
+            return {}
+        if n <= 0 or n > BODY_MAX:
+            return {}
+        raw = self.rfile.read(n)
         try:
             return json.loads(raw or b"{}")
         except json.JSONDecodeError:
@@ -7500,7 +7542,9 @@ class H(BaseHTTPRequestHandler):
         """Потоковая бинарная загрузка (без base64 — не роняет вкладку на больших файлах).
         rel — путь подпапок внутри назначения (загрузка папки целиком)."""
         q = parse_qs(urlparse(self.path).query)
-        d = os.path.realpath((q.get("path") or ["/"])[0])
+        d, err = _fs_guard((q.get("path") or [""])[0])   # не загружать в системные деревья/движок
+        if err:
+            return {"ok": False, "log": err}
         name = os.path.basename(((q.get("name") or [""])[0]).strip())
         if not os.path.isdir(d):
             return {"ok": False, "log": "не каталог назначения"}
