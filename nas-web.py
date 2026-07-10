@@ -6480,8 +6480,17 @@ mp="$(findmnt -n -o TARGET --source "$dev" 2>/dev/null | head -1)"
 selfmount=0
 if [ -z "$mp" ]; then
   mp="$(mktemp -d /run/nas-usb-import.XXXXXX)"
-  mount -o ro "$dev" "$mp" 2>>"$LOG" || { log "mount fail $dev"; rmdir "$mp" 2>/dev/null; exit 1; }
-  selfmount=1
+  if mount -o ro "$dev" "$mp" 2>>"$LOG"; then
+    selfmount=1
+  else
+    # Гонка с автомонтированием: оба скрипта висят на одном udev-событии ADD.
+    # findmnt выше сказал «не смонтирован», но пока мы шли к mount, automount
+    # успел занять носитель — тогда не падаем, а читаем из его точки.
+    rmdir "$mp" 2>/dev/null
+    mp="$(findmnt -n -o TARGET --source "$dev" 2>/dev/null | head -1)"
+    [ -n "$mp" ] || { log "import FAIL $dev: не удалось смонтировать"; exit 1; }
+    log "носитель уже смонтирован автомонтированием — читаю из $mp"
+  fi
 fi
 cleanup(){ [ "$selfmount" = "1" ] && { umount "$mp" 2>>"$LOG"; rmdir "$mp" 2>/dev/null; }; }
 base="${IMPORT_DEST:-/mnt/storage/imports}"
@@ -6629,9 +6638,13 @@ fi
 '''
 # матчим по ID_USB_DRIVER (usb-storage/uas), а не ID_BUS==usb — иначе USB-SATA
 # мосты (ID_BUS=ata) не срабатывают.
+# --unit даёт читаемое имя вместо run-p564-i565.service (иначе «упала служба
+# run-p…» ничего не говорит), --collect убирает упавший юнит сразу: без него он
+# висит в failed и следующая вставка того же носителя не смогла бы стартовать.
 _USB_RULE = ('ACTION=="add", SUBSYSTEM=="block", ENV{ID_USB_DRIVER}=="?*", '
             'ENV{ID_FS_USAGE}=="filesystem", '
-            'RUN+="/usr/bin/systemd-run --no-block /usr/local/bin/nas-usb-import.sh $devnode"\n')
+            'RUN+="/usr/bin/systemd-run --no-block --collect '
+            '--unit=nas-usb-import-%k /usr/local/bin/nas-usb-import.sh $devnode"\n')
 
 def usb_import_load():
     cfg = dict(_USB_DEFAULT)
@@ -6827,18 +6840,24 @@ def usb_ops_sync():
             threading.Thread(target=_thumbs_warm_bg, args=(j["dest"],), daemon=True).start()
 
 def _usb_sh_sync():
-    """Перезаписать /usr/local/bin/nas-usb-import.sh, если он разошёлся с кодом.
-    Раньше хелпер обновлялся только при сохранении настроек, поэтому после
-    обновления панели на диске оставалась старая версия со старыми багами."""
-    if not os.path.isfile(USB_IMPORT_SH):
-        return
-    if _read(USB_IMPORT_SH) == _USB_SH:
-        return
-    with open(USB_IMPORT_SH, "w") as f:
-        f.write(_USB_SH)
-    os.chmod(USB_IMPORT_SH, 0o755)
-    log_event("info", "USB-импорт: хелпер обновлён до текущей версии", "", "ok",
-              kind="disk", desk=False)
+    """Перезаписать хелпер и udev-правило, если они разошлись с кодом. Раньше и то
+    и другое обновлялось только при сохранении настроек, поэтому после обновления
+    панели на диске оставалась старая версия со старыми багами."""
+    changed = []
+    if os.path.isfile(USB_IMPORT_SH) and _read(USB_IMPORT_SH) != _USB_SH:
+        with open(USB_IMPORT_SH, "w") as f:
+            f.write(_USB_SH)
+        os.chmod(USB_IMPORT_SH, 0o755)
+        changed.append("хелпер")
+    # правило трогаем только если оно уже стоит: его отсутствие = импорт выключен
+    if os.path.isfile(USB_IMPORT_RULE) and _read(USB_IMPORT_RULE) != _USB_RULE.strip():
+        with open(USB_IMPORT_RULE, "w") as f:
+            f.write(_USB_RULE)
+        _run(["udevadm", "control", "--reload"], timeout=15)
+        changed.append("udev-правило")
+    if changed:
+        log_event("info", "USB-импорт: %s обновлён до текущей версии" % " и ".join(changed),
+                  "", "ok", kind="disk", desk=False)
 
 def _usb_install(enabled):
     try:
