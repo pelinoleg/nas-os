@@ -1478,6 +1478,10 @@
   .ev-chip{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11.5px;padding:4px 6px 4px 9px;border-radius:8px;background:var(--card);box-shadow:var(--sh-sm)}
   .ev-chip i{cursor:pointer;color:var(--dim);font-style:normal;font-size:11px;padding:0 2px;border-radius:5px}
   .ev-chip i:hover{color:var(--danger);background:var(--danger-soft)}
+  .ufw-tbl{width:100%;border-collapse:collapse;font-size:12.5px}
+  .ufw-tbl th{text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--mut);font-weight:700;padding:4px 8px;border-bottom:1px solid var(--line)}
+  .ufw-tbl td{padding:6px 8px;border-bottom:1px solid var(--line)}
+  .ufw-tbl tr:last-child td{border-bottom:none}
   .ev-col{width:74px;flex:none;display:flex;align-items:center;justify-content:center;gap:4px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--dim);text-align:center;line-height:1.25}
   .ev-colp{width:112px;flex:none;text-align:center;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--dim)}
   .ev-row .ev-prio{width:112px!important}
@@ -5978,9 +5982,10 @@ function securityTab(tc){withSysc(tc,()=>{const s=SYSC.security||{};const u=s.uf
  wireSc(tc);
  // порты UFW: список с удалением + добавление
  const up=tc.querySelector("#ufwPorts");
- if(up){const ports=u.ports||[];
-  up.innerHTML=`<div class="srow-d" style="margin-bottom:6px">Открытые порты (docker публикует в обход UFW):</div>
-   <div class="ev-chips" id="ufwChips">${ports.map(p=>`<span class="ev-chip">${esc(p)}<i data-del="${att(p)}" title="Закрыть порт">✕</i></span>`).join("")||'<span style="color:var(--mut);font-size:12px">нет правил</span>'}</div>
+ if(up){const rows=u.rows||(u.ports||[]).map(p=>({port:p,label:"",auto:false}));
+  const rowH=r=>`<tr><td class="mono">${esc(r.port)}</td><td>${r.label?esc(r.label):'<span style="color:var(--mut)">своё правило</span>'}</td><td style="text-align:right">${r.auto?'<span class="sbadge ok" style="font-size:9px">авто</span>':`<button class="iconbtn dng" data-del="${att(r.port)}" title="Закрыть порт">${svg("trash",13)}</button>`}</td></tr>`;
+  up.innerHTML=`<div class="srow-d" style="margin-bottom:6px">Открытые порты. «Авто» держатся сами: панель, SSH, Cockpit и все docker-порты (при смене порта/новом контейнере подхватятся). Свои правила можно закрыть.</div>
+   <table class="ufw-tbl"><thead><tr><th>Порт</th><th>Для чего</th><th></th></tr></thead><tbody>${rows.map(rowH).join("")}</tbody></table>
    <div class="nb-field-row" style="margin-top:8px"><input class="mono" id="ufwNew" placeholder="напр. 8096 или 8096/tcp" style="max-width:220px"><button class="btn sm" id="ufwAdd">Открыть порт</button></div>`;
   const doPort=(action,port)=>api("/api/security/ufw-port",{method:"POST",body:JSON.stringify({action,port})}).then(r=>{toast(LIVE?((r&&r.ok)?"Готово":"Ошибка: "+((r&&r.log)||"")):"Демо");refreshSysc(rerSet);});
   up.querySelectorAll("[data-del]").forEach(i=>i.onclick=()=>confirmDlg("Закрыть порт?",esc(i.dataset.del)+" будет закрыт в UFW.",()=>doPort("deny",i.dataset.del),true));

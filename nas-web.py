@@ -2376,6 +2376,12 @@ def monitor_tick():
                 fire("disk_remove", "NAS: диск отключён", "Пропал: " + ", ".join(map(str, removed)), pri("disk_remove"))
         _MON_DEVS = vols
 
+    # --- авто-освежение анализатора места (сам троттлит до раза в 15 мин) ---
+    _safe(lambda: _duscan_auto(load_maintenance().get("duscan_hours", 0)))
+    # --- авто-синхронизация firewall: держать открытыми нужные порты (панель/SSH/
+    #     Cockpit/шары + docker), чтобы новый контейнер/смена порта не остались за UFW ---
+    _safe(ufw_autosync)
+
     # --- файловая система в режиме «только чтение» (риск данных) ---
     if on("readonly"):
         ro = _safe(_readonly_mounts, [])
@@ -3696,7 +3702,7 @@ _maint_last = 0
 def load_maintenance():
     # 0 = выключено (для *_days); все значения попадают в бэкап настроек вместе с файлом
     d = {"trash_days": 30, "pool_alias": "",
-         "duscan_days": 0,          # авто-освежение анализатора места: пересканить тома с кэшем старше N дней (0 = выкл)
+         "duscan_hours": 0,         # авто-освежение анализатора места: пересканить тома с кэшем старше N часов (0 = выкл)
          "thumb_cache_mb": 512,     # лимит кэша миниатюр ФМ, МБ (0 = без лимита)
          "import_stale_hours": 24,  # снести брошенные .incomplete-* старше N часов (0 = не трогать)
          "import_keep_days": 0,     # удалять импорты старше N дней (0 = хранить вечно)
@@ -3780,7 +3786,7 @@ def save_maintenance(d):
     err = ""
     # числовые настройки: ключ → (мин, макс)
     for k, (lo, hi) in {"trash_days": (0, 365), "smart_scan_min": (5, 120),
-                        "duscan_days": (0, 365),
+                        "duscan_hours": (0, 8760),
                         "thumb_cache_mb": (0, 100000),
                         "import_stale_hours": (0, 720), "import_keep_days": (0, 3650),
                         "smart_short_days": (0, 90), "smart_long_days": (0, 365),
@@ -3895,10 +3901,6 @@ def maintenance_daily():
     try:
         m = load_maintenance()
         usb_import_gc(m.get("import_stale_hours", 24), m.get("import_keep_days", 0))
-    except Exception:
-        pass
-    try:
-        _duscan_auto(load_maintenance().get("duscan_days", 0))
     except Exception:
         pass
     try:
@@ -5785,12 +5787,23 @@ def _duscan_run(root):
         _duscan[root] = {"status": "done", "root": root, "ts": data["ts"],
                          "size": data["size"], "files": data["files"], "dirs": data["dirs"]}
 
-def _duscan_auto(days):
-    """Периодически освежать УЖЕ сканированные тома (кэш старше N дней). 0 = выкл.
-    Один скан за проход (сутки) — du нагружает диск, пачкой гонять незачем."""
-    if not days or days <= 0:
+_duscan_auto_last = 0
+
+def _duscan_auto(hours):
+    """Периодически освежать УЖЕ сканированные тома (кэш старше N часов). 0 = выкл.
+    Зовётся из monitor_tick (раз в минуту), но проверяет не чаще раза в ~15 мин;
+    один скан за проход — du нагружает диск, пачкой гонять незачем."""
+    global _duscan_auto_last
+    try:
+        hours = float(hours or 0)
+    except (ValueError, TypeError):
+        hours = 0
+    if hours <= 0:
         return
     now = time.time()
+    if now - _duscan_auto_last < 900:      # не чаще раза в 15 минут
+        return
+    _duscan_auto_last = now
     for f in sorted(glob.glob(os.path.join(NAS_CONFIG, "duscan-*.json"))):
         try:
             with open(f) as fh:
@@ -5798,13 +5811,13 @@ def _duscan_auto(days):
         except (OSError, ValueError):
             continue
         root, ts = d.get("root"), d.get("ts", 0)
-        if not root or not os.path.isdir(root) or now - ts < days * 86400:
+        if not root or not os.path.isdir(root) or now - ts < hours * 3600:
             continue
         with _duscan_lock:
             if (_duscan.get(root) or {}).get("status") == "scanning":
                 continue
         duscan_start(root)      # фоновый; освежит кэш и его ts
-        break                   # по одному за проход — остальные освежатся в следующие сутки
+        break                   # по одному за проход — остальные освежатся в следующие проверки
 
 def duscan_start(root):
     root = os.path.realpath(root or "/")
@@ -6624,11 +6637,67 @@ def _net_state():
             "method": method or "auto", "wifi": is_wifi, "wifi_ps_off": ps_off,
             "avahi": _svc("avahi-daemon")}
 
+def _ufw_managed_ports():
+    """Порты, которые firewall обязан держать открытыми, с подписями «для чего».
+    Системные (панель/SSH/Cockpit/шары) + все опубликованные docker-порты —
+    последние подхватываются автоматически при смене порта или новом контейнере."""
+    ports = {}
+    def add(p, label):
+        ports.setdefault(p, label)
+    add("%d/tcp" % PORT, "Веб-панель NAS")
+    add("22/tcp", "SSH")
+    if os.path.exists("/lib/systemd/system/cockpit.socket") or shutil.which("cockpit-bridge"):
+        add("9090/tcp", "Cockpit")
+    if shutil.which("smbd") or os.path.exists("/etc/samba/smb.conf"):
+        add("445/tcp", "Файлы (Samba)")
+    if os.path.exists("/etc/exports") and os.path.getsize("/etc/exports") > 0:
+        add("2049/tcp", "Файлы (NFS)")
+    try:
+        r = subprocess.run(["docker", "ps", "--format", "{{.Names}}\t{{.Ports}}"],
+                           capture_output=True, text=True, timeout=8)
+        for line in (r.stdout or "").splitlines():
+            parts = line.split("\t")
+            if len(parts) < 2:
+                continue
+            name = parts[0]
+            for m in re.finditer(r"(?:0\.0\.0\.0|\[::\]):(\d+)->\d+/(tcp|udp)", parts[1]):
+                add("%s/%s" % (m.group(1), m.group(2)), "Docker · " + name)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return ports
+
+_ufw_sync_last = 0
+
+def ufw_autosync():
+    """Держать открытыми нужные порты, пока UFW активен: новый docker-контейнер или
+    смена порта не должны оставаться за firewall. Троттл — раз в 2 минуты."""
+    global _ufw_sync_last
+    if not shutil.which("ufw"):
+        return
+    status = _sc("ufw", "status")
+    if "Status: active" not in status:
+        return
+    now = time.time()
+    if now - _ufw_sync_last < 120:
+        return
+    _ufw_sync_last = now
+    have = set(re.findall(r"(?m)^(\S+)\s+ALLOW", status))
+    ssh_ok = "OpenSSH" in have or "22/tcp" in have
+    for port in _ufw_managed_ports():
+        if port == "22/tcp" and ssh_ok:      # OpenSSH-правило уже покрывает SSH
+            continue
+        if port not in have:
+            _run(["ufw", "allow", port], timeout=15)
+
 def _ufw_state():
     out = _sc("ufw", "status")
-    ports = [m.group(1) for m in re.finditer(r"^(\S+)\s+ALLOW", out, re.M)]
+    ports = sorted(set(m.group(1) for m in re.finditer(r"(?m)^(\S+)\s+ALLOW", out)))
+    labels = dict(_ufw_managed_ports())
+    labels.setdefault("OpenSSH", "SSH")      # app-правила ufw → человеческая подпись
+    labels.setdefault("Samba", "Файлы (Samba)")
+    rows = [{"port": p, "label": labels.get(p, ""), "auto": p in labels} for p in ports]
     return {"installed": bool(shutil.which("ufw")),
-            "active": "Status: active" in out, "ports": sorted(set(ports))}
+            "active": "Status: active" in out, "ports": ports, "rows": rows}
 
 F2B_CONF = "/etc/fail2ban/jail.d/nas.conf"
 
@@ -6677,6 +6746,11 @@ def ufw_port(action, port):
         return {"ok": False, "log": "ufw не установлен"}
     if not re.match(r"^\d{1,5}(/(tcp|udp))?$", port or ""):
         return {"ok": False, "log": "порт: напр. 8080 или 8080/tcp"}
+    if action == "deny":
+        # нельзя закрыть порт самой панели и SSH — иначе пользователь запрёт себя
+        num = port.split("/")[0]
+        if num in (str(PORT), "80", "22"):
+            return {"ok": False, "log": "нельзя закрыть порт панели или SSH — потеряете доступ"}
     r = _run(["ufw", "allow", port] if action == "allow" else
              ["ufw", "delete", "allow", port], timeout=15)
     return {"ok": r["ok"], "log": (r.get("log") or "")[:200]}
@@ -6852,8 +6926,13 @@ def sysconf_set(key, val, extra=None):
             return engine("shares", {"keys": "avahi"}) if b \
                 else _svc_toggle("avahi-daemon", False)
         if key == "ufw":
-            return engine("security", {"keys": "ufw"}) if b \
-                else _run(["ufw", "--force", "disable"])
+            if not b:
+                return _run(["ufw", "--force", "disable"])
+            r = engine("security", {"keys": "ufw"})
+            global _ufw_sync_last
+            _ufw_sync_last = 0
+            _safe(ufw_autosync)      # сразу открыть docker-порты, не ждать тик
+            return r
         if key == "fail2ban":
             return engine("security", {"keys": "fail2ban"}) if b \
                 else _svc_toggle("fail2ban", False)
