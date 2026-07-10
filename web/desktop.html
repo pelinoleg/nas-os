@@ -229,7 +229,9 @@
   /* desktop layout — apps left, widgets pinned right */
   .desk{position:fixed;inset:40px 0 96px 0}
   .apps{position:absolute;inset:0 398px 0 0;padding:32px 34px;overflow:auto;
-    display:grid;grid-template-columns:repeat(auto-fill,96px);gap:18px 8px;align-content:start}
+    /* колонка = фактическая ширина иконки: раньше было жёсткие 96px, и при размере
+       иконок >1 плитка (--desk-icon+36) вылезала за колонку и налезала на соседа */
+    display:grid;grid-template-columns:repeat(auto-fill,calc(var(--desk-icon,60px) + 36px));gap:18px 8px;align-content:start}
   .rail{position:absolute;top:0;right:0;bottom:0;width:398px;padding:26px 26px 26px 26px;overflow-y:auto;
     display:flex;flex-direction:column;gap:14px}
   .rail::-webkit-scrollbar{width:0}
