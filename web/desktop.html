@@ -1076,6 +1076,8 @@
   /* анализатор места */
   .du{display:flex;flex-direction:column;height:100%;padding:12px 16px 14px}
   .du-top{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+  .du-auto-wrap{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;color:var(--dim);white-space:nowrap}
+  .du-auto-wrap svg{opacity:.7}
   .du-roots{flex-wrap:wrap}
   .du-roots button{display:inline-flex;align-items:center;gap:5px}
   .du-roots button svg{opacity:.8}
@@ -4677,7 +4679,7 @@ function winDiskUsage(initRoot){const existed=!!OPEN["__duscan"];const w=openWin
  // при открытии из папки — проваливаемся к ней (полный путь в крошках), иначе корень тома
  let cur=(startP===root||startP.startsWith(root==="/"?"/":root+"/"))?startP:root;
  let node=null,cache={},showL2=SET.duL2!==false,duView="chart";
- body.innerHTML=`<div class="du"><div class="du-top"><div class="seg du-roots" id="duRoots"></div><span class="grow"></span><span class="du-meta" id="duMeta"></span><button class="iconbtn" id="duBig" title="Крупнейшие файлы">${svg("activity",15)}</button><button class="iconbtn" id="duDup" title="Найти дубликаты">${svg("copy",15)}</button><button class="iconbtn" id="duL2" title="Показывать второй уровень колец">${svg("layers",15)}</button><select class="ev-prio" id="duAuto" title="Периодически освежать в фоне уже сканированные тома, если их данные старше выбранного срока"><option value="0">без авто</option><option value="1">ежедневно</option><option value="7">еженедельно</option><option value="30">ежемесячно</option></select><button class="btn sm" id="duRescan">${svg("refresh",13)} Пересканировать</button></div><div class="du-main" id="duMain"></div></div>`;
+ body.innerHTML=`<div class="du"><div class="du-top"><div class="seg du-roots" id="duRoots"></div><span class="grow"></span><span class="du-meta" id="duMeta"></span><button class="iconbtn" id="duBig" title="Крупнейшие файлы">${svg("activity",15)}</button><button class="iconbtn" id="duDup" title="Найти дубликаты">${svg("copy",15)}</button><button class="iconbtn" id="duL2" title="Показывать второй уровень колец">${svg("layers",15)}</button><span class="du-auto-wrap" title="Периодически освежать в фоне уже сканированные тома, если их данные старше выбранного срока">${svg("clock",13)} авто-скан <select class="ev-prio" id="duAuto"><option value="0">выкл</option><option value="1">ежедневно</option><option value="7">еженедельно</option><option value="30">ежемесячно</option></select></span><button class="btn sm" id="duRescan">${svg("refresh",13)} Пересканировать</button></div><div class="du-main" id="duMain"></div></div>`;
  // авто-скан: читаем/пишем maintenance.duscan_days
  {const sel=body.querySelector("#duAuto");
   api("/api/maintenance").then(r=>{const dv=((r&&r.maintenance)||{}).duscan_days||0;if(sel)sel.value=[0,1,7,30].includes(dv)?dv:0;});
