@@ -1471,6 +1471,11 @@
   /* фон = адаптивная поверхность окна (--win-bg), а не фиксированный --glass —
      иначе липкая шапка выбивалась из темы окна (белый/тёмный блок «не как UI») */
   .ev-cols{position:sticky;top:-14px;z-index:3;display:flex;align-items:center;gap:10px;padding:8px 0 8px;background:var(--win-bg,var(--glass));backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid var(--win-line,var(--line-2));margin-bottom:2px}
+  /* чипы портов UFW / забаненных IP */
+  .ev-chips{display:flex;flex-wrap:wrap;gap:6px}
+  .ev-chip{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11.5px;padding:4px 6px 4px 9px;border-radius:8px;background:var(--card);box-shadow:var(--sh-sm)}
+  .ev-chip i{cursor:pointer;color:var(--dim);font-style:normal;font-size:11px;padding:0 2px;border-radius:5px}
+  .ev-chip i:hover{color:var(--danger);background:var(--danger-soft)}
   .ev-col{width:74px;flex:none;display:flex;align-items:center;justify-content:center;gap:4px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--dim);text-align:center;line-height:1.25}
   .ev-colp{width:112px;flex:none;text-align:center;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--dim)}
   .ev-row .ev-prio{width:112px!important}
@@ -5950,10 +5955,33 @@ function securityTab(tc){withSysc(tc,()=>{const s=SYSC.security||{};const u=s.uf
  tc.innerHTML=`${rebootBan()}
   <h3 class="set-title">Безопасность</h3><p class="set-sub">Межсетевой экран, защита от подбора паролей, логи.</p>
   <div class="srow"><div class="srow-l"><div class="srow-t">Межсетевой экран (UFW)${tipHTML("Закрывает все входящие порты кроме разрешённых (SSH, Cockpit 9090, шары). Включение сначала открывает SSH, чтобы не заблокировать вас. Внимание: docker публикует порты в обход UFW.")}</div><div class="srow-d">${u.active?"активен · порты: "+((u.ports||[]).join(", ")||"—"):"выключен"}</div></div><div class="srow-c">${u.active?'<span class="sbadge ok">активен</span>':(u.installed?'<span class="sbadge off">выкл</span>':'<span class="sbadge na">не установлен</span>')}<label class="tgl"><input type="checkbox" data-sc="ufw"${u.active?" checked":""}><span class="sl"></span></label></div></div>
+  ${u.active?`<div id="ufwPorts" style="margin:6px 0 4px"></div>`:""}
   ${svcRow("Защита от подбора паролей (fail2ban)","Банит IP после нескольких неудачных входов по SSH. Базовая защита от брутфорса, особенно если сервер доступен извне.","fail2ban",s.fail2ban,"бан IP после неудачных входов SSH")}
+  ${(s.fail2ban&&s.fail2ban.installed)?`<div id="f2bBox" style="margin:2px 0 4px"></div>`:""}
   ${svcRow("Логи в ОЗУ (log2ram)","Держит /var/log в RAM и сбрасывает на диск по таймеру — меньше износ SD-карты от постоянной записи логов.","log2ram",s.log2ram,"бережёт SD-карту от износа логами")}
   <div class="mon-note">Вход по SSH-ключу, смена порта и удалённый доступ (Tailscale) вынесены отдельно — здесь пока не настраиваются.</div>`;
  wireSc(tc);
+ // порты UFW: список с удалением + добавление
+ const up=tc.querySelector("#ufwPorts");
+ if(up){const ports=u.ports||[];
+  up.innerHTML=`<div class="srow-d" style="margin-bottom:6px">Открытые порты (docker публикует в обход UFW):</div>
+   <div class="ev-chips" id="ufwChips">${ports.map(p=>`<span class="ev-chip">${esc(p)}<i data-del="${att(p)}" title="Закрыть порт">✕</i></span>`).join("")||'<span style="color:var(--mut);font-size:12px">нет правил</span>'}</div>
+   <div class="nb-field-row" style="margin-top:8px"><input class="mono" id="ufwNew" placeholder="напр. 8096 или 8096/tcp" style="max-width:220px"><button class="btn sm" id="ufwAdd">Открыть порт</button></div>`;
+  const doPort=(action,port)=>api("/api/security/ufw-port",{method:"POST",body:JSON.stringify({action,port})}).then(r=>{toast(LIVE?((r&&r.ok)?"Готово":"Ошибка: "+((r&&r.log)||"")):"Демо");refreshSysc(rerSet);});
+  up.querySelectorAll("[data-del]").forEach(i=>i.onclick=()=>confirmDlg("Закрыть порт?",esc(i.dataset.del)+" будет закрыт в UFW.",()=>doPort("deny",i.dataset.del),true));
+  const ab=up.querySelector("#ufwAdd");if(ab)ab.onclick=()=>{const v=up.querySelector("#ufwNew").value.trim();if(v)doPort("allow",v);};}
+ // настройки fail2ban: порог, время бана, забаненные IP
+ const fb=tc.querySelector("#f2bBox"),f=s.fail2ban||{};
+ if(fb){const banned=f.banned||[];
+  fb.innerHTML=`<div class="mon-grid" style="grid-template-columns:1fr 1fr;margin-top:2px">
+    <div class="f2"><label>Порог: банить после N неудач${tipHTML("Сколько неудачных попыток входа по SSH с одного IP до бана.")}</label><input class="mono" id="f2bR" value="${att(f.maxretry||"5")}" placeholder="5"></div>
+    <div class="f2"><label>Время бана${tipHTML("Насколько банить IP: 30m, 1h, 1d, -1 = навсегда.")}</label><input class="mono" id="f2bT" value="${att(f.bantime||"1h")}" placeholder="1h"></div>
+   </div>
+   <button class="btn sm pri" id="f2bSave">Сохранить</button>
+   <div class="srow-d" style="margin-top:10px">Забанены сейчас: ${banned.length?"":"—"}</div>
+   <div class="ev-chips" id="f2bBanned">${banned.map(ip=>`<span class="ev-chip">${esc(ip)}<i data-unban="${att(ip)}" title="Разбанить">✕</i></span>`).join("")}</div>`;
+  fb.querySelector("#f2bSave").onclick=async()=>{const r=await api("/api/security/fail2ban",{method:"POST",body:JSON.stringify({maxretry:fb.querySelector("#f2bR").value.trim(),bantime:fb.querySelector("#f2bT").value.trim()})});toast(LIVE?((r&&r.ok)?"Сохранено":"Ошибка: "+((r&&r.log)||"")):"Демо");refreshSysc(rerSet);};
+  fb.querySelectorAll("[data-unban]").forEach(i=>i.onclick=async()=>{const r=await api("/api/security/unban",{method:"POST",body:JSON.stringify({ip:i.dataset.unban})});toast(LIVE?((r&&r.ok)?"Разбанен":"Ошибка"):"Демо");refreshSysc(rerSet);});}
 });}
 /* --- settings: USB авто-импорт --- */
 const USB_TOKENS=[["{label}","метка носителя (имя флешки/карты)"],["{date}","дата ГГГГ-ММ-ДД"],["{time}","время ЧЧ-ММ-СС"],["{year}","год"],["{month}","месяц ММ"],["{month-name}","месяц названием"],["{day}","день"],["{hour}","час"],["{minute}","минута"],["{datetime}","дата+время слитно"]];

@@ -2810,18 +2810,9 @@ mod_cockpit_gui() {
     echo "Cockpit-модули установлены (доступные в репозитории)"
 }
 
-mod_cockpit_nopass() {
-    # ВХОД В COCKPIT БЕЗ ПРОВЕРКИ ПАРОЛЯ — осознанный выбор пользователя. pam_permit
-    # пускает пользователя (не root — он в disallowed-users) с любым/пустым паролем.
-    # Это ослабляет безопасность: любой в локальной сети получит доступ к Cockpit.
-    local P=/etc/pam.d/cockpit
-    [ -f "$P" ] || { warn "нет $P — Cockpit не установлен?"; return 1; }
-    if grep -q "nas-os: passwordless" "$P"; then echo "Cockpit уже без пароля"; return 0; fi
-    if [ "$DRY_RUN" -eq 1 ]; then info "[DRY-RUN] pam_permit в $P (вход без пароля)"; return 0; fi
-    cp -n "$P" "$P.nas-orig"
-    awk 'BEGIN{done=0} /^auth/ && !done {print "# nas-os: passwordless cockpit (вход без проверки пароля — выбор пользователя)"; print "auth       sufficient   pam_permit.so"; done=1} {print}' "$P.nas-orig" > "$P"
-    echo "Cockpit: вход без пароля включён (oleg, любой пароль)"
-}
+# (passwordless Cockpit убран: pam_permit пропускает без реальной аутентификации,
+#  но Cockpit использует пароль для установки рабочей сессии — без него UI ломается
+#  «failed to fetch…». Рабочий путь — задать известный системный пароль пользователю.)
 
 # ---------------------------------------------------------------------------
 # API-режим (headless, для nas-web.py). Без whiptail; подтверждения — из браузера.

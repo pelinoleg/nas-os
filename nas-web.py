@@ -6630,6 +6630,57 @@ def _ufw_state():
     return {"installed": bool(shutil.which("ufw")),
             "active": "Status: active" in out, "ports": sorted(set(ports))}
 
+F2B_CONF = "/etc/fail2ban/jail.d/nas.conf"
+
+def _fail2ban_state():
+    out = dict(_svc("fail2ban"))
+    conf = _read(F2B_CONF)
+    def g(k, d):
+        m = re.search(r"(?m)^\s*%s\s*=\s*(\S+)" % k, conf)
+        return m.group(1) if m else d
+    out["maxretry"] = g("maxretry", "5")
+    out["bantime"] = g("bantime", "1h")
+    banned = []
+    if out.get("active"):
+        m = re.search(r"Banned IP list:\s*(.*)", _sc("fail2ban-client", "status", "sshd"))
+        if m:
+            banned = [x for x in m.group(1).split() if x]
+    out["banned"] = banned
+    return out
+
+def fail2ban_save(maxretry, bantime):
+    if not shutil.which("fail2ban-client"):
+        return {"ok": False, "log": "fail2ban не установлен"}
+    try:
+        mr = max(1, min(100, int(maxretry)))
+    except (ValueError, TypeError):
+        return {"ok": False, "log": "порог: число"}
+    bt = str(bantime or "").strip()
+    if bt != "-1" and not re.match(r"^\d+[smhdw]?$", bt):     # 600 / 30m / 1h / 1d / -1 (навсегда)
+        return {"ok": False, "log": "время бана: напр. 30m, 1h, 1d или -1 (навсегда)"}
+    try:
+        with open(F2B_CONF, "w") as f:
+            f.write("[sshd]\nenabled = true\nmaxretry = %d\nbantime = %s\n" % (mr, bt))
+    except OSError as e:
+        return {"ok": False, "log": str(e)}
+    _run(["systemctl", "reload-or-restart", "fail2ban"], timeout=20)
+    return {"ok": True, "log": "сохранено"}
+
+def fail2ban_unban(ip):
+    if not re.match(r"^[0-9A-Fa-f.:]+$", ip or ""):
+        return {"ok": False, "log": "плохой IP"}
+    r = _run(["fail2ban-client", "set", "sshd", "unbanip", ip], timeout=15)
+    return {"ok": r["ok"], "log": (r.get("log") or "")[:200]}
+
+def ufw_port(action, port):
+    if not shutil.which("ufw"):
+        return {"ok": False, "log": "ufw не установлен"}
+    if not re.match(r"^\d{1,5}(/(tcp|udp))?$", port or ""):
+        return {"ok": False, "log": "порт: напр. 8080 или 8080/tcp"}
+    r = _run(["ufw", "allow", port] if action == "allow" else
+             ["ufw", "delete", "allow", port], timeout=15)
+    return {"ok": r["ok"], "log": (r.get("log") or "")[:200]}
+
 def _unattended_on():
     return 'Unattended-Upgrade "1"' in _read("/etc/apt/apt.conf.d/20auto-upgrades")
 
@@ -6657,7 +6708,7 @@ def sysconf():
         "network": _net_state(),
         "security": {
             "ufw": _ufw_state(),
-            "fail2ban": _svc("fail2ban"),
+            "fail2ban": _fail2ban_state(),
             "log2ram": _svc("log2ram"),
         },
         "pi": {
@@ -8682,6 +8733,14 @@ class H(BaseHTTPRequestHandler):
             elif p == "/api/comitup/save":
                 b = self._body()
                 self._json(comitup_save(b.get("ap_name", ""), b.get("ap_password", "")))
+            elif p == "/api/security/fail2ban":
+                b = self._body()
+                self._json(fail2ban_save(b.get("maxretry", 5), b.get("bantime", "1h")))
+            elif p == "/api/security/unban":
+                self._json(fail2ban_unban(self._body().get("ip", "")))
+            elif p == "/api/security/ufw-port":
+                b = self._body()
+                self._json(ufw_port(b.get("action", ""), b.get("port", "")))
             elif p == "/api/automount":
                 b = self._body()
                 user = b.get("user", TARGET_USER); base = b.get("base", "/media/nas")
