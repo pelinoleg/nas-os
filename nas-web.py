@@ -1271,8 +1271,11 @@ def wud_state():
             for c in (arr if isinstance(arr, list) else []):
                 if c.get("updateAvailable"):
                     img = c.get("image") or {}
+                    uk = c.get("updateKind") or {}
                     ups.append({"name": c.get("name"),
-                                "current": (img.get("tag") or {}).get("value")})
+                                "current": uk.get("localValue") or (img.get("tag") or {}).get("value"),
+                                "latest": uk.get("remoteValue") or (c.get("result") or {}).get("tag"),
+                                "kind": uk.get("kind"), "diff": uk.get("semverDiff")})
             out = {"ok": True, "url": base, "count": len(ups), "updates": ups}
         except Exception:
             out = {"ok": False}
@@ -8114,6 +8117,8 @@ class H(BaseHTTPRequestHandler):
                 self._json(myspeed_state())
             elif p == "/api/vnstat":
                 self._json(vnstat_state())
+            elif p == "/api/wud":
+                self._json(wud_state())
             elif p == "/api/wallpaper/img":
                 wp = _wallpaper_path()
                 if wp:

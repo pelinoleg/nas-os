@@ -609,6 +609,12 @@
   .stk-conts{margin-top:9px;display:flex;flex-direction:column;gap:5px}
   .stk-cont{display:flex;align-items:center;gap:9px;font-size:12px;padding:7px 9px;background:var(--card);border:1px solid var(--line);border-radius:var(--r-sm)}
   .stk-cont .cn{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:var(--mono);font-size:11.5px}
+  /* чип «есть обновление образа» (WUD) — янтарный, компактный */
+  .cupd{display:inline-flex;align-items:center;gap:2px;flex:none;font-size:10.5px;font-weight:600;color:var(--warn);background:var(--warn-soft,rgba(224,145,60,.15));padding:1px 6px;border-radius:8px;white-space:nowrap;margin-left:2px}
+  .cupd svg{width:10px;height:10px}
+  .upd-vers{display:flex;align-items:center;gap:12px;justify-content:center;margin:6px 0 16px;font-family:var(--mono);font-size:15px}
+  .upd-vers .uv-cur{color:var(--dim)}.upd-vers .uv-new{color:var(--warn);font-weight:700}
+  .upd-vers .uv-arr{display:flex;color:var(--mut)}
   .svc-edit{display:flex;flex-direction:column;height:100%}
   .svc-edit .ed-tabs{display:flex;gap:4px;margin-bottom:10px}
   .svc-edit .ed-tabs button{border:none;background:var(--glass);color:var(--dim);padding:7px 13px;border-radius:9px;font-size:12.5px;font-weight:600}
@@ -3224,6 +3230,7 @@ function winServices(initTab){openWin("__services","Docker",(body,win)=>{
  const load=async force=>{
   const d=await api("/api/stacks");if(!document.body.contains(body))return;
   ok=!!(d&&d.ok);stacks=(d&&d.stacks)||[];
+  await refreshWud();      // карта обновлений образов для точек в сайдбаре/стеках
   // сначала запущенные (есть работающие контейнеры), затем по алфавиту
   stacks.sort((a,b)=>((b.running>0)-(a.running>0))||(a.name||"").localeCompare(b.name||"",undefined,{sensitivity:"base",numeric:true}));
   if(DK_SEL.startsWith("stack:")&&!stacks.find(y=>"stack:"+y.name===DK_SEL))DK_SEL="overview";
@@ -3245,7 +3252,10 @@ function winServices(initTab){openWin("__services","Docker",(body,win)=>{
   stacks.forEach(s=>{
    const full=s.total>0&&s.running===s.total,part=s.running>0&&!full;
    const dot=s.total?(full?"var(--good)":part?"var(--warn)":"var(--mut)"):"transparent";
-   side.appendChild(item("stack:"+s.name,null,s.name,s.total?`${s.running} из ${s.total} запущено`:"нет контейнеров",dot));});
+   const it=item("stack:"+s.name,null,s.name,s.total?`${s.running} из ${s.total} запущено`:"нет контейнеров",dot);
+   const nu=(s.containers||[]).filter(c=>WUD[c.name]).length;   // точка «есть обновление» у стека
+   if(nu){const lm=it.querySelector(".li-main");if(lm)lm.insertAdjacentHTML("beforeend",`<span class="cupd" title="${att(nu+" обновлений образов в стеке")}">${svg("arrowup",10)} ${nu}</span>`);}
+   side.appendChild(it);});
   if(!stacks.length&&ok)side.appendChild(el(`<div class="dm2-slots">${svg("cube",13)} Пока пусто — нажмите «+»</div>`));
   side.appendChild(el(`<div class="dm2-side-h">Ресурсы</div>`));
   side.appendChild(item("images","hdd","Образы","хранилище образов"));
@@ -3384,9 +3394,11 @@ function dkStackPane(tc,s,reload){
  if(!(s.containers||[]).length)cbox.appendChild(el(`<div class="dempty">${svg("cube",16)} Контейнеров нет — стек не запущен</div>`));
  (s.containers||[]).forEach(c=>{const run=c.state==="running";let cls=run?"run":"dead",txt=run?"работает":esc(c.state||"—");
    if(c.health==="unhealthy"){cls="fail";txt="нездоров";}else if(c.health==="starting"){txt="запуск…";}else if((c.health||"").indexOf("exit:")===0){txt="вышел ("+c.health.slice(5)+")";}
-   const row=el(`<div class="stk-cont"><span class="stbadge ${cls}" title="${att(c.status||'')}">${txt}</span><span class="cn" title="${att(c.image)}">${esc(c.name)}</span><span class="cstat" data-cname="${att(c.name)}"></span><span style="flex:none;display:flex;gap:6px">${portLinks(c.ports)}</span><button class="iconbtn" data-c="menu" title="Действия с контейнером">${svg("cog",14)}</button></div>`);
+   const upd=WUD[c.name];
+   const row=el(`<div class="stk-cont"><span class="stbadge ${cls}" title="${att(c.status||'')}">${txt}</span><span class="cn" title="${att(c.image)}">${esc(c.name)}</span>${wudChip(c.name)}<span class="cstat" data-cname="${att(c.name)}"></span><span style="flex:none;display:flex;gap:6px">${portLinks(c.ports)}</span><button class="iconbtn" data-c="menu" title="Действия с контейнером">${svg("cog",14)}</button></div>`);
    const menu=[{label:run?"Остановить":"Запустить",ic:svg(run?"stop":"play",16),act:()=>contAct(c.name,run?"stop":"start",reload)},
      {label:"Перезапустить",ic:svg("refresh",16),act:()=>contAct(c.name,"restart",reload)}];
+   if(upd)menu.unshift({label:`Обновление: ${upd.current||"?"} → ${upd.latest||"?"}${upd.diff?" ("+upd.diff+")":""}`,ic:svg("arrowup",16),act:()=>updateInfoDlg(c.name,upd)},{sep:1});
    if(run)menu.push({label:"Терминал в контейнере",ic:svg("term",16),act:()=>execContainer(c.name)});
    menu.push({sep:1},{label:"Удалить контейнер",ic:svg("trash",16),dng:1,act:()=>contAct(c.name,"rm",reload)});
    row.querySelector('[data-c="menu"]').onclick=ev=>showMenu(ev.clientX,ev.clientY,menu);
@@ -3405,6 +3417,17 @@ function stackNoteDlg(s,reload){const sc=document.getElementById("scrim");
  sc.querySelector("#nc").onclick=()=>sc.classList.remove("show");
  sc.querySelector("#ns").onclick=async()=>{const v=ta.value;s.note=v;await api("/api/stack/note",{method:"POST",body:JSON.stringify({name:s.name,note:v})});sc.classList.remove("show");toast("Заметка сохранена");reload&&reload();};}
 async function stackAct(name,action,after){toast("Выполняю "+action+"…");const r=await api("/api/stack/action",{method:"POST",body:JSON.stringify({name,action})});toast(LIVE?(r&&r.ok?name+": "+action+" ✓":"Ошибка: "+((r&&r.log)||"").slice(0,90)):"Демо");after&&after();}
+/* Детали обновления образа (WUD только сообщает — не обновляет сам). Показываем
+   текущую и новую версию, тип изменения, и как обновить (pull + пересоздать стек). */
+function updateInfoDlg(name,upd){const s=document.getElementById("scrim");
+ const diffTxt={major:"мажорное (возможны несовместимости)",minor:"минорное (новые возможности)",patch:"патч (исправления)"}[upd.diff]||upd.kind||"";
+ s.innerHTML=`<div class="dialog"><h3>${svg("arrowup",16)} Обновление образа</h3>
+   <p>Контейнер <b class="mono">${esc(name)}</b>: доступна новая версия образа.${diffTxt?" Тип: "+esc(diffTxt)+".":""}</p>
+   <div class="upd-vers"><span class="uv-cur">${esc(upd.current||"?")}</span><span class="uv-arr">→</span><span class="uv-new">${esc(upd.latest||"?")}</span></div>
+   <p style="font-size:12.5px;color:var(--dim)">Обновить: в стеке этого контейнера подтяните новый образ и пересоздайте его — проще всего в Dockge (Pull → Up), либо через терминал: <span class="mono">docker compose pull && docker compose up -d</span>. WUD образы сам не трогает — только сообщает.</p>
+   <div class="r"><button class="btn pri" id="uok">Понятно</button></div></div>`;
+ s.classList.add("show");
+ s.querySelector("#uok").onclick=()=>s.classList.remove("show");}
 async function contAct(id,action,after){const go=async()=>{const r=await api("/api/container/action",{method:"POST",body:JSON.stringify({id,action})});toast(LIVE?(r&&r.ok?action+" ✓":"Ошибка: "+((r&&r.log)||"").slice(0,80)):"Демо");after&&after();};
  if(action==="rm")confirmDlg("Удалить контейнер?",esc(id),go,true);else go();}
 function stackDelete(name,after){api("/api/stack/delete",{method:"POST",body:JSON.stringify({name})}).then(r=>{toast(LIVE?(r&&r.ok?"Стек удалён":"Ошибка: "+((r&&r.log)||"")):"Демо");after&&after();});}
@@ -6163,15 +6186,28 @@ async function pollNet(){const box=document.getElementById("wg-netlink");if(!box
    else{NS_HTML="";if(res)res.textContent="Ошибка: "+((r&&r.log)||"?");}};}
  nsPaint();
 }
+/* WUD: карта «контейнер → обновление образа». Наполняется из /api/wud и рисует
+   точки там, где живут контейнеры (сайдбар, стек, виджет). Нет WUD → карта пуста. */
+let WUD={};
+async function refreshWud(){
+ try{const r=await api("/api/wud");const m={};if(r&&r.ok)(r.updates||[]).forEach(u=>{if(u.name)m[u.name]=u;});WUD=m;}
+ catch(e){WUD={};}
+ return WUD;}
+function wudChip(name){const u=WUD[name];if(!u)return "";
+ return `<span class="cupd" title="${att("Доступно обновление образа: "+(u.current||"?")+" → "+(u.latest||"?")+(u.diff?" ("+u.diff+")":""))}">${svg("arrowup",10)}${u.latest?" "+esc(u.latest):""}</span>`;}
 async function pollStacks(){const box=document.getElementById("wg-docker");if(!box)return;
+ await refreshWud();
  const r=await api("/api/stacks");const st=(r&&r.stacks)||[];
  const act=st.filter(x=>x.total>0);
  const run=act.reduce((s,x)=>s+x.running,0),tot=act.reduce((s,x)=>s+x.total,0);
  let h=`<div class="krow"><span>Запущено контейнеров</span><b>${run} из ${tot}</b></div>`;
+ const totUpd=st.reduce((s,x)=>s+(x.containers||[]).filter(c=>WUD[c.name]).length,0);
+ if(totUpd)h=`<div class="krow"><span>${svg("arrowup",12)} Обновления образов</span><b style="color:var(--warn)">${totUpd}</b></div>`+h;
  act.slice(0,5).forEach(x=>{
   const bad=x.containers.some(c=>c.health==="unhealthy"),part=x.running<x.total;
   const col=bad?"var(--danger)":part?"var(--warn)":x.running?"var(--good)":"var(--mut)";
-  h+=`<div class="dline" style="padding:6px 0"><span style="width:8px;height:8px;border-radius:50%;background:${col};flex:none"></span><span class="nm">${esc(x.name)}</span><span class="pc">${x.running}/${x.total}</span></div>`;});
+  const nu=(x.containers||[]).filter(c=>WUD[c.name]).length;
+  h+=`<div class="dline" style="padding:6px 0"><span style="width:8px;height:8px;border-radius:50%;background:${col};flex:none"></span><span class="nm">${esc(x.name)}</span>${nu?`<span class="cupd" title="${att(nu+" обновлений образов в стеке")}">${svg("arrowup",10)} ${nu}</span>`:""}<span class="pc">${x.running}/${x.total}</span></div>`;});
  if(!act.length)h+=`<div style="color:var(--mut);font-size:12px">Нет запущенных стеков</div>`;
  box.innerHTML=h;
 }
