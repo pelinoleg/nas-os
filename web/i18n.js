@@ -1815,6 +1815,7 @@ window.NAS_I18N = { en: {
 "Забанены сейчас:": "Currently banned:",
 "Разбанить": "Unban",
 "Разбанен": "Unbanned",
+"имя стека": "stack name",
 "Поставьте Scrutiny": "Install Scrutiny",
 "Оценка здоровья по Scrutiny": "Scrutiny health assessment",
 "диск здоров": "disk healthy",

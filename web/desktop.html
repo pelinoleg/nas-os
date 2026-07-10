@@ -3521,21 +3521,34 @@ function editStack(name,after){const isNew=!name,wid=isNew?"snew":"sed:"+name;op
  body.style.display="flex";body.style.flexDirection="column";body.style.padding="0";
  let cmC=null,cmE=null;const data={compose:isNew?STACK_SKELETON:"",env:""};
  const lbl=t=>`<div style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);font-family:var(--mono)">${t}</div>`;
- body.innerHTML=`<div class="stk-edit" style="display:flex;height:100%;padding:14px 16px;gap:12px">
-   <div class="stk-edit-side" style="width:280px;flex:none;display:flex;flex-direction:column;gap:8px;min-height:0">
-     ${isNew?`<div class="field" style="margin:0"><label>Имя стека</label><input id="seName" placeholder="my-app"></div>`:""}
-     <div class="mono" style="font-size:11px;color:var(--dim);word-break:break-all" id="sePath">${isNew?"/opt/stacks/…/":("/opt/stacks/"+esc(name)+"/")}</div>
-     ${lbl(".env — переменные и секреты")}
-     <div id="seE" class="ed-dark" style="flex:1;min-height:70px;border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden"></div>
+ // вертикаль: сверху имя+кнопки, по центру compose (главный), снизу свёрнутый .env
+ // (у большинства стеков .env пуст — незачем занимать им заметное место)
+ body.innerHTML=`<div class="stk-edit" style="display:flex;flex-direction:column;height:100%;padding:12px 14px;gap:9px">
+   <div class="stk-edit-top" style="display:flex;align-items:center;gap:9px;flex-wrap:wrap;flex:none">
+     ${isNew?`<input id="seName" placeholder="имя стека" style="max-width:190px;width:auto">`:`<span class="mono" style="font-weight:650;font-size:13px">${esc(name)}</span>`}
+     <span class="mono" id="sePath" style="font-size:11px;color:var(--dim)">${isNew?"/opt/stacks/…/":("/opt/stacks/"+esc(name)+"/")}</span>
+     <span class="grow"></span>
      <button class="btn sm pri" id="seUp">${svg("play",13)} Сохранить и запустить</button>
-     <div style="display:flex;gap:6px"><button class="btn sm" id="seSave" style="flex:1">${svg("save",13)} Сохранить</button><button class="btn sm" id="seVal" title="Проверить compose">${svg("shield",13)}</button><button class="btn sm ghost" id="seCancel">Отмена</button></div>
+     <button class="btn sm" id="seSave">${svg("save",13)} Сохранить</button>
+     <button class="btn sm" id="seVal" title="Проверить compose">${svg("shield",13)}</button>
+     <button class="btn sm ghost" id="seCancel">Отмена</button>
    </div>
-   <div style="flex:1;display:flex;flex-direction:column;gap:6px;min-width:0">
+   <div style="flex:1;display:flex;flex-direction:column;gap:5px;min-height:0">
      ${lbl("compose.yaml")}
      <div id="seC" class="ed-dark" style="flex:1;min-height:0;border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden"></div>
      <div id="seErr" style="display:none;flex:none"></div>
+   </div>
+   <div style="flex:none">
+     <button class="dd-grp dd-coll" id="seEnvTog" style="width:100%;margin:0">${svg("cog",12)} .env — переменные и секреты <span class="dd-chev">▸</span></button>
+     <div id="seEnvBox" style="display:none;margin-top:6px">
+       <div id="seE" class="ed-dark" style="height:150px;border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden"></div>
+     </div>
    </div></div>`;
  if(isNew){const ni=body.querySelector("#seName");ni.oninput=()=>{const v=ni.value.trim();body.querySelector("#sePath").textContent="/opt/stacks/"+(v||"…")+"/";};ni.focus();}
+ // сворачивание .env: развернуть → показать и обновить CodeMirror (в display:none не рисуется)
+ const envTog=body.querySelector("#seEnvTog"),envBox=body.querySelector("#seEnvBox");
+ const setEnv=open=>{envBox.style.display=open?"":"none";envTog.querySelector(".dd-chev").textContent=open?"▾":"▸";if(open&&cmE)setTimeout(()=>cmE.refresh(),20);};
+ envTog.onclick=()=>setEnv(envBox.style.display==="none");
  const grab=()=>{if(cmC)data.compose=cmC.getValue();if(cmE)data.env=cmE.getValue();};
  const seErr=()=>body.querySelector("#seErr");
  // проверка compose с ИНЛАЙН-выводом: подсветка строки + полный текст ошибки (не обрезанный тост)
@@ -3566,7 +3579,7 @@ function editStack(name,after){const isNew=!name,wid=isNew?"snew":"sed:"+name;op
    cmE=CodeMirror(body.querySelector("#seE"),{value:data.env,mode:"properties",lineNumbers:true,tabSize:2});
    setTimeout(()=>{cmC.refresh();cmE.refresh();},50);
    if(window.ResizeObserver){new ResizeObserver(()=>cmC&&cmC.refresh()).observe(body.querySelector("#seC"));new ResizeObserver(()=>cmE&&cmE.refresh()).observe(body.querySelector("#seE"));}});
- if(!isNew)(async()=>{const r=await api("/api/stack?name="+encodeURIComponent(name));if(r&&r.ok){data.compose=r.compose||"";data.env=r.env||"";if(cmC)cmC.setValue(data.compose);if(cmE)cmE.setValue(data.env);}})();
+ if(!isNew)(async()=>{const r=await api("/api/stack?name="+encodeURIComponent(name));if(r&&r.ok){data.compose=r.compose||"";data.env=r.env||"";if(cmC)cmC.setValue(data.compose);if(cmE)cmE.setValue(data.env);if(data.env.trim())setEnv(true);}})();
 },{w:820,h:640,geoKey:"stack-edit"});}
 
 /* Cron — управляет сервисом cronmaster через наш прокси /api/cron/* */
