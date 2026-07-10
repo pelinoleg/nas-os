@@ -834,7 +834,11 @@
   .nb-pbar i{display:block;height:100%;background:var(--accent);border-radius:999px;transition:width .4s}
   .nb-prog-l{color:var(--mut);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   /* дерево-выбор источников */
-  .nb-pick{max-width:880px;width:min(880px,95vw)}
+  /* .dialog{max-width:440px} объявлен ниже по файлу → при равной специфичности перебивал .nb-pick.
+     .dialog.nb-pick (специфичность выше) фиксит ширину. */
+  .dialog.nb-pick{max-width:880px;width:min(880px,95vw)}
+  .dialog.nb-pick .r button{white-space:nowrap}
+  .dialog.nb-pick .nb-selc{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   /* заметный индикатор загрузки в пикере — спиннер + текст, чтобы не казалось «сломалось» */
   .nb-load{display:flex;align-items:center;gap:10px;padding:22px 14px;color:var(--dim);font-size:13px}
   .nb-load::before{content:"";width:18px;height:18px;border-radius:50%;border:2.5px solid var(--line);border-top-color:var(--accent);animation:wspin .8s linear infinite;flex:none}
