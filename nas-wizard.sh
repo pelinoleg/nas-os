@@ -2029,6 +2029,160 @@ shares_avahi() {
     info "Avahi/mDNS включён: $(hostname).local"
 }
 
+# --------------------------------------------------------------------------- #
+#  Time Machine — этот NAS как приёмник macOS Time Machine (Samba + vfs_fruit +
+#  Avahi _adisk). ПОЛНОСТЬЮ отдельно от общих шар: свой include-файл, свой
+#  avahi-сервис, своя папка. Ничего из общего Samba не трогаем.
+# --------------------------------------------------------------------------- #
+TM_CONF="/etc/nas-wizard/timemachine.conf"       # persisted params (in settings backup)
+TM_INC="/etc/samba/nas-timemachine.conf"          # dedicated smb include (managed)
+TM_AVAHI="/etc/avahi/services/nas-timemachine.service"
+SMB_CONF="/etc/samba/smb.conf"
+
+tm_write_share() {
+    local path="$1" user="$2" quota="$3" qline=""
+    [ "${quota:-0}" -gt 0 ] 2>/dev/null && qline="   fruit:time machine max size = ${quota}G"
+    write_file "$TM_INC" <<EOF
+# NAS-OS Time Machine — управляется панелью. Руками не редактировать.
+[global]
+   fruit:aapl = yes
+   fruit:model = TimeCapsule8,119
+   fruit:metadata = stream
+   fruit:posix_rename = yes
+   fruit:veto_appledouble = no
+   fruit:nfs_aces = no
+   fruit:wipe_intentionally_left_blank_rfork = yes
+   fruit:delete_empty_adfiles = yes
+   min protocol = SMB2
+
+[TimeMachine]
+   comment = Time Machine (NAS-OS)
+   path = $path
+   valid users = $user
+   writable = yes
+   browseable = yes
+   create mask = 0600
+   directory mask = 0700
+   vfs objects = catia fruit streams_xattr
+   fruit:time machine = yes
+$qline
+EOF
+}
+
+tm_write_avahi() {
+    write_file "$TM_AVAHI" <<'EOF'
+<?xml version="1.0" standalone='no'?>
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+<service-group>
+  <name replace-wildcards="yes">%h</name>
+  <service>
+    <type>_smb._tcp</type>
+    <port>445</port>
+  </service>
+  <service>
+    <type>_device-info._tcp</type>
+    <port>0</port>
+    <txt-record>model=TimeCapsule8,119</txt-record>
+  </service>
+  <service>
+    <type>_adisk._tcp</type>
+    <port>9</port>
+    <txt-record>dk0=adVN=TimeMachine,adVF=0x82</txt-record>
+    <txt-record>sys=waMa=0,adVF=0x100</txt-record>
+  </service>
+</service-group>
+EOF
+}
+
+# add `include = TM_INC` under [global] in smb.conf, once
+tm_ensure_include() {
+    [ -f "$SMB_CONF" ] || write_file "$SMB_CONF" <<'EOF'
+[global]
+   workgroup = WORKGROUP
+   server role = standalone server
+EOF
+    if ! grep -qs "include = $TM_INC" "$SMB_CONF"; then
+        backup_file "$SMB_CONF"
+        if [ "$DRY_RUN" -eq 0 ]; then
+            awk -v inc="   include = $TM_INC" '
+                {print}
+                (!done && tolower($0) ~ /^\[global\]/){print inc; done=1}
+            ' "$SMB_CONF" > "$SMB_CONF.tmp" && mv "$SMB_CONF.tmp" "$SMB_CONF"
+        fi
+        info "include Time Machine добавлен в smb.conf"
+    fi
+}
+
+tm_apply() {
+    local path="${NASW_TM_PATH:-$STORAGE_MNT/TimeMachine}"
+    local user="${NASW_TM_USER:-$TARGET_USER}"
+    local quota="${NASW_TM_QUOTA:-0}"
+    local pass="${NASW_TM_PASS:-}"
+    case "$path" in /*) : ;; *) warn "путь должен быть абсолютным"; return 2 ;; esac
+
+    install_packages "samba" samba
+    install_packages "avahi" avahi-daemon
+
+    run mkdir -p "$path"
+    run chown "$user:$user" "$path"
+    run chmod 0700 "$path"
+
+    tm_ensure_include
+    tm_write_share "$path" "$user" "$quota"
+    tm_write_avahi
+
+    # Samba-пароль (нужен для приёмника; Mac спросит имя/пароль при подключении)
+    if [ -n "$pass" ] && [ "$DRY_RUN" -eq 0 ]; then
+        printf '%s\n%s\n' "$pass" "$pass" | smbpasswd -a -s "$user" >>"$LOG" 2>&1 \
+            && info "Samba-пароль для $user установлен" || warn "не удалось задать Samba-пароль"
+    fi
+
+    # firewall (если ufw активен)
+    if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi active; then
+        run ufw allow Samba 2>/dev/null || run ufw allow 445/tcp
+    fi
+
+    run mkdir -p /etc/nas-wizard
+    write_file "$TM_CONF" <<EOF
+enabled=1
+path=$path
+user=$user
+quota=$quota
+EOF
+
+    enable_service smbd
+    systemctl list-unit-files nmbd.service >/dev/null 2>&1 && enable_service nmbd
+    run systemctl restart smbd
+    enable_service avahi-daemon
+    run systemctl reload avahi-daemon 2>/dev/null || run systemctl restart avahi-daemon
+    info "Time Machine готов: //$(hostname)/TimeMachine  (папка $path, пользователь $user)"
+}
+
+tm_disable() {
+    # перестаём анонсировать и отдаём share; ДАННЫЕ и пароль не трогаем
+    [ -f "$TM_AVAHI" ] && run rm -f "$TM_AVAHI"
+    if [ -f "$SMB_CONF" ] && grep -qs "include = $TM_INC" "$SMB_CONF"; then
+        backup_file "$SMB_CONF"
+        [ "$DRY_RUN" -eq 0 ] && grep -v "include = $TM_INC" "$SMB_CONF" > "$SMB_CONF.tmp" && mv "$SMB_CONF.tmp" "$SMB_CONF"
+    fi
+    if [ -f "$TM_CONF" ] && [ "$DRY_RUN" -eq 0 ]; then
+        sed -i 's/^enabled=.*/enabled=0/' "$TM_CONF"
+    fi
+    run systemctl restart smbd 2>/dev/null
+    run systemctl reload avahi-daemon 2>/dev/null || true
+    info "Time Machine выключен (данные сохранены)"
+}
+
+# reapply on a fresh system stage if it was configured (survives reinstall once
+# the settings backup restored /etc/nas-wizard/timemachine.conf)
+tm_reapply_if_configured() {
+    [ -f "$TM_CONF" ] || return 0
+    # shellcheck disable=SC1090
+    . "$TM_CONF" 2>/dev/null || return 0
+    [ "${enabled:-0}" = "1" ] || return 0
+    NASW_TM_PATH="${path:-}" NASW_TM_USER="${user:-}" NASW_TM_QUOTA="${quota:-0}" tm_apply
+}
+
 stage_shares() {
     echo; echo "=== Этап 7: Сетевые шары ==="
     log "--- stage_shares start ---"
@@ -2542,6 +2696,9 @@ stage_system_apply() {
     # dead until someone hits the power button. Applied by default for reliability
     # (still listed in pi-tuning so it can be toggled). Harmless without a watchdog device.
     pi_watchdog
+    # Time Machine target: rebuild the SMB share + Avahi advert if it was configured
+    # before (settings backup restores /etc/nas-wizard/timemachine.conf).
+    tm_reapply_if_configured
     id -nG "$TARGET_USER" 2>/dev/null | tr ' ' '\n' | grep -qx docker || run usermod -aG docker "$TARGET_USER"
     run mkdir -p "$STORAGE_MNT" "$DOCKER_ROOT" "$SERVICES_SRC"
     if [ ! -d "$NAS_CONFIG" ]; then run mkdir -p "$NAS_CONFIG/scripts"; run chown -R "$TARGET_USER:$TARGET_USER" "$NAS_CONFIG"; fi
@@ -2939,6 +3096,8 @@ run_api() {
         pi)             api_pi ;;
         security)       api_keys_run sec ;;
         shares)         api_shares ;;
+        timemachine)    tm_apply ;;
+        timemachine-off) tm_disable ;;
         backup)         api_keys_run bk ;;
         notify)         api_notify ;;
         netguard)       install_netguard ;;

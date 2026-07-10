@@ -2701,6 +2701,79 @@ def history_sample():
         except OSError:
             pass
 
+# =========================================================================== #
+#  Time Machine — этот NAS как приёмник macOS Time Machine (Samba + vfs_fruit +
+#  Avahi). Полностью отдельная фича: свой include-конфиг, свой avahi-сервис,
+#  своя папка. Движок применения — nas-wizard.sh api timemachine[-off].
+# =========================================================================== #
+TM_CONF   = "/etc/nas-wizard/timemachine.conf"          # persisted params
+TM_INC    = "/etc/samba/nas-timemachine.conf"
+TM_AVAHI  = "/etc/avahi/services/nas-timemachine.service"
+TM_BUNDLE_EXT = (".sparsebundle", ".backupbundle")
+
+def _tm_read_conf():
+    """Прочитать /etc/nas-wizard/timemachine.conf (key=value) → dict."""
+    d = {}
+    try:
+        with open(TM_CONF) as f:
+            for line in f:
+                line = line.strip()
+                if "=" in line and not line.startswith("#"):
+                    k, v = line.split("=", 1)
+                    d[k.strip()] = v.strip()
+    except OSError:
+        pass
+    return d
+
+def _pkg_installed(name):
+    try:
+        return subprocess.run(["dpkg", "-s", name], capture_output=True,
+                              timeout=8).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+def tm_status():
+    """Состояние приёмника Time Machine: установка, активность, папка, лимит,
+    место и список бэкапов Mac (sparsebundle)."""
+    conf = _tm_read_conf()
+    path = conf.get("path") or (STORAGE + "/TimeMachine")
+    user = conf.get("user") or TARGET_USER
+    try:
+        quota = int(conf.get("quota") or 0)
+    except ValueError:
+        quota = 0
+    enabled = conf.get("enabled") == "1"
+    installed = _pkg_installed("samba")
+    active = _safe(lambda: subprocess.run(
+        ["systemctl", "is-active", "--quiet", "smbd"], timeout=5).returncode == 0, False)
+    advertised = os.path.exists(TM_AVAHI)
+    # место на разделе с папкой
+    space = None
+    try:
+        st = os.statvfs(path if os.path.isdir(path) else os.path.dirname(path) or "/")
+        total = st.f_blocks * st.f_frsize
+        free = st.f_bavail * st.f_frsize
+        space = {"total": total, "free": free, "used": total - free}
+    except OSError:
+        pass
+    # бэкапы Mac: каждый *.sparsebundle/*.backupbundle — отдельная машина
+    backups = []
+    try:
+        for name in sorted(os.listdir(path)):
+            if not name.endswith(TM_BUNDLE_EXT):
+                continue
+            full = os.path.join(path, name)
+            sz = _safe(lambda: _du_bytes(full), 0)
+            mt = _safe(lambda: int(os.path.getmtime(full)), 0)
+            backups.append({"name": name, "host": name.rsplit(".", 1)[0],
+                            "size": sz, "mtime": mt})
+    except OSError:
+        pass
+    return {"installed": installed, "active": active, "advertised": advertised,
+            "enabled": enabled, "path": path, "user": user, "quota_gb": quota,
+            "hostname": _safe(lambda: socket.gethostname(), ""),
+            "space": space, "backups": backups}
+
 # --------------------------------------------------------------------------- #
 #  Автообслуживание: ежедневные фоновые задачи (авто-очистка корзины и т.п.)
 # --------------------------------------------------------------------------- #
@@ -8628,6 +8701,8 @@ class H(BaseHTTPRequestHandler):
                 self._json(nb_log_tail((q.get("since") or ["0"])[0], _nb_qpid(q)))
             elif p == "/api/backup/history":
                 self._json({"history": nb_history(_nb_qpid(q))})
+            elif p == "/api/timemachine":
+                self._json(tm_status())
             elif p == "/api/winpos":
                 self._json({"winpos": load_winpos()})
             elif p == "/api/snippets":
@@ -8968,6 +9043,33 @@ class H(BaseHTTPRequestHandler):
                 except OSError:
                     pass
                 self._json({"ok": True})
+            elif p == "/api/timemachine/apply":
+                b = self._body()
+                params = {}
+                path = str(b.get("path", "")).strip()
+                if path:
+                    if not path.startswith("/") or ".." in path:
+                        self._json({"ok": False, "log": "путь должен быть абсолютным без .."}); return
+                    params["tm_path"] = path
+                user = str(b.get("user", "")).strip()
+                if user:
+                    if not re.match(r"^[a-z_][a-z0-9_-]{0,31}$", user):
+                        self._json({"ok": False, "log": "недопустимое имя пользователя"}); return
+                    params["tm_user"] = user
+                if b.get("password"):
+                    params["tm_pass"] = str(b.get("password"))
+                try:
+                    quota = int(b.get("quota_gb") or 0)
+                except (TypeError, ValueError):
+                    quota = 0
+                params["tm_quota"] = str(max(0, quota))
+                r = engine("timemachine", params)
+                r["status"] = tm_status()
+                self._json(r)
+            elif p == "/api/timemachine/disable":
+                r = engine("timemachine-off")
+                r["status"] = tm_status()
+                self._json(r)
             elif p == "/api/backup/history-del":
                 b = self._body()
                 if b.get("all"):

@@ -1559,6 +1559,21 @@
   .set-nav button.on svg{opacity:1;color:var(--accent)}
   .set-pane{flex:1;min-width:0;overflow-y:auto;padding:22px 26px}
   .set-load{color:var(--mut);font-size:12px;padding:20px 0}
+  /* Time Machine tab */
+  .tm-badges{display:flex;flex-wrap:wrap;gap:8px}
+  .tm-badge{display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:600;padding:4px 9px;border-radius:999px;white-space:nowrap}
+  .tm-badge.ok{color:var(--good);background:var(--good-soft)}
+  .tm-badge.off{color:var(--mut);background:var(--card-2)}
+  .tm-space{margin-top:11px}
+  .tm-space-bar{height:7px;border-radius:5px;background:var(--track,var(--card-2));overflow:hidden}
+  .tm-space-bar i{display:block;height:100%;border-radius:5px;background:var(--accent);transition:width .3s}
+  .tm-space-lbl{font-size:11px;color:var(--mut);margin-top:5px}
+  .tm-actions{display:flex;gap:9px;margin-top:12px;flex-wrap:wrap}
+  .tm-bks{display:flex;flex-direction:column;gap:6px}
+  .tm-bk{display:flex;align-items:center;gap:10px;padding:9px 11px;border-radius:var(--r-sm);background:var(--card)}
+  .tm-bk-i{color:var(--accent);flex:none;display:flex}
+  .tm-bk-n{font-weight:600;font-size:12.5px}
+  .tm-bk-m{margin-left:auto;font-size:11.5px;color:var(--mut)}
   .set-title{font-size:16px;font-weight:650;margin:0 0 3px}
   .set-sub{font-size:12px;color:var(--mut);margin:0 0 16px;line-height:1.5}
   .srow{display:flex;align-items:center;gap:14px;padding:12px 0;border-top:1px solid var(--line)}
@@ -5579,6 +5594,49 @@ function winTrash(){openWin("__trash","Корзина",body=>{
  draw();
 },{w:640,h:540});}
 /* --- settings: Бэкап настроек --- */
+function timemachineTab(tc){
+ tc.innerHTML=`<div class="set-load">загрузка…</div>`;
+ const draw=st=>{
+  const badge=(ok,t)=>`<span class="tm-badge ${ok?"ok":"off"}">${svg(ok?"check":"x",12)} ${esc(t)}</span>`;
+  const sp=st.space,usedPct=sp&&sp.total?Math.min(100,Math.round(sp.used/sp.total*100)):0;
+  const bks=st.backups||[];
+  const host=st.hostname||"nas";
+  tc.innerHTML=`
+   <h3 class="set-title">Time Machine</h3>
+   <p class="set-sub">Этот NAS как приёмник macOS Time Machine. Укажи папку и пользователя — панель сама поднимет отдельную Samba-шару (vfs_fruit) и анонс по сети (Avahi). Твой Mac увидит NAS в «Системные настройки → Time Machine → Выбрать диск».</p>
+   <div class="set-card"><div class="set-grp">Состояние</div>
+    <div class="tm-badges">${badge(st.installed,"Samba установлен")}${badge(st.active,"Служба SMB активна")}${badge(st.advertised,"Виден по сети (Avahi)")}${st.enabled?badge(true,"Включён"):""}</div>
+    ${sp?`<div class="tm-space"><div class="tm-space-bar"><i style="width:${usedPct}%"></i></div><div class="tm-space-lbl">Занято ${fmtB(sp.used)} из ${fmtB(sp.total)} · свободно ${fmtB(sp.free)}</div></div>`:""}
+   </div>
+   <div class="set-card"><div class="set-grp">Настройка</div>
+    <div class="srow"><div class="srow-l"><div class="srow-t">Папка для бэкапов${tipHTML("Куда Mac'и складывают резервные копии. Создастся автоматически, права 0700 у пользователя ниже. Лучше на пуле/отдельном диске.")}</div></div><div class="srow-c"><input class="mono" id="tmPath" value="${att(st.path||"")}" placeholder="/mnt/storage/TimeMachine" style="width:230px"></div></div>
+    <div class="srow"><div class="srow-l"><div class="srow-t">Пользователь Samba${tipHTML("Имя, под которым Mac подключается. Обычно системный пользователь NAS. Пароль — ниже (нужен для входа с Mac).")}</div></div><div class="srow-c"><input class="mono" id="tmUser" value="${att(st.user||"")}" placeholder="oleg" style="width:150px"></div></div>
+    <div class="srow"><div class="srow-l"><div class="srow-t">Пароль Samba${tipHTML("Пароль для подключения с Mac. Оставь пустым, если пользователь уже заведён в Samba и пароль менять не нужно.")}</div></div><div class="srow-c"><input class="mono" type="password" id="tmPass" placeholder="не менять" style="width:150px"></div></div>
+    <div class="srow"><div class="srow-l"><div class="srow-t">Лимит объёма, ГБ${tipHTML("Максимальный размер бэкапов Time Machine (мягкий лимит fruit). 0 — без лимита.")}</div></div><div class="srow-c"><input class="mono" type="number" min="0" id="tmQuota" value="${st.quota_gb||0}" style="width:90px"></div></div>
+    <div class="tm-actions">
+     <button class="btn pri" id="tmApply">${svg("check",14)} ${st.enabled?"Применить":"Включить Time Machine"}</button>
+     ${st.enabled?`<button class="btn" id="tmOff">${svg("power",14)} Выключить</button>`:""}
+    </div>
+   </div>
+   <div class="set-card"><div class="set-grp">Бэкапы Mac</div>
+    ${bks.length?`<div class="tm-bks">${bks.map(b=>`<div class="tm-bk"><span class="tm-bk-i">${svg("hdd",16)}</span><span class="tm-bk-n">${esc(b.host)}</span><span class="tm-bk-m mono">${fmtB(b.size)}${b.mtime?" · "+fmDate(b.mtime):""}</span></div>`).join("")}</div>`
+      :`<div class="mon-note" style="margin:0">Пока нет ни одного бэкапа. На Mac открой «Системные настройки → Time Machine → Выбрать резервный диск», выбери этот NAS и войди под пользователем Samba.</div>`}
+   </div>`;
+  const q=s=>tc.querySelector(s);
+  q("#tmApply").onclick=async()=>{
+   const btn=q("#tmApply");btn.disabled=true;btn.textContent="Применяю…";
+   const body={path:q("#tmPath").value.trim(),user:q("#tmUser").value.trim(),
+     password:q("#tmPass").value,quota_gb:+q("#tmQuota").value||0};
+   const r=await api("/api/timemachine/apply",{method:"POST",body:JSON.stringify(body)});
+   if(r&&r.ok){toast("Time Machine настроен");draw(r.status||st);}
+   else{toast("Ошибка: "+((r&&(r.log||"").trim().split("\n").pop())||"?"));btn.disabled=false;btn.textContent="Включить Time Machine";}
+  };
+  const off=q("#tmOff");if(off)off.onclick=()=>confirmDlg("Выключить Time Machine?","Шара и анонс по сети будут убраны, Mac перестанет видеть NAS. Сами бэкапы (файлы) останутся на месте.",async()=>{
+   const r=await api("/api/timemachine/disable",{method:"POST",body:"{}"});
+   if(r&&r.ok){toast("Time Machine выключен");draw(r.status||st);}else toast("Ошибка");},true);
+ };
+ api("/api/timemachine").then(st=>{if(st&&!st.error)draw(st);else tc.innerHTML=`<div class="mon-note">Не удалось получить состояние.</div>`;});
+}
 function backupTab(tc){
  tc.innerHTML=`<h3 class="set-title">Бэкап настроек</h3>
   <p class="set-sub">Полный слепок настроек NAS-OS: панель и оформление, уведомления с токенами, веб-пароль, шары Samba, конфиги визарда и USB-импорта, compose-файлы docker-стеков. fstab и snapraid.conf кладутся справочно и при восстановлении не трогаются.</p>
@@ -5650,6 +5708,7 @@ function winSettings(initTab){openWin("__set","Настройки",body=>{
   {id:"look",name:"Оформление",ic:"cog"},
   {id:"files",name:"Файлы",ic:"folder"},
   {id:"notify",name:"Уведомления",ic:"bell"},
+  {id:"timemachine",name:"Time Machine",ic:"sync"},
   {id:"system",name:"Система",ic:"activity"},
   {id:"motd",name:"Приветствие SSH",ic:"term"},
   {id:"maint",name:"Обслуживание",ic:"heart"},
@@ -5659,7 +5718,7 @@ function winSettings(initTab){openWin("__set","Настройки",body=>{
   {id:"backup",name:"Бэкап настроек",ic:"save"},
   {id:"pi",name:"Raspberry Pi",ic:"cpu"},
  ];
- const FN={look:lookTab,files:filesTab,notify:notifyTab,system:systemTab,motd:motdTab,maint:maintTab,network:networkTab,security:securityTab,usb:usbTab,backup:backupTab,pi:piTab};
+ const FN={look:lookTab,files:filesTab,notify:notifyTab,timemachine:timemachineTab,system:systemTab,motd:motdTab,maint:maintTab,network:networkTab,security:securityTab,usb:usbTab,backup:backupTab,pi:piTab};
  let footMo=null;
  const render=()=>{
   if(footMo){footMo.disconnect();footMo=null;}
