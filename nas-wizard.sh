@@ -1898,6 +1898,7 @@ sec_ufw() {
     local WEBPORT="${NAS_WEB_PORT:-80}"
     run ufw allow "${WEBPORT}/tcp"
     run ufw allow 9090/tcp    # Cockpit
+    run ufw allow 5353/udp    # mDNS (avahi) — иначе <host>.local не резолвится
     # Открыть порты шар, если они установлены
     if dpkg -s samba >/dev/null 2>&1; then run ufw allow Samba 2>/dev/null || run ufw allow 445/tcp; fi
     if dpkg -s nfs-kernel-server >/dev/null 2>&1; then run ufw allow 2049/tcp; run ufw allow 111/tcp; fi

@@ -6690,6 +6690,7 @@ def _ufw_managed_ports():
         ports.setdefault(p, label)
     add("%d/tcp" % PORT, "Веб-панель NAS")
     add("22/tcp", "SSH")
+    add("5353/udp", "Обнаружение (mDNS / .local)")   # иначе UFW режет avahi → pi5.local отваливается
     if os.path.exists("/lib/systemd/system/cockpit.socket") or shutil.which("cockpit-bridge"):
         add("9090/tcp", "Cockpit")
     if shutil.which("smbd") or os.path.exists("/etc/samba/smb.conf"):
