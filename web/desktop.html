@@ -1489,8 +1489,8 @@
   .srow-t .tip,.mon-row .tip{top:0}
   .tip:hover{opacity:1;color:var(--accent)}
   /* тултип — всегда тёмный пузырь со светлым текстом (не завязан на --ink, иначе в тёмной теме белое на белом) */
-  .tipbox{position:fixed;z-index:9999;max-width:280px;background:#222c3a;color:#f2f5fa;border:1px solid rgba(255,255,255,.10);font-size:11.5px;line-height:1.5;font-weight:450;padding:9px 12px;border-radius:10px;box-shadow:0 8px 28px rgba(0,0,0,.4);pointer-events:none;opacity:0;transition:opacity .12s}
-  .tipbox.show{opacity:1}
+  .tipbox{position:fixed;z-index:9999;max-width:320px;background:#222c3a;color:#f2f5fa;border:1px solid rgba(255,255,255,.12);font-size:12.5px;line-height:1.55;font-weight:450;padding:10px 13px;border-radius:11px;box-shadow:0 10px 32px rgba(0,0,0,.45);pointer-events:none;opacity:0;transform:translateY(3px);transition:opacity .1s,transform .1s;white-space:pre-line}
+  .tipbox.show{opacity:1;transform:translateY(0)}
   .sbadge{font-size:10px;font-weight:600;padding:2px 8px;border-radius:7px;font-family:var(--mono);white-space:nowrap}
   .sbadge.ok{background:var(--good-soft);color:var(--good)}
   .sbadge.off{background:var(--glass-2);color:var(--mut)}
@@ -5410,12 +5410,30 @@ function setFootAdopt(tc,tf){
 
 /* --- custom tooltips --- */
 function tipHTML(text){return `<span class="tip" data-tip="${att(text)}">${svg("info",13)}</span>`;}
-let _tipEl=null;
-function showTip(t){const txt=t.getAttribute("data-tip");if(!txt)return;if(!_tipEl){_tipEl=el(`<div class="tipbox"></div>`);document.body.appendChild(_tipEl);}_tipEl.textContent=txt;_tipEl.style.left="0px";_tipEl.style.top="0px";const r=t.getBoundingClientRect(),tb=_tipEl.getBoundingClientRect();let x=r.left+r.width/2-tb.width/2,y=r.top-tb.height-8;if(y<8)y=r.bottom+8;x=Math.max(8,Math.min(x,innerWidth-tb.width-8));_tipEl.style.left=x+"px";_tipEl.style.top=y+"px";_tipEl.classList.add("show");}
-function hideTip(){if(_tipEl)_tipEl.classList.remove("show");}
-document.addEventListener("pointerover",e=>{const t=e.target.closest&&e.target.closest(".tip");if(t)showTip(t);});
-document.addEventListener("pointerout",e=>{const t=e.target.closest&&e.target.closest(".tip");if(t)hideTip();});
+let _tipEl=null,_tipT=null,_tipCur=null;
+function _tipPlace(t){const txt=t.getAttribute("data-tip");if(!txt)return;
+ if(!_tipEl){_tipEl=el(`<div class="tipbox"></div>`);document.body.appendChild(_tipEl);}
+ _tipEl.textContent=txt;_tipEl.style.left="0px";_tipEl.style.top="0px";
+ const r=t.getBoundingClientRect(),tb=_tipEl.getBoundingClientRect();
+ let x=r.left+r.width/2-tb.width/2,y=r.top-tb.height-9;
+ if(y<8)y=r.bottom+9;
+ x=Math.max(8,Math.min(x,innerWidth-tb.width-8));
+ _tipEl.style.left=x+"px";_tipEl.style.top=y+"px";_tipEl.classList.add("show");}
+function showTip(t){_tipCur=t;clearTimeout(_tipT);_tipT=setTimeout(()=>{if(_tipCur===t&&document.contains(t))_tipPlace(t);},80);}
+function hideTip(){clearTimeout(_tipT);_tipCur=null;if(_tipEl)_tipEl.classList.remove("show");}
+/* Глобально: ЛЮБОЙ элемент с title или data-tip получает наш пузырь. Нативный
+   title сразу переносим в data-tip и удаляем — иначе поверх показался бы системный
+   тултип (медленный, мелкий, некрасивый). Так все подсказки в панели одинаковые. */
+function _tipFind(n){return n&&n.closest?n.closest("[data-tip],[title]"):null;}
+document.addEventListener("pointerover",e=>{const t=_tipFind(e.target);if(!t)return;
+ if(!t.hasAttribute("data-tip")){const ti=t.getAttribute("title");if(ti!=null){t.setAttribute("data-tip",ti);t.removeAttribute("title");}}
+ if(t.getAttribute("data-tip"))showTip(t);});
+document.addEventListener("pointerout",e=>{const t=_tipFind(e.target);if(!t)return;
+ if(e.relatedTarget&&t.contains(e.relatedTarget))return;   // ушли к дочернему того же элемента — не прячем
+ hideTip();});
 document.addEventListener("scroll",hideTip,true);
+document.addEventListener("pointerdown",hideTip,true);
+window.addEventListener("blur",hideTip);
 /* --- settings helpers --- */
 function withSysc(tc,fn){if(SYSC){fn();return;}tc.innerHTML=`<div class="set-load">загрузка состояния системы…</div>`;api("/api/sysconf").then(r=>{SYSC=r||{};fn();});}
 function rerSet(){if(winSettings._render)winSettings._render();}
