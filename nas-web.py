@@ -3110,6 +3110,20 @@ def nb_build_cmd(cfg, job, dry, prev_files=0):
     args += [remote + job["src"] + "/", dest]
     return args, env
 
+def _mountpoint_of(p):
+    """Ближайшая вверх точка монтирования для пути (существующего или нет)."""
+    p = os.path.abspath(p)
+    while p != "/" and not os.path.ismount(p):
+        p = os.path.dirname(p)
+    return p
+
+def _dest_disk_absent(dest):
+    """dest под /mnt|/media|/srv подразумевает отдельный носитель. Если он НЕ
+    смонтирован, точка проваливается в корень (mountpoint = '/') — писать туда
+    нельзя: rsync молча зальёт системный диск. Пул /mnt/storage смонтирован →
+    его mountpoint не '/', проверка проходит. Так безопасны и съёмные диски."""
+    return bool(re.match(r"^/(mnt|media|srv)/", dest or "")) and _mountpoint_of(dest) == "/"
+
 def nb_run(cfg, dry, writer, cancel=lambda: False):
     """Прогнать все включённые задачи. writer(line) — вывод; cancel() — прерывание."""
     cfg = cfg or nb_load()
@@ -3132,6 +3146,11 @@ def nb_run(cfg, dry, writer, cancel=lambda: False):
             writer("— отменено —"); break
         writer("")
         writer("=== %s → %s ===" % (j["src"], j["dest"]))
+        if _dest_disk_absent(j["dest"]):
+            writer("⚠ ПРОПУЩЕНО: целевой диск не смонтирован (%s ведёт в системный "
+                   "раздел). Бэкап пропущен, чтобы НЕ заполнить системный диск — "
+                   "подключите диск назначения." % j["dest"])
+            results.append({"src": j["src"], "ok": False, "not_mounted": True}); continue
         try:
             os.makedirs(j["dest"], exist_ok=True)
         except OSError as e:
