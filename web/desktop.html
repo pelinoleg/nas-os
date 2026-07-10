@@ -17,7 +17,7 @@
     --glass:rgba(255,255,255,.74); --glass-2:rgba(255,255,255,.92);
     --ink:#1A2431; --text:#1A2431; --dim:#53637B; --mut:#8493AA;
     --line:rgba(24,42,70,.045); --line-2:rgba(24,42,70,.08); --card:rgba(24,42,70,.05); --card-2:rgba(24,42,70,.09);
-    --accent:#12B0A6; --accent-2:#4C8DF6; --accent-ink:#FFFFFF; --accent-fill:#12B0A6; --accent-soft:rgba(18,176,166,.12); --accent-line:rgba(18,176,166,.5); --sel:rgba(0,0,0,.06);
+    --accent:#12B0A6; --accent-2:#4C8DF6; --accent-ink:#FFFFFF; --accent-fill:#12B0A6; --accent-soft:rgba(18,176,166,.12); --accent-line:rgba(18,176,166,.5); --sel:rgba(0,0,0,.06); --tab-on:rgba(255,255,255,.55);
     --good:#1FA971; --good-soft:rgba(31,169,113,.14); --warn:#CF881B; --warn-soft:rgba(207,136,27,.15);
     --danger:#DE4E48; --danger-soft:rgba(222,78,72,.13);
     --code-bg:#0F1620; --code-fg:#C9D6EA;
@@ -33,7 +33,7 @@
     --glass:rgba(22,30,42,.70); --glass-2:rgba(26,36,50,.86);
     --ink:#E9EFF7; --text:#E9EFF7; --dim:#9EACC2; --mut:#6F7F97;
     --line:rgba(140,160,195,.06); --line-2:rgba(140,160,195,.11); --card:rgba(180,200,235,.055); --card-2:rgba(180,200,235,.1);
-    --accent:#35C9C0; --accent-2:#5AA9FF; --accent-ink:#04181A; --accent-fill:#35C9C0; --accent-soft:rgba(53,201,192,.15); --accent-line:rgba(53,201,192,.5); --sel:rgba(255,255,255,.10);
+    --accent:#35C9C0; --accent-2:#5AA9FF; --accent-ink:#04181A; --accent-fill:#35C9C0; --accent-soft:rgba(53,201,192,.15); --accent-line:rgba(53,201,192,.5); --sel:rgba(255,255,255,.10); --tab-on:rgba(255,255,255,.05);
     --good:#43C08A; --good-soft:rgba(67,192,138,.16); --warn:#E4A94A; --warn-soft:rgba(228,169,74,.16);
     --danger:#E86560; --danger-soft:rgba(232,101,96,.16);
     --code-bg:#0A0F17; --code-fg:#C7D3E6;
@@ -44,7 +44,7 @@
     --glass:rgba(22,30,42,.70); --glass-2:rgba(26,36,50,.86);
     --ink:#E9EFF7; --text:#E9EFF7; --dim:#9EACC2; --mut:#6F7F97;
     --line:rgba(140,160,195,.06); --line-2:rgba(140,160,195,.11); --card:rgba(180,200,235,.055); --card-2:rgba(180,200,235,.1);
-    --accent:#35C9C0; --accent-2:#5AA9FF; --accent-ink:#04181A; --accent-fill:#35C9C0; --accent-soft:rgba(53,201,192,.15); --accent-line:rgba(53,201,192,.5); --sel:rgba(255,255,255,.10);
+    --accent:#35C9C0; --accent-2:#5AA9FF; --accent-ink:#04181A; --accent-fill:#35C9C0; --accent-soft:rgba(53,201,192,.15); --accent-line:rgba(53,201,192,.5); --sel:rgba(255,255,255,.10); --tab-on:rgba(255,255,255,.05);
     --good:#43C08A; --good-soft:rgba(67,192,138,.16); --warn:#E4A94A; --warn-soft:rgba(228,169,74,.16);
     --danger:#E86560; --danger-soft:rgba(232,101,96,.16);
     --code-bg:#0A0F17; --code-fg:#C7D3E6;
@@ -55,7 +55,7 @@
     --glass:rgba(255,255,255,.74); --glass-2:rgba(255,255,255,.92);
     --ink:#1A2431; --text:#1A2431; --dim:#53637B; --mut:#8493AA;
     --line:rgba(24,42,70,.045); --line-2:rgba(24,42,70,.08); --card:rgba(24,42,70,.05); --card-2:rgba(24,42,70,.09);
-    --accent:#12B0A6; --accent-2:#4C8DF6; --accent-ink:#FFFFFF; --accent-fill:#12B0A6; --accent-soft:rgba(18,176,166,.12); --accent-line:rgba(18,176,166,.5); --sel:rgba(0,0,0,.06);
+    --accent:#12B0A6; --accent-2:#4C8DF6; --accent-ink:#FFFFFF; --accent-fill:#12B0A6; --accent-soft:rgba(18,176,166,.12); --accent-line:rgba(18,176,166,.5); --sel:rgba(0,0,0,.06); --tab-on:rgba(255,255,255,.55);
     --good:#1FA971; --good-soft:rgba(31,169,113,.14); --warn:#CF881B; --warn-soft:rgba(207,136,27,.15);
     --danger:#DE4E48; --danger-soft:rgba(222,78,72,.13);
     --code-bg:#0F1620; --code-fg:#C9D6EA;
@@ -692,13 +692,14 @@
   .dp-cap .capbar{height:8px;border-radius:999px}
   .dp-lbl{font-size:11px;color:var(--dim);font-family:var(--mono);margin-top:4px}
   .dm2{display:flex;flex:1;min-height:0}
-  .dm2-side{width:210px;flex:none;border-right:1px solid var(--line);padding:8px 8px 12px;overflow-y:auto}
+  .dm2-side{width:250px;flex:none;border-right:1px solid var(--line);padding:8px 8px 12px;overflow-y:auto}
   .dm2-side-h{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--mut);font-family:var(--mono);padding:6px 8px 8px}
   .dm2-grp{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--mut);font-family:var(--mono);padding:11px 8px 5px}
   .dm2-grp:first-child{padding-top:4px}
   .dm2-item{display:flex;align-items:center;gap:9px;width:100%;padding:8px 9px;border-radius:var(--r-sm);border:1px solid transparent;background:transparent;text-align:left;margin-bottom:2px;transition:.12s}
   .dm2-item:hover{background:var(--sel)}
-  .dm2-item.on{background:var(--sel);border-color:var(--accent-line)}
+  /* active item: soft film (--sel shifted contrast too hard against the sidebar) */
+  .dm2-item.on{background:var(--tab-on);border-color:var(--accent-line)}
   .dm2-item.sys{opacity:.62}.dm2-item.sys.on,.dm2-item.sys:hover{opacity:1}
   .dm2-item .dot{width:8px;height:8px;border-radius:50%;flex:none}
   .dm2-item .li-main{flex:1;min-width:0}
@@ -1442,7 +1443,9 @@
     border:1px solid transparent;background:transparent;color:var(--win-dim,var(--dim));
     font-size:12.5px;font-weight:500;cursor:pointer;white-space:nowrap;transition:.13s}
   .nbtab:hover{background:var(--card-2)}
-  .nbtab.on{background:var(--sel);color:var(--win-accent,var(--accent));box-shadow:var(--sh-sm);font-weight:600}
+  /* active profile tab: soft white film, no shadow — in light it sits slightly
+     above the window background, in dark it stays muted (--sel was too dark/too bright) */
+  .nbtab.on{background:var(--tab-on);color:var(--win-accent,var(--accent));box-shadow:none;font-weight:600}
   .nbtab .nbdot{width:7px;height:7px;border-radius:50%;flex:none;background:var(--win-dim,var(--dim))}
   .nbtab .nbdot.run{background:var(--good);animation:nbpulse 1.4s ease-in-out infinite}
   .nbtab .nbdot.queue{background:var(--warn)}
@@ -1547,12 +1550,7 @@
   .set-nav button{display:flex;align-items:center;gap:10px;width:100%;border:none;background:none;color:var(--dim);padding:8px 10px;border-radius:var(--r-sm);font-size:12.5px;font-weight:550;text-align:left;transition:.12s}
   .set-nav button svg{flex:none;opacity:.85;color:var(--accent-2)}
   .set-nav button:hover:not(.on){background:var(--sel);color:var(--text)}
-  /* активный таб: мягкая белая плёнка (в светлой — чуть светлее фона, без тени;
-     в тёмной — приглушённая, не яркая). Значения по темам ниже. */
-  .set-nav button.on{background:rgba(255,255,255,.55);color:var(--text);font-weight:650;box-shadow:none}
-  @media (prefers-color-scheme:dark){.set-nav button.on{background:rgba(255,255,255,.05)}}
-  :root[data-theme="light"] .set-nav button.on{background:rgba(255,255,255,.55)}
-  :root[data-theme="dark"] .set-nav button.on{background:rgba(255,255,255,.05)}
+  .set-nav button.on{background:var(--sel);color:var(--text);font-weight:650}
   .set-nav button.on svg{opacity:1;color:var(--accent)}
   .set-pane{flex:1;min-width:0;overflow-y:auto;padding:22px 26px}
   .set-load{color:var(--mut);font-size:12px;padding:20px 0}
@@ -5397,7 +5395,8 @@ function winBackup(){openWin("__nasbak","Бэкап главного NAS",(body,
     box.innerHTML="";
     list.forEach(run=>{const ok=(run.jobs||[]).filter(x=>x.ok).length,tot=(run.jobs||[]).length;
      const bad=run.result!=="ok";
-     const head=el(`<div class="nb-hrun"><span class="ovh-dot" style="background:${bad?"var(--warn)":"var(--good)"};flex:none"></span><span class="nb-hdate">${fmDate(run.ts)}</span><span class="nb-hmeta mono">${ok}/${tot} · ${esc(dur(run.dur))}</span><button class="iconbtn nb-hdel" title="Удалить запись">${svg("x",13)}</button></div>`);
+     const meta=run.result==="aborted"?"прерван (сбой или перезагрузка)":`${ok}/${tot} · ${esc(dur(run.dur))}`;
+     const head=el(`<div class="nb-hrun"><span class="ovh-dot" style="background:${bad?"var(--warn)":"var(--good)"};flex:none"></span><span class="nb-hdate">${fmDate(run.ts)}</span><span class="nb-hmeta mono">${meta}</span><button class="iconbtn nb-hdel" title="Удалить запись">${svg("x",13)}</button></div>`);
      head.querySelector(".nb-hdel").onclick=async()=>{const r=await nbP("/api/backup/history-del",{ts:run.ts});draw((r&&r.history)||[]);};
      box.appendChild(head);
      (run.jobs||[]).forEach(j=>{const line=(j.code===25)?"остановлено защитой":((j.xfer||0)+" файлов · "+fmtB(j.xfer_bytes||0)+(j.deleted?(" · удалено "+j.deleted):""));

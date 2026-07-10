@@ -782,9 +782,7 @@ def disk_spindown(dev, minutes):
     cfg = _load_spindown()
     cfg[dev] = minutes
     try:
-        os.makedirs(NAS_CONFIG, exist_ok=True)
-        with open(SPINDOWN_FILE, "w") as f:
-            json.dump(cfg, f)
+        _json_save(SPINDOWN_FILE, cfg)
     except OSError:
         pass
     if not r["ok"]:
@@ -894,9 +892,7 @@ def load_created_units():
 
 def _save_created_units(lst):
     try:
-        os.makedirs(NAS_CONFIG, exist_ok=True)
-        with open(CREATED_UNITS, "w") as f:
-            json.dump(lst, f)
+        _json_save(CREATED_UNITS, lst)
     except OSError:
         pass
 
@@ -1035,9 +1031,7 @@ def load_snippets():
     except (OSError, json.JSONDecodeError):
         return []
 def save_snippets(d):
-    os.makedirs(NAS_CONFIG, exist_ok=True)
-    with open(SNIPPETS_FILE, "w") as f:
-        json.dump(d, f, ensure_ascii=False, indent=2)
+    _json_save(SNIPPETS_FILE, d, indent=2)
 
 # --------------------------------------------------------------------------- #
 #  История операций (загрузки, копирования, USB-импорт).
@@ -1456,11 +1450,7 @@ def save_settings(d):
     cur = load_settings()
     if isinstance(d, dict):
         cur.update(d)
-    os.makedirs(NAS_CONFIG, exist_ok=True)
-    tmp = SETTINGS_FILE + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(cur, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, SETTINGS_FILE)
+    _json_save(SETTINGS_FILE, cur, indent=2)   # fsync + rename: settings must survive a power cut
 
 WINPOS_FILE = os.path.join(NAS_CONFIG, "winpos.json")
 def load_winpos():
@@ -1485,8 +1475,11 @@ def stats():
         "iface": iface,
         "uptime": uptime_s(),
         "load": list(os.getloadavg()),
-        # идёт ли хоть один бэкап (индикатор на иконке; лёгкая проверка без systemctl)
-        "nb_running": any(_nb_run_state_read(p["id"]).get("running") for p in nb_profiles()),
+        # is any backup running (dock icon indicator). nb_run_active also verifies
+        # the transient unit is alive, so a stale "running" flag left by a power
+        # loss can't spin the icon forever; systemctl is only called while the
+        # state flag is set, so the idle path stays cheap.
+        "nb_running": any(nb_run_active(p["id"]) for p in nb_profiles()),
         # USB-импорт идёт в фоне (udev), панель могла быть закрыта — показываем его
         # в общем центре операций, а не только на вкладке настроек USB
         "usb_import": _safe(lambda: usb_import_progress()["jobs"], []),
@@ -2099,9 +2092,7 @@ def _known_ips():
 def _remember_ip(ip):
     s = _known_ips(); s.add(ip)
     try:
-        os.makedirs(NAS_CONFIG, exist_ok=True)
-        with open(_KNOWN_IPS_FILE, "w") as f:
-            json.dump(sorted(s), f)
+        _json_save(_KNOWN_IPS_FILE, sorted(s))
     except OSError:
         pass
 
@@ -2748,11 +2739,7 @@ def _nb_run_state_read(pid):
 
 def _nb_run_state_write(pid, d):
     try:
-        os.makedirs(NAS_CONFIG, exist_ok=True)
-        tmp = nb_run_state(pid) + ".tmp"
-        with open(tmp, "w") as f:
-            json.dump(d, f)
-        os.replace(tmp, nb_run_state(pid))
+        _json_save(nb_run_state(pid), d)
     except OSError:
         pass
 
@@ -2765,7 +2752,24 @@ def _nb_unit_active(pid):
 
 def nb_run_active(pid=NB_MAIN):
     """Идёт ли прогон: флаг в state И живой транзиентный юнит (чтобы не залипало после краха)."""
-    return bool(_nb_run_state_read(pid).get("running")) and _nb_unit_active(pid)
+    st = _nb_run_state_read(pid)
+    if not st.get("running"):
+        return False
+    if _nb_unit_active(pid):
+        return True
+    # Orphaned run: state says "running" but the unit is gone (power loss / hard
+    # reboot killed it mid-run). Close it out once — otherwise the dock spinner
+    # sticks forever — and leave an "aborted" trace in run history.
+    st["running"] = False
+    st["result"] = st.get("result") or "aborted"
+    _nb_run_state_write(pid, st)
+    try:
+        started = int(st.get("started") or 0)
+        _nb_history_add(pid, {"ts": started or int(time.time()), "dur": 0,
+                              "result": "aborted", "jobs": []})
+    except Exception:
+        pass
+    return False
 
 def nb_any_active():
     """Идёт ли прогон хоть какого-нибудь профиля (одновременно разрешён один)."""
@@ -3383,8 +3387,7 @@ def _nb_history_add(pid, entry):
     hist.append(entry)
     hist = hist[-50:]                    # последние 50 прогонов
     try:
-        os.makedirs(NAS_CONFIG, exist_ok=True)
-        with open(nb_history_file(pid), "w") as f: json.dump(hist, f)
+        _json_save(nb_history_file(pid), hist)
     except OSError:
         pass
 
@@ -3413,15 +3416,14 @@ def nb_history_clear(pid=None, ts=None):
         hist = []
     hist = [e for e in hist if int(e.get("ts", 0)) != int(ts)]
     try:
-        os.makedirs(NAS_CONFIG, exist_ok=True)
-        with open(f, "w") as fh: json.dump(hist, fh)
+        _json_save(f, hist)
     except OSError: pass
     return {"ok": True, "history": list(reversed(hist))}
 
 def _nb_write_status(pid, results):
     st = {"ts": int(time.time()), "jobs": results}
     try:
-        with open(nb_status_file(pid), "w") as f: json.dump(st, f)
+        _json_save(nb_status_file(pid), st)
     except OSError:
         pass
 
@@ -3505,9 +3507,7 @@ def _nb_health_load(pid):
 
 def _nb_health_save(pid, d):
     try:
-        os.makedirs(NAS_CONFIG, exist_ok=True)
-        with open(nb_health_file(pid), "w") as f:
-            json.dump(d, f)
+        _json_save(nb_health_file(pid), d)
     except OSError:
         pass
 
@@ -4249,9 +4249,7 @@ def _smart_selftest_tick():
                 devs.append(os.path.basename(dev))
         st[kind] = now
         try:
-            os.makedirs(NAS_CONFIG, exist_ok=True)
-            with open(SMARTTEST_FILE, "w") as f:
-                json.dump(st, f)
+            _json_save(SMARTTEST_FILE, st)
         except OSError:
             pass
         if devs:
@@ -4618,9 +4616,7 @@ def save_stack_note(name, note):
     elif name in d:
         del d[name]
     try:
-        os.makedirs(NAS_CONFIG, exist_ok=True)
-        with open(STACK_NOTES, "w") as f:
-            json.dump(d, f)
+        _json_save(STACK_NOTES, d)
     except OSError as e:
         return {"ok": False, "log": str(e)}
     return {"ok": True}

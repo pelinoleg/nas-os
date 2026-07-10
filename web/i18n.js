@@ -1278,6 +1278,7 @@ window.NAS_I18N = { en: {
 "Подстановки": "Placeholders",
 "Есть несохранённые изменения": "You have unsaved changes",
 "прервано перезагрузкой панели": "interrupted by a panel reload",
+"прерван (сбой или перезагрузка)": "aborted (crash or reboot)",
 "Импорт с USB": "USB import",
 "Загрузка файла": "Uploading file",
 "Перемещение": "Moving",
