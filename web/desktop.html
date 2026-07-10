@@ -7030,7 +7030,14 @@ function maybeOnboard(){let done=false;try{done=!!SET.onboarded||localStorage.ge
  setInterval(poll,3000);setInterval(pollApps,8000);setInterval(pollDisks,15000);setInterval(tickClock,10000);
  setInterval(pollStacks,15000);setInterval(pollTop,10000);setInterval(pollNet,15000);setInterval(pollMySpeed,60000);setInterval(pollVnstat,60000);
  setInterval(pollHealth,120000);
- if("serviceWorker" in navigator&&window.isSecureContext)navigator.serviceWorker.register("/sw.js").catch(()=>{});
+ if("serviceWorker" in navigator){
+   if(window.isSecureContext)navigator.serviceWorker.register("/sw.js").catch(()=>{});
+   else navigator.serviceWorker.getRegistrations().then(rs=>{  // по http SW не нужен: убрать залипший,
+     if(rs.length){rs.forEach(r=>r.unregister());                // иначе он отдаёт старую оболочку после правок
+       if(window.caches)caches.keys().then(ks=>ks.forEach(k=>caches.delete(k)));
+       location.reload();}
+   }).catch(()=>{});
+ }
  matchMedia("(prefers-color-scheme:light)").addEventListener("change",()=>{if(SET.theme==="auto")applySettings();});
 })();
 })();
