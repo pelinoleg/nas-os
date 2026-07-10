@@ -3397,6 +3397,27 @@ def nb_history(pid=None):
     except (OSError, ValueError):
         return []
 
+def nb_history_clear(pid=None, ts=None):
+    """ts=None → стереть всю историю профиля; иначе удалить одну запись по её ts."""
+    pid = _nb_pid(pid)
+    f = nb_history_file(pid)
+    if ts is None:
+        try: os.remove(f)
+        except OSError: pass
+        return {"ok": True, "history": []}
+    try:
+        with open(f) as fh:
+            hist = json.load(fh)
+        if not isinstance(hist, list): hist = []
+    except (OSError, ValueError):
+        hist = []
+    hist = [e for e in hist if int(e.get("ts", 0)) != int(ts)]
+    try:
+        os.makedirs(NAS_CONFIG, exist_ok=True)
+        with open(f, "w") as fh: json.dump(hist, fh)
+    except OSError: pass
+    return {"ok": True, "history": list(reversed(hist))}
+
 def _nb_write_status(pid, results):
     st = {"ts": int(time.time()), "jobs": results}
     try:
@@ -8952,6 +8973,15 @@ class H(BaseHTTPRequestHandler):
                 except OSError:
                     pass
                 self._json({"ok": True})
+            elif p == "/api/backup/history-del":
+                b = self._body()
+                if b.get("all"):
+                    self._json(nb_history_clear(_nb_bpid(b)))
+                else:
+                    try: ts = int(b.get("ts"))
+                    except (TypeError, ValueError): ts = None
+                    self._json(nb_history_clear(_nb_bpid(b), ts) if ts is not None
+                               else {"ok": False, "log": "нет ts"})
             elif p == "/api/backup/profile":
                 b = self._body(); act = b.get("action", "")
                 if act == "add":

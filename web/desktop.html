@@ -873,6 +873,9 @@
   .nb-hrun{display:flex;align-items:center;gap:8px;margin-top:12px;padding-top:8px;border-top:1px solid var(--line);font-size:12.5px}
   .nb-hrun:first-child{margin-top:0;border-top:none}
   .nb-hdate{font-weight:600}.nb-hmeta{margin-left:auto;color:var(--mut);font-size:11px}
+  .nb-hdel{flex:none;padding:2px;color:var(--mut);opacity:0;transition:opacity .12s}
+  .nb-hrun:hover .nb-hdel{opacity:1}.nb-hdel:hover{color:var(--danger)}
+  .set-titrow{display:flex;align-items:center;justify-content:space-between;gap:12px}
   .nb-hjob{display:flex;align-items:center;gap:8px;padding:3px 0 3px 16px;font-size:12px}
   .nb-hjm{margin-left:auto;color:var(--mut);font-size:11px;white-space:nowrap}
   .nb-help{display:flex;flex-direction:column;gap:3px;background:var(--card);border:1px solid var(--line);border-radius:var(--r-md);padding:11px 13px;margin:10px 0 4px;font-size:12.5px;line-height:1.5}
@@ -5375,18 +5378,22 @@ function winBackup(){openWin("__nasbak","Бэкап главного NAS",(body,
   g("#oTest").onclick=async()=>{toast("Проверяю связь…");const t=await nbP("/api/backup/test");toast(t&&t.ok?"✓ связь работает":("✗ "+((t&&t.log)||"нет связи")));};
  }
 
- function tabHistory(tc){tc.innerHTML=`<h3 class="set-title">История прогонов</h3><p class="set-sub">Последние запуски бэкапа: когда, сколько шёл, что передано.</p><div id="hList"><div class="set-load">загрузка…</div></div>`;
-  nbG("/api/backup/history").then(r=>{const list=(r&&r.history)||[],box=tc.querySelector("#hList");if(!box)return;
-   if(!list.length){box.innerHTML=`<div class="mon-note">Пока пусто — история появится после первого прогона.</div>`;return;}
+ function tabHistory(tc){tc.innerHTML=`<div class="set-titrow"><h3 class="set-title" style="margin:0">История прогонов</h3><button class="btn sm" id="hClear" style="display:none">${svg("trash",13)} Очистить</button></div><p class="set-sub">Последние запуски бэкапа: когда, сколько шёл, что передано.</p><div id="hList"><div class="set-load">загрузка…</div></div>`;
    const dur=s=>{s=+s||0;return s<60?s+" с":s<3600?Math.floor(s/60)+" мин "+(s%60)+" с":Math.floor(s/3600)+" ч "+Math.floor(s%3600/60)+" мин";};
-   box.innerHTML="";
-   list.forEach(run=>{const ok=(run.jobs||[]).filter(x=>x.ok).length,tot=(run.jobs||[]).length;
-    const bad=run.result!=="ok";
-    const head=el(`<div class="nb-hrun"><span class="ovh-dot" style="background:${bad?"var(--warn)":"var(--good)"};flex:none"></span><span class="nb-hdate">${fmDate(run.ts)}</span><span class="nb-hmeta mono">${ok}/${tot} · ${esc(dur(run.dur))}</span></div>`);
-    box.appendChild(head);
-    (run.jobs||[]).forEach(j=>{const line=(j.code===25)?"остановлено защитой":((j.xfer||0)+" файлов · "+fmtB(j.xfer_bytes||0)+(j.deleted?(" · удалено "+j.deleted):""));
-     box.appendChild(el(`<div class="nb-hjob"><span class="ovh-dot" style="background:${j.ok?"var(--good)":"var(--danger)"};flex:none"></span><span class="nb-src mono" title="${att(j.src)}">${esc(j.src)}</span><span class="nb-hjm mono">${esc(line)}</span></div>`));});
-   });});}
+   const draw=list=>{const box=tc.querySelector("#hList");if(!box)return;
+    const clr=tc.querySelector("#hClear");if(clr)clr.style.display=list.length?"":"none";
+    if(!list.length){box.innerHTML=`<div class="mon-note">Пока пусто — история появится после первого прогона.</div>`;return;}
+    box.innerHTML="";
+    list.forEach(run=>{const ok=(run.jobs||[]).filter(x=>x.ok).length,tot=(run.jobs||[]).length;
+     const bad=run.result!=="ok";
+     const head=el(`<div class="nb-hrun"><span class="ovh-dot" style="background:${bad?"var(--warn)":"var(--good)"};flex:none"></span><span class="nb-hdate">${fmDate(run.ts)}</span><span class="nb-hmeta mono">${ok}/${tot} · ${esc(dur(run.dur))}</span><button class="iconbtn nb-hdel" title="Удалить запись">${svg("x",13)}</button></div>`);
+     head.querySelector(".nb-hdel").onclick=async()=>{const r=await nbP("/api/backup/history-del",{ts:run.ts});draw((r&&r.history)||[]);};
+     box.appendChild(head);
+     (run.jobs||[]).forEach(j=>{const line=(j.code===25)?"остановлено защитой":((j.xfer||0)+" файлов · "+fmtB(j.xfer_bytes||0)+(j.deleted?(" · удалено "+j.deleted):""));
+      box.appendChild(el(`<div class="nb-hjob"><span class="ovh-dot" style="background:${j.ok?"var(--good)":"var(--danger)"};flex:none"></span><span class="nb-src mono" title="${att(j.src)}">${esc(j.src)}</span><span class="nb-hjm mono">${esc(line)}</span></div>`));});
+    });};
+   const cb=tc.querySelector("#hClear");if(cb)cb.onclick=()=>confirmDlg("Очистить историю?","Все записи истории этого профиля будут удалены. Сами бэкапы не тронутся.",async()=>{const r=await nbP("/api/backup/history-del",{all:true});draw((r&&r.history)||[]);},true);
+   nbG("/api/backup/history").then(r=>draw((r&&r.history)||[]));}
  const TABS={overview:tabOverview,conn:tabConn,sources:tabSources,deleted:tabDeleted,sched:tabSched,history:tabHistory};
  /* ── профили: полоса вкладок ── */
  const curProf=()=>PROFS.find(x=>x.id===NB_PID)||PROFS[0]||{};
