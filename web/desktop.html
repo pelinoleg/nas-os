@@ -500,7 +500,10 @@
   .dock button:hover{transform:translateY(-4px)}
   .dock button:hover .dl{color:var(--text)}
   .dock .di{position:relative;width:calc(40px*var(--dock-icon,1));height:calc(40px*var(--dock-icon,1));border-radius:13px;display:grid;place-items:center}
-  .dock .di svg{width:calc(22px*var(--dock-icon,1));height:calc(22px*var(--dock-icon,1))}
+  .dock .di svg{width:calc(26px*var(--dock-icon,1));height:calc(26px*var(--dock-icon,1))}
+  /* an icon that IS the tile (Files): no square behind it, glyph fills the box */
+  .dock .di.di-bare{background:none!important;box-shadow:none!important}
+  .dock .di.di-bare svg{width:100%;height:100%}
   .dock .dl{font-size:10px;font-weight:560;color:var(--dim);white-space:nowrap;letter-spacing:-.01em;max-width:66px;overflow:hidden;text-overflow:ellipsis}
   /* индикатор запущенного приложения — снизу по центру, читаем на любом фоне дока */
   .dock .run{position:absolute;left:50%;bottom:-3px;transform:translateX(-50%);width:5px;height:5px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 1.5px var(--dock-bg,var(--glass-2))}
@@ -1624,8 +1627,11 @@
   /* здоровье в трее: цветная иконка сердца, при «плохо» — мягкий пульс */
   #healthBtn.mbh-bad{animation:mbhpulse 1.8s ease-in-out infinite}
   @keyframes mbhpulse{0%,100%{opacity:1}50%{opacity:.4}}
-  .mbpop{min-width:324px;max-width:384px;padding:7px}
-  .mbp-h{font-size:12.5px;font-weight:700;padding:5px 6px 6px 10px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--line);margin-bottom:5px}
+  /* bar popovers: hairline edge + a thin light line on top (elevation is a translucent
+     white layer over the material, never a lighter fill), roomier padding */
+  .mbpop{min-width:324px;max-width:384px;padding:8px;border-radius:var(--r-lg);
+    border:1px solid var(--line-2);box-shadow:var(--sh),inset 0 1px 0 rgba(255,255,255,.07)}
+  .mbp-h{font-size:12.5px;font-weight:700;padding:6px 6px 8px 10px;display:flex;align-items:center;gap:8px;border-bottom:1px solid var(--line);margin-bottom:6px}
   .mbp-hb{border:none;background:transparent;color:var(--dim);cursor:pointer;padding:5px;border-radius:8px;display:flex;flex:none;transition:.12s}
   .mbp-hb:hover{color:var(--text);background:var(--sel);box-shadow:var(--sh-sm)}
   /* внутри .menu общий стиль кнопок растягивает на 100% — возвращаем компактность */
@@ -1640,11 +1646,16 @@
   .nico.ok{background:var(--good-soft);color:var(--good)}
   .nico.warn{background:var(--warn-soft);color:var(--warn)}
   .nico.crit{background:var(--danger-soft);color:var(--danger);box-shadow:0 0 0 1px var(--danger)}
-  .mbp-row{display:flex;gap:9px;padding:7px 10px;border-radius:9px;align-items:flex-start;cursor:pointer}
+  .mbp-row{display:flex;gap:9px;padding:8px 10px;border-radius:10px;align-items:flex-start;cursor:pointer;transition:background .12s}
+  .mbp-row+.mbp-row{margin-top:2px}
   .mbp-row:hover{background:var(--sel)}
+  /* «новые» события: акцентный рант + тонкое кольцо. Одной бледной заливки мало —
+     на стеклянном фоне она почти не видна, а соседние подсвеченные строки стояли
+     вплотную и сливались в один блок. */
+  .mbp-row.new,.mbp-row.new:hover{box-shadow:inset 3px 0 0 var(--accent),inset 0 0 0 1px var(--accent-line)}
   .mbp-row.new{background:var(--accent-soft)}
   .mbp-row.new:hover{background:var(--sel)}
-  .nt-row.new{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent)}
+  .nt-row.new{background:var(--accent-soft);box-shadow:inset 3px 0 0 var(--accent),inset 0 0 0 1px var(--accent-line)}
   .ndot{width:8px;height:8px;border-radius:50%;margin-top:4px;flex:none}
   .ndot.crit{background:var(--danger);box-shadow:0 0 0 3px var(--danger-soft)}
   .ndot.warn{background:var(--warn)}.ndot.ok{background:var(--good)}.ndot.info{background:var(--accent-2)}
@@ -1817,6 +1828,26 @@ const P={
 };
 const svg=(n,s)=>`<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${P[n]||""}</svg>`;
 const I=new Proxy({},{get:(_,n)=>svg(n,22)});
+
+/* App icons for dock tiles. A separate, filled two-tone pack: the stroke set above
+   is for UI buttons and makes every app look the same on a coloured tile.
+   fill=currentColor so the flat dock (no tile) still gets a readable glyph. */
+const AP={
+ sys:'<g opacity=".5"><rect x="8.3" y="1.5" width="1.8" height="3.0" rx=".9"/><rect x="11.1" y="1.5" width="1.8" height="3.0" rx=".9"/><rect x="13.9" y="1.5" width="1.8" height="3.0" rx=".9"/><rect x="8.3" y="19.5" width="1.8" height="3.0" rx=".9"/><rect x="11.1" y="19.5" width="1.8" height="3.0" rx=".9"/><rect x="13.9" y="19.5" width="1.8" height="3.0" rx=".9"/><rect x="1.5" y="8.3" width="3.0" height="1.8" rx=".9"/><rect x="1.5" y="11.1" width="3.0" height="1.8" rx=".9"/><rect x="1.5" y="13.9" width="3.0" height="1.8" rx=".9"/><rect x="19.5" y="8.3" width="3.0" height="1.8" rx=".9"/><rect x="19.5" y="11.1" width="3.0" height="1.8" rx=".9"/><rect x="19.5" y="13.9" width="3.0" height="1.8" rx=".9"/></g><path fill-rule="evenodd" d="M6.4 4.2h11.2a2.2 2.2 0 0 1 2.2 2.2v11.2a2.2 2.2 0 0 1-2.2 2.2H6.4a2.2 2.2 0 0 1-2.2-2.2V6.4a2.2 2.2 0 0 1 2.2-2.2Zm3.3 4a1.5 1.5 0 0 0-1.5 1.5v4.6a1.5 1.5 0 0 0 1.5 1.5h4.6a1.5 1.5 0 0 0 1.5-1.5V9.7a1.5 1.5 0 0 0-1.5-1.5H9.7Z"/>',
+ disks:'<ellipse cx="12" cy="6.4" rx="8" ry="3.1" opacity=".45"/><path d="M4 9.1v3c0 1.7 3.6 3.1 8 3.1s8-1.4 8-3.1v-3c0 1.7-3.6 3.1-8 3.1S4 10.8 4 9.1Z" opacity=".7"/><path d="M4 14.6v3c0 1.7 3.6 3.1 8 3.1s8-1.4 8-3.1v-3c0 1.7-3.6 3.1-8 3.1s-8-1.4-8-3.1Z"/>',
+ whale:'<path d="M13.983 11.078h2.119a.186.186 0 00.186-.185V9.006a.186.186 0 00-.186-.186h-2.119a.185.185 0 00-.185.185v1.888c0 .102.083.185.185.185m-2.954-5.43h2.118a.186.186 0 00.186-.186V3.574a.186.186 0 00-.186-.185h-2.118a.185.185 0 00-.185.185v1.888c0 .102.082.185.185.185m0 2.716h2.118a.187.187 0 00.186-.186V6.29a.186.186 0 00-.186-.185h-2.118a.185.185 0 00-.185.185v1.887c0 .102.082.185.185.186m-2.93 0h2.12a.186.186 0 00.184-.186V6.29a.185.185 0 00-.185-.185H8.1a.185.185 0 00-.185.185v1.887c0 .102.083.185.185.186m-2.964 0h2.119a.186.186 0 00.185-.186V6.29a.185.185 0 00-.185-.185H5.136a.186.186 0 00-.186.185v1.887c0 .102.084.185.186.186m5.893 2.715h2.118a.186.186 0 00.186-.185V9.006a.186.186 0 00-.186-.186h-2.118a.185.185 0 00-.185.185v1.888c0 .102.082.185.185.185m-2.93 0h2.12a.185.185 0 00.184-.185V9.006a.185.185 0 00-.184-.186h-2.12a.185.185 0 00-.184.185v1.888c0 .102.083.185.185.185m-2.964 0h2.119a.185.185 0 00.185-.185V9.006a.185.185 0 00-.184-.186h-2.12a.186.186 0 00-.186.186v1.887c0 .102.084.185.186.185m-2.92 0h2.12a.185.185 0 00.184-.185V9.006a.185.185 0 00-.184-.186h-2.12a.185.185 0 00-.184.185v1.888c0 .102.082.185.185.185M23.763 9.89c-.065-.051-.672-.51-1.954-.51-.338.001-.676.03-1.01.087-.248-1.7-1.653-2.53-1.716-2.566l-.344-.199-.226.327c-.284.438-.49.922-.612 1.43-.23.97-.09 1.882.403 2.661-.595.332-1.55.413-1.744.42H.751a.751.751 0 00-.75.748 11.376 11.376 0 00.692 4.062c.545 1.428 1.355 2.48 2.41 3.124 1.18.723 3.1 1.137 5.275 1.137.983.003 1.963-.086 2.93-.266a12.248 12.248 0 003.823-1.389c.98-.567 1.86-1.288 2.61-2.136 1.252-1.418 1.998-2.997 2.553-4.4h.221c1.372 0 2.215-.549 2.68-1.009.309-.293.55-.65.707-1.046l.098-.288Z"/>',
+ clockf:'<circle cx="12" cy="12" r="9" opacity=".45"/><path d="M12 6.3a1.2 1.2 0 0 1 1.2 1.2v4l2.9 1.7a1.2 1.2 0 1 1-1.2 2.1l-3.5-2a1.2 1.2 0 0 1-.6-1.1V7.5A1.2 1.2 0 0 1 12 6.3Z"/>',
+ termw:'<rect x="2.4" y="3.8" width="19.2" height="16.4" rx="3.2" opacity=".45"/><path d="M6.6 9a1.3 1.3 0 0 1 1.8 0l2.7 2.7a1.3 1.3 0 0 1 0 1.8l-2.7 2.7a1.3 1.3 0 1 1-1.8-1.8l1.8-1.8-1.8-1.8A1.3 1.3 0 0 1 6.6 9Z"/><rect x="12.4" y="14.6" width="5.6" height="2.4" rx="1.2"/>',
+ folderc:'<path fill="#D98E1F" d="M1.6 6.2a2.6 2.6 0 0 1 2.6-2.6h5.2a2.2 2.2 0 0 1 1.8.9l1.6 2.2h6.8a2.6 2.6 0 0 1 2.6 2.6v9.1a2.6 2.6 0 0 1-2.6 2.6H4.2a2.6 2.6 0 0 1-2.6-2.6V6.2Z"/><path fill="#FFC24B" d="M4.4 8.9h15.2a2.4 2.4 0 0 1 2.4 2.4v7.1a2.6 2.6 0 0 1-2.6 2.6H4.6A2.6 2.6 0 0 1 2 18.4v-7.1a2.4 2.4 0 0 1 2.4-2.4Z"/><path fill="#FFF" opacity=".22" d="M4.4 8.9h15.2a2.4 2.4 0 0 1 2.4 2.4v.5a2.4 2.4 0 0 0-2.4-2.4H4.4A2.4 2.4 0 0 0 2 11.8v-.5a2.4 2.4 0 0 1 2.4-2.4Z"/>',
+ donut:'<path fill-rule="evenodd" opacity=".45" d="M12 3a9 9 0 1 1 0 18 9 9 0 0 1 0-18Zm0 3.6a5.4 5.4 0 1 0 0 10.8 5.4 5.4 0 0 0 0-10.8Z"/><path d="M12.9 3a9 9 0 0 1 8.1 8.1h-4.6a4.5 4.5 0 0 0-3.5-3.5V3Z"/>',
+ backup:'<path d="M3.82 9.02A8.7 8.7 0 0 1 20.67 11.24L18.28 11.45A6.3 6.3 0 0 0 6.08 9.85ZM22.96 11.04L19.39 13.30L15.98 11.65Z"/><path opacity=".55" d="M20.18 14.98A8.7 8.7 0 0 1 3.33 12.76L5.72 12.55A6.3 6.3 0 0 0 17.92 14.15ZM1.04 12.96L4.61 10.70L8.02 12.35Z"/>',
+ keyf:'<path fill-rule="evenodd" opacity=".5" d="M8.8 3.6a5.2 5.2 0 1 1 0 10.4 5.2 5.2 0 0 1 0-10.4Zm0 2.9a2.3 2.3 0 1 0 0 4.6 2.3 2.3 0 0 0 0-4.6Z"/><path d="m12.3 11.4 1.9-1.9 7.4 7.4a1.3 1.3 0 0 1 0 1.9l-.7.7a1.3 1.3 0 0 1-1.9 0l-.8-.8-1.5 1.5-1.9-1.9 1.5-1.5-1.3-1.3-1.3 1.3-1.9-1.9 1.3-1.3-.8-.8Z"/>',
+ trashf:'<path opacity=".5" d="M9.7 3h4.6a1.5 1.5 0 0 1 1.5 1.5V5h3.6a1.2 1.2 0 0 1 0 2.5H4.6a1.2 1.2 0 0 1 0-2.5h3.6v-.5A1.5 1.5 0 0 1 9.7 3Z"/><path d="M5.6 8.9h12.8l-.8 10.1A2.4 2.4 0 0 1 15.2 21H8.8a2.4 2.4 0 0 1-2.4-2L5.6 8.9Z"/>',
+ gearf:'<g opacity=".5"><rect x="10.75" y="1.4" width="2.5" height="4.6" rx="1.25" transform="rotate(0 12 12)"/><rect x="10.75" y="1.4" width="2.5" height="4.6" rx="1.25" transform="rotate(45 12 12)"/><rect x="10.75" y="1.4" width="2.5" height="4.6" rx="1.25" transform="rotate(90 12 12)"/><rect x="10.75" y="1.4" width="2.5" height="4.6" rx="1.25" transform="rotate(135 12 12)"/><rect x="10.75" y="1.4" width="2.5" height="4.6" rx="1.25" transform="rotate(180 12 12)"/><rect x="10.75" y="1.4" width="2.5" height="4.6" rx="1.25" transform="rotate(225 12 12)"/><rect x="10.75" y="1.4" width="2.5" height="4.6" rx="1.25" transform="rotate(270 12 12)"/><rect x="10.75" y="1.4" width="2.5" height="4.6" rx="1.25" transform="rotate(315 12 12)"/></g><path fill-rule="evenodd" d="M12 4.6a7.4 7.4 0 1 1 0 14.8 7.4 7.4 0 0 1 0-14.8Zm0 4.3a3.1 3.1 0 1 0 0 6.2 3.1 3.1 0 0 0 0-6.2Z"/>',
+ wandf:'<path d="M4.9 20.8a1.7 1.7 0 0 1 0-2.4L14.6 8.7a1.7 1.7 0 0 1 2.4 2.4L7.3 20.8a1.7 1.7 0 0 1-2.4 0Z"/><g opacity=".55"><path d="M18.4 2.6a.4.4 0 0 1 .8 0l.5 1.7 1.7.5a.4.4 0 0 1 0 .8l-1.7.5-.5 1.7a.4.4 0 0 1-.8 0l-.5-1.7-1.7-.5a.4.4 0 0 1 0-.8l1.7-.5Z"/><path d="M12.6 2.2a.3.3 0 0 1 .6 0l.35 1.2 1.2.35a.3.3 0 0 1 0 .6l-1.2.35-.35 1.2a.3.3 0 0 1-.6 0l-.35-1.2-1.2-.35a.3.3 0 0 1 0-.6l1.2-.35Z"/><path d="M20.6 10.4a.3.3 0 0 1 .6 0l.35 1.2 1.2.35a.3.3 0 0 1 0 .6l-1.2.35-.35 1.2a.3.3 0 0 1-.6 0l-.35-1.2-1.2-.35a.3.3 0 0 1 0-.6l1.2-.35Z"/></g>',
+ dash:'<rect x="3.4" y="3.4" width="8" height="8" rx="2.2"/><rect x="12.6" y="12.6" width="8" height="8" rx="2.2"/><rect x="12.6" y="3.4" width="8" height="8" rx="2.2" opacity=".5"/><rect x="3.4" y="12.6" width="8" height="8" rx="2.2" opacity=".5"/>',
+};
+const appIcon=(n,s=22)=>AP[n]?`<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="currentColor" stroke="none">${AP[n]}</svg>`:svg(n,s);
 
 /* catalog */
 /* Cockpit — единственный системный сервис с фикс-портом (не docker-контейнер) */
@@ -2413,18 +2444,18 @@ let APPS=[],APPS_LOADED=false;   // ярлыки из docker-лейблов web-
 let VOLS=[];   // тома вне пула (USB/свободные диски) — ярлыки на столе + сайдбар ФМ
 let NB_RUNNING=false;   // идёт ли бэкап главного NAS (индикатор на иконке дока)
 const INTERNAL=[
- {id:"__sys",name:"Система",color:"linear-gradient(135deg,#34C6BE,#2C9C9C)",ic:"gauge",fn:()=>winSystem()},
+ {id:"__sys",name:"Система",color:"linear-gradient(135deg,#34C6BE,#2C9C9C)",ic:"sys",fn:()=>winSystem()},
  {id:"__disks",name:"Диски",color:"linear-gradient(135deg,#e5544e,#c2403a)",ic:"disks",fn:()=>winDisks()},
- {id:"__services",name:"Docker",color:"linear-gradient(135deg,#4b7bec,#3a63c9)",ic:"cube",fn:()=>winServices()},
- {id:"__cron",name:"Cron",color:"linear-gradient(135deg,#6d7cff,#4b57d6)",ic:"clock",fn:()=>winCron()},
- {id:"__term",name:"Терминал",color:"linear-gradient(135deg,#2b3444,#1a2230)",ic:"term",fn:()=>winTerminal()},
- {id:"__files",name:"Файлы",color:"linear-gradient(135deg,#8a7dff,#6a5de0)",ic:"folder",fn:()=>winFiles()},
- {id:"__duscan",name:"Анализ места",color:"linear-gradient(135deg,#33BE86,#2a9d6e)",ic:"chartpie",fn:()=>winDiskUsage()},
- {id:"__nasbak",name:"Бэкап NAS",color:"linear-gradient(135deg,#2f9d70,#1f7d78)",ic:"sync",fn:()=>winBackup()},
- {id:"__vault",name:"Доступы",color:"linear-gradient(135deg,#e0913c,#c96f22)",ic:"key",fn:()=>winVault()},
- {id:"__trash",name:"Корзина",color:"linear-gradient(135deg,#8592a6,#5f6b7d)",ic:"trash",fn:()=>winTrash()},
- {id:"__set",name:"Настройки",color:"linear-gradient(135deg,#7183a0,#55647d)",ic:"cog",fn:()=>winSettings()},
- {id:"__wiz",name:"Мастер",color:"linear-gradient(135deg,#46B98A,#2f9d70)",ic:"wand",fn:()=>location.href="/setup.html"},
+ {id:"__services",name:"Docker",color:"linear-gradient(135deg,#3aa0f0,#1d76c9)",ic:"whale",fn:()=>winServices()},
+ {id:"__cron",name:"Cron",color:"linear-gradient(135deg,#6d7cff,#4b57d6)",ic:"clockf",fn:()=>winCron()},
+ {id:"__term",name:"Терминал",color:"linear-gradient(135deg,#2b3444,#1a2230)",ic:"termw",fn:()=>winTerminal()},
+ {id:"__files",name:"Файлы",color:"linear-gradient(135deg,#FFC24B,#F0A128)",ic:"folderc",bare:1,fn:()=>winFiles()},
+ {id:"__duscan",name:"Анализ места",color:"linear-gradient(135deg,#33BE86,#2a9d6e)",ic:"donut",fn:()=>winDiskUsage()},
+ {id:"__nasbak",name:"Бэкап NAS",color:"linear-gradient(135deg,#2f9d70,#1f7d78)",ic:"backup",fn:()=>winBackup()},
+ {id:"__vault",name:"Доступы",color:"linear-gradient(135deg,#e0913c,#c96f22)",ic:"keyf",fn:()=>winVault()},
+ {id:"__trash",name:"Корзина",color:"linear-gradient(135deg,#8592a6,#5f6b7d)",ic:"trashf",fn:()=>winTrash()},
+ {id:"__set",name:"Настройки",color:"linear-gradient(135deg,#7183a0,#55647d)",ic:"gearf",fn:()=>winSettings()},
+ {id:"__wiz",name:"Мастер",color:"linear-gradient(135deg,#46B98A,#2f9d70)",ic:"wandf",fn:()=>location.href="/setup.html"},
 ];
 function renderApps(){
  const box=document.getElementById("apps");box.innerHTML="";
@@ -2491,8 +2522,8 @@ async function nbDockMenu(x,y){
  if(it.length&&it[it.length-1].sep)it.pop();
  showMenu(x,y,it);}
 function dockItems(){
- const base=INTERNAL.map(a=>({id:a.id,ic:a.ic,color:a.color,name:a.name,fn:a.fn}));
- base.push({id:"__cockpit",ic:"grid",color:"linear-gradient(135deg,#4b7bec,#3a63c9)",name:"Cockpit",fn:()=>window.open(cockpitURL(),"_blank")});
+ const base=INTERNAL.map(a=>({id:a.id,ic:a.ic,color:a.color,name:a.name,fn:a.fn,bare:a.bare}));
+ base.push({id:"__cockpit",ic:"dash",color:"linear-gradient(135deg,#4b7bec,#3a63c9)",name:"Cockpit",fn:()=>window.open(cockpitURL(),"_blank")});
  const byId={};base.forEach(b=>byId[b.id]=b);
  const order=(SET.dockOrder&&SET.dockOrder.length)?SET.dockOrder:base.map(b=>b.id);
  const out=[];order.forEach(id=>{if(byId[id]){out.push(byId[id]);delete byId[id];}});
@@ -2506,7 +2537,7 @@ function dockDragAfter(d,x,y){const vert=(SET.dockPos==="left"||SET.dockPos==="r
  return best;}
 function renderDock(){
  const d=document.getElementById("dock");if(!d)return;d.innerHTML="";
- dockItems().forEach(a=>{const busy=a.id==="__nasbak"&&NB_RUNNING;const b=el(`<button title="${esc(a.name)}${busy?" — идёт бэкап":""}" draggable="true" data-did="${a.id}"><span class="di${busy?" di-busy":""}" style="background:${a.color}">${I[a.ic]}${OPEN[a.id]?'<span class="run"></span>':''}${busy?'<span class="di-spin"></span>':''}</span><span class="dl">${esc(a.name)}</span></button>`);
+ dockItems().forEach(a=>{const busy=a.id==="__nasbak"&&NB_RUNNING;const b=el(`<button title="${esc(a.name)}${busy?" — идёт бэкап":""}" draggable="true" data-did="${a.id}"><span class="di${busy?" di-busy":""}${a.bare?" di-bare":""}"${a.bare?"":` style="background:${a.color}"`}>${appIcon(a.ic)}${OPEN[a.id]?'<span class="run"></span>':''}${busy?'<span class="di-spin"></span>':''}</span><span class="dl">${esc(a.name)}</span></button>`);
   b.onclick=a.fn;
   if(a.id==="__nasbak")b.oncontextmenu=e=>{e.preventDefault();nbDockMenu(e.clientX,e.clientY);};
   else if(OPEN[a.id])b.oncontextmenu=e=>{e.preventDefault();winCtxMenu(a.id,e.clientX,e.clientY);};
