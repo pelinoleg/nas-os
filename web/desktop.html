@@ -5428,7 +5428,7 @@ function winSettings(initTab){openWin("__set","Настройки",body=>{
    +`<div class="set-main"><div class="set-pane" id="tc"></div><div class="set-foot" id="tf"></div></div>`;
   body.querySelectorAll(".set-nav button").forEach(b=>b.onclick=()=>{tab=b.dataset.t;render();});
   winSettings._render=render;
-  FN[tab](body.querySelector("#tc"));
+  FN[tab](body.querySelector("#tc"));cardify(body.querySelector("#tc"));  // блочный вид (sync-вкладки; withSysc сам)
   footMo=setFootAdopt(body.querySelector("#tc"),body.querySelector("#tf"));
  };
  render();
@@ -5475,7 +5475,23 @@ document.addEventListener("scroll",hideTip,true);
 document.addEventListener("pointerdown",hideTip,true);
 window.addEventListener("blur",hideTip);
 /* --- settings helpers --- */
-function withSysc(tc,fn){if(SYSC){fn();return;}tc.innerHTML=`<div class="set-load">загрузка состояния системы…</div>`;api("/api/sysconf").then(r=>{SYSC=r||{};fn();});}
+/* Единый блочный вид: секции-заголовки .set-h + их строки заворачиваем в карточки
+   .set-card (как в «Файлах»), чтобы настройки не были сплошной стеной. Идемпотентно:
+   уже карточную вкладку и вкладку без .set-h не трогает. Репарент сохраняет
+   обработчики, а вся привязка идёт по id (querySelector) — от вложенности не зависит. */
+function cardify(tc){
+ // пропускаем: уже карточные, вкладку событий (sticky-таблица .ev-cols)
+ if(!tc||tc.querySelector(".set-card")||tc.querySelector(".ev-cols"))return;
+ if(!tc.querySelector(".set-h")&&!tc.querySelector(".set-grp"))return;   // нет секций-заголовков
+ let card=null;
+ [...tc.children].forEach(k=>{const c=k.classList;
+  if(c.contains("set-title")||c.contains("set-sub")||c.contains("set-savebar")||c.contains("rban")){card=null;return;}
+  if(c.contains("set-h")||c.contains("set-grp")){                       // начало секции → новая карта
+   card=document.createElement("div");card.className="set-card";c.remove("set-h");c.add("set-grp");
+   tc.insertBefore(card,k);card.appendChild(k);return;}
+  if(card)card.appendChild(k);});
+}
+function withSysc(tc,fn){if(SYSC){fn();cardify(tc);return;}tc.innerHTML=`<div class="set-load">загрузка состояния системы…</div>`;api("/api/sysconf").then(r=>{SYSC=r||{};fn();cardify(tc);});}
 function rerSet(){if(winSettings._render)winSettings._render();}
 function refreshSysc(cb){api("/api/sysconf").then(r=>{SYSC=r||{};cb&&cb();});}
 async function sconf(key,value,extra){const r=await api("/api/sysconf",{method:"POST",body:JSON.stringify({key,value,extra})});if(r&&r.reboot)PENDING_REBOOT=true;toast(LIVE?(r&&r.ok?"✓ "+((r&&r.log)||"готово"):"Ошибка: "+((r&&r.log)||"?")):"Демо-режим");return r;}
@@ -5973,10 +5989,13 @@ function networkTab(tc){withSysc(tc,()=>{const n=SYSC.network||{};const manual=n
 function securityTab(tc){withSysc(tc,()=>{const s=SYSC.security||{};const u=s.ufw||{};
  tc.innerHTML=`${rebootBan()}
   <h3 class="set-title">Безопасность</h3><p class="set-sub">Межсетевой экран, защита от подбора паролей, логи.</p>
+  <div class="set-h">Межсетевой экран</div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Межсетевой экран (UFW)${tipHTML("Закрывает все входящие порты кроме разрешённых (SSH, Cockpit 9090, шары). Включение сначала открывает SSH, чтобы не заблокировать вас. Внимание: docker публикует порты в обход UFW.")}</div><div class="srow-d">${u.active?"активен · порты: "+((u.ports||[]).join(", ")||"—"):"выключен"}</div></div><div class="srow-c">${u.active?'<span class="sbadge ok">активен</span>':(u.installed?'<span class="sbadge off">выкл</span>':'<span class="sbadge na">не установлен</span>')}<label class="tgl"><input type="checkbox" data-sc="ufw"${u.active?" checked":""}><span class="sl"></span></label></div></div>
   ${u.active?`<div id="ufwPorts" style="margin:6px 0 4px"></div>`:""}
+  <div class="set-h">Защита от подбора паролей</div>
   ${svcRow("Защита от подбора паролей (fail2ban)","Банит IP после нескольких неудачных входов по SSH. Базовая защита от брутфорса, особенно если сервер доступен извне.","fail2ban",s.fail2ban,"бан IP после неудачных входов SSH")}
   ${(s.fail2ban&&s.fail2ban.installed)?`<div id="f2bBox" style="margin:2px 0 4px"></div>`:""}
+  <div class="set-h">Логи</div>
   ${svcRow("Логи в ОЗУ (log2ram)","Держит /var/log в RAM и сбрасывает на диск по таймеру — меньше износ SD-карты от постоянной записи логов.","log2ram",s.log2ram,"бережёт SD-карту от износа логами")}
   <div class="mon-note">Вход по SSH-ключу, смена порта и удалённый доступ (Tailscale) вынесены отдельно — здесь пока не настраиваются.</div>`;
  wireSc(tc);
@@ -6389,7 +6408,9 @@ function poolRow(u,ndata,nparity){
    <div class="capbar"><span class="used" style="width:${pct}%;background:${barCol(u.pct)}"></span></div>
    <div class="dp-free2">${fmtB(free)} свободно · ${fmtB(u.total)}</div></div>`;}
 function paintDiskWidget(disks){const box=document.getElementById("wg-disk");if(!box)return;
- const arr=(disks||[]).slice().sort((a,b)=>roleRank(a.role)-roleRank(b.role));
+ // в виджете показываем только реально смонтированное — пустые слоты/не смонтированные
+ // (напр. картридер MassStorageClass) лишь занимают место; всё видно в окне «Хранилище»
+ const arr=(disks||[]).filter(d=>d.mounted&&!d.no_media).slice().sort((a,b)=>roleRank(a.role)-roleRank(b.role));
  const temps=arr.map(d=>d.smart&&d.smart.temp).filter(t=>t!=null);
  DISK_TEMP_MAX=temps.length?Math.max(...temps):null;   // виджет «Система» подхватит на своём тике (paintSys каждые 3с)
  let h="";

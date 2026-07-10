@@ -8335,6 +8335,12 @@ class H(BaseHTTPRequestHandler):
             try:
                 if os.geteuid() == 0:      # если сервер root — уронить права до пользователя
                     u = pwd.getpwnam(TARGET_USER)
+                    # initgroups до setuid: иначе shell без вспомогательных групп (video,
+                    # docker, gpio…) и падает vcgencmd/docker без sudo. setgid ПОСЛЕ.
+                    try:
+                        os.initgroups(TARGET_USER, u.pw_gid)
+                    except OSError:
+                        pass
                     os.setgid(u.pw_gid); os.setuid(u.pw_uid)
                     os.environ.update(HOME=u.pw_dir, USER=TARGET_USER, LOGNAME=TARGET_USER)
             except (KeyError, OSError):
