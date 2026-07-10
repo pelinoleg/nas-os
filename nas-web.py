@@ -3482,6 +3482,57 @@ _BK_NAME_RE = re.compile(r"^nas-settings-[\w.-]+\.tar\.gz$")
 # archive-префикс → (источник, восстанавливать ли автоматически)
 _BK_EXCLUDE = ("events.json", "history.json", "history-long.json", "sessions.json")
 
+# Разделы выборочного восстановления: (ключ, название, секрет?, префиксы в архиве).
+# Порядок значим дважды: он же порядок в диалоге, и раздел файла — ПЕРВЫЙ
+# совпавший префикс (иначе "etc/nas-wizard/" из maint проглотил бы notify.conf).
+# Секретные разделы в диалоге по умолчанию сняты: восстановление старого архива
+# не должно молча подменить пароль входа тем, что был полгода назад.
+_BK_SECTIONS = (
+    ("desktop",   "Рабочий стол",              False, ("nas-config/desktop.json", "nas-config/winpos.json",
+                                                       "nas-config/wallpaper.", "nas-config/fm-favorites.json",
+                                                       "nas-config/icons/")),
+    ("notify",    "Уведомления",               False, ("nas-config/monitor.json", "etc/nas-wizard/notify.conf")),
+    ("maint",     "Обслуживание и расписания", False, ("nas-config/maintenance.json", "etc/nas-wizard/")),
+    ("samba",     "Общие папки (Samba)",       False, ("etc/samba/", "var/lib/samba/")),
+    ("stacks",    "Docker-стеки",              False, ("opt/stacks/",)),
+    ("disks",     "Диски и пул",               False, ("nas-config/fstab.",)),
+    ("webauth",   "Пароль панели",             True,  ("etc/nas-os/webauth.json",)),
+    ("nasbackup", "Бэкап главного NAS",        True,  ("etc/nas-os/nas-backup.json", "nas-config/nas-backup-")),
+    ("other",     "Прочее",                    False, ()),      # всё, что не подошло выше
+)
+
+def _bk_section(nm):
+    for key, _title, _secret, prefixes in _BK_SECTIONS:
+        for p in prefixes:
+            if nm.startswith(p):
+                return key
+    return "other"
+
+def _bk_restorable(m, nm):
+    """Члены архива, которые вообще можно восстановить (reference/* — только справка).
+    .git отвергаем и на восстановлении: старые архивы несут его внутри, а разливать
+    чужую историю поверх рабочего репозитория nas-config нельзя."""
+    parts = nm.split("/")
+    return m.isreg() and nm != "manifest.json" and not nm.startswith("reference/") \
+        and ".." not in parts and ".git" not in parts and not nm.startswith("/")
+
+def settings_backup_inspect(path):
+    """Какие разделы есть в архиве — для диалога с чекбоксами."""
+    seen = {}
+    try:
+        with tarfile.open(path, "r:gz") as tar:
+            for m in tar:
+                nm = m.name.lstrip("./")
+                if not _bk_restorable(m, nm):
+                    continue
+                c = seen.setdefault(_bk_section(nm), [0, 0])
+                c[0] += 1; c[1] += m.size
+    except (OSError, tarfile.TarError) as e:
+        return {"ok": False, "log": "плохой архив: %s" % e}
+    return {"ok": True, "sections": [
+        {"key": k, "title": t, "secret": s, "files": seen[k][0], "bytes": seen[k][1]}
+        for k, t, s, _p in _BK_SECTIONS if k in seen]}
+
 def settings_backup_path():
     """Куда складывать бэкап настроек: свой путь из maintenance или дефолт.
     Дефолт — на пуле (переживает переустановку), отдельная папка (не общая «backups»)."""
@@ -3508,15 +3559,22 @@ def _bk_add_file(tar, src, arc):
         pass
     return None
 
+# Пересоздаваемое и нескончаемое: кэш анализатора места, логи прогонов бэкапа,
+# огрызки после сбоя. Каталог .git репозитория nas-config — тем более: он весил
+# больше всех настроек вместе взятых и разливался поверх чужой истории.
+_BK_SKIP_DIRS = (".git",)
+_BK_SKIP_FILE = re.compile(r"^duscan-.+\.json$|\.(log|tmp|bad)$")
+
 def _bk_sources():
     """(src, arcname) всех файлов бэкапа. Каталоги обходим целиком —
     будущие настройки попадут в бэкап автоматически."""
     out = []
     for base, arcroot in ((NAS_CONFIG, "nas-config"), ("/etc/nas-wizard", "etc/nas-wizard")):
         if os.path.isdir(base):
-            for root, _, files in os.walk(base):
+            for root, dirs, files in os.walk(base):
+                dirs[:] = [d for d in dirs if d not in _BK_SKIP_DIRS]
                 for fn in files:
-                    if fn in _BK_EXCLUDE or fn.endswith(".tmp"):
+                    if fn in _BK_EXCLUDE or _BK_SKIP_FILE.search(fn):
                         continue
                     p = os.path.join(root, fn)
                     out.append((p, arcroot + "/" + os.path.relpath(p, base)))
@@ -3591,10 +3649,15 @@ def settings_backup_list():
     return {"ok": True, "dir": d, "days": cfg.get("backup_days", 7),
             "keep": cfg.get("backup_keep", BACKUP_KEEP), "list": out}
 
-def settings_backup_restore(path):
+def settings_backup_restore(path, sections=None):
     """Восстановить из архива. Проверяем каждого члена: только обычные файлы,
-    без ../, только известные префиксы, разумный размер. reference/* не трогаем."""
+    без ../, только известные префиксы, разумный размер. reference/* не трогаем.
+    sections=None — восстановить всё (совместимость со старым клиентом), иначе
+    только перечисленные разделы из _BK_SECTIONS."""
     global _events, _history, _history_long
+    sel = None if sections is None else {s for s in sections if isinstance(s, str)}
+    if sel is not None and not sel:
+        return {"ok": False, "log": "не выбрано ни одного раздела"}
     # префиксы архива → куда восстанавливать (STACKS_DIR определяется ниже по файлу)
     restore_map = [("etc/nas-wizard/", "/etc/nas-wizard"),
                    ("etc/nas-os/webauth.json", "/etc/nas-os/webauth.json"),
@@ -3602,13 +3665,16 @@ def settings_backup_restore(path):
                    ("etc/samba/smb.conf", "/etc/samba/smb.conf"),
                    ("var/lib/samba/private/passdb.tdb", "/var/lib/samba/private/passdb.tdb"),
                    ("opt/stacks/", STACKS_DIR)]
-    restored, skipped = [], []
+    restored, skipped, deselected = [], [], 0
     try:
         with tarfile.open(path, "r:gz") as tar:
             for m in tar:
                 nm = m.name.lstrip("./")
                 if not m.isreg() or ".." in nm.split("/") or nm.startswith("/"):
                     continue
+                # снятый раздел — не ошибка, а осознанный выбор: не в skipped
+                if sel is not None and _bk_restorable(m, nm) and _bk_section(nm) not in sel:
+                    deselected += 1; continue
                 if m.size > 16 * 1024 * 1024:
                     skipped.append(nm); continue
                 dest = None
@@ -3637,7 +3703,8 @@ def settings_backup_restore(path):
     except (OSError, tarfile.TarError) as e:
         return {"ok": False, "log": "плохой архив: %s" % e}
     if not restored:
-        return {"ok": False, "log": "в архиве нет файлов настроек NAS-OS"}
+        return {"ok": False, "log": "в выбранных разделах нет файлов" if deselected
+                else "в архиве нет файлов настроек NAS-OS"}
     # сбросить кэши в памяти, применить сон дисков
     with _events_lock:
         _events = None
@@ -3647,9 +3714,13 @@ def settings_backup_restore(path):
         apply_spindown_all()
     except Exception:
         pass
+    titles = dict((k, t) for k, t, _s, _p in _BK_SECTIONS)
+    what = ("разделы: " + ", ".join(titles[k] for k, _t, _s, _p in _BK_SECTIONS if k in sel)) \
+        if sel is not None else "все разделы"
     try:
         log_event("action", "Настройки восстановлены из бэкапа",
-                  "файлов: %d%s" % (len(restored), (" · пропущено: %d" % len(skipped)) if skipped else ""),
+                  "%s · файлов: %d%s" % (what, len(restored),
+                                         (" · пропущено: %d" % len(skipped)) if skipped else ""),
                   "warn", kind="action", desk=False)
     except Exception:
         pass
@@ -7564,6 +7635,13 @@ class H(BaseHTTPRequestHandler):
                                        (q.get("limit") or ["400"])[0]))
             elif p == "/api/settings-backup":
                 self._json(settings_backup_list())
+            elif p == "/api/settings-backup/inspect":
+                nm = (q.get("name") or [""])[0]
+                fp = os.path.join(settings_backup_dir(), nm)
+                if not _BK_NAME_RE.match(nm) or not os.path.isfile(fp):
+                    self._json({"ok": False, "log": "нет такого бэкапа"}, 404)
+                else:
+                    self._json(settings_backup_inspect(fp))
             elif p == "/api/settings-backup/get":
                 nm = (q.get("name") or [""])[0]
                 fp = os.path.join(settings_backup_dir(), nm)
@@ -7832,7 +7910,9 @@ class H(BaseHTTPRequestHandler):
                 if not _BK_NAME_RE.match(nm) or not os.path.isfile(fp):
                     self._json({"ok": False, "log": "нет такого бэкапа"}, 404)
                 else:
-                    self._json(settings_backup_restore(fp))
+                    secs = b.get("sections")
+                    self._json(settings_backup_restore(
+                        fp, secs if isinstance(secs, list) else None))
             elif p == "/api/settings-backup/delete":
                 b = self._body(); nm = b.get("name", "")
                 fp = os.path.join(settings_backup_dir(), nm)
@@ -7854,12 +7934,25 @@ class H(BaseHTTPRequestHandler):
                             if not chunk:
                                 break
                             f.write(chunk); remaining -= len(chunk)
-                    r = settings_backup_restore(tmp) if remaining == 0 else {"ok": False, "log": "обрыв загрузки"}
-                    try:
-                        os.remove(tmp)
-                    except OSError:
-                        pass
-                    self._json(r)
+                    # Не восстанавливаем сразу: кладём архив в список и отдаём имя,
+                    # чтобы клиент показал тот же диалог выбора разделов. Иначе
+                    # чужой файл молча перезаписал бы пароль панели.
+                    info = settings_backup_inspect(tmp) if remaining == 0 \
+                        else {"ok": False, "log": "обрыв загрузки"}
+                    if not info.get("ok") or not info.get("sections"):
+                        try:
+                            os.remove(tmp)
+                        except OSError:
+                            pass
+                        self._json({"ok": False, "log": info.get("log")
+                                    or "в архиве нет файлов настроек NAS-OS"}, 400)
+                    else:
+                        # дата в имени — чтобы ротация по backup_keep резала по возрасту
+                        name = "nas-settings-%s-up.tar.gz" % time.strftime("%Y%m%d-%H%M%S")
+                        dst = os.path.join(settings_backup_dir(), name)
+                        os.replace(tmp, dst); os.chmod(dst, 0o600)
+                        self._json({"ok": True, "name": name, "sections": info["sections"],
+                                    "log": "архив загружен"})
             elif p == "/api/unit/save":
                 b = self._body(); self._json(unit_write(b.get("name", ""), b.get("content", "")))
             elif p == "/api/unit/create":

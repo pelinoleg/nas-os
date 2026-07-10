@@ -1491,6 +1491,14 @@
   .dialog{background:var(--menu-bg,var(--glass-2));backdrop-filter:var(--win-bf,none);-webkit-backdrop-filter:var(--win-bf,none);border-radius:var(--r-win);max-width:440px;width:100%;box-shadow:var(--sh);padding:26px;animation:winin .18s ease}
   .dialog h3{margin:0 0 9px;font-size:17px;font-weight:680;letter-spacing:-.01em}.dialog p{margin:0 0 18px;color:var(--dim);font-size:13.5px;line-height:1.5}
   .dialog .r{display:flex;gap:10px;justify-content:flex-end;margin-top:4px}
+  /* выбор разделов при восстановлении бэкапа настроек */
+  .bk-secs{max-height:44vh;overflow:auto;margin:0 0 16px;-webkit-overflow-scrolling:touch}
+  .bk-sec{display:flex;gap:11px;align-items:flex-start;padding:8px 9px;border-radius:9px;cursor:pointer}
+  .bk-sec:hover{background:var(--glass)}
+  .bk-sec input{flex:none;width:17px;height:17px;margin:1px 0 0;accent-color:var(--accent)}
+  .bk-sec b{display:block;font-size:13.5px;font-weight:600}
+  .bk-sec .sub{display:block;font-size:12px;color:var(--dim);margin-top:2px}
+  .bk-sec.secret .sub{color:var(--warn)}
   .toast{position:fixed;left:50%;bottom:96px;transform:translateX(-50%) translateY(14px);z-index:600;background:var(--glass-2);backdrop-filter:blur(20px) saturate(1.4);-webkit-backdrop-filter:blur(20px) saturate(1.4);
     border:1px solid var(--line-2);border-radius:var(--r-md);padding:12px 18px;font-size:13px;font-weight:500;box-shadow:var(--sh);opacity:0;pointer-events:none;transition:.26s cubic-bezier(.2,.8,.3,1)}
   .toast.show{opacity:1;transform:translateX(-50%)}
@@ -2118,6 +2126,31 @@ function confirmDlg(title,msg,onOk,danger){
  s.classList.add("show");
  s.querySelector("#dc").onclick=()=>s.classList.remove("show");
  s.querySelector("#do").onclick=()=>{s.classList.remove("show");onOk();};
+}
+/* Восстановление бэкапа настроек по разделам. Секретные (пароль панели, пароль
+   главного NAS) приходят снятыми: восстановление старого архива не должно молча
+   подменить текущий пароль входа тем, что был на момент бэкапа. */
+async function bkSectionsDlg(name, when, onOk){
+ const r=await api("/api/settings-backup/inspect?name="+encodeURIComponent(name));
+ if(!r||!r.ok||!(r.sections||[]).length){toast("Ошибка: "+((r&&r.log)||"в архиве нет настроек"));return;}
+ const s=document.getElementById("scrim");
+ s.innerHTML=`<div class="dialog"><h3>Восстановить настройки?</h3>
+   <p>Бэкап от ${esc(when)}. Отмеченные разделы перезапишут текущие настройки, снятые останутся нетронутыми. После восстановления страница перезагрузится.</p>
+   <div class="bk-secs">${r.sections.map(x=>`<label class="bk-sec${x.secret?" secret":""}">
+     <input type="checkbox" data-k="${att(x.key)}"${x.secret?"":" checked"}>
+     <span><b>${esc(x.title)}</b><span class="sub">${x.files} файлов · ${fmtB(x.bytes)}${x.secret?" · перезапишет секреты":""}</span></span></label>`).join("")}</div>
+   <div class="r"><button class="btn" id="dc">Отмена</button><button class="btn dng" id="do">Восстановить</button></div></div>`;
+ s.classList.add("show");
+ s.querySelector("#dc").onclick=()=>s.classList.remove("show");
+ s.querySelector("#do").onclick=()=>{
+   const sel=[...s.querySelectorAll(".bk-sec input:checked")].map(i=>i.dataset.k);
+   if(!sel.length){toast("Не выбрано ни одного раздела");return;}
+   s.classList.remove("show");onOk(sel);};
+}
+async function bkDoRestore(name, sections){
+ const w=await api("/api/settings-backup/restore",{method:"POST",body:JSON.stringify({name,sections})});
+ toast(LIVE?((w&&w.ok)?w.log:("Ошибка: "+((w&&w.log)||""))):"Демо");
+ if(w&&w.ok)setTimeout(()=>location.reload(),1400);
 }
 
 /* window manager */
@@ -5206,10 +5239,7 @@ function backupTab(tc){
        <button class="iconbtn" data-a="rs" title="Восстановить из этого бэкапа">${svg("arrowup",14)}</button>
        <button class="iconbtn dng" data-a="del" title="Удалить">${svg("trash",14)}</button></span></div>`);
    row.querySelector('[data-a="dl"]').onclick=()=>{location.href="/api/settings-backup/get?name="+encodeURIComponent(b.name);};
-   row.querySelector('[data-a="rs"]').onclick=()=>confirmDlg("Восстановить настройки?",`Текущие настройки будут перезаписаны бэкапом от ${ruWhen(b.t)}. После восстановления страница перезагрузится.`,async()=>{
-     const w=await api("/api/settings-backup/restore",{method:"POST",body:JSON.stringify({name:b.name})});
-     toast(LIVE?((w&&w.ok)?w.log:("Ошибка: "+((w&&w.log)||""))):"Демо");
-     if(w&&w.ok)setTimeout(()=>location.reload(),1400);},true);
+   row.querySelector('[data-a="rs"]').onclick=()=>bkSectionsDlg(b.name,ruWhen(b.t),sel=>bkDoRestore(b.name,sel));
    row.querySelector('[data-a="del"]').onclick=()=>confirmDlg("Удалить бэкап?",esc(b.name),async()=>{
      await api("/api/settings-backup/delete",{method:"POST",body:JSON.stringify({name:b.name})});load();},true);
    list.appendChild(row);});};
@@ -5219,12 +5249,14 @@ function backupTab(tc){
   toast(LIVE?((r&&r.ok)?`Бэкап создан (${r.files} файлов)`:("Ошибка: "+((r&&r.log)||""))):"Демо");load();};
  const fi=tc.querySelector("#bkFile");
  tc.querySelector("#bkUp").onclick=()=>fi.click();
- fi.onchange=()=>{const f=fi.files&&fi.files[0];if(!f)return;
-  confirmDlg("Восстановить из файла?",`«${esc(f.name)}» перезапишет текущие настройки. После восстановления страница перезагрузится.`,async()=>{
-   let w=null;try{w=await(await fetch("/api/settings-backup/upload",{method:"POST",body:f})).json();}catch(e){}
-   toast(w&&w.ok?w.log:("Ошибка: "+((w&&w.log)||"не удалось загрузить")));
-   if(w&&w.ok)setTimeout(()=>location.reload(),1400);},true);
-  fi.value="";};
+ /* Загруженный архив сначала кладём в список, потом спрашиваем разделы тем же
+    диалогом — иначе чужой файл молча перезаписал бы пароль панели. */
+ fi.onchange=async()=>{const f=fi.files&&fi.files[0];if(!f){return;}
+  fi.value="";
+  let w=null;try{w=await(await fetch("/api/settings-backup/upload",{method:"POST",body:f})).json();}catch(e){}
+  if(!w||!w.ok){toast("Ошибка: "+((w&&w.log)||"не удалось загрузить"));return;}
+  load();
+  bkSectionsDlg(w.name,esc(f.name),sel=>bkDoRestore(w.name,sel));};
  load();
 }
 let SYSC=null, PENDING_REBOOT=false;
