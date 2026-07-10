@@ -263,8 +263,11 @@
     /* на телефоне иконки фиксированно мелкие и НЕ следуют desktop-настройке размера
        (--desk-icon переопределяем на .apps → перебивает инлайн с html для этого
        поддерева); сетка = ширина плитки, чтобы не налезали */
-    .apps{position:static;inset:auto;padding:16px 16px 6px;--desk-icon:44px;grid-template-columns:repeat(auto-fill,calc(var(--desk-icon,44px) + 26px));gap:14px 4px}
-    .app{width:calc(var(--desk-icon,44px) + 26px);padding:8px 3px}
+    /* фиксировано: картинка крупнее, подпись мельче — обе НЕ следуют desktop-настройке */
+    .apps{position:static;inset:auto;padding:16px 12px 6px;--desk-icon:54px;--desk-fs:11px;grid-template-columns:repeat(auto-fill,calc(var(--desk-icon,54px) + 24px));gap:16px 6px}
+    .app{width:calc(var(--desk-icon,54px) + 24px);padding:8px 2px}
+    /* подпись в 2 строки с переносом — иначе длинные имена слипались с соседями */
+    .app .lbl{font-size:11px;line-height:1.2;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
     .rail{position:static;width:auto;overflow:visible;display:flex;flex-direction:column;gap:12px;padding:6px 16px 20px}
     .win{inset:40px 0 calc(60px + env(safe-area-inset-bottom)) 0!important;width:auto!important;height:auto!important;border-radius:0;max-width:100%}
     .win.max{inset:40px 0 calc(60px + env(safe-area-inset-bottom)) 0!important}
