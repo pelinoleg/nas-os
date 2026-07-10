@@ -121,5 +121,12 @@ Docker master-detail, **бэкап главного NAS** (мини-прилож
 sunburst 2 кольца с drill-down/подписями/подсветкой круг↔бары, возраст скана цветом.
 **Кэш иконок ярлыков** (`/api/icon` → `~/nas-config/icons/`) и **лимит кэша миниатюр**
 (`maintenance.json:thumb_cache_mb`, GC в `maintenance_daily`).
+**Интеграции внешних сервисов** (единый паттерн, как MySpeed — сервиса нет → `{ok:false}`,
+UI прячется, никаких ошибок): **Scrutiny** (здоровье/наработка дисков → вливается в `disks()`
+по серийнику; compose `services/scrutiny`, char-девайсы `/dev/nvmeN` для `--scan`), **vnstat**
+(виджет «Трафик», сумма физических аплинков eth*/wlan*; системный пакет), **WUD** (обновления
+образов Docker → плитка в docker/overview; compose `services/wud`). Порт сервиса берётся из
+ЖИВОГО Docker через `docker_service_url(name, internal_port)` — менять порт в compose можно,
+панель подхватит сама. Сервисов нет → ненавязчивые бейджи-напоминалки со ссылкой в Dockge.
 Идеи в бэклоге: Telegram-бот, магазин приложений (1-клик Docker: Jellyfin/Immich/…),
 бэкап наружу (restic/rclone), «топ самых больших файлов» в анализаторе.
