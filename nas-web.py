@@ -1176,6 +1176,59 @@ def scrutiny_state():
         _scrutiny_cache["t"] = time.time(); _scrutiny_cache["data"] = out
     return out
 
+# --------------------------------------------------------------------------- #
+#  vnstat — счётчик трафика по основному интерфейсу (сегодня/месяц/всего).
+#  Системный пакет; нет бинаря/данных → {ok:False}, и виджет прячется.
+#  vnstat 2.x (json v2) отдаёт rx/tx в БАЙТАХ.
+# --------------------------------------------------------------------------- #
+_vnstat_cache = {"t": 0, "data": {"ok": False}}
+_vnstat_lock = threading.Lock()
+VNSTAT_TTL = 30
+
+# Физические аплинки (eth0/wlan0/en*), но не docker-мосты (br-*), veth*, lo.
+# Суммируем их: при переключении кабель↔Wi-Fi (netguard) трафик идёт то по eth0,
+# то по wlan0 — сумма даёт цельную картину, а не «теряет» историю при смене линка.
+_PHYS_IF = re.compile(r"^(eth|en|end|wlan|wl)\d")
+
+def vnstat_state():
+    with _vnstat_lock:
+        if time.time() - _vnstat_cache["t"] < VNSTAT_TTL:
+            return _vnstat_cache["data"]
+    out = {"ok": False}
+    if shutil.which("vnstat"):
+        try:
+            r = subprocess.run(["vnstat", "--json"], capture_output=True, text=True, timeout=6)
+            if r.returncode == 0:
+                lt = time.localtime()
+                today, thismon = (lt.tm_year, lt.tm_mon, lt.tm_mday), (lt.tm_year, lt.tm_mon)
+                acc = {"today": [0, 0], "month": [0, 0], "total": [0, 0]}
+                ifaces = []
+                for it in (json.loads(r.stdout).get("interfaces") or []):
+                    nm = it.get("name", "")
+                    if not _PHYS_IF.match(nm):
+                        continue
+                    ifaces.append(nm)
+                    t = it.get("traffic") or {}
+                    tot = t.get("total") or {}
+                    acc["total"][0] += tot.get("rx", 0); acc["total"][1] += tot.get("tx", 0)
+                    for e in (t.get("day") or []):
+                        dd = e.get("date") or {}
+                        if (dd.get("year"), dd.get("month"), dd.get("day")) == today:
+                            acc["today"][0] += e.get("rx", 0); acc["today"][1] += e.get("tx", 0)
+                    for e in (t.get("month") or []):
+                        dd = e.get("date") or {}
+                        if (dd.get("year"), dd.get("month")) == thismon:
+                            acc["month"][0] += e.get("rx", 0); acc["month"][1] += e.get("tx", 0)
+                if ifaces:
+                    mk = lambda p: {"rx": p[0], "tx": p[1]}
+                    out = {"ok": True, "ifaces": ifaces, "today": mk(acc["today"]),
+                           "month": mk(acc["month"]), "total": mk(acc["total"])}
+        except Exception:
+            out = {"ok": False}
+    with _vnstat_lock:
+        _vnstat_cache["t"] = time.time(); _vnstat_cache["data"] = out
+    return out
+
 FAV_FILE = os.path.join(NAS_CONFIG, "fm-favorites.json")
 def load_favs():
     try:
@@ -5622,9 +5675,39 @@ def _trash_load():
         return []
 
 def _trash_save(items):
-    os.makedirs(TRASH, exist_ok=True)
-    with open(os.path.join(TRASH, "index.json"), "w") as f:
-        json.dump(items, f)
+    # Атомарно: не-атомарная запись при крахе/гонке рвала index.json → корзина
+    # «пустела», а файлы в files/ оставались осиротевшими и молча копили гигабайты.
+    _json_save(os.path.join(TRASH, "index.json"), items)
+
+def _trash_orphans(known_ids):
+    """Каталоги в files/, которых нет в индексе (индекс был повреждён/сброшен, а
+    файлы остались). Возвращаем их как записи корзины — иначе место не вернуть."""
+    out = []
+    store_dir = os.path.join(TRASH, "files")
+    try:
+        entries = os.listdir(store_dir)
+    except OSError:
+        return out
+    for nm in entries:
+        tid = nm.split("__", 1)[0]
+        if tid in known_ids:
+            continue
+        p = os.path.join(store_dir, nm)
+        sz = 0
+        try:
+            if os.path.isdir(p) and not os.path.islink(p):
+                for root, _, files in os.walk(p):
+                    for f in files:
+                        try: sz += os.path.getsize(os.path.join(root, f))
+                        except OSError: pass
+            else:
+                sz = os.path.getsize(p)
+        except OSError:
+            pass
+        out.append({"id": tid, "orig": "", "name": nm.split("__", 1)[-1],
+                    "deleted": int(os.path.getmtime(p)) if os.path.exists(p) else 0,
+                    "isdir": os.path.isdir(p), "size": sz, "store": p, "orphan": True})
+    return out
 
 def _trash_rm(store):
     if store and os.path.lexists(store):
@@ -5667,10 +5750,16 @@ def fs_trash(path):
 
 def fs_trash_list():
     items = []
-    for it in _trash_load():
+    indexed = _trash_load()
+    for it in indexed:
         it = dict(it)
         it["exists"] = os.path.lexists(it.get("store", ""))
         items.append(it)
+    # осиротевшие файлы (в files/, но не в индексе) — тоже показываем, иначе их
+    # место не вернуть из UI; помечаем orphan, restore для них недоступен (orig="")
+    for orp in _trash_orphans({i.get("id") for i in indexed}):
+        orp["exists"] = True
+        items.append(orp)
     items.sort(key=lambda x: x.get("deleted", 0), reverse=True)
     return {"ok": True, "items": items}
 
@@ -5695,6 +5784,9 @@ def fs_trash_restore(tid):
 def fs_trash_delete(tid):
     items = _trash_load()
     hit = next((i for i in items if i.get("id") == tid), None)
+    if not hit:                                  # не в индексе — возможно, осиротевший
+        hit = next((o for o in _trash_orphans({i.get("id") for i in items})
+                    if o.get("id") == tid), None)
     if not hit:
         return {"ok": False, "log": "не найдено"}
     try:
@@ -5705,14 +5797,21 @@ def fs_trash_delete(tid):
     return {"ok": True}
 
 def fs_trash_empty():
+    # Чистим ВСЮ папку files/, а не только индекс: иначе осиротевшее (индекс был
+    # повреждён/сброшен) осталось бы на диске и «пустая» корзина копила бы гигабайты.
     items = _trash_load()
-    for it in items:
-        try:
-            _trash_rm(it.get("store"))
-        except OSError:
-            pass
+    store_dir = os.path.join(TRASH, "files")
+    removed = 0
+    try:
+        for nm in os.listdir(store_dir):
+            try:
+                _trash_rm(os.path.join(store_dir, nm)); removed += 1
+            except OSError:
+                pass
+    except OSError:
+        pass
     _trash_save([])
-    return {"ok": True, "count": len(items)}
+    return {"ok": True, "count": max(removed, len(items))}
 
 def fs_archive(items, dest, name):
     import zipfile
@@ -7939,6 +8038,8 @@ class H(BaseHTTPRequestHandler):
                 self._json({"ops": ops_hist_list()})
             elif p == "/api/myspeed":
                 self._json(myspeed_state())
+            elif p == "/api/vnstat":
+                self._json(vnstat_state())
             elif p == "/api/wallpaper/img":
                 wp = _wallpaper_path()
                 if wp:

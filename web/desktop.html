@@ -521,7 +521,7 @@
      шапки и на пол-зазора по бокам. По точке 11px попадать мышью/пальцем неудобно. */
   .lights i::before{content:"";position:absolute;left:-4px;right:-4px;top:-12px;bottom:-12px}
   .lights .c{background:#ff5f57}.lights .m{background:#febc2e}.lights .z{background:#28c840}
-  .lights i:hover{filter:brightness(1.12)}
+  .lights i:hover{filter:brightness(1.12);transform:scale(1.25)}
   .win .ttl{font-size:13.5px;font-weight:650;flex:1;text-align:center;color:var(--dim);padding-right:44px;letter-spacing:-.01em}
   .win .body{padding:22px 26px;overflow:auto;flex:1}
   .win.max{inset:56px 14px 108px 14px!important;width:auto!important;height:auto!important}
@@ -6006,8 +6006,9 @@ const WIDGET_DEFS={
  docker:{name:"Контейнеры",ic:"cube",extra:'<span class="more" id="more-docker">все →</span>',body:'<div id="wg-docker"></div>'},
  top:{name:"Топ процессов",ic:"activity",def:false,extra:'<span class="more" id="more-top">все →</span>',body:'<div id="wg-top"></div>'},
  myspeed:{name:"Скорость интернета",ic:"net",extra:'<span class="more" id="more-myspeed">открыть →</span>',body:'<div id="wg-myspeed"></div>'},
+ vnstat:{name:"Трафик",ic:"activity",body:'<div id="wg-vnstat"></div>'},
 };
-const WIDGET_ORDER=["vols","sys","disk","net","docker","top","myspeed"];
+const WIDGET_ORDER=["vols","sys","disk","net","docker","top","myspeed","vnstat"];
 function railWidgets(){let cfg=(SET.widgets&&SET.widgets.length)?SET.widgets.slice():WIDGET_ORDER.map(id=>({id,on:WIDGET_DEFS[id].def!==false}));
  cfg=cfg.filter(w=>WIDGET_DEFS[w.id]);
  WIDGET_ORDER.forEach(id=>{if(!cfg.find(w=>w.id===id))cfg.push({id,on:WIDGET_DEFS[id].def!==false});});
@@ -6019,7 +6020,7 @@ function renderRail(){const rail=document.getElementById("rail");if(!rail)return
  const md=document.getElementById("more-disks");if(md)md.onclick=()=>winDisks();
  const mdk=document.getElementById("more-docker");if(mdk)mdk.onclick=()=>winServices();
  const mt=document.getElementById("more-top");if(mt)mt.onclick=()=>winMon();
- paintVols();if(LAST){paintSys(LAST);}pollDisks();pollStacks();pollTop();pollNet();pollMySpeed();
+ paintVols();if(LAST){paintSys(LAST);}pollDisks();pollStacks();pollTop();pollNet();pollMySpeed();pollVnstat();
 }
 
 /* MySpeed: последний замер скорости интернета. Сервис ставится отдельным стеком,
@@ -6061,6 +6062,17 @@ async function pollMySpeed(){
    ${r.failed?`<div class="ms-avg" style="color:var(--danger)">последний замер не удался · ${esc(ago(r.failed_at))}</div>`:""}`;
  const mm=document.getElementById("more-myspeed");
  if(mm)mm.onclick=()=>{if(MS_URL)window.open(MS_URL,"_blank");};
+}
+/* vnstat: накопленный трафик по основному интерфейсу (сегодня/месяц/всего).
+   Нет vnstat или данных → карточка прячется целиком, как у MySpeed. */
+async function pollVnstat(){
+ const box=document.getElementById("wg-vnstat");if(!box)return;
+ const wdg=box.closest(".wdg");
+ let r=null;try{r=await api("/api/vnstat");}catch(e){}
+ if(!r||!r.ok){if(wdg)wdg.style.display="none";return;}
+ if(wdg)wdg.style.display="";
+ const row=(lbl,o)=>`<div class="ms-row"><span class="ms-l">${lbl}</span><b>${o?`${svg("download",12)} ${esc(fmtB(o.rx))} · ${svg("upload",12)} ${esc(fmtB(o.tx))}`:"—"}</b></div>`;
+ box.innerHTML=row("Сегодня",r.today)+row("За месяц",r.month)+row("Всего",r.total);
 }
 function paintVols(){const box=document.getElementById("wg-vols");if(!box)return;box.innerHTML="";
  const wdg=box.closest(".wdg");   // нет томов → прячем всю карточку виджета, а не показываем пустую плашку
@@ -6580,7 +6592,7 @@ function maybeOnboard(){let done=false;try{done=!!SET.onboarded||localStorage.ge
  pollStacks();pollTop();pollNet();
  pollEvents();setTimeout(pollHealth,2500);
  setInterval(poll,3000);setInterval(pollApps,8000);setInterval(pollDisks,15000);setInterval(tickClock,10000);
- setInterval(pollStacks,15000);setInterval(pollTop,10000);setInterval(pollNet,15000);setInterval(pollMySpeed,60000);
+ setInterval(pollStacks,15000);setInterval(pollTop,10000);setInterval(pollNet,15000);setInterval(pollMySpeed,60000);setInterval(pollVnstat,60000);
  setInterval(pollEvents,15000);setInterval(pollHealth,120000);
  if("serviceWorker" in navigator&&window.isSecureContext)navigator.serviceWorker.register("/sw.js").catch(()=>{});
  matchMedia("(prefers-color-scheme:light)").addEventListener("change",()=>{if(SET.theme==="auto")applySettings();});

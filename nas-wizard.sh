@@ -48,6 +48,7 @@ SERVICES_SRC="$SCRIPT_DIR/services"
 STACK_PACKAGES=(cockpit cockpit-storaged cockpit-networkmanager mergerfs snapraid smartmontools)
 # Утилиты общего назначения — то, что почти всегда нужно на сервере/NAS
 UTIL_PACKAGES=(
+  vnstat              # счётчик трафика по интерфейсам (виджет «Трафик» в панели)
   dialog
   libheif-examples   # heif-convert: HEIC с айфона нарезан плитками, ffmpeg берёт лишь одну
   eject              # мягкое извлечение носителя после USB-импорта (power-off гасит весь ридер)
