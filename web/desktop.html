@@ -2443,7 +2443,7 @@ const tileColor=n=>{let h=0;for(let i=0;i<(n||"").length;i++)h=(h*31+n.charCodeA
    Внешние http(s)-картинки грузим не напрямую, а через локальный кэш NAS
    (/api/icon) — сервер один раз качает и отдаёт с диска; смена URL в метке
    = новый ключ = свежая загрузка. data:/локальные пути отдаём как есть. */
-const iconSrc=u=>(/^https?:\/\//i.test(u||"")?"/api/icon?u="+encodeURIComponent(u):(u||""));
+const iconSrc=u=>(/^(https?|custom):\/\//i.test(u||"")?"/api/icon?u="+encodeURIComponent(u):(u||""));
 function appIconHTML(app){
  const letter=`<span class="tletter">${((app.name||"?").trim()[0]||"?").toUpperCase()}</span>`;
  let src=app.icon||"";
@@ -4309,12 +4309,26 @@ function stOwnCard(o,tc,reload){
  const b=el(`<button class="btn sm">${svg("star",13)} ${cu?"Ярлык…":"На рабочий стол…"}</button>`);
  b.onclick=()=>{
   const s=document.getElementById("scrim");
+  const ports=o.ports||[];
   s.innerHTML=`<div class="dialog" style="max-width:560px;width:92vw"><h3>Ярлык: ${esc(o.id)}</h3>
    <div class="field"><label>Название</label><input id="cuN" value="${att((cu&&cu.name)||o.id)}"></div>
-   <div class="field"><label>Иконка (URL, необязательно)</label><input id="cuI" value="${att((cu&&cu.icon)||"")}" placeholder="https://cdn.jsdelivr.net/gh/selfhst/icons@main/svg/….svg"></div>
-   <div class="field"><label>Порт веб-интерфейса</label><input id="cuP" value="${att((cu&&cu.port)||"")}" placeholder="8080"></div>
+   <div class="field"><label>Иконка <span style="color:var(--mut);font-weight:400">— URL или свой файл</span></label>
+    <div style="display:flex;gap:6px;align-items:center"><input id="cuI" style="flex:1" value="${att((cu&&cu.icon)||"")}" placeholder="https://cdn.jsdelivr.net/gh/selfhst/icons@main/svg/….svg"><button class="btn sm" id="cuUp">${svg("upload",13)} Файл…</button></div></div>
+   <div class="field"><label>Порт веб-интерфейса</label><input id="cuP" value="${att((cu&&cu.port)||(ports.length===1?ports[0]:""))}" placeholder="8080">
+    ${ports.length?`<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;align-items:center"><span style="color:var(--mut);font-size:12px">у стека наружу:</span>${ports.map(pp=>`<button class="btn sm" data-pp="${pp}">${pp}</button>`).join("")}</div>`
+     :`<div style="color:var(--mut);font-size:12px;margin-top:4px">порты видны, когда стек запущен — панель подставит их сюда сама</div>`}</div>
    <div class="r">${cu?`<button class="btn dng" id="cuDel">Убрать ярлык</button>`:""}<span style="flex:1"></span><button class="btn" id="cuX">Отмена</button><button class="btn pri" id="cuOk">Сохранить</button></div></div>`;
   s.classList.add("show");
+  s.querySelectorAll("[data-pp]").forEach(pb=>pb.onclick=()=>{s.querySelector("#cuP").value=pb.dataset.pp;});
+  s.querySelector("#cuUp").onclick=()=>{
+   const fi=document.createElement("input");fi.type="file";fi.accept="image/*";
+   fi.onchange=()=>{const f=fi.files&&fi.files[0];if(!f)return;
+    const rd=new FileReader();
+    rd.onload=async()=>{const r=await api("/api/store/icon",{method:"POST",body:JSON.stringify({stack:o.id,data:rd.result})});
+     if(r&&r.ok){s.querySelector("#cuI").value=r.icon;toast("Иконка загружена");}
+     else toast("Ошибка: "+((r&&r.log)||"?"));};
+    rd.readAsDataURL(f);};
+   fi.click();};
   s.querySelector("#cuX").onclick=()=>s.classList.remove("show");
   const fin=async body=>{const r2=await api("/api/store/custom",{method:"POST",body:JSON.stringify(body)});
    s.classList.remove("show");

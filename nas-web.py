@@ -6163,10 +6163,17 @@ def store_catalog():
                                "dest_default": _stack_env(sid).get(rep.get("data_env") or "", ""),
                                "state": _replica_state(sid)}
         out.append(item)
-    # свои стеки (не из каталога) — кандидаты на карточку/ярлык
+    # свои стеки (не из каталога) — кандидаты на карточку/ярлык; published-порты
+    # достаём из живых контейнеров, чтобы не гонять пользователя в редактор compose
     custom = st.get("custom") or {}
+    def _host_ports(s):
+        pts = set()
+        for c in s.get("containers") or []:
+            for mm in re.finditer(r":(\d+)->\d+/tcp", c.get("ports") or ""):
+                pts.add(int(mm.group(1)))
+        return sorted(pts)
     others = [{"id": n, "installed": True, "running": bool(s["running"]),
-               "total": s["total"], "custom": custom.get(n)}
+               "total": s["total"], "custom": custom.get(n), "ports": _host_ports(s)}
               for n, s in sorted(stacks.items()) if not _store_compose_src(n)]
     return {"ok": True, "apps": out, "own": others}
 
@@ -6214,6 +6221,31 @@ def store_install(sid, values):
     log_event("action", "Магазин: установка %s" % (m.get("name") or sid), "", "ok",
               kind="svc", desk=False)
     return {"ok": True}
+
+def store_icon_upload(stack, data_url):
+    """Пользовательская иконка ярлыка: кладём в тот же кэш иконок под псевдо-URL
+    custom://<stack>#<ts> (метка времени в ключе = браузерный кэш не отдаст старую
+    картинку после замены)."""
+    if not _STACK_RE.match(stack or ""):
+        return {"ok": False, "log": "имя"}
+    m = re.match(r"^data:image/(png|jpeg|svg\+xml|webp|gif|x-icon|vnd\.microsoft\.icon);base64,(.+)$",
+                 data_url or "", re.S)
+    if not m:
+        return {"ok": False, "log": "нужна картинка: png / svg / jpeg / webp / gif / ico"}
+    try:
+        raw = base64.b64decode(m.group(2))
+    except (ValueError, TypeError):
+        return {"ok": False, "log": "битые данные"}
+    if len(raw) > 1024 * 1024:
+        return {"ok": False, "log": "иконка больше 1 МБ"}
+    ext = {"png": ".png", "jpeg": ".jpg", "svg+xml": ".svg", "webp": ".webp",
+           "gif": ".gif", "x-icon": ".ico", "vnd.microsoft.icon": ".ico"}[m.group(1)]
+    url = "custom://%s#%d" % (stack, int(time.time()))
+    os.makedirs(ICON_CACHE_DIR, exist_ok=True)
+    with open(os.path.join(ICON_CACHE_DIR,
+              hashlib.sha1(url.encode()).hexdigest() + ext), "wb") as f:
+        f.write(raw)
+    return {"ok": True, "icon": url}
 
 def store_custom_save(stack, name, icon, port):
     if not _STACK_RE.match(stack or ""):
@@ -6572,11 +6604,22 @@ def discover_desktop_apps():
     # без правки чужого compose; стек с готовыми web-desktop-метками не дублируем
     cust = _safe(lambda: _store_load().get("custom") or {}, {})
     if cust:
-        labeled = {a["_proj"] for a in apps if a["_proj"]}
-        ps = _docker_ps()
+        ps = None
         for stack, c in sorted(cust.items()):
-            if stack in labeled:
+            hit = [a for a in apps if a.get("_proj") == stack]
+            if hit:
+                # ярлык, настроенный в панели, главнее web-desktop-меток compose:
+                # метки часто приезжают с другого хоста с чужим URL
+                for a in hit:
+                    if c.get("name"):
+                        a["name"] = c["name"]
+                    if c.get("icon"):
+                        a["icon"] = c["icon"]
+                    if c.get("port"):
+                        a["url"] = "http://%s:%d" % (lan_ip(), c["port"])
                 continue
+            if ps is None:
+                ps = _docker_ps()
             running = any(x.get("State") == "running" for x in ps
                           if ("com.docker.compose.project=%s" % stack) in (x.get("Labels") or ""))
             port = c.get("port")
@@ -6617,7 +6660,10 @@ def _icon_cached_path(url):
     return None
 
 def fetch_icon(url):
-    """Путь к локальной копии иконки по http(s)-URL (качает при отсутствии) или None."""
+    """Путь к локальной копии иконки по http(s)-URL (качает при отсутствии) или None.
+    custom:// — загруженные пользователем иконки ярлыков: только кэш, не качаем."""
+    if re.match(r"custom://", url or "", re.I):
+        return _icon_cached_path(url)
     if not re.match(r"https?://", url or "", re.I):
         return None
     hit = _icon_cached_path(url)
@@ -11447,6 +11493,9 @@ class H(BaseHTTPRequestHandler):
             elif p == "/api/store/install":
                 b = self._body()
                 self._json(store_install(b.get("id", ""), b.get("values") or {}))
+            elif p == "/api/store/icon":
+                b = self._body()
+                self._json(store_icon_upload(b.get("stack", ""), b.get("data", "")))
             elif p == "/api/store/custom":
                 b = self._body()
                 self._json(store_custom_save(b.get("stack", ""), b.get("name", ""),
