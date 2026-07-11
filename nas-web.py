@@ -9536,7 +9536,9 @@ def _usb_sh_sync():
     и другое обновлялось только при сохранении настроек, поэтому после обновления
     панели на диске оставалась старая версия со старыми багами."""
     changed = []
-    if os.path.isfile(USB_IMPORT_SH) and _read(USB_IMPORT_SH) != _USB_SH:
+    # _read() strips the trailing newline — compare stripped, or every service
+    # start "updates" an identical helper and spams the event log
+    if os.path.isfile(USB_IMPORT_SH) and _read(USB_IMPORT_SH) != _USB_SH.strip():
         with open(USB_IMPORT_SH, "w") as f:
             f.write(_USB_SH)
         os.chmod(USB_IMPORT_SH, 0o755)
