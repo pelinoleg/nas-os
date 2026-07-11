@@ -2505,7 +2505,7 @@ fix_onlink "$ACTIVE"
 #   local = box alive but no usable network (e.g. stuck in comitup hotspot)
 #   off   = gap between heartbeats (powered off / crashed), written on wake
 avail_track(){
-  local now state ip gw beat last
+  local now state ip gw beat last boot
   now="$(date +%s)"
   state=local
   ip="$(ip4 "$ACTIVE")"
@@ -2519,7 +2519,12 @@ avail_track(){
   mkdir -p "$(dirname "$AVLOG")" 2>/dev/null || true
   beat="$(cat "$BEAT" 2>/dev/null || true)"
   case "$beat" in *[!0-9]*|'') beat="" ;; esac
-  if [ -n "$beat" ] && [ $(( now - beat )) -gt 180 ]; then
+  # A beat older than the current boot means the box went down, even when the
+  # whole reboot fits inside the gap threshold (real case 2026-07-11: hard
+  # reset + ~2.5 min of downtime < 180 s threshold -> outage never recorded).
+  boot="$(( now - $(cut -d. -f1 /proc/uptime) ))"
+  if [ -n "$beat" ] && [ $(( beat + 30 )) -lt "$now" ] \
+     && { [ $(( now - beat )) -gt 90 ] || [ "$beat" -lt "$boot" ]; }; then
     printf '%s off\n' "$(( beat + 30 ))" >> "$AVLOG"
   fi
   last="$(tail -n1 "$AVLOG" 2>/dev/null | awk '{print $2}')"
