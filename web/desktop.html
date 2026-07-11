@@ -1744,7 +1744,7 @@
   /* the paper: surface card, radius-lg, shadow-1 */
   .nt-ed .toastui-editor-main{flex:1;min-height:0;background:var(--surface);border-radius:var(--radius-lg);overflow:hidden;border:1px solid var(--border);box-shadow:var(--shadow-1)}
   .nt-ed .toastui-editor,.nt-ed .toastui-editor-ww-container,.nt-ed .toastui-editor-md-container{background:var(--surface)}
-  .nt-ed .ProseMirror{color:var(--text);font-size:var(--nt-font,var(--fs-body));line-height:1.6;padding:var(--sp-5) var(--sp-6) var(--sp-7);max-width:720px;margin:0 auto}
+  .nt-ed .ProseMirror{color:var(--text);font-size:var(--nt-font,var(--fs-body));line-height:1.6;padding:var(--sp-5) var(--sp-6) var(--sp-7)}
   .nt-ed .toastui-editor-md-container .ProseMirror{font-family:var(--font-mono);font-size:var(--fs-meta);line-height:1.65;max-width:none}
   .nt-ed .toastui-editor-md-preview{background:var(--surface)}
   .nt-ed .toastui-editor-md-preview .toastui-editor-contents{padding:var(--sp-4) var(--sp-5);color:var(--text)}
@@ -1781,6 +1781,11 @@
   .nt-ed .toastui-editor-contents code{font-family:var(--font-mono);background:var(--surface-inset);color:var(--text);border-radius:var(--radius-sm)}
   .nt-ed .toastui-editor-contents pre{font-family:var(--font-mono);background:var(--surface-inset);border-radius:var(--radius-lg);padding:var(--sp-4)}
   .nt-ed .toastui-editor-contents pre code{background:transparent}
+  /* ww code block: the language badge + pencil are editor chrome — show them
+     only on hover, quietly, per contract (they used to hang on every block) */
+  .nt-root .nt-ed .toastui-editor-ww-code-block:after{opacity:0;transition:opacity .12s;
+   background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-muted)}
+  .nt-root .nt-ed .toastui-editor-ww-code-block:hover:after{opacity:1}
   /* mode tabs: quiet, accent-soft when active */
   .nt-ed .toastui-editor-mode-switch{background:transparent;border:0;height:34px;padding-top:var(--sp-1)}
   .nt-ed .toastui-editor-mode-switch .tab-item{background:transparent;border:0;color:var(--text-muted);height:26px;line-height:26px;font-size:var(--fs-meta);border-radius:var(--radius-sm);margin-right:var(--sp-1)}
@@ -1804,6 +1809,14 @@
   .nt-hv.on{background:var(--sel);color:var(--accent);box-shadow:var(--sh-sm)}
   .nt-hprev{flex:1;overflow:auto;max-height:340px;font-size:12px;background:var(--glass);border:1px solid var(--line);border-radius:10px;padding:10px;white-space:pre-wrap}
   .nt-pin-on{color:#E5A50A!important}
+  .nt-root.qn{display:flex;flex-direction:column;gap:var(--sp-2);width:300px;padding:var(--sp-3);border-radius:var(--radius-lg);background:var(--bg)}
+  .qn-h{display:flex;align-items:center;gap:var(--sp-2);font-size:var(--fs-meta);font-weight:600;color:var(--text)}
+  .qn-hint{margin-left:auto;font-weight:400;color:var(--text-faint)}
+  .nt-root.qn textarea{resize:vertical;min-height:96px;border:1px solid var(--border);border-radius:var(--radius-sm);
+   background:var(--surface);color:var(--text);padding:var(--sp-2) var(--sp-3);font-size:var(--fs-meta);line-height:1.5;font-family:var(--font-ui)}
+  .nt-root.qn textarea::placeholder{color:var(--text-faint)}
+  .nt-root.qn textarea:focus{outline:none;border-color:var(--accent)}
+  .qn-f{display:flex;gap:var(--sp-2);justify-content:flex-end}
   .nt-lb{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;cursor:zoom-out}
   .nt-lb img{max-width:94vw;max-height:92vh;border-radius:10px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
   @media(max-width:1024px){
@@ -6450,10 +6463,11 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
 /* quick note from the menu bar: dropped into the «Входящие» folder */
 function qnotePop(){const b=document.getElementById("qnoteBtn");
  mbPop(b,box=>{
-  box.innerHTML=`<div style="padding:10px;display:flex;flex-direction:column;gap:8px;width:280px">
-   <b style="font-size:13px">Быстрая заметка</b>
-   <textarea id="qnT" rows="5" placeholder="Мысль, ссылка, список…" style="resize:vertical"></textarea>
-   <div style="display:flex;gap:6px;justify-content:flex-end"><button class="btn sm" id="qnOpen">Открыть заметки</button><button class="btn sm pri" id="qnSave">Сохранить</button></div></div>`;
+  const dk=SET.ntTheme==="dark"?"dark":SET.ntTheme==="light"?"light":(!isLight()?"dark":"light");
+  box.innerHTML=`<div class="nt-root qn" data-theme="${dk}">
+   <div class="qn-h">${svg("note",15)} Быстрая заметка<span class="qn-hint">→ «Входящие»</span></div>
+   <textarea id="qnT" rows="5" placeholder="Мысль, ссылка, список…"></textarea>
+   <div class="qn-f"><button class="btn sm" id="qnOpen">Открыть заметки</button><button class="btn sm pri" id="qnSave">Сохранить</button></div></div>`;
   const ta=box.querySelector("#qnT");setTimeout(()=>ta.focus(),40);
   box.querySelector("#qnOpen").onclick=()=>{document.body.click();winNotes();};
   box.querySelector("#qnSave").onclick=async()=>{
