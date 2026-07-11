@@ -4525,7 +4525,9 @@ function ensureCM(cb){
  // специфичности — токены/фон редактора не менялись бы (см. баг с нечитаемой темой).
  if(!document.getElementById("cmcss")){const l=document.createElement("link");l.id="cmcss";l.rel="stylesheet";l.href="/codemirror.css";document.head.insertBefore(l,document.head.firstChild);}
  const load=src=>new Promise(res=>{const s=document.createElement("script");s.src=src;s.onload=res;s.onerror=res;document.head.appendChild(s);});
- (window.CodeMirror?Promise.resolve():load("/codemirror.js")).then(()=>Promise.all(
+ // cm-simple.js must be loaded before cm-dockerfile.js: the dockerfile mode is built
+ // on defineSimpleMode from the simple-mode addon (otherwise TypeError at load)
+ (window.CodeMirror?Promise.resolve():load("/codemirror.js")).then(()=>load("cm-simple.js")).then(()=>Promise.all(
    ["cm-yaml.js","cm-shell.js","cm-javascript.js","cm-python.js","cm-xml.js","cm-css.js","cm-properties.js","cm-dockerfile.js"].map(load)))
  .then(()=>{CM_READY=true;cb();});
 }
@@ -7131,7 +7133,7 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
   if(!r||!r.path){toast("Не открыть: "+((r&&r.error)||"нет ответа сервера"));return;}
   r.tags=r.tags||[];r.md=r.md||"";r.title=r.title||"";
   NT_PATH=p;
-  try{localStorage.setItem("nasNotesLast",p);}catch(e){}
+  if(SET.notesLast!==p){SET.notesLast=p;saveSettings();}   // server-side (desktop.json): same last note in every browser
   const ed=q("#ntEdit");
   ed.innerHTML=`
    <div class="nt-crumb"></div>
@@ -7337,7 +7339,7 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
  let qT=null;
  q("#ntQ").oninput=()=>{clearTimeout(qT);qT=setTimeout(()=>{qstr=q("#ntQ").value.trim();paintList();},300);};
  await refresh();
- try{const last=localStorage.getItem("nasNotesLast");
+ try{const last=SET.notesLast||localStorage.getItem("nasNotesLast");   // localStorage = legacy fallback (pre-server installs)
   if(last&&TREE.notes.some(n=>n.path===last))openNote(last);}catch(e){}
  /* save on window close / tab hide */
  const iv=setInterval(()=>{if(!document.contains(body)){clearInterval(iv);flushSave();if(NT_ED){try{NT_ED.destroy();}catch(e){}NT_ED=null;NT_PATH=null;}}},1500);
@@ -9206,10 +9208,13 @@ function maybeOnboard(){let done=false;try{done=!!SET.onboarded||localStorage.ge
  const dsk=document.querySelector(".desk");if(dsk)dsk.addEventListener("click",e=>{if((e.target===dsk||e.target.id==="apps")&&Object.keys(OPEN).some(id=>OPEN[id].style.display!=="none"))toggleExpo();});
  if(!SET.wpVer&&SET.wpType==="url"&&SET.wpUrl)setWallUrl();  // первый запуск: подтянуть обои по умолчанию
  startSlideshow();sampleWallLum();
- try{const ls=localStorage.getItem("nassnips");if(ls)SNIPS=JSON.parse(ls);}catch(e){}
+ try{const ls=localStorage.getItem("nassnips");if(ls)SNIPS=JSON.parse(ls);}catch(e){}   // offline cache until the API answers
  const sn=await api("/api/snippets");if(sn&&sn.snippets&&sn.snippets.length)SNIPS=sn.snippets;
- let snInit=false;try{snInit=localStorage.getItem("nassnipinit")==="1";}catch(e){}
- if(!snInit){seedSnips();try{localStorage.setItem("nassnipinit","1");}catch(e){}saveSnips();}
+ if(SET.snipCol)SNIPCOL=SET.snipCol;   // parse-time init ran before server settings arrived
+ let snInit=!!SET.snipSeeded;
+ try{if(!snInit)snInit=localStorage.getItem("nassnipinit")==="1";}catch(e){}   // legacy pre-server flag
+ if(!snInit){seedSnips();saveSnips();}
+ if(!SET.snipSeeded){SET.snipSeeded=true;saveSettings();}   // seed flag lives on the server (desktop.json) now
  document.querySelectorAll("[title]").forEach(n=>{if(n.title)n.title=nasTr(n.title);});   // статические title из HTML
  renderRail();renderApps();renderDock();renderWinbar();renderPhoneNav();tickClock();
  if(NOTES_SOLO){document.body.classList.add("nt-solo");winNotes();}
