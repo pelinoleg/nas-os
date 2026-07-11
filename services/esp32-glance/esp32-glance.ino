@@ -67,11 +67,33 @@ void drawSpark(JsonArray sp, int x, int y, int w, int h) {
   }
 }
 
-// "#RRGGBB" -> RGB565 (fallback when absent/invalid)
-uint16_t hex565(const char* s, uint16_t fb) {
-  if (!s || s[0] != '#' || strlen(s) != 7) return fb;
+// "#RRGGBB[AA]" -> RGB565; alpha is blended against bg (r,g,b) because the
+// panel has no real transparency. fb = fallback when absent/invalid.
+uint16_t hexBlend(const char* s, uint16_t fb, uint8_t br, uint8_t bgc, uint8_t bb) {
+  if (!s || s[0] != '#') return fb;
+  size_t n = strlen(s);
+  if (n != 7 && n != 9) return fb;
   long v = strtol(s + 1, nullptr, 16);
-  return tft.color565((v >> 16) & 0xFF, (v >> 8) & 0xFF, v & 0xFF);
+  uint8_t r, g, b, a = 255;
+  if (n == 9) { a = v & 0xFF; v >>= 8; }
+  r = (v >> 16) & 0xFF; g = (v >> 8) & 0xFF; b = v & 0xFF;
+  if (a < 255) {
+    r = (r * a + br * (255 - a)) / 255;
+    g = (g * a + bgc * (255 - a)) / 255;
+    b = (b * a + bb * (255 - a)) / 255;
+  }
+  return tft.color565(r, g, b);
+}
+uint16_t hex565(const char* s, uint16_t fb) { return hexBlend(s, fb, 0, 0, 0); }
+// tile background as 8-bit RGB, for blending text alpha over it
+void tileBgRGB(const char* bgs, uint8_t &r, uint8_t &g, uint8_t &b) {
+  r = 0x14; g = 0x16; b = 0x1c;                       // default card ≈ 0x10A2
+  if (!strcmp(bgs, "none")) { r = g = b = 0; return; }
+  if (bgs[0] == '#' && strlen(bgs) >= 7) {
+    long v = strtol(bgs + 1, nullptr, 16);
+    if (strlen(bgs) == 9) v >>= 8;
+    r = (v >> 16) & 0xFF; g = (v >> 8) & 0xFF; b = v & 0xFF;
+  }
 }
 
 // requested font-size (device px) -> nearest TFT_eSPI font
@@ -119,17 +141,22 @@ void drawTile(JsonObject t, int x, int y, int w, int h) {
   int ls = st["ls"] | d.ls, vs = st["vs"] | d.vs, us = st["us"] | d.us;
   int bw = st["bw"] | 1;
   const char* bgs = st["bg"] | "";
-  uint16_t bg = !strcmp(bgs, "none") ? TFT_BLACK : hex565(bgs, 0x10A2);
   bool noBg = !strcmp(bgs, "none");
-  uint16_t line = hex565(st["bc"] | "", 0x2965);
+  uint8_t br, bgc, bb;
+  tileBgRGB(bgs, br, bgc, bb);                        // blended-alpha base
+  uint16_t bg = noBg ? TFT_BLACK : hexBlend(bgs, 0x10A2, 0, 0, 0);
+  uint16_t line = hexBlend(st["bc"] | "", 0x2965, br, bgc, bb);
   if (!noBg) tft.fillRoundRect(x, y, w, h, 7, bg);
   for (int k = 0; k < bw; k++) tft.drawRoundRect(x + k, y + k, w - 2 * k, h - 2 * k, 7 - k, line);
   uint16_t tbg = noBg ? TFT_BLACK : bg;
+  uint16_t labC = hexBlend(st["lc"] | "", TFT_DARKGREY, br, bgc, bb);
+  uint16_t valC = hexBlend(st["vc"] | "", TFT_WHITE, br, bgc, bb);
+  uint16_t uniC = hexBlend(st["uc"] | "", TFT_DARKGREY, br, bgc, bb);
   // label
   if (strcmp(lp, "hide")) {
     Anchor a = posAnchor(lp, x, y, w, h);
     tft.setTextDatum(a.datum);
-    tft.setTextColor(TFT_DARKGREY, tbg);
+    tft.setTextColor(labC, tbg);
     tft.drawString(t["label"] | "", a.x, a.y, pickFont(ls, ""));
   }
   // value (+ attached unit when up == "val")
@@ -144,13 +171,13 @@ void drawTile(JsonObject t, int x, int y, int w, int h) {
       int lx = a.datum % 3 == 0 ? a.x : (a.datum % 3 == 1 ? a.x - total / 2 : a.x - total);
       int dy = a.datum / 3 == 0 ? 0 : (a.datum / 3 == 1 ? 0 : 0);
       tft.setTextDatum(a.datum / 3 == 0 ? TL_DATUM : (a.datum / 3 == 1 ? ML_DATUM : BL_DATUM));
-      tft.setTextColor(TFT_WHITE, tbg);
+      tft.setTextColor(valC, tbg);
       tft.drawString(val, lx, a.y + dy, vf);
-      tft.setTextColor(TFT_DARKGREY, tbg);
+      tft.setTextColor(uniC, tbg);
       tft.drawString(unit, lx + tft.textWidth(val, vf) + 5, a.y + dy, uf);
     } else {
       tft.setTextDatum(a.datum);
-      tft.setTextColor(TFT_WHITE, tbg);
+      tft.setTextColor(valC, tbg);
       tft.drawString(val, a.x, a.y, vf);
     }
   }
@@ -158,7 +185,7 @@ void drawTile(JsonObject t, int x, int y, int w, int h) {
   if (strcmp(up, "val") && strcmp(up, "hide") && unit.length()) {
     Anchor a = posAnchor(up, x, y, w, h);
     tft.setTextDatum(a.datum);
-    tft.setTextColor(TFT_DARKGREY, tbg);
+    tft.setTextColor(uniC, tbg);
     tft.drawString(unit, a.x, a.y, pickFont(us, unit));
   }
   tft.setTextDatum(ML_DATUM);
@@ -222,13 +249,15 @@ void drawPage() {
       int tw = big ? tft.width() : colW;
       if (big && x > 0) { y += rowH; x = 0; rowH = 0; }        // "l" starts a fresh row
       if (x + tw > tft.width()) { y += rowH; x = 0; rowH = 0; }
-      if (y + th > tft.height() - 14) break;                    // keep room for avail strip
+      int bot = (scrInfo["avail"] | true) ? 14 : 2;
+      if (y + th > tft.height() - bot) break;                   // keep room for avail strip
       drawTile(t, x + 2 + gap / 2, y + 2 + gap / 2, tw - 4 - gap, th - 4 - gap);
       x += tw; rowH = max(rowH, th);
       if (big) { y += th; x = 0; rowH = 0; }
     }
   }
   JsonObject avail = DOC["avail"];
+  if (!(scrInfo["avail"] | true)) return;      // strip disabled for this screen
   if (!avail.isNull()) drawAvail(avail, tft.height() - 12);
 }
 

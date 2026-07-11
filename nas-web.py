@@ -1574,6 +1574,10 @@ def _gl_spark(field, points=48):
 # the unit glued to the value, "hide" hides the element
 _GL_POS = {"tl", "tc", "tr", "cl", "c", "cr", "bl", "bc", "br", "hide", "val"}
 
+# colors are #RRGGBB or #RRGGBBAA — the device blends the alpha against the
+# tile background itself (TFT has no true transparency)
+_GL_COLOR = re.compile(r"^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$")
+
 def _gl_norm_style(st):
     if not isinstance(st, dict):
         return {}
@@ -1588,8 +1592,12 @@ def _gl_norm_style(st):
                 out[k] = v
         except (TypeError, ValueError):
             pass
+    for k in ("lc", "vc", "uc", "bc"):                # text/border colors
+        v = st.get(k)
+        if isinstance(v, str) and _GL_COLOR.match(v):
+            out[k] = v
     bg = st.get("bg")                                 # absent=default card
-    if bg == "none" or (isinstance(bg, str) and re.match(r"^#[0-9a-fA-F]{6}$", bg)):
+    if bg == "none" or (isinstance(bg, str) and _GL_COLOR.match(bg)):
         out["bg"] = bg
     try:
         bw = int(st.get("bw"))                        # border width, 0=none
@@ -1597,9 +1605,6 @@ def _gl_norm_style(st):
             out["bw"] = bw
     except (TypeError, ValueError):
         pass
-    bc = st.get("bc")
-    if isinstance(bc, str) and re.match(r"^#[0-9a-fA-F]{6}$", bc):
-        out["bc"] = bc
     return out
 
 def _gl_norm_tiles(lst):
@@ -1663,6 +1668,8 @@ def load_glance():
         out.append({"id": sid, "name": str(s.get("name") or "Экран")[:24],
                     "preset": preset, "gap": gap,
                     "mode": "free" if s.get("mode") == "free" else "flow",
+                    "avail": s.get("avail") is not False,   # bottom 24h strip
+                    "defst": _gl_norm_style(s.get("defst")),  # style for new tiles
                     "pages": _gl_norm_pages(s.get("pages"))})
     return {"enabled": bool(d.get("enabled")),
             "token": d.get("token") or "",
@@ -1696,6 +1703,8 @@ def save_glance(d):
             screens.append({"id": sid, "name": str(s.get("name") or "Экран")[:24],
                             "preset": preset, "gap": gap,
                             "mode": "free" if s.get("mode") == "free" else "flow",
+                            "avail": s.get("avail") is not False,
+                            "defst": _gl_norm_style(s.get("defst")),
                             "pages": pages or [{"name": "Главная", "tiles": []}]})
         if screens:
             cur["screens"] = screens
@@ -2085,7 +2094,7 @@ def glance_payload(lang="ru", screen=""):
     av = avail_bars(24, 96)
     payload = {"v": 2, "host": socket.gethostname(), "status": status,
                "screen": {"id": scr["id"], "name": scr["name"], "preset": scr["preset"],
-                          "mode": scr["mode"], "gap": scr["gap"]},
+                          "mode": scr["mode"], "gap": scr["gap"], "avail": scr["avail"]},
                "problems": problems[:4], "pages": pages,
                # legacy flat list = first page (older sketches keep working)
                "tiles": pages[0]["tiles"] if pages else [],

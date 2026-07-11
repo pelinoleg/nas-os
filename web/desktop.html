@@ -1609,7 +1609,8 @@
   .glc-hdr .pgdots{margin-left:auto;display:flex;gap:5px}
   .glc-hdr .pgdots b{width:6px;height:6px;border-radius:50%;background:#3a3f4c}
   .glc-hdr .pgdots b.on{background:#e8eaf0}
-  .glc-av{position:absolute;left:6px;right:6px;bottom:2px;border-radius:3px;background:repeating-linear-gradient(90deg,#2e7d54 0 8px,#255f42 8px 9px)}
+  .glc-av{position:absolute;left:6px;right:6px;bottom:2px;border-radius:3px;overflow:hidden;display:flex;gap:1px;background:#181b22}
+  .glc-av i{flex:1;min-width:1px}
   .glc-tile{position:absolute;box-sizing:border-box;border-radius:7px;color:#e8eaf0;cursor:grab;overflow:hidden;touch-action:none}
   .glc-tile.sel{box-shadow:0 0 0 2px var(--accent)}
   .glc-tile .e{position:absolute;white-space:nowrap;line-height:1.05;max-width:96%;overflow:hidden;text-overflow:ellipsis}
@@ -1618,6 +1619,9 @@
   .glc-tile .u{font-weight:500}
   .glc-tile .d{position:absolute;top:4px;right:5px;width:7px;height:7px;border-radius:50%}
   .glc-tile .rzh{position:absolute;right:0;bottom:0;width:14px;height:14px;cursor:nwse-resize;border-right:2px solid var(--accent);border-bottom:2px solid var(--accent);border-bottom-right-radius:6px}
+  .glc-guide{position:absolute;background:var(--accent);z-index:900;pointer-events:none;opacity:.8}
+  .glc-guide.v{width:1px;top:0;bottom:0}
+  .glc-guide.h{height:1px;left:0;right:0}
   .glc-over{align-self:stretch;display:flex;align-items:center;gap:6px;flex-wrap:wrap;color:var(--warn);font-size:12px}
   .glc-insp{width:216px;flex:none;overflow:auto;display:flex;flex-direction:column;gap:10px;font-size:12px;padding-right:4px}
   .glc-insp .gi{display:flex;flex-direction:column;gap:5px;padding:9px 11px;border-radius:10px;background:var(--card);border:1px solid var(--line)}
@@ -5836,6 +5840,7 @@ function winGlance(){openWin("__glance","Экран NAS",async body=>{
    <select id="gcPreset">${presets.map(p=>`<option value="${p.id}">${esc(p.name)} — ${p.id}</option>`).join("")}</select>
    <div class="seg" id="gcMode"><button data-m="flow">Сетка</button><button data-m="free">Свободно</button></div>
    <label class="glc-cap" style="display:flex;align-items:center;gap:4px;text-transform:none">gap <input id="gcGap" type="number" min="0" max="24" style="width:52px"></label>
+   <label class="glc-cap" style="display:flex;align-items:center;gap:5px;text-transform:none" title="Полоска доступности за 24ч внизу экрана (зелёное — онлайн, красное — недоступен)"><input type="checkbox" id="gcAv">доступность</label>
    <span class="glc-id mono" id="gcScrId"></span>
    <button class="iconbtn" id="gcScrDel" title="Удалить экран">${svg("trash",15)}</button>
   </div>
@@ -5863,8 +5868,9 @@ function winGlance(){openWin("__glance","Экран NAS",async body=>{
  const save=()=>{clearTimeout(postT);postT=setTimeout(()=>api("/api/glance/config",{method:"POST",body:JSON.stringify({screens})}),350);};
  const commit=()=>{save();paint();};
  const stColor=s=>s==="ok"?"var(--good)":s==="warn"?"var(--warn)":"var(--danger)";
+ let AVB=null;   // real availability bars for the canvas strip
  const refresh=async()=>{const g=await api("/api/glance?all=1&lang="+(window.NAS_LANG||"ru"));
-  if(g&&g.palette){LIVE={};g.palette.forEach(t=>LIVE[t.id]=t);paintPal();paintCv();}};
+  if(g&&g.palette){LIVE={};g.palette.forEach(t=>LIVE[t.id]=t);AVB=(g.avail&&g.avail.bars)||null;paintPal();paintCv();}};
  const tload=id=>LIVE[id]||{value:"—",unit:"",state:"ok"};
  /* per-size defaults for label/value/unit position+font (device px) */
  const DEF={s:{lp:"cl",ls:10,vp:"cr",vs:12,up:"val",us:9},
@@ -5880,12 +5886,16 @@ function winGlance(){openWin("__glance","Экран NAS",async body=>{
    return `<div class="glc-pitem${used.has(c.id)?" used":""}" draggable="true" data-id="${c.id}">
     <i style="background:${stColor(t.state)}"></i><span class="pn">${esc(c.name)}</span><span class="pv mono">${esc(t.value)}</span></div>`;}).join("");
   pal.querySelectorAll(".glc-pitem").forEach(it=>{
-   it.onclick=()=>{pg().tiles.push({id:it.dataset.id,size:"m"});sel=pg().tiles.length-1;commit();};
+   it.onclick=()=>{pg().tiles.push(newTile(it.dataset.id));sel=pg().tiles.length-1;commit();paintInsp();};
    it.ondragstart=e=>e.dataTransfer.setData("text/plain","add:"+it.dataset.id);});};
+ /* new tiles inherit the screen's default style (inspector: «сделать по умолчанию») */
+ const newTile=id=>{const t={id,size:"m"};
+  if(scr().defst&&Object.keys(scr().defst).length)t.st=JSON.parse(JSON.stringify(scr().defst));
+  return t;};
  /* device-px boxes: grid mode replicates the sketch flow; free mode = manual */
  let PLACES=[],SCALE=1;
  const flowBoxes=()=>{const [W,H]=WH();
-  const gap=scr().gap||0,cols=W>=480?3:2,colW=W/cols,hL=66,hM=50,hS=20,top=28,bot=14;
+  const gap=scr().gap||0,cols=W>=480?3:2,colW=W/cols,hL=66,hM=50,hS=20,top=28,bot=scr().avail===false?2:14;
   let x=0,y=top,rowH=0,full=false;const boxes=[],over=[];
   pg().tiles.forEach((t,i)=>{
    const big=t.size==="l",slim=t.size==="s";
@@ -5912,11 +5922,12 @@ function winGlance(){openWin("__glance","Экран NAS",async body=>{
   const bg=t.st&&t.st.bg,bw=(t.st&&t.st.bw!==undefined)?t.st.bw:1,bc=(t.st&&t.st.bc)||"#262b36";
   const fs=v=>Math.max(6,px(v))+"px";
   const lp=stv(t,"lp"),vp=stv(t,"vp"),up=stv(t,"up");
+  const col=k=>t.st&&t.st[k]?`;color:${t.st[k]}`:"";
   let inner="";
-  if(lp!=="hide"&&lp!=="val")inner+=`<span class="e l" style="${POS[lp]};font-size:${fs(stv(t,"ls"))}">${esc(names[t.id]||t.id)}</span>`;
-  const uIn=up==="val"?` <span class="u" style="font-size:${fs(stv(t,"us"))}">${esc(live.unit||"")}</span>`:"";
-  if(vp!=="hide"&&vp!=="val")inner+=`<span class="e v" style="${POS[vp]};font-size:${fs(stv(t,"vs"))}">${esc(live.value)}${uIn}</span>`;
-  if(up!=="val"&&up!=="hide")inner+=`<span class="e u2" style="${POS[up]};font-size:${fs(stv(t,"us"))}">${esc(live.unit||"")}</span>`;
+  if(lp!=="hide"&&lp!=="val")inner+=`<span class="e l" style="${POS[lp]};font-size:${fs(stv(t,"ls"))}${col("lc")}">${esc(names[t.id]||t.id)}</span>`;
+  const uIn=up==="val"?` <span class="u" style="font-size:${fs(stv(t,"us"))}${col("uc")}">${esc(live.unit||"")}</span>`:"";
+  if(vp!=="hide"&&vp!=="val")inner+=`<span class="e v" style="${POS[vp]};font-size:${fs(stv(t,"vs"))}${col("vc")}">${esc(live.value)}${uIn}</span>`;
+  if(up!=="val"&&up!=="hide")inner+=`<span class="e u2" style="${POS[up]};font-size:${fs(stv(t,"us"))}${col("uc")}">${esc(live.unit||"")}</span>`;
   inner+=`<i class="d" style="background:${stColor(live.state)}"></i>`;
   if(MODE()==="free"&&i===sel)inner+=`<span class="rzh"></span>`;
   return `<div class="glc-tile${i===sel?" sel":""}" ${MODE()==="flow"?'draggable="true"':""} data-i="${i}" style="left:${px(b.x)}px;top:${px(b.y)}px;width:${px(b.w)}px;height:${px(b.h)}px;background:${bg==="none"?"transparent":(bg||"#151821")};border:${bw?Math.max(1,px(bw))+"px solid "+bc:"none"};z-index:${10+i}">${inner}</div>`;};
@@ -5927,9 +5938,10 @@ function winGlance(){openWin("__glance","Экран NAS",async body=>{
   cv.style.width=Math.round(W*f)+"px";cv.style.height=Math.round(H*f)+"px";
   const {boxes,over}=MODE()==="free"?freeBoxes():flowBoxes();PLACES=boxes;
   const px=v=>Math.round(v*f)+"px";
+  const avHTML=scr().avail===false?"":`<div class="glc-av" style="height:${px(11)}" title="Доступность за 24ч — устройство рисует её внизу сам">${(AVB||[]).map(v=>`<i style="background:${v===2?"#2e7d54":v===1?"#8a6d1f":v===0?"#7d2e2e":"#23262e"}"></i>`).join("")}</div>`;
   cv.innerHTML=`<div class="glc-hdr" style="height:${px(28)}"><i></i><span>${esc(location.hostname)}</span><span class="pgdots">${scr().pages.map((_,k)=>`<b class="${k===pi?"on":""}"></b>`).join("")}</span></div>`
    +boxes.map(b=>tileHTML(pg().tiles[b.i],b.i,b,f)).join("")
-   +`<div class="glc-av" style="height:${px(12)}"></div>`;
+   +avHTML;
   cv.querySelectorAll(".glc-tile").forEach(tl=>{
    const i=+tl.dataset.i;
    tl.onclick=e=>{e.stopPropagation();if(sel!==i){sel=i;paintCtl();paintInsp();paintCv();}};
@@ -5938,19 +5950,52 @@ function winGlance(){openWin("__glance","Экран NAS",async body=>{
   const ov=q("#gcOver");
   ov.innerHTML=over.length?`<span class="glc-cap">Не влезло на экран:</span> `+over.map(i=>`<button class="btn sm" data-i="${i}">${esc(names[pg().tiles[i].id]||"?")} ✕</button>`).join(" "):"";
   ov.querySelectorAll("button").forEach(b=>b.onclick=()=>{pg().tiles.splice(+b.dataset.i,1);sel=-1;commit();});};
- /* free mode: pointer drag to move, corner handle to resize; overlap is fine */
+ /* free mode: pointer drag to move, corner handle to resize; overlap is fine.
+    Smart snapping (Photoshop-style): edges/centres stick to neighbours' edges,
+    centres and the screen bounds; resize also snaps to neighbours' w/h so two
+    tiles never end up 50 vs 51 px. Accent guide lines show what snapped. */
  const freeDrag=(e,el,i)=>{
   if(sel!==i){sel=i;paintCtl();paintInsp();paintCv();el=q(`.glc-tile[data-i="${i}"]`);if(!el)return;}
   e.preventDefault();
   const t=pg().tiles[i],[W,H]=WH();
   const rz=e.target.classList.contains("rzh");
   const sx=e.clientX,sy=e.clientY,ox=t.x,oy=t.y,ow=t.w,oh=t.h;
+  const SN=4;                                        // snap threshold, device px
+  const xs=[0,W,Math.round(W/2)],ys=[0,28,H-14,H,Math.round(H/2)],ws=[],hs=[];
+  pg().tiles.forEach((o,k)=>{if(k===i||o.x===undefined)return;
+   xs.push(o.x,o.x+o.w,Math.round(o.x+o.w/2));ys.push(o.y,o.y+o.h,Math.round(o.y+o.h/2));
+   ws.push(o.w);hs.push(o.h);});
+  const cv=q("#gcCv");
+  const gv=el2("v"),gh=el2("h");
+  function el2(cls){const g=document.createElement("div");g.className="glc-guide "+cls;g.style.display="none";cv.appendChild(g);return g;}
+  const snap1=(v,cands)=>{let best=null,bd=SN+1;
+   for(const c of cands){const d=Math.abs(v-c);if(d<bd){bd=d;best=c;}}
+   return best;};
   const mv=ev=>{const dx=(ev.clientX-sx)/SCALE,dy=(ev.clientY-sy)/SCALE;
-   if(rz){t.w=Math.round(Math.max(16,Math.min(W-t.x,ow+dx)));t.h=Math.round(Math.max(12,Math.min(H-t.y,oh+dy)));
-    el.style.width=Math.round(t.w*SCALE)+"px";el.style.height=Math.round(t.h*SCALE)+"px";}
-   else{t.x=Math.round(Math.max(0,Math.min(W-t.w,ox+dx)));t.y=Math.round(Math.max(0,Math.min(H-t.h,oy+dy)));
-    el.style.left=Math.round(t.x*SCALE)+"px";el.style.top=Math.round(t.y*SCALE)+"px";}};
-  const up=()=>{window.removeEventListener("pointermove",mv);window.removeEventListener("pointerup",up);save();paintInsp();};
+   let gx=null,gy=null;
+   if(rz){
+    let w=Math.max(16,Math.min(W-t.x,ow+dx)),h=Math.max(12,Math.min(H-t.y,oh+dy));
+    const se=snap1(t.x+w,xs);            // right edge to guides
+    const sw=snap1(w,ws);                // width to neighbours' widths
+    if(se!==null){w=se-t.x;gx=se;}else if(sw!==null)w=sw;
+    const be=snap1(t.y+h,ys);
+    const sh=snap1(h,hs);
+    if(be!==null){h=be-t.y;gy=be;}else if(sh!==null)h=sh;
+    t.w=Math.round(Math.max(16,w));t.h=Math.round(Math.max(12,h));
+    el.style.width=Math.round(t.w*SCALE)+"px";el.style.height=Math.round(t.h*SCALE)+"px";
+   }else{
+    let x=Math.max(0,Math.min(W-t.w,ox+dx)),y=Math.max(0,Math.min(H-t.h,oy+dy));
+    for(const [edge,off] of [[x,0],[x+t.w,t.w],[x+t.w/2,t.w/2]]){
+     const s=snap1(edge,xs);if(s!==null){x=s-off;gx=s;break;}}
+    for(const [edge,off] of [[y,0],[y+t.h,t.h],[y+t.h/2,t.h/2]]){
+     const s=snap1(edge,ys);if(s!==null){y=s-off;gy=s;break;}}
+    t.x=Math.round(Math.max(0,Math.min(W-t.w,x)));t.y=Math.round(Math.max(0,Math.min(H-t.h,y)));
+    el.style.left=Math.round(t.x*SCALE)+"px";el.style.top=Math.round(t.y*SCALE)+"px";
+   }
+   gv.style.display=gx===null?"none":"";if(gx!==null)gv.style.left=Math.round(gx*SCALE)+"px";
+   gh.style.display=gy===null?"none":"";if(gy!==null)gh.style.top=Math.round(gy*SCALE)+"px";};
+  const up=()=>{window.removeEventListener("pointermove",mv);window.removeEventListener("pointerup",up);
+   gv.remove();gh.remove();save();paintInsp();};
   window.addEventListener("pointermove",mv);window.addEventListener("pointerup",up);};
  const paintCtl=()=>{const c=q("#gcCtl");const ok=sel>=0&&sel<pg().tiles.length;
   c.style.visibility=ok?"visible":"hidden";
@@ -5963,32 +6008,44 @@ function winGlance(){openWin("__glance","Экран NAS",async body=>{
   const t=pg().tiles[sel];
   const g9=(pre,extra)=>`<div class="glc-9" data-k="${pre}p">${["tl","tc","tr","cl","c","cr","bl","bc","br"].map(p=>`<button data-p="${p}" class="${stv(t,pre+"p")===p?"on":""}"></button>`).join("")}</div><div class="glc-9x" data-k="${pre}p">${(extra||[]).map(([v,l])=>`<button data-p="${v}" class="btn sm ${stv(t,pre+"p")===v?"on":""}">${l}</button>`).join("")}</div>`;
   const num=(k,mn,mx)=>`<input type="number" min="${mn}" max="${mx}" data-n="${k}" value="${stv(t,k)!==undefined&&DEF[t.size||"m"][k]!==undefined?stv(t,k):(t.st&&t.st[k]!==undefined?t.st[k]:(k==="bw"?1:10))}" style="width:56px">`;
+  /* color + alpha pair; stored as #RRGGBB or #RRGGBBAA (device blends alpha) */
+  const aOf=v=>v&&v.length===9?Math.round(parseInt(v.slice(7,9),16)/2.55):100;
+  const cw=(k,defc)=>{const v=(t.st&&t.st[k])||"";
+   return `<label>цвет <input type="color" data-cc="${k}" value="${(v||defc).slice(0,7)}"><input type="number" data-ca="${k}" min="5" max="100" value="${aOf(v)}" style="width:50px" title="прозрачность, %"><button class="btn sm" data-cd="${k}" ${v?"":"disabled"}>авто</button></label>`;};
   const bgMode=!t.st||t.st.bg===undefined?"def":(t.st.bg==="none"?"none":"color");
   insp.innerHTML=`
    <div class="glc-cap" style="margin-bottom:2px">${esc(names[t.id]||t.id)}</div>
-   <div class="gi"><span>Заголовок</span>${g9("l",[["hide","скрыть"]])}<label>размер ${num("ls",6,60)}</label></div>
-   <div class="gi"><span>Значение</span>${g9("v",[["hide","скрыть"]])}<label>размер ${num("vs",6,120)}</label></div>
-   <div class="gi"><span>Единица</span>${g9("u",[["val","у значения"],["hide","скрыть"]])}<label>размер ${num("us",6,60)}</label></div>
-   <div class="gi"><span>Фон</span><div class="seg" id="giBg">${[["def","карточка"],["none","нет"],["color","цвет"]].map(([v,l])=>`<button data-b="${v}" class="${bgMode===v?"on":""}">${l}</button>`).join("")}</div><input type="color" id="giBgC" value="${t.st&&t.st.bg&&t.st.bg!=="none"?t.st.bg:"#151821"}" style="${bgMode==="color"?"":"display:none"}"></div>
-   <div class="gi"><span>Рамка</span><label>толщина ${num("bw",0,6)}</label><input type="color" id="giBcC" value="${(t.st&&t.st.bc)||"#262b36"}"><button class="btn sm" id="giBcDef">авто</button></div>
+   <div class="gi"><span>Заголовок</span>${g9("l",[["hide","скрыть"]])}<label>размер ${num("ls",6,60)}</label>${cw("lc","#8a90a0")}</div>
+   <div class="gi"><span>Значение</span>${g9("v",[["hide","скрыть"]])}<label>размер ${num("vs",6,120)}</label>${cw("vc","#e8eaf0")}</div>
+   <div class="gi"><span>Единица</span>${g9("u",[["val","у значения"],["hide","скрыть"]])}<label>размер ${num("us",6,60)}</label>${cw("uc","#8a90a0")}</div>
+   <div class="gi"><span>Фон</span><div class="seg" id="giBg">${[["def","карточка"],["none","нет"],["color","цвет"]].map(([v,l])=>`<button data-b="${v}" class="${bgMode===v?"on":""}">${l}</button>`).join("")}</div><label style="${bgMode==="color"?"":"display:none"}" id="giBgRow">цвет <input type="color" id="giBgC" value="${t.st&&t.st.bg&&t.st.bg!=="none"?t.st.bg.slice(0,7):"#151821"}"><input type="number" id="giBgA" min="5" max="100" value="${aOf(t.st&&t.st.bg!=="none"?t.st.bg:"")}" style="width:50px" title="прозрачность, %"></label></div>
+   <div class="gi"><span>Рамка</span><label>толщина ${num("bw",0,6)}</label>${cw("bc","#262b36")}</div>
    ${MODE()==="free"?`<div class="gi"><span>Геометрия</span><label>x ${num("x",0,4096)}</label><label>y ${num("y",0,4096)}</label><label>w ${num("w",8,4096)}</label><label>h ${num("h",8,4096)}</label></div>`:""}
-   <button class="btn sm" id="giReset">Сбросить стиль</button>`;
+   <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn sm" id="giDef" title="Новые плитки этого экрана будут получать этот стиль">Сделать по умолчанию</button><button class="btn sm" id="giReset">Сбросить стиль</button></div>`;
   const st=()=>t.st||(t.st={});
+  const hexA=(c,a)=>a>=100?c:c+Math.round(a*2.55).toString(16).padStart(2,"0");
   insp.querySelectorAll(".glc-9 button,.glc-9x button").forEach(b=>b.onclick=()=>{st()[b.closest("[data-k]").dataset.k]=b.dataset.p;commit();paintInsp();});
   insp.querySelectorAll("input[data-n]").forEach(inp=>inp.onchange=()=>{const k=inp.dataset.n,v=+inp.value;
    if(["x","y","w","h"].includes(k))t[k]=v;else st()[k]=v;commit();});
+  insp.querySelectorAll("[data-cc],[data-ca]").forEach(inp=>inp.onchange=()=>{
+   const k=inp.dataset.cc||inp.dataset.ca;
+   const c=insp.querySelector(`[data-cc="${k}"]`).value,a=+insp.querySelector(`[data-ca="${k}"]`).value;
+   st()[k]=hexA(c,a);commit();paintInsp();});
+  insp.querySelectorAll("[data-cd]").forEach(b=>b.onclick=()=>{delete st()[b.dataset.cd];commit();paintInsp();});
   insp.querySelector("#giBg").querySelectorAll("button").forEach(b=>b.onclick=()=>{
-   if(b.dataset.b==="def")delete st().bg;else if(b.dataset.b==="none")st().bg="none";else st().bg=insp.querySelector("#giBgC").value;
+   if(b.dataset.b==="def")delete st().bg;else if(b.dataset.b==="none")st().bg="none";
+   else st().bg=hexA(insp.querySelector("#giBgC").value,+insp.querySelector("#giBgA").value);
    commit();paintInsp();});
-  insp.querySelector("#giBgC").onchange=e=>{st().bg=e.target.value;commit();};
-  insp.querySelector("#giBcC").onchange=e=>{st().bc=e.target.value;commit();};
-  insp.querySelector("#giBcDef").onclick=()=>{delete st().bc;commit();paintInsp();};
+  insp.querySelector("#giBgC").onchange=insp.querySelector("#giBgA").onchange=()=>{
+   st().bg=hexA(insp.querySelector("#giBgC").value,+insp.querySelector("#giBgA").value);commit();};
+  insp.querySelector("#giDef").onclick=()=>{scr().defst=t.st?JSON.parse(JSON.stringify(t.st)):{};save();toast("Стиль по умолчанию сохранён");};
   insp.querySelector("#giReset").onclick=()=>{delete t.st;commit();paintInsp();};};
  const paint=()=>{
   q("#gcScr").innerHTML=screens.map((s,k)=>`<button data-v="${k}" class="${k===si?"on":""}">${esc(s.name)}</button>`).join("");
   q("#gcScr").querySelectorAll("button").forEach(b=>b.onclick=()=>{si=+b.dataset.v;pi=0;sel=-1;paint();paintInsp();});
   q("#gcScrName").value=scr().name;q("#gcPreset").value=scr().preset;
   q("#gcGap").value=scr().gap||0;
+  q("#gcAv").checked=scr().avail!==false;
   q("#gcMode").querySelectorAll("button").forEach(b=>b.classList.toggle("on",b.dataset.m===MODE()));
   q("#gcScrId").textContent="screen="+scr().id;
   q("#gcScrDel").disabled=screens.length<2;
@@ -6000,6 +6057,7 @@ function winGlance(){openWin("__glance","Экран NAS",async body=>{
  q("#gcScrName").onchange=()=>{scr().name=q("#gcScrName").value.trim()||"Экран";commit();};
  q("#gcPreset").onchange=()=>{scr().preset=q("#gcPreset").value;commit();};
  q("#gcGap").onchange=()=>{scr().gap=Math.max(0,Math.min(24,+q("#gcGap").value||0));commit();};
+ q("#gcAv").onchange=e=>{scr().avail=e.target.checked;commit();};
  q("#gcMode").querySelectorAll("button").forEach(b=>b.onclick=()=>{
   if(b.dataset.m===MODE())return;
   if(b.dataset.m==="free"){/* materialize current grid coords so nothing jumps */
@@ -6027,7 +6085,7 @@ function winGlance(){openWin("__glance","Экран NAS",async body=>{
   const d=e.dataTransfer.getData("text/plain")||"";
   const rect=cvBox.getBoundingClientRect(),mx=e.clientX-rect.left,my=e.clientY-rect.top;
   if(MODE()==="free"&&d.startsWith("add:")){
-   const t={id:d.slice(4),size:"m"};pg().tiles.push(t);
+   const t=newTile(d.slice(4));pg().tiles.push(t);
    const [W,H]=WH();const cols=W>=480?3:2;
    t.w=Math.round(W/cols)-6;t.h=46;
    t.x=Math.round(Math.max(0,Math.min(W-t.w,mx/SCALE-t.w/2)));
@@ -6037,7 +6095,7 @@ function winGlance(){openWin("__glance","Экран NAS",async body=>{
   let idx=pg().tiles.length;
   for(const p of PLACES){const cxp=(p.x+p.w/2)*SCALE,cyp=(p.y+p.h/2)*SCALE;
    if(my<cyp-2||(Math.abs(my-cyp)<=p.h*SCALE/2&&mx<cxp)){idx=p.i;break;}}
-  if(d.startsWith("add:")){pg().tiles.splice(idx,0,{id:d.slice(4),size:"m"});sel=idx;commit();paintInsp();}
+  if(d.startsWith("add:")){pg().tiles.splice(idx,0,newTile(d.slice(4)));sel=idx;commit();paintInsp();}
   else if(d.startsWith("mv:")){const from=+d.slice(3);if(from===idx)return;
    const [t]=pg().tiles.splice(from,1);pg().tiles.splice(from<idx?idx-1:idx,0,t);sel=from<idx?idx-1:idx;commit();paintInsp();}};
  paint();refresh();
