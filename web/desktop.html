@@ -1586,6 +1586,47 @@
   .gl-tile.sm b{font-size:12px} .gl-tile.sm .gl-sv{margin-left:auto}
   .gl-pgname{margin-top:12px;font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--dim)}
   .gl-size{flex:none} .gl-size button{padding:3px 8px;font-size:10px}
+  /* glance constructor (winGlance): device-mock canvas is intentionally dark —
+     it imitates the physical display, not a panel surface */
+  .glc-bar{display:flex;align-items:center;gap:8px;padding:10px 16px 0;flex-wrap:wrap}
+  .glc-bar input,.glc-bar select{height:28px;border-radius:8px;border:1px solid var(--line);background:var(--glass);color:var(--ink);padding:0 8px;font-size:12px;width:120px}
+  .glc-bar select{width:auto;max-width:230px}
+  .glc-cap{font-size:11px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--dim)}
+  .glc-id{font-size:11px;color:var(--dim)}
+  .glc-main{display:flex;gap:16px;flex:1;min-height:0;padding:12px 16px 16px}
+  .glc-pal-wrap{width:230px;flex:none;display:flex;flex-direction:column;min-height:0}
+  .glc-pal{flex:1;overflow:auto;display:flex;flex-direction:column;gap:5px;padding-right:4px}
+  .glc-pitem{display:flex;align-items:center;gap:7px;padding:7px 10px;border-radius:9px;background:var(--card);border:1px solid var(--line);cursor:grab;font-size:12px}
+  .glc-pitem i{width:8px;height:8px;border-radius:50%;flex:none}
+  .glc-pitem .pn{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .glc-pitem .pv{color:var(--dim);font-size:11px;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .glc-pitem.used{opacity:.45}
+  .glc-pitem:hover{box-shadow:var(--sh-sm)}
+  .glc-stage{flex:1;overflow:auto;display:flex;flex-direction:column;align-items:center;gap:10px;min-height:0}
+  .glc-canvas{position:relative;flex:none;background:#0a0c11;border-radius:12px;border:1px solid var(--line);overflow:hidden;box-shadow:var(--sh-sm)}
+  .glc-hdr{position:absolute;top:0;left:0;right:0;display:flex;align-items:center;gap:7px;padding:0 10px;color:#e8eaf0;font-size:12px;font-weight:650}
+  .glc-hdr i{width:9px;height:9px;border-radius:50%;background:#43C08A}
+  .glc-hdr .pgdots{margin-left:auto;display:flex;gap:5px}
+  .glc-hdr .pgdots b{width:6px;height:6px;border-radius:50%;background:#3a3f4c}
+  .glc-hdr .pgdots b.on{background:#e8eaf0}
+  .glc-av{position:absolute;left:6px;right:6px;bottom:2px;border-radius:3px;background:repeating-linear-gradient(90deg,#2e7d54 0 8px,#255f42 8px 9px)}
+  .glc-tile{position:absolute;box-sizing:border-box;border-radius:7px;background:#151821;border:1px solid #262b36;color:#e8eaf0;cursor:grab;overflow:hidden}
+  .glc-tile.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+  .glc-tile .l{position:absolute;top:3px;left:7px;right:18px;color:#8a90a0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .glc-tile .d{position:absolute;top:5px;right:6px;width:7px;height:7px;border-radius:50%}
+  .glc-tile .v{position:absolute;inset:0;padding-top:10px;display:flex;align-items:center;justify-content:center;gap:4px;font-weight:700;white-space:nowrap;overflow:hidden}
+  .glc-tile .u{font-size:.55em;color:#8a90a0;font-weight:500}
+  .glc-tile.slim{display:flex;align-items:center;gap:6px;padding:0 7px}
+  .glc-tile.slim .l{position:static;flex:1;right:auto}
+  .glc-tile.slim .v{position:static;inset:auto;padding:0;font-weight:600}
+  .glc-tile.slim .d{position:static;margin-left:2px}
+  .glc-over{align-self:stretch;display:flex;align-items:center;gap:6px;flex-wrap:wrap;color:var(--warn);font-size:12px}
+  @media(max-width:1024px){
+   .glc-main{flex-direction:column}
+   .glc-pal-wrap{width:auto;max-height:150px}
+   .glc-pal{flex-direction:row;flex-wrap:wrap}
+   .glc-pitem{flex:none}
+  }
   .gl-avwrap{margin-top:12px}
   .gl-bars{display:flex;gap:1px;height:14px}
   .gl-bars i{flex:1;border-radius:2px;min-width:1px}
@@ -5727,7 +5768,9 @@ let SYSC=null, PENDING_REBOOT=false;
    Config lives server-side (~/nas-config/glance.json): the device polls
    /api/glance with a read-only token and just renders what the server sends,
    so changing tiles here never requires reflashing the device. */
-function sparkSVG(v){if(!v||v.length<2)return "";
+/* NB: distinct name — a global sparkSVG(data,color,max) already exists for the
+   monitoring widgets and function declarations override each other */
+function glSpark(v){if(!v||v.length<2)return "";
  const mn=Math.min(...v),mx=Math.max(...v),sp=(mx-mn)||1;
  const pts=v.map((x,i)=>`${(i/(v.length-1)*46).toFixed(1)},${(17-(x-mn)/sp*14).toFixed(1)}`).join(" ");
  return `<svg class="gl-spark" viewBox="0 0 46 18" preserveAspectRatio="none"><polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="1.5" vector-effect="non-scaling-stroke"/></svg>`;}
@@ -5739,82 +5782,164 @@ async function glanceTab(tc){
  tc.innerHTML=`<div class="set-load">загрузка…</div>`;
  const r=await api("/api/glance/config");
  if(!r||!r.config){tc.innerHTML=`<div class="set-load">нет данных</div>`;return;}
- const cfg=r.config,cat=r.catalog||[];
+ const cfg=r.config;
  const tok=cfg.token||"";
  const url=`http://${location.host}/api/glance?token=${tok||"…"}&lang=en`;
  tc.innerHTML=`
   <div class="set-title">Экран</div>
-  <div class="set-sub">Компактный статус NAS для внешнего экрана (ESP32): устройство опрашивает адрес ниже и просто рисует плитки. Состав и порядок задаются здесь — прошивку менять не нужно. Пример прошивки — <span class="mono">services/esp32-glance</span> в репозитории.</div>
+  <div class="set-sub">Компактный статус NAS для внешних экранов (ESP32): устройство опрашивает адрес ниже и просто рисует то, что вы собрали в конструкторе. Прошивку менять не нужно.</div>
+  <div class="set-h">Конструктор</div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Экраны, страницы и плитки</div><div class="srow-d">визуальный редактор: пресеты размеров, перетаскивание, живые данные</div></div><div class="srow-c"><button class="btn" id="glOpen">Открыть конструктор</button></div></div>
   <div class="set-h">Доступ</div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Отдавать данные по токену</div><div class="srow-d">без токена доступ к этим данным есть только из панели</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="glEn"${cfg.enabled?" checked":""}><span class="sl"></span></label></div></div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Токен</div><div class="srow-d mono">${tok?esc(tok):"— не создан —"}</div></div><div class="srow-c"><button class="btn sm" id="glNew">${tok?"Перевыпустить":"Создать"}</button><button class="btn sm" id="glCopy"${tok?"":" disabled"}>Копировать URL</button><button class="btn sm warn" id="glRev"${tok?"":" disabled"}>Отозвать</button></div></div>
-  <div class="srow"><div class="srow-l"><div class="srow-t">Адрес для устройства</div><div class="srow-d mono" style="user-select:all;word-break:break-all">${esc(url)}</div></div></div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Адрес для устройства</div><div class="srow-d mono" style="user-select:all;word-break:break-all">${esc(url)}</div><div class="srow-d">у второго экрана добавьте <span class="mono">&screen=ID</span> — ID виден в конструкторе</div></div></div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Пример прошивки для ESP32</div><div class="srow-d mono">/opt/nas-os/services/esp32-glance</div></div><div class="srow-c"><button class="btn sm" id="glFw">Показать в файлах</button></div></div>
   <div class="set-h">Доступность</div>
   <div class="set-sub">Журнал доступности ведёт сторож сети: пингует шлюз и пишет состояние (онлайн / без сети / выключен). Полоски — в виджетах «Доступность · 24h / 30d» и в плитках avail.</div>
-  <div class="srow"><div class="srow-l"><div class="srow-t">Интервал проверки</div><div class="srow-d">чаще — точнее полоски, реже — меньше фоновой работы</div></div><div class="srow-c"><div class="seg" id="glPing">${[15,30,60,120].map(v=>`<button data-v="${v}" class="${(cfg.ping_interval||30)===v?"on":""}">${v}с</button>`).join("")}</div></div></div>
-  <div class="set-h">Страницы и плитки</div>
-  <div class="set-sub">Экран листает страницы кнопкой (или сам). Важное — крупнее: размер S/M/L у каждой плитки. Плитки отсутствующих сервисов пропускаются сами. Свои проверки: исполняемый скрипт в <span class="mono">~/nas-config/scripts/glance/</span> — первая строка вывода <span class="mono">ok|warn|danger текст</span> станет плиткой и влияет на общий статус.</div>
-  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:6px 0"><div class="seg" id="glPgSeg"></div><button class="btn sm" id="glPgAdd">+ страница</button></div>
-  <div class="srow"><div class="srow-l"><div class="srow-t">Название страницы</div></div><div class="srow-c"><input type="text" id="glPgName" maxlength="24" style="width:150px"><button class="btn sm warn" id="glPgDel">Удалить страницу</button></div></div>
-  <div id="glList"></div>
-  <div style="display:flex;align-items:center;gap:8px;margin:8px 0"><select id="glAddSel" style="max-width:240px"></select><button class="btn sm" id="glAdd">Добавить плитку</button></div>
-  <div class="set-h">Предпросмотр</div>
-  <div id="glPrev" class="gl-prev"><div class="set-load">загрузка…</div></div>`;
- const post=async d=>{const rr=await api("/api/glance/config",{method:"POST",body:JSON.stringify(d)});if(rr&&rr.config)Object.assign(cfg,rr.config);return rr;};
+  <div class="srow"><div class="srow-l"><div class="srow-t">Интервал проверки</div><div class="srow-d">чаще — точнее полоски, реже — меньше фоновой работы</div></div><div class="srow-c"><div class="seg" id="glPing">${[15,30,60,120].map(v=>`<button data-v="${v}" class="${(cfg.ping_interval||30)===v?"on":""}">${v}с</button>`).join("")}</div></div></div>`;
+ const post=async d=>api("/api/glance/config",{method:"POST",body:JSON.stringify(d)});
+ tc.querySelector("#glOpen").onclick=()=>winGlance();
  tc.querySelector("#glEn").onchange=e=>post({enabled:e.target.checked});
  tc.querySelector("#glNew").onclick=async()=>{await post({token_action:"new"});rerSet();};
  tc.querySelector("#glRev").onclick=async()=>{await post({token_action:"revoke"});rerSet();};
  tc.querySelector("#glCopy").onclick=()=>{if(navigator.clipboard)navigator.clipboard.writeText(url);toast("Скопировано");};
  tc.querySelector("#glFw").onclick=()=>winFiles("/opt/nas-os/services/esp32-glance");
  tc.querySelectorAll("#glPing button").forEach(b=>b.onclick=()=>{tc.querySelectorAll("#glPing button").forEach(x=>x.classList.toggle("on",x===b));post({ping_interval:+b.dataset.v});toast("Интервал обновлён");});
- /* pages editor: tabs, per-page ordered tiles with S/M/L size, add/remove */
- const names={};cat.forEach(c=>names[c.id]=c.name);
- const pages=cfg.pages&&cfg.pages.length?cfg.pages:[{name:"Главная",tiles:[]}];
- let cur=0;
- const list=tc.querySelector("#glList"),pgSeg=tc.querySelector("#glPgSeg"),
-       pgName=tc.querySelector("#glPgName"),addSel=tc.querySelector("#glAddSel");
- const commit=async()=>{await post({pages});paintPages();paintPrev();};
- const paintPages=()=>{
-  pgSeg.innerHTML=pages.map((p,i)=>`<button data-v="${i}" class="${i===cur?"on":""}">${esc(p.name)}</button>`).join("");
-  pgSeg.querySelectorAll("button").forEach(b=>b.onclick=()=>{cur=+b.dataset.v;paintPages();});
-  const pg=pages[cur];
-  pgName.value=pg.name;
-  tc.querySelector("#glPgDel").disabled=pages.length<2;
-  const used=new Set(pg.tiles.map(t=>t.id));
-  addSel.innerHTML=cat.filter(c=>!used.has(c.id)).map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join("");
-  list.innerHTML="";
-  pg.tiles.forEach((w,i)=>{
-   const row=el(`<div class="wg-cfg"><span class="nm">${esc(names[w.id]||w.id)}</span><div class="seg gl-size">${["s","m","l"].map(z=>`<button data-z="${z}" class="${w.size===z?"on":""}">${z.toUpperCase()}</button>`).join("")}</div><div class="ord"><button data-u ${i===0?"disabled":""} title="Выше">${svg("arrowup",14)}</button><button data-dn ${i===pg.tiles.length-1?"disabled":""} title="Ниже" style="transform:rotate(180deg)">${svg("arrowup",14)}</button></div><button class="iconbtn" data-x title="Убрать">${svg("x",14)}</button></div>`);
-   row.querySelectorAll("[data-z]").forEach(b=>b.onclick=()=>{w.size=b.dataset.z;commit();});
-   row.querySelector("[data-u]").onclick=()=>{if(i>0){[pg.tiles[i-1],pg.tiles[i]]=[pg.tiles[i],pg.tiles[i-1]];commit();}};
-   row.querySelector("[data-dn]").onclick=()=>{if(i<pg.tiles.length-1){[pg.tiles[i+1],pg.tiles[i]]=[pg.tiles[i],pg.tiles[i+1]];commit();}};
-   row.querySelector("[data-x]").onclick=()=>{pg.tiles.splice(i,1);commit();};
-   list.appendChild(row);});
- };
- pgName.onchange=()=>{pages[cur].name=pgName.value.trim()||"Экран";commit();};
- tc.querySelector("#glPgAdd").onclick=()=>{if(pages.length>=6)return;pages.push({name:"Стр. "+(pages.length+1),tiles:[]});cur=pages.length-1;commit();};
- tc.querySelector("#glPgDel").onclick=()=>{if(pages.length<2)return;pages.splice(cur,1);cur=Math.max(0,cur-1);commit();};
- tc.querySelector("#glAdd").onclick=()=>{const id=addSel.value;if(!id)return;pages[cur].tiles.push({id,size:"m"});commit();};
- paintPages();
- const prev=tc.querySelector("#glPrev");
- const paintPrev=async()=>{
-  /* request the panel's language so server-side units/values arrive localized */
-  const g=await api("/api/glance?lang="+(window.NAS_LANG||"ru"));
-  if(!g||!g.tiles){prev.innerHTML=`<div class="set-load">нет данных</div>`;return;}
-  const dot=s=>`<i class="gl-dot" style="background:var(--${s==="ok"?"good":s==="warn"?"warn":"danger"})"></i>`;
-  const tile=t=>t.size==="s"
-   ?`<div class="gl-tile sm">${dot(t.state)}<span class="gl-lab">${esc(t.label)}</span><span class="gl-sv"><b>${esc(t.value)}</b> <span class="gl-unit">${esc(t.unit||"")}</span></span></div>`
-   :`<div class="gl-tile card${t.size==="l"?" lg":""}"><span class="gl-top"><span class="gl-lab">${esc(t.label)}</span>${dot(t.state)}</span><span class="gl-mid"><b>${esc(t.value)}</b><span class="gl-unit">${esc(t.unit||"")}</span></span>${t.spark?sparkSVG(t.spark):""}</div>`;
-  const pgs=g.pages&&g.pages.length?g.pages:[{name:"",tiles:g.tiles}];
-  prev.innerHTML=`<div class="gl-head">${dot(g.status)}<b>${esc(g.host)}</b><span class="mono" style="color:var(--dim);font-size:11px">seq ${g.seq}</span></div>
-   ${g.problems&&g.problems.length?`<div class="gl-prob">${g.problems.map(esc).join("<br>")}</div>`:""}
-   ${pgs.map(p=>`${pgs.length>1?`<div class="gl-pgname">${esc(p.name)}</div>`:""}<div class="gl-tiles">${p.tiles.map(tile).join("")}</div>`).join("")}
-   ${avBarsHTML(g.avail&&g.avail.bars,g.avail&&g.avail.pct24)}`;
- };
- paintPrev();
- const t=setInterval(()=>{if(!document.contains(prev)){clearInterval(t);return;}paintPrev();},5000);
 }
+/* Glance constructor: visual editor for external displays. Screens (size
+   presets) -> pages -> tiles; the canvas repeats the ESP32 flow layout at true
+   proportions, so what overflows the device is listed separately. Click a tile
+   to select (size / order / remove), click or drag from the palette to add. */
+function winGlance(){openWin("__glance","Экран NAS",async body=>{
+ body.style.padding="0";body.style.display="flex";body.style.flexDirection="column";
+ body.innerHTML=`<div class="set-load" style="padding:20px">загрузка…</div>`;
+ const r=await api("/api/glance/config");
+ if(!r||!r.config){body.innerHTML=`<div class="set-load" style="padding:20px">нет данных</div>`;return;}
+ const screens=r.config.screens,cat=r.catalog||[],presets=r.presets||[];
+ const names={};cat.forEach(c=>names[c.id]=c.name);
+ let si=0,pi=0,sel=-1,LIVE={};
+ body.innerHTML=`
+  <div class="glc-bar">
+   <span class="glc-cap">Экран</span><div class="seg" id="gcScr"></div><button class="btn sm" id="gcScrAdd">+</button>
+   <input id="gcScrName" maxlength="24" placeholder="имя">
+   <select id="gcPreset">${presets.map(p=>`<option value="${p.id}">${esc(p.name)} — ${p.id}</option>`).join("")}</select>
+   <span class="glc-id mono" id="gcScrId"></span>
+   <button class="iconbtn" id="gcScrDel" title="Удалить экран">${svg("trash",15)}</button>
+  </div>
+  <div class="glc-bar">
+   <span class="glc-cap">Страница</span><div class="seg" id="gcPg"></div><button class="btn sm" id="gcPgAdd">+</button>
+   <input id="gcPgName" maxlength="24" placeholder="имя">
+   <button class="iconbtn" id="gcPgDel" title="Удалить страницу">${svg("trash",15)}</button>
+   <span style="flex:1"></span>
+   <div id="gcCtl" style="display:flex;align-items:center;gap:6px;visibility:hidden">
+    <div class="seg" id="gcSize">${["s","m","l"].map(z=>`<button data-z="${z}">${z.toUpperCase()}</button>`).join("")}</div>
+    <button class="iconbtn" id="gcMvL" title="Раньше">${svg("arrowup",15)}</button>
+    <button class="iconbtn" id="gcMvR" title="Позже" style="transform:rotate(180deg)">${svg("arrowup",15)}</button>
+    <button class="iconbtn" id="gcTDel" title="Убрать с экрана">${svg("x",15)}</button>
+   </div>
+  </div>
+  <div class="glc-main">
+   <div class="glc-pal-wrap"><div class="glc-cap" style="margin:0 0 6px">Плитки — кликните или перетащите</div><div class="glc-pal" id="gcPal"></div></div>
+   <div class="glc-stage"><div class="glc-canvas" id="gcCv"></div><div class="glc-over" id="gcOver"></div></div>
+  </div>`;
+ const q=s=>body.querySelector(s);
+ const scr=()=>screens[si],pg=()=>scr().pages[pi];
+ let postT=null;
+ const commit=()=>{clearTimeout(postT);postT=setTimeout(()=>api("/api/glance/config",{method:"POST",body:JSON.stringify({screens})}),350);paint();};
+ const stColor=s=>s==="ok"?"var(--good)":s==="warn"?"var(--warn)":"var(--danger)";
+ /* live values for every catalog tile (palette + canvas) */
+ const refresh=async()=>{const g=await api("/api/glance?all=1&lang="+(window.NAS_LANG||"ru"));
+  if(g&&g.palette){LIVE={};g.palette.forEach(t=>LIVE[t.id]=t);paintPal();paintCv();}};
+ const tload=id=>LIVE[id]||{value:"—",unit:"",state:"ok"};
+ const paintPal=()=>{const pal=q("#gcPal");if(!pal)return;
+  const used=new Set(pg().tiles.map(t=>t.id));
+  pal.innerHTML=cat.map(c=>{const t=tload(c.id);
+   return `<div class="glc-pitem${used.has(c.id)?" used":""}" draggable="true" data-id="${c.id}">
+    <i style="background:${stColor(t.state)}"></i><span class="pn">${esc(c.name)}</span><span class="pv mono">${esc(t.value)}</span></div>`;}).join("");
+  pal.querySelectorAll(".glc-pitem").forEach(it=>{
+   it.onclick=()=>{pg().tiles.push({id:it.dataset.id,size:"m"});sel=pg().tiles.length-1;commit();};
+   it.ondragstart=e=>e.dataTransfer.setData("text/plain","add:"+it.dataset.id);});};
+ /* canvas: replica of the sketch flow layout, scaled to the preset */
+ let PLACES=[],SCALE=1;
+ const paintCv=()=>{const cv=q("#gcCv");if(!cv)return;
+  const [W,H]=scr().preset.split("x").map(Number);
+  const stage=cv.parentElement;
+  const f=Math.max(.6,Math.min((stage.clientWidth-16)/W,2.1,360/H));SCALE=f;
+  cv.style.width=Math.round(W*f)+"px";cv.style.height=Math.round(H*f)+"px";
+  const cols=W>=480?3:2,colW=W/cols,hL=66,hM=50,hS=20,top=28,bot=14;
+  let x=0,y=top,rowH=0,full=false;PLACES=[];const over=[];
+  pg().tiles.forEach((t,i)=>{
+   const big=t.size==="l",slim=t.size==="s";
+   const th=big?hL:slim?hS:hM,tw=big?W:colW;
+   if(!full){
+    if(big&&x>0){y+=rowH;x=0;rowH=0;}
+    if(x+tw>W){y+=rowH;x=0;rowH=0;}
+    if(y+th>H-bot)full=true;}
+   if(full){over.push({t,i});return;}
+   PLACES.push({t,i,x,y,w:tw,h:th});
+   x+=tw;rowH=Math.max(rowH,th);
+   if(big){y+=th;x=0;rowH=0;}});
+  const px=v=>Math.round(v*f)+"px";
+  cv.innerHTML=`<div class="glc-hdr" style="height:${px(top)}"><i></i><span>${esc(location.hostname)}</span><span class="pgdots">${scr().pages.map((_,k)=>`<b class="${k===pi?"on":""}"></b>`).join("")}</span></div>`
+   +PLACES.map(p=>{const t=tload(p.t.id),slim=p.t.size==="s";
+    return `<div class="glc-tile${slim?" slim":""}${p.i===sel?" sel":""}" draggable="true" data-i="${p.i}" style="left:${px(p.x)};top:${px(p.y)};width:${px(p.w)};height:${px(p.h)};font-size:${Math.max(9,Math.round(11*f*.75))}px">
+     ${slim?`<span class="l">${esc(names[p.t.id]||p.t.id)}</span><span class="v mono">${esc(t.value)} ${esc(t.unit||"")}</span><i class="d" style="background:${stColor(t.state)}"></i>`
+          :`<span class="l">${esc(names[p.t.id]||p.t.id)}</span><i class="d" style="background:${stColor(t.state)}"></i><span class="v" style="font-size:${Math.max(11,Math.round((p.t.size==="l"?26:17)*f*.75))}px">${esc(t.value)}<span class="u">${esc(t.unit||"")}</span></span>`}
+    </div>`;}).join("")
+   +`<div class="glc-av" style="height:${px(12)}"></div>`;
+  cv.querySelectorAll(".glc-tile").forEach(tl=>{
+   tl.onclick=e=>{e.stopPropagation();sel=+tl.dataset.i;paintCtl();paintCv();};
+   tl.ondragstart=e=>e.dataTransfer.setData("text/plain","mv:"+tl.dataset.i);});
+  const ov=q("#gcOver");
+  ov.innerHTML=over.length?`<span class="glc-cap">Не влезло на экран:</span> `+over.map(o=>`<button class="btn sm" data-i="${o.i}">${esc(names[o.t.id]||o.t.id)} ✕</button>`).join(" "):"";
+  ov.querySelectorAll("button").forEach(b=>b.onclick=()=>{pg().tiles.splice(+b.dataset.i,1);sel=-1;commit();});};
+ const paintCtl=()=>{const c=q("#gcCtl");const ok=sel>=0&&sel<pg().tiles.length;
+  c.style.visibility=ok?"visible":"hidden";
+  if(ok)c.querySelectorAll("[data-z]").forEach(b=>b.classList.toggle("on",b.dataset.z===pg().tiles[sel].size));};
+ const paint=()=>{
+  q("#gcScr").innerHTML=screens.map((s,k)=>`<button data-v="${k}" class="${k===si?"on":""}">${esc(s.name)}</button>`).join("");
+  q("#gcScr").querySelectorAll("button").forEach(b=>b.onclick=()=>{si=+b.dataset.v;pi=0;sel=-1;paint();});
+  q("#gcScrName").value=scr().name;q("#gcPreset").value=scr().preset;
+  q("#gcScrId").textContent="screen="+scr().id;
+  q("#gcScrDel").disabled=screens.length<2;
+  q("#gcPg").innerHTML=scr().pages.map((p,k)=>`<button data-v="${k}" class="${k===pi?"on":""}">${esc(p.name)}</button>`).join("");
+  q("#gcPg").querySelectorAll("button").forEach(b=>b.onclick=()=>{pi=+b.dataset.v;sel=-1;paint();});
+  q("#gcPgName").value=pg().name;
+  q("#gcPgDel").disabled=scr().pages.length<2;
+  paintCtl();paintPal();paintCv();};
+ q("#gcScrName").onchange=()=>{scr().name=q("#gcScrName").value.trim()||"Экран";commit();};
+ q("#gcPreset").onchange=()=>{scr().preset=q("#gcPreset").value;commit();};
+ q("#gcScrAdd").onclick=()=>{if(screens.length>=4)return;
+  screens.push({id:"",name:"Экран "+(screens.length+1),preset:"320x170",pages:[{name:"Главная",tiles:[]}]});
+  si=screens.length-1;pi=0;sel=-1;
+  /* immediate save: the server assigns the screen id we show for &screen= */
+  clearTimeout(postT);api("/api/glance/config",{method:"POST",body:JSON.stringify({screens})}).then(rr=>{
+   if(rr&&rr.config){screens.length=0;rr.config.screens.forEach(s=>screens.push(s));}paint();});};
+ q("#gcScrDel").onclick=()=>{if(screens.length<2)return;screens.splice(si,1);si=0;pi=0;sel=-1;commit();};
+ q("#gcPgName").onchange=()=>{pg().name=q("#gcPgName").value.trim()||"Стр.";commit();};
+ q("#gcPgAdd").onclick=()=>{if(scr().pages.length>=6)return;scr().pages.push({name:"Стр. "+(scr().pages.length+1),tiles:[]});pi=scr().pages.length-1;sel=-1;commit();};
+ q("#gcPgDel").onclick=()=>{if(scr().pages.length<2)return;scr().pages.splice(pi,1);pi=0;sel=-1;commit();};
+ q("#gcSize").querySelectorAll("[data-z]").forEach(b=>b.onclick=()=>{if(sel<0)return;pg().tiles[sel].size=b.dataset.z;commit();});
+ q("#gcMvL").onclick=()=>{if(sel>0){const a=pg().tiles;[a[sel-1],a[sel]]=[a[sel],a[sel-1]];sel--;commit();}};
+ q("#gcMvR").onclick=()=>{const a=pg().tiles;if(sel>=0&&sel<a.length-1){[a[sel+1],a[sel]]=[a[sel],a[sel+1]];sel++;commit();}};
+ q("#gcTDel").onclick=()=>{if(sel<0)return;pg().tiles.splice(sel,1);sel=-1;commit();};
+ const cvBox=q("#gcCv");
+ cvBox.onclick=()=>{sel=-1;paintCtl();paintCv();};
+ cvBox.ondragover=e=>e.preventDefault();
+ cvBox.ondrop=e=>{e.preventDefault();
+  const d=e.dataTransfer.getData("text/plain")||"";
+  const rect=cvBox.getBoundingClientRect(),mx=e.clientX-rect.left,my=e.clientY-rect.top;
+  /* insertion index: first placed tile whose centre lies beyond the drop point */
+  let idx=pg().tiles.length;
+  for(const p of PLACES){const cxp=(p.x+p.w/2)*SCALE,cyp=(p.y+p.h/2)*SCALE;
+   if(my<cyp-2||(Math.abs(my-cyp)<=p.h*SCALE/2&&mx<cxp)){idx=p.i;break;}}
+  if(d.startsWith("add:")){pg().tiles.splice(idx,0,{id:d.slice(4),size:"m"});sel=idx;commit();}
+  else if(d.startsWith("mv:")){const from=+d.slice(3);if(from===idx)return;
+   const [t]=pg().tiles.splice(from,1);pg().tiles.splice(from<idx?idx-1:idx,0,t);sel=from<idx?idx-1:idx;commit();}};
+ paint();refresh();
+ const tim=setInterval(()=>{if(!document.contains(body)){clearInterval(tim);return;}refresh();},5000);
+},{w:1060,h:700});}
 function winSettings(initTab){openWin("__set","Настройки",body=>{
  body.style.display="flex";body.style.padding="0";
  let tab=initTab||"look";
@@ -7163,6 +7288,7 @@ function opsPop(){const b=document.getElementById("opsBtn");if(!b)return;
 document.querySelector(".desk").addEventListener("contextmenu",e=>{e.preventDefault();
  showMenu(e.clientX,e.clientY,[
   {label:"Система",ic:svg("gauge",17),act:winMon},{label:"Диски",ic:svg("disks",17),act:winDisks},
+  {label:"Экран NAS",ic:svg("monitor",17),act:winGlance},
   {label:"Персонализация",ic:svg("cog",17),act:winSettings},{sep:1},
   {label:"Обновить ярлыки",ic:svg("refresh",17),act:()=>{pollApps();toast("Ярлыки обновлены");}},
   {label:"Обновить всё",ic:svg("refresh",17),act:()=>{poll();pollApps();pollDisks();}},{label:"Открыть Cockpit",ic:svg("grid",17),act:()=>window.open(cockpitURL(),"_blank")},{sep:1},

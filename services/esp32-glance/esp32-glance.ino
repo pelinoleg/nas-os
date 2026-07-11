@@ -21,6 +21,7 @@ static const char* WIFI_SSID = "your-wifi";
 static const char* WIFI_PASS = "your-pass";
 static const char* NAS_HOST  = "192.168.1.48";   // NAS IP or hostname
 static const char* TOKEN     = "paste-glance-token-here";
+static const char* SCREEN_ID = "";               // empty = first screen; ids are shown in the constructor
 
 static const uint32_t POLL_MS = 5000;
 static const uint32_t PAGE_ROTATE_MS = 15000;    // 0 = manual (button) only
@@ -176,6 +177,7 @@ void poll() {
   HTTPClient http;
   String url = String("http://") + NAS_HOST + "/api/glance?token=" + TOKEN +
                "&lang=en&seq=" + String(lastSeq);
+  if (SCREEN_ID[0]) url += String("&screen=") + SCREEN_ID;
   http.setTimeout(4000);
   http.begin(url);
   int code = http.GET();

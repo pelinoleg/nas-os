@@ -1581,34 +1581,68 @@ def _gl_norm_tiles(lst):
             out.append({"id": str(t["id"]), "size": sz})
     return out
 
+# display size presets for the constructor canvas ("сколько поместится")
+GLANCE_PRESETS = [
+    ("320x170", "LilyGO T-Display-S3"),
+    ("640x180", "LilyGO T-Display-S3 Long"),
+    ("320x240", "TFT 2.4\" 320×240"),
+    ("480x320", "TFT 3.5\" 480×320"),
+    ("296x128", "e-ink 2.9\" 296×128"),
+]
+
+def _gl_norm_pages(pages):
+    return [{"name": str(p.get("name") or "Экран")[:24], "tiles": _gl_norm_tiles(p.get("tiles"))}
+            for p in (pages or []) if isinstance(p, dict)][:6]
+
 def load_glance():
     d = _json_load_strict(GLANCE_FILE, {})
-    pages = d.get("pages")
-    if not isinstance(pages, list) or not pages:
-        # legacy flat tile list (or first run) -> single page
-        flat = d.get("tiles") if isinstance(d.get("tiles"), list) else list(GLANCE_DEF_TILES)
-        pages = [{"name": "Главная", "tiles": flat}]
-    pages = [{"name": str(p.get("name") or "Экран")[:24], "tiles": _gl_norm_tiles(p.get("tiles"))}
-             for p in pages if isinstance(p, dict)][:6]
+    screens = d.get("screens")
+    if not isinstance(screens, list) or not screens:
+        # migrate: legacy flat pages/tiles -> a single screen
+        pages = d.get("pages")
+        if not isinstance(pages, list) or not pages:
+            flat = d.get("tiles") if isinstance(d.get("tiles"), list) else list(GLANCE_DEF_TILES)
+            pages = [{"name": "Главная", "tiles": flat}]
+        screens = [{"id": "main", "name": "Экран 1", "preset": "320x170", "pages": pages}]
+    out = []
+    for s in screens[:4]:
+        if not isinstance(s, dict):
+            continue
+        sid = re.sub(r"[^a-z0-9]", "", str(s.get("id") or ""))[:12] or "s%d" % (len(out) + 1)
+        preset = str(s.get("preset") or "320x170")
+        if not re.match(r"^\d{2,4}x\d{2,4}$", preset):
+            preset = "320x170"
+        out.append({"id": sid, "name": str(s.get("name") or "Экран")[:24],
+                    "preset": preset, "pages": _gl_norm_pages(s.get("pages"))})
     return {"enabled": bool(d.get("enabled")),
             "token": d.get("token") or "",
             "ping_interval": int(d.get("ping_interval") or 30),
-            "pages": pages}
+            "screens": out}
 
 def save_glance(d):
     cur = load_glance()
     if "enabled" in d:
         cur["enabled"] = bool(d["enabled"])
-    if isinstance(d.get("pages"), list):
+    if isinstance(d.get("screens"), list):
         ok_ids = {t[0] for t in glance_catalog()}
-        pages = []
-        for p in d["pages"][:6]:
-            if not isinstance(p, dict):
+        screens, seen = [], set()
+        for s in d["screens"][:4]:
+            if not isinstance(s, dict):
                 continue
-            tiles = [t for t in _gl_norm_tiles(p.get("tiles")) if t["id"] in ok_ids]
-            pages.append({"name": str(p.get("name") or "Экран")[:24], "tiles": tiles})
-        if pages:
-            cur["pages"] = pages
+            sid = re.sub(r"[^a-z0-9]", "", str(s.get("id") or ""))[:12]
+            while not sid or sid in seen:
+                sid = secrets.token_hex(3)
+            seen.add(sid)
+            preset = str(s.get("preset") or "320x170")
+            if not re.match(r"^\d{2,4}x\d{2,4}$", preset):
+                preset = "320x170"
+            pages = _gl_norm_pages(s.get("pages"))
+            for p in pages:
+                p["tiles"] = [t for t in p["tiles"] if t["id"] in ok_ids]
+            screens.append({"id": sid, "name": str(s.get("name") or "Экран")[:24],
+                            "preset": preset, "pages": pages or [{"name": "Главная", "tiles": []}]})
+        if screens:
+            cur["screens"] = screens
     act = d.get("token_action")
     if act == "new":
         cur["token"] = secrets.token_hex(16)
@@ -1932,14 +1966,33 @@ def _glance_tile(tid, en):
 _GL_CACHE = {"t": 0, "langs": {}}
 _GL_LOCK = threading.Lock()
 
-def glance_payload(lang="ru"):
-    """Full glance document; cached a few seconds, seq bumps only on change."""
+_GL_PAL_CACHE = {}
+def glance_palette(lang="ru"):
+    """Every catalog tile built with live data — for the constructor app's
+    palette (session-only; devices never request this)."""
     en = (lang == "en")
+    c = _GL_PAL_CACHE.get(lang)
+    if c and time.time() - c["t"] < 5:
+        return c["data"]
+    out = []
+    for tid, ru, en_l in glance_catalog():
+        d = _safe(lambda: _glance_tile(tid, en))
+        if d:
+            out.append(dict(d, id=tid, label=(en_l if en else ru)))
+    _GL_PAL_CACHE[lang] = {"t": time.time(), "data": out}
+    return out
+
+def glance_payload(lang="ru", screen=""):
+    """Glance document for one screen profile; cached a few seconds,
+    seq bumps only on change. Cache/seq stream is per (lang, screen)."""
+    en = (lang == "en")
+    cfg = load_glance()
+    scr = next((s for s in cfg["screens"] if s["id"] == screen), cfg["screens"][0])
+    key = lang + "|" + scr["id"]
     with _GL_LOCK:
-        c = _GL_CACHE["langs"].get(lang)
+        c = _GL_CACHE["langs"].get(key)
         if c and time.time() - c["t"] < 3:
             return c["payload"]
-    cfg = load_glance()
     labels = {t[0]: (t[2] if en else t[1]) for t in glance_catalog()}
     built, problems, seen_prob = {}, [], set()
     def build(tid):
@@ -1955,7 +2008,7 @@ def glance_payload(lang="ru"):
         built[tid] = d
         return d
     pages = []
-    for pg in cfg["pages"]:
+    for pg in scr["pages"]:
         tl = []
         for t in pg["tiles"]:
             d = build(t["id"])
@@ -1974,6 +2027,7 @@ def glance_payload(lang="ru"):
         status = "warn"
     av = avail_bars(24, 96)
     payload = {"v": 2, "host": socket.gethostname(), "status": status,
+               "screen": {"id": scr["id"], "name": scr["name"], "preset": scr["preset"]},
                "problems": problems[:4], "pages": pages,
                # legacy flat list = first page (older sketches keep working)
                "tiles": pages[0]["tiles"] if pages else [],
@@ -1981,7 +2035,7 @@ def glance_payload(lang="ru"):
                "ts": int(time.time())}
     sig = json.dumps([pages, problems, status, av["bars"]], sort_keys=True, ensure_ascii=False)
     with _GL_LOCK:
-        c = _GL_CACHE["langs"].setdefault(lang, {"t": 0, "sig": "", "seq": 0, "payload": None})
+        c = _GL_CACHE["langs"].setdefault(key, {"t": 0, "sig": "", "seq": 0, "payload": None})
         if sig != c["sig"]:
             c["seq"] += 1
             c["sig"] = sig
@@ -8268,7 +8322,7 @@ def _usb_sh_sync():
         _run(["udevadm", "control", "--reload"], timeout=15)
         changed.append("udev-правило")
     if changed:
-        log_event("info", "USB-импорт: %s обновлён до текущей версии" % " и ".join(changed),
+        log_event("info", "USB-импорт: %s обновлён до текущей версии" % " + ".join(changed),
                   "", "ok", kind="disk", desk=False)
 
 def _usb_install(enabled):
@@ -9089,7 +9143,12 @@ class H(BaseHTTPRequestHandler):
                           and hmac.compare_digest(tok, cfg["token"]))
             if not (tok_ok or self._authed()):
                 self._json({"error": "auth"}, 401); return
-            pl = glance_payload((q.get("lang") or ["ru"])[0])
+            lang = (q.get("lang") or ["ru"])[0]
+            pl = glance_payload(lang, (q.get("screen") or [""])[0])
+            if (q.get("all") or [""])[0] and self._authed():
+                # constructor palette: every possible tile with live values
+                pl = dict(pl, palette=glance_palette(lang))
+                self._json(pl); return
             try:
                 seq = int((q.get("seq") or ["-1"])[0])
             except ValueError:
@@ -9106,7 +9165,8 @@ class H(BaseHTTPRequestHandler):
                 self._json(stats())
             elif p == "/api/glance/config":
                 self._json({"config": load_glance(),
-                            "catalog": [{"id": t[0], "name": t[1]} for t in glance_catalog()]})
+                            "catalog": [{"id": t[0], "name": t[1]} for t in glance_catalog()],
+                            "presets": [{"id": pi, "name": pn} for pi, pn in GLANCE_PRESETS]})
             elif p == "/api/avail":
                 self._json(avail_bars(int((q.get("hours") or ["24"])[0]),
                                       int((q.get("slots") or ["96"])[0])))
