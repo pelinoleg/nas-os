@@ -1683,40 +1683,40 @@
   .nt-ed{flex:1;min-height:0;border-radius:12px;overflow:hidden;display:flex;flex-direction:column;position:relative}
   .nt-ed .toastui-editor-defaultUI{height:100%!important;display:flex;flex-direction:column;width:100%;font-family:inherit}
   .nt-ed .toastui-editor-main{flex:1;min-height:0}
-  /* The right pane is one continuous "paper" (macOS Notes-like), themed
-     independently of the panel. --nt-acc is a theme-local accent: the panel
-     accent is contrast-tuned for the WINDOW background and gets lost on the
-     opposite paper. md-mode ink is explicit for the same reason. */
-  .nt-edit.light{--nt-bg:#fff;--nt-ink:#23272f;--nt-dim:#79808f;--nt-line:#e7e9ee;--nt-acc:#0d8f86;--nt-code:#f4f5f8}
-  .nt-edit.dark{--nt-bg:#15181f;--nt-ink:#e8ebf2;--nt-dim:#8f96a6;--nt-line:#272c38;--nt-acc:#33c9be;--nt-code:#1d222c}
-  .nt-edit{background:var(--nt-bg);color:var(--nt-ink);padding:10px 4px 0 10px;gap:0;border-left:1px solid var(--line)}
-  .nt-empty{color:var(--nt-dim,var(--mut))}
-  .nt-head{padding:8px 14px 0}
-  .nt-head input{flex:1;font-size:26px;font-weight:800;letter-spacing:-.02em;height:42px;border:0;background:transparent;padding:0;color:var(--nt-ink)}
-  .nt-head input::placeholder{color:var(--nt-dim);opacity:.6}
+  /* Reference layout: the CHROME (crumb, title, tags, buttons, toolbar, mode
+     tabs) lives in the PANEL theme; only the paper card with the note text is
+     white/dark per the notes theme. --nt-* = paper palette. */
+  .nt-edit.light{--nt-bg:#fff;--nt-ink:#23272f;--nt-dim:#79808f;--nt-line:#e7e9ee;--nt-acc:#0d8f86;--nt-code:#f4f5f8;--nt-callout:#fdf3d7}
+  .nt-edit.dark{--nt-bg:#181b23;--nt-ink:#e8ebf2;--nt-dim:#8f96a6;--nt-line:#272c38;--nt-acc:#33c9be;--nt-code:#20242e;--nt-callout:#2b2617}
+  .nt-edit{background:transparent;color:var(--ink);padding:10px 16px 16px;gap:0;border-left:1px solid var(--line)}
+  .nt-empty{color:var(--mut)}
+  .nt-crumb{padding:4px 4px 0;font-size:11.5px;color:var(--dim);min-height:16px}
+  .nt-head{display:flex;align-items:center;gap:8px;padding:2px 4px 0}
+  .nt-head input{flex:1;font-size:26px;font-weight:800;letter-spacing:-.02em;height:42px;border:0;background:transparent;padding:0;color:var(--ink)}
+  .nt-head input::placeholder{color:var(--mut);opacity:.7}
   .nt-head input:focus{outline:none}
-  .nt-head .iconbtn{color:var(--nt-dim);background:transparent;border-color:transparent}
-  .nt-head .iconbtn:hover{background:color-mix(in srgb,var(--nt-ink) 8%,transparent);color:var(--nt-ink)}
+  .nt-head .iconbtn{color:var(--dim);background:transparent;border-color:transparent}
+  .nt-head .iconbtn:hover{background:var(--sel);color:var(--ink)}
   .nt-head .nt-pin-on{color:#E5A50A!important}
-  .nt-edit #ntTagsIn{margin:2px 14px 8px;height:26px;border:0;background:transparent;padding:0;font-size:12.5px;color:var(--nt-acc)}
-  .nt-edit #ntTagsIn::placeholder{color:var(--nt-dim);opacity:.55}
+  .nt-edit #ntTagsIn{margin:0 4px 6px;height:26px;border:0;background:transparent;padding:0;font-size:12.5px;color:var(--accent)}
+  .nt-edit #ntTagsIn::placeholder{color:var(--mut);opacity:.6}
   .nt-edit #ntTagsIn:focus{outline:none}
-  .nt-mut{color:var(--mut);font-size:12px}
-  .nt-edit .nt-mut{color:var(--nt-dim);font-size:11.5px;flex:none}
-  /* editor melts into the paper: no own borders, quiet toolbar */
+  .nt-edit .nt-mut{color:var(--dim);font-size:11.5px;flex:none}
+  /* editor: transparent chrome, the paper card is the main area only */
   .nt-ed{flex:1;min-height:0;display:flex;flex-direction:column;position:relative}
-  .nt-ed .toastui-editor-defaultUI{height:100%!important;display:flex;flex-direction:column;width:100%;font-family:inherit;border:0;border-radius:0;background:var(--nt-bg)}
-  .nt-ed .toastui-editor-defaultUI-toolbar{background:transparent;border-bottom:1px solid var(--nt-line);border-radius:0;padding:2px 8px;height:38px}
-  .nt-ed .toastui-editor-toolbar-icons{border:0;background-color:transparent;border-radius:7px}
-  .nt-ed .toastui-editor-toolbar-icons:not(:disabled):hover{background-color:color-mix(in srgb,var(--nt-ink) 9%,transparent)}
-  .nt-ed .toastui-editor-toolbar-divider{background-color:var(--nt-line);margin:9px 6px;height:16px}
-  .nt-ed .toastui-editor-main{flex:1;min-height:0}
+  .nt-ed .toastui-editor-defaultUI{height:100%!important;display:flex;flex-direction:column;width:100%;font-family:inherit;border:0;border-radius:0;background:transparent}
+  .nt-ed .toastui-editor-defaultUI-toolbar{background:transparent;border:0;border-radius:0;padding:2px 0 8px;height:auto}
+  .nt-ed .toastui-editor-toolbar-icons{border:0;background-color:transparent;border-radius:8px}
+  .nt-ed .toastui-editor-toolbar-icons:not(:disabled):hover{background-color:var(--sel)}
+  .nt-ed .toastui-editor-toolbar-divider{background-color:var(--line);margin:10px 8px;height:14px}
+  .nt-ed .toastui-editor-main{flex:1;min-height:0;background:var(--nt-bg);border-radius:16px;overflow:hidden;
+   border:1px solid color-mix(in srgb,var(--ink) 9%,transparent);box-shadow:0 10px 30px rgba(0,0,0,.12)}
   .nt-ed .toastui-editor,.nt-ed .toastui-editor-ww-container,.nt-ed .toastui-editor-md-container{background:var(--nt-bg)}
-  .nt-ed .ProseMirror{color:var(--nt-ink);font-size:var(--nt-font,15px);padding:20px 36px 80px;max-width:860px}
+  .nt-ed .ProseMirror{color:var(--nt-ink);font-size:var(--nt-font,15px);padding:24px 34px 80px;max-width:860px}
   .nt-ed .toastui-editor-md-container .ProseMirror{font-family:var(--mono);font-size:13px;line-height:1.65}
   .nt-ed .toastui-editor-md-preview{background:var(--nt-bg)}
-  .nt-ed .toastui-editor-md-preview .toastui-editor-contents{padding:8px 24px}
-  .nt-ed .toastui-editor-md-preview .toastui-editor-contents{color:var(--nt-ink)}
+  .nt-ed .toastui-editor-md-preview .toastui-editor-contents{padding:16px 26px;color:var(--nt-ink)}
+  .nt-ed .toastui-editor-md-splitter{background:var(--nt-line)}
   .nt-ed .toastui-editor-contents{font-family:inherit;font-size:var(--nt-font,15px);color:var(--nt-ink)}
   .nt-ed .toastui-editor-contents h1,.nt-ed .toastui-editor-contents h2,.nt-ed .toastui-editor-contents h3,
   .nt-ed .toastui-editor-contents h4,.nt-ed .toastui-editor-contents p,.nt-ed .toastui-editor-contents li,
@@ -1727,12 +1727,8 @@
   .nt-ed .toastui-editor-contents h3{font-size:1.15em;font-weight:700;margin:18px 0 6px}
   .nt-ed .toastui-editor-contents ul li::marker,.nt-ed .toastui-editor-contents ol li::marker{color:var(--nt-dim)}
   .nt-ed .toastui-editor-contents li{line-height:1.7}
-  /* blockquote = soft callout card (as in the references) */
-  .nt-edit.light{--nt-callout:#fdf3d7}
-  .nt-edit.dark{--nt-callout:#2b2617}
   .nt-ed .toastui-editor-contents blockquote{margin:14px 0;padding:12px 16px;border:0;border-radius:12px;background:var(--nt-callout)}
   .nt-ed .toastui-editor-contents blockquote p,.nt-ed .toastui-editor-contents blockquote li{color:var(--nt-ink)}
-  /* task checkboxes in the note accent */
   .nt-ed .toastui-editor-contents .task-list-item::before{border:1.5px solid var(--nt-dim);border-radius:6px;background-color:transparent;background-image:none;width:16px;height:16px}
   .nt-ed .toastui-editor-contents .task-list-item.checked::before{background-color:var(--nt-acc);border-color:var(--nt-acc);background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E");background-size:11px;background-position:center;background-repeat:no-repeat}
   .nt-ed .toastui-editor-contents .task-list-item.checked{color:var(--nt-dim);text-decoration:line-through}
@@ -1745,15 +1741,15 @@
   .nt-ed .toastui-editor-contents code{font-family:var(--mono);background:var(--nt-code);color:var(--nt-ink);border-radius:5px}
   .nt-ed .toastui-editor-contents pre{font-family:var(--mono);background:var(--nt-code);border-radius:10px}
   .nt-ed .toastui-editor-contents pre code{background:transparent}
-  .nt-ed .toastui-editor-mode-switch{background:transparent;border-top:1px solid var(--nt-line);height:30px}
-  .nt-ed .toastui-editor-mode-switch .tab-item{background:transparent;border:0;color:var(--nt-dim);height:28px;line-height:28px;font-size:12px}
-  .nt-ed .toastui-editor-mode-switch .tab-item.active{color:var(--nt-acc);font-weight:700}
-  .nt-ed .toastui-editor-popup{background:var(--nt-bg);border:1px solid var(--nt-line);border-radius:12px;box-shadow:0 12px 34px rgba(0,0,0,.24);color:var(--nt-ink);font-family:inherit}
-  .nt-ed .toastui-editor-popup-body,.nt-ed .toastui-editor-popup-body label{color:var(--nt-ink)}
-  .nt-ed .toastui-editor-popup-body input[type=text]{background:transparent;border:1px solid var(--nt-line);color:var(--nt-ink);border-radius:8px}
-  .nt-ed .toastui-editor-defaultUI .toastui-editor-ok-button{background:var(--nt-acc);color:#fff;border-radius:8px;outline:0}
-  .nt-ed .toastui-editor-defaultUI .toastui-editor-close-button{background:transparent;border:1px solid var(--nt-line);color:var(--nt-ink);border-radius:8px}
-  .nt-ed .toastui-editor-dropdown-toolbar{background:var(--nt-bg);border:1px solid var(--nt-line);border-radius:10px}
+  /* mode tabs at the bottom: quiet, panel tone */
+  .nt-ed .toastui-editor-mode-switch{background:transparent;border:0;height:32px;padding-top:4px}
+  .nt-ed .toastui-editor-mode-switch .tab-item{background:transparent;border:0;color:var(--dim);height:26px;line-height:26px;font-size:12px;border-radius:8px;margin-right:4px}
+  .nt-ed .toastui-editor-mode-switch .tab-item.active{color:var(--accent);background:var(--sel);font-weight:700;box-shadow:var(--sh-sm)}
+  /* editor popups: panel tone, rounded */
+  .nt-ed .toastui-editor-popup{border-radius:12px;box-shadow:0 12px 34px rgba(0,0,0,.24);font-family:inherit}
+  .nt-ed .toastui-editor-defaultUI .toastui-editor-ok-button{background:var(--accent);color:var(--accent-ink,#fff);border-radius:8px;outline:0}
+  .nt-ed .toastui-editor-defaultUI .toastui-editor-close-button{border-radius:8px}
+  .nt-ed .toastui-editor-dropdown-toolbar{border-radius:10px}
   /* images: 300px tall max, left by default; selection + resize handle */
   .nt-ed .toastui-editor-contents img{max-height:300px;max-width:100%;display:block;border-radius:8px;cursor:pointer}
   .nt-ed .toastui-editor-contents img.ProseMirror-selectednode{outline:2px solid var(--nt-acc)}
@@ -6200,7 +6196,8 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
    NT_PATH=null;ed.innerHTML=`<div class="nt-empty">Выберите заметку или создайте новую</div>`;refresh();},true);
   if(NT_ED){try{NT_ED.destroy();}catch(e){}NT_ED=null;}
   const folder=p.includes("/")?p.slice(0,p.lastIndexOf("/")):"";
-  const dark=SET.ntTheme==="dark"?true:SET.ntTheme==="light"?false:!isLight();
+  const chromeDark=!isLight();                     // toolbar/popups = panel theme
+  const dark=SET.ntTheme==="dark"?true:SET.ntTheme==="light"?false:chromeDark;  // the paper
   ed.classList.remove("light","dark");ed.classList.add(dark?"dark":"light");
   const box=ed.querySelector("#ntEd");
   box.style.setProperty("--nt-font",(SET.ntFont||15)+"px");
@@ -6212,7 +6209,7 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
    toolbarItems:[["heading","bold","italic","strike"],["ul","ol","task"],["quote","codeblock"],["table","image","link"]],
    initialEditType:SET.ntMode||"wysiwyg",previewStyle:"tab",
    language:(window.NAS_LANG||"en")==="en"?"en-US":"ru-RU",
-   theme:dark?"dark":"light",
+   theme:chromeDark?"dark":"light",
    initialValue:r.md,
    plugins,
    hooks:{addImageBlobHook:async(blob,cb)=>{
