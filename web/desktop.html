@@ -6426,8 +6426,13 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
   inp.onkeydown=ev=>{if(ev.key==="Enter")ok();};
   s.querySelector("#ntFX").onclick=()=>s.classList.remove("show");};
  const ntDark=()=>SET.ntTheme==="dark"?true:SET.ntTheme==="light"?false:!isLight();
+ /* the tokens live on .nt-root[data-theme=...] — class AND attribute must be
+    on this very element, otherwise no token applies at all */
+ body.classList.add("nt-root");
+ body.dataset.theme=ntDark()?"dark":"light";
  const paintThemeB=()=>{const b=q("#ntThemeB");if(b)b.innerHTML=svg(ntDark()?"sun":"moon",15);};
  q("#ntThemeB").onclick=()=>{SET.ntTheme=ntDark()?"light":"dark";saveSettings();paintThemeB();
+  body.dataset.theme=ntDark()?"dark":"light";
   if(NT_PATH)openNote(NT_PATH);};
  paintThemeB();
  q("#ntTrash").onclick=()=>ntTrash(refresh);
