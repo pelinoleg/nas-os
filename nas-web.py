@@ -14,7 +14,7 @@ nas-web.py — веб-бэкенд мастера настройки NAS и ра
 """
 import json, os, re, subprocess, time, shutil, socket, threading, pwd, mimetypes, glob, errno, heapq, sys, sqlite3, fnmatch
 import html as _htmllib
-import pty, select, struct, hashlib, base64, signal, fcntl, termios, secrets, hmac, shlex
+import pty, select, struct, hashlib, base64, signal, fcntl, termios, secrets, hmac, shlex, stat
 import urllib.request, urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs, quote, urlencode
@@ -6536,6 +6536,59 @@ def _remotes_tick():
         threading.Thread(target=lambda i=rid: _safe(lambda: remote_mount(i)),
                          daemon=True).start()
 
+def remote_realpath(rid, local_path):
+    """Настоящий путь В ПРОСТРАНСТВЕ СЕРВЕРА для файла внутри sshfs-маунта.
+    Нельзя ни резолвить локально (realpath уйдёт за пределы маунта), ни тупо
+    клеить базовый префикс: у NAS-ов (Ugreen/Synology) папки в корне SSH-вида —
+    симлинки на /volumeN/…. Идём по компонентам: lstat/readlink через sshfs
+    возвращают ЦЕЛИ ссылок в серверных путях — из них и собираем ответ."""
+    r = next((x for x in _remotes_load() if x["id"] == rid), None)
+    mp = _remote_mp(rid)
+    lp0 = os.path.normpath(local_path or "")
+    if not r or not (lp0 == mp or lp0.startswith(mp + os.sep)):
+        return {"ok": False, "log": "путь вне маунта"}
+    base = "" if (r.get("path") or "/") == "/" else (r.get("path") or "").rstrip("/")
+    def to_local(remote_abs):
+        # серверный абсолютный путь → локальный через маунт (если достижим)
+        if not base:
+            return mp + remote_abs
+        if remote_abs == base or remote_abs.startswith(base + "/"):
+            return mp + remote_abs[len(base):]
+        return None
+    # идём только по хвосту ОТ базовой папки: компоненты самой базы через маунт
+    # не видны (и резолвить их не нужно — пользователь задал базу буквально)
+    parts = [p for p in lp0[len(mp):].split("/") if p]
+    res, i, hops = base, 0, 0
+    while i < len(parts):
+        seg = parts[i]
+        if seg == ".":
+            i += 1; continue
+        if seg == "..":
+            res = res.rsplit("/", 1)[0]; i += 1; continue
+        nxt = res + "/" + seg
+        lp = to_local(nxt)
+        if lp is None:      # цель ссылки за пределами базовой папки — дальше не заглянуть,
+            break           # но сам серверный путь уже собран верно
+        try:
+            st = os.lstat(lp)
+        except OSError:
+            break
+        if stat.S_ISLNK(st.st_mode) and hops < 40:
+            hops += 1
+            tgt = os.readlink(lp)
+            tail = parts[i + 1:]
+            if tgt.startswith("/"):
+                res, i = "", 0
+                parts = [p for p in tgt.split("/") if p] + tail
+            else:                            # относительная ссылка — от текущего res
+                parts = [p for p in tgt.split("/") if p] + tail
+                i = 0
+            continue
+        res, i = nxt, i + 1
+    if i < len(parts):
+        res = res + "/" + "/".join(parts[i:])
+    return {"ok": True, "path": res or "/"}
+
 def remote_umount(rid):
     if not _REMOTE_ID.match(rid or ""):
         return {"ok": False, "log": "id"}
@@ -11490,6 +11543,9 @@ class H(BaseHTTPRequestHandler):
                 self._json(remote_mount(self._body().get("id", "")))
             elif p == "/api/remotes/umount":
                 self._json(remote_umount(self._body().get("id", "")))
+            elif p == "/api/remotes/realpath":
+                b = self._body()
+                self._json(remote_realpath(b.get("id", ""), b.get("path", "")))
             elif p == "/api/store/install":
                 b = self._body()
                 self._json(store_install(b.get("id", ""), b.get("values") or {}))

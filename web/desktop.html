@@ -5449,13 +5449,13 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    else if(ctrl&&k.toLowerCase()==="x"){if(sel.size){clip={mode:"cut",items:[...sel]};toast("Вырезано: "+sel.size);selUpdate();}}
    else if(ctrl&&k.toLowerCase()==="v"){if(clip&&clip.items.length)doPaste();}});
  async function doProps(e){const r=await api("/api/fs/stat?path="+encodeURIComponent(e.path)),d=(r&&r.ok)?r:{},sc=document.getElementById("scrim");
-   // внутри SSH-маунта показываем оба пути: локальный и настоящий на сервере
+   // внутри SSH-маунта показываем оба пути; настоящий серверный резолвит бэкенд
+   // (симлинки NAS-ов вида /Backup → /volume2/Backup раскрываются честно)
    const rmt=REMS.find(x=>x.mounted&&(e.path===x.mount||e.path.startsWith(x.mount+"/")));
-   const srvPath=rmt?((rmt.path==="/"?"":rmt.path.replace(/\/$/,""))+e.path.slice(rmt.mount.length)||"/"):null;
    sc.innerHTML=`<div class="dialog"><h3>Свойства</h3>
      <div style="font-weight:650;font-size:13.5px">${esc(e.name)}</div>
      <div class="mono" style="color:var(--mut);font-size:11px;word-break:break-all;margin-bottom:${rmt?"2":"10"}px">${esc(e.path)}</div>
-     ${rmt?`<div class="mono" style="color:var(--mut);font-size:11px;word-break:break-all;margin-bottom:10px">${svg("net",11)} ${esc(rmt.name)}: ${esc(srvPath)}</div>`:""}
+     ${rmt?`<div class="mono" style="color:var(--mut);font-size:11px;word-break:break-all;margin-bottom:10px">${svg("net",11)} ${esc(rmt.name)}: <span id="pSrv">…</span></div>`:""}
      <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:12.5px">
        <span style="color:var(--mut)">Тип</span><span>${e.type==="dir"?"каталог":"файл"}${d.link?" · симлинк":""}</span>
        <span style="color:var(--mut)">Размер</span><span id="pRs">${e.type==="dir"?`<button class="btn sm" id="pDu">${svg("gauge",13)} вычислить</button>`:fmtB(d.size!=null?d.size:e.size)}</span>
@@ -5464,6 +5464,8 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
        <span style="color:var(--mut)">Изменён</span><span>${fmDate(d.mtime||e.mtime)}</span></div>
      <div class="r"><button class="btn pri" id="px">Закрыть</button></div></div>`;
    sc.classList.add("show");sc.querySelector("#px").onclick=()=>sc.classList.remove("show");
+   if(rmt){api("/api/remotes/realpath",{method:"POST",body:JSON.stringify({id:rmt.id,path:e.path})}).then(rp=>{
+     const sp=sc.querySelector("#pSrv");if(sp)sp.textContent=(rp&&rp.ok&&rp.path)||"—";});}
    const du=sc.querySelector("#pDu");if(du)du.onclick=async()=>{du.textContent="…";const r2=await api("/api/fs/du?path="+encodeURIComponent(e.path));
      const box=sc.querySelector("#pRs");if(box)box.textContent=(r2&&r2.ok)?`${fmtB(r2.size)}  ·  ${r2.files} файлов, ${r2.dirs} папок`:"—";};}
  async function doDup(e){const r=await api("/api/fs/copy",{method:"POST",body:JSON.stringify({src:e.path,dest:cwd})});toast(LIVE?(r&&r.ok?"Дубликат создан":("Ошибка: "+((r&&r.log)||""))):"Демо");if(r&&r.ok)load(cwd);}
