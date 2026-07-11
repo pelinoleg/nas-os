@@ -2406,6 +2406,8 @@ ETH="${NAS_ETH:-eth0}"
 WIFI="${NAS_WIFI:-wlan0}"
 STATE="${NAS_NETGUARD_STATE:-/var/lib/nas-wizard/netguard.state}"
 WSTATE="${NAS_NETGUARD_WIFI_STATE:-/var/lib/nas-wizard/netguard.wifi}"
+AVLOG="${NAS_NETGUARD_AVAIL:-/var/lib/nas-wizard/avail.log}"
+BEAT="${NAS_NETGUARD_BEAT:-/var/lib/nas-wizard/avail.beat}"
 LOCK="${NAS_NETGUARD_LOCK:-/run/nas-netguard.lock}"
 
 notify(){ [ -x /usr/local/bin/nas-notify.sh ] && /usr/local/bin/nas-notify.sh "$1" "$2" "${3:-0}" >/dev/null 2>&1 || true; }
@@ -2496,6 +2498,39 @@ else
 fi
 if [ "$ACTIVE" = "$WIFI" ]; then wifi_rescue; fi
 fix_onlink "$ACTIVE"
+
+# Availability journal for status-page bars (read by nas-web /api/glance).
+# avail.log is an append-only run-length timeline: "<epoch> up|local|off".
+#   up    = global IPv4 + default gateway answers (NAS reachable from LAN)
+#   local = box alive but no usable network (e.g. stuck in comitup hotspot)
+#   off   = gap between heartbeats (powered off / crashed), written on wake
+avail_track(){
+  local now state ip gw beat last
+  now="$(date +%s)"
+  state=local
+  ip="$(ip4 "$ACTIVE")"
+  if [ -n "$ip" ]; then
+    gw="$(ip -4 route show default 2>/dev/null | awk '{print $3; exit}')"
+    if [ -n "$gw" ] && { ping -c1 -W2 "$gw" >/dev/null 2>&1 \
+        || arping -c1 -w2 -I "$ACTIVE" "$gw" >/dev/null 2>&1; }; then
+      state=up
+    fi
+  fi
+  mkdir -p "$(dirname "$AVLOG")" 2>/dev/null || true
+  beat="$(cat "$BEAT" 2>/dev/null || true)"
+  case "$beat" in *[!0-9]*|'') beat="" ;; esac
+  if [ -n "$beat" ] && [ $(( now - beat )) -gt 180 ]; then
+    printf '%s off\n' "$(( beat + 30 ))" >> "$AVLOG"
+  fi
+  last="$(tail -n1 "$AVLOG" 2>/dev/null | awk '{print $2}')"
+  [ "$last" = "$state" ] || printf '%s %s\n' "$now" "$state" >> "$AVLOG"
+  printf '%s' "$now" > "$BEAT"
+  # trim: transitions are rare, 20k lines is years of history
+  if [ "$(wc -l < "$AVLOG" 2>/dev/null || echo 0)" -gt 20000 ]; then
+    tail -n 10000 "$AVLOG" > "$AVLOG.tmp" 2>/dev/null && mv "$AVLOG.tmp" "$AVLOG"
+  fi
+}
+avail_track
 
 # смена интерфейса/адреса -> Pushover. Первый прогон только запоминает состояние,
 # чтобы установка и перезагрузка не сыпали уведомлениями.

@@ -1431,6 +1431,299 @@ def wud_invalidate():
     with _wud_lock:
         _wud_cache["t"] = 0
 
+# --------------------------------------------------------------------------- #
+#  Glance: compact status feed for external displays (ESP32 etc.)
+#  GET /api/glance is reachable with a dedicated read-only token, so a dumb
+#  microcontroller never holds a panel session. The server decides WHAT to
+#  show: the settings tab picks/orders tiles, the device just renders them.
+# --------------------------------------------------------------------------- #
+GLANCE_FILE = os.path.join(NAS_CONFIG, "glance.json")
+AVAIL_LOG = "/var/lib/nas-wizard/avail.log"   # written by nas-netguard.sh
+
+# (id, label-ru, label-en) — every tile the server can build. Collectors may
+# return None (service absent) — the tile silently disappears from the feed.
+GLANCE_TILES = [
+    ("pool",     "Пул",            "Pool"),
+    ("backup",   "Бэкап",          "Backup"),
+    ("avail",    "Доступность",    "Uptime"),
+    ("cputemp",  "Температура",    "CPU temp"),
+    ("load",     "Нагрузка",       "Load"),
+    ("ram",      "Память",         "RAM"),
+    ("rootfs",   "Система",        "System SSD"),
+    ("uptime",   "Аптайм",         "Uptime h"),
+    ("net",      "Сеть",           "Network"),
+    ("inet",     "Интернет",       "Internet"),
+    ("traffic",  "Трафик",         "Traffic"),
+    ("speed",    "Скорость",       "Speed"),
+    ("docker",   "Docker",         "Docker"),
+    ("wud",      "Образы",         "Images"),
+    ("updates",  "Обновления",     "Updates"),
+    ("snapraid", "SnapRAID",       "SnapRAID"),
+    ("events",   "События",        "Events"),
+]
+GLANCE_DEF_TILES = ["pool", "backup", "avail", "cputemp", "net", "docker"]
+
+def load_glance():
+    d = _json_load_strict(GLANCE_FILE, {})
+    return {"enabled": bool(d.get("enabled")),
+            "token": d.get("token") or "",
+            "tiles": d.get("tiles") if isinstance(d.get("tiles"), list) else list(GLANCE_DEF_TILES)}
+
+def save_glance(d):
+    cur = load_glance()
+    if "enabled" in d:
+        cur["enabled"] = bool(d["enabled"])
+    if isinstance(d.get("tiles"), list):
+        ok_ids = {t[0] for t in GLANCE_TILES}
+        cur["tiles"] = [str(t) for t in d["tiles"] if str(t) in ok_ids]
+    act = d.get("token_action")
+    if act == "new":
+        cur["token"] = secrets.token_hex(16)
+    elif act == "revoke":
+        cur["token"] = ""
+    _json_save(GLANCE_FILE, cur, indent=2)
+    with _GL_LOCK:
+        _GL_CACHE["langs"].clear()
+    return cur
+
+def _avail_segments():
+    segs = []
+    try:
+        with open(AVAIL_LOG) as f:
+            for ln in f:
+                p = ln.split()
+                if len(p) == 2 and p[0].isdigit() and p[1] in ("up", "local", "off"):
+                    segs.append((int(p[0]), p[1]))
+    except OSError:
+        pass
+    return segs
+
+def avail_bars(hours=24, slots=96):
+    """RLE timeline -> per-slot worst state + uptime %. 2=up 1=local 0=off -1=no data."""
+    segs = _avail_segments()
+    now = int(time.time())
+    start = now - hours * 3600
+    rank = {"off": 0, "local": 1, "up": 2}
+    bars = [-1] * slots
+    slot_w = hours * 3600.0 / slots
+    up_t = known_t = 0
+    for i, (t, s) in enumerate(segs):
+        t2 = segs[i + 1][0] if i + 1 < len(segs) else now
+        a, b = max(t, start), min(t2, now)
+        if b <= a:
+            continue
+        known_t += b - a
+        if s == "up":
+            up_t += b - a
+        s0 = int((a - start) / slot_w)
+        s1 = int((b - 1 - start) / slot_w)
+        v = rank[s]
+        for k in range(max(0, s0), min(slots - 1, s1) + 1):
+            bars[k] = v if bars[k] < 0 else min(bars[k], v)
+    pct = round(100.0 * up_t / known_t, 1) if known_t else None
+    return {"bars": bars, "pct": pct, "hours": hours}
+
+_INET_CACHE = {"t": 0, "ok": False}
+def _inet_ok():
+    """Cheap cached internet check: TCP connect to a public resolver."""
+    if time.time() - _INET_CACHE["t"] < 30:
+        return _INET_CACHE["ok"]
+    ok = False
+    for host in ("1.1.1.1", "8.8.8.8"):
+        try:
+            socket.create_connection((host, 53), timeout=1.5).close()
+            ok = True
+            break
+        except OSError:
+            pass
+    _INET_CACHE["t"] = time.time(); _INET_CACHE["ok"] = ok
+    return ok
+
+def _gl_ago(sec, en):
+    """Short age: '3д'/'3d', '5ч'/'5h', '12м'/'12m'."""
+    sec = max(0, int(sec))
+    if sec >= 172800:
+        return "%dд" % (sec // 86400) if not en else "%dd" % (sec // 86400)
+    if sec >= 5400:
+        return "%dч" % round(sec / 3600) if not en else "%dh" % round(sec / 3600)
+    return "%dм" % (sec // 60) if not en else "%dm" % (sec // 60)
+
+def _gl_gb(n, en):
+    """Free space as a short number + unit tuple."""
+    n = float(n or 0) / 1024 ** 3
+    if n >= 1000:
+        return ("%.1f" % (n / 1024), "ТБ" if not en else "TB")
+    return ("%d" % n, "ГБ" if not en else "GB")
+
+def _glance_tile(tid, en):
+    """Build one tile -> {value, unit, state[, note]} or None to hide it."""
+    if tid == "pool":
+        di = disk_info(STORAGE) if os.path.ismount(STORAGE) else None
+        if not di:
+            return {"value": "—", "unit": "", "state": "danger",
+                    "note": "пул не смонтирован" if not en else "pool not mounted"}
+        v, u = _gl_gb(di["free"], en)
+        st = "danger" if di["pct"] >= 90 else ("warn" if di["pct"] >= 80 else "ok")
+        return {"value": v, "unit": u + (" своб." if not en else " free"), "state": st}
+    if tid == "backup":
+        best = 0
+        for pr in nb_profiles():
+            for h in nb_history(pr["id"]):
+                if h.get("result") in ("ok", "warn") and h.get("ts", 0) > best:
+                    best = h["ts"]
+                    break
+        if not best:
+            return {"value": "—", "unit": "", "state": "warn",
+                    "note": "ещё не было" if not en else "never ran"}
+        age = time.time() - best
+        st = "danger" if age > 7 * 86400 else ("warn" if age > 2 * 86400 else "ok")
+        return {"value": _gl_ago(age, en), "unit": "назад" if not en else "ago", "state": st}
+    if tid == "avail":
+        av = avail_bars(24, 96)
+        if av["pct"] is None:
+            return None
+        st = "ok" if av["pct"] >= 99 else ("warn" if av["pct"] >= 95 else "danger")
+        return {"value": "%.1f" % av["pct"], "unit": "% / 24ч" if not en else "% / 24h", "state": st}
+    if tid == "cputemp":
+        t = temp_c()
+        if t is None:
+            return None
+        thr = _safe(throttled) or {}
+        st = "danger" if (t >= 75 or thr.get("throttle")) else ("warn" if t >= 65 else "ok")
+        return {"value": "%d" % round(t), "unit": "°C", "state": st}
+    if tid == "load":
+        la = os.getloadavg()[0]
+        ncpu = os.cpu_count() or 4
+        st = "danger" if la >= ncpu * 2 else ("warn" if la >= ncpu else "ok")
+        return {"value": "%.1f" % la, "unit": "load", "state": st}
+    if tid == "ram":
+        pct = mem_info()["pct"]
+        st = "danger" if pct >= 92 else ("warn" if pct >= 80 else "ok")
+        return {"value": "%d" % round(pct), "unit": "%", "state": st}
+    if tid == "rootfs":
+        di = disk_info("/")
+        if not di:
+            return None
+        st = "danger" if di["pct"] >= 90 else ("warn" if di["pct"] >= 80 else "ok")
+        v, u = _gl_gb(di["free"], en)
+        return {"value": v, "unit": u + (" своб." if not en else " free"), "state": st}
+    if tid == "uptime":
+        return {"value": _gl_ago(uptime_s(), en), "unit": "", "state": "ok"}
+    if tid == "net":
+        ip = lan_ip()
+        good = bool(ip) and not ip.startswith("127.")
+        return {"value": ip or "—", "unit": default_iface() or "",
+                "state": "ok" if good else "danger"}
+    if tid == "inet":
+        ok = _inet_ok()
+        return {"value": ("есть" if not en else "up") if ok else ("нет" if not en else "down"),
+                "unit": "", "state": "ok" if ok else "danger"}
+    if tid == "traffic":
+        v = _safe(vnstat_state) or {}
+        if not v.get("ok"):
+            return None
+        td = v.get("today") or {}
+        return {"value": "↓%s ↑%s" % (fmt_bytes(td.get("rx")).replace(" ", ""),
+                                       fmt_bytes(td.get("tx")).replace(" ", "")),
+                "unit": "", "state": "ok"}
+    if tid == "speed":
+        m = _safe(myspeed_state) or {}
+        if not m.get("ok") or m.get("download") is None:
+            return None
+        return {"value": "↓%s ↑%s" % (m.get("download"), m.get("upload")),
+                "unit": "Мбит" if not en else "Mbit",
+                "state": "warn" if m.get("failed") else "ok"}
+    if tid == "docker":
+        ps = _safe(_docker_ps) or []
+        if not ps:
+            return None
+        run = [c for c in ps if str(c.get("State")) == "running"]
+        bad = [c for c in run if "unhealthy" in str(c.get("Status", ""))]
+        st = "warn" if bad else "ok"
+        note = ", ".join(c.get("Names", "?") for c in bad[:3]) if bad else None
+        out = {"value": "%d/%d" % (len(run), len(ps)), "unit": "", "state": st}
+        if note:
+            out["note"] = note
+        return out
+    if tid == "wud":
+        w = _safe(wud_state) or {}
+        if not w.get("ok"):
+            return None
+        n = w.get("count", 0)
+        return {"value": str(n), "unit": "обнов." if not en else "upd", "state": "warn" if n else "ok"}
+    if tid == "updates":
+        n = _safe(_apt_upgradable, 0) or 0
+        return {"value": str(n), "unit": "apt", "state": "warn" if n > 20 else "ok"}
+    if tid == "snapraid":
+        sr = _safe(snapraid_status) or {}
+        if not sr.get("configured"):
+            return None
+        ls = sr.get("last_sync") or {}
+        if not ls.get("date"):
+            return {"value": "—", "unit": "sync", "state": "warn"}
+        try:
+            age = time.time() - time.mktime(time.strptime(ls["date"], "%Y-%m-%d %H:%M:%S"))
+        except ValueError:
+            age = 0
+        st = "danger" if (ls.get("result") == "err" or sr.get("blocked")) else \
+             ("warn" if age > 8 * 86400 else "ok")
+        return {"value": _gl_ago(age, en), "unit": "sync", "state": st}
+    if tid == "events":
+        try:
+            with open(EVENTS_FILE) as f:
+                ev = json.load(f)
+            unseen = sum(1 for e in ev.get("items", []) if e.get("id", 0) > ev.get("seen", 0))
+        except (OSError, ValueError):
+            unseen = 0
+        return {"value": str(unseen), "unit": "новых" if not en else "new", "state": "ok"}
+    return None
+
+# per-language cache: labels/values are localized, so each language keeps its
+# own change-signature and seq stream (a device polls with one fixed lang)
+_GL_CACHE = {"t": 0, "langs": {}}
+_GL_LOCK = threading.Lock()
+
+def glance_payload(lang="ru"):
+    """Full glance document; cached a few seconds, seq bumps only on change."""
+    en = (lang == "en")
+    with _GL_LOCK:
+        c = _GL_CACHE["langs"].get(lang)
+        if c and time.time() - c["t"] < 3:
+            return c["payload"]
+    cfg = load_glance()
+    labels = {t[0]: (t[2] if en else t[1]) for t in GLANCE_TILES}
+    tiles, problems = [], []
+    for tid in cfg["tiles"]:
+        if tid not in labels:
+            continue
+        d = _safe(lambda: _glance_tile(tid, en))
+        if not d:
+            continue
+        d = dict(d, id=tid, label=labels[tid])
+        tiles.append(d)
+        if d["state"] != "ok":
+            problems.append("%s: %s %s" % (d["label"], d["value"], d.get("note") or d["unit"]))
+    status = "ok"
+    if any(t["state"] == "danger" for t in tiles):
+        status = "danger"
+    elif any(t["state"] == "warn" for t in tiles):
+        status = "warn"
+    av = avail_bars(24, 96)
+    payload = {"v": 1, "host": socket.gethostname(), "status": status,
+               "problems": problems[:4], "tiles": tiles,
+               "avail": {"bars": av["bars"], "pct24": av["pct"]},
+               "ts": int(time.time())}
+    sig = json.dumps([tiles, problems, status, av["bars"]], sort_keys=True, ensure_ascii=False)
+    with _GL_LOCK:
+        c = _GL_CACHE["langs"].setdefault(lang, {"t": 0, "sig": "", "seq": 0, "payload": None})
+        if sig != c["sig"]:
+            c["seq"] += 1
+            c["sig"] = sig
+        payload["seq"] = c["seq"]
+        c["t"] = time.time()
+        c["payload"] = payload
+    return payload
+
 FAV_FILE = os.path.join(NAS_CONFIG, "fm-favorites.json")
 def load_favs():
     try:
@@ -8521,11 +8814,36 @@ class H(BaseHTTPRequestHandler):
             return
         if p == "/api/auth/state":
             self._auth_endpoints(p); return
+        if p == "/api/glance":
+            # external displays authenticate with a read-only token instead of
+            # a session cookie; the panel preview still works via the session
+            cfg = load_glance()
+            tok = (q.get("token") or [""])[0]
+            tok_ok = bool(cfg["enabled"] and cfg["token"]
+                          and hmac.compare_digest(tok, cfg["token"]))
+            if not (tok_ok or self._authed()):
+                self._json({"error": "auth"}, 401); return
+            pl = glance_payload((q.get("lang") or ["ru"])[0])
+            try:
+                seq = int((q.get("seq") or ["-1"])[0])
+            except ValueError:
+                seq = -1
+            if seq == pl["seq"]:
+                self.send_response(304); self.end_headers()
+            else:
+                self._json(pl)
+            return
         if p.startswith("/api/") and not self._authed():
             self._json({"error": "auth", "configured": auth_configured()}, 401); return
         try:
             if p == "/api/stats":
                 self._json(stats())
+            elif p == "/api/glance/config":
+                self._json({"config": load_glance(),
+                            "catalog": [{"id": t[0], "name": t[1]} for t in GLANCE_TILES]})
+            elif p == "/api/avail":
+                self._json(avail_bars(int((q.get("hours") or ["24"])[0]),
+                                      int((q.get("slots") or ["96"])[0])))
             elif p == "/api/net":
                 self._json(net_info())
             elif p == "/api/net/speedtest":
@@ -8752,6 +9070,8 @@ class H(BaseHTTPRequestHandler):
             elif p == "/api/settings":
                 b = self._body(); save_settings(b.get("settings", {}))
                 self._json({"ok": True})
+            elif p == "/api/glance/config":
+                self._json({"ok": True, "config": save_glance(self._body())})
             elif p == "/api/maintenance":
                 b = self._body(); self._json({"maintenance": save_maintenance(b.get("maintenance", {}))})
             elif p == "/api/fs/thumbcache/clear":

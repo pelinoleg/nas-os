@@ -1559,6 +1559,18 @@
   .set-nav button.on svg{opacity:1;color:var(--accent)}
   .set-pane{flex:1;min-width:0;overflow-y:auto;padding:22px 26px}
   .set-load{color:var(--mut);font-size:12px;padding:20px 0}
+  /* glance (внешний экран): предпросмотр плиток + полоски доступности */
+  .gl-head{display:flex;align-items:center;gap:8px;margin:6px 0}
+  .gl-prob{color:var(--warn);font-size:12px;margin:4px 0}
+  .gl-tiles{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+  .gl-tile{display:flex;align-items:center;gap:7px;padding:8px 12px;border-radius:10px;background:var(--card);border:1px solid var(--line);font-size:13px}
+  .gl-tile b{font-size:15px}
+  .gl-lab{color:var(--dim)} .gl-unit{color:var(--dim);font-size:11px}
+  .gl-dot{width:9px;height:9px;border-radius:50%;display:inline-block;flex:none}
+  .gl-avwrap{margin-top:12px}
+  .gl-bars{display:flex;gap:1px;height:14px}
+  .gl-bars i{flex:1;border-radius:2px;min-width:1px}
+  .gl-avcap{display:flex;justify-content:space-between;font-size:11px;color:var(--dim);margin-top:3px}
   /* Time Machine tab */
   .tm-actions{display:flex;gap:9px;margin-top:12px;flex-wrap:wrap}
   .tm-bks{display:flex;flex-direction:column;gap:6px}
@@ -1810,6 +1822,7 @@ const P={
  upload:'<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/>',
  download:'<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/>',
  arrowup:'<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>',
+ monitor:'<rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/>',
  image:'<rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21"/>',
  archive:'<rect width="20" height="5" x="2" y="3" rx="1"/><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"/><path d="M10 12h4"/>',
  music:'<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
@@ -5691,6 +5704,62 @@ function backupTab(tc){
  load();
 }
 let SYSC=null, PENDING_REBOOT=false;
+/* Settings tab «Экран»: status feed for external displays (ESP32 etc.).
+   Config lives server-side (~/nas-config/glance.json): the device polls
+   /api/glance with a read-only token and just renders what the server sends,
+   so changing tiles here never requires reflashing the device. */
+function avBarsHTML(bars,pct){if(!bars||!bars.length)return "";
+ const c=v=>v===2?"var(--good)":v===1?"var(--warn)":v===0?"var(--danger)":"var(--track)";
+ return `<div class="gl-avwrap"><div class="gl-bars">${bars.map(v=>`<i style="background:${c(v)}"></i>`).join("")}</div><div class="gl-avcap"><span>−24ч</span><span>${pct==null?"":pct+"% доступность"}</span><span>сейчас</span></div></div>`;}
+async function glanceTab(tc){
+ tc.innerHTML=`<div class="set-load">загрузка…</div>`;
+ const r=await api("/api/glance/config");
+ if(!r||!r.config){tc.innerHTML=`<div class="set-load">нет данных</div>`;return;}
+ const cfg=r.config,cat=r.catalog||[];
+ const tok=cfg.token||"";
+ const url=`http://${location.host}/api/glance?token=${tok||"…"}&lang=en`;
+ tc.innerHTML=`
+  <div class="set-title">Экран</div>
+  <div class="set-sub">Компактный статус NAS для внешнего экрана (ESP32): устройство опрашивает адрес ниже и просто рисует плитки. Состав и порядок задаются здесь — прошивку менять не нужно. Пример прошивки — <span class="mono">services/esp32-glance</span> в репозитории.</div>
+  <div class="set-h">Доступ</div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Отдавать данные по токену</div><div class="srow-d">без токена доступ к этим данным есть только из панели</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="glEn"${cfg.enabled?" checked":""}><span class="sl"></span></label></div></div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Токен</div><div class="srow-d mono">${tok?esc(tok):"— не создан —"}</div></div><div class="srow-c"><button class="btn sm" id="glNew">${tok?"Перевыпустить":"Создать"}</button><button class="btn sm" id="glCopy"${tok?"":" disabled"}>Копировать URL</button><button class="btn sm warn" id="glRev"${tok?"":" disabled"}>Отозвать</button></div></div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Адрес для устройства</div><div class="srow-d mono" style="user-select:all;word-break:break-all">${esc(url)}</div></div></div>
+  <div class="set-h">Плитки</div>
+  <div class="set-sub">Что и в каком порядке отдаётся на экран. Плитки отсутствующих сервисов (vnstat, MySpeed, WUD…) пропускаются сами.</div>
+  <div id="glList"></div>
+  <div class="set-h">Предпросмотр</div>
+  <div id="glPrev" class="gl-prev"><div class="set-load">загрузка…</div></div>`;
+ const post=async d=>{const rr=await api("/api/glance/config",{method:"POST",body:JSON.stringify(d)});if(rr&&rr.config)Object.assign(cfg,rr.config);return rr;};
+ tc.querySelector("#glEn").onchange=e=>post({enabled:e.target.checked});
+ tc.querySelector("#glNew").onclick=async()=>{await post({token_action:"new"});rerSet();};
+ tc.querySelector("#glRev").onclick=async()=>{await post({token_action:"revoke"});rerSet();};
+ tc.querySelector("#glCopy").onclick=()=>{if(navigator.clipboard)navigator.clipboard.writeText(url);toast("Скопировано");};
+ /* ordered enable-list: enabled tiles first (server order), then the rest */
+ const items=cfg.tiles.map(id=>({id,on:true})).concat(cat.filter(c=>!cfg.tiles.includes(c.id)).map(c=>({id:c.id,on:false})));
+ const names={};cat.forEach(c=>names[c.id]=c.name);
+ const list=tc.querySelector("#glList");
+ const paintList=()=>{list.innerHTML="";items.forEach((w,i)=>{
+  const row=el(`<div class="wg-cfg"><span class="nm">${esc(names[w.id]||w.id)}</span><div class="ord"><button data-u ${i===0?"disabled":""} title="Выше">${svg("arrowup",14)}</button><button data-dn ${i===items.length-1?"disabled":""} title="Ниже" style="transform:rotate(180deg)">${svg("arrowup",14)}</button></div><label class="tgl"><input type="checkbox" ${w.on?"checked":""}><span class="sl"></span></label></div>`);
+  const commit=async()=>{await post({tiles:items.filter(x=>x.on).map(x=>x.id)});paintList();paintPrev();};
+  row.querySelector("input").onchange=e=>{w.on=e.target.checked;commit();};
+  row.querySelector("[data-u]").onclick=()=>{if(i>0){[items[i-1],items[i]]=[items[i],items[i-1]];commit();}};
+  row.querySelector("[data-dn]").onclick=()=>{if(i<items.length-1){[items[i+1],items[i]]=[items[i],items[i+1]];commit();}};
+  list.appendChild(row);});};
+ paintList();
+ const prev=tc.querySelector("#glPrev");
+ const paintPrev=async()=>{
+  const g=await api("/api/glance");
+  if(!g||!g.tiles){prev.innerHTML=`<div class="set-load">нет данных</div>`;return;}
+  const dot=s=>`<i class="gl-dot" style="background:var(--${s==="ok"?"good":s==="warn"?"warn":"danger"})"></i>`;
+  prev.innerHTML=`<div class="gl-head">${dot(g.status)}<b>${esc(g.host)}</b><span class="mono" style="color:var(--dim);font-size:11px">seq ${g.seq}</span></div>
+   ${g.problems&&g.problems.length?`<div class="gl-prob">${g.problems.map(esc).join("<br>")}</div>`:""}
+   <div class="gl-tiles">${g.tiles.map(t=>`<div class="gl-tile">${dot(t.state)}<span class="gl-lab">${esc(t.label)}</span><b>${esc(t.value)}</b><span class="gl-unit">${esc(t.unit||"")}</span></div>`).join("")}</div>
+   ${avBarsHTML(g.avail&&g.avail.bars,g.avail&&g.avail.pct24)}`;
+ };
+ paintPrev();
+ const t=setInterval(()=>{if(!document.contains(prev)){clearInterval(t);return;}paintPrev();},5000);
+}
 function winSettings(initTab){openWin("__set","Настройки",body=>{
  body.style.display="flex";body.style.padding="0";
  let tab=initTab||"look";
@@ -5698,6 +5767,7 @@ function winSettings(initTab){openWin("__set","Настройки",body=>{
   {id:"look",name:"Оформление",ic:"cog"},
   {id:"files",name:"Файлы",ic:"folder"},
   {id:"notify",name:"Уведомления",ic:"bell"},
+  {id:"glance",name:"Экран",ic:"monitor"},
   {id:"system",name:"Система",ic:"activity"},
   {id:"motd",name:"Приветствие SSH",ic:"term"},
   {id:"maint",name:"Обслуживание",ic:"heart"},
@@ -5708,7 +5778,7 @@ function winSettings(initTab){openWin("__set","Настройки",body=>{
   {id:"pi",name:"Raspberry Pi",ic:"cpu"},
   {id:"timemachine",name:"Time Machine",ic:"timemachine"},
  ];
- const FN={look:lookTab,files:filesTab,notify:notifyTab,timemachine:timemachineTab,system:systemTab,motd:motdTab,maint:maintTab,network:networkTab,security:securityTab,usb:usbTab,backup:backupTab,pi:piTab};
+ const FN={look:lookTab,files:filesTab,notify:notifyTab,glance:glanceTab,timemachine:timemachineTab,system:systemTab,motd:motdTab,maint:maintTab,network:networkTab,security:securityTab,usb:usbTab,backup:backupTab,pi:piTab};
  let footMo=null;
  const render=()=>{
   if(footMo){footMo.disconnect();footMo=null;}
@@ -6517,8 +6587,9 @@ const WIDGET_DEFS={
  top:{name:"Топ процессов",ic:"activity",def:false,extra:'<span class="more" id="more-top">все →</span>',body:'<div id="wg-top"></div>'},
  myspeed:{name:"Скорость интернета",ic:"net",extra:'<span class="more" id="more-myspeed">открыть →</span>',body:'<div id="wg-myspeed"></div>'},
  vnstat:{name:"Трафик",ic:"activity",body:'<div id="wg-vnstat"></div>'},
+ avail:{name:"Доступность",ic:"monitor",body:'<div id="wg-avail"></div>'},
 };
-const WIDGET_ORDER=["vols","sys","disk","net","docker","top","myspeed","vnstat"];
+const WIDGET_ORDER=["vols","sys","disk","net","docker","top","myspeed","vnstat","avail"];
 function railWidgets(){let cfg=(SET.widgets&&SET.widgets.length)?SET.widgets.slice():WIDGET_ORDER.map(id=>({id,on:WIDGET_DEFS[id].def!==false}));
  cfg=cfg.filter(w=>WIDGET_DEFS[w.id]);
  WIDGET_ORDER.forEach(id=>{if(!cfg.find(w=>w.id===id))cfg.push({id,on:WIDGET_DEFS[id].def!==false});});
@@ -6530,7 +6601,18 @@ function renderRail(){const rail=document.getElementById("rail");if(!rail)return
  const md=document.getElementById("more-disks");if(md)md.onclick=()=>winDisks();
  const mdk=document.getElementById("more-docker");if(mdk)mdk.onclick=()=>winServices();
  const mt=document.getElementById("more-top");if(mt)mt.onclick=()=>winMon();
- paintVols();if(LAST){paintSys(LAST);}pollDisks();pollStacks();pollTop();pollNet();pollMySpeed();pollVnstat();
+ paintVols();if(LAST){paintSys(LAST);}pollDisks();pollStacks();pollTop();pollNet();pollMySpeed();pollVnstat();pollAvail();
+}
+
+/* Availability bars (timeline collected by nas-netguard every 30 s).
+   Hidden until the log has at least some history. */
+async function pollAvail(){
+ const box=document.getElementById("wg-avail");if(!box)return;
+ const wdg=box.closest(".wdg");
+ let r=null;try{r=await api("/api/avail?hours=24&slots=48");}catch(e){}
+ if(!r||r.pct==null){if(wdg)wdg.style.display="none";return;}
+ if(wdg)wdg.style.display="";
+ box.innerHTML=avBarsHTML(r.bars,r.pct);
 }
 
 /* MySpeed: последний замер скорости интернета. Сервис ставится отдельным стеком,
@@ -7149,7 +7231,7 @@ function maybeOnboard(){let done=false;try{done=!!SET.onboarded||localStorage.ge
  refreshFmHideBk();
  pollStacks();pollTop();pollNet();
  eventLoop();setTimeout(pollHealth,2500);   // события — long-poll (мгновенно), не 15-сек опрос
- setInterval(poll,3000);setInterval(pollApps,8000);setInterval(pollDisks,15000);setInterval(tickClock,10000);
+ setInterval(poll,3000);setInterval(pollApps,8000);setInterval(pollDisks,15000);setInterval(tickClock,10000);setInterval(pollAvail,60000);
  setInterval(pollStacks,15000);setInterval(pollTop,10000);setInterval(pollNet,15000);setInterval(pollMySpeed,60000);setInterval(pollVnstat,60000);
  setInterval(pollHealth,120000);
  if("serviceWorker" in navigator){
