@@ -4268,6 +4268,7 @@ function stReplicaDlg(a,tc,reload){
   <div class="field"><label>Пароль SSH</label><input id="rpPass" type="password" placeholder="${rp.has_pass?"•••••• (задан; пусто = не менять)":"пусто = вход по ключу"}" autocomplete="new-password"></div>
   <div class="field"><label>Медиатека на источнике <span style="color:var(--mut);font-weight:400">— путь на главном NAS</span></label><input id="rpSrc" value="${att(cfg.src_data||"")}" placeholder="/mnt/pool/immich/library" autocomplete="off"></div>
   <div class="field"><label>Медиатека на этом NAS</label><input id="rpDst" value="${att(cfg.dest_data||rp.dest_default||"")}" placeholder="${att(rp.dest_default||"/mnt/storage/immich")}" autocomplete="off"></div>
+  <div class="field"><label>Автосинхронизация <span style="color:var(--mut);font-weight:400">— каждый день в это время; пусто = выкл</span></label><input id="rpAuto" type="time" value="${att(cfg.auto||"")}" style="max-width:140px"></div>
   <div class="krow" style="margin:6px 0"><span>Последняя синхронизация</span><b>${esc(last)}</b></div>
   <div class="r" style="flex-wrap:wrap;gap:6px">
    <button class="btn" id="rpX">Закрыть</button><span style="flex:1"></span>
@@ -4275,9 +4276,9 @@ function stReplicaDlg(a,tc,reload){
    <button class="btn pri" id="rpRestore">${svg("play",13)} Обновить реплику</button></div>
   <div class="mcon" id="rpCon"></div></div>`;
  s.classList.add("show");
- s.querySelector("#rpX").onclick=()=>s.classList.remove("show");
+ s.querySelector("#rpX").onclick=async()=>{await save();s.classList.remove("show");};   // закрытие тоже сохраняет (например, только что выставленный автосинк)
  const save=async()=>{const b={id:a.id,host:s.querySelector("#rpHost").value.trim(),user:s.querySelector("#rpUser").value.trim(),
-   src_data:s.querySelector("#rpSrc").value.trim(),dest_data:s.querySelector("#rpDst").value.trim()};
+   src_data:s.querySelector("#rpSrc").value.trim(),dest_data:s.querySelector("#rpDst").value.trim(),auto:s.querySelector("#rpAuto").value.trim()};
   const pw=s.querySelector("#rpPass").value;if(pw)b.pass=pw;
   const r2=await api("/api/store/replica",{method:"POST",body:JSON.stringify(b)});
   if(!(r2&&r2.ok)){toast("Ошибка: "+((r2&&r2.log)||"?"));return false;}
@@ -5063,7 +5064,9 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    <div class="fm-fav-h"><span>Избранное</span><button class="iconbtn" id="fFavAdd" title="Добавить текущую папку в избранное">+</button></div>
    <div class="fm-fav-list" id="fFav"></div>
    <div id="fVolsWrap" style="display:none;flex:none"><div class="fm-fav-h"><span>Диски</span></div>
-   <div id="fVols" style="margin:0 -4px"></div></div></div>
+   <div id="fVols" style="margin:0 -4px"></div></div>
+   <div id="fRemWrap" style="flex:none"><div class="fm-fav-h"><span>Серверы</span><button class="iconbtn" id="fRemAdd" title="Добавить SSH-сервер">+</button></div>
+   <div id="fRem" style="margin:0 -4px"></div></div></div>
    <div class="fm-side">
    <div class="fm-top">
      <div class="fm-tabs" id="fTabs"></div>
@@ -5201,6 +5204,58 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
        await ejectVolume(v);renderVols();};
      c.appendChild(it);});}
  win._vols=renderVols;
+ /* ---- SSH-серверы: sshfs-маунты в /mnt/remote, дальше это обычные папки ---- */
+ let REMS=[];
+ async function renderRemotes(fetchNew){
+   const c=body.querySelector("#fRem");if(!c)return;
+   if(fetchNew!==false){const r=await api("/api/remotes");if(!body.isConnected&&!document.body.contains(body))return;REMS=(r&&r.remotes)||[];}
+   c.innerHTML="";
+   REMS.forEach(rm=>{const on=rm.mounted&&(cwd===rm.mount||cwd.startsWith(rm.mount+"/"));
+     const it=el(`<div class="fm-fav-i${on?" on":""}" title="${att(rm.user+"@"+rm.host+":"+rm.path+(rm.mounted?"":" · не подключён"))}"><span class="fi" style="${rm.mounted?"":"opacity:.45"}">${svg("net",15)}</span><span class="fn">${esc(rm.name)}</span>${rm.mounted?`<button class="fx fx-eject" title="Отключить">${svg("eject",13)}</button>`:""}</div>`);
+     const open=async()=>{
+       if(!rm.mounted){toast("Подключение к "+rm.name+"…");
+         const r2=await api("/api/remotes/mount",{method:"POST",body:JSON.stringify({id:rm.id})});
+         if(!(r2&&r2.ok)){toast("Ошибка: "+((r2&&r2.log)||"не подключиться"));renderRemotes();return;}}
+       await renderRemotes();load(rm.mount);};
+     const off=async()=>{
+       if(cwd===rm.mount||cwd.startsWith(rm.mount+"/"))load(SET.fmStart||"/mnt/storage");
+       const r2=await api("/api/remotes/umount",{method:"POST",body:JSON.stringify({id:rm.id})});
+       if(!(r2&&r2.ok))toast("Ошибка: "+((r2&&r2.log)||"?"));
+       renderRemotes();};
+     it.onclick=ev=>{if(ev.target.closest(".fx"))return;open();};
+     const ej=it.querySelector(".fx");if(ej)ej.onclick=ev=>{ev.stopPropagation();off();};
+     it.oncontextmenu=ev=>{ev.preventDefault();ev.stopPropagation();showMenu(ev.clientX,ev.clientY,[
+       {label:rm.mounted?"Открыть":"Подключить",ic:svg(rm.mounted?"folder":"net",16),act:open},
+       ...(rm.mounted?[{label:"Отключить",ic:svg("eject",16),act:off}]:[]),
+       {label:"Изменить…",ic:svg("edit",16),act:()=>remDlg(rm)},
+       {sep:1},
+       {label:"Удалить подключение",ic:svg("trash",16),dng:1,act:()=>confirmDlg("Удалить "+rm.name,"Подключение будет отключено и забыто. Файлы на сервере не трогаем.",async()=>{
+         await api("/api/remotes/delete",{method:"POST",body:JSON.stringify({id:rm.id})});renderRemotes();},true)},
+     ]);};
+     c.appendChild(it);});
+   if(!REMS.length)c.innerHTML=`<div style="color:var(--mut);font-size:11px;padding:2px 10px 6px">SSH-серверы: «+» — и гуляйте по ним как по папкам.</div>`;
+ }
+ function remDlg(rm){
+   const s=document.getElementById("scrim");
+   s.innerHTML=`<div class="dialog"><h3>${rm?"Изменить сервер":"Новый SSH-сервер"}</h3>
+     <div class="field"><label>Название</label><input id="rmN" value="${att((rm&&rm.name)||"")}" placeholder="Главный NAS"></div>
+     <div class="field"><label>Адрес</label><input id="rmH" class="mono" value="${att((rm&&rm.host)||"")}" placeholder="192.168.1.95"></div>
+     <div class="field" style="display:flex;gap:8px"><div style="flex:1"><label>Пользователь</label><input id="rmU" class="mono" value="${att((rm&&rm.user)||"")}" placeholder="root"></div>
+       <div style="width:90px"><label>Порт</label><input id="rmP" class="mono" value="${att((rm&&rm.port)||22)}"></div></div>
+     <div class="field"><label>Пароль <span style="color:var(--mut);font-weight:400">— ${rm&&rm.has_pass?"задан; пусто = не менять":"пусто = вход по ключу"}</span></label><input id="rmW" type="password" autocomplete="new-password"></div>
+     <div class="field"><label>Папка на сервере</label><input id="rmD" class="mono" value="${att((rm&&rm.path)||"/")}"></div>
+     <div class="r"><button class="btn" id="rmX">Отмена</button><button class="btn pri" id="rmOk">Сохранить</button></div></div>`;
+   s.classList.add("show");
+   s.querySelector("#rmX").onclick=()=>s.classList.remove("show");
+   s.querySelector("#rmOk").onclick=async()=>{
+     const b={id:(rm&&rm.id)||"",name:s.querySelector("#rmN").value.trim(),host:s.querySelector("#rmH").value.trim(),
+       user:s.querySelector("#rmU").value.trim(),port:s.querySelector("#rmP").value.trim(),path:s.querySelector("#rmD").value.trim()};
+     const pw=s.querySelector("#rmW").value;if(pw)b.pass=pw;
+     const r=await api("/api/remotes/save",{method:"POST",body:JSON.stringify(b)});
+     s.classList.remove("show");
+     if(r&&r.ok){toast("Сохранено");renderRemotes();}else toast("Ошибка: "+((r&&r.log)||"?"));};
+ }
+ const remAdd=body.querySelector("#fRemAdd");if(remAdd)remAdd.onclick=()=>remDlg(null);
  // живое применение настроек ФМ к уже открытому окну (без перезагрузки страницы)
  function syncSettings(){
    showHidden=SET.fmHidden===true;
@@ -5666,7 +5721,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
  const bandEnd=ev=>{if(!bandStart)return;bandStart=null;if(band){band.remove();band=null;try{listBox.releasePointerCapture(ev.pointerId);}catch(e){}}};
  listBox.addEventListener("pointerup",bandEnd);listBox.addEventListener("pointercancel",bandEnd);
  win._nav=p=>load(p);
- loadFav();renderVols();load(cwd);
+ loadFav();renderVols();renderRemotes();load(cwd);
 },{w:880,h:620});}
 /* ===== Анализ места (DaisyDisk-подобный): sunburst + drill-down ===== */
 function winDiskUsage(initRoot){const existed=!!OPEN["__duscan"];const w=openWin("__duscan","Анализ места",(body,win)=>{

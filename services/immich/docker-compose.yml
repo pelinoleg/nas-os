@@ -1,8 +1,9 @@
 # Immich — фото/видео библиотека (аналог Google Photos). http://<pi>:2283
-# Основано на официальном compose:
-#   https://github.com/immich-app/immich/releases/latest/download/docker-compose.yml
+# ВЫРОВНЕНО с релизным compose и с боевым инстансом на главном NAS: маунт
+# /usr/src/app/upload и та же строка образа Postgres — это ВАЖНО для реплики
+# (пути внутри контейнера и версия/расширения БД должны совпадать с источником).
 # Медиа (UPLOAD_LOCATION) — в пул /mnt/storage; БД (DB_DATA_LOCATION) — на SSD
-# (Immich не поддерживает БД на сетевых/пуловых ФС). Настройки — в .env.
+# (Postgres нельзя держать на mergerfs). Настройки — в .env.
 name: immich
 
 services:
@@ -10,7 +11,8 @@ services:
     container_name: immich_server
     image: ghcr.io/immich-app/immich-server:${IMMICH_VERSION:-v3.0.1}
     volumes:
-      - ${UPLOAD_LOCATION}:/data
+      # Do not edit: to move the media change UPLOAD_LOCATION in .env
+      - ${UPLOAD_LOCATION}:/usr/src/app/upload
       - /etc/localtime:/etc/localtime:ro
     env_file:
       - .env
@@ -41,20 +43,22 @@ services:
 
   redis:
     container_name: immich_redis
-    image: docker.io/valkey/valkey:9@sha256:4963247afc4cd33c7d3b2d2816b9f7f8eeebab148d29056c2ca4d7cbc966f2d9
+    image: docker.io/redis:6.2-alpine@sha256:2ba50e1ac3a0ea17b736ce9db2b0a9f6f8b85d4c27d5f5accc6a416d8f42c6d5
     healthcheck:
       test: redis-cli ping || exit 1
     restart: unless-stopped
 
   database:
     container_name: immich_postgres
-    image: ghcr.io/immich-app/postgres:14-vectorchord0.4.3-pgvectors0.2.0@sha256:bcf63357191b76a916ae5eb93464d65c07511da41e3bf7a8416db519b40b1c23
+    # same image line as the source NAS — the replica restores its dump 1:1
+    image: ghcr.io/immich-app/postgres:14-vectorchord0.3.0-pgvectors0.2.0
     environment:
       POSTGRES_PASSWORD: ${DB_PASSWORD}
       POSTGRES_USER: ${DB_USERNAME}
       POSTGRES_DB: ${DB_DATABASE_NAME}
       POSTGRES_INITDB_ARGS: '--data-checksums'
     volumes:
+      # Do not edit: to move the database change DB_DATA_LOCATION in .env
       - ${DB_DATA_LOCATION}:/var/lib/postgresql/data
     shm_size: 128mb
     restart: unless-stopped

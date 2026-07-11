@@ -5211,7 +5211,8 @@ _BK_SECTIONS = (
     ("disks",     "Диски и пул",               False, ("nas-config/fstab.",)),
     ("webauth",   "Пароль панели",             True,  ("etc/nas-os/webauth.json",)),
     ("nasbackup", "Бэкап главного NAS",        True,  ("etc/nas-os/nas-backup.json", "nas-config/nas-backup-",
-                                                       "nas-config/store.json")),   # store.json: пароль SSH реплики
+                                                       # store.json / remotes.json содержат SSH-пароли
+                                                       "nas-config/store.json", "nas-config/remotes.json")),
     ("other",     "Прочее",                    False, ()),      # всё, что не подошло выше
 )
 
@@ -5807,7 +5808,7 @@ def monitor_loop():
         funcs = ((monitor_tick, _automount_tick, usb_ops_sync) if poked else
                  (history_sample, monitor_tick, maintenance_daily, _smart_selftest_tick,
                   _nb_sched_tick, _automount_tick, _summary_tick, _thermal_tick, usb_ops_sync,
-                  _fsw_tick))
+                  _fsw_tick, _replica_tick))
         for fn in funcs:
             try:
                 fn()
@@ -6240,6 +6241,9 @@ def store_replica_save(sid, cfg):
     for k in ("host", "user", "src_data", "dest_data"):
         if k in cfg:
             cur[k] = str(cfg.get(k) or "").strip()
+    if "auto" in cfg:                       # "HH:MM" = ежедневный автосинк, "" = выкл
+        a = str(cfg.get("auto") or "").strip()
+        cur["auto"] = a if re.match(r"^([01]\d|2[0-3]):[0-5]\d$", a) else ""
     if cfg.get("pass"):                     # пустое поле = пароль не трогаем
         cur["pass"] = str(cfg["pass"])
     if cfg.get("clear_pass"):
@@ -6332,6 +6336,159 @@ echo "== реплика обновлена: версия %(tag)s, дамп от 
        "wait": rep.get("wait_db_cmd") or "true", "psql": rep.get("psql_cmd") or "psql",
        "dump": q(dump)}
     return script, {}
+
+# ---- автосинхронизация реплик (store.json: replica.<id>.auto = "HH:MM") ----
+_REPLICA_RUN = set()          # sids syncing right now (manual runs don't set this)
+
+def _replica_tick():
+    """Kick the replica sync at the configured wall-clock minute, once a day.
+    Runs in a background thread; the log lands next to the dump, the outcome
+    goes to the event feed (failures also pop on the desktop)."""
+    reps = _safe(lambda: _store_load().get("replica") or {}, {})
+    hhmm, today = time.strftime("%H:%M"), time.strftime("%Y-%m-%d")
+    for sid, cfg in (reps or {}).items():
+        if (cfg or {}).get("auto") != hhmm or sid in _REPLICA_RUN:
+            continue
+        rd = _replica_dir(sid)
+        stamp = os.path.join(rd, "auto-last")
+        if _read(stamp) == today:
+            continue
+        os.makedirs(rd, exist_ok=True)
+        with open(stamp, "w") as f:      # before the run: the loop may hit this minute twice
+            f.write(today)
+        try:
+            script, env = store_replica_script(sid, "sync")
+        except ValueError as e:
+            log_event("replica_auto", "Реплика %s: автосинк не запущен" % sid, str(e),
+                      "warn", kind="svc", desk=True)
+            continue
+        def run(sid=sid, script=script, env=env, rd=rd):
+            try:
+                r = subprocess.run(["bash", "-c", script], env=dict(_C_ENV, **env),
+                                   capture_output=True, text=True, timeout=6 * 3600)
+                out = (r.stdout or "") + (r.stderr or "")
+                _safe(lambda: open(os.path.join(rd, "sync.log"), "w").write(out))
+                ok = r.returncode == 0
+                log_event("replica_auto",
+                          "Реплика %s: %s" % (sid, "синхронизирована" if ok else "ошибка автосинка"),
+                          "" if ok else "\n".join(out.splitlines()[-5:])[:400],
+                          "ok" if ok else "warn", kind="svc", desk=not ok)
+            except Exception as e:
+                log_event("replica_auto", "Реплика %s: ошибка автосинка" % sid, str(e),
+                          "warn", kind="svc", desk=True)
+            finally:
+                _REPLICA_RUN.discard(sid)
+        _REPLICA_RUN.add(sid)
+        threading.Thread(target=run, daemon=True).start()
+
+# --------------------------------------------------------------------------- #
+#  Внешние SSH-серверы в файловом менеджере: sshfs-маунты в /mnt/remote/<id>.
+#  Смонтированный сервер — обычная папка, все операции ФМ работают как есть.
+# --------------------------------------------------------------------------- #
+REMOTES_FILE = os.path.join(NAS_CONFIG, "remotes.json")
+REMOTE_MNT = "/mnt/remote"
+_REMOTE_ID = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,30}$")
+
+def _remotes_load():
+    d = _json_load_strict(REMOTES_FILE, {})
+    return d.get("remotes") or []
+
+def _remotes_save(lst):
+    _json_save(REMOTES_FILE, {"remotes": lst}, indent=2)
+
+def _remote_mp(rid):
+    return os.path.join(REMOTE_MNT, rid)
+
+def _remote_mounted(rid):
+    mp = _remote_mp(rid)
+    return any(l.split()[1:2] == [mp] for l in _read("/proc/mounts").splitlines())
+
+def remotes_list():
+    out = []
+    for r in _remotes_load():
+        out.append({"id": r["id"], "name": r.get("name") or r["id"],
+                    "host": r.get("host", ""), "user": r.get("user", ""),
+                    "port": r.get("port") or 22, "path": r.get("path") or "/",
+                    "has_pass": bool(r.get("pass")),
+                    "mounted": _remote_mounted(r["id"]), "mount": _remote_mp(r["id"])})
+    return {"ok": True, "remotes": out, "sshfs": bool(shutil.which("sshfs"))}
+
+def remotes_save(d):
+    host = str(d.get("host") or "").strip()
+    user = str(d.get("user") or "").strip() or "root"
+    if not re.match(r"^[\w.\-]+$", host or "") or not re.match(r"^[\w.\-]+$", user):
+        return {"ok": False, "log": "проверьте адрес и пользователя"}
+    rid = str(d.get("id") or "").strip()
+    lst = _remotes_load()
+    cur = next((r for r in lst if r["id"] == rid), None)
+    if cur is None:
+        rid = re.sub(r"[^a-zA-Z0-9_-]", "-", (d.get("name") or host)).strip("-")[:24] or "srv"
+        base, i = rid, 1
+        while any(r["id"] == rid for r in lst):
+            i += 1
+            rid = "%s-%d" % (base, i)
+        cur = {"id": rid}
+        lst.append(cur)
+    try:
+        port = int(d.get("port") or 22)
+    except (TypeError, ValueError):
+        port = 22
+    cur.update({"name": str(d.get("name") or "").strip()[:40] or host,
+                "host": host, "user": user, "port": port,
+                "path": str(d.get("path") or "/").strip() or "/"})
+    if d.get("pass"):
+        cur["pass"] = str(d["pass"])
+    if d.get("clear_pass"):
+        cur.pop("pass", None)
+    _remotes_save(lst)
+    return {"ok": True, "id": rid}
+
+def remotes_delete(rid):
+    if not _REMOTE_ID.match(rid or ""):
+        return {"ok": False, "log": "id"}
+    remote_umount(rid)
+    _remotes_save([r for r in _remotes_load() if r["id"] != rid])
+    _safe(lambda: os.rmdir(_remote_mp(rid)))
+    return {"ok": True}
+
+def remote_mount(rid):
+    r = next((x for x in _remotes_load() if x["id"] == rid), None)
+    if not r:
+        return {"ok": False, "log": "нет такого подключения"}
+    if _remote_mounted(rid):
+        return {"ok": True, "mount": _remote_mp(rid)}
+    if not shutil.which("sshfs"):
+        return {"ok": False, "log": "sshfs не установлен: sudo apt install sshfs"}
+    mp = _remote_mp(rid)
+    os.makedirs(mp, exist_ok=True)
+    # reconnect+ServerAlive: гуляющий Wi-Fi не оставляет «мёртвый» маунт, listing
+    # падает с ошибкой за секунды, а не виснет; allow_other — папку видят и samba/oleg
+    opts = ("reconnect,ServerAliveInterval=15,ServerAliveCountMax=3,allow_other,"
+            "default_permissions,StrictHostKeyChecking=accept-new,ConnectTimeout=10")
+    if r.get("pass"):
+        opts += ",password_stdin"
+    src = "%s@%s:%s" % (r.get("user") or "root", r["host"], r.get("path") or "/")
+    try:
+        p = subprocess.run(["sshfs", src, mp, "-p", str(r.get("port") or 22), "-o", opts],
+                           input=(r.get("pass") or "") + "\n" if r.get("pass") else None,
+                           capture_output=True, text=True, timeout=30)
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "log": "сервер не ответил за 30 с"}
+    except OSError as e:
+        return {"ok": False, "log": str(e)}
+    if p.returncode != 0 or not _remote_mounted(rid):
+        return {"ok": False, "log": (p.stderr or p.stdout or "не смонтировалось").strip()[:300]}
+    log_event("action", "Подключён сервер: %s" % (r.get("name") or r["host"]), "", "ok",
+              kind="files", desk=False)
+    return {"ok": True, "mount": mp}
+
+def remote_umount(rid):
+    if not _REMOTE_ID.match(rid or ""):
+        return {"ok": False, "log": "id"}
+    if not _remote_mounted(rid):
+        return {"ok": True}
+    p = _run(["fusermount", "-uz", _remote_mp(rid)], timeout=15)   # lazy: не ждём зависший io
+    return {"ok": p["ok"] or not _remote_mounted(rid), "log": p.get("log", "")}
 
 # --------------------------------------------------------------------------- #
 #  Docker-сервисы
@@ -10838,6 +10995,8 @@ class H(BaseHTTPRequestHandler):
                 self._json(docker_stacks())
             elif p == "/api/store":
                 self._json(store_catalog())
+            elif p == "/api/remotes":
+                self._json(remotes_list())
             elif p == "/api/stack":
                 self._json(stack_read((q.get("name") or [""])[0]))
             elif p == "/api/stack/logs":
@@ -11255,6 +11414,14 @@ class H(BaseHTTPRequestHandler):
             elif re.match(r"^/api/cron/job/[\w.\-:]+$", p):
                 jid = p.rsplit("/", 1)[1]
                 self._json(cron_update(jid, self._body()))
+            elif p == "/api/remotes/save":
+                self._json(remotes_save(self._body()))
+            elif p == "/api/remotes/delete":
+                self._json(remotes_delete(self._body().get("id", "")))
+            elif p == "/api/remotes/mount":
+                self._json(remote_mount(self._body().get("id", "")))
+            elif p == "/api/remotes/umount":
+                self._json(remote_umount(self._body().get("id", "")))
             elif p == "/api/store/install":
                 b = self._body()
                 self._json(store_install(b.get("id", ""), b.get("values") or {}))
