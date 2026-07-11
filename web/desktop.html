@@ -1786,6 +1786,52 @@
   .nt-root .nt-ed .toastui-editor-ww-code-block:after{opacity:0;transition:opacity .12s;
    background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-muted)}
   .nt-root .nt-ed .toastui-editor-ww-code-block:hover:after{opacity:1}
+  /* ===== Part A polish: every content block, tokens only (2026-07-11) ===== */
+  /* 1) block rhythm: sp-4 between top-level blocks, sp-5 before / sp-2 after headings */
+  .nt-root .nt-ed .toastui-editor-contents>*{margin-top:0;margin-bottom:0}
+  .nt-root .nt-ed .toastui-editor-contents>*+*{margin-top:var(--sp-4)}
+  .nt-root .nt-ed .toastui-editor-contents>*+h1,.nt-root .nt-ed .toastui-editor-contents>*+h2,
+  .nt-root .nt-ed .toastui-editor-contents>*+h3{margin-top:var(--sp-5)}
+  .nt-root .nt-ed .toastui-editor-contents>h1+*,.nt-root .nt-ed .toastui-editor-contents>h2+*,
+  .nt-root .nt-ed .toastui-editor-contents>h3+*{margin-top:var(--sp-2)}
+  /* 3) inline marks */
+  .nt-root .nt-ed .toastui-editor-contents strong{font-weight:700;color:var(--text)}
+  .nt-root .nt-ed .toastui-editor-contents em{font-style:italic}
+  .nt-root .nt-ed .toastui-editor-contents del,.nt-root .nt-ed .toastui-editor-contents s{color:var(--text-muted);text-decoration:line-through}
+  .nt-root .nt-ed .toastui-editor-contents code:not(pre code){font-family:var(--font-mono);font-size:.9em;
+   background:var(--surface-inset);color:var(--text);padding:2px 6px;border-radius:6px}
+  /* 4) blockquote: transparent, accent-soft left rule, muted text */
+  .nt-root .nt-ed .toastui-editor-contents blockquote{background:transparent;border:0;border-left:3px solid var(--accent-soft);
+   border-radius:0;padding:0 0 0 var(--sp-4);margin-left:0}
+  .nt-root .nt-ed .toastui-editor-contents blockquote p,.nt-root .nt-ed .toastui-editor-contents blockquote li{color:var(--text-muted)}
+  /* 5) fenced code */
+  .nt-root .nt-ed .toastui-editor-contents pre{background:var(--surface-inset);font-family:var(--font-mono);
+   border-radius:var(--radius-lg);padding:var(--sp-4);overflow-x:auto}
+  .nt-root .nt-ed .toastui-editor-contents pre code{background:transparent;color:var(--text);padding:0}
+  /* 6) lists */
+  .nt-root .nt-ed .toastui-editor-contents ul:not(.task-list){list-style:disc;padding-left:var(--sp-5)}
+  .nt-root .nt-ed .toastui-editor-contents ol{list-style:decimal;padding-left:var(--sp-5)}
+  .nt-root .nt-ed .toastui-editor-contents li+li{margin-top:var(--sp-1)}
+  .nt-root .nt-ed .toastui-editor-contents li>ul,.nt-root .nt-ed .toastui-editor-contents li>ol{margin-top:var(--sp-1);padding-left:var(--sp-5)}
+  /* 7) tables: rounded outer contour, 1px cell grid, th on surface-2, zebra */
+  .nt-root .nt-ed .toastui-editor-contents table{border-collapse:separate;border-spacing:0;border:1px solid var(--border);
+   border-radius:var(--radius-lg);overflow:hidden}
+  .nt-root .nt-ed .toastui-editor-contents th,.nt-root .nt-ed .toastui-editor-contents td{border:0;
+   border-right:1px solid var(--border);border-bottom:1px solid var(--border);padding:var(--sp-2) var(--sp-3);color:var(--text)}
+  .nt-root .nt-ed .toastui-editor-contents tr>*:last-child{border-right:0}
+  .nt-root .nt-ed .toastui-editor-contents tr:last-child>td{border-bottom:0}
+  .nt-root .nt-ed .toastui-editor-contents th{background:var(--surface-2);font-weight:600}
+  .nt-root .nt-ed .toastui-editor-contents tbody tr:nth-child(even) td{background:color-mix(in srgb,var(--surface-2) 45%,transparent)}
+  /* 8) images */
+  .nt-root .nt-ed .toastui-editor-contents img{max-width:100%;height:auto;border-radius:var(--radius-lg);margin:var(--sp-3) 0}
+  .nt-root .nt-ed .toastui-editor-contents img.nt-imgbroken{display:none}
+  /* 9) links */
+  .nt-root .nt-ed .toastui-editor-contents a{color:var(--accent);text-decoration:none}
+  .nt-root .nt-ed .toastui-editor-contents a:hover{color:var(--accent-hover);text-decoration:underline}
+  /* 10) hr */
+  .nt-root .nt-ed .toastui-editor-contents hr{border:0;border-top:1px solid var(--border);margin:var(--sp-5) 0}
+  /* 11) selection */
+  .nt-root .nt-ed .toastui-editor-contents ::selection,.nt-root .nt-ed .ProseMirror ::selection{background:var(--accent-soft)}
   /* mode tabs: quiet, accent-soft when active */
   .nt-ed .toastui-editor-mode-switch{background:transparent;border:0;height:34px;padding-top:var(--sp-1)}
   .nt-ed .toastui-editor-mode-switch .tab-item{background:transparent;border:0;color:var(--text-muted);height:26px;line-height:26px;font-size:var(--fs-meta);border-radius:var(--radius-sm);margin-right:var(--sp-1)}
@@ -6382,6 +6428,8 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
  /* apply hash-encoded layout to every rendered image (ww + preview) */
  const ntApplyImgs=box=>{if(!box)return;
   box.querySelectorAll("img").forEach(im=>{
+   im.onerror=()=>im.classList.add("nt-imgbroken");
+   if(!im.getAttribute("src"))im.classList.add("nt-imgbroken");
    const a=imgAttrs(im);
    im.style.width=a.w?(/%$/.test(a.w)?a.w:a.w+(/^\d+$/.test(a.w)?"px":"")):"";
    im.style.maxHeight=a.w?"none":"";
