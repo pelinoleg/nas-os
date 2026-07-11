@@ -4302,10 +4302,14 @@ function stOwnCard(o,tc,reload){
    <div class="st-acts"></div></div>`);
  const im=c.querySelector(".st-ic");if(im)im.onerror=()=>{im.style.display="none";c.querySelector(".st-fb").style.display="flex";};
  const acts=c.querySelector(".st-acts");
+ if(cu&&cu.port&&o.running){const ob=el(`<button class="btn sm">${svg("expand",13)} Открыть</button>`);ob.onclick=()=>window.open(`http://${host()}:${cu.port}`,"_blank");acts.appendChild(ob);}
+ if(!o.running){const rb=el(`<button class="btn sm pri">${svg("play",13)} Запустить</button>`);rb.onclick=()=>stRunDlg(nm+" — запуск",{name:o.id,action:"up"},tc,reload);acts.appendChild(rb);}
+ else{const sb=el(`<button class="btn sm">${svg("stop",13)} Остановить</button>`);sb.onclick=async()=>{const r2=await api("/api/stack/action",{method:"POST",body:JSON.stringify({name:o.id,action:"stop"})});
+  if(r2&&r2.ok){toast("Остановлено");storeTab(tc,reload);reload();pollApps();}else toast("Ошибка: "+((r2&&r2.log)||"?"));};acts.appendChild(sb);}
  const b=el(`<button class="btn sm">${svg("star",13)} ${cu?"Ярлык…":"На рабочий стол…"}</button>`);
  b.onclick=()=>{
   const s=document.getElementById("scrim");
-  s.innerHTML=`<div class="dialog"><h3>Ярлык: ${esc(o.id)}</h3>
+  s.innerHTML=`<div class="dialog" style="max-width:560px;width:92vw"><h3>Ярлык: ${esc(o.id)}</h3>
    <div class="field"><label>Название</label><input id="cuN" value="${att((cu&&cu.name)||o.id)}"></div>
    <div class="field"><label>Иконка (URL, необязательно)</label><input id="cuI" value="${att((cu&&cu.icon)||"")}" placeholder="https://cdn.jsdelivr.net/gh/selfhst/icons@main/svg/….svg"></div>
    <div class="field"><label>Порт веб-интерфейса</label><input id="cuP" value="${att((cu&&cu.port)||"")}" placeholder="8080"></div>
@@ -5240,7 +5244,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
  }
  function remDlg(rm){
    const s=document.getElementById("scrim");
-   s.innerHTML=`<div class="dialog"><h3>${rm?"Изменить сервер":"Новый SSH-сервер"}</h3>
+   s.innerHTML=`<div class="dialog" style="max-width:560px;width:92vw"><h3>${rm?"Изменить сервер":"Новый SSH-сервер"}</h3>
      <div class="field"><label>Название</label><input id="rmN" value="${att((rm&&rm.name)||"")}" placeholder="Главный NAS"></div>
      <div class="field"><label>Адрес</label><input id="rmH" class="mono" value="${att((rm&&rm.host)||"")}" placeholder="192.168.1.95"></div>
      <div class="field" style="display:flex;gap:8px"><div style="flex:1"><label>Пользователь</label><input id="rmU" class="mono" value="${att((rm&&rm.user)||"")}" placeholder="root"></div>

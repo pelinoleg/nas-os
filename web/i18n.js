@@ -985,6 +985,7 @@ window.NAS_I18N = { en: {
 "Порт": "Port",
 "Папка на сервере": "Folder on the server",
 "Подключать автоматически": "Connect automatically",
+"Остановлено": "Stopped",
 "— панель монтирует сама (и после перезагрузки)": "— the panel mounts it by itself (incl. after a reboot)",
 "задан; пусто = не менять": "set; empty = keep",
 "синхронизирована": "synced",
