@@ -1755,7 +1755,7 @@
   .nt-ed .toastui-editor-defaultUI .toastui-editor-close-button{background:transparent;border:1px solid var(--nt-line);color:var(--nt-ink);border-radius:8px}
   .nt-ed .toastui-editor-dropdown-toolbar{background:var(--nt-bg);border:1px solid var(--nt-line);border-radius:10px}
   /* images: 300px tall max, left by default; selection + resize handle */
-  .nt-ed .toastui-editor-contents img{max-height:300px;max-width:100%;display:block;margin-right:auto;border-radius:8px;cursor:pointer}
+  .nt-ed .toastui-editor-contents img{max-height:300px;max-width:100%;display:block;border-radius:8px;cursor:pointer}
   .nt-ed .toastui-editor-contents img.ProseMirror-selectednode{outline:2px solid var(--nt-acc)}
   .nt-imgov{position:absolute;z-index:40;border:1.5px dashed var(--nt-acc,var(--accent));border-radius:8px;pointer-events:none}
   .nt-imgov i{position:absolute;right:-7px;bottom:-7px;width:14px;height:14px;border-radius:50%;background:var(--nt-acc,var(--accent));pointer-events:auto;cursor:nwse-resize}
@@ -6220,7 +6220,8 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
     const rr=await api("/api/notes/upload",{method:"POST",body:JSON.stringify({folder,name:blob.name||"img.png",data:b64})});
     if(rr&&rr.ok)cb(rr.url,blob.name||"");else toast("Ошибка загрузки: "+((rr&&rr.error)||"?"));
    }},
-   events:{change:schedSave}});
+   events:{change:()=>{schedSave();clearTimeout(winNotes._imT);winNotes._imT=setTimeout(()=>ntApplyImgs(box),60);}}});
+  setTimeout(()=>ntApplyImgs(box),80);
   }catch(err){box.innerHTML=`<div class="nt-empty">Редактор не запустился: ${esc(err&&err.message||err)}</div>`;console.error(err);return;}
   ntImgWire(box);
   /* image interactions: click = select + resize handle, right click = menu,
@@ -6240,26 +6241,36 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
     if(rr&&rr.ok){await refresh();openNote(rr.path);}});});
   paintList();
  }catch(err){console.error(err);toast("Ошибка открытия: "+(err&&err.message||err));}};
- /* rewrite one image in the markdown source: size + alignment live in an
-    <img> tag (markdown has no syntax for either) */
- const setImg=(src,attrs)=>{
-  let md=NT_ED.getMarkdown();
-  const escRe=src.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
-  const mdRe=new RegExp("!\\[[^\\]]*\\]\\("+escRe+"\\)");
-  const htmlRe=new RegExp('<img[^>]*src="'+escRe+'"[^>]*>');
-  let tag2;
-  if(!attrs.w&&(!attrs.align||attrs.align==="left"))tag2=`![](${src})`;
-  else{
-   const st2=attrs.align==="center"?' style="margin:0 auto"':attrs.align==="right"?' style="margin-left:auto"':"";
-   tag2=`<img src="${src}"${attrs.w?` width="${attrs.w}"`:""}${st2}>`;}
-  if(htmlRe.test(md))md=md.replace(htmlRe,tag2);
-  else if(mdRe.test(md))md=md.replace(mdRe,tag2);
-  else return toast("Не нашёл картинку в тексте");
-  NT_ED.setMarkdown(md);schedSave();};
+ /* image size + alignment live in the URL hash (#al=c&w=300): the hash
+    survives every markdown<->wysiwyg round-trip (unlike style attrs, which
+    the editor normalises away); a tiny walker applies it to the DOM */
+ const imgBase=u=>(u||"").split("#")[0];
  const imgAttrs=im=>{
-  const st2=im.getAttribute("style")||"";
-  return {w:im.getAttribute("width")||null,
-          align:/margin:\s*0\s*auto(?!.*margin-left)/.test(st2)?"center":/margin-left:\s*auto/.test(st2)?"right":"left"};};
+  const h=((im.getAttribute("src")||"").split("#")[1]||"");
+  const g=k=>{const m=h.match(new RegExp("(?:^|&)"+k+"=([^&]*)"));return m?m[1]:null;};
+  return {w:g("w"),align:g("al")==="c"?"center":g("al")==="r"?"right":"left"};};
+ const setImg=(src,attrs)=>{
+  const base=imgBase(src);
+  let h=[];
+  if(attrs.align==="center")h.push("al=c");else if(attrs.align==="right")h.push("al=r");
+  if(attrs.w)h.push("w="+encodeURIComponent(attrs.w));
+  const nu=base+(h.length?"#"+h.join("&"):"");
+  let md=NT_ED.getMarkdown();
+  const escRe=base.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+  const mdRe=new RegExp("(!\\[[^\\]]*\\]\\()"+escRe+"(?:#[^)\\s]*)?(\\))");
+  const htmlRe=new RegExp('<img[^>]*src="'+escRe+'[^"]*"[^>]*>');
+  if(mdRe.test(md))md=md.replace(mdRe,"$1"+nu+"$2");
+  else if(htmlRe.test(md))md=md.replace(htmlRe,"![]("+nu+")");
+  else return toast("Не нашёл картинку в тексте");
+  NT_ED.setMarkdown(md);ntApplyImgs(q("#ntEd"));schedSave();};
+ /* apply hash-encoded layout to every rendered image (ww + preview) */
+ const ntApplyImgs=box=>{if(!box)return;
+  box.querySelectorAll("img").forEach(im=>{
+   const a=imgAttrs(im);
+   im.style.width=a.w?(/%$/.test(a.w)?a.w:a.w+(/^\d+$/.test(a.w)?"px":"")):"";
+   im.style.maxHeight=a.w?"none":"";
+   im.style.marginLeft=a.align==="center"||a.align==="right"?"auto":"0";
+   im.style.marginRight=a.align==="center"?"auto":a.align==="right"?"0":"auto";});};
  const ntImgMenu=(e,im)=>{
   const src=im.getAttribute("src")||"";
   const cur=imgAttrs(im);
@@ -6295,7 +6306,7 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
      const mv=e2=>{const w=Math.max(40,Math.round(sw+e2.clientX-sx));theImg.style.width=w+"px";theImg.style.maxHeight="none";place();};
      const up=e2=>{window.removeEventListener("pointermove",mv);window.removeEventListener("pointerup",up);
       const w=Math.max(40,Math.round(sw+e2.clientX-sx));
-      setImg(theImg.getAttribute("src")||"",{w:w,align:imgAttrs(theImg).align});clear();};
+      setImg(theImg.getAttribute("src")||"",{w:String(w),align:imgAttrs(theImg).align});clear();};
      window.addEventListener("pointermove",mv);window.addEventListener("pointerup",up);};}
    place();},true);
   box.addEventListener("scroll",place,true);};
@@ -6392,6 +6403,7 @@ async function ntTrash(refresh){
 }
 function ntLightbox(src){
  if(!src)return;
+ src=src.split("#")[0];
  const s=document.getElementById("scrim");
  s.innerHTML=`<div class="nt-lb"><img src="${att(src)}"></div>`;
  s.classList.add("show");
