@@ -239,6 +239,17 @@ def uptime_s():
 _UV_MASK  = (1 << 0) | (1 << 16)                        # under-voltage
 _THR_MASK = sum(1 << b for b in (1, 2, 3, 17, 18, 19))  # freq cap / throttling / soft temp limit
 
+# USB-PD negotiation result, mA: 5000 = official 27 W PSU, 3000 = 15 W (or a weak
+# cable that dropped the PD talk) — under 3xNVMe + USB load the PMIC cuts power.
+# Static per boot, so read once at import.
+def _psu_max_current():
+    try:
+        with open("/proc/device-tree/chosen/power/max_current", "rb") as f:
+            return int.from_bytes(f.read(4), "big") or None
+    except OSError:
+        return None
+PSU_MA = _psu_max_current()
+
 def throttled():
     try:
         out = subprocess.run(["vcgencmd", "get_throttled"], capture_output=True,
@@ -2494,6 +2505,7 @@ def stats():
         "cpu": cpu_percent(),
         "temp": temp_c(),
         "throttled": throttled(),
+        "psu_ma": PSU_MA,
         "mem": mem_info(),
         # пула нет — значит нет и его статистики (раньше молча подставлялась
         # системная карта, и «заполнение пула» показывало ерунду)
