@@ -1610,22 +1610,32 @@
   .glc-hdr .pgdots b{width:6px;height:6px;border-radius:50%;background:#3a3f4c}
   .glc-hdr .pgdots b.on{background:#e8eaf0}
   .glc-av{position:absolute;left:6px;right:6px;bottom:2px;border-radius:3px;background:repeating-linear-gradient(90deg,#2e7d54 0 8px,#255f42 8px 9px)}
-  .glc-tile{position:absolute;box-sizing:border-box;border-radius:7px;background:#151821;border:1px solid #262b36;color:#e8eaf0;cursor:grab;overflow:hidden}
-  .glc-tile.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
-  .glc-tile .l{position:absolute;top:3px;left:7px;right:18px;color:#8a90a0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .glc-tile .d{position:absolute;top:5px;right:6px;width:7px;height:7px;border-radius:50%}
-  .glc-tile .v{position:absolute;inset:0;padding-top:10px;display:flex;align-items:center;justify-content:center;gap:4px;font-weight:700;white-space:nowrap;overflow:hidden}
-  .glc-tile .u{font-size:.55em;color:#8a90a0;font-weight:500}
-  .glc-tile.slim{display:flex;align-items:center;gap:6px;padding:0 7px}
-  .glc-tile.slim .l{position:static;flex:1;right:auto}
-  .glc-tile.slim .v{position:static;inset:auto;padding:0;font-weight:600}
-  .glc-tile.slim .d{position:static;margin-left:2px}
+  .glc-tile{position:absolute;box-sizing:border-box;border-radius:7px;color:#e8eaf0;cursor:grab;overflow:hidden;touch-action:none}
+  .glc-tile.sel{box-shadow:0 0 0 2px var(--accent)}
+  .glc-tile .e{position:absolute;white-space:nowrap;line-height:1.05;max-width:96%;overflow:hidden;text-overflow:ellipsis}
+  .glc-tile .l,.glc-tile .u,.glc-tile .u2{color:#8a90a0}
+  .glc-tile .v{font-weight:700}
+  .glc-tile .u{font-weight:500}
+  .glc-tile .d{position:absolute;top:4px;right:5px;width:7px;height:7px;border-radius:50%}
+  .glc-tile .rzh{position:absolute;right:0;bottom:0;width:14px;height:14px;cursor:nwse-resize;border-right:2px solid var(--accent);border-bottom:2px solid var(--accent);border-bottom-right-radius:6px}
   .glc-over{align-self:stretch;display:flex;align-items:center;gap:6px;flex-wrap:wrap;color:var(--warn);font-size:12px}
+  .glc-insp{width:216px;flex:none;overflow:auto;display:flex;flex-direction:column;gap:10px;font-size:12px;padding-right:4px}
+  .glc-insp .gi{display:flex;flex-direction:column;gap:5px;padding:9px 11px;border-radius:10px;background:var(--card);border:1px solid var(--line)}
+  .glc-insp .gi>span{font-size:10.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--dim)}
+  .glc-insp .gi label{display:flex;align-items:center;gap:5px;color:var(--dim)}
+  .glc-insp input[type=number]{height:24px;border-radius:6px;border:1px solid var(--line);background:var(--glass);color:var(--ink);padding:0 5px;font-size:12px}
+  .glc-insp input[type=color]{width:36px;height:24px;border:1px solid var(--line);border-radius:6px;background:none;padding:1px}
+  .glc-9{display:grid;grid-template-columns:repeat(3,18px);gap:3px;width:max-content}
+  .glc-9 button{width:18px;height:14px;border-radius:4px;border:1px solid var(--line);background:var(--glass);cursor:pointer;padding:0}
+  .glc-9 button.on{background:var(--accent);border-color:var(--accent)}
+  .glc-9x{display:flex;gap:4px;flex-wrap:wrap}
+  .glc-9x .btn.on{background:var(--sel);color:var(--accent);box-shadow:var(--sh-sm)}
   @media(max-width:1024px){
    .glc-main{flex-direction:column}
    .glc-pal-wrap{width:auto;max-height:150px}
    .glc-pal{flex-direction:row;flex-wrap:wrap}
    .glc-pitem{flex:none}
+   .glc-insp{width:auto}
   }
   .gl-avwrap{margin-top:12px}
   .gl-bars{display:flex;gap:1px;height:14px}
@@ -5824,6 +5834,8 @@ function winGlance(){openWin("__glance","Экран NAS",async body=>{
    <span class="glc-cap">Экран</span><div class="seg" id="gcScr"></div><button class="btn sm" id="gcScrAdd">+</button>
    <input id="gcScrName" maxlength="24" placeholder="имя">
    <select id="gcPreset">${presets.map(p=>`<option value="${p.id}">${esc(p.name)} — ${p.id}</option>`).join("")}</select>
+   <div class="seg" id="gcMode"><button data-m="flow">Сетка</button><button data-m="free">Свободно</button></div>
+   <label class="glc-cap" style="display:flex;align-items:center;gap:4px;text-transform:none">gap <input id="gcGap" type="number" min="0" max="24" style="width:52px"></label>
    <span class="glc-id mono" id="gcScrId"></span>
    <button class="iconbtn" id="gcScrDel" title="Удалить экран">${svg("trash",15)}</button>
   </div>
@@ -5834,24 +5846,34 @@ function winGlance(){openWin("__glance","Экран NAS",async body=>{
    <span style="flex:1"></span>
    <div id="gcCtl" style="display:flex;align-items:center;gap:6px;visibility:hidden">
     <div class="seg" id="gcSize">${["s","m","l"].map(z=>`<button data-z="${z}">${z.toUpperCase()}</button>`).join("")}</div>
-    <button class="iconbtn" id="gcMvL" title="Раньше">${svg("arrowup",15)}</button>
-    <button class="iconbtn" id="gcMvR" title="Позже" style="transform:rotate(180deg)">${svg("arrowup",15)}</button>
+    <button class="iconbtn" id="gcMvL" title="Раньше / ниже слоем">${svg("arrowup",15)}</button>
+    <button class="iconbtn" id="gcMvR" title="Позже / выше слоем" style="transform:rotate(180deg)">${svg("arrowup",15)}</button>
     <button class="iconbtn" id="gcTDel" title="Убрать с экрана">${svg("x",15)}</button>
    </div>
   </div>
   <div class="glc-main">
    <div class="glc-pal-wrap"><div class="glc-cap" style="margin:0 0 6px">Плитки — кликните или перетащите</div><div class="glc-pal" id="gcPal"></div></div>
    <div class="glc-stage"><div class="glc-canvas" id="gcCv"></div><div class="glc-over" id="gcOver"></div></div>
+   <div class="glc-insp" id="gcInsp" style="display:none"></div>
   </div>`;
  const q=s=>body.querySelector(s);
- const scr=()=>screens[si],pg=()=>scr().pages[pi];
+ const scr=()=>screens[si],pg=()=>scr().pages[pi],MODE=()=>scr().mode||"flow";
+ const WH=()=>scr().preset.split("x").map(Number);
  let postT=null;
- const commit=()=>{clearTimeout(postT);postT=setTimeout(()=>api("/api/glance/config",{method:"POST",body:JSON.stringify({screens})}),350);paint();};
+ const save=()=>{clearTimeout(postT);postT=setTimeout(()=>api("/api/glance/config",{method:"POST",body:JSON.stringify({screens})}),350);};
+ const commit=()=>{save();paint();};
  const stColor=s=>s==="ok"?"var(--good)":s==="warn"?"var(--warn)":"var(--danger)";
- /* live values for every catalog tile (palette + canvas) */
  const refresh=async()=>{const g=await api("/api/glance?all=1&lang="+(window.NAS_LANG||"ru"));
   if(g&&g.palette){LIVE={};g.palette.forEach(t=>LIVE[t.id]=t);paintPal();paintCv();}};
  const tload=id=>LIVE[id]||{value:"—",unit:"",state:"ok"};
+ /* per-size defaults for label/value/unit position+font (device px) */
+ const DEF={s:{lp:"cl",ls:10,vp:"cr",vs:12,up:"val",us:9},
+            m:{lp:"tl",ls:10,vp:"c",vs:17,up:"val",us:10},
+            l:{lp:"tl",ls:11,vp:"c",vs:26,up:"val",us:11}};
+ const stv=(t,k)=>(t.st&&t.st[k]!==undefined)?t.st[k]:DEF[t.size||"m"][k];
+ const POS={tl:"left:6px;top:3px",tc:"left:50%;top:3px;transform:translateX(-50%)",tr:"right:6px;top:3px",
+   cl:"left:6px;top:50%;transform:translateY(-50%)",c:"left:50%;top:50%;transform:translate(-50%,-50%)",cr:"right:6px;top:50%;transform:translateY(-50%)",
+   bl:"left:6px;bottom:3px",bc:"left:50%;bottom:3px;transform:translateX(-50%)",br:"right:6px;bottom:3px"};
  const paintPal=()=>{const pal=q("#gcPal");if(!pal)return;
   const used=new Set(pg().tiles.map(t=>t.id));
   pal.innerHTML=cat.map(c=>{const t=tload(c.id);
@@ -5860,15 +5882,11 @@ function winGlance(){openWin("__glance","Экран NAS",async body=>{
   pal.querySelectorAll(".glc-pitem").forEach(it=>{
    it.onclick=()=>{pg().tiles.push({id:it.dataset.id,size:"m"});sel=pg().tiles.length-1;commit();};
    it.ondragstart=e=>e.dataTransfer.setData("text/plain","add:"+it.dataset.id);});};
- /* canvas: replica of the sketch flow layout, scaled to the preset */
+ /* device-px boxes: grid mode replicates the sketch flow; free mode = manual */
  let PLACES=[],SCALE=1;
- const paintCv=()=>{const cv=q("#gcCv");if(!cv)return;
-  const [W,H]=scr().preset.split("x").map(Number);
-  const stage=cv.parentElement;
-  const f=Math.max(.6,Math.min((stage.clientWidth-16)/W,2.1,360/H));SCALE=f;
-  cv.style.width=Math.round(W*f)+"px";cv.style.height=Math.round(H*f)+"px";
-  const cols=W>=480?3:2,colW=W/cols,hL=66,hM=50,hS=20,top=28,bot=14;
-  let x=0,y=top,rowH=0,full=false;PLACES=[];const over=[];
+ const flowBoxes=()=>{const [W,H]=WH();
+  const gap=scr().gap||0,cols=W>=480?3:2,colW=W/cols,hL=66,hM=50,hS=20,top=28,bot=14;
+  let x=0,y=top,rowH=0,full=false;const boxes=[],over=[];
   pg().tiles.forEach((t,i)=>{
    const big=t.size==="l",slim=t.size==="s";
    const th=big?hL:slim?hS:hM,tw=big?W:colW;
@@ -5876,70 +5894,154 @@ function winGlance(){openWin("__glance","Экран NAS",async body=>{
     if(big&&x>0){y+=rowH;x=0;rowH=0;}
     if(x+tw>W){y+=rowH;x=0;rowH=0;}
     if(y+th>H-bot)full=true;}
-   if(full){over.push({t,i});return;}
-   PLACES.push({t,i,x,y,w:tw,h:th});
+   if(full){over.push(i);return;}
+   boxes.push({i,x:x+2+gap/2,y:y+2+gap/2,w:tw-4-gap,h:th-4-gap});
    x+=tw;rowH=Math.max(rowH,th);
    if(big){y+=th;x=0;rowH=0;}});
+  return {boxes,over};};
+ const freeBoxes=()=>{const [W,H]=WH();const cols=W>=480?3:2,colW=Math.round(W/cols);
+  const boxes=[];
+  pg().tiles.forEach((t,i)=>{
+   if(t.x===undefined||t.w===undefined){
+    t.w=t.size==="l"?W-8:colW-6;t.h=t.size==="l"?62:t.size==="s"?18:46;
+    t.x=4+(i%4)*12;t.y=30+(i%4)*14;}
+   boxes.push({i,x:t.x,y:t.y,w:t.w,h:t.h});});
+  return {boxes,over:[]};};
+ const tileHTML=(t,i,b,f)=>{const live=tload(t.id);
+  const px=v=>Math.round(v*f);
+  const bg=t.st&&t.st.bg,bw=(t.st&&t.st.bw!==undefined)?t.st.bw:1,bc=(t.st&&t.st.bc)||"#262b36";
+  const fs=v=>Math.max(6,px(v))+"px";
+  const lp=stv(t,"lp"),vp=stv(t,"vp"),up=stv(t,"up");
+  let inner="";
+  if(lp!=="hide"&&lp!=="val")inner+=`<span class="e l" style="${POS[lp]};font-size:${fs(stv(t,"ls"))}">${esc(names[t.id]||t.id)}</span>`;
+  const uIn=up==="val"?` <span class="u" style="font-size:${fs(stv(t,"us"))}">${esc(live.unit||"")}</span>`:"";
+  if(vp!=="hide"&&vp!=="val")inner+=`<span class="e v" style="${POS[vp]};font-size:${fs(stv(t,"vs"))}">${esc(live.value)}${uIn}</span>`;
+  if(up!=="val"&&up!=="hide")inner+=`<span class="e u2" style="${POS[up]};font-size:${fs(stv(t,"us"))}">${esc(live.unit||"")}</span>`;
+  inner+=`<i class="d" style="background:${stColor(live.state)}"></i>`;
+  if(MODE()==="free"&&i===sel)inner+=`<span class="rzh"></span>`;
+  return `<div class="glc-tile${i===sel?" sel":""}" ${MODE()==="flow"?'draggable="true"':""} data-i="${i}" style="left:${px(b.x)}px;top:${px(b.y)}px;width:${px(b.w)}px;height:${px(b.h)}px;background:${bg==="none"?"transparent":(bg||"#151821")};border:${bw?Math.max(1,px(bw))+"px solid "+bc:"none"};z-index:${10+i}">${inner}</div>`;};
+ const paintCv=()=>{const cv=q("#gcCv");if(!cv)return;
+  const [W,H]=WH();
+  const stage=cv.parentElement;
+  const f=Math.max(.6,Math.min((stage.clientWidth-16)/W,2.1,360/H));SCALE=f;
+  cv.style.width=Math.round(W*f)+"px";cv.style.height=Math.round(H*f)+"px";
+  const {boxes,over}=MODE()==="free"?freeBoxes():flowBoxes();PLACES=boxes;
   const px=v=>Math.round(v*f)+"px";
-  cv.innerHTML=`<div class="glc-hdr" style="height:${px(top)}"><i></i><span>${esc(location.hostname)}</span><span class="pgdots">${scr().pages.map((_,k)=>`<b class="${k===pi?"on":""}"></b>`).join("")}</span></div>`
-   +PLACES.map(p=>{const t=tload(p.t.id),slim=p.t.size==="s";
-    return `<div class="glc-tile${slim?" slim":""}${p.i===sel?" sel":""}" draggable="true" data-i="${p.i}" style="left:${px(p.x)};top:${px(p.y)};width:${px(p.w)};height:${px(p.h)};font-size:${Math.max(9,Math.round(11*f*.75))}px">
-     ${slim?`<span class="l">${esc(names[p.t.id]||p.t.id)}</span><span class="v mono">${esc(t.value)} ${esc(t.unit||"")}</span><i class="d" style="background:${stColor(t.state)}"></i>`
-          :`<span class="l">${esc(names[p.t.id]||p.t.id)}</span><i class="d" style="background:${stColor(t.state)}"></i><span class="v" style="font-size:${Math.max(11,Math.round((p.t.size==="l"?26:17)*f*.75))}px">${esc(t.value)}<span class="u">${esc(t.unit||"")}</span></span>`}
-    </div>`;}).join("")
+  cv.innerHTML=`<div class="glc-hdr" style="height:${px(28)}"><i></i><span>${esc(location.hostname)}</span><span class="pgdots">${scr().pages.map((_,k)=>`<b class="${k===pi?"on":""}"></b>`).join("")}</span></div>`
+   +boxes.map(b=>tileHTML(pg().tiles[b.i],b.i,b,f)).join("")
    +`<div class="glc-av" style="height:${px(12)}"></div>`;
   cv.querySelectorAll(".glc-tile").forEach(tl=>{
-   tl.onclick=e=>{e.stopPropagation();sel=+tl.dataset.i;paintCtl();paintCv();};
-   tl.ondragstart=e=>e.dataTransfer.setData("text/plain","mv:"+tl.dataset.i);});
+   const i=+tl.dataset.i;
+   tl.onclick=e=>{e.stopPropagation();if(sel!==i){sel=i;paintCtl();paintInsp();paintCv();}};
+   if(MODE()==="flow"){tl.ondragstart=e=>e.dataTransfer.setData("text/plain","mv:"+i);}
+   else tl.onpointerdown=e=>freeDrag(e,tl,i);});
   const ov=q("#gcOver");
-  ov.innerHTML=over.length?`<span class="glc-cap">Не влезло на экран:</span> `+over.map(o=>`<button class="btn sm" data-i="${o.i}">${esc(names[o.t.id]||o.t.id)} ✕</button>`).join(" "):"";
+  ov.innerHTML=over.length?`<span class="glc-cap">Не влезло на экран:</span> `+over.map(i=>`<button class="btn sm" data-i="${i}">${esc(names[pg().tiles[i].id]||"?")} ✕</button>`).join(" "):"";
   ov.querySelectorAll("button").forEach(b=>b.onclick=()=>{pg().tiles.splice(+b.dataset.i,1);sel=-1;commit();});};
+ /* free mode: pointer drag to move, corner handle to resize; overlap is fine */
+ const freeDrag=(e,el,i)=>{
+  if(sel!==i){sel=i;paintCtl();paintInsp();paintCv();el=q(`.glc-tile[data-i="${i}"]`);if(!el)return;}
+  e.preventDefault();
+  const t=pg().tiles[i],[W,H]=WH();
+  const rz=e.target.classList.contains("rzh");
+  const sx=e.clientX,sy=e.clientY,ox=t.x,oy=t.y,ow=t.w,oh=t.h;
+  const mv=ev=>{const dx=(ev.clientX-sx)/SCALE,dy=(ev.clientY-sy)/SCALE;
+   if(rz){t.w=Math.round(Math.max(16,Math.min(W-t.x,ow+dx)));t.h=Math.round(Math.max(12,Math.min(H-t.y,oh+dy)));
+    el.style.width=Math.round(t.w*SCALE)+"px";el.style.height=Math.round(t.h*SCALE)+"px";}
+   else{t.x=Math.round(Math.max(0,Math.min(W-t.w,ox+dx)));t.y=Math.round(Math.max(0,Math.min(H-t.h,oy+dy)));
+    el.style.left=Math.round(t.x*SCALE)+"px";el.style.top=Math.round(t.y*SCALE)+"px";}};
+  const up=()=>{window.removeEventListener("pointermove",mv);window.removeEventListener("pointerup",up);save();paintInsp();};
+  window.addEventListener("pointermove",mv);window.addEventListener("pointerup",up);};
  const paintCtl=()=>{const c=q("#gcCtl");const ok=sel>=0&&sel<pg().tiles.length;
   c.style.visibility=ok?"visible":"hidden";
   if(ok)c.querySelectorAll("[data-z]").forEach(b=>b.classList.toggle("on",b.dataset.z===pg().tiles[sel].size));};
+ /* inspector: per-tile style */
+ const paintInsp=()=>{const insp=q("#gcInsp");
+  if(sel<0||sel>=pg().tiles.length){insp.style.display="none";return;}
+  insp.style.display="";
+  const t=pg().tiles[sel];
+  const g9=(pre,extra)=>`<div class="glc-9" data-k="${pre}p">${["tl","tc","tr","cl","c","cr","bl","bc","br"].map(p=>`<button data-p="${p}" class="${stv(t,pre+"p")===p?"on":""}"></button>`).join("")}</div><div class="glc-9x" data-k="${pre}p">${(extra||[]).map(([v,l])=>`<button data-p="${v}" class="btn sm ${stv(t,pre+"p")===v?"on":""}">${l}</button>`).join("")}</div>`;
+  const num=(k,mn,mx)=>`<input type="number" min="${mn}" max="${mx}" data-n="${k}" value="${stv(t,k)!==undefined&&DEF[t.size||"m"][k]!==undefined?stv(t,k):(t.st&&t.st[k]!==undefined?t.st[k]:(k==="bw"?1:10))}" style="width:56px">`;
+  const bgMode=!t.st||t.st.bg===undefined?"def":(t.st.bg==="none"?"none":"color");
+  insp.innerHTML=`
+   <div class="glc-cap" style="margin-bottom:2px">${esc(names[t.id]||t.id)}</div>
+   <div class="gi"><span>Заголовок</span>${g9("l",[["hide","скрыть"]])}<label>размер ${num("ls",6,60)}</label></div>
+   <div class="gi"><span>Значение</span>${g9("v",[["hide","скрыть"]])}<label>размер ${num("vs",6,120)}</label></div>
+   <div class="gi"><span>Единица</span>${g9("u",[["val","у значения"],["hide","скрыть"]])}<label>размер ${num("us",6,60)}</label></div>
+   <div class="gi"><span>Фон</span><div class="seg" id="giBg">${[["def","карточка"],["none","нет"],["color","цвет"]].map(([v,l])=>`<button data-b="${v}" class="${bgMode===v?"on":""}">${l}</button>`).join("")}</div><input type="color" id="giBgC" value="${t.st&&t.st.bg&&t.st.bg!=="none"?t.st.bg:"#151821"}" style="${bgMode==="color"?"":"display:none"}"></div>
+   <div class="gi"><span>Рамка</span><label>толщина ${num("bw",0,6)}</label><input type="color" id="giBcC" value="${(t.st&&t.st.bc)||"#262b36"}"><button class="btn sm" id="giBcDef">авто</button></div>
+   ${MODE()==="free"?`<div class="gi"><span>Геометрия</span><label>x ${num("x",0,4096)}</label><label>y ${num("y",0,4096)}</label><label>w ${num("w",8,4096)}</label><label>h ${num("h",8,4096)}</label></div>`:""}
+   <button class="btn sm" id="giReset">Сбросить стиль</button>`;
+  const st=()=>t.st||(t.st={});
+  insp.querySelectorAll(".glc-9 button,.glc-9x button").forEach(b=>b.onclick=()=>{st()[b.closest("[data-k]").dataset.k]=b.dataset.p;commit();paintInsp();});
+  insp.querySelectorAll("input[data-n]").forEach(inp=>inp.onchange=()=>{const k=inp.dataset.n,v=+inp.value;
+   if(["x","y","w","h"].includes(k))t[k]=v;else st()[k]=v;commit();});
+  insp.querySelector("#giBg").querySelectorAll("button").forEach(b=>b.onclick=()=>{
+   if(b.dataset.b==="def")delete st().bg;else if(b.dataset.b==="none")st().bg="none";else st().bg=insp.querySelector("#giBgC").value;
+   commit();paintInsp();});
+  insp.querySelector("#giBgC").onchange=e=>{st().bg=e.target.value;commit();};
+  insp.querySelector("#giBcC").onchange=e=>{st().bc=e.target.value;commit();};
+  insp.querySelector("#giBcDef").onclick=()=>{delete st().bc;commit();paintInsp();};
+  insp.querySelector("#giReset").onclick=()=>{delete t.st;commit();paintInsp();};};
  const paint=()=>{
   q("#gcScr").innerHTML=screens.map((s,k)=>`<button data-v="${k}" class="${k===si?"on":""}">${esc(s.name)}</button>`).join("");
-  q("#gcScr").querySelectorAll("button").forEach(b=>b.onclick=()=>{si=+b.dataset.v;pi=0;sel=-1;paint();});
+  q("#gcScr").querySelectorAll("button").forEach(b=>b.onclick=()=>{si=+b.dataset.v;pi=0;sel=-1;paint();paintInsp();});
   q("#gcScrName").value=scr().name;q("#gcPreset").value=scr().preset;
+  q("#gcGap").value=scr().gap||0;
+  q("#gcMode").querySelectorAll("button").forEach(b=>b.classList.toggle("on",b.dataset.m===MODE()));
   q("#gcScrId").textContent="screen="+scr().id;
   q("#gcScrDel").disabled=screens.length<2;
   q("#gcPg").innerHTML=scr().pages.map((p,k)=>`<button data-v="${k}" class="${k===pi?"on":""}">${esc(p.name)}</button>`).join("");
-  q("#gcPg").querySelectorAll("button").forEach(b=>b.onclick=()=>{pi=+b.dataset.v;sel=-1;paint();});
+  q("#gcPg").querySelectorAll("button").forEach(b=>b.onclick=()=>{pi=+b.dataset.v;sel=-1;paint();paintInsp();});
   q("#gcPgName").value=pg().name;
   q("#gcPgDel").disabled=scr().pages.length<2;
   paintCtl();paintPal();paintCv();};
  q("#gcScrName").onchange=()=>{scr().name=q("#gcScrName").value.trim()||"Экран";commit();};
  q("#gcPreset").onchange=()=>{scr().preset=q("#gcPreset").value;commit();};
+ q("#gcGap").onchange=()=>{scr().gap=Math.max(0,Math.min(24,+q("#gcGap").value||0));commit();};
+ q("#gcMode").querySelectorAll("button").forEach(b=>b.onclick=()=>{
+  if(b.dataset.m===MODE())return;
+  if(b.dataset.m==="free"){/* materialize current grid coords so nothing jumps */
+   const {boxes}=flowBoxes();boxes.forEach(bx=>{const t=pg().tiles[bx.i];t.x=Math.round(bx.x);t.y=Math.round(bx.y);t.w=Math.round(bx.w);t.h=Math.round(bx.h);});}
+  scr().mode=b.dataset.m;sel=-1;commit();paintInsp();});
  q("#gcScrAdd").onclick=()=>{if(screens.length>=4)return;
-  screens.push({id:"",name:"Экран "+(screens.length+1),preset:"320x170",pages:[{name:"Главная",tiles:[]}]});
+  screens.push({id:"",name:"Экран "+(screens.length+1),preset:"320x170",gap:0,mode:"flow",pages:[{name:"Главная",tiles:[]}]});
   si=screens.length-1;pi=0;sel=-1;
-  /* immediate save: the server assigns the screen id we show for &screen= */
   clearTimeout(postT);api("/api/glance/config",{method:"POST",body:JSON.stringify({screens})}).then(rr=>{
    if(rr&&rr.config){screens.length=0;rr.config.screens.forEach(s=>screens.push(s));}paint();});};
- q("#gcScrDel").onclick=()=>{if(screens.length<2)return;screens.splice(si,1);si=0;pi=0;sel=-1;commit();};
+ q("#gcScrDel").onclick=()=>{if(screens.length<2)return;screens.splice(si,1);si=0;pi=0;sel=-1;commit();paintInsp();};
  q("#gcPgName").onchange=()=>{pg().name=q("#gcPgName").value.trim()||"Стр.";commit();};
- q("#gcPgAdd").onclick=()=>{if(scr().pages.length>=6)return;scr().pages.push({name:"Стр. "+(scr().pages.length+1),tiles:[]});pi=scr().pages.length-1;sel=-1;commit();};
- q("#gcPgDel").onclick=()=>{if(scr().pages.length<2)return;scr().pages.splice(pi,1);pi=0;sel=-1;commit();};
- q("#gcSize").querySelectorAll("[data-z]").forEach(b=>b.onclick=()=>{if(sel<0)return;pg().tiles[sel].size=b.dataset.z;commit();});
+ q("#gcPgAdd").onclick=()=>{if(scr().pages.length>=6)return;scr().pages.push({name:"Стр. "+(scr().pages.length+1),tiles:[]});pi=scr().pages.length-1;sel=-1;commit();paintInsp();};
+ q("#gcPgDel").onclick=()=>{if(scr().pages.length<2)return;scr().pages.splice(pi,1);pi=0;sel=-1;commit();paintInsp();};
+ q("#gcSize").querySelectorAll("[data-z]").forEach(b=>b.onclick=()=>{if(sel<0)return;const t=pg().tiles[sel];t.size=b.dataset.z;
+  if(MODE()==="free"){delete t.x;delete t.y;delete t.w;delete t.h;} /* re-materialize with new size defaults */
+  commit();paintInsp();});
  q("#gcMvL").onclick=()=>{if(sel>0){const a=pg().tiles;[a[sel-1],a[sel]]=[a[sel],a[sel-1]];sel--;commit();}};
  q("#gcMvR").onclick=()=>{const a=pg().tiles;if(sel>=0&&sel<a.length-1){[a[sel+1],a[sel]]=[a[sel],a[sel+1]];sel++;commit();}};
- q("#gcTDel").onclick=()=>{if(sel<0)return;pg().tiles.splice(sel,1);sel=-1;commit();};
+ q("#gcTDel").onclick=()=>{if(sel<0)return;pg().tiles.splice(sel,1);sel=-1;commit();paintInsp();};
  const cvBox=q("#gcCv");
- cvBox.onclick=()=>{sel=-1;paintCtl();paintCv();};
+ cvBox.onclick=()=>{sel=-1;paintCtl();paintInsp();paintCv();};
  cvBox.ondragover=e=>e.preventDefault();
  cvBox.ondrop=e=>{e.preventDefault();
   const d=e.dataTransfer.getData("text/plain")||"";
   const rect=cvBox.getBoundingClientRect(),mx=e.clientX-rect.left,my=e.clientY-rect.top;
-  /* insertion index: first placed tile whose centre lies beyond the drop point */
+  if(MODE()==="free"&&d.startsWith("add:")){
+   const t={id:d.slice(4),size:"m"};pg().tiles.push(t);
+   const [W,H]=WH();const cols=W>=480?3:2;
+   t.w=Math.round(W/cols)-6;t.h=46;
+   t.x=Math.round(Math.max(0,Math.min(W-t.w,mx/SCALE-t.w/2)));
+   t.y=Math.round(Math.max(0,Math.min(H-t.h,my/SCALE-t.h/2)));
+   sel=pg().tiles.length-1;commit();paintInsp();return;}
+  /* grid mode: insertion index = first tile whose centre lies beyond the drop */
   let idx=pg().tiles.length;
   for(const p of PLACES){const cxp=(p.x+p.w/2)*SCALE,cyp=(p.y+p.h/2)*SCALE;
    if(my<cyp-2||(Math.abs(my-cyp)<=p.h*SCALE/2&&mx<cxp)){idx=p.i;break;}}
-  if(d.startsWith("add:")){pg().tiles.splice(idx,0,{id:d.slice(4),size:"m"});sel=idx;commit();}
+  if(d.startsWith("add:")){pg().tiles.splice(idx,0,{id:d.slice(4),size:"m"});sel=idx;commit();paintInsp();}
   else if(d.startsWith("mv:")){const from=+d.slice(3);if(from===idx)return;
-   const [t]=pg().tiles.splice(from,1);pg().tiles.splice(from<idx?idx-1:idx,0,t);sel=from<idx?idx-1:idx;commit();}};
+   const [t]=pg().tiles.splice(from,1);pg().tiles.splice(from<idx?idx-1:idx,0,t);sel=from<idx?idx-1:idx;commit();paintInsp();}};
  paint();refresh();
  const tim=setInterval(()=>{if(!document.contains(body)){clearInterval(tim);return;}refresh();},5000);
-},{w:1060,h:700});}
+},{w:1180,h:720});}
 function winSettings(initTab){openWin("__set","Настройки",body=>{
  body.style.display="flex";body.style.padding="0";
  let tab=initTab||"look";

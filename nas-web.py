@@ -1570,15 +1570,59 @@ def _gl_spark(field, points=48):
         out.append(int(v) if v >= 100 else round(v, 1))
     return out
 
+# tile style: positions use the 9-grid (matches TFT_eSPI datums), "val" keeps
+# the unit glued to the value, "hide" hides the element
+_GL_POS = {"tl", "tc", "tr", "cl", "c", "cr", "bl", "bc", "br", "hide", "val"}
+
+def _gl_norm_style(st):
+    if not isinstance(st, dict):
+        return {}
+    out = {}
+    for k in ("lp", "vp", "up"):                      # label/value/unit position
+        if st.get(k) in _GL_POS:
+            out[k] = st[k]
+    for k in ("ls", "vs", "us"):                      # label/value/unit font px
+        try:
+            v = int(st.get(k))
+            if 6 <= v <= 120:
+                out[k] = v
+        except (TypeError, ValueError):
+            pass
+    bg = st.get("bg")                                 # absent=default card
+    if bg == "none" or (isinstance(bg, str) and re.match(r"^#[0-9a-fA-F]{6}$", bg)):
+        out["bg"] = bg
+    try:
+        bw = int(st.get("bw"))                        # border width, 0=none
+        if 0 <= bw <= 6:
+            out["bw"] = bw
+    except (TypeError, ValueError):
+        pass
+    bc = st.get("bc")
+    if isinstance(bc, str) and re.match(r"^#[0-9a-fA-F]{6}$", bc):
+        out["bc"] = bc
+    return out
+
 def _gl_norm_tiles(lst):
-    """Normalize a tile list: plain id strings (legacy) or {id, size s|m|l}."""
+    """Normalize a tile list: id string (legacy) or
+    {id, size s|m|l, x/y/w/h (free mode, device px), st (style)}."""
     out = []
     for t in lst or []:
         if isinstance(t, str):
             out.append({"id": t, "size": "m"})
-        elif isinstance(t, dict) and t.get("id"):
-            sz = t.get("size") if t.get("size") in ("s", "m", "l") else "m"
-            out.append({"id": str(t["id"]), "size": sz})
+            continue
+        if not (isinstance(t, dict) and t.get("id")):
+            continue
+        d = {"id": str(t["id"]),
+             "size": t.get("size") if t.get("size") in ("s", "m", "l") else "m"}
+        for k in ("x", "y", "w", "h"):
+            try:
+                d[k] = max(0, min(4096, int(t[k])))
+            except (KeyError, TypeError, ValueError):
+                pass
+        st = _gl_norm_style(t.get("st"))
+        if st:
+            d["st"] = st
+        out.append(d)
     return out
 
 # display size presets for the constructor canvas ("сколько поместится")
@@ -1612,8 +1656,14 @@ def load_glance():
         preset = str(s.get("preset") or "320x170")
         if not re.match(r"^\d{2,4}x\d{2,4}$", preset):
             preset = "320x170"
+        try:
+            gap = max(0, min(24, int(s.get("gap"))))
+        except (TypeError, ValueError):
+            gap = 0
         out.append({"id": sid, "name": str(s.get("name") or "Экран")[:24],
-                    "preset": preset, "pages": _gl_norm_pages(s.get("pages"))})
+                    "preset": preset, "gap": gap,
+                    "mode": "free" if s.get("mode") == "free" else "flow",
+                    "pages": _gl_norm_pages(s.get("pages"))})
     return {"enabled": bool(d.get("enabled")),
             "token": d.get("token") or "",
             "ping_interval": int(d.get("ping_interval") or 30),
@@ -1636,11 +1686,17 @@ def save_glance(d):
             preset = str(s.get("preset") or "320x170")
             if not re.match(r"^\d{2,4}x\d{2,4}$", preset):
                 preset = "320x170"
+            try:
+                gap = max(0, min(24, int(s.get("gap"))))
+            except (TypeError, ValueError):
+                gap = 0
             pages = _gl_norm_pages(s.get("pages"))
             for p in pages:
                 p["tiles"] = [t for t in p["tiles"] if t["id"] in ok_ids]
             screens.append({"id": sid, "name": str(s.get("name") or "Экран")[:24],
-                            "preset": preset, "pages": pages or [{"name": "Главная", "tiles": []}]})
+                            "preset": preset, "gap": gap,
+                            "mode": "free" if s.get("mode") == "free" else "flow",
+                            "pages": pages or [{"name": "Главная", "tiles": []}]})
         if screens:
             cur["screens"] = screens
     act = d.get("token_action")
@@ -2014,7 +2070,8 @@ def glance_payload(lang="ru", screen=""):
             d = build(t["id"])
             if not d:
                 continue
-            tl.append(dict(d, size=t["size"]))
+            extra = {k: t[k] for k in ("x", "y", "w", "h", "st") if k in t}
+            tl.append(dict(d, size=t["size"], **extra))
             if d["state"] != "ok" and d["id"] not in seen_prob:
                 seen_prob.add(d["id"])
                 problems.append("%s: %s %s" % (d["label"], d["value"], d.get("note") or d["unit"]))
@@ -2027,7 +2084,8 @@ def glance_payload(lang="ru", screen=""):
         status = "warn"
     av = avail_bars(24, 96)
     payload = {"v": 2, "host": socket.gethostname(), "status": status,
-               "screen": {"id": scr["id"], "name": scr["name"], "preset": scr["preset"]},
+               "screen": {"id": scr["id"], "name": scr["name"], "preset": scr["preset"],
+                          "mode": scr["mode"], "gap": scr["gap"]},
                "problems": problems[:4], "pages": pages,
                # legacy flat list = first page (older sketches keep working)
                "tiles": pages[0]["tiles"] if pages else [],
