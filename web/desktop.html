@@ -1602,7 +1602,7 @@
   .glc-pitem .pv{color:var(--dim);font-size:11px;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .glc-pitem.used{opacity:.45}
   .glc-pitem:hover{box-shadow:var(--sh-sm)}
-  .glc-stage{flex:1;overflow:auto;display:flex;flex-direction:column;align-items:center;gap:10px;min-height:0}
+  .glc-stage{flex:1;overflow:auto;scrollbar-gutter:stable;display:flex;flex-direction:column;align-items:center;gap:10px;min-height:0}
   .glc-canvas{position:relative;flex:none;background:#0a0c11;border-radius:12px;border:1px solid var(--line);overflow:hidden;box-shadow:var(--sh-sm)}
   .glc-hdr{position:absolute;top:0;left:0;right:0;display:flex;align-items:center;gap:7px;padding:0 10px;color:#e8eaf0;font-size:12px;font-weight:650}
   .glc-hdr i{width:9px;height:9px;border-radius:50%;background:#43C08A}
@@ -5854,7 +5854,7 @@ function winGlance(){openWin("__glance","Экран NAS",async body=>{
   <div class="glc-main">
    <div class="glc-pal-wrap"><div class="glc-cap" style="margin:0 0 6px">Плитки — кликните или перетащите</div><div class="glc-pal" id="gcPal"></div></div>
    <div class="glc-stage"><div class="glc-canvas" id="gcCv"></div><div class="glc-over" id="gcOver"></div></div>
-   <div class="glc-insp" id="gcInsp" style="display:none"></div>
+   <div class="glc-insp" id="gcInsp"></div>
   </div>`;
  const q=s=>body.querySelector(s);
  const scr=()=>screens[si],pg=()=>scr().pages[pi],MODE=()=>scr().mode||"flow";
@@ -5957,8 +5957,9 @@ function winGlance(){openWin("__glance","Экран NAS",async body=>{
   if(ok)c.querySelectorAll("[data-z]").forEach(b=>b.classList.toggle("on",b.dataset.z===pg().tiles[sel].size));};
  /* inspector: per-tile style */
  const paintInsp=()=>{const insp=q("#gcInsp");
-  if(sel<0||sel>=pg().tiles.length){insp.style.display="none";return;}
-  insp.style.display="";
+  /* the column always keeps its width — hiding it would resize the stage and
+     make the canvas rescale/jump on every select/deselect */
+  if(sel<0||sel>=pg().tiles.length){insp.innerHTML=`<div class="glc-cap">Стиль плитки</div><div class="set-load" style="padding:8px 0">выберите плитку на холсте</div>`;return;}
   const t=pg().tiles[sel];
   const g9=(pre,extra)=>`<div class="glc-9" data-k="${pre}p">${["tl","tc","tr","cl","c","cr","bl","bc","br"].map(p=>`<button data-p="${p}" class="${stv(t,pre+"p")===p?"on":""}"></button>`).join("")}</div><div class="glc-9x" data-k="${pre}p">${(extra||[]).map(([v,l])=>`<button data-p="${v}" class="btn sm ${stv(t,pre+"p")===v?"on":""}">${l}</button>`).join("")}</div>`;
   const num=(k,mn,mx)=>`<input type="number" min="${mn}" max="${mx}" data-n="${k}" value="${stv(t,k)!==undefined&&DEF[t.size||"m"][k]!==undefined?stv(t,k):(t.st&&t.st[k]!==undefined?t.st[k]:(k==="bw"?1:10))}" style="width:56px">`;
@@ -5995,7 +5996,7 @@ function winGlance(){openWin("__glance","Экран NAS",async body=>{
   q("#gcPg").querySelectorAll("button").forEach(b=>b.onclick=()=>{pi=+b.dataset.v;sel=-1;paint();paintInsp();});
   q("#gcPgName").value=pg().name;
   q("#gcPgDel").disabled=scr().pages.length<2;
-  paintCtl();paintPal();paintCv();};
+  paintCtl();paintPal();paintCv();paintInsp();};
  q("#gcScrName").onchange=()=>{scr().name=q("#gcScrName").value.trim()||"Экран";commit();};
  q("#gcPreset").onchange=()=>{scr().preset=q("#gcPreset").value;commit();};
  q("#gcGap").onchange=()=>{scr().gap=Math.max(0,Math.min(24,+q("#gcGap").value||0));commit();};

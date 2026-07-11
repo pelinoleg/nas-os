@@ -77,6 +77,8 @@ window.NAS_I18N = { en: {
 "авто": "auto",
 "Геометрия": "Geometry",
 "Сбросить стиль": "Reset style",
+"Стиль плитки": "Tile style",
+"выберите плитку на холсте": "select a tile on the canvas",
 "Не влезло на экран": "Does not fit the screen",
 "хелпер": "helper",
 "udev-правило": "udev rule",
