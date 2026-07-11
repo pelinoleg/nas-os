@@ -1666,7 +1666,7 @@
    --shadow-2:0 4px 14px rgba(0,0,0,.4),0 2px 6px rgba(0,0,0,.3)}
   /* ---- sidebar (folders/tags) = surface-2 ---- */
   .nt-side{width:220px;flex:none;display:flex;flex-direction:column;gap:var(--sp-2);
-   padding:var(--sp-4) var(--sp-3);border-right:1px solid var(--border);overflow:auto;background:var(--surface-2)}
+   padding:var(--sp-4);border-right:1px solid var(--border);overflow:auto;background:var(--surface-2)}
   .nt-tools{display:flex;gap:var(--sp-2);align-items:center}
   .nt-root .btn{background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);box-shadow:none}
   .nt-root .btn:hover{background:var(--surface-inset)}
@@ -1679,7 +1679,7 @@
   .nt-side input::placeholder{color:var(--text-faint)}
   .nt-side input:focus{outline:none;border-color:var(--accent)}
   .nt-cap{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);margin-top:var(--sp-2)}
-  .nt-dir{display:flex;align-items:center;gap:var(--sp-2);padding:6px var(--sp-2);border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-meta);color:var(--text)}
+  .nt-dir{display:flex;align-items:center;gap:var(--sp-2);padding:var(--sp-1) var(--sp-2);border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-meta);color:var(--text)}
   .nt-dir:hover{background:var(--surface)}
   .nt-dir.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
   .nt-dir.drop{outline:2px dashed var(--accent)}
@@ -1690,7 +1690,7 @@
   .nt-tw::before{content:"";border-left:5px solid var(--text-faint);border-top:4px solid transparent;border-bottom:4px solid transparent}
   .nt-tw.open{transform:rotate(90deg)}
   .nt-tw.empty::before{opacity:0}
-  .nt-dnote{display:flex;align-items:center;gap:var(--sp-2);padding:5px var(--sp-2);border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-meta);color:var(--text-muted)}
+  .nt-dnote{display:flex;align-items:center;gap:var(--sp-2);padding:var(--sp-1) var(--sp-2);border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-meta);color:var(--text-muted)}
   .nt-dnote:hover{background:var(--surface)}
   .nt-dnote.on{color:var(--accent);background:var(--accent-soft)}
   .nt-dnote .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -1714,15 +1714,15 @@
   .nt-split:hover{background:var(--accent-soft)}
   .nt-root{--sel:var(--accent-soft)}   /* panel hover token remapped inside notes */
   /* ---- editor pane: same theme, the paper is a surface card ---- */
-  .nt-edit{flex:1;display:flex;flex-direction:column;gap:0;padding:var(--sp-2) var(--sp-4) var(--sp-4);min-width:0;background:var(--bg);color:var(--text)}
+  .nt-edit{flex:1;display:flex;flex-direction:column;gap:0;padding:var(--sp-3) var(--sp-4) var(--sp-4);min-width:0;background:var(--bg);color:var(--text)}
   .nt-empty{margin:auto;color:var(--text-faint)}
-  .nt-crumb{padding:var(--sp-1) var(--sp-1) 0;font-size:var(--fs-meta);color:var(--text-muted);min-height:16px}
-  .nt-head{display:flex;align-items:center;gap:var(--sp-2);padding:0 var(--sp-1)}
+  .nt-crumb{padding:var(--sp-1) var(--sp-6) 0;font-size:var(--fs-meta);color:var(--text-muted);min-height:16px}
+  .nt-head{display:flex;align-items:center;gap:var(--sp-2);padding:0 var(--sp-6)}
   .nt-head input{flex:1;font-size:var(--fs-h1);font-weight:700;letter-spacing:-.02em;height:44px;border:0;background:transparent;padding:0;color:var(--text)}
   .nt-head input::placeholder{color:var(--text-faint)}
   .nt-head input:focus{outline:none}
   .nt-head .nt-pin-on{color:var(--warning)!important}
-  .nt-tagrow{display:flex;align-items:center;gap:var(--sp-1);flex-wrap:wrap;margin:0 var(--sp-1) var(--sp-2)}
+  .nt-tagrow{display:flex;align-items:center;gap:var(--sp-1);flex-wrap:wrap;margin:0;padding:0 var(--sp-6) var(--sp-2)}
   .nt-chip{display:inline-flex;align-items:center;gap:var(--sp-1);padding:var(--sp-1) var(--sp-2);border-radius:var(--radius-sm);
    background:var(--accent-soft);color:var(--accent);font-size:var(--fs-meta);font-weight:600}
   .nt-chip i{font-style:normal;cursor:pointer;opacity:.6}
@@ -1735,7 +1735,7 @@
   .nt-ed .toastui-editor-defaultUI{height:100%!important;display:flex;flex-direction:column;width:100%;font-family:var(--font-ui);border:0;border-radius:0;background:transparent}
   /* native toolbar is replaced by our own (#ntTb) */
   .nt-ed .toastui-editor-defaultUI-toolbar,.nt-ed .toastui-editor-toolbar{display:none}
-  .nt-tb{display:flex;align-items:center;gap:var(--sp-1);padding:0 var(--sp-1) var(--sp-2);flex-wrap:wrap}
+  .nt-tb{display:flex;align-items:center;gap:var(--sp-1);padding:0 var(--sp-6) var(--sp-2);flex-wrap:wrap}
   .nt-tbb{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border:0;background:transparent;
    color:var(--text-muted);border-radius:var(--radius-sm);cursor:pointer;padding:0}
   .nt-tbb:hover{color:var(--text);background:var(--surface-2)}
@@ -1744,7 +1744,7 @@
   /* the paper: surface card, radius-lg, shadow-1 */
   .nt-ed .toastui-editor-main{flex:1;min-height:0;background:var(--surface);border-radius:var(--radius-lg);overflow:hidden;border:1px solid var(--border);box-shadow:var(--shadow-1)}
   .nt-ed .toastui-editor,.nt-ed .toastui-editor-ww-container,.nt-ed .toastui-editor-md-container{background:var(--surface)}
-  .nt-ed .ProseMirror{color:var(--text);font-size:var(--nt-font,var(--fs-body));line-height:1.6;padding:var(--sp-5) var(--sp-6) var(--sp-7);max-width:720px}
+  .nt-ed .ProseMirror{color:var(--text);font-size:var(--nt-font,var(--fs-body));line-height:1.6;padding:var(--sp-5) var(--sp-6) var(--sp-7);max-width:720px;margin:0 auto}
   .nt-ed .toastui-editor-md-container .ProseMirror{font-family:var(--font-mono);font-size:var(--fs-meta);line-height:1.65;max-width:none}
   .nt-ed .toastui-editor-md-preview{background:var(--surface)}
   .nt-ed .toastui-editor-md-preview .toastui-editor-contents{padding:var(--sp-4) var(--sp-5);color:var(--text)}
@@ -1764,7 +1764,8 @@
   .nt-ed .toastui-editor-contents blockquote p,.nt-ed .toastui-editor-contents blockquote li{color:var(--text)}
   /* checkboxes: FULL 1.5px border on --checkbox-border, 16x16, inset bg.
      .nt-root prefix beats the vendor css that loads after our <style>. */
-  .nt-root .nt-ed .toastui-editor-contents .task-list-item{gap:var(--sp-2)}
+  .nt-root .nt-ed .toastui-editor-contents .task-list-item{gap:var(--sp-2);margin:var(--sp-1) 0}
+  .nt-root .nt-ed .toastui-editor-contents ul.task-list{padding-left:var(--sp-2)}
   .nt-root .nt-ed .toastui-editor-contents .task-list-item::before{content:"";box-sizing:border-box;
    border:1.5px solid var(--checkbox-border);border-radius:6px;background-color:var(--surface-inset);
    background-image:none;width:16px;height:16px}
