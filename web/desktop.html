@@ -219,7 +219,8 @@
 
   /* menu popover */
   .menu{position:fixed;z-index:2600;background:var(--menu-bg,var(--glass-2));backdrop-filter:var(--win-bf,none);-webkit-backdrop-filter:var(--win-bf,none);
-    border-radius:14px;box-shadow:var(--sh);padding:7px;min-width:216px;animation:pop .14s ease}
+    border-radius:14px;box-shadow:var(--sh);padding:7px;min-width:216px;animation:pop .14s ease;
+    max-height:min(70vh,560px);overflow-y:auto}   /* long lists (move targets) scroll instead of clipping */
   @keyframes pop{from{opacity:0;transform:translateY(-6px) scale(.98)}}
   .menu button{display:flex;align-items:center;gap:12px;width:100%;padding:10px 12px;border:none;background:transparent;
     border-radius:var(--r-sm);font-size:13px;font-weight:500;text-align:left;transition:.1s}
@@ -6838,7 +6839,26 @@ function loadNotesLibs(){
  NT_LIBS=js("/tui-editor.js").then(()=>Promise.all([js("/tui-hl.js"),js("/tui-editor-ru.js")]));
  return NT_LIBS;
 }
-let NT_ED=null,NT_PATH=null,NT_SAVE_T=null,NT_DIRTY=false,NT_PIN=false,NT_TAGS=[];
+let NT_ED=null,NT_PATH=null,NT_SAVE_T=null,NT_DIRTY=false,NT_PIN=false,NT_TAGS=[],NT_MTIME=0;
+/* flush unsaved edits when the page goes away (tab close, PWA switch): the
+   1.2s autosave debounce would otherwise drop the last keystrokes. keepalive
+   lets the request outlive the page; conflict_copy=true because nobody is
+   left to answer a conflict dialog — the server parks the text in a sibling
+   file instead of clobbering a newer version from another device. */
+function ntFlushPage(){
+ if(!NT_DIRTY||!NT_PATH||!NT_ED)return;
+ NT_DIRTY=false;clearTimeout(NT_SAVE_T);
+ try{
+  const t=document.getElementById("ntTitle");
+  fetch("/api/notes/save",{method:"POST",keepalive:true,headers:{"Content-Type":"application/json"},
+   body:JSON.stringify({path:NT_PATH,title:t?t.value.trim():"",tags:NT_TAGS.slice(),pinned:NT_PIN,
+    md:NT_ED.getMarkdown(),base_mtime:NT_MTIME,conflict_copy:true})})
+   .then(x=>x.json()).then(r=>{if(r&&r.ok&&r.mtime)NT_MTIME=r.mtime;   // page survived (tab switch) — stay in sync
+    if(r&&r.conflict_copy)toast("Конфликт версий: текст сохранён копией «"+r.conflict_copy+"»");})
+   .catch(()=>{NT_DIRTY=true;});
+ }catch(e){}}
+window.addEventListener("pagehide",ntFlushPage);
+document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="hidden")ntFlushPage();});
 /* custom toolbar per DESIGN.md: lucide icons, exec() into Toast UI commands
    (works in both wysiwyg and markdown modes) */
 function ntUploadInsert(f){if(winNotes._upload)winNotes._upload(f);}
@@ -7060,14 +7080,22 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
   dirs.querySelectorAll(".nt-dnote").forEach(el2=>{
    const p2=decodeURIComponent(el2.dataset.p),n2=TREE.notes.find(n=>n.path===p2);
    el2.querySelector(".nm").textContent=n2?n2.title:p2.split("/").pop().replace(/\.md$/,"");
-   el2.onclick=()=>openNote(p2);});
+   el2.onclick=()=>openNote(p2);
+   el2.oncontextmenu=e=>{e.preventDefault();e.stopPropagation();noteCtx(e,p2);};});
   dirs.querySelectorAll(".nt-dir").forEach(el2=>{
    if(el2.dataset.d)el2.querySelector(".nm").textContent=decodeURIComponent(el2.dataset.d).split("/").pop();
    el2.onclick=()=>{fold=decodeURIComponent(el2.dataset.d);tag=null;qstr="";q("#ntQ").value="";if(fold)EXP.add(fold);paintSide();paintList();};
    if(el2.dataset.d)el2.oncontextmenu=e=>{e.preventDefault();e.stopPropagation();
     const d=decodeURIComponent(el2.dataset.d);
     showMenu(e.clientX,e.clientY,[
+     {label:"Новая заметка здесь",ic:svg("plus",15),act:async()=>{
+      const r=await api("/api/notes/new",{method:"POST",body:JSON.stringify({folder:d,title:"Новая заметка"})});
+      if(r&&r.ok){fold=d;tag=null;EXP.add(d);await refresh();openNote(r.path);const t=q("#ntTitle");if(t){t.focus();t.select();}}}},
+     {label:"Новая подпапка",ic:svg("folder",15),act:()=>newDirDlg(d)},
+     {sep:1},
      {label:"Переименовать",ic:svg("edit",15),act:()=>renameDir(d)},
+     {label:"Переместить в…",ic:svg("layers",15),act:()=>moveDirMenu(e,d)},
+     {sep:1},
      {label:"Удалить",ic:svg("trash",15),dng:1,act:()=>deleteDir(d)}]);};
    /* drag a note onto a folder to move it */
    el2.ondragover=e=>{e.preventDefault();el2.classList.add("drop");};
@@ -7109,31 +7137,45 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
   l.querySelectorAll(".nt-item").forEach(el2=>{
    el2.onclick=()=>openNote(decodeURIComponent(el2.dataset.p));
    el2.ondragstart=e=>e.dataTransfer.setData("text/plain",decodeURIComponent(el2.dataset.p));
-   el2.oncontextmenu=e=>{e.preventDefault();
-    const pth=decodeURIComponent(el2.dataset.p),note=TREE.notes.find(n=>n.path===pth);if(!note)return;
-    const mv=["",...TREE.dirs].filter(d=>d!==note.folder).map(d=>({label:(d||"Корень"),ic:svg("folder",15),act:async()=>{
-     const to=(d?d+"/":"")+pth.split("/").pop();
-     const r=await api("/api/notes/move",{method:"POST",body:JSON.stringify({path:pth,to})});
-     if(r&&r.ok){if(NT_PATH===pth)NT_PATH=to;refresh();}else toast("Ошибка: "+((r&&r.error)||"не перенести"));}}));
-    showMenu(e.clientX,e.clientY,[
-     {label:"Открыть",ic:svg("note",15),act:()=>openNote(pth)},
-     {label:note.pinned?"Открепить":"Закрепить",ic:svg("star",15),act:async()=>{
-      const g=await api("/api/notes/get?path="+encodeURIComponent(pth));
-      await api("/api/notes/save",{method:"POST",body:JSON.stringify({path:pth,title:g.title,tags:g.tags,md:g.md,pinned:!note.pinned})});
-      refresh();}},
-     {sep:1},
-     ...mv.slice(0,12),
-     {sep:1},
-     {label:"В корзину",ic:svg("trash",15),dng:1,act:()=>confirmDlg("Удалить заметку","«"+note.title+"» уедет в корзину.",async()=>{
-      await api("/api/notes/delete",{method:"POST",body:JSON.stringify({path:pth})});
-      if(NT_PATH===pth){NT_PATH=null;q("#ntEdit").innerHTML=`<div class="nt-empty">Выберите заметку или создайте новую</div>`;}
-      refresh();},true)}]);};});};
- const saveNow=async()=>{
-  if(!NT_PATH||!NT_ED)return;
+   el2.oncontextmenu=e=>{e.preventDefault();noteCtx(e,decodeURIComponent(el2.dataset.p));};});};
+ /* shared note context menu: the middle list and the sidebar tree offer the
+    same actions. The move list is complete (no cap) — .menu scrolls. */
+ const noteCtx=(e,pth)=>{
+  const note=TREE.notes.find(n=>n.path===pth);if(!note)return;
+  const mv=["",...TREE.dirs].filter(d=>d!==note.folder).map(d=>({label:(d||"Корень"),ic:svg(d?"folder":"home",15),act:async()=>{
+   const to=(d?d+"/":"")+pth.split("/").pop();
+   const r=await api("/api/notes/move",{method:"POST",body:JSON.stringify({path:pth,to})});
+   if(r&&r.ok){if(NT_PATH===pth)NT_PATH=to;refresh();}else toast("Ошибка: "+((r&&r.error)||"не перенести"));}}));
+  showMenu(e.clientX,e.clientY,[
+   {label:"Открыть",ic:svg("note",15),act:()=>openNote(pth)},
+   {label:note.pinned?"Открепить":"Закрепить",ic:svg("star",15),act:async()=>{
+    const g=await api("/api/notes/get?path="+encodeURIComponent(pth));
+    await api("/api/notes/save",{method:"POST",body:JSON.stringify({path:pth,title:g.title,tags:g.tags,md:g.md,pinned:!note.pinned})});
+    refresh();}},
+   {sep:1},
+   ...mv,
+   {sep:1},
+   {label:"В корзину",ic:svg("trash",15),dng:1,act:()=>confirmDlg("Удалить заметку","«"+note.title+"» уедет в корзину.",async()=>{
+    await api("/api/notes/delete",{method:"POST",body:JSON.stringify({path:pth})});
+    if(NT_PATH===pth){NT_PATH=null;q("#ntEdit").innerHTML=`<div class="nt-empty">Выберите заметку или создайте новую</div>`;}
+    refresh();},true)}]);};
+ let ntConflict=false;
+ const saveNow=async force=>{
+  if(!NT_PATH||!NT_ED||ntConflict)return;
   NT_DIRTY=false;clearTimeout(NT_SAVE_T);
   const title=q("#ntTitle")?q("#ntTitle").value.trim():"";
   const tags=NT_TAGS.slice();
-  const r=await api("/api/notes/save",{method:"POST",body:JSON.stringify({path:NT_PATH,title,tags,pinned:NT_PIN,md:NT_ED.getMarkdown()})});
+  const r=await api("/api/notes/save",{method:"POST",body:JSON.stringify({path:NT_PATH,title,tags,pinned:NT_PIN,md:NT_ED.getMarkdown(),base_mtime:NT_MTIME,force:!!force})});
+  if(r&&r.conflict){   // somebody saved this note from another window/device meanwhile
+   NT_DIRTY=true;ntConflict=true;
+   const s=document.getElementById("scrim"),pth=NT_PATH;
+   s.innerHTML=`<div class="dialog"><h3>Заметка изменена в другом месте</h3><p>Эту заметку сохранили из другого окна или устройства. Открыть свежую версию (правки этого окна пропадут) или перезаписать её своим текстом?</p>
+    <div class="r"><button class="btn" id="ntCF">Открыть свежую</button><button class="btn dng" id="ntCO">Перезаписать</button></div></div>`;
+   s.classList.add("show");
+   s.querySelector("#ntCF").onclick=()=>{s.classList.remove("show");ntConflict=false;NT_DIRTY=false;openNote(pth);};
+   s.querySelector("#ntCO").onclick=()=>{s.classList.remove("show");ntConflict=false;saveNow(true);};
+   return;}
+  if(r&&r.ok&&r.mtime)NT_MTIME=r.mtime;
   const st=q("#ntSt");if(st)st.textContent=r&&r.ok?"сохранено "+new Date().toTimeString().slice(0,5):"ошибка сохранения";
   const n=TREE.notes.find(x=>x.path===NT_PATH);
   if(n){n.title=title||n.title;n.tags=tags;n.pinned=NT_PIN;n.mtime=Math.floor(Date.now()/1000);paintSide();paintList();}};
@@ -7144,7 +7186,7 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
   const r=await api("/api/notes/get?path="+encodeURIComponent(p));
   if(!r||!r.path){toast("Не открыть: "+((r&&r.error)||"нет ответа сервера"));return;}
   r.tags=r.tags||[];r.md=r.md||"";r.title=r.title||"";
-  NT_PATH=p;
+  NT_PATH=p;NT_MTIME=r.mtime||0;
   if(SET.notesLast!==p){SET.notesLast=p;saveSettings();}   // server-side (desktop.json): same last note in every browser
   const ed=q("#ntEdit");
   ed.innerHTML=`
@@ -7324,34 +7366,43 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
  q("#ntNew").onclick=async()=>{
   const r=await api("/api/notes/new",{method:"POST",body:JSON.stringify({folder:fold,title:"Новая заметка"})});
   if(r&&r.ok){await refresh();openNote(r.path);const t=q("#ntTitle");if(t){t.focus();t.select();}}};
- q("#ntNewF").onclick=()=>{
+ const newDirDlg=target=>{
   const s=document.getElementById("scrim");
   s.innerHTML=`<div class="dialog"><h3>Новая папка</h3><input id="ntFN" placeholder="Название" style="width:100%"><div class="r"><button class="btn" id="ntFX">Отмена</button><button class="btn pri" id="ntFOk">Создать</button></div></div>`;
   s.classList.add("show");const inp=s.querySelector("#ntFN");inp.focus();
   const ok=async()=>{const name=inp.value.trim();if(!name)return;
-   const r=await api("/api/notes/mkdir",{method:"POST",body:JSON.stringify({folder:fold,name})});
-   s.classList.remove("show");if(r&&r.ok)refresh();else toast("Ошибка: "+((r&&r.error)||"?"));};
+   const r=await api("/api/notes/mkdir",{method:"POST",body:JSON.stringify({folder:target,name})});
+   s.classList.remove("show");if(r&&r.ok){if(target)EXP.add(target);refresh();}else toast("Ошибка: "+((r&&r.error)||"?"));};
   s.querySelector("#ntFOk").onclick=ok;
   inp.onkeydown=ev=>{if(ev.key==="Enter")ok();};
   s.querySelector("#ntFX").onclick=()=>s.classList.remove("show");};
- /* folder rename: /api/notes/move handles directories too (history follows) */
+ q("#ntNewF").onclick=()=>newDirDlg(fold);
+ /* folder rename/move: /api/notes/move handles directories too (history follows);
+    open note, active filter and expanded state follow the new path */
+ const relocateDir=async(d,to)=>{
+  const r=await api("/api/notes/move",{method:"POST",body:JSON.stringify({path:d,to})});
+  if(!(r&&r.ok)){toast("Ошибка: "+((r&&r.error)||"не перенести"));return;}
+  if(NT_PATH&&(NT_PATH+"/").startsWith(d+"/"))NT_PATH=to+NT_PATH.slice(d.length);
+  if((fold+"/").startsWith(d+"/"))fold=to+fold.slice(d.length);
+  if(EXP.has(d)){EXP.delete(d);EXP.add(to);}
+  refresh();};
  const renameDir=d=>{
   const s=document.getElementById("scrim"),old=d.split("/").pop();
   s.innerHTML=`<div class="dialog"><h3>Переименовать папку</h3><input id="ntFR" style="width:100%"><div class="r"><button class="btn" id="ntFX">Отмена</button><button class="btn pri" id="ntFOk">Переименовать</button></div></div>`;
   s.classList.add("show");const inp=s.querySelector("#ntFR");inp.value=old;inp.focus();inp.select();
-  const ok=async()=>{const nm=inp.value.trim().replace(/[\\/]/g," ").trim();
-   if(!nm||nm===old){s.classList.remove("show");return;}
-   const to=(d.includes("/")?d.slice(0,d.lastIndexOf("/")+1):"")+nm;
-   const r=await api("/api/notes/move",{method:"POST",body:JSON.stringify({path:d,to})});
+  const ok=()=>{const nm=inp.value.trim().replace(/[\\/]/g," ").trim();
    s.classList.remove("show");
-   if(!(r&&r.ok)){toast("Ошибка: "+((r&&r.error)||"не переименовать"));return;}
-   // open note / active filter / expanded state follow the renamed path
-   if(NT_PATH&&(NT_PATH+"/").startsWith(d+"/"))NT_PATH=to+NT_PATH.slice(d.length);
-   if((fold+"/").startsWith(d+"/"))fold=to+fold.slice(d.length);
-   if(EXP.has(d)){EXP.delete(d);EXP.add(to);}
-   refresh();};
+   if(!nm||nm===old)return;
+   relocateDir(d,(d.includes("/")?d.slice(0,d.lastIndexOf("/")+1):"")+nm);};
   s.querySelector("#ntFOk").onclick=ok;inp.onkeydown=ev=>{if(ev.key==="Enter")ok();};
   s.querySelector("#ntFX").onclick=()=>s.classList.remove("show");};
+ const moveDirMenu=(e,d)=>{
+  const parent=d.includes("/")?d.slice(0,d.lastIndexOf("/")):"";
+  // any folder except itself, its own subtree and where it already lives
+  const targets=["",...TREE.dirs].filter(x=>x!==d&&x!==parent&&!(x+"/").startsWith(d+"/"));
+  if(!targets.length){toast("Перемещать некуда");return;}
+  showMenu(e.clientX,e.clientY,targets.map(x=>({label:x||"Корень",ic:svg(x?"folder":"home",15),
+   act:()=>relocateDir(d,(x?x+"/":"")+d.split("/").pop())})));};
  /* folder delete: whole directory goes to .trash as one item (restorable) */
  const deleteDir=d=>{
   const n=TREE.notes.filter(x=>x.folder===d||x.folder.startsWith(d+"/")).length;
@@ -7375,6 +7426,9 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
  q("#ntTrash").onclick=()=>ntTrash(refresh);
  q("#ntSet").onclick=()=>winSettings("nts");
  winNotes._reopen=p2=>openNote(p2);
+ // Ctrl/Cmd+S saves the note instead of invoking the browser "save page" dialog
+ body.addEventListener("keydown",e=>{
+  if((e.ctrlKey||e.metaKey)&&!e.shiftKey&&!e.altKey&&e.key.toLowerCase()==="s"){e.preventDefault();saveNow();}});
  let qT=null;
  q("#ntQ").oninput=()=>{clearTimeout(qT);qT=setTimeout(()=>{qstr=q("#ntQ").value.trim();paintList();},300);};
  await refresh();
@@ -7432,12 +7486,18 @@ async function ntHistory(path){
 async function ntTrash(refresh){
  const r=await api("/api/notes/trash");
  const items=(r&&r.items)||[];
+ const mr=await api("/api/maintenance"),md=(mr&&mr.maintenance)||{};
+ const dopts=[[0,"выкл"],[7,"7 дн"],[14,"14 дн"],[30,"30 дн"],[90,"90 дн"]];
+ const autoSel=`<label class="nt-mut" style="margin-right:auto;display:flex;align-items:center;gap:6px" title="Автоматически удалять из корзины заметки старше выбранного срока">${svg("clock",13)} авто-очистка: <select id="ntTA">${dopts.map(([v,l])=>`<option value="${v}"${v===(md.notes_trash_days||0)?" selected":""}>${l}</option>`).join("")}</select></label>`;
  const sc=document.getElementById("scrim");
  sc.innerHTML=`<div class="dialog" style="max-width:560px;width:92vw"><h3>Корзина заметок</h3>
   ${items.length?`<div class="nt-hlist" style="max-height:300px">${items.map(it=>`<div class="nt-hv"><span style="flex:1;overflow:hidden;text-overflow:ellipsis">${esc(it.name)}</span><span class="nt-mut">${esc(it.day)}</span><button class="btn sm" data-r="${att(it.path)}">Вернуть</button></div>`).join("")}</div>
-   <div class="r"><button class="btn dng" id="ntTC">Очистить корзину</button><button class="btn" id="ntTX">Закрыть</button></div>`
-  :`<p>Корзина пуста.</p><div class="r"><button class="btn" id="ntTX">Закрыть</button></div>`}</div>`;
+   <div class="r">${autoSel}<button class="btn dng" id="ntTC">Очистить корзину</button><button class="btn" id="ntTX">Закрыть</button></div>`
+  :`<p>Корзина пуста.</p><div class="r">${autoSel}<button class="btn" id="ntTX">Закрыть</button></div>`}</div>`;
  sc.classList.add("show");
+ const ta=sc.querySelector("#ntTA");
+ if(ta)ta.onchange=async()=>{await api("/api/maintenance",{method:"POST",body:JSON.stringify({maintenance:{notes_trash_days:+ta.value}})});
+  toast(+ta.value?("Авто-очистка: старше "+ta.value+" дн"):"Авто-очистка выключена");};
  sc.querySelector("#ntTX").onclick=()=>sc.classList.remove("show");
  sc.querySelectorAll("[data-r]").forEach(b=>b.onclick=async()=>{
   const rr=await api("/api/notes/trash/restore",{method:"POST",body:JSON.stringify({path:b.dataset.r})});

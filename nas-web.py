@@ -2302,6 +2302,8 @@ def notes_trash_list():
             if not os.path.isdir(dd):
                 continue
             for f in sorted(os.listdir(dd)):
+                if f == ".origins.json":
+                    continue
                 fp = os.path.join(dd, f)
                 out.append({"path": ".trash/" + day + "/" + f, "name": f, "day": day,
                             "isdir": os.path.isdir(fp),
@@ -2314,12 +2316,25 @@ def notes_trash_restore(rel):
     if parts[0] != ".trash" or not os.path.exists(src):
         raise ValueError("это не корзина")
     name = parts[-1]
-    dst = os.path.join(notes_root(), name)
+    # restore to the folder the item was deleted from (recorded in .origins.json),
+    # falling back to the notes root for items trashed before origins existed
+    og = os.path.join(os.path.dirname(src), ".origins.json")
+    m = _json_load_strict(og, {})
+    try:
+        base = _notes_abs(m.get(name, ""))
+    except ValueError:
+        base = notes_root()
+    os.makedirs(base, exist_ok=True)
+    _chown_user(base)
+    dst = os.path.join(base, name)
     i, stem = 1, os.path.splitext(name)
     while os.path.exists(dst):
         i += 1
-        dst = os.path.join(notes_root(), "%s (%d)%s" % (stem[0], i, stem[1]))
+        dst = os.path.join(base, "%s (%d)%s" % (stem[0], i, stem[1]))
     os.rename(src, dst)
+    if name in m:
+        del m[name]
+        _json_save(og, m)
     return {"ok": True}
 
 def notes_trash_clear():
@@ -2327,6 +2342,67 @@ def notes_trash_clear():
     if os.path.isdir(tr):
         shutil.rmtree(tr)
     return {"ok": True}
+
+def notes_gc():
+    """Daily housekeeping for the notes tree: expire old trash days
+    (maintenance.json:notes_trash_days, 0 = keep forever), drop version history
+    of notes that no longer exist anywhere, and remove _assets files that no
+    note text references."""
+    root = notes_root(create=False)
+    if not os.path.isdir(root):
+        return
+    now = time.time()
+    days = int(load_maintenance().get("notes_trash_days", 0) or 0)
+    tr = os.path.join(root, ".trash")
+    if days > 0 and os.path.isdir(tr):
+        cutoff = time.strftime("%Y-%m-%d", time.localtime(now - days * 86400))
+        for day in os.listdir(tr):
+            if re.match(r"^\d{4}-\d\d-\d\d$", day) and day < cutoff:
+                shutil.rmtree(os.path.join(tr, day), ignore_errors=True)
+    # orphaned history: the note is gone and the newest snapshot is older than
+    # the trash horizon — by then the trash copy (the only way the note could
+    # come back to this path) has expired too
+    hist = os.path.join(root, ".history")
+    keep_s = max(days, 30) * 86400
+    for dp, dn, fn in os.walk(hist, topdown=False):
+        rel = os.path.relpath(dp, hist).replace(os.sep, "/")
+        if not rel.lower().endswith(".md") or os.path.isfile(os.path.join(root, rel)):
+            continue
+        try:
+            newest = max(os.path.getmtime(os.path.join(dp, f)) for f in fn) if fn else 0
+        except OSError:
+            continue
+        if now - newest > keep_s:
+            shutil.rmtree(dp, ignore_errors=True)
+    # unreferenced assets: file name (raw or percent-encoded, as note_upload
+    # embeds it) is absent from every note text — including trashed notes and
+    # history versions, so a restore keeps its images. Age guard: an image is
+    # uploaded before the note referencing it is saved.
+    corpus = []
+    for dp, dn, fn in os.walk(root):
+        if os.path.basename(dp) == "_assets":
+            dn[:] = []
+            continue
+        for f in fn:
+            if f.lower().endswith(".md"):
+                try:
+                    with open(os.path.join(dp, f), encoding="utf-8", errors="replace") as fh:
+                        corpus.append(fh.read())
+                except OSError:
+                    pass
+    corpus = "\n".join(corpus)
+    for dp, dn, fn in os.walk(root):
+        if os.path.basename(dp) != "_assets" or "/.trash/" in (dp + "/").replace(os.sep, "/"):
+            continue
+        for f in fn:
+            fp = os.path.join(dp, f)
+            try:
+                if now - os.path.getmtime(fp) < 7 * 86400:
+                    continue
+            except OSError:
+                continue
+            if f not in corpus and quote(f) not in corpus:
+                _safe(lambda: os.remove(fp))
 
 def note_get(rel):
     p = _notes_abs(rel)
@@ -2343,11 +2419,31 @@ def _note_slug(name):
     name = re.sub(r"[\\/:*?\"<>|\n\r\t]", "", str(name or "").strip())
     return name[:80] or "Заметка"
 
-def note_save(rel, title, tags, md, pinned=False):
+def note_save(rel, title, tags, md, pinned=False, base_mtime=0, force=False, conflict_copy=False):
     p = _notes_abs(rel)
     if not p.lower().endswith(".md"):
         raise ValueError("не .md")
-    _safe(lambda: _nt_snapshot(rel))            # history before overwriting
+    out = {"ok": True}
+    # optimistic lock: the file changed on disk after this client opened it
+    # (another device or tab) — never clobber the other text silently
+    try:
+        base_mtime = int(base_mtime or 0)
+    except (TypeError, ValueError):
+        base_mtime = 0
+    if base_mtime and not force and os.path.isfile(p) \
+            and int(os.stat(p).st_mtime) > base_mtime:
+        if not conflict_copy:
+            return {"ok": False, "conflict": True, "mtime": int(os.stat(p).st_mtime)}
+        # unload-flush can't ask the user — park this client's text in a sibling
+        stem = p[:-3] + time.strftime(" (конфликт %Y-%m-%d %H-%M)")
+        cp, i = stem + ".md", 1
+        while os.path.exists(cp):
+            i += 1
+            cp = "%s %d.md" % (stem, i)
+        out["conflict_copy"] = os.path.basename(cp)
+        rel, p = None, cp
+    if rel:
+        _safe(lambda: _nt_snapshot(rel))            # history before overwriting
     os.makedirs(os.path.dirname(p), exist_ok=True)
     tags = [_note_slug(t) for t in (tags or []) if str(t).strip()][:20]
     tmp = p + ".tmp"
@@ -2355,7 +2451,8 @@ def note_save(rel, title, tags, md, pinned=False):
         f.write(_note_dump(title or "", tags, str(md or ""), pinned))
     os.replace(tmp, p)
     _chown_user(p)
-    return {"ok": True, "mtime": int(os.stat(p).st_mtime)}
+    out["mtime"] = int(os.stat(p).st_mtime)
+    return out
 
 def note_new(folder, title):
     base = _note_slug(title or "Новая заметка")
@@ -2406,6 +2503,11 @@ def note_delete(rel):
         i += 1
         dst = os.path.join(tr, "%s (%d)%s" % (stem, i, ext))
     os.rename(p, dst)
+    # remember the source folder so restore can put the item back where it lived
+    og = os.path.join(tr, ".origins.json")
+    m = _json_load_strict(og, {})
+    m[os.path.basename(dst)] = os.path.dirname(rel.strip("/"))
+    _json_save(og, m)
     return {"ok": True}
 
 def note_upload(folder, name, data_b64):
@@ -4950,7 +5052,8 @@ def save_maintenance(d):
     cur = load_maintenance()
     err = ""
     # числовые настройки: ключ → (мин, макс)
-    for k, (lo, hi) in {"trash_days": (0, 365), "smart_scan_min": (5, 120),
+    for k, (lo, hi) in {"trash_days": (0, 365), "notes_trash_days": (0, 365),
+                        "smart_scan_min": (5, 120),
                         "duscan_hours": (0, 8760),
                         "thumb_cache_mb": (0, 100000),
                         "import_stale_hours": (0, 720), "import_keep_days": (0, 3650),
@@ -5066,6 +5169,10 @@ def maintenance_daily():
     try:
         m = load_maintenance()
         usb_import_gc(m.get("import_stale_hours", 24), m.get("import_keep_days", 0))
+    except Exception:
+        pass
+    try:
+        notes_gc()
     except Exception:
         pass
     try:
@@ -10567,7 +10674,8 @@ class H(BaseHTTPRequestHandler):
                 b = self._body()
                 self._json(note_save(b.get("path", ""), b.get("title", ""),
                                      b.get("tags") or [], b.get("md", ""),
-                                     bool(b.get("pinned"))))
+                                     bool(b.get("pinned")), b.get("base_mtime", 0),
+                                     bool(b.get("force")), bool(b.get("conflict_copy"))))
             elif p == "/api/notes/restore":
                 b = self._body()
                 self._json(notes_restore(b.get("path", ""), b.get("v", "")))
