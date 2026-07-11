@@ -6022,7 +6022,7 @@ function winGlance(){openWin("__glance","Экран NAS",async body=>{
    <div class="gi"><span>Единица</span>${g9("u",[["val","у значения"],["valb","под значением"],["hide","скрыть"]])}<label>размер ${num("us",6,60)}</label>${cw("uc","#8a90a0")}</div>
    <div class="gi"><span>Фон</span><div class="seg" id="giBg">${[["def","карточка"],["none","нет"],["color","цвет"]].map(([v,l])=>`<button data-b="${v}" class="${bgMode===v?"on":""}">${l}</button>`).join("")}</div><label style="${bgMode==="color"?"":"display:none"}" id="giBgRow">цвет <input type="color" id="giBgC" value="${t.st&&t.st.bg&&t.st.bg!=="none"?t.st.bg.slice(0,7):"#151821"}"><input type="number" id="giBgA" min="5" max="100" value="${aOf(t.st&&t.st.bg!=="none"?t.st.bg:"")}" style="width:50px" title="прозрачность, %"></label></div>
    <div class="gi"><span>Рамка</span><label>толщина ${num("bw",0,6)}</label>${cw("bc","#262b36")}</div>
-   ${MODE()==="free"?`<div class="gi"><span>Геометрия</span><label>x ${num("x",0,4096)}</label><label>y ${num("y",0,4096)}</label><label>w ${num("w",8,4096)}</label><label>h ${num("h",8,4096)}</label></div>`:""}
+   ${MODE()==="free"?`<div class="gi"><span>Положение и размер</span><label>x ${num("x",0,4096)}</label><label>y ${num("y",0,4096)}</label><label>w ${num("w",8,4096)}</label><label>h ${num("h",8,4096)}</label></div>`:""}
    <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn sm" id="giDef" title="Новые плитки этого экрана будут получать этот стиль">Сделать по умолчанию</button><button class="btn sm" id="giReset">Сбросить стиль</button></div>`;
   const st=()=>t.st||(t.st={});
   const hexA=(c,a)=>a>=100?c:c+Math.round(a*2.55).toString(16).padStart(2,"0");

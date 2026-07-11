@@ -76,7 +76,7 @@ window.NAS_I18N = { en: {
 "Рамка": "Border",
 "толщина": "width",
 "авто": "auto",
-"Геометрия": "Geometry",
+"Положение и размер": "Position & size",
 "Сбросить стиль": "Reset style",
 "Полоска доступности за 24ч внизу экрана (зелёное — онлайн, красное — недоступен)": "24h availability strip at the bottom of the display (green — online, red — was unreachable)",
 "Доступность за 24ч — устройство рисует её внизу сам": "24h availability — the device draws it at the bottom itself",
