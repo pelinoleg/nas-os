@@ -13,6 +13,7 @@ nas-web.py — веб-бэкенд мастера настройки NAS и ра
 сервер нужно запускать от root (launcher nas-setup.sh это делает).
 """
 import json, os, re, subprocess, time, shutil, socket, threading, pwd, mimetypes, glob, errno, heapq, sys
+import html as _htmllib
 import pty, select, struct, hashlib, base64, signal, fcntl, termios, secrets, hmac
 import urllib.request, urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -2203,9 +2204,12 @@ def notes_tree():
             except OSError:
                 continue
             title, tags, body = _note_parse(head)
-            # short body preview for the list cards (markdown noise stripped)
-            prev = re.sub(r"[#*`>\[\]!|_-]+", " ", body)
-            prev = re.sub(r"\(https?://\S+\)|\(/api/\S+\)", "", prev)
+            # list-card excerpt: strip HTML tags first, decode entities, then
+            # drop markdown noise and urls — plain text only
+            prev = re.sub(r"<[^>]*>", " ", body)
+            prev = _htmllib.unescape(prev)
+            prev = re.sub(r"\(https?://\S+\)|\(/api/\S+\)|https?://\S+|/api/\S+", " ", prev)
+            prev = re.sub(r"[#*`>\[\]!|_-]+", " ", prev)
             prev = " ".join(prev.split())[:150]
             stats["notes"] += 1
             notes.append({"path": (rel + "/" if rel else "") + f, "folder": rel,

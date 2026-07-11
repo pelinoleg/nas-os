@@ -1645,6 +1645,7 @@
    --accent:#1F9E6E;--accent-hover:#178A5F;--accent-soft:#E3F3EC;--on-accent:#FFFFFF;
    --success:#1F9E6E;--warning:#C98A1B;--danger:#C0473B;
    --callout-bg:#FBF3D9;--callout-border:#F0E2AE;
+   --checkbox-border:var(--border-strong);
    --radius-sm:8px;--radius-lg:14px;
    --sp-1:4px;--sp-2:8px;--sp-3:12px;--sp-4:16px;--sp-5:24px;--sp-6:32px;--sp-7:48px;
    --shadow-1:0 1px 2px rgba(0,0,0,.04),0 1px 3px rgba(0,0,0,.06);
@@ -1660,6 +1661,7 @@
    --accent:#3FC48C;--accent-hover:#55D19C;--accent-soft:#1E3A2D;--on-accent:#0C130F;
    --success:#3FC48C;--warning:#E0B25A;--danger:#E27B6E;
    --callout-bg:#2A2A18;--callout-border:#4A4522;
+   --checkbox-border:#4E6B5C;
    --shadow-1:0 1px 2px rgba(0,0,0,.3),0 1px 3px rgba(0,0,0,.35);
    --shadow-2:0 4px 14px rgba(0,0,0,.4),0 2px 6px rgba(0,0,0,.3)}
   /* ---- sidebar (folders/tags) = surface-2 ---- */
@@ -1672,7 +1674,7 @@
   .nt-root .btn.pri:hover{background:var(--accent-hover)}
   .nt-root .iconbtn{color:var(--text-muted);background:transparent;border:0;border-radius:var(--radius-sm)}
   .nt-root .iconbtn:hover{background:var(--surface-inset);color:var(--text)}
-  .nt-side input,.nt-root #ntTagsIn{height:32px;border-radius:var(--radius-sm);border:1px solid var(--border);
+  .nt-side input{height:32px;border-radius:var(--radius-sm);border:1px solid var(--border);
    background:var(--surface);color:var(--text);padding:0 var(--sp-3);font-size:var(--fs-meta)}
   .nt-side input::placeholder{color:var(--text-faint)}
   .nt-side input:focus{outline:none;border-color:var(--accent)}
@@ -1708,8 +1710,9 @@
   .nt-meta{display:flex;align-items:center;gap:var(--sp-1);font-size:11px;color:var(--text-muted);margin-top:var(--sp-1);flex-wrap:wrap}
   .nt-meta i{font-style:normal;color:var(--accent);background:var(--accent-soft);border-radius:999px;padding:2px 8px;font-weight:600}
   .nt-meta>span{margin-left:auto}
-  .nt-split{width:5px;flex:none;cursor:col-resize;touch-action:none;position:relative;z-index:5;margin:0 -2px}
+  .nt-split{width:5px;flex:none;cursor:col-resize;touch-action:none;position:relative;z-index:5;margin:0 -2px;background:transparent}
   .nt-split:hover{background:var(--accent-soft)}
+  .nt-root{--sel:var(--accent-soft)}   /* panel hover token remapped inside notes */
   /* ---- editor pane: same theme, the paper is a surface card ---- */
   .nt-edit{flex:1;display:flex;flex-direction:column;gap:0;padding:var(--sp-2) var(--sp-4) var(--sp-4);min-width:0;background:var(--bg);color:var(--text)}
   .nt-empty{margin:auto;color:var(--text-faint)}
@@ -1719,18 +1722,25 @@
   .nt-head input::placeholder{color:var(--text-faint)}
   .nt-head input:focus{outline:none}
   .nt-head .nt-pin-on{color:var(--warning)!important}
-  .nt-edit #ntTagsIn{margin:0 var(--sp-1) var(--sp-2);height:26px;border:0;background:transparent;padding:0;color:var(--accent)}
-  .nt-edit #ntTagsIn::placeholder{color:var(--text-faint)}
-  .nt-edit #ntTagsIn:focus{outline:none}
+  .nt-tagrow{display:flex;align-items:center;gap:var(--sp-1);flex-wrap:wrap;margin:0 var(--sp-1) var(--sp-2)}
+  .nt-chip{display:inline-flex;align-items:center;gap:var(--sp-1);padding:var(--sp-1) var(--sp-2);border-radius:var(--radius-sm);
+   background:var(--accent-soft);color:var(--accent);font-size:var(--fs-meta);font-weight:600}
+  .nt-chip i{font-style:normal;cursor:pointer;opacity:.6}
+  .nt-chip i:hover{opacity:1}
+  .nt-tagrow input{flex:1;min-width:110px;height:24px;border:0;background:transparent;color:var(--text-muted);font-size:var(--fs-meta);padding:0}
+  .nt-tagrow input::placeholder{color:var(--text-faint)}
+  .nt-tagrow input:focus{outline:none}
   .nt-edit .nt-mut{flex:none}
   .nt-ed{flex:1;min-height:0;display:flex;flex-direction:column;position:relative}
   .nt-ed .toastui-editor-defaultUI{height:100%!important;display:flex;flex-direction:column;width:100%;font-family:var(--font-ui);border:0;border-radius:0;background:transparent}
-  /* toolbar: icons-only on the bg, per contract */
-  .nt-ed .toastui-editor-defaultUI-toolbar{background:transparent;border:0;border-radius:0;padding:0 0 var(--sp-2);height:auto}
-  .nt-ed .toastui-editor-toolbar-icons{border:0;background-color:transparent;border-radius:var(--radius-sm)}
-  .nt-ed .toastui-editor-toolbar-icons:not(:disabled):hover{background-color:var(--surface-2)}
-  .nt-ed .toastui-editor-toolbar-icons.active{background-color:var(--accent-soft)}
-  .nt-ed .toastui-editor-toolbar-divider{background-color:var(--border);margin:10px var(--sp-2);height:14px}
+  /* native toolbar is replaced by our own (#ntTb) */
+  .nt-ed .toastui-editor-defaultUI-toolbar,.nt-ed .toastui-editor-toolbar{display:none}
+  .nt-tb{display:flex;align-items:center;gap:var(--sp-1);padding:0 var(--sp-1) var(--sp-2);flex-wrap:wrap}
+  .nt-tbb{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border:0;background:transparent;
+   color:var(--text-muted);border-radius:var(--radius-sm);cursor:pointer;padding:0}
+  .nt-tbb:hover{color:var(--text);background:var(--surface-2)}
+  .nt-tbb:active,.nt-tbb.on{color:var(--accent);background:var(--accent-soft)}
+  .nt-tbs{width:1px;height:16px;background:var(--border);margin:0 var(--sp-1);flex:none}
   /* the paper: surface card, radius-lg, shadow-1 */
   .nt-ed .toastui-editor-main{flex:1;min-height:0;background:var(--surface);border-radius:var(--radius-lg);overflow:hidden;border:1px solid var(--border);box-shadow:var(--shadow-1)}
   .nt-ed .toastui-editor,.nt-ed .toastui-editor-ww-container,.nt-ed .toastui-editor-md-container{background:var(--surface)}
@@ -1752,10 +1762,14 @@
   .nt-ed .toastui-editor-contents li{line-height:1.6}
   .nt-ed .toastui-editor-contents blockquote{margin:var(--sp-3) 0;padding:var(--sp-4);border:1px solid var(--callout-border);border-radius:var(--radius-lg);background:var(--callout-bg)}
   .nt-ed .toastui-editor-contents blockquote p,.nt-ed .toastui-editor-contents blockquote li{color:var(--text)}
-  .nt-ed .toastui-editor-contents .task-list-item{gap:var(--sp-2)}
-  .nt-ed .toastui-editor-contents .task-list-item::before{border:1.5px solid var(--border-strong);border-radius:6px;background-color:var(--surface);background-image:none;width:16px;height:16px}
-  .nt-ed .toastui-editor-contents .task-list-item.checked::before{background-color:var(--accent);border-color:var(--accent);background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E");background-size:11px;background-position:center;background-repeat:no-repeat}
-  .nt-ed .toastui-editor-contents .task-list-item.checked{color:var(--text-muted);text-decoration:line-through}
+  /* checkboxes: FULL 1.5px border on --checkbox-border, 16x16, inset bg.
+     .nt-root prefix beats the vendor css that loads after our <style>. */
+  .nt-root .nt-ed .toastui-editor-contents .task-list-item{gap:var(--sp-2)}
+  .nt-root .nt-ed .toastui-editor-contents .task-list-item::before{content:"";box-sizing:border-box;
+   border:1.5px solid var(--checkbox-border);border-radius:6px;background-color:var(--surface-inset);
+   background-image:none;width:16px;height:16px}
+  .nt-root .nt-ed .toastui-editor-contents .task-list-item.checked::before{background-color:var(--accent);border-color:var(--accent);background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E");background-size:11px;background-position:center;background-repeat:no-repeat}
+  .nt-root .nt-ed .toastui-editor-contents .task-list-item.checked{color:var(--text-muted);text-decoration:line-through}
   .nt-ed .toastui-editor-contents hr{border:0;border-top:1px solid var(--border);margin:var(--sp-5) 0}
   .nt-ed .toastui-editor-contents table{border-collapse:collapse}
   .nt-ed .toastui-editor-contents th{background:var(--surface-inset);font-weight:600}
@@ -2036,6 +2050,20 @@ const P={
  star:'<path d="M11.5 2.6a.55.55 0 0 1 1 0l2.5 5.1 5.6.8a.55.55 0 0 1 .3.94l-4 3.95 1 5.6a.55.55 0 0 1-.8.58L12 16.9l-5 2.66a.55.55 0 0 1-.8-.58l1-5.6-4-3.94a.55.55 0 0 1 .3-.95l5.6-.8Z"/>',
  note:'<path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2Z"/><path d="M9 13h6M9 17h4"/>',
  clip:'<path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/>',
+ tbold:'<path d="M6 12h9a4 4 0 0 1 0 8H7a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h7a4 4 0 0 1 0 8"/>',
+ titalic:'<line x1="19" x2="10" y1="4" y2="4"/><line x1="14" x2="5" y1="20" y2="20"/><line x1="15" x2="9" y1="4" y2="20"/>',
+ tstrike:'<path d="M16 4H9a3 3 0 0 0-2.83 4"/><path d="M14 12a4 4 0 0 1 0 8H6"/><line x1="4" x2="20" y1="12" y2="12"/>',
+ tul:'<line x1="8" x2="21" y1="6" y2="6"/><line x1="8" x2="21" y1="12" y2="12"/><line x1="8" x2="21" y1="18" y2="18"/><line x1="3" x2="3.01" y1="6" y2="6"/><line x1="3" x2="3.01" y1="12" y2="12"/><line x1="3" x2="3.01" y1="18" y2="18"/>',
+ tol:'<line x1="10" x2="21" y1="6" y2="6"/><line x1="10" x2="21" y1="12" y2="12"/><line x1="10" x2="21" y1="18" y2="18"/><path d="M4 6h1v4"/><path d="M4 10h2"/><path d="M6 18H4c0-1 2-2 2-3s-1-1.5-2-1"/>',
+ ttask:'<path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/><path d="M13 6h8"/><path d="M13 12h8"/><path d="M13 18h8"/>',
+ tquote:'<path d="M17 6H3"/><path d="M21 12H8"/><path d="M21 18H8"/><path d="M3 12v6"/>',
+ tcode:'<polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/>',
+ ttable:'<path d="M12 3v18"/><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M3 15h18"/>',
+ timg:'<rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>',
+ tlink:'<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+ th1:'<path d="M4 12h8"/><path d="M4 18V6"/><path d="M12 18V6"/><path d="m17 12 3-2v8"/>',
+ th2:'<path d="M4 12h8"/><path d="M4 18V6"/><path d="M12 18V6"/><path d="M21 18h-4c0-4 4-3 4-6 0-1.5-2-2.5-4-1"/>',
+ th3:'<path d="M4 12h8"/><path d="M4 18V6"/><path d="M12 18V6"/><path d="M17.5 10.5c1.7-1 3.5 0 3.5 1.5a2 2 0 0 1-2 2"/><path d="M17 17.5c2 1.5 4 .3 4-1.5a2 2 0 0 0-2-2"/>',
  plus:'<path d="M12 5v14"/><path d="M5 12h14"/>',
  expand:'<path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/>',
  shrink:'<path d="M4 14h6v6"/><path d="M20 10h-6V4"/><path d="m14 10 7-7"/><path d="m3 21 7-7"/>',
@@ -6045,7 +6073,49 @@ function loadNotesLibs(){
  NT_LIBS=js("/tui-editor.js").then(()=>Promise.all([js("/tui-hl.js"),js("/tui-editor-ru.js")]));
  return NT_LIBS;
 }
-let NT_ED=null,NT_PATH=null,NT_SAVE_T=null,NT_DIRTY=false,NT_PIN=false;
+let NT_ED=null,NT_PATH=null,NT_SAVE_T=null,NT_DIRTY=false,NT_PIN=false,NT_TAGS=[];
+/* custom toolbar per DESIGN.md: lucide icons, exec() into Toast UI commands
+   (works in both wysiwyg and markdown modes) */
+function ntUploadInsert(f){if(winNotes._upload)winNotes._upload(f);}
+function ntToolbar(ed){
+ const tb=ed.querySelector("#ntTb");if(!tb||!NT_ED)return;
+ const B=(ic,tip,fn)=>{const b=document.createElement("button");b.className="nt-tbb";b.title=tip;b.innerHTML=svg(ic,20);b.onmousedown=e=>e.preventDefault();b.onclick=fn;return b;};
+ const S=()=>{const i=document.createElement("i");i.className="nt-tbs";return i;};
+ const X=c=>()=>NT_ED.exec(c);
+ [
+  B("th1","Заголовок 1",()=>NT_ED.exec("heading",{level:1})),
+  B("th2","Заголовок 2",()=>NT_ED.exec("heading",{level:2})),
+  B("th3","Заголовок 3",()=>NT_ED.exec("heading",{level:3})),
+  S(),
+  B("tbold","Жирный",X("bold")),
+  B("titalic","Курсив",X("italic")),
+  B("tstrike","Зачёркнутый",X("strike")),
+  S(),
+  B("tul","Список",X("bulletList")),
+  B("tol","Нумерованный список",X("orderedList")),
+  B("ttask","Чек-лист",X("taskList")),
+  S(),
+  B("tquote","Цитата",X("blockQuote")),
+  B("tcode","Блок кода",X("codeBlock")),
+  S(),
+  B("ttable","Таблица",()=>NT_ED.exec("addTable",{rowCount:3,columnCount:3})),
+  B("timg","Картинка",()=>{
+   const inp=document.createElement("input");inp.type="file";inp.accept="image/*";
+   inp.onchange=()=>{const f=inp.files&&inp.files[0];if(f)ntUploadInsert(f);};
+   inp.click();}),
+  B("tlink","Ссылка",()=>{
+   const sc=document.getElementById("scrim");
+   sc.innerHTML=`<div class="dialog"><h3>Ссылка</h3>
+    <input id="nlU" placeholder="https://…" style="width:100%"><input id="nlT" placeholder="Текст (необязательно)" style="width:100%;margin-top:8px">
+    <div class="r"><button class="btn" id="nlX">Отмена</button><button class="btn pri" id="nlOk">Вставить</button></div></div>`;
+   sc.classList.add("show");const u=sc.querySelector("#nlU");u.focus();
+   const ok=()=>{const url=u.value.trim();if(!url)return;
+    NT_ED.exec("addLink",{linkUrl:url,linkText:sc.querySelector("#nlT").value.trim()||url});
+    sc.classList.remove("show");};
+   sc.querySelector("#nlOk").onclick=ok;u.onkeydown=e=>{if(e.key==="Enter")ok();};
+   sc.querySelector("#nlX").onclick=()=>sc.classList.remove("show");}),
+ ].forEach(el2=>tb.appendChild(el2));
+}
 /* our notes are trusted local content; still strip scripts/handlers but keep
    layout attributes (style/width on img) that the default sanitizer removes */
 function ntSanitize(html){
@@ -6167,7 +6237,7 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
   if(!NT_PATH||!NT_ED)return;
   NT_DIRTY=false;clearTimeout(NT_SAVE_T);
   const title=q("#ntTitle")?q("#ntTitle").value.trim():"";
-  const tags=(q("#ntTagsIn")?q("#ntTagsIn").value:"").split(",").map(s2=>s2.trim().replace(/^#/,"")).filter(Boolean);
+  const tags=NT_TAGS.slice();
   const r=await api("/api/notes/save",{method:"POST",body:JSON.stringify({path:NT_PATH,title,tags,pinned:NT_PIN,md:NT_ED.getMarkdown()})});
   const st=q("#ntSt");if(st)st.textContent=r&&r.ok?"сохранено "+new Date().toTimeString().slice(0,5):"ошибка сохранения";
   const n=TREE.notes.find(x=>x.path===NT_PATH);
@@ -6192,22 +6262,38 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
     <button class="iconbtn" id="ntHist" title="История версий">${svg("clock",15)}</button>
     <button class="iconbtn" id="ntDel" title="В корзину">${svg("trash",15)}</button>
    </div>
-   <input id="ntTagsIn" placeholder="теги, через, запятую" value="${att(r.tags.join(", "))}">
+   <div class="nt-tagrow" id="ntTagRow"></div>
+   <div class="nt-tb" id="ntTb"></div>
    <div class="nt-ed" id="ntEd"></div>`;
   ed.querySelector("#ntTitle").oninput=schedSave;
-  ed.querySelector("#ntTagsIn").oninput=schedSave;
+  NT_TAGS=(r.tags||[]).slice();
+  const paintTags=()=>{const row=ed.querySelector("#ntTagRow");if(!row)return;
+   row.innerHTML=NT_TAGS.map((t,i)=>`<span class="nt-chip">#${esc(t)}<i data-i="${i}">×</i></span>`).join("")
+    +`<input id="ntTagAdd" placeholder="${NT_TAGS.length?"":"добавить тег…"}">`;
+   row.querySelectorAll(".nt-chip i").forEach(x=>x.onclick=()=>{NT_TAGS.splice(+x.dataset.i,1);paintTags();schedSave();});
+   const inp=row.querySelector("#ntTagAdd");
+   inp.onkeydown=ev=>{
+    if(ev.key==="Enter"||ev.key===","){ev.preventDefault();
+     const v=inp.value.trim().replace(/^#/,"").replace(/,+$/,"");
+     if(v&&!NT_TAGS.includes(v)){NT_TAGS.push(v);paintTags();schedSave();
+      const ni=ed.querySelector("#ntTagAdd");if(ni)ni.focus();}
+     else inp.value="";}
+    else if(ev.key==="Backspace"&&!inp.value&&NT_TAGS.length){NT_TAGS.pop();paintTags();schedSave();
+     const ni=ed.querySelector("#ntTagAdd");if(ni)ni.focus();}};};
+  paintTags();
   NT_PIN=!!r.pinned;
   ed.querySelector("#ntPin").onclick=()=>{NT_PIN=!NT_PIN;ed.querySelector("#ntPin").classList.toggle("nt-pin-on",NT_PIN);schedSave();};
+  winNotes._upload=async f=>{
+   if(f.size>30*1024*1024)return toast("Файл больше 30 МБ");
+   const b64=await new Promise(res=>{const fr=new FileReader();fr.onload=()=>res(fr.result);fr.readAsDataURL(f);});
+   const rr=await api("/api/notes/upload",{method:"POST",body:JSON.stringify({folder,name:f.name,data:b64})});
+   if(!(rr&&rr.ok))return toast("Ошибка загрузки: "+((rr&&rr.error)||"?"));
+   if(/^image\//.test(f.type))NT_ED.exec("addImage",{imageUrl:rr.url,altText:""});
+   else NT_ED.insertText("["+f.name+"]("+rr.url+")");
+   schedSave();};
   ed.querySelector("#ntAtt").onclick=()=>{
    const inp=document.createElement("input");inp.type="file";
-   inp.onchange=async()=>{const f=inp.files&&inp.files[0];if(!f)return;
-    if(f.size>30*1024*1024)return toast("Файл больше 30 МБ");
-    const b64=await new Promise(res=>{const fr=new FileReader();fr.onload=()=>res(fr.result);fr.readAsDataURL(f);});
-    const rr=await api("/api/notes/upload",{method:"POST",body:JSON.stringify({folder,name:f.name,data:b64})});
-    if(!(rr&&rr.ok))return toast("Ошибка загрузки: "+((rr&&rr.error)||"?"));
-    if(/^image\//.test(f.type))NT_ED.insertText("![]("+rr.url+")");
-    else NT_ED.insertText("["+f.name+"]("+rr.url+")");
-    schedSave();};
+   inp.onchange=()=>{const f=inp.files&&inp.files[0];if(f)winNotes._upload(f);};
    inp.click();};
   ed.querySelector("#ntHist").onclick=()=>ntHistory(p);
   ed.querySelector("#ntDel").onclick=()=>confirmDlg("Удалить заметку","«"+(r.title||p)+"» уедет в корзину (папка .trash в заметках).",async()=>{
@@ -6224,7 +6310,7 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
   NT_ED=new toastui.Editor({
    el:box,height:"100%",usageStatistics:false,
    customHTMLSanitizer:ntSanitize,
-   toolbarItems:[["heading","bold","italic","strike"],["ul","ol","task"],["quote","codeblock"],["table","image","link"]],
+   toolbarItems:[],
    initialEditType:SET.ntMode||"wysiwyg",previewStyle:"tab",
    language:(window.NAS_LANG||"en")==="en"?"en-US":"ru-RU",
    theme:dark?"dark":"light",
@@ -6239,6 +6325,7 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
   setTimeout(()=>ntApplyImgs(box),80);
   }catch(err){box.innerHTML=`<div class="nt-empty">Редактор не запустился: ${esc(err&&err.message||err)}</div>`;console.error(err);return;}
   ntImgWire(box);
+  ntToolbar(ed);
   /* image interactions: click = select + resize handle, right click = menu,
      double click = full-size lightbox */
   box.addEventListener("contextmenu",e=>{const im=e.target.closest("img");if(!im)return;e.preventDefault();ntImgMenu(e,im);});

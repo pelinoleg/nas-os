@@ -61,6 +61,9 @@
   --callout-bg:     #FBF3D9;
   --callout-border: #F0E2AE;
 
+  /* controls */
+  --checkbox-border: var(--border-strong);  /* рамка пустого чекбокса */
+
   /* ---------- shape ---------- */
   --radius-sm: 8px;
   --radius-lg: 14px;
@@ -104,6 +107,8 @@
 
   --callout-bg:     #2A2A18;
   --callout-border: #4A4522;
+
+  --checkbox-border: #4E6B5C;  /* заметно ярче surface — иначе квадрат тонет */
 
   --shadow-1: 0 1px 2px rgba(0,0,0,.3), 0 1px 3px rgba(0,0,0,.35);
   --shadow-2: 0 4px 14px rgba(0,0,0,.4), 0 2px 6px rgba(0,0,0,.3);
