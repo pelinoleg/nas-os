@@ -1938,19 +1938,17 @@
   /* ww code block, trigger chip [lang ⌄]: one compact button, pencil gone.
      The vendor opens the editor only when the clicked target's ::after has a
      background-image — keep a non-none transparent gradient to stay clickable. */
-  .nt-root .nt-ed .toastui-editor-ww-code-block:,.nt-root .nt-ed .toastui-editor-ww-code-block-highlighting:after{opacity:0;transition:opacity .12s;
+  .nt-root .nt-ed .toastui-editor-ww-code-block:after,.nt-root .nt-ed .toastui-editor-ww-code-block-highlighting:after{opacity:0;transition:opacity .12s;
    content:attr(data-language);position:absolute;right:10px;top:10px;height:24px;
    padding:2px 24px 2px var(--sp-2);border:0;border-radius:var(--radius-sm);cursor:pointer;
    background:transparent;background-image:linear-gradient(transparent,transparent);
    color:var(--text-muted);font-family:var(--font-mono);font-size:12px;font-weight:400;line-height:20px}
-  .nt-root .nt-ed .toastui-editor-ww-code-block:,.nt-root .nt-ed .toastui-editor-ww-code-block-highlighting:before{content:"";position:absolute;z-index:1;
+  .nt-root .nt-ed .toastui-editor-ww-code-block:before,.nt-root .nt-ed .toastui-editor-ww-code-block-highlighting:before{content:"";position:absolute;z-index:1;
    right:19px;top:17px;width:5px;height:5px;transform:rotate(45deg);pointer-events:none;
    border-right:1.5px solid var(--text-faint);border-bottom:1.5px solid var(--text-faint);
    opacity:0;transition:opacity .12s}
-  .nt-root .nt-ed .toastui-editor-ww-code-block:,.nt-root .nt-ed .toastui-editor-ww-code-block-highlighting:hover:after{opacity:1;background-color:var(--veil)}
-  .nt-root .nt-ed .toastui-editor-ww-code-block:,.nt-root .nt-ed .toastui-editor-ww-code-block-highlighting:hover:before{opacity:1}
-  .nt-root .nt-ed .toastui-editor-ww-code-block.,.nt-root .nt-ed .toastui-editor-ww-code-block-highlighting.nt-lang-open:after{opacity:1;background-color:var(--accent-soft);color:var(--accent)}
-  .nt-root .nt-ed .toastui-editor-ww-code-block.,.nt-root .nt-ed .toastui-editor-ww-code-block-highlighting.nt-lang-open:before{opacity:1;border-color:var(--accent)}
+  .nt-root .nt-ed .toastui-editor-ww-code-block:hover:after,.nt-root .nt-ed .toastui-editor-ww-code-block-highlighting:hover:after{opacity:1;background-color:var(--veil)}
+  .nt-root .nt-ed .toastui-editor-ww-code-block:hover:before,.nt-root .nt-ed .toastui-editor-ww-code-block-highlighting:hover:before{opacity:1}
   /* language dropdown: vendor <span><input></span> re-anchored under the chip,
      our filterable list appended inside; popup surface = system menu level */
   .nt-root .nt-ed .toastui-editor-ww-code-block-language{background:var(--surface-3);border:1px solid var(--border);
@@ -1963,7 +1961,7 @@
   .nt-root .nt-ed .toastui-editor-ww-code-block-language input:focus{outline:none;box-shadow:inset 0 0 0 1.5px var(--accent)}
   /* highlight-plugin language select (.toastui-editor-code-block-language):
      same custom look; extra specificity beats tui-hl.css which loads later */
-  .nt-root .nt-ed .toastui-editor-code-block-language{position:absolute!important;right:auto;z-index:60;width:200px;
+  .nt-root .nt-ed .toastui-editor-code-block-language{position:fixed!important;right:auto;z-index:600;width:200px;
    background:var(--surface-3);border:1px solid var(--border);border-radius:var(--radius-lg);
    box-shadow:var(--shadow-2);padding:var(--sp-2);animation:ntpop .12s ease}
   .nt-root .nt-ed .toastui-editor-code-block-language-input{display:block;width:auto;height:28px;padding:0;border:0;background:transparent}
@@ -6909,31 +6907,33 @@ function ntLangWire(box){
      only be caught here, never wired once at editor init */
   const wr=box.querySelector(".toastui-editor-code-block-language");
   if(wr&&!wr._nt){wr._nt=1;ntLangDressHl(box,wr,anchor);}
-  if(!sp&&!wr)box.querySelectorAll(".nt-lang-open").forEach(b=>b.classList.remove("nt-lang-open"));
  }).observe(box,{childList:true,subtree:true});
 }
 function ntLangDressHl(box,wr,anchor){
- /* out of the overflow-hidden editor body; CSS pins it position:absolute
-    inside .nt-ed so vendor viewport coords can never inflate the window */
- box.appendChild(wr);
+ /* stays position:FIXED where the vendor put it (its coords are viewport
+    based). Forcing absolute moved it deep into the editor scrollable, focus
+    auto-scrolled it into view → PM emitted "scroll" → the plugin destroys
+    the box on scroll → the panel died the instant it opened. */
  const inp=wr.querySelector("input"),list=wr.querySelector(".toastui-editor-code-block-language-list");
  const btns=list?[...list.querySelectorAll("button")]:[];
- const bb=box.getBoundingClientRect(),W=200;
- let L=bb.width-W-8,T=8;
- if(anchor){anchor.classList.add("nt-lang-open");
+ const W=200;
+ let L=innerWidth-W-8,T=8;
+ /* NEVER mutate the block div: it is ProseMirror-owned DOM — adding a class
+    there makes PM mark the node dirty, rebuild the node view and DESTROY the
+    select box the moment it opened (found the hard way) */
+ if(anchor){
   const ab=anchor.getBoundingClientRect();
-  L=Math.max(8,Math.min(ab.right-bb.left-10-W,bb.width-W-8));
-  T=Math.max(8,Math.min(ab.top-bb.top+38,bb.height-320));}
- wr.style.left=L+"px";wr.style.top=Math.max(8,T)+"px";
+  L=Math.max(8,Math.min(ab.right-10-W,innerWidth-W-8));
+  T=Math.max(8,Math.min(ab.top+38,innerHeight-320));}
+ wr.style.left=L+"px";wr.style.top=T+"px";
  if(list)list.style.display="block";
  if(inp){inp.placeholder=nasTr("поиск языка…");
-  /* re-parenting blurred the vendor-focused input — refocus and select */
-  setTimeout(()=>inp.select(),30);
+  setTimeout(()=>{try{inp.select();}catch(e){}},30);
   inp.addEventListener("input",()=>{const v=inp.value.trim().toLowerCase();
    if(list)list.style.display="block";   // vendor hides the list on non-nav keys
    btns.forEach(b=>{b.style.display=!v||b.textContent.toLowerCase().includes(v)?"":"none";});});}
  const act=list&&list.querySelector("button.active");
- if(act)setTimeout(()=>act.scrollIntoView({block:"nearest"}),0);
+ if(act)setTimeout(()=>{const bx=list.querySelector(".buttons");if(bx)bx.scrollTop=Math.max(0,act.offsetTop-60);},0);
 }
 /* custom select on top of the vendor mechanics: its <input> stays as the
    commit path (Enter/blur) AND doubles as the search field; around it — our
@@ -6943,7 +6943,7 @@ function ntLangDress(box,sp,anchor){
  /* re-parent into .nt-ed (position:relative) and place absolutely under the
     badge, clamped to the editor box — position:fixed at viewport coords kept
     escaping the window (and ancestor filters break fixed altogether) */
- if(anchor){anchor.classList.add("nt-lang-open");
+ if(anchor){
   box.appendChild(sp);
   const bb=box.getBoundingClientRect(),ab=anchor.getBoundingClientRect(),W=200;
   sp.style.position="absolute";
