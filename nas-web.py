@@ -5808,7 +5808,7 @@ def monitor_loop():
         funcs = ((monitor_tick, _automount_tick, usb_ops_sync) if poked else
                  (history_sample, monitor_tick, maintenance_daily, _smart_selftest_tick,
                   _nb_sched_tick, _automount_tick, _summary_tick, _thermal_tick, usb_ops_sync,
-                  _fsw_tick, _replica_tick))
+                  _fsw_tick, _replica_tick, _remotes_tick))
         for fn in funcs:
             try:
                 fn()
@@ -6409,7 +6409,7 @@ def remotes_list():
         out.append({"id": r["id"], "name": r.get("name") or r["id"],
                     "host": r.get("host", ""), "user": r.get("user", ""),
                     "port": r.get("port") or 22, "path": r.get("path") or "/",
-                    "has_pass": bool(r.get("pass")),
+                    "has_pass": bool(r.get("pass")), "auto": bool(r.get("auto")),
                     "mounted": _remote_mounted(r["id"]), "mount": _remote_mp(r["id"])})
     return {"ok": True, "remotes": out, "sshfs": bool(shutil.which("sshfs"))}
 
@@ -6435,7 +6435,8 @@ def remotes_save(d):
         port = 22
     cur.update({"name": str(d.get("name") or "").strip()[:40] or host,
                 "host": host, "user": user, "port": port,
-                "path": str(d.get("path") or "/").strip() or "/"})
+                "path": str(d.get("path") or "/").strip() or "/",
+                "auto": bool(d.get("auto"))})
     if d.get("pass"):
         cur["pass"] = str(d["pass"])
     if d.get("clear_pass"):
@@ -6477,10 +6478,31 @@ def remote_mount(rid):
     except OSError as e:
         return {"ok": False, "log": str(e)}
     if p.returncode != 0 or not _remote_mounted(rid):
-        return {"ok": False, "log": (p.stderr or p.stdout or "не смонтировалось").strip()[:300]}
+        msg = (p.stderr or p.stdout or "не смонтировалось").strip()[:300]
+        # sshfs = SFTP: если SSH пускает, а данные не идут — на сервере, скорее
+        # всего, выключена служба SFTP (частый случай на Synology)
+        if "Input/output error" in msg or "Connection reset" in msg:
+            msg += " — похоже, на сервере выключен SFTP. Synology: Панель управления → Файловые службы → FTP → включить SFTP."
+        return {"ok": False, "log": msg}
     log_event("action", "Подключён сервер: %s" % (r.get("name") or r["host"]), "", "ok",
               kind="files", desk=False)
     return {"ok": True, "mount": mp}
+
+# авто-маунт: помеченные auto подключаются сами (после ребута, обрыва, недоступности);
+# бэкофф 5 минут, чтобы не долбить выключенный сервер каждый тик
+_REMOTE_TRY = {}
+
+def _remotes_tick():
+    for r in _remotes_load():
+        rid = r["id"]
+        if not r.get("auto") or _remote_mounted(rid):
+            continue
+        now = time.time()
+        if now - _REMOTE_TRY.get(rid, 0) < 300:
+            continue
+        _REMOTE_TRY[rid] = now
+        threading.Thread(target=lambda i=rid: _safe(lambda: remote_mount(i)),
+                         daemon=True).start()
 
 def remote_umount(rid):
     if not _REMOTE_ID.match(rid or ""):

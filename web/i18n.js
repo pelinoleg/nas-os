@@ -984,6 +984,8 @@ window.NAS_I18N = { en: {
 "Главный NAS": "Main NAS",
 "Порт": "Port",
 "Папка на сервере": "Folder on the server",
+"Подключать автоматически": "Connect automatically",
+"— панель монтирует сама (и после перезагрузки)": "— the panel mounts it by itself (incl. after a reboot)",
 "задан; пусто = не менять": "set; empty = keep",
 "синхронизирована": "synced",
 "ошибка автосинка": "auto-sync error",

@@ -4202,26 +4202,30 @@ async function storeTab(tc,reload){
   box.appendChild(g);}
 }
 function stCard(a,tc,reload){
- const dot=a.installed?(a.running?"var(--good)":"var(--mut)"):"transparent";
+ // «папка в stacks есть, но контейнеры ни разу не создавались» = ещё не установлено:
+ // кнопка «Установить» ведёт через диалог настроек к первому запуску
+ const virgin=a.installed&&!a.total;
+ const ready=a.installed&&!virgin;
+ const dot=ready?(a.running?"var(--good)":"var(--mut)"):"transparent";
  const c=el(`<div class="st-card">
    <div class="st-top"><img class="st-ic" src="${att(iconSrc(a.icon))}" alt=""><span class="st-fb">${esc((a.name||"?")[0])}</span>
-    <div class="st-tt"><b>${esc(a.name)}</b><span class="st-status"><i class="dot" style="background:${dot};${a.installed?"":"box-shadow:inset 0 0 0 1.5px var(--mut)"}"></i>${a.installed?(a.running?"запущено":"остановлено"):"не установлено"}</span></div></div>
+    <div class="st-tt"><b>${esc(a.name)}</b><span class="st-status"><i class="dot" style="background:${dot};${ready?"":"box-shadow:inset 0 0 0 1.5px var(--mut)"}"></i>${ready?(a.running?"запущено":"остановлено"):"не установлено"}</span></div></div>
    <div class="st-desc"></div>
    <div class="st-acts"></div></div>`);
  const im=c.querySelector(".st-ic");im.onerror=()=>{im.style.display="none";c.querySelector(".st-fb").style.display="flex";};
  c.querySelector(".st-desc").textContent=nasTr(a.desc||"");
  const acts=c.querySelector(".st-acts");
  const btn=(label,ic,cls,fn)=>{const b=el(`<button class="btn sm ${cls||""}">${ic?svg(ic,13)+" ":""}${label}</button>`);b.onclick=fn;acts.appendChild(b);return b;};
- if(!a.installed)btn("Установить","download","pri",()=>stInstallDlg(a,tc,reload));
+ if(!ready)btn("Установить","download","pri",()=>stInstallDlg(a,tc,reload));
  else{
   if(a.port&&a.running)btn("Открыть","expand","",()=>window.open(`http://${host()}:${a.port}`,"_blank"));
   if(!a.running)btn("Запустить","play","pri",()=>stRunDlg(a.name+" — запуск",{name:a.id,action:"up"},tc,reload));
   if((a.fields||[]).length)btn("Настроить…","cog","",()=>stInstallDlg(a,tc,reload));
   btn("Обновить","arrowup","",()=>stRunDlg(a.name+" — обновление (pull + up)",{name:a.id,action:"update"},tc,reload));
-  if(a.replica)btn("Реплика…","sync","",()=>stReplicaDlg(a,tc,reload));
-  btn("Удалить","trash","dng",()=>confirmDlg("Удалить "+a.name,"Стек будет остановлен, папка /opt/stacks/"+a.id+" удалена. Данные приложения (тома и папки в пуле) останутся на диске.",async()=>{
+  if(a.replica)btn("Реплика…","sync","",()=>stReplicaDlg(a,tc,reload));}
+ if(a.installed)btn("Удалить","trash","dng",()=>confirmDlg("Удалить "+a.name,"Стек будет остановлен, папка /opt/stacks/"+a.id+" удалена. Данные приложения (тома и папки в пуле) останутся на диске.",async()=>{
    const r2=await api("/api/stack/delete",{method:"POST",body:JSON.stringify({name:a.id})});
-   if(r2&&r2.ok){toast(a.name+" удалён");storeTab(tc,reload);reload();pollApps();}else toast("Ошибка: "+((r2&&r2.log)||"?"));},true));}
+   if(r2&&r2.ok){toast(a.name+" удалён");storeTab(tc,reload);reload();pollApps();}else toast("Ошибка: "+((r2&&r2.log)||"?"));},true));
  return c;
 }
 /* стрим долгого compose-действия в маленьком диалоге с консолью */
@@ -5233,7 +5237,6 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
          await api("/api/remotes/delete",{method:"POST",body:JSON.stringify({id:rm.id})});renderRemotes();},true)},
      ]);};
      c.appendChild(it);});
-   if(!REMS.length)c.innerHTML=`<div style="color:var(--mut);font-size:11px;padding:2px 10px 6px">SSH-серверы: «+» — и гуляйте по ним как по папкам.</div>`;
  }
  function remDlg(rm){
    const s=document.getElementById("scrim");
@@ -5244,12 +5247,14 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
        <div style="width:90px"><label>Порт</label><input id="rmP" class="mono" value="${att((rm&&rm.port)||22)}"></div></div>
      <div class="field"><label>Пароль <span style="color:var(--mut);font-weight:400">— ${rm&&rm.has_pass?"задан; пусто = не менять":"пусто = вход по ключу"}</span></label><input id="rmW" type="password" autocomplete="new-password"></div>
      <div class="field"><label>Папка на сервере</label><input id="rmD" class="mono" value="${att((rm&&rm.path)||"/")}"></div>
+     <div class="field" style="display:flex;align-items:center;gap:10px"><label style="margin:0">Подключать автоматически <span style="color:var(--mut);font-weight:400">— панель монтирует сама (и после перезагрузки)</span></label><label class="tgl" style="margin-left:auto"><input type="checkbox" id="rmA"${rm&&rm.auto?" checked":""}><span class="sl"></span></label></div>
      <div class="r"><button class="btn" id="rmX">Отмена</button><button class="btn pri" id="rmOk">Сохранить</button></div></div>`;
    s.classList.add("show");
    s.querySelector("#rmX").onclick=()=>s.classList.remove("show");
    s.querySelector("#rmOk").onclick=async()=>{
      const b={id:(rm&&rm.id)||"",name:s.querySelector("#rmN").value.trim(),host:s.querySelector("#rmH").value.trim(),
-       user:s.querySelector("#rmU").value.trim(),port:s.querySelector("#rmP").value.trim(),path:s.querySelector("#rmD").value.trim()};
+       user:s.querySelector("#rmU").value.trim(),port:s.querySelector("#rmP").value.trim(),path:s.querySelector("#rmD").value.trim(),
+       auto:s.querySelector("#rmA").checked};
      const pw=s.querySelector("#rmW").value;if(pw)b.pass=pw;
      const r=await api("/api/remotes/save",{method:"POST",body:JSON.stringify(b)});
      s.classList.remove("show");
