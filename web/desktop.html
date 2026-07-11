@@ -1355,6 +1355,9 @@
   .fm-row .fsz{width:60px;text-align:right;flex:none;display:inline-block!important}
   .fm-row .fdate{font-family:var(--mono);font-size:10px;color:var(--mut);width:92px;text-align:right;flex:none}
   .fm-list.drop{outline:2px dashed var(--accent);outline-offset:-4px;background:var(--accent-soft)}
+  /* внутри SSH-маунта папки сине-бирюзовые, чтобы не путать с локальными */
+  .fm-list.fm-remote .fmico path[fill="#E0A63C"]{fill:#2E86AB}
+  .fm-list.fm-remote .fmico path[fill="#F5C24C"]{fill:#4FA8CF}
   .fm-row.dragover,.fm-tile.dragover,.fm-fav-i.dragover{background:var(--accent-soft)!important;outline:2px solid var(--accent);outline-offset:-2px;color:var(--accent)}
   .fm-row[draggable],.fm-tile[draggable]{-webkit-user-drag:element}
   .fm-band{position:absolute;border:1px solid var(--accent);background:var(--accent-soft);opacity:.55;pointer-events:none;z-index:5;border-radius:2px}
@@ -5384,7 +5387,9 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    cwd=r.path;tabs[tabI]=r.path;entries=r.entries||[];searchRes=null;sel.clear();filt="";lastIdx=-1;
    lastSig=dirSig(entries);
    const si=body.querySelector("#fSearch");if(si)si.value="";
-   cursor=-1;renderTabs();renderCrumb();renderFav();renderVols();renderRemotes(false);renderList();selUpdate();listBox.focus();}
+   cursor=-1;renderTabs();renderCrumb();renderFav();renderVols();renderRemotes(false);
+   listBox.classList.toggle("fm-remote",cwd==="/mnt/remote"||cwd.startsWith("/mnt/remote/"));
+   renderList();selUpdate();listBox.focus();}
 
  /* Auto-refresh: the folder can change under us (uploads, USB import, rsync, another
     tab). Re-render only when the listing actually differs, and keep the selection and
