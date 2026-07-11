@@ -173,6 +173,8 @@ window.NAS_I18N = { en: {
 "Редактор не запустился": "The editor failed to start",
 "Корень": "Root",
 "Ошибка открытия": "Open failed",
+"Скачать выбранные": "Download selected",
+"ZIP-ом": "as ZIP",
 "нет ответа сервера": "no answer from the server",
 "Влево": "Left",
 "По центру": "Center",

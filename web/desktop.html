@@ -5055,8 +5055,9 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
        if(j.ok)load(cwd);return;}
      await new Promise(res=>setTimeout(res,700));}}
  function rowMenu(e,x,y){const it=[{label:"Открыть",ic:svg(e.type==="dir"?"folder":"file",16),act:()=>openEntry(e)}];
-   if(e.type==="file")it.push({label:"Скачать",ic:svg("download",16),act:()=>dl(e)});
-   if(e.type==="dir")it.push({label:"Скачать как ZIP",ic:svg("download",16),act:()=>doZip([e.path])});
+   if(sel.size>1&&sel.has(e.path))it.push({label:`Скачать выбранные (${sel.size}) ZIP-ом`,ic:svg("download",16),act:()=>doZip(selOr(e))});
+   else if(e.type==="file")it.push({label:"Скачать",ic:svg("download",16),act:()=>dl(e)});
+   else if(e.type==="dir")it.push({label:"Скачать как ZIP",ic:svg("download",16),act:()=>doZip([e.path])});
    it.push({label:"Копировать путь",ic:svg("copy",16),act:()=>{copyText(e.path);toast("Путь скопирован");}});
    it.push({label:"В избранное",ic:svg("folder",16),act:()=>{if(favs.some(f=>f.path===e.path)){toast("Уже в избранном");return;}favs.push({name:e.name,path:e.type==="dir"?e.path:cwd});saveFav();renderFav();toast("Добавлено");}});
    it.push({sep:1});
