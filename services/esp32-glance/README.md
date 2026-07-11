@@ -98,14 +98,39 @@ CPU, память, скорость сети, пул) есть `spark` — 48 т
 проверки: исполняемый скрипт в `~/nas-config/scripts/glance/`, первая строка
 вывода `ok|warn|danger текст` — станет плиткой и влияет на общий `status`.
 
-## Сборка
+## Прошивка шаг за шагом (T-Display-S3)
 
-1. Arduino IDE / PlatformIO, плата ESP32.
-2. Библиотеки: **TFT_eSPI** (настроить `User_Setup.h` под свой дисплей —
-   проверялось с ST7789 и ILI9341 240×320) и **ArduinoJson** (v7).
-3. В `esp32-glance.ino` заполнить `WIFI_SSID`, `WIFI_PASS`, `NAS_HOST`, `TOKEN`.
-4. Прошить. Экран сам переживает потери Wi-Fi и рестарты NAS
-   (показывает «NAS UNREACHABLE», пока связь не вернётся).
+Экран у платы впаян — ничего подключать не надо, только кабель USB-C.
+
+1. **Arduino IDE** (arduino.cc). В *File → Preferences → Additional boards
+   manager URLs* добавить:
+   `https://espressif.github.io/arduino-esp32/package_esp32_index.json`,
+   затем *Boards Manager* → установить **esp32 by Espressif**.
+2. *Tools → Board* → **LilyGo T-Display-S3**. Если такой нет — **ESP32S3 Dev
+   Module** и руками: *USB CDC On Boot: Enabled*, *Flash Size: 16MB*,
+   *PSRAM: OPI PSRAM*, *Partition Scheme: 16M Flash (3MB APP)*.
+3. *Library Manager* → установить **TFT_eSPI** (Bodmer) и **ArduinoJson** (≥7).
+4. Настроить TFT_eSPI под панель: открыть
+   `Документы/Arduino/libraries/TFT_eSPI/User_Setup_Select.h`, закомментировать
+   `#include <User_Setup.h>` и раскомментировать строку с
+   **`Setup206_LilyGo_T_Display_S3.h`** — профиль уже в комплекте библиотеки.
+5. Открыть `esp32-glance.ino`, заполнить четыре константы сверху:
+   `WIFI_SSID`, `WIFI_PASS`, `NAS_HOST` (IP NAS-а) и `TOKEN` — токен создаётся
+   в панели: **Настройки → Экран → Токен → Создать**, там же «Копировать URL»
+   (токен — это часть `token=…`). Для второго экрана впишите его id в
+   `SCREEN_ID` (виден в конструкторе как `screen=…`).
+6. Подключить плату по USB-C, выбрать появившийся порт (*Tools → Port*) и
+   нажать **Upload**. Если порт не появился: зажать кнопку **BOOT**, нажать
+   **RST**, отпустить BOOT — плата войдёт в режим прошивки.
+7. После прошивки экран сам подключится к Wi-Fi и покажет плитки. Кнопки
+   BOOT/KEY листают страницы. Потери Wi-Fi/NAS переживает сам: «offline Nm»
+   на последних данных, «NAS UNREACHABLE» — если данных ещё не было.
+
+**T-Display-S3 Long** — та же процедура, но вместо TFT_eSPI взять библиотеку
+из репозитория LilyGO (см. «Целевое железо» выше) и заменить draw-вызовы.
+
+Если что-то не заводится — смотрите Serial Monitor (115200): скетч пишет,
+что происходит.
 
 ## Идеи для доработки
 
