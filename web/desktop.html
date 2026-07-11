@@ -1654,6 +1654,7 @@
    --success:#1F9E6E;--warning:#C98A1B;--danger:#C0473B;
    --callout-bg:#FBF3D9;--callout-border:#F0E2AE;
    --checkbox-border:var(--border-strong);
+   --veil:rgba(28,27,26,.06);          /* translucent hover wash — never solid */
    --shadow-1:0 1px 2px rgba(0,0,0,.04),0 1px 3px rgba(0,0,0,.06);
    --shadow-2:0 4px 12px rgba(0,0,0,.08),0 2px 4px rgba(0,0,0,.04);
    background:var(--bg);color:var(--text);font-family:var(--font-ui)}
@@ -1668,6 +1669,7 @@
    --success:#3FC48C;--warning:#E0B25A;--danger:#E27B6E;
    --callout-bg:#2A2A18;--callout-border:#4A4522;
    --checkbox-border:#4A4A46;
+   --veil:rgba(255,255,255,.07);
    --shadow-1:0 1px 2px rgba(0,0,0,.3),0 1px 3px rgba(0,0,0,.35);
    --shadow-2:0 4px 14px rgba(0,0,0,.4),0 2px 6px rgba(0,0,0,.3)}
   /* window chrome follows the notes theme: seamless strip above the paper */
@@ -1683,7 +1685,7 @@
   .nt-root .btn.pri{background:var(--accent);border-color:var(--accent);color:var(--on-accent)}
   .nt-root .btn.pri:hover{background:var(--accent-hover)}
   .nt-root .iconbtn{color:var(--text-muted);background:transparent;border:0;border-radius:var(--radius-sm)}
-  .nt-root .iconbtn:hover{background:var(--surface-inset);color:var(--text)}
+  .nt-root .iconbtn:hover{background:var(--veil);color:var(--text)}
   .nt-side input{height:32px;border-radius:var(--radius-sm);border:1px solid var(--border);
    background:var(--surface);color:var(--text);padding:0 var(--sp-3);font-size:var(--fs-meta)}
   .nt-side input::placeholder{color:var(--text-faint)}
@@ -1751,7 +1753,7 @@
   .nt-tbsp{flex:1}
   .nt-tbb{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border:0;background:transparent;
    color:var(--text-muted);border-radius:var(--radius-sm);cursor:pointer;padding:0}
-  .nt-tbb:hover{color:var(--text);background:var(--surface-2)}
+  .nt-tbb:hover{color:var(--text);background:var(--veil)}
   .nt-tbb:active,.nt-tbb.on{color:var(--accent);background:var(--accent-soft)}
   .nt-tbs{width:1px;height:16px;background:var(--border);margin:0 var(--sp-1);flex:none}
   /* the paper: surface card, radius-lg, shadow-1 */
@@ -1806,7 +1808,7 @@
    right:19px;top:17px;width:5px;height:5px;transform:rotate(45deg);pointer-events:none;
    border-right:1.5px solid var(--text-faint);border-bottom:1.5px solid var(--text-faint);
    opacity:0;transition:opacity .12s}
-  .nt-root .nt-ed .toastui-editor-ww-code-block:hover:after{opacity:1;background-color:var(--surface-2)}
+  .nt-root .nt-ed .toastui-editor-ww-code-block:hover:after{opacity:1;background-color:var(--veil)}
   .nt-root .nt-ed .toastui-editor-ww-code-block:hover:before{opacity:1}
   .nt-root .nt-ed .toastui-editor-ww-code-block.nt-lang-open:after{opacity:1;background-color:var(--accent-soft);color:var(--accent)}
   .nt-root .nt-ed .toastui-editor-ww-code-block.nt-lang-open:before{opacity:1;border-color:var(--accent)}
@@ -1823,7 +1825,7 @@
   .nt-langs button{display:flex;align-items:center;gap:var(--sp-1);padding:var(--sp-1) var(--sp-2);border:0;background:transparent;
    color:var(--text);font-family:var(--font-mono);font-size:13px;border-radius:var(--radius-sm);cursor:pointer;text-align:left;width:100%}
   .nt-langs button::before{content:"";width:13px;flex:none;color:var(--accent)}
-  .nt-langs button:hover{background:var(--surface)}
+  .nt-langs button:hover{background:var(--veil)}
   .nt-langs button.on{background:var(--accent-soft);color:var(--accent)}
   .nt-langs button.on::before{content:"✓"}
   /* ===== Part A polish: every content block, tokens only (2026-07-11) ===== */
@@ -6244,17 +6246,24 @@ const NT_LANGS=["text","bash","python","javascript","typescript","json","yaml","
 function ntLangWire(box){
  let anchor=null;
  box.addEventListener("mousedown",e=>{const cb=e.target.closest(".toastui-editor-ww-code-block");if(cb)anchor=cb;},true);
- new MutationObserver(ms=>ms.forEach(m=>{
-  m.addedNodes.forEach(n=>{if(n.nodeType===1&&n.classList.contains("toastui-editor-ww-code-block-language"))ntLangDress(n,anchor);});
-  m.removedNodes.forEach(n=>{if(n.nodeType===1&&n.classList&&n.classList.contains("toastui-editor-ww-code-block-language")&&anchor)anchor.classList.remove("nt-lang-open");});
- })).observe(box,{childList:true,subtree:true});
+ new MutationObserver(()=>{
+  const sp=box.querySelector(".toastui-editor-ww-code-block-language");
+  if(sp&&!sp._nt){sp._nt=1;ntLangDress(box,sp,anchor);}
+  if(!sp)box.querySelectorAll(".nt-lang-open").forEach(b=>b.classList.remove("nt-lang-open"));
+ }).observe(box,{childList:true,subtree:true});
 }
-function ntLangDress(sp,anchor){
+function ntLangDress(box,sp,anchor){
  const inp=sp.querySelector("input");if(!inp)return;
+ /* re-parent into .nt-ed (position:relative) and place absolutely under the
+    badge, clamped to the editor box — position:fixed at viewport coords kept
+    escaping the window (and ancestor filters break fixed altogether) */
  if(anchor){anchor.classList.add("nt-lang-open");
-  const r=anchor.getBoundingClientRect(),W=190;
-  sp.style.top=Math.min(r.top+38,innerHeight-290)+"px";
-  sp.style.left=Math.max(8,r.right-10-W)+"px";sp.style.width=W+"px";}
+  box.appendChild(sp);
+  const bb=box.getBoundingClientRect(),ab=anchor.getBoundingClientRect(),W=180;
+  sp.style.position="absolute";
+  sp.style.left=Math.max(8,Math.min(ab.right-bb.left-10-W,bb.width-W-8))+"px";
+  sp.style.top=Math.max(8,Math.min(ab.top-bb.top+38,bb.height-300))+"px";
+  sp.style.width=W+"px";}
  const cur=(inp.value||"text").toLowerCase();
  const ls=document.createElement("div");ls.className="nt-langs";
  NT_LANGS.forEach(l=>{const b=document.createElement("button");b.type="button";b.textContent=l;
@@ -6426,10 +6435,10 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
    <div class="nt-head">
     <input id="ntTitle" placeholder="Заголовок">
     <span id="ntSt" class="nt-mut"></span>
-    <button class="iconbtn${r.pinned?" nt-pin-on":""}" id="ntPin" title="Закрепить">${svg("star",15)}</button>
-    <button class="iconbtn" id="ntAtt" title="Прикрепить файл">${svg("clip",15)}</button>
-    <button class="iconbtn" id="ntHist" title="История версий">${svg("clock",15)}</button>
-    <button class="iconbtn" id="ntDel" title="В корзину">${svg("trash",15)}</button>
+    <button class="iconbtn${r.pinned?" nt-pin-on":""}" id="ntPin" title="Закрепить">${svg("star",13)}</button>
+    <button class="iconbtn" id="ntAtt" title="Прикрепить файл">${svg("clip",13)}</button>
+    <button class="iconbtn" id="ntHist" title="История версий">${svg("clock",13)}</button>
+    <button class="iconbtn" id="ntDel" title="В корзину">${svg("trash",13)}</button>
    </div>
    <div class="nt-tagrow" id="ntTagRow"></div>
    <div class="nt-tb" id="ntTb"></div>
