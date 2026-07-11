@@ -6275,47 +6275,40 @@ const NT_LANGS=["text","bash","python","javascript","typescript","json","yaml","
 function ntLangWire(box){
  let anchor=null;
  box.addEventListener("mousedown",e=>{const cb=e.target.closest(".toastui-editor-ww-code-block,.toastui-editor-ww-code-block-highlighting");if(cb)anchor=cb;},true);
- /* fallback UI of the base editor (only when the highlight plugin is absent) */
  new MutationObserver(()=>{
+  /* base-editor fallback UI (no highlight plugin) */
   const sp=box.querySelector(".toastui-editor-ww-code-block-language");
   if(sp&&!sp._nt){sp._nt=1;ntLangDress(box,sp,anchor);}
-  if(!sp&&!box._ntPluginOpen)box.querySelectorAll(".nt-lang-open").forEach(b=>b.classList.remove("nt-lang-open"));
+  /* highlight-plugin UI: the wrapper is created FRESH on every badge click
+     (openLanguageSelectBox → new instance) and destroyed on close — it can
+     only be caught here, never wired once at editor init */
+  const wr=box.querySelector(".toastui-editor-code-block-language");
+  if(wr&&!wr._nt){wr._nt=1;ntLangDressHl(box,wr,anchor);}
+  if(!sp&&!wr)box.querySelectorAll(".nt-lang-open").forEach(b=>b.classList.remove("nt-lang-open"));
  }).observe(box,{childList:true,subtree:true});
- /* highlight-plugin UI (.toastui-editor-code-block-language): created once at
-    editor init, toggled via inline display. Re-parent into .nt-ed and place
-    under the clicked badge on every open; add live filtering (the vendor
-    hides the list on any non-navigation key instead of filtering). */
- const wr=box.querySelector(".toastui-editor-code-block-language");
- if(!wr)return;
+}
+function ntLangDressHl(box,wr,anchor){
+ /* out of the overflow-hidden editor body; CSS pins it position:absolute
+    inside .nt-ed so vendor viewport coords can never inflate the window */
  box.appendChild(wr);
  const inp=wr.querySelector("input"),list=wr.querySelector(".toastui-editor-code-block-language-list");
  const btns=list?[...list.querySelectorAll("button")]:[];
+ const bb=box.getBoundingClientRect(),W=200;
+ let L=bb.width-W-8,T=8;
+ if(anchor){anchor.classList.add("nt-lang-open");
+  const ab=anchor.getBoundingClientRect();
+  L=Math.max(8,Math.min(ab.right-bb.left-10-W,bb.width-W-8));
+  T=Math.max(8,Math.min(ab.top-bb.top+38,bb.height-320));}
+ wr.style.left=L+"px";wr.style.top=Math.max(8,T)+"px";
+ if(list)list.style.display="block";
  if(inp){inp.placeholder=nasTr("поиск языка…");
+  /* re-parenting blurred the vendor-focused input — refocus and select */
+  setTimeout(()=>inp.select(),30);
   inp.addEventListener("input",()=>{const v=inp.value.trim().toLowerCase();
-   if(list)list.style.display="block";
+   if(list)list.style.display="block";   // vendor hides the list on non-nav keys
    btns.forEach(b=>{b.style.display=!v||b.textContent.toLowerCase().includes(v)?"":"none";});});}
- let wasOpen=false;
- new MutationObserver(()=>{
-  const open=wr.style.display!=="none";
-  box._ntPluginOpen=open;
-  if(open&&!wasOpen){
-   /* after the vendor's own top/left write (it uses viewport coords of the
-      node start — top-left, off target); we anchor under the badge instead */
-   setTimeout(()=>{
-    const bb=box.getBoundingClientRect(),W=200;
-    let L=bb.width-W-8,T=8;   // no anchor → still clamp inside the editor
-    if(anchor){anchor.classList.add("nt-lang-open");
-     const ab=anchor.getBoundingClientRect();
-     L=Math.max(8,Math.min(ab.right-bb.left-10-W,bb.width-W-8));
-     T=Math.max(8,Math.min(ab.top-bb.top+38,bb.height-320));}
-    wr.style.left=L+"px";wr.style.top=Math.max(8,T)+"px";
-    btns.forEach(b=>b.style.display="");
-    if(inp)inp.select();
-    const act=list&&list.querySelector("button.active");if(act)act.scrollIntoView({block:"nearest"});
-   },0);}
-  if(!open)box.querySelectorAll(".nt-lang-open").forEach(b=>b.classList.remove("nt-lang-open"));
-  wasOpen=open;
- }).observe(wr,{attributes:true,attributeFilter:["style"]});
+ const act=list&&list.querySelector("button.active");
+ if(act)setTimeout(()=>act.scrollIntoView({block:"nearest"}),0);
 }
 /* custom select on top of the vendor mechanics: its <input> stays as the
    commit path (Enter/blur) AND doubles as the search field; around it — our
