@@ -2202,10 +2202,14 @@ def notes_tree():
                     head = fh.read(2048)
             except OSError:
                 continue
-            title, tags, _ = _note_parse(head)
+            title, tags, body = _note_parse(head)
+            # short body preview for the list cards (markdown noise stripped)
+            prev = re.sub(r"[#*`>\[\]!|_-]+", " ", body)
+            prev = re.sub(r"\(https?://\S+\)|\(/api/\S+\)", "", prev)
+            prev = " ".join(prev.split())[:150]
             stats["notes"] += 1
             notes.append({"path": (rel + "/" if rel else "") + f, "folder": rel,
-                          "title": title or f[:-3], "tags": tags,
+                          "title": title or f[:-3], "tags": tags, "prev": prev,
                           "pinned": _note_meta(head).get("pinned") == "1",
                           "mtime": int(st.st_mtime), "size": st.st_size})
     return {"root": root, "dirs": dirs, "notes": notes, "stats": stats}

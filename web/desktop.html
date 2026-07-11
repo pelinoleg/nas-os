@@ -1664,16 +1664,19 @@
   .nt-list{width:270px;flex:none;overflow:auto;border-right:1px solid var(--line);padding:10px}
   .nt-lhead{display:flex;align-items:center;justify-content:space-between;padding:4px 8px 10px;font-size:12px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--dim)}
   .nt-lhead span{font-weight:600;color:var(--mut)}
-  .nt-item{display:flex;flex-direction:column;gap:4px;padding:10px 12px;border-radius:10px;cursor:pointer;border:1px solid transparent}
-  .nt-item:hover{background:var(--sel)}
-  .nt-item.on{background:var(--sel);border-color:var(--line);box-shadow:var(--sh-sm)}
-  .nt-item b{font-size:13.5px}
-  .nt-snip{font-size:11.5px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .nt-meta{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--dim)}
-  .nt-meta i{font-style:normal;color:var(--accent)}
+  /* note cards (по референсу): заголовок, 2 строки превью, чипы тегов + дата */
+  .nt-item{display:flex;flex-direction:column;gap:5px;padding:12px 13px;margin-bottom:8px;border-radius:12px;cursor:pointer;
+   background:var(--card);border:1.5px solid var(--line)}
+  .nt-item:hover{box-shadow:var(--sh-sm)}
+  .nt-item.on{border-color:var(--accent);box-shadow:var(--sh-sm)}
+  .nt-item b{font-size:13.5px;line-height:1.3;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+  .nt-snip{font-size:11.5px;line-height:1.45;color:var(--dim);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+  .nt-meta{display:flex;align-items:center;gap:4px;font-size:10.5px;color:var(--mut);margin-top:2px;flex-wrap:wrap}
+  .nt-meta i{font-style:normal;color:var(--accent);background:var(--accent-soft);border-radius:999px;padding:2px 8px;font-weight:600}
   .nt-meta>span{margin-left:auto}
   .nt-edit{flex:1;display:flex;flex-direction:column;gap:8px;padding:14px;min-width:0}
   .nt-empty{margin:auto;color:var(--mut)}
+  .nt-crumb{padding:2px 14px 0;font-size:11.5px;color:var(--nt-dim,var(--dim));min-height:15px}
   .nt-head{display:flex;align-items:center;gap:8px}
   .nt-ed{flex:1;min-height:0;border-radius:12px;overflow:hidden;display:flex;flex-direction:column;position:relative}
   .nt-ed .toastui-editor-defaultUI{height:100%!important;display:flex;flex-direction:column;width:100%;font-family:inherit}
@@ -1687,7 +1690,7 @@
   .nt-edit{background:var(--nt-bg);color:var(--nt-ink);padding:10px 4px 0 10px;gap:0;border-left:1px solid var(--line)}
   .nt-empty{color:var(--nt-dim,var(--mut))}
   .nt-head{padding:8px 14px 0}
-  .nt-head input{flex:1;font-size:22px;font-weight:700;height:40px;border:0;background:transparent;padding:0;color:var(--nt-ink)}
+  .nt-head input{flex:1;font-size:26px;font-weight:800;letter-spacing:-.02em;height:42px;border:0;background:transparent;padding:0;color:var(--nt-ink)}
   .nt-head input::placeholder{color:var(--nt-dim);opacity:.6}
   .nt-head input:focus{outline:none}
   .nt-head .iconbtn{color:var(--nt-dim);background:transparent;border-color:transparent}
@@ -1702,8 +1705,7 @@
   .nt-ed{flex:1;min-height:0;display:flex;flex-direction:column;position:relative}
   .nt-ed .toastui-editor-defaultUI{height:100%!important;display:flex;flex-direction:column;width:100%;font-family:inherit;border:0;border-radius:0;background:var(--nt-bg)}
   .nt-ed .toastui-editor-defaultUI-toolbar{background:transparent;border-bottom:1px solid var(--nt-line);border-radius:0;padding:2px 8px;height:38px}
-  .nt-ed .toastui-editor-toolbar-group{gap:0}
-  .nt-ed .toastui-editor-toolbar-icons{border:0;background-color:transparent;border-radius:7px;width:28px;height:28px;background-size:400px 46px;margin:3px 0}
+  .nt-ed .toastui-editor-toolbar-icons{border:0;background-color:transparent;border-radius:7px}
   .nt-ed .toastui-editor-toolbar-icons:not(:disabled):hover{background-color:color-mix(in srgb,var(--nt-ink) 9%,transparent)}
   .nt-ed .toastui-editor-toolbar-divider{background-color:var(--nt-line);margin:9px 6px;height:16px}
   .nt-ed .toastui-editor-main{flex:1;min-height:0}
@@ -6100,8 +6102,8 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
   l.innerHTML=`<div class="nt-lhead">${esc(where)}<span>${items.length}</span></div>`
    +(items.length?items.map(n=>`<div class="nt-item${NT_PATH===n.path?" on":""}" data-p="${att(n.path)}" draggable="true">
     <b>${n.pinned?svg("star",11)+" ":""}${esc(n.title)}</b>
-    ${n.snip?`<span class="nt-snip">${esc(n.snip)}</span>`:""}
-    <span class="nt-meta">${n.tags.map(t=>`<i>#${esc(t)}</i>`).join(" ")}<span>${fmtD(n.mtime)}</span></span>
+    ${(n.snip||n.prev)?`<span class="nt-snip">${esc(n.snip||n.prev)}</span>`:""}
+    <span class="nt-meta">${n.tags.slice(0,3).map(t=>`<i>#${esc(t)}</i>`).join("")}<span>${fmtD(n.mtime)}</span></span>
    </div>`).join(""):`<div class="nt-mut" style="padding:18px">пусто</div>`);
   l.querySelectorAll(".nt-item").forEach(el2=>{
    el2.onclick=()=>openNote(el2.dataset.p);
@@ -6145,6 +6147,7 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
   try{localStorage.setItem("nasNotesLast",p);}catch(e){}
   const ed=q("#ntEdit");
   ed.innerHTML=`
+   <div class="nt-crumb">${p.includes("/")?esc(p.slice(0,p.lastIndexOf("/")).split("/").join(" / "))+" /":"&nbsp;"}</div>
    <div class="nt-head">
     <input id="ntTitle" placeholder="Заголовок" value="${att(r.title)}">
     <span id="ntSt" class="nt-mut"></span>
@@ -6185,6 +6188,7 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
   NT_ED=new toastui.Editor({
    el:box,height:"100%",usageStatistics:false,
    customHTMLSanitizer:ntSanitize,
+   toolbarItems:[["heading","bold","italic","strike"],["ul","ol","task"],["quote","codeblock"],["table","image","link"]],
    initialEditType:SET.ntMode||"wysiwyg",previewStyle:"tab",
    language:(window.NAS_LANG||"en")==="en"?"en-US":"ru-RU",
    theme:dark?"dark":"light",
