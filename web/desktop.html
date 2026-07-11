@@ -5264,7 +5264,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
      <div class="field" style="display:flex;gap:8px"><div style="flex:1"><label>Пользователь</label><input id="rmU" class="mono" value="${att((rm&&rm.user)||"")}" placeholder="root"></div>
        <div style="width:90px"><label>Порт</label><input id="rmP" class="mono" value="${att((rm&&rm.port)||22)}"></div></div>
      <div class="field"><label>Пароль <span style="color:var(--mut);font-weight:400">— ${rm&&rm.has_pass?"задан; пусто = не менять":"пусто = вход по ключу"}</span></label><input id="rmW" type="password" autocomplete="new-password"></div>
-     <div class="field"><label>Папка на сервере</label><input id="rmD" class="mono" value="${att((rm&&rm.path)||"/")}"></div>
+     <div class="field"><label>Папка на сервере <span style="color:var(--mut);font-weight:400">— пусто = домашняя папка (например, rsync.net)</span></label><input id="rmD" class="mono" value="${att((rm&&rm.path)||"")}" placeholder="/ или /volume2/… или пусто"></div>
      <div class="field" style="flex-direction:row;align-items:center;gap:10px"><label style="margin:0;flex:1">Подключать автоматически <span style="color:var(--mut);font-weight:400">— панель монтирует сама (и после перезагрузки)</span></label><label class="tgl" style="flex:none"><input type="checkbox" id="rmA"${rm&&rm.auto?" checked":""}><span class="sl"></span></label></div>
      <div class="r"><button class="btn" id="rmX">Отмена</button><button class="btn pri" id="rmOk">Сохранить</button></div></div>`;
    s.classList.add("show");
@@ -5384,7 +5384,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    cwd=r.path;tabs[tabI]=r.path;entries=r.entries||[];searchRes=null;sel.clear();filt="";lastIdx=-1;
    lastSig=dirSig(entries);
    const si=body.querySelector("#fSearch");if(si)si.value="";
-   cursor=-1;renderTabs();renderCrumb();renderFav();renderVols();renderList();selUpdate();listBox.focus();}
+   cursor=-1;renderTabs();renderCrumb();renderFav();renderVols();renderRemotes(false);renderList();selUpdate();listBox.focus();}
 
  /* Auto-refresh: the folder can change under us (uploads, USB import, rsync, another
     tab). Re-render only when the listing actually differs, and keep the selection and
@@ -9430,10 +9430,6 @@ function opsPop(){const b=document.getElementById("opsBtn");if(!b)return;
 /* context menu */
 document.querySelector(".desk").addEventListener("contextmenu",e=>{e.preventDefault();
  showMenu(e.clientX,e.clientY,[
-  {label:"Система",ic:svg("gauge",17),act:winMon},{label:"Диски",ic:svg("disks",17),act:winDisks},
-  {label:"Заметки",ic:svg("note",17),act:winNotes},
-  {label:"Экран NAS",ic:svg("monitor",17),act:winGlance},
-  {label:"Персонализация",ic:svg("cog",17),act:winSettings},{sep:1},
   {label:"Обновить ярлыки",ic:svg("refresh",17),act:()=>{pollApps();toast("Ярлыки обновлены");}},
   {label:"Обновить всё",ic:svg("refresh",17),act:()=>{poll();pollApps();pollDisks();}},{label:"Открыть Cockpit",ic:svg("grid",17),act:()=>window.open(cockpitURL(),"_blank")},{sep:1},
   {label:"Выйти из панели",ic:svg("key",17),act:logout},{sep:1},

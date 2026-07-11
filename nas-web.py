@@ -6440,7 +6440,7 @@ def remotes_list():
     for r in _remotes_load():
         out.append({"id": r["id"], "name": r.get("name") or r["id"],
                     "host": r.get("host", ""), "user": r.get("user", ""),
-                    "port": r.get("port") or 22, "path": r.get("path") or "/",
+                    "port": r.get("port") or 22, "path": r.get("path") or "",
                     "has_pass": bool(r.get("pass")), "auto": bool(r.get("auto")),
                     "mounted": _remote_mounted(r["id"]), "mount": _remote_mp(r["id"])})
     return {"ok": True, "remotes": out, "sshfs": bool(shutil.which("sshfs"))}
@@ -6467,7 +6467,9 @@ def remotes_save(d):
         port = 22
     cur.update({"name": str(d.get("name") or "").strip()[:40] or host,
                 "host": host, "user": user, "port": port,
-                "path": str(d.get("path") or "/").strip() or "/",
+                # пусто = домашняя папка (sshfs "host:"): у rsync.net и подобных
+                # SFTP-хостингов корень / закрыт, доступен только home
+                "path": str(d.get("path") or "").strip(),
                 "auto": bool(d.get("auto"))})
     if d.get("pass"):
         cur["pass"] = str(d["pass"])
@@ -6500,7 +6502,7 @@ def remote_mount(rid):
             "default_permissions,StrictHostKeyChecking=accept-new,ConnectTimeout=10")
     if r.get("pass"):
         opts += ",password_stdin"
-    src = "%s@%s:%s" % (r.get("user") or "root", r["host"], r.get("path") or "/")
+    src = "%s@%s:%s" % (r.get("user") or "root", r["host"], r.get("path") or "")
     try:
         p = subprocess.run(["sshfs", src, mp, "-p", str(r.get("port") or 22), "-o", opts],
                            input=(r.get("pass") or "") + "\n" if r.get("pass") else None,
@@ -6536,6 +6538,68 @@ def _remotes_tick():
         threading.Thread(target=lambda i=rid: _safe(lambda: remote_mount(i)),
                          daemon=True).start()
 
+# резолв «настоящего» пути прямо на сервере: readlink -f + /proc/self/mountinfo
+# раскрывают И симлинки, И bind-mount'ы (Ugreen: /Backup — bind на /volume2/Backup,
+# через sftp это обычный каталог, симлинк-обходом не взять)
+_REMOTE_REALPATH_SH = r'''p="$0"
+if [ -e "$p" ]; then
+  rp=$(readlink -f -- "$p" 2>/dev/null || echo "$p")
+  awk -v p="$rp" '
+  { dev[NR]=$3; root[NR]=$4; mp[NR]=$5 }
+  END{
+    bl=-1; bi=0
+    for(i=1;i<=NR;i++){ m=mp[i]
+      if(p==m || index(p, (m=="/")?"/":m"/")==1){ if(length(m)>bl){bl=length(m); bi=i} } }
+    if(!bi){ print "REAL " p; exit }
+    main=""
+    for(i=1;i<=NR;i++) if(dev[i]==dev[bi] && root[i]=="/"){ main=mp[i]; break }
+    r=root[bi]; if(r=="/") r=""
+    if(main=="/") main=""
+    out=main r substr(p, bl+1)
+    print "REAL " ((out=="")?"/":out)
+  }' /proc/self/mountinfo
+else
+  # путь есть только в chroot-витрине SFTP (Ugreen/Synology): ищем шару по имени
+  # на томах и отдаём кандидатов с mtime — панель сверит с видом через sftp
+  share="${p#/}"; share="${share%%/*}"
+  rest="${p#/"$share"}"
+  for c in /volume*/"$share"; do
+    [ -e "$c$rest" ] && echo "CAND $c$rest $(stat -c %Y -- "$c$rest" 2>/dev/null || echo 0)"
+  done
+fi'''
+
+def _remote_realpath_ssh(r, remote_path):
+    """Спросить настоящий путь у самого сервера; None, если шелла/awk там нет."""
+    cmd = ["ssh", "-p", str(r.get("port") or 22),
+           "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=8"]
+    env = dict(_C_ENV)
+    if r.get("pass"):
+        if not shutil.which("sshpass"):
+            return None
+        cmd = ["sshpass", "-e"] + cmd
+        env["SSHPASS"] = r["pass"]
+    else:
+        cmd += ["-o", "BatchMode=yes"]
+    cmd += ["%s@%s" % (r.get("user") or "root", r["host"]),
+            "sh -c %s %s" % (shlex.quote(_REMOTE_REALPATH_SH), shlex.quote(remote_path))]
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=12, env=env)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    real, cands = None, []
+    for line in (p.stdout or "").splitlines():
+        if line.startswith("REAL /"):
+            real = line[5:].strip()
+        elif line.startswith("CAND /"):
+            bits = line[5:].rsplit(" ", 1)
+            try:
+                c = (bits[0].strip(), int(bits[1]))
+                if c not in cands:
+                    cands.append(c)
+            except (IndexError, ValueError):
+                pass
+    return real, cands
+
 def remote_realpath(rid, local_path):
     """Настоящий путь В ПРОСТРАНСТВЕ СЕРВЕРА для файла внутри sshfs-маунта.
     Нельзя ни резолвить локально (realpath уйдёт за пределы маунта), ни тупо
@@ -6547,7 +6611,9 @@ def remote_realpath(rid, local_path):
     lp0 = os.path.normpath(local_path or "")
     if not r or not (lp0 == mp or lp0.startswith(mp + os.sep)):
         return {"ok": False, "log": "путь вне маунта"}
-    base = "" if (r.get("path") or "/") == "/" else (r.get("path") or "").rstrip("/")
+    rp_cfg = (r.get("path") or "").strip()
+    home_mode = rp_cfg == ""                 # маунт домашней папки: серверные пути относительные
+    base = "" if rp_cfg in ("", "/") else rp_cfg.rstrip("/")
     def to_local(remote_abs):
         # серверный абсолютный путь → локальный через маунт (если достижим)
         if not base:
@@ -6587,7 +6653,28 @@ def remote_realpath(rid, local_path):
         res, i = nxt, i + 1
     if i < len(parts):
         res = res + "/" + "/".join(parts[i:])
-    return {"ok": True, "path": res or "/"}
+    res = res or "/"
+    # точнее знает сам сервер: bind-mounts и chroot-витрины SFTP через sshfs не
+    # видны. Нет шелла на той стороне (rsync.net и т.п.) — остаёмся на sshfs-резолве
+    ask = (res.lstrip("/") or ".") if home_mode else res
+    got = _remote_realpath_ssh(r, ask)
+    if got:
+        real, cands = got
+        if real:
+            return {"ok": True, "path": real}
+        if len(cands) == 1:
+            return {"ok": True, "path": cands[0][0]}
+        if len(cands) > 1:
+            # шара с этим именем есть на нескольких томах — сверяем mtime
+            # каталога через sftp с кандидатами
+            try:
+                mt = int(os.stat(lp0).st_mtime)
+                hit = [c for c, m in cands if m == mt]
+                if len(hit) == 1:
+                    return {"ok": True, "path": hit[0]}
+            except OSError:
+                pass
+    return {"ok": True, "path": res}
 
 def remote_umount(rid):
     if not _REMOTE_ID.match(rid or ""):

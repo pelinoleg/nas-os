@@ -984,6 +984,8 @@ window.NAS_I18N = { en: {
 "Главный NAS": "Main NAS",
 "Порт": "Port",
 "Папка на сервере": "Folder on the server",
+"— пусто = домашняя папка (например, rsync.net)": "— empty = home folder (e.g. rsync.net)",
+"или пусто": "or empty",
 "Подключать автоматически": "Connect automatically",
 "Остановлено": "Stopped",
 "— панель монтирует сама (и после перезагрузки)": "— the panel mounts it by itself (incl. after a reboot)",
