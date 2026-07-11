@@ -965,6 +965,7 @@ window.NAS_I18N = { en: {
 "Обновить реплику": "Update replica",
 "Реплика обновлена": "Replica updated",
 "База данных на этом NAS будет перезаписана дампом с источника. Приложение перезапустится той же версией, что и источник.": "The database on this NAS will be overwritten with the dump from the source. The app will restart pinned to the source's version.",
+"Настроить…": "Configure…",
 "На рабочий стол…": "Add to desktop…",
 "Ярлык…": "Shortcut…",
 "Ярлык:": "Shortcut:",

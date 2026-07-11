@@ -3,5 +3,6 @@
   "desc": "Уведомления об обновлениях образов (без веб-интерфейса)",
   "category": "tools",
   "icon": "https://cdn.jsdelivr.net/gh/selfhst/icons@main/svg/diun.svg",
-  "port": null
+  "port": null,
+  "hidden": true
 }

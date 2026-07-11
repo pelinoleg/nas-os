@@ -4216,6 +4216,7 @@ function stCard(a,tc,reload){
  else{
   if(a.port&&a.running)btn("Открыть","expand","",()=>window.open(`http://${host()}:${a.port}`,"_blank"));
   if(!a.running)btn("Запустить","play","pri",()=>stRunDlg(a.name+" — запуск",{name:a.id,action:"up"},tc,reload));
+  if((a.fields||[]).length)btn("Настроить…","cog","",()=>stInstallDlg(a,tc,reload));
   btn("Обновить","arrowup","",()=>stRunDlg(a.name+" — обновление (pull + up)",{name:a.id,action:"update"},tc,reload));
   if(a.replica)btn("Реплика…","sync","",()=>stReplicaDlg(a,tc,reload));
   btn("Удалить","trash","dng",()=>confirmDlg("Удалить "+a.name,"Стек будет остановлен, папка /opt/stacks/"+a.id+" удалена. Данные приложения (тома и папки в пуле) останутся на диске.",async()=>{
@@ -4238,11 +4239,11 @@ function stRunDlg(title,body,tc,reload){
 function stInstallDlg(a,tc,reload){
  const s=document.getElementById("scrim");
  const flds=a.fields||[],main=flds.filter(f=>!f.adv),adv=flds.filter(f=>f.adv);
- const row=f=>`<div class="field"><label>${esc(nasTr(f.label||f.key))}${f.hint?` <span style="color:var(--mut);font-weight:400">— ${esc(nasTr(f.hint))}</span>`:""}</label><input data-k="${att(f.key)}"${f.secret?' type="password"':""} value="${att(f.default||"")}" autocomplete="off" spellcheck="false"></div>`;
- s.innerHTML=`<div class="dialog" style="max-width:560px;width:92vw"><h3>${esc(a.name)} — установка</h3>
+ const row=f=>`<div class="field"><label>${esc(nasTr(f.label||f.key))}${f.hint?` <span style="color:var(--mut);font-weight:400">— ${esc(nasTr(f.hint))}</span>`:""}</label><input data-k="${att(f.key)}"${f.secret?' type="password"':""} value="${att(f.secret?"":(f.default||""))}" placeholder="${att(f.secret?(f.has_value?nasTr("•••••• (задан; пусто = не менять)"):""):"")}" autocomplete="off" spellcheck="false"></div>`;
+ s.innerHTML=`<div class="dialog" style="max-width:560px;width:92vw"><h3>${esc(a.name)} — ${a.installed?"настройка":"установка"}</h3>
   ${main.map(row).join("")||`<p style="color:var(--mut);font-size:13px">Настройки не требуются — приложение готово к запуску.</p>`}
   ${adv.length?`<details><summary style="cursor:pointer;color:var(--mut);font-size:13px;margin:6px 0">Дополнительно (${adv.length})</summary>${adv.map(row).join("")}</details>`:""}
-  <div class="r"><button class="btn" id="stX">Отмена</button><button class="btn pri" id="stGo">${svg("download",14)} Установить</button></div>
+  <div class="r"><button class="btn" id="stX">Отмена</button><button class="btn pri" id="stGo">${svg("download",14)} ${a.installed?"Сохранить и перезапустить":"Установить"}</button></div>
   <div class="mcon" id="stCon"></div></div>`;
  s.classList.add("show");
  s.querySelector("#stX").onclick=()=>s.classList.remove("show");

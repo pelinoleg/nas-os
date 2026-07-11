@@ -6142,6 +6142,18 @@ def store_catalog():
                            for f in (m.get("fields") or []) if f.get("key")],
                 "installed": bool(s), "running": bool(s and s["running"]),
                 "total": (s or {}).get("total", 0)}
+        if s and item["fields"]:
+            # «Настроить…»: prefill the dialog with the live .env; secrets are
+            # never sent back — the field just reports whether a value is set
+            env = _stack_env(sid)
+            for f in item["fields"]:
+                cur = env.get(f["key"])
+                if cur is None:
+                    continue
+                if f.get("secret"):
+                    f["has_value"] = bool(cur)
+                else:
+                    f["default"] = cur
         if rep:
             cfg = (st.get("replica") or {}).get(sid) or {}
             item["replica"] = {"desc": rep.get("desc") or "",
