@@ -5449,9 +5449,13 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    else if(ctrl&&k.toLowerCase()==="x"){if(sel.size){clip={mode:"cut",items:[...sel]};toast("Вырезано: "+sel.size);selUpdate();}}
    else if(ctrl&&k.toLowerCase()==="v"){if(clip&&clip.items.length)doPaste();}});
  async function doProps(e){const r=await api("/api/fs/stat?path="+encodeURIComponent(e.path)),d=(r&&r.ok)?r:{},sc=document.getElementById("scrim");
+   // внутри SSH-маунта показываем оба пути: локальный и настоящий на сервере
+   const rmt=REMS.find(x=>x.mounted&&(e.path===x.mount||e.path.startsWith(x.mount+"/")));
+   const srvPath=rmt?((rmt.path==="/"?"":rmt.path.replace(/\/$/,""))+e.path.slice(rmt.mount.length)||"/"):null;
    sc.innerHTML=`<div class="dialog"><h3>Свойства</h3>
      <div style="font-weight:650;font-size:13.5px">${esc(e.name)}</div>
-     <div class="mono" style="color:var(--mut);font-size:11px;word-break:break-all;margin-bottom:10px">${esc(e.path)}</div>
+     <div class="mono" style="color:var(--mut);font-size:11px;word-break:break-all;margin-bottom:${rmt?"2":"10"}px">${esc(e.path)}</div>
+     ${rmt?`<div class="mono" style="color:var(--mut);font-size:11px;word-break:break-all;margin-bottom:10px">${svg("net",11)} ${esc(rmt.name)}: ${esc(srvPath)}</div>`:""}
      <div style="display:grid;grid-template-columns:auto 1fr;gap:6px 16px;font-size:12.5px">
        <span style="color:var(--mut)">Тип</span><span>${e.type==="dir"?"каталог":"файл"}${d.link?" · симлинк":""}</span>
        <span style="color:var(--mut)">Размер</span><span id="pRs">${e.type==="dir"?`<button class="btn sm" id="pDu">${svg("gauge",13)} вычислить</button>`:fmtB(d.size!=null?d.size:e.size)}</span>
