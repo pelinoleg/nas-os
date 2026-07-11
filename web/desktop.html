@@ -1655,6 +1655,8 @@
   .nt-dnote:hover{background:var(--sel)}
   .nt-dnote.on{color:var(--accent);background:var(--sel)}
   .nt-dnote .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .nt-split{width:5px;flex:none;cursor:col-resize;touch-action:none;position:relative;z-index:5;margin:0 -2px}
+  .nt-split:hover{background:color-mix(in srgb,var(--accent) 35%,transparent)}
   .nt-tag{display:inline-flex;align-items:center;gap:4px;margin:2px 3px 2px 0;padding:3px 9px;border-radius:999px;background:var(--glass);border:1px solid var(--line);font-size:12px;cursor:pointer}
   .nt-tag i{font-style:normal;color:var(--dim);font-size:10px}
   .nt-tag.on{background:var(--sel);color:var(--accent);box-shadow:var(--sh-sm)}
@@ -6032,12 +6034,26 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
    <div style="margin-top:auto"><div class="nt-dir" id="ntTrash">${svg("trash",13)} Корзина</div>
    <div class="nt-dir" id="ntSet">${svg("cog",13)} Настройки</div></div>
   </div>
+  <div class="nt-split" id="ntSp1"></div>
   <div class="nt-list" id="ntList"></div>
+  <div class="nt-split" id="ntSp2"></div>
   <div class="nt-edit" id="ntEdit"><div class="nt-empty">Выберите заметку или создайте новую</div></div>`;
  const q=sel=>body.querySelector(sel);
  const flushSave=async()=>{if(NT_DIRTY&&NT_PATH)await saveNow();};
  const refresh=async()=>{const r=await api("/api/notes/tree");if(r&&r.notes){TREE=r;paintSide();paintList();}};
  const tagsAll=()=>{const m={};TREE.notes.forEach(n=>n.tags.forEach(t=>m[t]=(m[t]||0)+1));return Object.entries(m).sort((a,b)=>b[1]-a[1]);};
+ /* draggable column splitters; widths persist in SET */
+ const sideEl=q(".nt-side"),listEl=q("#ntList");
+ if(SET.ntW1)sideEl.style.width=SET.ntW1+"px";
+ if(SET.ntW2)listEl.style.width=SET.ntW2+"px";
+ const wireSplit=(sp,el,key,mn,mx)=>{sp.onpointerdown=e=>{
+  e.preventDefault();
+  const sx=e.clientX,sw=el.getBoundingClientRect().width;
+  const mv=ev=>{const w=Math.max(mn,Math.min(mx,Math.round(sw+ev.clientX-sx)));el.style.width=w+"px";SET[key]=w;};
+  const up=()=>{window.removeEventListener("pointermove",mv);window.removeEventListener("pointerup",up);saveSettings();};
+  window.addEventListener("pointermove",mv);window.addEventListener("pointerup",up);};};
+ wireSplit(q("#ntSp1"),sideEl,"ntW1",150,380);
+ wireSplit(q("#ntSp2"),listEl,"ntW2",190,480);
  const EXP=winNotes._exp||(winNotes._exp=new Set());
  const paintSide=()=>{
   const dirs=q("#ntDirs");
