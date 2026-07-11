@@ -1832,6 +1832,24 @@
    border-radius:var(--radius-sm);height:28px;padding:0 var(--sp-2);font-family:var(--font-mono);font-size:12px;color:var(--text)}
   .nt-root .nt-ed .toastui-editor-ww-code-block-language input::placeholder{color:var(--text-faint)}
   .nt-root .nt-ed .toastui-editor-ww-code-block-language input:focus{outline:none;box-shadow:inset 0 0 0 1.5px var(--accent)}
+  /* highlight-plugin language select (.toastui-editor-code-block-language):
+     same custom look; extra specificity beats tui-hl.css which loads later */
+  .nt-root .nt-ed .toastui-editor-code-block-language{position:absolute!important;right:auto;z-index:60;width:200px;
+   background:var(--surface-3);border:1px solid var(--border);border-radius:var(--radius-lg);
+   box-shadow:var(--shadow-2);padding:var(--sp-2);animation:ntpop .12s ease}
+  .nt-root .nt-ed .toastui-editor-code-block-language-input{display:block;width:auto;height:28px;padding:0;border:0;background:transparent}
+  .nt-root .nt-ed .toastui-editor-code-block-language-input input{background:var(--surface-inset);color:var(--text);
+   border-radius:var(--radius-sm);height:28px;padding:0 var(--sp-2);font-family:var(--font-mono);font-size:12px}
+  .nt-root .nt-ed .toastui-editor-code-block-language-input input:focus{outline:none;box-shadow:inset 0 0 0 1.5px var(--accent)}
+  .nt-root .nt-ed .toastui-editor-code-block-language-input input::placeholder{color:var(--text-faint)}
+  .nt-root .nt-ed .toastui-editor-code-block-language .toastui-editor-code-block-language-input::after,
+  .nt-root .nt-ed .toastui-editor-code-block-language.active .toastui-editor-code-block-language-input::after{content:none}
+  .nt-root .nt-ed .toastui-editor-code-block-language-list{position:static;width:auto;border:0;margin-top:var(--sp-1);border-radius:0;box-shadow:none}
+  .nt-root .nt-ed .toastui-editor-code-block-language-list .buttons{max-height:240px;overflow-y:auto;display:flex;flex-direction:column}
+  .nt-root .nt-ed .toastui-editor-code-block-language-list .buttons button{background:transparent;color:var(--text);
+   font-family:var(--font-mono);font-size:13px;padding:var(--sp-1) var(--sp-2);border-radius:var(--radius-sm);text-align:left;line-height:1.5}
+  .nt-root .nt-ed .toastui-editor-code-block-language-list .buttons button:hover{background:var(--veil)}
+  .nt-root .nt-ed .toastui-editor-code-block-language-list .buttons button.active{background:var(--accent-soft);color:var(--accent);font-weight:600}
   .nt-langs{max-height:240px;overflow-y:auto;margin-top:var(--sp-1);display:flex;flex-direction:column}
   .nt-langs button{display:flex;align-items:center;gap:var(--sp-1);padding:var(--sp-1) var(--sp-2);border:0;background:transparent;
    color:var(--text);font-family:var(--font-mono);font-size:13px;border-radius:var(--radius-sm);cursor:pointer;text-align:left;width:100%}
@@ -6257,11 +6275,44 @@ const NT_LANGS=["text","bash","python","javascript","typescript","json","yaml","
 function ntLangWire(box){
  let anchor=null;
  box.addEventListener("mousedown",e=>{const cb=e.target.closest(".toastui-editor-ww-code-block");if(cb)anchor=cb;},true);
+ /* fallback UI of the base editor (only when the highlight plugin is absent) */
  new MutationObserver(()=>{
   const sp=box.querySelector(".toastui-editor-ww-code-block-language");
   if(sp&&!sp._nt){sp._nt=1;ntLangDress(box,sp,anchor);}
-  if(!sp)box.querySelectorAll(".nt-lang-open").forEach(b=>b.classList.remove("nt-lang-open"));
+  if(!sp&&!box._ntPluginOpen)box.querySelectorAll(".nt-lang-open").forEach(b=>b.classList.remove("nt-lang-open"));
  }).observe(box,{childList:true,subtree:true});
+ /* highlight-plugin UI (.toastui-editor-code-block-language): created once at
+    editor init, toggled via inline display. Re-parent into .nt-ed and place
+    under the clicked badge on every open; add live filtering (the vendor
+    hides the list on any non-navigation key instead of filtering). */
+ const wr=box.querySelector(".toastui-editor-code-block-language");
+ if(!wr)return;
+ box.appendChild(wr);
+ const inp=wr.querySelector("input"),list=wr.querySelector(".toastui-editor-code-block-language-list");
+ const btns=list?[...list.querySelectorAll("button")]:[];
+ if(inp){inp.placeholder=nasTr("поиск языка…");
+  inp.addEventListener("input",()=>{const v=inp.value.trim().toLowerCase();
+   if(list)list.style.display="block";
+   btns.forEach(b=>{b.style.display=!v||b.textContent.toLowerCase().includes(v)?"":"none";});});}
+ let wasOpen=false;
+ new MutationObserver(()=>{
+  const open=wr.style.display!=="none";
+  box._ntPluginOpen=open;
+  if(open&&!wasOpen){
+   /* after the vendor's own top/left write (it uses viewport coords of the
+      node start — top-left, off target); we anchor under the badge instead */
+   setTimeout(()=>{
+    if(anchor){anchor.classList.add("nt-lang-open");
+     const bb=box.getBoundingClientRect(),ab=anchor.getBoundingClientRect(),W=200;
+     wr.style.left=Math.max(8,Math.min(ab.right-bb.left-10-W,bb.width-W-8))+"px";
+     wr.style.top=Math.max(8,Math.min(ab.top-bb.top+38,bb.height-320))+"px";}
+    btns.forEach(b=>b.style.display="");
+    if(inp)inp.select();
+    const act=list&&list.querySelector("button.active");if(act)act.scrollIntoView({block:"nearest"});
+   },0);}
+  if(!open)box.querySelectorAll(".nt-lang-open").forEach(b=>b.classList.remove("nt-lang-open"));
+  wasOpen=open;
+ }).observe(wr,{attributes:true,attributeFilter:["style"]});
 }
 /* custom select on top of the vendor mechanics: its <input> stays as the
    commit path (Enter/blur) AND doubles as the search field; around it — our
