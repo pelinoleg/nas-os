@@ -32,14 +32,29 @@ JsonDocument DOC;              // last payload (kept for page redraws)
 bool haveDoc = false;
 long lastSeq = -1;
 int page = 0;
-uint32_t lastPoll = 0, lastFlip = 0;
+uint32_t lastPoll = 0, lastFlip = 0, lastOkMs = 0;
 uint8_t failures = 0;
+bool stale = false;            // polls are failing: keep last data + red badge
 
 uint16_t stColor(const char* s) {
   if (!s) return TFT_DARKGREY;
   if (!strcmp(s, "ok"))   return TFT_GREEN;
   if (!strcmp(s, "warn")) return TFT_YELLOW;
   return TFT_RED;
+}
+
+// red "offline Nm" badge in the top-right corner: the NAS stopped answering,
+// tiles below are the last known state (better than wiping the screen)
+void drawStaleBadge() {
+  uint32_t mins = (millis() - lastOkMs) / 60000UL;
+  String s = "offline " + String(mins) + "m";
+  int tw = tft.textWidth(s, 2);
+  int x = tft.width() - tw - 14, y = 2;
+  tft.fillRoundRect(x, y, tw + 12, 18, 5, TFT_RED);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(TFT_WHITE, TFT_RED);
+  tft.drawString(s, x + (tw + 12) / 2, y + 9, 2);
+  tft.setTextDatum(ML_DATUM);
 }
 
 void drawOffline(const char* why) {
@@ -282,13 +297,21 @@ void poll() {
   http.setTimeout(4000);
   http.begin(url);
   int code = http.GET();
-  if (code == 304) { http.end(); failures = 0; return; }
-  if (code != 200) {
-    http.end();
-    if (++failures >= 3) { haveDoc = false; drawOffline(code > 0 ? ("HTTP " + String(code)).c_str() : "no connection"); }
+  if (code == 304) {
+    http.end(); failures = 0; lastOkMs = millis();
+    if (stale) { stale = false; drawPage(); }        // link is back — clear badge
     return;
   }
-  failures = 0;
+  if (code != 200) {
+    http.end();
+    if (++failures >= 2) {
+      if (!haveDoc) drawOffline(code > 0 ? ("HTTP " + String(code)).c_str() : "no connection");
+      else { stale = true; drawStaleBadge(); }       // keep data, show outage age
+    }
+    return;
+  }
+  failures = 0; lastOkMs = millis();
+  if (stale) { stale = false; lastSeq = -1; }        // force redraw with fresh data
   DeserializationError err = deserializeJson(DOC, http.getString());
   http.end();
   if (err) return;
@@ -305,6 +328,7 @@ void flipPage(int dir) {
   page = (page + dir + pages.size()) % pages.size();
   lastFlip = millis();
   drawPage();
+  if (stale) drawStaleBadge();
 }
 
 void setup() {
