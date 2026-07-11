@@ -2766,6 +2766,7 @@ Description=NAS thumbnail cache sweep
 Type=oneshot
 Nice=15
 IOSchedulingClass=idle
+CPUQuota=200%
 ExecStart=/usr/bin/python3 $SCRIPT_DIR/nas-web.py thumbs-sweep $STORAGE_MNT /home/$TARGET_USER
 UNIT
     write_file /etc/systemd/system/nas-thumbs.timer <<'UNIT'

@@ -1563,7 +1563,7 @@ def _def_monitor():
         "weekly":      {"on": False, "priority": -1},
         # --- поведенческие ---
         "traffic":     {"on": False, "priority": 0, "threshold": 50},
-        "slow_disk":   {"on": False, "priority": 0, "threshold": 100},
+        "slow_disk":   {"on": False, "priority": 0, "threshold": 250},
         "proc_hog":    {"on": False, "priority": 0, "threshold": 80},
         "inodes":      {"on": True,  "priority": 1, "threshold": 90},
         "boot":        {"on": False, "priority": -1},
@@ -2552,7 +2552,7 @@ def monitor_tick():
         fire("traffic", "NAS: большой исходящий трафик", "Отдача %s/с — проверьте, что это ожидаемо" % fmt_bytes(tx), pri("traffic"))
     if on("slow_disk"):
         for dev, aw in (_safe(_diskstat_await, {}) or {}).items():
-            if aw >= thr("slow_disk", 100):
+            if aw >= thr("slow_disk", 250):
                 fire("slow:" + dev, "NAS: диск отвечает медленно", "%s — задержка %d мс/операцию" % (dev, round(aw)), pri("slow_disk"), ev_name="slow_disk")
     if on("proc_hog"):
         hog = _safe(lambda: _proc_hog(thr("proc_hog", 80)))
