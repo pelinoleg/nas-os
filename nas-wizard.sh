@@ -2405,6 +2405,7 @@ set -u
 ETH="${NAS_ETH:-eth0}"
 WIFI="${NAS_WIFI:-wlan0}"
 STATE="${NAS_NETGUARD_STATE:-/var/lib/nas-wizard/netguard.state}"
+WSTATE="${NAS_NETGUARD_WIFI_STATE:-/var/lib/nas-wizard/netguard.wifi}"
 LOCK="${NAS_NETGUARD_LOCK:-/run/nas-netguard.lock}"
 
 notify(){ [ -x /usr/local/bin/nas-notify.sh ] && /usr/local/bin/nas-notify.sh "$1" "$2" "${3:-0}" >/dev/null 2>&1 || true; }
@@ -2442,6 +2443,43 @@ fix_onlink(){
     && logj "восстановлен on-link маршрут $net dev $dev"
 }
 
+# comitup (headless Wi-Fi provisioning) reacts to a lost home network by
+# starting a comitup-* hotspot, then gives each reconnect attempt only ~20 s —
+# not enough for a 5 GHz scan after a router reboot — so wlan0 can stay stuck
+# in the hotspot forever (box alive, LAN unreachable). Rescue it ourselves:
+# stop comitup, give NM one full attempt, bring comitup back either way.
+wifi_rescue(){
+  has_nm || return 0
+  local act home name type now
+  act="$(nmcli -g GENERAL.CONNECTION device show "$WIFI" 2>/dev/null)"
+  case "$act" in comitup-*) ;; *) rm -f "$WSTATE" 2>/dev/null || true; return 0 ;; esac
+  home=""
+  while IFS=: read -r name type; do
+    case "$name" in ''|comitup*) continue ;; esac
+    [ "$type" = "802-11-wireless" ] || continue
+    [ "$(nmcli -g 802-11-wireless.mode connection show "$name" 2>/dev/null)" = "ap" ] && continue
+    home="$name"; break
+  done < <(nmcli -t -f NAME,TYPE connection show 2>/dev/null)
+  [ -n "$home" ] || return 0
+  FAILS=0; LAST=0
+  [ -r "$WSTATE" ] && . "$WSTATE"
+  now="$(date +%s)"
+  # after 5 straight failures retry every 5 min so the hotspot stays usable
+  if [ "${FAILS:-0}" -ge 5 ] && [ $(( now - ${LAST:-0} )) -lt 300 ]; then return 0; fi
+  logj "$WIFI застрял в хотспоте $act — возвращаю «$home»"
+  systemctl stop comitup >/dev/null 2>&1 || true
+  if nmcli --wait 45 connection up "$home" >/dev/null 2>&1; then
+    rm -f "$WSTATE" 2>/dev/null || true
+    logj "Wi-Fi восстановлен: $home"
+    notify "NAS: Wi-Fi восстановлен" "$WIFI вернулся в сеть «$home» из аварийного хотспота comitup"
+  else
+    mkdir -p "$(dirname "$WSTATE")" 2>/dev/null || true
+    printf 'FAILS=%s\nLAST=%s\n' "$(( ${FAILS:-0} + 1 ))" "$now" > "$WSTATE"
+    logj "вернуть «$home» не вышло (попытка $(( ${FAILS:-0} + 1 )))"
+  fi
+  systemctl start --no-block comitup >/dev/null 2>&1 || true
+}
+
 if eth_healthy; then
   ACTIVE="$ETH"
   if has_nm && [ "$(dev_state "$WIFI")" = "connected" ]; then
@@ -2456,6 +2494,7 @@ else
     sleep 3
   fi
 fi
+if [ "$ACTIVE" = "$WIFI" ]; then wifi_rescue; fi
 fix_onlink "$ACTIVE"
 
 # смена интерфейса/адреса -> Pushover. Первый прогон только запоминает состояние,
