@@ -1636,7 +1636,8 @@
   .glc-9x{display:flex;gap:4px;flex-wrap:wrap}
   .glc-9x .btn.on{background:var(--sel);color:var(--accent);box-shadow:var(--sh-sm)}
   /* notes app */
-  .nt-side{width:220px;flex:none;display:flex;flex-direction:column;gap:8px;padding:14px 10px 14px 14px;border-right:1px solid var(--line);overflow:auto}
+  .nt-side{width:220px;flex:none;display:flex;flex-direction:column;gap:8px;padding:14px 10px 14px 14px;border-right:1px solid var(--line);overflow:auto;
+   background:color-mix(in srgb,var(--ink) 5%,transparent)}
   .nt-tools{display:flex;gap:6px}
   .nt-side input,#ntEdit input{height:30px;border-radius:8px;border:1px solid var(--line);background:var(--glass);color:var(--ink);padding:0 9px;font-size:13px}
   .nt-cap{font-size:10.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--dim);margin-top:6px}
@@ -1661,7 +1662,8 @@
   .nt-tag i{font-style:normal;color:var(--dim);font-size:10px}
   .nt-tag.on{background:var(--sel);color:var(--accent);box-shadow:var(--sh-sm)}
   .nt-mut{color:var(--mut);font-size:12px}
-  .nt-list{width:270px;flex:none;overflow:auto;border-right:1px solid var(--line);padding:10px}
+  .nt-list{width:270px;flex:none;overflow:auto;border-right:1px solid var(--line);padding:10px;
+   background:color-mix(in srgb,var(--ink) 2%,transparent)}
   .nt-lhead{display:flex;align-items:center;justify-content:space-between;padding:4px 8px 10px;font-size:12px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--dim)}
   .nt-lhead span{font-weight:600;color:var(--mut)}
   /* note cards (по референсу): заголовок, 2 строки превью, чипы тегов + дата */
@@ -1710,16 +1712,35 @@
   .nt-ed .toastui-editor-toolbar-divider{background-color:var(--nt-line);margin:9px 6px;height:16px}
   .nt-ed .toastui-editor-main{flex:1;min-height:0}
   .nt-ed .toastui-editor,.nt-ed .toastui-editor-ww-container,.nt-ed .toastui-editor-md-container{background:var(--nt-bg)}
-  .nt-ed .ProseMirror{color:var(--nt-ink);font-size:var(--nt-font,15px);padding:16px 18px}
+  .nt-ed .ProseMirror{color:var(--nt-ink);font-size:var(--nt-font,15px);padding:20px 36px 80px;max-width:860px}
   .nt-ed .toastui-editor-md-container .ProseMirror{font-family:var(--mono);font-size:13px;line-height:1.65}
   .nt-ed .toastui-editor-md-preview{background:var(--nt-bg)}
+  .nt-ed .toastui-editor-md-preview .toastui-editor-contents{padding:8px 24px}
   .nt-ed .toastui-editor-md-preview .toastui-editor-contents{color:var(--nt-ink)}
   .nt-ed .toastui-editor-contents{font-family:inherit;font-size:var(--nt-font,15px);color:var(--nt-ink)}
   .nt-ed .toastui-editor-contents h1,.nt-ed .toastui-editor-contents h2,.nt-ed .toastui-editor-contents h3,
   .nt-ed .toastui-editor-contents h4,.nt-ed .toastui-editor-contents p,.nt-ed .toastui-editor-contents li,
   .nt-ed .toastui-editor-contents td,.nt-ed .toastui-editor-contents th{color:var(--nt-ink)}
-  .nt-ed .toastui-editor-contents h1,.nt-ed .toastui-editor-contents h2{border-bottom:1px solid var(--nt-line)}
-  .nt-ed .toastui-editor-contents blockquote{border-left:3px solid var(--nt-line);color:var(--nt-dim)}
+  .nt-ed .toastui-editor-contents p{line-height:1.7;margin:10px 0}
+  .nt-ed .toastui-editor-contents h1{font-size:1.85em;font-weight:800;letter-spacing:-.02em;border:0;margin:28px 0 10px;padding:0}
+  .nt-ed .toastui-editor-contents h2{font-size:1.4em;font-weight:750;border:0;margin:24px 0 8px;padding:0}
+  .nt-ed .toastui-editor-contents h3{font-size:1.15em;font-weight:700;margin:18px 0 6px}
+  .nt-ed .toastui-editor-contents ul li::marker,.nt-ed .toastui-editor-contents ol li::marker{color:var(--nt-dim)}
+  .nt-ed .toastui-editor-contents li{line-height:1.7}
+  /* blockquote = soft callout card (as in the references) */
+  .nt-edit.light{--nt-callout:#fdf3d7}
+  .nt-edit.dark{--nt-callout:#2b2617}
+  .nt-ed .toastui-editor-contents blockquote{margin:14px 0;padding:12px 16px;border:0;border-radius:12px;background:var(--nt-callout)}
+  .nt-ed .toastui-editor-contents blockquote p,.nt-ed .toastui-editor-contents blockquote li{color:var(--nt-ink)}
+  /* task checkboxes in the note accent */
+  .nt-ed .toastui-editor-contents .task-list-item::before{border:1.5px solid var(--nt-dim);border-radius:6px;background-color:transparent;background-image:none;width:16px;height:16px}
+  .nt-ed .toastui-editor-contents .task-list-item.checked::before{background-color:var(--nt-acc);border-color:var(--nt-acc);background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E");background-size:11px;background-position:center;background-repeat:no-repeat}
+  .nt-ed .toastui-editor-contents .task-list-item.checked{color:var(--nt-dim);text-decoration:line-through}
+  .nt-ed .toastui-editor-contents hr{border:0;border-top:1px solid var(--nt-line);margin:22px 0}
+  .nt-ed .toastui-editor-contents table{border-collapse:collapse}
+  .nt-ed .toastui-editor-contents th{background:var(--nt-code);font-weight:650}
+  .nt-ed .toastui-editor-contents th,.nt-ed .toastui-editor-contents td{border:1px solid var(--nt-line);padding:7px 12px}
+  .nt-ed .toastui-editor-contents ::selection,.nt-ed .ProseMirror ::selection{background:color-mix(in srgb,var(--nt-acc) 28%,transparent)}
   .nt-ed .toastui-editor-contents a{color:var(--nt-acc)}
   .nt-ed .toastui-editor-contents code{font-family:var(--mono);background:var(--nt-code);color:var(--nt-ink);border-radius:5px}
   .nt-ed .toastui-editor-contents pre{font-family:var(--mono);background:var(--nt-code);border-radius:10px}
