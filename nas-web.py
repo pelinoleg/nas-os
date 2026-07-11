@@ -1443,30 +1443,46 @@ AVAIL_LOG = "/var/lib/nas-wizard/avail.log"   # written by nas-netguard.sh
 # (id, label-ru, label-en) — every tile the server can build. Collectors may
 # return None (service absent) — the tile silently disappears from the feed.
 GLANCE_TILES = [
-    ("pool",     "Пул",            "Pool"),
-    ("backup",   "Бэкап",          "Backup"),
-    ("avail",    "Доступность",    "Uptime"),
-    ("cputemp",  "Температура",    "CPU temp"),
-    ("load",     "Нагрузка",       "Load"),
-    ("ram",      "Память",         "RAM"),
-    ("rootfs",   "Система",        "System SSD"),
-    ("uptime",   "Аптайм",         "Uptime h"),
-    ("net",      "Сеть",           "Network"),
-    ("inet",     "Интернет",       "Internet"),
-    ("traffic",  "Трафик",         "Traffic"),
-    ("speed",    "Скорость",       "Speed"),
-    ("docker",   "Docker",         "Docker"),
-    ("wud",      "Образы",         "Images"),
-    ("updates",  "Обновления",     "Updates"),
-    ("snapraid", "SnapRAID",       "SnapRAID"),
-    ("events",   "События",        "Events"),
+    ("pool",     "Пул",              "Pool"),
+    ("backup",   "Бэкап (общий)",    "Backup (all)"),
+    ("avail",    "Доступность · 24h", "Uptime 24h"),
+    ("avail30",  "Доступность · 30d", "Uptime 30d"),
+    ("cputemp",  "Температура CPU",  "CPU temp"),
+    ("disktemp", "Температура дисков", "Disk temp"),
+    ("cpu",      "CPU",              "CPU"),
+    ("load",     "Нагрузка",         "Load"),
+    ("ram",      "Память",           "RAM"),
+    ("rootfs",   "Система",          "System SSD"),
+    ("uptime",   "Аптайм",           "Booted"),
+    ("net",      "Сеть",             "Network"),
+    ("netspeed", "Скорость сети",    "Net speed"),
+    ("inet",     "Интернет",         "Internet"),
+    ("traffic",  "Трафик",           "Traffic"),
+    ("speed",    "Спидтест",         "Speedtest"),
+    ("docker",   "Docker",           "Docker"),
+    ("wud",      "Образы",           "Images"),
+    ("updates",  "Обновления",       "Updates"),
+    ("snapraid", "SnapRAID",         "SnapRAID"),
+    ("events",   "События",          "Events"),
 ]
 GLANCE_DEF_TILES = ["pool", "backup", "avail", "cputemp", "net", "docker"]
+
+def glance_catalog():
+    """Static tiles + one dynamic tile per backup profile (named like its tab)."""
+    cat = []
+    for t in GLANCE_TILES:
+        cat.append(t)
+        if t[0] == "backup":
+            for pr in _safe(nb_profiles, []) or []:
+                nm = pr.get("name") or pr["id"]
+                cat.append(("nb:" + pr["id"], "Бэкап · " + nm, "Backup · " + nm))
+    return cat
 
 def load_glance():
     d = _json_load_strict(GLANCE_FILE, {})
     return {"enabled": bool(d.get("enabled")),
             "token": d.get("token") or "",
+            "ping_interval": int(d.get("ping_interval") or 30),
             "tiles": d.get("tiles") if isinstance(d.get("tiles"), list) else list(GLANCE_DEF_TILES)}
 
 def save_glance(d):
@@ -1474,13 +1490,26 @@ def save_glance(d):
     if "enabled" in d:
         cur["enabled"] = bool(d["enabled"])
     if isinstance(d.get("tiles"), list):
-        ok_ids = {t[0] for t in GLANCE_TILES}
+        ok_ids = {t[0] for t in glance_catalog()}
         cur["tiles"] = [str(t) for t in d["tiles"] if str(t) in ok_ids]
     act = d.get("token_action")
     if act == "new":
         cur["token"] = secrets.token_hex(16)
     elif act == "revoke":
         cur["token"] = ""
+    pi = d.get("ping_interval")
+    if pi in (15, 30, 60, 120):
+        cur["ping_interval"] = pi
+        # availability probe period = netguard timer period; a systemd drop-in
+        # overrides the base 30 s without touching the wizard-managed unit
+        try:
+            os.makedirs("/etc/systemd/system/nas-netguard.timer.d", exist_ok=True)
+            with open("/etc/systemd/system/nas-netguard.timer.d/override.conf", "w") as f:
+                f.write("[Timer]\nOnUnitActiveSec=\nOnUnitActiveSec=%ds\n" % pi)
+            subprocess.run(["systemctl", "daemon-reload"], timeout=15)
+            subprocess.run(["systemctl", "restart", "nas-netguard.timer"], timeout=15)
+        except (OSError, subprocess.SubprocessError):
+            pass
     _json_save(GLANCE_FILE, cur, indent=2)
     with _GL_LOCK:
         _GL_CACHE["langs"].clear()
@@ -1555,6 +1584,53 @@ def _gl_gb(n, en):
         return ("%.1f" % (n / 1024), "ТБ" if not en else "TB")
     return ("%d" % n, "ГБ" if not en else "GB")
 
+def _gl_bytes(n, en):
+    """fmt_bytes with latin units for lang=en (TFT default fonts have no cyrillic)."""
+    s = fmt_bytes(n)
+    if en:
+        for a, b in (("КБ", "KB"), ("МБ", "MB"), ("ГБ", "GB"), ("ТБ", "TB"), ("ПБ", "PB"), ("Б", "B")):
+            if s.endswith(a):
+                return s[:-len(a)] + b
+    return s
+
+def _hwmon_disk_temps():
+    """Disk temps from hwmon (nvme/drivetemp) — never wakes sleeping disks,
+    unlike smartctl. Returns [(dev, °C)]."""
+    out = []
+    for h in glob.glob("/sys/class/hwmon/hwmon*"):
+        name = _read(os.path.join(h, "name")).strip()
+        if name not in ("nvme", "drivetemp"):
+            continue
+        try:
+            t = int(_read(os.path.join(h, "temp1_input")).strip()) / 1000.0
+        except ValueError:
+            continue
+        dev = ""
+        try:
+            for d in os.listdir(os.path.join(h, "device")):
+                if re.match(r"^(nvme\d+n\d+|sd[a-z]+)$", d):
+                    dev = d
+                    break
+        except OSError:
+            pass
+        out.append((dev or name, t))
+    return out
+
+def _nb_last_ok(pid):
+    """Timestamp of the profile's last completed run (ok or warn), 0 if none."""
+    for h in nb_history(pid):
+        if h.get("result") in ("ok", "warn"):
+            return h.get("ts", 0)
+    return 0
+
+def _gl_backup_tile(best, en):
+    if not best:
+        return {"value": "—", "unit": "", "state": "warn",
+                "note": "ещё не было" if not en else "never ran"}
+    age = time.time() - best
+    st = "danger" if age > 7 * 86400 else ("warn" if age > 2 * 86400 else "ok")
+    return {"value": _gl_ago(age, en), "unit": "назад" if not en else "ago", "state": st}
+
 def _glance_tile(tid, en):
     """Build one tile -> {value, unit, state[, note]} or None to hide it."""
     if tid == "pool":
@@ -1566,24 +1642,37 @@ def _glance_tile(tid, en):
         st = "danger" if di["pct"] >= 90 else ("warn" if di["pct"] >= 80 else "ok")
         return {"value": v, "unit": u + (" своб." if not en else " free"), "state": st}
     if tid == "backup":
-        best = 0
-        for pr in nb_profiles():
-            for h in nb_history(pr["id"]):
-                if h.get("result") in ("ok", "warn") and h.get("ts", 0) > best:
-                    best = h["ts"]
-                    break
-        if not best:
-            return {"value": "—", "unit": "", "state": "warn",
-                    "note": "ещё не было" if not en else "never ran"}
-        age = time.time() - best
-        st = "danger" if age > 7 * 86400 else ("warn" if age > 2 * 86400 else "ok")
-        return {"value": _gl_ago(age, en), "unit": "назад" if not en else "ago", "state": st}
-    if tid == "avail":
-        av = avail_bars(24, 96)
+        return _gl_backup_tile(max((_nb_last_ok(pr["id"]) for pr in nb_profiles()), default=0), en)
+    if tid.startswith("nb:"):
+        return _gl_backup_tile(_nb_last_ok(tid[3:]), en)
+    if tid in ("avail", "avail30"):
+        hours = 24 if tid == "avail" else 720
+        av = avail_bars(hours, 96)
         if av["pct"] is None:
             return None
         st = "ok" if av["pct"] >= 99 else ("warn" if av["pct"] >= 95 else "danger")
-        return {"value": "%.1f" % av["pct"], "unit": "% / 24ч" if not en else "% / 24h", "state": st}
+        unit = ("% / 24ч" if not en else "% / 24h") if tid == "avail" else \
+               ("% / 30д" if not en else "% / 30d")
+        return {"value": "%.1f" % av["pct"], "unit": unit, "state": st}
+    if tid == "disktemp":
+        temps = _hwmon_disk_temps()
+        if not temps:
+            return None
+        dev, t = max(temps, key=lambda x: x[1])
+        try:
+            warn_at = int((load_monitor().get("events", {}).get("disktemp") or {}).get("threshold", 60))
+        except (TypeError, ValueError):
+            warn_at = 60
+        st = "danger" if t >= warn_at + 10 else ("warn" if t >= warn_at else "ok")
+        return {"value": "%d" % round(t), "unit": "°C", "state": st, "note": dev}
+    if tid == "cpu":
+        pct = cpu_percent()
+        st = "danger" if pct >= 95 else ("warn" if pct >= 80 else "ok")
+        return {"value": "%d" % round(pct), "unit": "%", "state": st}
+    if tid == "netspeed":
+        r = net_rate(default_iface()) or {}
+        return {"value": "↓%s ↑%s" % (_gl_bytes(r.get("rx"), en), _gl_bytes(r.get("tx"), en)),
+                "unit": "/с" if not en else "/s", "state": "ok"}
     if tid == "cputemp":
         t = temp_c()
         if t is None:
@@ -1623,9 +1712,9 @@ def _glance_tile(tid, en):
         if not v.get("ok"):
             return None
         td = v.get("today") or {}
-        return {"value": "↓%s ↑%s" % (fmt_bytes(td.get("rx")).replace(" ", ""),
-                                       fmt_bytes(td.get("tx")).replace(" ", "")),
-                "unit": "", "state": "ok"}
+        return {"value": "↓%s ↑%s" % (_gl_bytes(td.get("rx"), en).replace(" ", ""),
+                                       _gl_bytes(td.get("tx"), en).replace(" ", "")),
+                "unit": "сегодня" if not en else "today", "state": "ok"}
     if tid == "speed":
         m = _safe(myspeed_state) or {}
         if not m.get("ok") or m.get("download") is None:
@@ -1691,7 +1780,7 @@ def glance_payload(lang="ru"):
         if c and time.time() - c["t"] < 3:
             return c["payload"]
     cfg = load_glance()
-    labels = {t[0]: (t[2] if en else t[1]) for t in GLANCE_TILES}
+    labels = {t[0]: (t[2] if en else t[1]) for t in glance_catalog()}
     tiles, problems = [], []
     for tid in cfg["tiles"]:
         if tid not in labels:
@@ -8840,7 +8929,7 @@ class H(BaseHTTPRequestHandler):
                 self._json(stats())
             elif p == "/api/glance/config":
                 self._json({"config": load_glance(),
-                            "catalog": [{"id": t[0], "name": t[1]} for t in GLANCE_TILES]})
+                            "catalog": [{"id": t[0], "name": t[1]} for t in glance_catalog()]})
             elif p == "/api/avail":
                 self._json(avail_bars(int((q.get("hours") or ["24"])[0]),
                                       int((q.get("slots") or ["96"])[0])))

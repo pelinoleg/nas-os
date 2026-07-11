@@ -5708,9 +5708,10 @@ let SYSC=null, PENDING_REBOOT=false;
    Config lives server-side (~/nas-config/glance.json): the device polls
    /api/glance with a read-only token and just renders what the server sends,
    so changing tiles here never requires reflashing the device. */
-function avBarsHTML(bars,pct){if(!bars||!bars.length)return "";
+function avBarsHTML(bars,pct,hours){if(!bars||!bars.length)return "";
  const c=v=>v===2?"var(--good)":v===1?"var(--warn)":v===0?"var(--danger)":"var(--track)";
- return `<div class="gl-avwrap"><div class="gl-bars">${bars.map(v=>`<i style="background:${c(v)}"></i>`).join("")}</div><div class="gl-avcap"><span>−24ч</span><span>${pct==null?"":pct+"% доступность"}</span><span>сейчас</span></div></div>`;}
+ const span=(hours||24)>=48?`−${Math.round((hours||24)/24)}d`:`−${hours||24}h`;
+ return `<div class="gl-avwrap"><div class="gl-bars">${bars.map(v=>`<i style="background:${c(v)}"></i>`).join("")}</div><div class="gl-avcap"><span>${span}</span><span>${pct==null?"":pct+"% доступность"}</span><span>сейчас</span></div></div>`;}
 async function glanceTab(tc){
  tc.innerHTML=`<div class="set-load">загрузка…</div>`;
  const r=await api("/api/glance/config");
@@ -5725,6 +5726,10 @@ async function glanceTab(tc){
   <div class="srow"><div class="srow-l"><div class="srow-t">Отдавать данные по токену</div><div class="srow-d">без токена доступ к этим данным есть только из панели</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="glEn"${cfg.enabled?" checked":""}><span class="sl"></span></label></div></div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Токен</div><div class="srow-d mono">${tok?esc(tok):"— не создан —"}</div></div><div class="srow-c"><button class="btn sm" id="glNew">${tok?"Перевыпустить":"Создать"}</button><button class="btn sm" id="glCopy"${tok?"":" disabled"}>Копировать URL</button><button class="btn sm warn" id="glRev"${tok?"":" disabled"}>Отозвать</button></div></div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Адрес для устройства</div><div class="srow-d mono" style="user-select:all;word-break:break-all">${esc(url)}</div></div></div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Пример прошивки для ESP32</div><div class="srow-d mono">/opt/nas-os/services/esp32-glance</div></div><div class="srow-c"><button class="btn sm" id="glFw">Показать в файлах</button></div></div>
+  <div class="set-h">Доступность</div>
+  <div class="set-sub">Журнал доступности ведёт сторож сети: пингует шлюз и пишет состояние (онлайн / без сети / выключен). Полоски — в виджетах «Доступность · 24h / 30d» и в плитках avail.</div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Интервал проверки</div><div class="srow-d">чаще — точнее полоски, реже — меньше фоновой работы</div></div><div class="srow-c"><div class="seg" id="glPing">${[15,30,60,120].map(v=>`<button data-v="${v}" class="${(cfg.ping_interval||30)===v?"on":""}">${v}с</button>`).join("")}</div></div></div>
   <div class="set-h">Плитки</div>
   <div class="set-sub">Что и в каком порядке отдаётся на экран. Плитки отсутствующих сервисов (vnstat, MySpeed, WUD…) пропускаются сами.</div>
   <div id="glList"></div>
@@ -5735,6 +5740,8 @@ async function glanceTab(tc){
  tc.querySelector("#glNew").onclick=async()=>{await post({token_action:"new"});rerSet();};
  tc.querySelector("#glRev").onclick=async()=>{await post({token_action:"revoke"});rerSet();};
  tc.querySelector("#glCopy").onclick=()=>{if(navigator.clipboard)navigator.clipboard.writeText(url);toast("Скопировано");};
+ tc.querySelector("#glFw").onclick=()=>winFiles("/opt/nas-os/services/esp32-glance");
+ tc.querySelectorAll("#glPing button").forEach(b=>b.onclick=()=>{tc.querySelectorAll("#glPing button").forEach(x=>x.classList.toggle("on",x===b));post({ping_interval:+b.dataset.v});toast("Интервал обновлён");});
  /* ordered enable-list: enabled tiles first (server order), then the rest */
  const items=cfg.tiles.map(id=>({id,on:true})).concat(cat.filter(c=>!cfg.tiles.includes(c.id)).map(c=>({id:c.id,on:false})));
  const names={};cat.forEach(c=>names[c.id]=c.name);
@@ -6587,9 +6594,10 @@ const WIDGET_DEFS={
  top:{name:"Топ процессов",ic:"activity",def:false,extra:'<span class="more" id="more-top">все →</span>',body:'<div id="wg-top"></div>'},
  myspeed:{name:"Скорость интернета",ic:"net",extra:'<span class="more" id="more-myspeed">открыть →</span>',body:'<div id="wg-myspeed"></div>'},
  vnstat:{name:"Трафик",ic:"activity",body:'<div id="wg-vnstat"></div>'},
- avail:{name:"Доступность",ic:"monitor",body:'<div id="wg-avail"></div>'},
+ avail:{name:"Доступность · 24h",ic:"monitor",body:'<div id="wg-avail"></div>'},
+ avail30:{name:"Доступность · 30d",ic:"monitor",def:false,body:'<div id="wg-avail30"></div>'},
 };
-const WIDGET_ORDER=["vols","sys","disk","net","docker","top","myspeed","vnstat","avail"];
+const WIDGET_ORDER=["vols","sys","disk","net","docker","top","myspeed","vnstat","avail","avail30"];
 function railWidgets(){let cfg=(SET.widgets&&SET.widgets.length)?SET.widgets.slice():WIDGET_ORDER.map(id=>({id,on:WIDGET_DEFS[id].def!==false}));
  cfg=cfg.filter(w=>WIDGET_DEFS[w.id]);
  WIDGET_ORDER.forEach(id=>{if(!cfg.find(w=>w.id===id))cfg.push({id,on:WIDGET_DEFS[id].def!==false});});
@@ -6604,15 +6612,17 @@ function renderRail(){const rail=document.getElementById("rail");if(!rail)return
  paintVols();if(LAST){paintSys(LAST);}pollDisks();pollStacks();pollTop();pollNet();pollMySpeed();pollVnstat();pollAvail();
 }
 
-/* Availability bars (timeline collected by nas-netguard every 30 s).
-   Hidden until the log has at least some history. */
+/* Availability bars (timeline collected by nas-netguard, period configurable
+   in Настройки → Экран). Hidden until the log has at least some history. */
 async function pollAvail(){
- const box=document.getElementById("wg-avail");if(!box)return;
- const wdg=box.closest(".wdg");
- let r=null;try{r=await api("/api/avail?hours=24&slots=48");}catch(e){}
- if(!r||r.pct==null){if(wdg)wdg.style.display="none";return;}
- if(wdg)wdg.style.display="";
- box.innerHTML=avBarsHTML(r.bars,r.pct);
+ for(const [id,h,n] of [["wg-avail",24,48],["wg-avail30",720,30]]){
+  const box=document.getElementById(id);if(!box)continue;
+  const wdg=box.closest(".wdg");
+  let r=null;try{r=await api(`/api/avail?hours=${h}&slots=${n}`);}catch(e){}
+  if(!r||r.pct==null){if(wdg)wdg.style.display="none";continue;}
+  if(wdg)wdg.style.display="";
+  box.innerHTML=avBarsHTML(r.bars,r.pct,h);
+ }
 }
 
 /* MySpeed: последний замер скорости интернета. Сервис ставится отдельным стеком,
