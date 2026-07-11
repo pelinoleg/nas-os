@@ -1570,20 +1570,45 @@ def _gl_spark(field, points=48):
         out.append(int(v) if v >= 100 else round(v, 1))
     return out
 
+def _gl_norm_tiles(lst):
+    """Normalize a tile list: plain id strings (legacy) or {id, size s|m|l}."""
+    out = []
+    for t in lst or []:
+        if isinstance(t, str):
+            out.append({"id": t, "size": "m"})
+        elif isinstance(t, dict) and t.get("id"):
+            sz = t.get("size") if t.get("size") in ("s", "m", "l") else "m"
+            out.append({"id": str(t["id"]), "size": sz})
+    return out
+
 def load_glance():
     d = _json_load_strict(GLANCE_FILE, {})
+    pages = d.get("pages")
+    if not isinstance(pages, list) or not pages:
+        # legacy flat tile list (or first run) -> single page
+        flat = d.get("tiles") if isinstance(d.get("tiles"), list) else list(GLANCE_DEF_TILES)
+        pages = [{"name": "Главная", "tiles": flat}]
+    pages = [{"name": str(p.get("name") or "Экран")[:24], "tiles": _gl_norm_tiles(p.get("tiles"))}
+             for p in pages if isinstance(p, dict)][:6]
     return {"enabled": bool(d.get("enabled")),
             "token": d.get("token") or "",
             "ping_interval": int(d.get("ping_interval") or 30),
-            "tiles": d.get("tiles") if isinstance(d.get("tiles"), list) else list(GLANCE_DEF_TILES)}
+            "pages": pages}
 
 def save_glance(d):
     cur = load_glance()
     if "enabled" in d:
         cur["enabled"] = bool(d["enabled"])
-    if isinstance(d.get("tiles"), list):
+    if isinstance(d.get("pages"), list):
         ok_ids = {t[0] for t in glance_catalog()}
-        cur["tiles"] = [str(t) for t in d["tiles"] if str(t) in ok_ids]
+        pages = []
+        for p in d["pages"][:6]:
+            if not isinstance(p, dict):
+                continue
+            tiles = [t for t in _gl_norm_tiles(p.get("tiles")) if t["id"] in ok_ids]
+            pages.append({"name": str(p.get("name") or "Экран")[:24], "tiles": tiles})
+        if pages:
+            cur["pages"] = pages
     act = d.get("token_action")
     if act == "new":
         cur["token"] = secrets.token_hex(16)
@@ -1889,32 +1914,45 @@ def glance_payload(lang="ru"):
             return c["payload"]
     cfg = load_glance()
     labels = {t[0]: (t[2] if en else t[1]) for t in glance_catalog()}
-    tiles, problems = [], []
-    for tid in cfg["tiles"]:
-        if tid not in labels:
-            continue
-        d = _safe(lambda: _glance_tile(tid, en))
-        if not d:
-            continue
-        d = dict(d, id=tid, label=labels[tid])
-        if tid in GLANCE_SPARKS:
-            sp = _safe(lambda: _gl_spark(GLANCE_SPARKS[tid]))
-            if sp:
-                d["spark"] = sp
-        tiles.append(d)
-        if d["state"] != "ok":
-            problems.append("%s: %s %s" % (d["label"], d["value"], d.get("note") or d["unit"]))
+    built, problems, seen_prob = {}, [], set()
+    def build(tid):
+        if tid in built:
+            return built[tid]
+        d = _safe(lambda: _glance_tile(tid, en)) if tid in labels else None
+        if d:
+            d = dict(d, id=tid, label=labels[tid])
+            if tid in GLANCE_SPARKS:
+                sp = _safe(lambda: _gl_spark(GLANCE_SPARKS[tid]))
+                if sp:
+                    d["spark"] = sp
+        built[tid] = d
+        return d
+    pages = []
+    for pg in cfg["pages"]:
+        tl = []
+        for t in pg["tiles"]:
+            d = build(t["id"])
+            if not d:
+                continue
+            tl.append(dict(d, size=t["size"]))
+            if d["state"] != "ok" and d["id"] not in seen_prob:
+                seen_prob.add(d["id"])
+                problems.append("%s: %s %s" % (d["label"], d["value"], d.get("note") or d["unit"]))
+        pages.append({"name": pg["name"], "tiles": tl})
+    shown = [d for d in built.values() if d]
     status = "ok"
-    if any(t["state"] == "danger" for t in tiles):
+    if any(t["state"] == "danger" for t in shown):
         status = "danger"
-    elif any(t["state"] == "warn" for t in tiles):
+    elif any(t["state"] == "warn" for t in shown):
         status = "warn"
     av = avail_bars(24, 96)
-    payload = {"v": 1, "host": socket.gethostname(), "status": status,
-               "problems": problems[:4], "tiles": tiles,
+    payload = {"v": 2, "host": socket.gethostname(), "status": status,
+               "problems": problems[:4], "pages": pages,
+               # legacy flat list = first page (older sketches keep working)
+               "tiles": pages[0]["tiles"] if pages else [],
                "avail": {"bars": av["bars"], "pct24": av["pct"]},
                "ts": int(time.time())}
-    sig = json.dumps([tiles, problems, status, av["bars"]], sort_keys=True, ensure_ascii=False)
+    sig = json.dumps([pages, problems, status, av["bars"]], sort_keys=True, ensure_ascii=False)
     with _GL_LOCK:
         c = _GL_CACHE["langs"].setdefault(lang, {"t": 0, "sig": "", "seq": 0, "payload": None})
         if sig != c["sig"]:

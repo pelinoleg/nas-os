@@ -1568,6 +1568,10 @@
   .gl-lab{color:var(--dim)} .gl-unit{color:var(--dim);font-size:11px}
   .gl-dot{width:9px;height:9px;border-radius:50%;display:inline-block;flex:none}
   .gl-spark{width:46px;height:18px;flex:none;opacity:.85}
+  .gl-tile.lg{flex-basis:100%;padding:12px 14px} .gl-tile.lg b{font-size:20px}
+  .gl-tile.sm{padding:5px 9px;font-size:11px} .gl-tile.sm b{font-size:12px}
+  .gl-pgname{margin-top:12px;font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--dim)}
+  .gl-size{flex:none} .gl-size button{padding:3px 8px;font-size:10px}
   .gl-avwrap{margin-top:12px}
   .gl-bars{display:flex;gap:1px;height:14px}
   .gl-bars i{flex:1;border-radius:2px;min-width:1px}
@@ -5735,9 +5739,12 @@ async function glanceTab(tc){
   <div class="set-h">Доступность</div>
   <div class="set-sub">Журнал доступности ведёт сторож сети: пингует шлюз и пишет состояние (онлайн / без сети / выключен). Полоски — в виджетах «Доступность · 24h / 30d» и в плитках avail.</div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Интервал проверки</div><div class="srow-d">чаще — точнее полоски, реже — меньше фоновой работы</div></div><div class="srow-c"><div class="seg" id="glPing">${[15,30,60,120].map(v=>`<button data-v="${v}" class="${(cfg.ping_interval||30)===v?"on":""}">${v}с</button>`).join("")}</div></div></div>
-  <div class="set-h">Плитки</div>
-  <div class="set-sub">Что и в каком порядке отдаётся на экран. Плитки отсутствующих сервисов (vnstat, MySpeed, WUD…) пропускаются сами. Свои проверки: исполняемый скрипт в <span class="mono">~/nas-config/scripts/glance/</span> — первая строка вывода <span class="mono">ok|warn|danger текст</span> станет плиткой и влияет на общий статус.</div>
+  <div class="set-h">Страницы и плитки</div>
+  <div class="set-sub">Экран листает страницы кнопкой (или сам). Важное — крупнее: размер S/M/L у каждой плитки. Плитки отсутствующих сервисов пропускаются сами. Свои проверки: исполняемый скрипт в <span class="mono">~/nas-config/scripts/glance/</span> — первая строка вывода <span class="mono">ok|warn|danger текст</span> станет плиткой и влияет на общий статус.</div>
+  <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:6px 0"><div class="seg" id="glPgSeg"></div><button class="btn sm" id="glPgAdd">+ страница</button></div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Название страницы</div></div><div class="srow-c"><input type="text" id="glPgName" maxlength="24" style="width:150px"><button class="btn sm warn" id="glPgDel">Удалить страницу</button></div></div>
   <div id="glList"></div>
+  <div style="display:flex;align-items:center;gap:8px;margin:8px 0"><select id="glAddSel" style="max-width:240px"></select><button class="btn sm" id="glAdd">Добавить плитку</button></div>
   <div class="set-h">Предпросмотр</div>
   <div id="glPrev" class="gl-prev"><div class="set-load">загрузка…</div></div>`;
  const post=async d=>{const rr=await api("/api/glance/config",{method:"POST",body:JSON.stringify(d)});if(rr&&rr.config)Object.assign(cfg,rr.config);return rr;};
@@ -5747,27 +5754,46 @@ async function glanceTab(tc){
  tc.querySelector("#glCopy").onclick=()=>{if(navigator.clipboard)navigator.clipboard.writeText(url);toast("Скопировано");};
  tc.querySelector("#glFw").onclick=()=>winFiles("/opt/nas-os/services/esp32-glance");
  tc.querySelectorAll("#glPing button").forEach(b=>b.onclick=()=>{tc.querySelectorAll("#glPing button").forEach(x=>x.classList.toggle("on",x===b));post({ping_interval:+b.dataset.v});toast("Интервал обновлён");});
- /* ordered enable-list: enabled tiles first (server order), then the rest */
- const items=cfg.tiles.map(id=>({id,on:true})).concat(cat.filter(c=>!cfg.tiles.includes(c.id)).map(c=>({id:c.id,on:false})));
+ /* pages editor: tabs, per-page ordered tiles with S/M/L size, add/remove */
  const names={};cat.forEach(c=>names[c.id]=c.name);
- const list=tc.querySelector("#glList");
- const paintList=()=>{list.innerHTML="";items.forEach((w,i)=>{
-  const row=el(`<div class="wg-cfg"><span class="nm">${esc(names[w.id]||w.id)}</span><div class="ord"><button data-u ${i===0?"disabled":""} title="Выше">${svg("arrowup",14)}</button><button data-dn ${i===items.length-1?"disabled":""} title="Ниже" style="transform:rotate(180deg)">${svg("arrowup",14)}</button></div><label class="tgl"><input type="checkbox" ${w.on?"checked":""}><span class="sl"></span></label></div>`);
-  const commit=async()=>{await post({tiles:items.filter(x=>x.on).map(x=>x.id)});paintList();paintPrev();};
-  row.querySelector("input").onchange=e=>{w.on=e.target.checked;commit();};
-  row.querySelector("[data-u]").onclick=()=>{if(i>0){[items[i-1],items[i]]=[items[i],items[i-1]];commit();}};
-  row.querySelector("[data-dn]").onclick=()=>{if(i<items.length-1){[items[i+1],items[i]]=[items[i],items[i+1]];commit();}};
-  list.appendChild(row);});};
- paintList();
+ const pages=cfg.pages&&cfg.pages.length?cfg.pages:[{name:"Главная",tiles:[]}];
+ let cur=0;
+ const list=tc.querySelector("#glList"),pgSeg=tc.querySelector("#glPgSeg"),
+       pgName=tc.querySelector("#glPgName"),addSel=tc.querySelector("#glAddSel");
+ const commit=async()=>{await post({pages});paintPages();paintPrev();};
+ const paintPages=()=>{
+  pgSeg.innerHTML=pages.map((p,i)=>`<button data-v="${i}" class="${i===cur?"on":""}">${esc(p.name)}</button>`).join("");
+  pgSeg.querySelectorAll("button").forEach(b=>b.onclick=()=>{cur=+b.dataset.v;paintPages();});
+  const pg=pages[cur];
+  pgName.value=pg.name;
+  tc.querySelector("#glPgDel").disabled=pages.length<2;
+  const used=new Set(pg.tiles.map(t=>t.id));
+  addSel.innerHTML=cat.filter(c=>!used.has(c.id)).map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join("");
+  list.innerHTML="";
+  pg.tiles.forEach((w,i)=>{
+   const row=el(`<div class="wg-cfg"><span class="nm">${esc(names[w.id]||w.id)}</span><div class="seg gl-size">${["s","m","l"].map(z=>`<button data-z="${z}" class="${w.size===z?"on":""}">${z.toUpperCase()}</button>`).join("")}</div><div class="ord"><button data-u ${i===0?"disabled":""} title="Выше">${svg("arrowup",14)}</button><button data-dn ${i===pg.tiles.length-1?"disabled":""} title="Ниже" style="transform:rotate(180deg)">${svg("arrowup",14)}</button></div><button class="iconbtn" data-x title="Убрать">${svg("x",14)}</button></div>`);
+   row.querySelectorAll("[data-z]").forEach(b=>b.onclick=()=>{w.size=b.dataset.z;commit();});
+   row.querySelector("[data-u]").onclick=()=>{if(i>0){[pg.tiles[i-1],pg.tiles[i]]=[pg.tiles[i],pg.tiles[i-1]];commit();}};
+   row.querySelector("[data-dn]").onclick=()=>{if(i<pg.tiles.length-1){[pg.tiles[i+1],pg.tiles[i]]=[pg.tiles[i],pg.tiles[i+1]];commit();}};
+   row.querySelector("[data-x]").onclick=()=>{pg.tiles.splice(i,1);commit();};
+   list.appendChild(row);});
+ };
+ pgName.onchange=()=>{pages[cur].name=pgName.value.trim()||"Экран";commit();};
+ tc.querySelector("#glPgAdd").onclick=()=>{if(pages.length>=6)return;pages.push({name:"Стр. "+(pages.length+1),tiles:[]});cur=pages.length-1;commit();};
+ tc.querySelector("#glPgDel").onclick=()=>{if(pages.length<2)return;pages.splice(cur,1);cur=Math.max(0,cur-1);commit();};
+ tc.querySelector("#glAdd").onclick=()=>{const id=addSel.value;if(!id)return;pages[cur].tiles.push({id,size:"m"});commit();};
+ paintPages();
  const prev=tc.querySelector("#glPrev");
  const paintPrev=async()=>{
   /* request the panel's language so server-side units/values arrive localized */
   const g=await api("/api/glance?lang="+(window.NAS_LANG||"ru"));
   if(!g||!g.tiles){prev.innerHTML=`<div class="set-load">нет данных</div>`;return;}
   const dot=s=>`<i class="gl-dot" style="background:var(--${s==="ok"?"good":s==="warn"?"warn":"danger"})"></i>`;
+  const tile=t=>`<div class="gl-tile${t.size==="l"?" lg":t.size==="s"?" sm":""}">${dot(t.state)}<span class="gl-lab">${esc(t.label)}</span><b>${esc(t.value)}</b><span class="gl-unit">${esc(t.unit||"")}</span>${t.spark?sparkSVG(t.spark):""}</div>`;
+  const pgs=g.pages&&g.pages.length?g.pages:[{name:"",tiles:g.tiles}];
   prev.innerHTML=`<div class="gl-head">${dot(g.status)}<b>${esc(g.host)}</b><span class="mono" style="color:var(--dim);font-size:11px">seq ${g.seq}</span></div>
    ${g.problems&&g.problems.length?`<div class="gl-prob">${g.problems.map(esc).join("<br>")}</div>`:""}
-   <div class="gl-tiles">${g.tiles.map(t=>`<div class="gl-tile">${dot(t.state)}<span class="gl-lab">${esc(t.label)}</span><b>${esc(t.value)}</b><span class="gl-unit">${esc(t.unit||"")}</span>${t.spark?sparkSVG(t.spark):""}</div>`).join("")}</div>
+   ${pgs.map(p=>`${pgs.length>1?`<div class="gl-pgname">${esc(p.name)}</div>`:""}<div class="gl-tiles">${p.tiles.map(tile).join("")}</div>`).join("")}
    ${avBarsHTML(g.avail&&g.avail.bars,g.avail&&g.avail.pct24)}`;
  };
  paintPrev();
