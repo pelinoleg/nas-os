@@ -2537,6 +2537,39 @@ avail_track(){
 }
 avail_track
 
+# nas-web can hang without exiting (worker threads stuck) — systemd's
+# Restart=on-failure never fires because the process is still alive.
+# Probe HTTP on localhost every run; any HTTP status (even 401/404) proves
+# the server answers, only a timeout / connection failure / 5xx counts as
+# down. 3 consecutive failures (~45 s at the 15 s timer) -> restart nas-web.
+# No reboot escalation on purpose: if the panel code itself is broken,
+# rebooting would not fix it and would kill SSH sessions mid-repair.
+web_selfheal(){
+  systemctl is-active --quiet nas-web 2>/dev/null || return 0
+  local st=/run/nas-web.fail code n
+  code="$(curl -s -o /dev/null -m 5 -w '%{http_code}' http://127.0.0.1/ 2>/dev/null)" || code=000
+  case "$code" in
+    ''|000|5*) ;;
+    *) rm -f "$st" 2>/dev/null; return 0 ;;
+  esac
+  n="$(cat "$st" 2>/dev/null || echo 0)"
+  case "$n" in *[!0-9]*|'') n=0 ;; esac
+  n=$(( n + 1 ))
+  if [ "$n" -ge 3 ]; then
+    printf '0' > "$st"
+    # ask python to dump all thread stacks to the journal first (faulthandler
+    # on SIGUSR1) so we learn WHERE it hung, then restart
+    local pid; pid="$(systemctl show -p MainPID --value nas-web 2>/dev/null)"
+    case "$pid" in ''|0|*[!0-9]*) ;; *) kill -USR1 "$pid" 2>/dev/null || true; sleep 1 ;; esac
+    systemctl --no-block try-restart nas-web 2>/dev/null || true
+    logj "панель не отвечает на localhost (HTTP $code) — перезапускаю nas-web"
+    notify "Панель зависла" "nas-web не отвечал на localhost (HTTP $code) — перезапущен автоматически" 1
+  else
+    printf '%s' "$n" > "$st"
+  fi
+}
+web_selfheal
+
 # смена интерфейса/адреса -> Pushover. Первый прогон только запоминает состояние,
 # чтобы установка и перезагрузка не сыпали уведомлениями.
 CUR_IF="$ACTIVE"

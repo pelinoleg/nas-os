@@ -10216,6 +10216,10 @@ class H(BaseHTTPRequestHandler):
 
 
 def main():
+    # SIGUSR1 -> dump all thread stacks to stderr (journal). nas-netguard sends
+    # it right before restarting a hung panel, so the hang site gets logged.
+    import faulthandler
+    faulthandler.register(signal.SIGUSR1, all_threads=True)
     os.makedirs(WEB_DIR, exist_ok=True)
     ensure_web_assets()
     try:
