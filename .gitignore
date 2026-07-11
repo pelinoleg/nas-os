@@ -14,6 +14,8 @@
 !/dialogrc-nas
 !/web/
 !/services/
+!/.claude/
+.claude/settings.local.json
 
 # внутри web/: не тащим кэш обоев и превью (это runtime), остальное (иконки, ассеты) — в репо
 web/wallpaper.*
