@@ -2578,12 +2578,13 @@ def _def_monitor():
         "delete_block":{"on": True,  "priority": 1},
         "backup":      {"on": False, "priority": 0},
         "mergerfs":    {"on": True,  "priority": 1},
-        # --- история файлов (fswatch) ---
-        "fsw_corrupt": {"on": True,  "priority": 2},
-        "fsw_guard":   {"on": True,  "priority": 2},
+        # --- история файлов (fswatch); priority 2 = Pushover emergency (ретраи
+        #     каждую минуту до подтверждения) — по умолчанию не используем ---
+        "fsw_corrupt": {"on": True,  "priority": 1},
+        "fsw_guard":   {"on": True,  "priority": 1},
         "fsw_root":    {"on": True,  "priority": 1},
         "fsw_del":     {"on": True,  "priority": 0, "threshold": 50},
-        "fsw_scan":    {"on": False, "priority": -1},
+        "fsw_scan":    {"on": True,  "priority": -1},
         # --- обслуживание ---
         "reboot_req":  {"on": True,  "priority": -1},
         "root_full":   {"on": True,  "priority": 1, "threshold": 90},
@@ -7300,7 +7301,7 @@ def _fsw_fire(key, title, msg, lvl=None, priority=None):
     except Exception:
         pass
 
-def _fsw_run(deep=False):
+def _fsw_run(deep=False, manual=False):
     cfg = fsw_load()
     now = int(time.time())
     t0 = time.time()
@@ -7507,6 +7508,12 @@ def _fsw_run(deep=False):
         if baseline:
             _fsw_fire("fsw_scan", "История файлов: индекс построен",
                       "Проиндексировано %d файлов (%s)." % (n_files, _fsw_human(n_size)), lvl="ok")
+        elif manual:
+            _fsw_fire("fsw_scan", "История файлов: скан завершён",
+                      "+%d −%d ~%d →%d · повреждений: %d · проверено %s за %d сек" %
+                      (summary["added"], summary["removed"], summary["modified"],
+                       summary["moved"], summary["corrupt"], _fsw_human(vbytes),
+                       summary["dur"]), lvl="ok")
         with _fsw_lock:
             _fsw.update({"status": "idle", "cancel": False})
     except _FswCancel:
@@ -7519,14 +7526,15 @@ def _fsw_run(deep=False):
     finally:
         db.close()
 
-def fsw_start(deep=False):
+def fsw_start(deep=False, manual=True):
     with _fsw_lock:
         if _fsw.get("status") in ("scan", "verify"):
             return {"ok": False, "log": "скан уже идёт"}
         _fsw.clear()
         _fsw.update({"status": "scan", "started": int(time.time()),
                      "files": 0, "bytes": 0, "deep": bool(deep)})
-    threading.Thread(target=_fsw_run, args=(bool(deep),), daemon=True).start()
+    threading.Thread(target=_fsw_run, args=(bool(deep), bool(manual)),
+                     daemon=True).start()
     return {"ok": True}
 
 def fsw_cancel():
@@ -7682,7 +7690,78 @@ def fsw_activity(days=60):
         pass
     for d, k, n in rows:
         out.setdefault(d, {})[k] = n
-    return {"ok": True, "days": out}
+    # hot folders: parent dirs with the most events over the period
+    hot = {}
+    try:
+        db = _fsw_db()
+        try:
+            for k, p in db.execute("SELECT kind, path FROM events WHERE ts>=?",
+                                   (int(time.time()) - days * 86400,)):
+                d = (p or "").rsplit("/", 1)[0] or "/"
+                a = hot.setdefault(d, {"n": 0})
+                a["n"] += 1
+                a[k] = a.get(k, 0) + 1
+        finally:
+            db.close()
+    except Exception:
+        pass
+    top = sorted(hot.items(), key=lambda kv: -kv[1]["n"])[:12]
+    return {"ok": True, "days": out,
+            "hot": [dict(v, dir=d) for d, v in top]}
+
+def fsw_file(path):
+    """Manifest row + full event history of one path (info dialog)."""
+    path = path or ""
+    out = {"ok": True, "path": path, "file": None, "events": []}
+    try:
+        db = _fsw_db()
+        try:
+            r = db.execute("SELECT size,mtime,hash,verified FROM files WHERE path=?",
+                           (path,)).fetchone()
+            if r:
+                out["file"] = {"size": r[0], "mtime": r[1], "hash": r[2],
+                               "verified": r[3]}
+            out["events"] = [
+                {"id": i, "ts": t, "kind": k, "path": p, "dst": d, "size": s, "info": inf}
+                for (i, t, k, p, d, s, inf) in db.execute(
+                    "SELECT id,ts,kind,path,dst,size,info FROM events "
+                    "WHERE path=? OR dst=? ORDER BY id DESC LIMIT 100", (path, path))]
+        finally:
+            db.close()
+    except Exception as e:
+        return {"ok": False, "log": str(e)[:200]}
+    return out
+
+def fsw_export_csv(days=365, kind="", q=""):
+    import csv, io
+    try:
+        days = max(1, min(3650, int(days or 365)))
+    except (ValueError, TypeError):
+        days = 365
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["date", "time", "event", "path", "moved_to", "size", "info"])
+    try:
+        db = _fsw_db()
+        try:
+            conds = ["ts>=?"]
+            args = [int(time.time()) - days * 86400]
+            if kind:
+                conds.append("kind=?"); args.append(kind)
+            if q:
+                conds.append("(path LIKE ? OR dst LIKE ?)")
+                args += ["%" + q + "%"] * 2
+            for ts, k, p, d, s, inf in db.execute(
+                    "SELECT ts,kind,path,dst,size,info FROM events WHERE " +
+                    " AND ".join(conds) + " ORDER BY id DESC LIMIT 100000", args):
+                lt = time.localtime(ts)
+                w.writerow([time.strftime("%Y-%m-%d", lt), time.strftime("%H:%M:%S", lt),
+                            k, p, d or "", s if s is not None else "", inf or ""])
+        finally:
+            db.close()
+    except Exception:
+        pass
+    return buf.getvalue()
 
 def fsw_clear(mode):
     """mode='events' wipes the history journal; 'all' drops the whole index
@@ -7725,7 +7804,7 @@ def _fsw_tick():
     _fsw_auto_day = day
     if last and time.strftime("%Y-%m-%d", time.localtime(last.get("ts", 0))) == day:
         return                                    # already scanned today (manual)
-    fsw_start()
+    fsw_start(manual=False)
 
 def fs_grep(path, query, limit=200):
     path = os.path.realpath(path or "/")
@@ -10292,6 +10371,19 @@ class H(BaseHTTPRequestHandler):
                 self._json(fsw_status())
             elif p == "/api/fsw/activity":
                 self._json(fsw_activity((q.get("days") or ["60"])[0]))
+            elif p == "/api/fsw/file":
+                self._json(fsw_file((q.get("path") or [""])[0]))
+            elif p == "/api/fsw/export":
+                data = fsw_export_csv((q.get("days") or ["365"])[0],
+                                      (q.get("kind") or [""])[0],
+                                      (q.get("q") or [""])[0]).encode("utf-8-sig")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/csv; charset=utf-8")
+                self.send_header("Content-Disposition",
+                                 'attachment; filename="file-history.csv"')
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
             elif p == "/api/fsw/events":
                 self._json(fsw_events((q.get("before") or ["0"])[0],
                                       (q.get("limit") or ["100"])[0],

@@ -1177,11 +1177,14 @@
   .fsw{flex:1;min-width:0;height:100%;display:flex;flex-direction:column;gap:10px}
   .fsw-head{display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap;padding:14px 16px 0}
   .fsw>#fswGuard .fsw-guard{margin:0 16px}
-  .fsw-stats{flex:1;min-width:0;display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start}
-  .fsw-st{display:flex;flex-direction:column;gap:2px;min-width:0}
-  .fsw-st b{font-size:13.5px;white-space:nowrap}
-  .fsw-st span{font-size:10.5px;color:var(--mut);white-space:nowrap}
+  .fsw-stats{flex:1;min-width:0;display:flex;gap:9px;flex-wrap:wrap;align-items:stretch}
+  .fsw-st{display:flex;align-items:center;gap:9px;min-width:0;padding:7px 12px 7px 8px;
+    background:var(--card);border:1px solid var(--line);border-radius:var(--r-md)}
+  .fsw-st>div{display:flex;flex-direction:column;gap:1px;min-width:0}
+  .fsw-st b{font-size:13px;white-space:nowrap}
+  .fsw-st span{font-size:10px;color:var(--mut);white-space:nowrap}
   .fsw-st b.ok{color:var(--good)}.fsw-st b.warn{color:var(--warn)}.fsw-st b.bad{color:var(--danger)}
+  .fsw-ki.n{background:var(--sel);color:var(--dim)}
   .fsw-actions{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
   .fsw-prog{font-family:var(--mono);font-size:11px;color:var(--mut);display:flex;gap:6px;align-items:center}
   .fsw-prog svg{animation:wspin 1s linear infinite;color:var(--accent)}
@@ -1254,6 +1257,17 @@
     opacity:0;cursor:pointer;display:flex}
   .fsw-row:hover .fsw-go{opacity:1}
   .fsw-go:hover{color:var(--accent);background:var(--sel)}
+  .fsw-chart.big .fsw-col{max-width:none}
+  .fsw-axis{display:flex;justify-content:space-between;font-size:10px;color:var(--mut);font-family:var(--mono);padding:2px 4px 0}
+  .fsw-legend{display:flex;gap:14px;flex-wrap:wrap;font-size:11px;color:var(--dim);padding:4px 2px}
+  .fsw-lg{display:inline-flex;align-items:center;gap:5px}
+  .fsw-dot{width:8px;height:8px;border-radius:2.5px;display:inline-block}
+  .fsw-dot.add{background:var(--good)}.fsw-dot.del{background:var(--danger)}.fsw-dot.mod{background:var(--warn)}
+  .fsw-dot.move{background:var(--accent)}.fsw-dot.corrupt{background:var(--danger);box-shadow:0 0 0 1.5px var(--card)}
+  .fsw-fpl{cursor:pointer}
+  .fsw-fpl:hover{color:var(--accent);text-decoration:underline}
+  .fsw-fn[data-p]{cursor:pointer}
+  .fsw-fn[data-p]:hover{text-decoration:underline}
   .fsw .set-pane.fsw-flex{display:flex;flex-direction:column;gap:10px;overflow:hidden}
   .fsw textarea{font-size:12px;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-sm);
     background:var(--card);color:var(--text)}
@@ -1310,7 +1324,7 @@
   .fm-fav-list{flex:1;overflow:auto;margin:0 -4px}
   .fm-fav-i{display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:var(--r-sm);cursor:pointer;font-size:12.5px;color:var(--dim);transition:background .12s,box-shadow .12s,opacity .12s}
   .fm-fav-i:hover{background:var(--sel);color:var(--text)}
-  .fm-fav-i.on{background:var(--sel);color:var(--accent)}
+  .fm-fav-i.on{background:var(--sel);color:var(--text);font-weight:650;box-shadow:var(--sh-sm)}
   .fm-fav-i .fi{flex:none;color:var(--accent-2);display:flex}
   .fm-fav-i .fn{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .fm-fav-i .fx{border:none;background:none;color:var(--mut);display:flex;visibility:hidden;padding:2px;cursor:pointer}
@@ -6234,6 +6248,7 @@ function winFsHistory(){openWin("__fsw","История файлов",(body,win)
   <div class="nbmain">
    <div class="set-nav" id="fswNav">
     <button data-t="feed" class="on">${svg("list",17)}<span>Хроника</span></button>
+    <button data-t="act">${svg("activity",17)}<span>Активность</span></button>
     <button data-t="integ">${svg("shield",17)}<span>Целостность</span></button>
     <button data-t="watch">${svg("eye",17)}<span>Наблюдение</span></button>
     <button data-t="sched">${svg("clock",17)}<span>Расписание</span></button>
@@ -6246,15 +6261,17 @@ function winFsHistory(){openWin("__fsw","История файлов",(body,win)
   const l=ST.last,p=ST.progress||{};
   const fresh=ST.files?Math.round(100*(ST.verified_fresh||0)/ST.files):0;
   const fCls=fresh>=95?"ok":fresh>=60?"warn":"bad";
-  let cells=`<div class="fsw-st"><b>${ST.files||0} · ${fmtB(ST.size)}</b><span>файлов под наблюдением</span></div>`;
+  const ICLS={ok:"add",warn:"mod",bad:"del"};
+  const cell=(ic,icls,v,lbl,cls)=>`<div class="fsw-st"><span class="fsw-ki ${icls||"n"}">${svg(ic,14)}</span><div><b class="${cls||""}">${v}</b><span>${lbl}</span></div></div>`;
+  let cells=cell("layers","",`${ST.files||0} · ${fmtB(ST.size)}`,"файлов под наблюдением");
   if(running()){
-   cells+=`<div class="fsw-st"><b class="fsw-prog">${svg("refresh",12)} ${p.status==="verify"?"проверка содержимого…":"идёт скан…"}</b><span>${p.files||0} файлов · ${fmtB(p.bytes||0)} прочитано</span></div>`;
+   cells+=cell("refresh","move",`<span class="fsw-prog">${svg("refresh",12)} ${p.status==="verify"?"проверка содержимого…":"идёт скан…"}</span>`,`${p.files||0} файлов · ${fmtB(p.bytes||0)} прочитано`);
   }else{
-   cells+=`<div class="fsw-st"><b>${l?ago(l.ts):"ещё не было"}</b><span>последний скан${l&&l.dur!=null?" · "+l.dur+" с":""}</span></div>`;
-   if(l&&!l.baseline)cells+=`<div class="fsw-st"><b>+${l.added} −${l.removed} ~${l.modified}${l.moved?" →"+l.moved:""}</b><span>за последний скан</span></div>`;
-   cells+=`<div class="fsw-st"><b class="${fCls}">${fresh}%</b><span>содержимое проверено недавно</span></div>`;
+   cells+=cell("clock","",l?ago(l.ts):"ещё не было",`последний скан${l&&l.dur!=null?" · "+l.dur+" сек":""}`);
+   if(l&&!l.baseline)cells+=cell("activity","move",`+${l.added} −${l.removed} ~${l.modified}${l.moved?" →"+l.moved:""}`,"за последний скан");
+   cells+=cell("shield",ICLS[fCls],fresh+"%","содержимое проверено",fCls);
   }
-  if(ST.progress&&ST.progress.status==="error")cells+=`<div class="fsw-st"><b class="bad">ошибка</b><span>${esc(ST.progress.error||"")}</span></div>`;
+  if(ST.progress&&ST.progress.status==="error")cells+=cell("warn","corrupt","ошибка",esc(ST.progress.error||""),"bad");
   b.innerHTML=cells;
   g("#fswScan").innerHTML=running()?svg("stop",13)+" Остановить":svg("refresh",13)+" Сканировать";
  }
@@ -6289,31 +6306,64 @@ function winFsHistory(){openWin("__fsw","История файлов",(body,win)
   set("feed",tn?`<span class="fsw-nb" title="событий сегодня">${tn>999?"999+":tn}</span>`:"");
   set("integ",ST&&ST.corrupt?`<span class="fsw-nb bad">${ST.corrupt}</span>`:"");
  }
- async function loadAct(){const r=await api("/api/fsw/activity?days=60");ACT=(r&&r.days)||{};paintNav();
-  const ch=g("#fswChart");if(ch)ch.outerHTML=chartHTML();}
- function chartHTML(){
+ let ACT_HOT=[];
+ async function loadAct(){const r=await api("/api/fsw/activity?days="+Math.max(ACT_P||30,30));
+  ACT=(r&&r.days)||{};ACT_HOT=(r&&r.hot)||[];paintNav();}
+ function chartHTML(n,H){
   const days=[];const now=new Date();
-  for(let i=29;i>=0;i--){const d=new Date(now.getTime()-i*864e5);days.push(dayKey(d));}
+  for(let i=n-1;i>=0;i--){const d=new Date(now.getTime()-i*864e5);days.push(dayKey(d));}
   let max=1;
   for(const k of days){const v=(ACT&&ACT[k])||{};max=Math.max(max,Object.values(v).reduce((a,b)=>a+b,0));}
-  const H=40,sc=n=>n?Math.max(3,Math.round(H*Math.sqrt(n)/Math.sqrt(max))):0;
-  return `<div class="fsw-chart" id="fswChart" title="Активность за 30 дней — клик по столбику покажет день">${days.map(k=>{
+  const sc=x=>x?Math.max(3,Math.round(H*Math.sqrt(x)/Math.sqrt(max))):0;
+  const cols=days.map(k=>{
    const v=(ACT&&ACT[k])||{};
    const parts=["add","mod","move","del","corrupt"].map(t=>v[t]?`<i class="${t}" style="height:${sc(v[t])}px"></i>`:"").join("");
    const tot=Object.values(v).reduce((a,b)=>a+b,0);
    const tip=`${k.slice(8)}.${k.slice(5,7)}: ${tot?`+${v.add||0} −${v.del||0} ~${v.mod||0} →${v.move||0}${v.corrupt?" ⚠"+v.corrupt:""}`:"пусто"}`;
-   return `<div class="fsw-col${DAY===k?" on":""}" data-d="${k}" title="${att(tip)}">${parts||'<i class="trk"></i>'}</div>`;}).join("")}</div>`;
+   return `<div class="fsw-col${DAY===k?" on":""}" data-d="${k}" title="${att(tip)}">${parts||'<i class="trk"></i>'}</div>`;}).join("");
+  const cap=k=>`${k.slice(8)}.${k.slice(5,7)}`;
+  return `<div class="fsw-chart big" id="fswChart" style="height:${H+14}px">${cols}</div>
+   <div class="fsw-axis"><span>${cap(days[0])}</span><span>клик по столбику откроет день в Хронике</span><span>${cap(days[days.length-1])}</span></div>`;
+ }
+ function openTab(t){TAB=t;
+  g("#fswNav").querySelectorAll("button").forEach(z=>z.classList.toggle("on",z.dataset.t===t));
+  renderPane();}
+ async function fileInfoDlg(path){
+  const r=await api("/api/fsw/file?path="+encodeURIComponent(path));
+  if(!r||!r.ok)return;
+  const f=r.file,nm=path.split("/").pop(),dir=path.replace(/\/[^/]*$/,"")||"/";
+  const s=document.getElementById("scrim");
+  const evs=(r.events||[]).map(e=>{const k=FSW_KINDS[e.kind]||{ic:"file",t:e.kind};
+   return `<div class="fsw-row"><div class="fsw-ki ${e.kind}">${svg(k.ic,12)}</div>
+    <div class="fsw-nm"><div class="fsw-fn">${k.t}${e.kind==="move"?" → "+esc(e.dst||""):""}${e.info?" · "+esc(e.info):""}</div></div>
+    <div class="fsw-tm" style="min-width:0">${dayLbl(e.ts)} ${hm(e.ts)}</div></div>`;}).join("")||`<div class="set-sub">событий нет</div>`;
+  s.innerHTML=`<div class="dialog" style="max-width:540px"><h3 style="word-break:break-all">${esc(nm)}</h3>
+   <div class="set-sub mono" style="word-break:break-all;margin-top:2px">${esc(path)}</div>
+   ${f?`<div class="fsw-stats" style="margin:12px 0 6px">
+     <div class="fsw-st"><div><b>${fmtB(f.size)}</b><span>размер</span></div></div>
+     <div class="fsw-st"><div><b>${new Date(f.mtime*1000).toLocaleString()}</b><span>изменён</span></div></div>
+     <div class="fsw-st"><div><b>${f.verified?ago(f.verified):"—"}</b><span>содержимое проверено</span></div></div></div>
+    <div class="set-sub mono" style="word-break:break-all">BLAKE2: ${esc(f.hash||"—")}</div>`
+    :`<div class="set-sub" style="margin-top:10px">В индексе файла сейчас нет — удалён или вне наблюдения.</div>`}
+   <div class="set-h">История этого файла</div>
+   <div class="fsw-feed" style="max-height:230px;overflow:auto">${evs}</div>
+   <div class="r"><button class="btn" id="fiF">${svg("folder",13)} Показать в файлах</button><button class="btn pri" id="fiX">Закрыть</button></div></div>`;
+  s.classList.add("show");
+  s.querySelector("#fiX").onclick=()=>s.classList.remove("show");
+  s.querySelector("#fiF").onclick=()=>{s.classList.remove("show");winFiles(dir);};
  }
  const rowHTML=e=>{const k=FSW_KINDS[e.kind]||{ic:"file",t:e.kind};
   const nm=(e.path||"").split("/").pop();const dir=(e.path||"").slice(0,-(nm.length));
   const goDir=e.kind==="move"?(e.dst||"").replace(/\/[^/]*$/,"/"):dir;   // после переноса файл живёт по новому пути
+  const infoPath=e.kind==="move"?(e.dst||e.path):e.path;                 // историю смотрим по актуальному пути
   const extra=e.kind==="move"?` → ${esc(e.dst||"")}`:(e.info?` · ${esc(e.info)}`:"");
   const dl=e.kind==="corrupt"?`<span style="color:var(--mut)"> · ${dayLbl(e.ts)}</span>`:"";
-  const go=e.kind==="del"?"":`<button class="fsw-go" data-d="${att(goDir)}" title="Показать в файлах">${svg("folder",12)}</button>`;
   return `<div class="fsw-row" title="${att(k.t+": "+e.path+(e.dst?" → "+e.dst:""))}">
    <div class="fsw-ki ${e.kind}">${svg(k.ic,13)}</div>
-   <div class="fsw-nm"><div class="fsw-fn">${esc(nm)}${dl}</div><div class="fsw-fp">${esc(dir)}${extra}</div></div>
-   ${go}<div class="fsw-sz">${e.size!=null?fmtB(e.size):""}</div><div class="fsw-tm">${hm(e.ts)}</div></div>`;};
+   <div class="fsw-nm"><div class="fsw-fn" data-p="${att(infoPath)}">${esc(nm)}${dl}</div>
+    <div class="fsw-fp"><span class="fsw-fpl" data-fp="${att(dir)}" title="Показать события этой папки">${esc(dir)}</span>${extra}</div></div>
+   <button class="fsw-go" data-d="${att(goDir)}" title="Открыть папку в файлах">${svg("folder",12)}</button>
+   <div class="fsw-sz">${e.size!=null?fmtB(e.size):""}</div><div class="fsw-tm">${hm(e.ts)}</div></div>`;};
  function paintCounts(c){
   const bar=g("#fswF");if(!bar||!c)return;
   const tot=Object.values(c).reduce((a,b)=>a+b,0);
@@ -6336,10 +6386,12 @@ function winFsHistory(){openWin("__fsw","История файлов",(body,win)
   const k=FSW_KINDS[gr.kind]||{ic:"file"};
   const pl={add:"Добавлено",del:"Удалено",mod:"Изменено",move:"Перемещено",corrupt:"Повреждено"}[gr.kind]||gr.kind;
   const first=gr.items.slice(0,3).map(i=>(i.path||"").split("/").pop()).join(", ");
+  const gdir=((gr.items[0]||{}).path||"").replace(/\/[^/]*$/,"")||"/";
   return `<div class="fsw-grp" data-ts="${gr.ts}" data-kind="${gr.kind}">
    <div class="fsw-row fsw-grph">
     <div class="fsw-ki ${gr.kind}">${svg(k.ic,13)}</div>
     <div class="fsw-nm"><div class="fsw-fn">${pl}: ${gr.n} файлов</div><div class="fsw-fp">${esc(first)}…</div></div>
+    <button class="fsw-go" data-d="${att(gdir)}" title="Открыть папку в файлах">${svg("folder",12)}</button>
     <div class="fsw-sz">${fmtB(gr.size)}</div><div class="fsw-tm">${hm(gr.ts)}</div>
     <span class="fsw-chev">${svg("chev",12)}</span></div>
    <div class="fsw-grpb" style="display:none"></div></div>`;};
@@ -6370,26 +6422,76 @@ function winFsHistory(){openWin("__fsw","История файлов",(body,win)
    feed.querySelector(".fsw-more").onclick=()=>loadFeed(false);}
  }
  /* --- вкладки --- */
+ function paintFilterState(){
+  const tk=dayKey(new Date()),yk=dayKey(new Date(Date.now()-864e5));
+  const dseg=g("#fswD");if(dseg)dseg.querySelectorAll("button").forEach(b=>
+   b.classList.toggle("on",(b.dataset.p==="t"&&DAY===tk)||(b.dataset.p==="y"&&DAY===yk)));
+  const di=g("#fswDay");if(di)di.value=DAY;
+  const cl=g("#fswClr");if(cl)cl.style.display=(DAY||Q)?"":"none";
+ }
  function paneFeed(pane){
   pane.classList.add("fsw-flex");
-  pane.innerHTML=`${chartHTML()}<div class="fsw-bar">
+  pane.innerHTML=`<div class="fsw-bar">
     <div class="seg" id="fswF"><button data-k="">Все</button><button data-k="add">Добавлены</button><button data-k="del">Удалены</button><button data-k="mod">Изменены</button><button data-k="move">Перемещены</button><button data-k="corrupt">Повреждены</button></div>
-    <input type="date" class="fsw-q" id="fswDay" style="flex:none" value="${att(DAY)}" title="Показать события конкретного дня">
-    <input class="fsw-q" id="fswQ" placeholder="фильтр по пути…" value="${att(Q)}">
+   </div>
+   <div class="fsw-bar">
+    <div class="seg" id="fswD"><button data-p="t">Сегодня</button><button data-p="y">Вчера</button></div>
+    <input type="date" class="fsw-q" id="fswDay" style="flex:none" title="Показать события конкретного дня">
+    <input class="fsw-q" id="fswQ" placeholder="фильтр по пути — или клик по серому пути в строке" value="${att(Q)}">
+    <button class="btn sm" id="fswClr" style="display:none">${svg("x",12)} Сбросить</button>
    </div><div class="fsw-feed" id="fswFeed"></div>`;
   pane.querySelectorAll("#fswF button").forEach(b=>{
    b.classList.toggle("on",b.dataset.k===KIND);
    b.onclick=()=>{KIND=b.dataset.k;pane.querySelectorAll("#fswF button").forEach(z=>z.classList.toggle("on",z===b));loadFeed(true);};});
-  g("#fswDay").onchange=e=>{DAY=e.target.value||"";syncChart();loadFeed(true);};
-  g("#fswQ").oninput=e=>{clearTimeout(qTimer);qTimer=setTimeout(()=>{Q=e.target.value.trim();loadFeed(true);},350);};
-  // клик по столбику графика = выбрать день (повторный клик — снять)
-  pane.addEventListener("click",e=>{const col=e.target.closest(".fsw-col");if(!col)return;
-   DAY=(DAY===col.dataset.d)?"":col.dataset.d;
-   const di=g("#fswDay");if(di)di.value=DAY;syncChart();loadFeed(true);});
+  g("#fswD").querySelectorAll("button").forEach(b=>b.onclick=()=>{
+   const key=b.dataset.p==="t"?dayKey(new Date()):dayKey(new Date(Date.now()-864e5));
+   DAY=(DAY===key)?"":key;paintFilterState();loadFeed(true);});
+  g("#fswDay").onchange=e=>{DAY=e.target.value||"";paintFilterState();loadFeed(true);};
+  g("#fswQ").oninput=e=>{clearTimeout(qTimer);qTimer=setTimeout(()=>{Q=e.target.value.trim();paintFilterState();loadFeed(true);},350);};
+  g("#fswClr").onclick=()=>{DAY="";Q="";g("#fswQ").value="";paintFilterState();loadFeed(true);};
+  paintFilterState();
   loadFeed(true);
  }
- function syncChart(){const ch=g("#fswChart");if(!ch)return;
-  ch.querySelectorAll(".fsw-col").forEach(c=>c.classList.toggle("on",c.dataset.d===DAY));}
+ let ACT_P=30;
+ const sumPeriod=n=>{const t={add:0,del:0,mod:0,move:0,corrupt:0};const now=new Date();
+  for(let i=0;i<n;i++){const v=(ACT&&ACT[dayKey(new Date(now.getTime()-i*864e5))])||{};
+   for(const k in t)t[k]+=v[k]||0;}
+  return t;};
+ const hotHTML=h=>{const nm=h.dir.split("/").pop()||h.dir;
+  const chips=["add","del","mod","move","corrupt"].filter(k=>h[k]).map(k=>`<i class="fsw-cnt ${k}">${h[k]}</i>`).join("");
+  return `<div class="fsw-row"><div class="fsw-ki n">${svg("folder",13)}</div>
+   <div class="fsw-nm"><div class="fsw-fn">${esc(nm)}</div><div class="fsw-fp"><span class="fsw-fpl" data-fp="${att(h.dir+"/")}" title="Показать события этой папки">${esc(h.dir)}</span></div></div>
+   <div style="display:flex;gap:4px;align-items:center;flex:none">${chips}</div>
+   <button class="fsw-go" data-d="${att(h.dir)}" title="Показать в файлах">${svg("folder",12)}</button></div>`;};
+ async function paneAct(pane){
+  pane.classList.add("fsw-flex");
+  pane.innerHTML=`
+   <div class="fsw-bar" style="flex:none">
+    <div class="seg" id="fswAP">${[14,30,60,90].map(d=>`<button data-d="${d}" class="${ACT_P===d?"on":""}">${d} дн</button>`).join("")}</div>
+    <span style="flex:1"></span>
+    <button class="btn sm" id="fswCsv" title="Выгрузить журнал за период в CSV">${svg("download",13)} Экспорт CSV</button>
+   </div>
+   <div id="fswChartBox" style="flex:none"></div>
+   <div class="fsw-legend" id="fswLeg" style="flex:none"></div>
+   <div class="set-h" style="flex:none">Горячие папки за период</div>
+   <div class="fsw-feed" id="fswHot"></div>`;
+  const draw=()=>{
+   g("#fswChartBox").innerHTML=chartHTML(ACT_P,110);
+   const t=sumPeriod(ACT_P);
+   g("#fswLeg").innerHTML=[["add","добавлены"],["del","удалены"],["mod","изменены"],["move","перемещены"],["corrupt","повреждены"]]
+    .map(([k,l])=>`<span class="fsw-lg"><i class="fsw-dot ${k}"></i>${l}: <b>${t[k]||0}</b></span>`).join("");
+   g("#fswHot").innerHTML=(ACT_HOT||[]).length?ACT_HOT.map(hotHTML).join(""):
+    `<div class="fsw-empty">${svg("activity",30)}<div>За период активности не было.</div></div>`;};
+  g("#fswAP").querySelectorAll("button").forEach(b=>b.onclick=async()=>{
+   ACT_P=+b.dataset.d;g("#fswAP").querySelectorAll("button").forEach(z=>z.classList.toggle("on",z===b));
+   await loadAct();draw();});
+  g("#fswCsv").onclick=()=>{location.href=`/api/fsw/export?days=${ACT_P}${KIND?"&kind="+KIND:""}${Q?"&q="+encodeURIComponent(Q):""}`;};
+  // клик по столбику = открыть этот день в Хронике
+  pane.addEventListener("click",e=>{const col=e.target.closest(".fsw-col");if(!col)return;
+   DAY=col.dataset.d;openTab("feed");});
+  if(!ACT)await loadAct();
+  draw();
+ }
  async function paneInteg(pane){
   pane.classList.add("fsw-flex");
   const c=(ST&&ST.config)||{};
@@ -6420,7 +6522,8 @@ function winFsHistory(){openWin("__fsw","История файлов",(body,win)
    <div class="set-sub">Скан следит только за этими папками (не заходя в чужие точки монтирования). Исключения отсеивают мусор: имена и маски сравниваются с именем файла/папки, регулярные выражения — с полным путём.</div>
    <div class="set-h">Папки</div>
    <div id="fwRoots"></div>
-   <div style="margin-top:6px"><button class="btn sm" id="fwAdd">${svg("plus",12)} Добавить папку</button></div>
+   <div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap"><button class="btn sm" id="fwAdd">${svg("plus",12)} Добавить папку</button>
+    <button class="btn sm" id="fwEtc" title="Увидишь, кто и когда меняет конфиги системы">${svg("plus",12)} /etc — конфиги системы</button></div>
    <div class="set-h">Исключения — имена и маски</div>
    <textarea class="mono" id="fwEx" rows="7" style="width:100%;resize:vertical">${esc((c.exclude||[]).join("\n"))}</textarea>
    <div class="set-h">Исключения — регулярные выражения</div>
@@ -6432,6 +6535,10 @@ function winFsHistory(){openWin("__fsw","История файлов",(body,win)
    pane.querySelectorAll("#fwRoots .iconbtn").forEach(b=>b.onclick=()=>{roots.splice(+b.dataset.i,1);drawRoots();});};
   drawRoots();
   g("#fwAdd").onclick=()=>pickFolder({start:roots[0]||"/mnt",title:"Следить за папкой",onPick:p=>{if(!roots.includes(p))roots.push(p);drawRoots();}});
+  const eb=g("#fwEtc");
+  const syncEtc=()=>{eb.style.display=roots.includes("/etc")?"none":"";};
+  eb.onclick=()=>{roots.push("/etc");drawRoots();syncEtc();};
+  syncEtc();
   g("#fwSave").onclick=async()=>{
    const r=await api("/api/fsw/config",{method:"POST",body:JSON.stringify({roots,
     exclude:g("#fwEx").value.split("\n").map(x=>x.trim()).filter(Boolean),
@@ -6477,22 +6584,29 @@ function winFsHistory(){openWin("__fsw","История файлов",(body,win)
     const r=await api("/api/fsw/clear",{method:"POST",body:JSON.stringify({mode})});
     toast(r&&r.ok?"Готово":(r&&r.log)||"не вышло");refreshPane();};}
  }
- const PANES={feed:paneFeed,integ:paneInteg,watch:paneWatch,sched:paneSched};
+ const PANES={feed:paneFeed,act:paneAct,integ:paneInteg,watch:paneWatch,sched:paneSched};
  function renderPane(){const pane=g("#fswPane");pane.classList.remove("fsw-flex");PANES[TAB](pane);}
  async function refreshPane(keepPane){ST=await api("/api/fsw/status");paintStats();paintGuard();paintSide();paintNav();if(!keepPane)renderPane();}
- g("#fswNav").querySelectorAll("button").forEach(b=>b.onclick=()=>{
-  TAB=b.dataset.t;g("#fswNav").querySelectorAll("button").forEach(z=>z.classList.toggle("on",z===b));renderPane();});
+ g("#fswNav").querySelectorAll("button").forEach(b=>b.onclick=()=>openTab(b.dataset.t));
  g("#fswScan").onclick=async()=>{
   if(running()){await api("/api/fsw/cancel",{method:"POST",body:"{}"});toast("Останавливаю…");}
   else{const r=await api("/api/fsw/scan",{method:"POST",body:"{}"});toast(r&&r.ok?"Скан запущен":(r&&r.log)||"не вышло");}
   setTimeout(()=>refreshPane(true),600);};
- // «показать в файлах» на строках событий (делегирование: строки динамические)
- body.addEventListener("click",e=>{const b=e.target.closest(".fsw-go");
-  if(b){e.stopPropagation();winFiles(b.dataset.d||"/");}});
+ // делегирование по динамическим строкам: «в файлы», фильтр по пути, инфо о файле
+ body.addEventListener("click",e=>{
+  const go=e.target.closest(".fsw-go");
+  if(go){e.stopPropagation();winFiles(go.dataset.d||"/");return;}
+  const fp=e.target.closest(".fsw-fpl");
+  if(fp){e.stopPropagation();Q=fp.dataset.fp||"";
+   if(TAB!=="feed")openTab("feed");
+   else{const qi=g("#fswQ");if(qi)qi.value=Q;paintFilterState();loadFeed(true);}
+   return;}
+  const fn=e.target.closest(".fsw-fn[data-p]");
+  if(fn){e.stopPropagation();fileInfoDlg(fn.dataset.p);}});
  const t=setInterval(async()=>{
   if(!document.body.contains(body)){clearInterval(t);return;}
   ST=await api("/api/fsw/status");paintStats();paintGuard();paintSide();
-  if(wasRun&&!running()){loadAct();if(TAB==="feed"||TAB==="integ")renderPane();}   // скан закончился — обновить
+  if(wasRun&&!running()){loadAct();if(TAB!=="watch"&&TAB!=="sched")renderPane();}   // скан закончился — обновить
   wasRun=!!running();
  },4000);
  refreshPane();loadAct();
