@@ -7595,15 +7595,16 @@ def _fsw_day_range(day):
     except (ValueError, OverflowError):
         return None
 
-def fsw_events(before=0, limit=100, kind="", q="", day="", ts=0, group=False):
+def fsw_events(before=0, limit=100, kind="", q="", day="", ts=0, group=False, days=0):
     def _i(v):
         try:
             return int(v or 0)
         except (ValueError, TypeError):
             return 0
     before, ts, limit = _i(before), _i(ts), max(1, min(500, _i(limit) or 100))
-    # scope conditions (q/day) are shared by the feed, the per-kind counters
-    # and the group view; kind/pagination narrow the feed only
+    days = _i(days)
+    # scope conditions (q/day/days) are shared by the feed, the per-kind
+    # counters and the group view; kind/pagination narrow the feed only
     scope, sargs = [], []
     if q:
         scope.append("(path LIKE ? OR dst LIKE ?)")
@@ -7612,6 +7613,8 @@ def fsw_events(before=0, limit=100, kind="", q="", day="", ts=0, group=False):
         dr = _fsw_day_range(day)
         if dr:
             scope.append("ts>=? AND ts<?"); sargs += list(dr)
+    elif days:
+        scope.append("ts>=?"); sargs.append(int(time.time()) - days * 86400)
     try:
         db = _fsw_db()
         try:
@@ -10391,7 +10394,8 @@ class H(BaseHTTPRequestHandler):
                                       (q.get("q") or [""])[0],
                                       (q.get("day") or [""])[0],
                                       (q.get("ts") or ["0"])[0],
-                                      (q.get("group") or [""])[0] == "1"))
+                                      (q.get("group") or [""])[0] == "1",
+                                      (q.get("days") or ["0"])[0]))
             elif p == "/api/fs/duscan/status":
                 self._json(duscan_status((q.get("root") or ["/"])[0]))
             elif p == "/api/fs/duscan/node":

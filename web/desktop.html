@@ -218,7 +218,7 @@
   .clock small{display:block;color:var(--dim);font-size:11px;font-weight:500;letter-spacing:.01em}
 
   /* menu popover */
-  .menu{position:fixed;z-index:400;background:var(--menu-bg,var(--glass-2));backdrop-filter:var(--win-bf,none);-webkit-backdrop-filter:var(--win-bf,none);
+  .menu{position:fixed;z-index:2600;background:var(--menu-bg,var(--glass-2));backdrop-filter:var(--win-bf,none);-webkit-backdrop-filter:var(--win-bf,none);
     border-radius:14px;box-shadow:var(--sh);padding:7px;min-width:216px;animation:pop .14s ease}
   @keyframes pop{from{opacity:0;transform:translateY(-6px) scale(.98)}}
   .menu button{display:flex;align-items:center;gap:12px;width:100%;padding:10px 12px;border:none;background:transparent;
@@ -1243,7 +1243,7 @@
   .fsw-nb.bad{background:var(--danger);color:#fff}
   .fsw-chart{display:flex;gap:2px;align-items:flex-end;height:52px;flex:none;padding:2px 2px 0}
   .fsw-col{flex:1;max-width:18px;min-width:5px;height:100%;display:flex;flex-direction:column-reverse;
-    gap:1px;cursor:pointer;border-radius:4px;padding:2px;justify-content:flex-start}
+    gap:1px;cursor:pointer;border-radius:4px;padding:2px;justify-content:flex-start;overflow:hidden}
   .fsw-col:hover{background:var(--sel)}
   .fsw-col.on{background:var(--accent-soft)}
   .fsw-col i{display:block;border-radius:2px;flex:none}
@@ -1278,14 +1278,26 @@
   .lp-q{width:min(420px,84vw);font-size:14px;padding:9px 14px;border-radius:11px;border:1px solid var(--line);
     background:var(--card);color:var(--text);margin-bottom:24px;flex:none}
   .lp-q:focus{outline:none;border-color:var(--accent-line)}
-  .lp-grid{flex:1;min-height:0;overflow-y:auto;width:min(940px,94vw);align-content:start;
-    display:grid;grid-template-columns:repeat(auto-fill,minmax(94px,1fr));gap:16px 6px;padding:6px}
+  .lp-grid{flex:1;min-height:0;overflow-y:auto;width:min(1020px,94vw);align-content:start;
+    display:grid;grid-template-columns:repeat(auto-fill,minmax(116px,1fr));gap:20px 8px;padding:6px}
+  .lp-grid .app .tile{width:72px;height:72px;border-radius:21px}
+  .lp-grid .app .lbl{font-size:12px;max-width:110px}
   .lp-grid .lp-h{grid-column:1/-1;font-size:11px;font-weight:700;color:var(--dim);padding:8px 6px 0}
   .lp-grid .app{width:auto}
   .lp-grid .lp-empty{grid-column:1/-1;color:var(--dim);font-size:13px;text-align:center;padding:30px}
   .lp-pin{position:absolute;top:4px;right:10px;width:8px;height:8px;border-radius:50%;background:var(--accent);opacity:.85}
   .lp-grid .tile.lp-bare{background:none!important;box-shadow:none!important}
   .lp-grid .tile.lp-bare svg{filter:drop-shadow(0 1px 2px rgba(0,0,0,.25))}
+  /* тултип графика активности: тёмный пузырь, как .tipbox */
+  .fsw-tip{position:fixed;z-index:2700;background:#222c3a;color:#f2f5fa;border:1px solid rgba(255,255,255,.12);
+    font-size:11.5px;line-height:1.5;padding:8px 11px;border-radius:10px;box-shadow:0 10px 32px rgba(0,0,0,.45);
+    pointer-events:none;min-width:130px}
+  .fsw-tip-h{font-weight:700;font-family:var(--mono);font-size:11px;margin-bottom:4px;color:#cfd8e6}
+  .fsw-tip-r{display:flex;align-items:center;gap:7px}
+  .fsw-tip-r b{margin-left:auto;font-family:var(--mono)}
+  .fsw-tip .fsw-dot.add{background:#3fbf7f}.fsw-tip .fsw-dot.del{background:#e5654d}
+  .fsw-tip .fsw-dot.mod{background:#dfa63c}.fsw-tip .fsw-dot.move{background:#5f8ef7}
+  .fsw-tip .fsw-dot.corrupt{background:#e5654d;box-shadow:0 0 0 1.5px #f2f5fa}
   .fsw .set-pane.fsw-flex{display:flex;flex-direction:column;gap:10px;overflow:hidden}
   .fsw textarea{font-size:12px;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-sm);
     background:var(--card);color:var(--text)}
@@ -2254,7 +2266,6 @@
   <div class="mb-brand"><img class="mb-logo" src="/icon-flat.svg" alt="Raspberry Pi" draggable="false"><span id="brandName">pi5.local</span></div>
   <span class="mb-sep"></span>
   <button class="mb-theme" id="lpBtn" title="Все приложения"></button>
-  <button class="mb-theme" id="expoBtn" title="Все окна (F9)"></button>
   <div class="winbar" id="winbar"></div>
   <span class="mb-sep"></span>
   <div class="tray" id="tray"></div>
@@ -3035,8 +3046,15 @@ function renderApps(){
  const box=document.getElementById("apps");box.innerHTML="";
  /* Ярлыки контейнеров с меткой web-desktop.* (запущенные и остановленные; скрытые enable=false отфильтрованы бэкендом). */
  APPS.forEach(app=>{if(!app.url)return;
+  const key=app.container||app.name;
+  if((SET.deskHidden||[]).includes(key))return;      // спрятано через Launchpad
   const b=el(`<button class="app" title="${app.container||""}${app.running?"":" · остановлен"}"><div class="tile applbl" style="background:${tileColor(app.name)}">${appIconHTML(app)}</div><div class="lbl">${app.name}</div><span class="st ${app.running?"on":"off"}"></span></button>`);
-  b.onclick=()=>window.open(app.url,"_blank");box.appendChild(b);});
+  b.onclick=()=>window.open(app.url,"_blank");
+  b.oncontextmenu=e=>{e.preventDefault();showMenu(e.clientX,e.clientY,[
+   {label:"Скрыть с рабочего стола",ic:svg("eye",16),act:()=>{
+    SET.deskHidden=[...(SET.deskHidden||[]),key];saveSettings();renderApps();
+    toast("Вернуть можно через Launchpad — кнопка в верхнем баре");}}]);};
+  box.appendChild(b);});
  if(APPS_LOADED&&!APPS.filter(a=>a.url).length)box.appendChild(el(`<div class="apps-hint">Ярлыки приложений появятся здесь автоматически.<br>Добавьте контейнеру метки <b>web-desktop.*</b> в docker-compose, поднимите его в <b>Dockge</b> и нажмите <b>«Обновить ярлыки»</b> (правый клик по столу).<br><br>Системные инструменты — в панели снизу.</div>`));
 }
 function volIcon(v){return v.rotational?"hdd":(v.tran==="mmc"?"sd":"ssd");}
@@ -3138,7 +3156,9 @@ function lpClose(){document.getElementById("launchpad").classList.remove("show")
 function lpDraw(){
  const grid=document.getElementById("lpGrid");
  const q=(document.getElementById("lpQ").value||"").trim().toLowerCase();
- const f=n=>!q||(n||"").toLowerCase().includes(q);
+ // имена в исходнике русские, UI может быть на EN — ищем и по переводу
+ const f=(...ns)=>!q||ns.some(n=>{n=n||"";return n.toLowerCase().includes(q)||
+  (window.nasTr?nasTr(n):n).toLowerCase().includes(q);});
  const hid=SET.dockHidden||[];
  grid.innerHTML="";
  const sys=dockItems().filter(a=>f(a.name));
@@ -3153,11 +3173,17 @@ function lpDraw(){
    inDock?{label:"Убрать из дока",ic:svg("eject",16),act:()=>{SET.dockHidden=[...(SET.dockHidden||[]),a.id];saveSettings();renderDock();lpDraw();}}
          :{label:"Закрепить в доке",ic:svg("plus",16),act:()=>{SET.dockHidden=(SET.dockHidden||[]).filter(x=>x!==a.id);saveSettings();renderDock();lpDraw();}}]);};
   grid.appendChild(b);});
- const apps=(APPS||[]).filter(a=>a.url&&f(a.name));
+ const dHid=SET.deskHidden||[];
+ const apps=(APPS||[]).filter(a=>a.url&&f(a.name,a.container));
  if(apps.length)grid.insertAdjacentHTML("beforeend",`<div class="lp-h">Приложения (Docker)</div>`);
  apps.forEach(app=>{
-  const b=el(`<button class="app" title="${att(app.container||app.name)}"><div class="tile applbl" style="background:${tileColor(app.name)}">${appIconHTML(app)}</div><div class="lbl">${esc(app.name)}</div><span class="st ${app.running?"on":"off"}"></span></button>`);
+  const key=app.container||app.name;
+  const onDesk=!dHid.includes(key);
+  const b=el(`<button class="app" style="position:relative" title="${att(app.container||app.name)}">${onDesk?'<span class="lp-pin" title="на рабочем столе"></span>':""}<div class="tile applbl" style="background:${tileColor(app.name)}">${appIconHTML(app)}</div><div class="lbl">${esc(app.name)}</div><span class="st ${app.running?"on":"off"}"></span></button>`);
   b.onclick=()=>{lpClose();window.open(app.url,"_blank");};
+  b.oncontextmenu=e=>{e.preventDefault();showMenu(e.clientX,e.clientY,[
+   onDesk?{label:"Скрыть с рабочего стола",ic:svg("eye",16),act:()=>{SET.deskHidden=[...dHid,key];saveSettings();renderApps();lpDraw();}}
+         :{label:"Показывать на рабочем столе",ic:svg("plus",16),act:()=>{SET.deskHidden=dHid.filter(x=>x!==key);saveSettings();renderApps();lpDraw();}}]);};
   grid.appendChild(b);});
  if(!sys.length&&!apps.length)grid.innerHTML=`<div class="lp-empty">Ничего не найдено.</div>`;
 }
@@ -6296,7 +6322,7 @@ const FSW_KINDS={add:{ic:"plus",t:"добавлен"},del:{ic:"trash",t:"уда�
                  move:{ic:"sync",t:"перемещён"},corrupt:{ic:"warn",t:"повреждён"}};
 function winFsHistory(){openWin("__fsw","История файлов",(body,win)=>{
  body.style.display="flex";body.style.padding="0";   // сайдбар сам задаёт отступы — без двойного паддинга
- let ST=null,KIND="",Q="",DAY="",qTimer=null,TAB="feed",wasRun=false;
+ let ST=null,KIND="",Q="",DAY="",RANGE=0,qTimer=null,TAB="feed",wasRun=false;
  const g=s=>body.querySelector(s);
  const running=()=>ST&&ST.progress&&(ST.progress.status==="scan"||ST.progress.status==="verify");
  const hm=ts=>{const d=new Date(ts*1000);return String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0");};
@@ -6381,13 +6407,14 @@ function winFsHistory(){openWin("__fsw","История файлов",(body,win)
   for(let i=n-1;i>=0;i--){const d=new Date(now.getTime()-i*864e5);days.push(dayKey(d));}
   let max=1;
   for(const k of days){const v=(ACT&&ACT[k])||{};max=Math.max(max,Object.values(v).reduce((a,b)=>a+b,0));}
-  const sc=x=>x?Math.max(3,Math.round(H*Math.sqrt(x)/Math.sqrt(max))):0;
   const cols=days.map(k=>{
    const v=(ACT&&ACT[k])||{};
-   const parts=["add","mod","move","del","corrupt"].map(t=>v[t]?`<i class="${t}" style="height:${sc(v[t])}px"></i>`:"").join("");
    const tot=Object.values(v).reduce((a,b)=>a+b,0);
-   const tip=`${k.slice(8)}.${k.slice(5,7)}: ${tot?`+${v.add||0} −${v.del||0} ~${v.mod||0} →${v.move||0}${v.corrupt?" ⚠"+v.corrupt:""}`:"пусто"}`;
-   return `<div class="fsw-col${DAY===k?" on":""}" data-d="${k}" title="${att(tip)}">${parts||'<i class="trk"></i>'}</div>`;}).join("");
+   // высота столбика — sqrt от суммы за день, сегменты делят её пропорционально
+   // (раньше каждый сегмент масштабировался отдельно и сумма вылезала за график)
+   const Ht=tot?Math.max(4,Math.round(H*Math.sqrt(tot)/Math.sqrt(max))):0;
+   const parts=["add","mod","move","del","corrupt"].map(t=>v[t]?`<i class="${t}" style="height:${Math.max(2,Math.round(Ht*v[t]/tot))}px"></i>`:"").join("");
+   return `<div class="fsw-col${DAY===k?" on":""}" data-d="${k}">${parts||'<i class="trk"></i>'}</div>`;}).join("");
   const cap=k=>`${k.slice(8)}.${k.slice(5,7)}`;
   return `<div class="fsw-chart big" id="fswChart" style="height:${H+14}px">${cols}</div>
    <div class="fsw-axis"><span>${cap(days[0])}</span><span>клик по столбику откроет день в Хронике</span><span>${cap(days[days.length-1])}</span></div>`;
@@ -6395,6 +6422,19 @@ function winFsHistory(){openWin("__fsw","История файлов",(body,win)
  function openTab(t){TAB=t;
   g("#fswNav").querySelectorAll("button").forEach(z=>z.classList.toggle("on",z.dataset.t===t));
   renderPane();}
+ function fswTipHide(){document.querySelectorAll(".fsw-tip").forEach(x=>x.remove());}
+ function fswTipShow(col){
+  fswTipHide();
+  const k=col.dataset.d,v=(ACT&&ACT[k])||{};
+  const tot=Object.values(v).reduce((a,b)=>a+b,0);
+  const rows=[["add","добавлены"],["del","удалены"],["mod","изменены"],["move","перемещены"],["corrupt","повреждены"]]
+   .filter(([t])=>v[t]).map(([t,l])=>`<div class="fsw-tip-r"><i class="fsw-dot ${t}"></i>${l}<b>${v[t]}</b></div>`).join("");
+  const tip=el(`<div class="fsw-tip"><div class="fsw-tip-h">${k.slice(8)}.${k.slice(5,7)}${tot?` · событий: ${tot}`:" · пусто"}</div>${rows}</div>`);
+  document.body.appendChild(tip);
+  const r=col.getBoundingClientRect(),tr=tip.getBoundingClientRect();
+  tip.style.left=Math.max(8,Math.min(innerWidth-tr.width-8,r.left+r.width/2-tr.width/2))+"px";
+  tip.style.top=Math.max(8,r.top-tr.height-8)+"px";
+ }
  async function fileInfoDlg(path){
   const r=await api("/api/fsw/file?path="+encodeURIComponent(path));
   if(!r||!r.ok)return;
@@ -6466,7 +6506,7 @@ function winFsHistory(){openWin("__fsw","История файлов",(body,win)
  async function loadFeed(reset){
   const feed=g("#fswFeed");if(!feed)return;
   if(reset){feed.innerHTML="";nextTs=null;feed._day="";}
-  const r=await api(`/api/fsw/events?group=1&kind=${KIND}&q=${encodeURIComponent(Q)}&day=${DAY}${nextTs?"&before="+nextTs:""}`);
+  const r=await api(`/api/fsw/events?group=1&kind=${KIND}&q=${encodeURIComponent(Q)}&day=${DAY}${RANGE?"&days="+RANGE:""}${nextTs?"&before="+nextTs:""}`);
   paintCounts(r&&r.counts);
   const grs=(r&&r.groups)||[];
   const more=feed.querySelector(".fsw-more");if(more)more.remove();
@@ -6492,9 +6532,10 @@ function winFsHistory(){openWin("__fsw","История файлов",(body,win)
  function paintFilterState(){
   const tk=dayKey(new Date()),yk=dayKey(new Date(Date.now()-864e5));
   const dseg=g("#fswD");if(dseg)dseg.querySelectorAll("button").forEach(b=>
-   b.classList.toggle("on",(b.dataset.p==="t"&&DAY===tk)||(b.dataset.p==="y"&&DAY===yk)));
+   b.classList.toggle("on",(b.dataset.p==="t"&&DAY===tk)||(b.dataset.p==="y"&&DAY===yk)||
+    (+b.dataset.p===RANGE&&RANGE>0)));
   const di=g("#fswDay");if(di)di.value=DAY;
-  const cl=g("#fswClr");if(cl)cl.style.display=(DAY||Q)?"":"none";
+  const cl=g("#fswClr");if(cl)cl.style.display=(DAY||Q||RANGE)?"":"none";
  }
  function paneFeed(pane){
   pane.classList.add("fsw-flex");
@@ -6502,7 +6543,7 @@ function winFsHistory(){openWin("__fsw","История файлов",(body,win)
     <div class="seg" id="fswF"><button data-k="">Все</button><button data-k="add">Добавлены</button><button data-k="del">Удалены</button><button data-k="mod">Изменены</button><button data-k="move">Перемещены</button><button data-k="corrupt">Повреждены</button></div>
    </div>
    <div class="fsw-bar">
-    <div class="seg" id="fswD"><button data-p="t">Сегодня</button><button data-p="y">Вчера</button></div>
+    <div class="seg" id="fswD"><button data-p="t">Сегодня</button><button data-p="y">Вчера</button><button data-p="7">7 дней</button><button data-p="30">30 дней</button></div>
     <input type="date" class="fsw-q" id="fswDay" style="flex:none" title="Показать события конкретного дня">
     <input class="fsw-q" id="fswQ" placeholder="фильтр по пути — или клик по серому пути в строке" value="${att(Q)}">
     <button class="btn sm" id="fswClr" style="display:none">${svg("x",12)} Сбросить</button>
@@ -6511,11 +6552,14 @@ function winFsHistory(){openWin("__fsw","История файлов",(body,win)
    b.classList.toggle("on",b.dataset.k===KIND);
    b.onclick=()=>{KIND=b.dataset.k;pane.querySelectorAll("#fswF button").forEach(z=>z.classList.toggle("on",z===b));loadFeed(true);};});
   g("#fswD").querySelectorAll("button").forEach(b=>b.onclick=()=>{
-   const key=b.dataset.p==="t"?dayKey(new Date()):dayKey(new Date(Date.now()-864e5));
-   DAY=(DAY===key)?"":key;paintFilterState();loadFeed(true);});
-  g("#fswDay").onchange=e=>{DAY=e.target.value||"";paintFilterState();loadFeed(true);};
+   const p=b.dataset.p;
+   if(p==="t"||p==="y"){const key=p==="t"?dayKey(new Date()):dayKey(new Date(Date.now()-864e5));
+    DAY=(DAY===key)?"":key;RANGE=0;}
+   else{RANGE=(RANGE===+p)?0:+p;DAY="";}
+   paintFilterState();loadFeed(true);});
+  g("#fswDay").onchange=e=>{DAY=e.target.value||"";if(DAY)RANGE=0;paintFilterState();loadFeed(true);};
   g("#fswQ").oninput=e=>{clearTimeout(qTimer);qTimer=setTimeout(()=>{Q=e.target.value.trim();paintFilterState();loadFeed(true);},350);};
-  g("#fswClr").onclick=()=>{DAY="";Q="";g("#fswQ").value="";paintFilterState();loadFeed(true);};
+  g("#fswClr").onclick=()=>{DAY="";Q="";RANGE=0;g("#fswQ").value="";paintFilterState();loadFeed(true);};
   paintFilterState();
   loadFeed(true);
  }
@@ -6555,7 +6599,11 @@ function winFsHistory(){openWin("__fsw","История файлов",(body,win)
   g("#fswCsv").onclick=()=>{location.href=`/api/fsw/export?days=${ACT_P}${KIND?"&kind="+KIND:""}${Q?"&q="+encodeURIComponent(Q):""}`;};
   // клик по столбику = открыть этот день в Хронике
   pane.addEventListener("click",e=>{const col=e.target.closest(".fsw-col");if(!col)return;
-   DAY=col.dataset.d;openTab("feed");});
+   DAY=col.dataset.d;RANGE=0;fswTipHide();openTab("feed");});
+  // кастомный тултип: цветные строки по типам вместо нечитаемой одной строки
+  pane.addEventListener("mouseover",e=>{const col=e.target.closest(".fsw-col");if(col)fswTipShow(col);});
+  pane.addEventListener("mouseout",e=>{const col=e.target.closest(".fsw-col");
+   if(col&&!col.contains(e.relatedTarget))fswTipHide();});
   if(!ACT)await loadAct();
   draw();
  }
@@ -9141,8 +9189,8 @@ function maybeOnboard(){let done=false;try{done=!!SET.onboarded||localStorage.ge
    {label:"Выключить",ic:svg("power",17),act:poweroff,dng:1}]);};}
  const xb=document.getElementById("expoBtn");if(xb){xb.innerHTML=svg("grid",17);xb.onclick=toggleExpo;}
  const lb=document.getElementById("lpBtn");
- if(lb){lb.innerHTML='<svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor">'+
-   [5,12,19].map(y=>[5,12,19].map(x=>`<circle cx="${x}" cy="${y}" r="2"/>`).join("")).join("")+'</svg>';
+ if(lb){lb.innerHTML='<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">'+
+   [5,12,19].map(y=>[5,12,19].map(x=>`<circle cx="${x}" cy="${y}" r="2.2"/>`).join("")).join("")+'</svg>';
   lb.onclick=lpToggle;}
  const lpEl=document.getElementById("launchpad");
  if(lpEl){lpEl.addEventListener("pointerdown",e=>{if(e.target===lpEl||e.target.id==="lpGrid")lpClose();});
