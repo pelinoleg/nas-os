@@ -5839,7 +5839,8 @@ function winGlance(){openWin("__glance","Экран NAS",async body=>{
   <div class="glc-bar">
    <span class="glc-cap">Экран</span><div class="seg" id="gcScr"></div><button class="btn sm" id="gcScrAdd">+</button>
    <input id="gcScrName" maxlength="24" placeholder="имя">
-   <select id="gcPreset">${presets.map(p=>`<option value="${p.id}">${esc(p.name)} — ${p.id}</option>`).join("")}</select>
+   <select id="gcPreset">${presets.map(p=>`<option value="${p.id}">${esc(p.name)} — ${p.id}</option>`).join("")}<option value="custom">Свой размер…</option></select>
+   <span id="gcWH" style="display:none;align-items:center;gap:3px"><input id="gcW" type="number" min="50" max="2000" style="width:62px">×<input id="gcH" type="number" min="50" max="2000" style="width:62px"></span>
    <div class="seg" id="gcMode"><button data-m="flow">Сетка</button><button data-m="free">Свободно</button></div>
    <label class="glc-cap" style="display:flex;align-items:center;gap:4px;text-transform:none">gap <input id="gcGap" type="number" min="0" max="24" style="width:52px"></label>
    <label class="glc-cap" style="display:flex;align-items:center;gap:5px;text-transform:none" title="Полоска доступности за 24ч внизу экрана (зелёное — онлайн, красное — недоступен)"><input type="checkbox" id="gcAv">доступность</label>
@@ -6011,7 +6012,11 @@ function winGlance(){openWin("__glance","Экран NAS",async body=>{
   if(sel<0||sel>=pg().tiles.length){insp.innerHTML=`<div class="glc-cap">Стиль плитки</div><div class="set-load" style="padding:8px 0">выберите плитку на холсте</div>`;return;}
   const t=pg().tiles[sel];
   const g9=(pre,extra)=>`<div class="glc-9" data-k="${pre}p">${["tl","tc","tr","cl","c","cr","bl","bc","br"].map(p=>`<button data-p="${p}" class="${stv(t,pre+"p")===p?"on":""}"></button>`).join("")}</div><div class="glc-9x" data-k="${pre}p">${(extra||[]).map(([v,l])=>`<button data-p="${v}" class="btn sm ${stv(t,pre+"p")===v?"on":""}">${l}</button>`).join("")}</div>`;
-  const num=(k,mn,mx)=>`<input type="number" min="${mn}" max="${mx}" data-n="${k}" value="${stv(t,k)!==undefined&&DEF[t.size||"m"][k]!==undefined?stv(t,k):(t.st&&t.st[k]!==undefined?t.st[k]:(k==="bw"?1:10))}" style="width:56px">`;
+  const num=(k,mn,mx)=>{let v;
+   if(["x","y","w","h"].includes(k))v=t[k]!==undefined?t[k]:0;      // geometry lives on the tile itself
+   else if(k==="bw")v=(t.st&&t.st.bw!==undefined)?t.st.bw:1;
+   else v=stv(t,k);
+   return `<input type="number" min="${mn}" max="${mx}" data-n="${k}" value="${v}" style="width:56px">`;};
   /* color + alpha pair; stored as #RRGGBB or #RRGGBBAA (device blends alpha) */
   const aOf=v=>v&&v.length===9?Math.round(parseInt(v.slice(7,9),16)/2.55):100;
   const cw=(k,defc)=>{const v=(t.st&&t.st[k])||"";
@@ -6047,7 +6052,12 @@ function winGlance(){openWin("__glance","Экран NAS",async body=>{
  const paint=()=>{
   q("#gcScr").innerHTML=screens.map((s,k)=>`<button data-v="${k}" class="${k===si?"on":""}">${esc(s.name)}</button>`).join("");
   q("#gcScr").querySelectorAll("button").forEach(b=>b.onclick=()=>{si=+b.dataset.v;pi=0;sel=-1;paint();paintInsp();});
-  q("#gcScrName").value=scr().name;q("#gcPreset").value=scr().preset;
+  q("#gcScrName").value=scr().name;
+  /* a preset outside the list = custom size: show the W×H inputs */
+  const known=presets.some(p=>p.id===scr().preset);
+  q("#gcPreset").value=known?scr().preset:"custom";
+  const wh=q("#gcWH");wh.style.display=known?"none":"flex";
+  if(!known){const [w,h]=scr().preset.split("x");q("#gcW").value=w;q("#gcH").value=h;}
   q("#gcGap").value=scr().gap||0;
   q("#gcAv").checked=scr().avail!==false;
   q("#gcMode").querySelectorAll("button").forEach(b=>b.classList.toggle("on",b.dataset.m===MODE()));
@@ -6059,7 +6069,12 @@ function winGlance(){openWin("__glance","Экран NAS",async body=>{
   q("#gcPgDel").disabled=scr().pages.length<2;
   paintCtl();paintPal();paintCv();paintInsp();};
  q("#gcScrName").onchange=()=>{scr().name=q("#gcScrName").value.trim()||"Экран";commit();};
- q("#gcPreset").onchange=()=>{scr().preset=q("#gcPreset").value;commit();};
+ q("#gcPreset").onchange=()=>{const v=q("#gcPreset").value;
+  if(v==="custom"){const [w,h]=scr().preset.split("x");q("#gcW").value=w;q("#gcH").value=h;q("#gcWH").style.display="flex";return;}
+  scr().preset=v;commit();};
+ const whApply=()=>{const w=Math.max(50,Math.min(2000,+q("#gcW").value||320)),h=Math.max(50,Math.min(2000,+q("#gcH").value||170));
+  scr().preset=w+"x"+h;commit();};
+ q("#gcW").onchange=q("#gcH").onchange=whApply;
  q("#gcGap").onchange=()=>{scr().gap=Math.max(0,Math.min(24,+q("#gcGap").value||0));commit();};
  q("#gcAv").onchange=e=>{scr().avail=e.target.checked;commit();};
  q("#gcMode").querySelectorAll("button").forEach(b=>b.onclick=()=>{
