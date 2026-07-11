@@ -5265,7 +5265,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
        <div style="width:90px"><label>Порт</label><input id="rmP" class="mono" value="${att((rm&&rm.port)||22)}"></div></div>
      <div class="field"><label>Пароль <span style="color:var(--mut);font-weight:400">— ${rm&&rm.has_pass?"задан; пусто = не менять":"пусто = вход по ключу"}</span></label><input id="rmW" type="password" autocomplete="new-password"></div>
      <div class="field"><label>Папка на сервере</label><input id="rmD" class="mono" value="${att((rm&&rm.path)||"/")}"></div>
-     <div class="field" style="display:flex;align-items:center;gap:10px"><label style="margin:0">Подключать автоматически <span style="color:var(--mut);font-weight:400">— панель монтирует сама (и после перезагрузки)</span></label><label class="tgl" style="margin-left:auto"><input type="checkbox" id="rmA"${rm&&rm.auto?" checked":""}><span class="sl"></span></label></div>
+     <div class="field" style="flex-direction:row;align-items:center;gap:10px"><label style="margin:0;flex:1">Подключать автоматически <span style="color:var(--mut);font-weight:400">— панель монтирует сама (и после перезагрузки)</span></label><label class="tgl" style="flex:none"><input type="checkbox" id="rmA"${rm&&rm.auto?" checked":""}><span class="sl"></span></label></div>
      <div class="r"><button class="btn" id="rmX">Отмена</button><button class="btn pri" id="rmOk">Сохранить</button></div></div>`;
    s.classList.add("show");
    s.querySelector("#rmX").onclick=()=>s.classList.remove("show");
