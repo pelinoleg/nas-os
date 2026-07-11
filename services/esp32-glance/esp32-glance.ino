@@ -27,6 +27,35 @@ static const uint32_t POLL_MS = 5000;
 static const uint32_t PAGE_ROTATE_MS = 15000;    // 0 = manual (button) only
 static const int BTN1 = 0, BTN2 = 14;            // T-Display-S3 buttons
 
+// Touch variant (T-Display-S3 Touch / Long): swipe left/right flips pages.
+// Set to 0 for boards without a touch panel. CST816 on SDA=18 SCL=17 RST=21.
+#define USE_TOUCH 1
+
+#if USE_TOUCH
+#include <Wire.h>
+static const int TP_SDA = 18, TP_SCL = 17, TP_RST = 21;
+static const uint8_t TP_ADDR = 0x15;
+void touchInit() {
+  pinMode(TP_RST, OUTPUT);
+  digitalWrite(TP_RST, LOW); delay(10);
+  digitalWrite(TP_RST, HIGH); delay(60);
+  Wire.begin(TP_SDA, TP_SCL);
+}
+// one finger down? -> raw panel coords (portrait orientation)
+bool touchRead(int &x, int &y) {
+  Wire.beginTransmission(TP_ADDR);
+  Wire.write(0x02);
+  if (Wire.endTransmission(false) != 0) return false;
+  if (Wire.requestFrom((int)TP_ADDR, 5) < 5) return false;
+  int n = Wire.read();
+  int xh = Wire.read(), xl = Wire.read(), yh = Wire.read(), yl = Wire.read();
+  if (!(n & 0x0F)) return false;
+  x = ((xh & 0x0F) << 8) | xl;
+  y = ((yh & 0x0F) << 8) | yl;
+  return true;
+}
+#endif
+
 TFT_eSPI tft;
 JsonDocument DOC;              // last payload (kept for page redraws)
 bool haveDoc = false;
@@ -250,8 +279,8 @@ void drawPage() {
   String pname = pg["name"] | "";
   if (pages.size() > 1) {
     for (int i = 0; i < (int)pages.size(); i++)
-      tft.fillCircle(tft.width() - 10 - i * 12, 13, 3, i == page ? TFT_WHITE : TFT_DARKGREY);
-    tft.drawString(pname, tft.width() - 14 - pages.size() * 12 - tft.textWidth(pname, 2), 13, 2);
+      tft.fillCircle(tft.width() - 12 - i * 15, 13, 4, i == page ? TFT_WHITE : TFT_DARKGREY);
+    tft.drawString(pname, tft.width() - 18 - pages.size() * 15 - tft.textWidth(pname, 2), 13, 2);
   }
 
   // free mode: the constructor supplies x/y/w/h per tile, overlap is fine.
@@ -343,6 +372,9 @@ void setup() {
   tft.drawString("connecting...", 10, tft.height() / 2, 2);
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
+#if USE_TOUCH
+  touchInit();
+#endif
 }
 
 void loop() {
@@ -351,6 +383,22 @@ void loop() {
   if (b1 == HIGH && n1 == LOW) flipPage(+1);
   if (b2 == HIGH && n2 == LOW) flipPage(-1);
   b1 = n1; b2 = n2;
+
+#if USE_TOUCH
+  // swipe detection: remember where the finger landed, compare on release
+  static bool touching = false;
+  static int tx0 = 0, ty0 = 0, tx = 0, ty = 0;
+  int px, py;
+  if (touchRead(px, py)) {
+    if (!touching) { touching = true; tx0 = px; ty0 = py; }
+    tx = px; ty = py;
+  } else if (touching) {
+    touching = false;
+    // panel reports portrait coords; with rotation 1 the long axis is Y
+    int dl = (tft.getRotation() % 2) ? (ty - ty0) : (tx - tx0);
+    if (abs(dl) > 50) flipPage(dl < 0 ? +1 : -1);
+  }
+#endif
 
   if (WiFi.status() != WL_CONNECTED) {
     static uint32_t lostAt = 0;

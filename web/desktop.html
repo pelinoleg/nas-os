@@ -1606,8 +1606,9 @@
   .glc-canvas{position:relative;flex:none;background:#0a0c11;border-radius:12px;border:1px solid var(--line);overflow:hidden;box-shadow:var(--sh-sm)}
   .glc-hdr{position:absolute;top:0;left:0;right:0;display:flex;align-items:center;gap:7px;padding:0 10px;color:#e8eaf0;font-size:12px;font-weight:650}
   .glc-hdr i{width:9px;height:9px;border-radius:50%;background:#43C08A}
-  .glc-hdr .pgdots{margin-left:auto;display:flex;gap:5px}
-  .glc-hdr .pgdots b{width:6px;height:6px;border-radius:50%;background:#3a3f4c}
+  .glc-hdr .pgdots{margin-left:auto;display:flex;gap:7px}
+  .glc-hdr .pgdots b{width:10px;height:10px;border-radius:50%;background:#3a3f4c;cursor:pointer}
+  .glc-hdr .pgdots b:hover{background:#5a6070}
   .glc-hdr .pgdots b.on{background:#e8eaf0}
   .glc-av{position:absolute;left:6px;right:6px;bottom:2px;border-radius:3px;overflow:hidden;display:flex;gap:1px;background:#181b22}
   .glc-av i{flex:1;min-width:1px}
@@ -5944,9 +5945,10 @@ function winGlance(){openWin("__glance","Экран NAS",async body=>{
   const {boxes,over}=MODE()==="free"?freeBoxes():flowBoxes();PLACES=boxes;
   const px=v=>Math.round(v*f)+"px";
   const avHTML=scr().avail===false?"":`<div class="glc-av" style="height:${px(11)}" title="Доступность за 24ч — устройство рисует её внизу сам">${(AVB||[]).map(v=>`<i style="background:${v===2?"#2e7d54":v===1?"#8a6d1f":v===0?"#7d2e2e":"#23262e"}"></i>`).join("")}</div>`;
-  cv.innerHTML=`<div class="glc-hdr" style="height:${px(28)}"><i></i><span>${esc(location.hostname)}</span><span class="pgdots">${scr().pages.map((_,k)=>`<b class="${k===pi?"on":""}"></b>`).join("")}</span></div>`
+  cv.innerHTML=`<div class="glc-hdr" style="height:${px(28)}"><i></i><span>${esc(location.hostname)}</span><span class="pgdots">${scr().pages.map((p,k)=>`<b data-k="${k}" title="${esc(p.name)}" class="${k===pi?"on":""}"></b>`).join("")}</span></div>`
    +boxes.map(b=>tileHTML(pg().tiles[b.i],b.i,b,f)).join("")
    +avHTML;
+  cv.querySelectorAll(".pgdots b").forEach(b=>b.onclick=e=>{e.stopPropagation();pi=+b.dataset.k;sel=-1;paint();paintInsp();});
   cv.querySelectorAll(".glc-tile").forEach(tl=>{
    const i=+tl.dataset.i;
    tl.onclick=e=>{e.stopPropagation();if(sel!==i){sel=i;paintCtl();paintInsp();paintCv();}};
@@ -6098,7 +6100,16 @@ function winGlance(){openWin("__glance","Экран NAS",async body=>{
  q("#gcMvR").onclick=()=>{const a=pg().tiles;if(sel>=0&&sel<a.length-1){[a[sel+1],a[sel]]=[a[sel],a[sel+1]];sel++;commit();}};
  q("#gcTDel").onclick=()=>{if(sel<0)return;pg().tiles.splice(sel,1);sel=-1;commit();paintInsp();};
  const cvBox=q("#gcCv");
- cvBox.onclick=()=>{sel=-1;paintCtl();paintInsp();paintCv();};
+ let cvSwiped=false;
+ cvBox.onclick=()=>{if(cvSwiped){cvSwiped=false;return;}sel=-1;paintCtl();paintInsp();paintCv();};
+ /* swipe on the canvas background (mouse or finger) flips pages, like on the device */
+ cvBox.onpointerdown=e=>{if(e.target.closest(".glc-tile"))return;
+  const sx=e.clientX,sy=e.clientY;
+  const up=ev=>{window.removeEventListener("pointerup",up);
+   const dx=ev.clientX-sx,dy=ev.clientY-sy;
+   if(Math.abs(dx)>60&&Math.abs(dy)<60&&scr().pages.length>1){cvSwiped=true;
+    pi=(pi+(dx<0?1:-1)+scr().pages.length)%scr().pages.length;sel=-1;paint();paintInsp();}};
+  window.addEventListener("pointerup",up);};
  cvBox.ondragover=e=>e.preventDefault();
  cvBox.ondrop=e=>{e.preventDefault();
   const d=e.dataTransfer.getData("text/plain")||"";
