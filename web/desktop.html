@@ -1664,9 +1664,39 @@
   .nt-head{display:flex;align-items:center;gap:8px}
   .nt-head input{flex:1;font-size:21px;font-weight:700;height:38px;border:0;background:transparent;padding:0 2px}
   .nt-head input:focus{outline:none}
-  .nt-ed{flex:1;min-height:0;border-radius:12px;overflow:hidden;display:flex;flex-direction:column}
-  .nt-ed .toastui-editor-defaultUI{height:100%!important;display:flex;flex-direction:column;width:100%}
+  .nt-ed{flex:1;min-height:0;border-radius:12px;overflow:hidden;display:flex;flex-direction:column;position:relative}
+  .nt-ed .toastui-editor-defaultUI{height:100%!important;display:flex;flex-direction:column;width:100%;font-family:inherit}
   .nt-ed .toastui-editor-main{flex:1;min-height:0}
+  /* integrate Toast UI into the design system: our lines/radius/fonts and an
+     explicit ink colour per notes-theme — md-mode text used to inherit the
+     panel colour and vanish on the opposite background */
+  .nt-ed.light{--nt-ink:#23272f;--nt-dim:#6a7180;--nt-line:#e4e7ec;--nt-bg:#fff}
+  .nt-ed.dark{--nt-ink:#e8ebf2;--nt-dim:#8f96a6;--nt-line:#2b3140;--nt-bg:#14171e}
+  .nt-ed .toastui-editor-defaultUI{border:1px solid var(--nt-line);border-radius:12px;background:var(--nt-bg)}
+  .nt-ed .toastui-editor-defaultUI-toolbar{background:transparent;border-bottom:1px solid var(--nt-line);border-radius:12px 12px 0 0;padding:3px 8px}
+  .nt-ed .toastui-editor-toolbar-icons{border:0;background-color:transparent;border-radius:7px}
+  .nt-ed .toastui-editor-toolbar-icons:not(:disabled):hover{background-color:rgba(128,140,160,.16)}
+  .nt-ed .toastui-editor-toolbar-divider{background-color:var(--nt-line)}
+  .nt-ed .toastui-editor,.nt-ed .toastui-editor-ww-container,.nt-ed .toastui-editor-md-container{background:var(--nt-bg)}
+  .nt-ed .ProseMirror{color:var(--nt-ink);font-size:var(--nt-font,15px)}
+  .nt-ed .toastui-editor-md-container .ProseMirror{font-family:var(--mono);font-size:13px;line-height:1.6}
+  .nt-ed .toastui-editor-md-preview .toastui-editor-contents{color:var(--nt-ink)}
+  .nt-ed .toastui-editor-contents{font-family:inherit;font-size:var(--nt-font,15px);color:var(--nt-ink)}
+  .nt-ed .toastui-editor-contents h1,.nt-ed .toastui-editor-contents h2{border-bottom:1px solid var(--nt-line);color:var(--nt-ink)}
+  .nt-ed .toastui-editor-contents h3,.nt-ed .toastui-editor-contents h4,.nt-ed .toastui-editor-contents p,.nt-ed .toastui-editor-contents li{color:var(--nt-ink)}
+  .nt-ed .toastui-editor-contents code{font-family:var(--mono)}
+  .nt-ed .toastui-editor-contents pre{font-family:var(--mono);border-radius:10px}
+  .nt-ed .toastui-editor-mode-switch{background:transparent;border-top:1px solid var(--nt-line);height:30px}
+  .nt-ed .toastui-editor-mode-switch .tab-item{background:transparent;border:1px solid var(--nt-line);border-bottom:0;color:var(--nt-dim);height:26px;line-height:24px}
+  .nt-ed .toastui-editor-mode-switch .tab-item.active{color:var(--accent);background:var(--nt-bg);font-weight:650}
+  .nt-ed .toastui-editor-popup{background:var(--nt-bg);border:1px solid var(--nt-line);border-radius:10px;box-shadow:var(--sh-sm);color:var(--nt-ink)}
+  .nt-ed .toastui-editor-popup-body,.nt-ed .toastui-editor-popup-body label{color:var(--nt-ink)}
+  /* images: 25vh tall max, left-aligned by default, pointer affordance */
+  .nt-ed .toastui-editor-contents img{max-height:25vh;max-width:100%;display:block;border-radius:8px;cursor:pointer}
+  .nt-ed .toastui-editor-contents img.ProseMirror-selectednode{outline:2px solid var(--accent)}
+  /* drag-resize overlay handle */
+  .nt-imgov{position:absolute;z-index:40;border:1.5px dashed var(--accent);border-radius:8px;pointer-events:none}
+  .nt-imgov i{position:absolute;right:-7px;bottom:-7px;width:14px;height:14px;border-radius:50%;background:var(--accent);pointer-events:auto;cursor:nwse-resize}
   .nt-ed .toastui-editor-defaultUI{border-color:var(--line)}
   .nt-ed .toastui-editor-contents{font-size:var(--nt-font,15px)}
   .nt-ed .toastui-editor-contents img{cursor:pointer;border-radius:6px;max-width:100%}
@@ -1928,6 +1958,7 @@ const P={
  x:'<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
  home:'<path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/>',
  star:'<path d="M11.5 2.6a.55.55 0 0 1 1 0l2.5 5.1 5.6.8a.55.55 0 0 1 .3.94l-4 3.95 1 5.6a.55.55 0 0 1-.8.58L12 16.9l-5 2.66a.55.55 0 0 1-.8-.58l1-5.6-4-3.94a.55.55 0 0 1 .3-.95l5.6-.8Z"/>',
+ note:'<path d="M14 3v4a1 1 0 0 0 1 1h4"/><path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2Z"/><path d="M9 13h6M9 17h4"/>',
  clip:'<path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/>',
  plus:'<path d="M12 5v14"/><path d="M5 12h14"/>',
  expand:'<path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/>',
@@ -5950,7 +5981,8 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
    <input id="ntQ" placeholder="Поиск…">
    <div class="nt-cap">Папки</div><div id="ntDirs"></div>
    <div class="nt-cap">Теги</div><div id="ntTags"></div>
-   <div style="margin-top:auto"><div class="nt-dir" id="ntTrash">${svg("trash",13)} Корзина</div></div>
+   <div style="margin-top:auto"><div class="nt-dir" id="ntTrash">${svg("trash",13)} Корзина</div>
+   <div class="nt-dir" id="ntSet">${svg("cog",13)} Настройки</div></div>
   </div>
   <div class="nt-list" id="ntList"></div>
   <div class="nt-edit" id="ntEdit"><div class="nt-empty">Выберите заметку или создайте новую</div></div>`;
@@ -6024,7 +6056,7 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
   if(n){n.title=title||n.title;n.tags=tags;n.pinned=NT_PIN;n.mtime=Math.floor(Date.now()/1000);paintSide();paintList();}};
  const schedSave=()=>{NT_DIRTY=true;clearTimeout(NT_SAVE_T);NT_SAVE_T=setTimeout(saveNow,1200);
   const st=q("#ntSt");if(st)st.textContent="сохранение…";};
- const openNote=async p=>{
+ const openNote=async p=>{try{
   await flushSave();
   const r=await api("/api/notes/get?path="+encodeURIComponent(p));
   if(!r||r.error){toast("Не открыть: "+((r&&r.error)||"?"));return;}
@@ -6065,6 +6097,7 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
   const folder=p.includes("/")?p.slice(0,p.lastIndexOf("/")):"";
   const dark=SET.ntTheme==="dark"?true:SET.ntTheme==="light"?false:!isLight();
   const box=ed.querySelector("#ntEd");
+  box.classList.add(dark?"dark":"light");
   box.style.setProperty("--nt-font",(SET.ntFont||15)+"px");
   const plugins=(window.toastui&&toastui.Editor.plugin&&toastui.Editor.plugin.codeSyntaxHighlight)?[toastui.Editor.plugin.codeSyntaxHighlight]:[];
   try{
@@ -6082,6 +6115,7 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
    }},
    events:{change:schedSave}});
   }catch(err){box.innerHTML=`<div class="nt-empty">Редактор не запустился: ${esc(err&&err.message||err)}</div>`;console.error(err);return;}
+  ntImgWire(box);
   /* image interactions: click = size menu, double click = full-size lightbox */
   box.addEventListener("click",e=>{const im=e.target.closest("img");if(!im)return;ntImgMenu(e,im);});
   box.addEventListener("dblclick",e=>{const im=e.target.closest("img");if(im)ntLightbox(im.getAttribute("src"));});
@@ -6096,28 +6130,67 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
    confirmDlg("Создать заметку?","Заметки «"+name+"» ещё нет — создать?",async()=>{
     const rr=await api("/api/notes/new",{method:"POST",body:JSON.stringify({folder:fold,title:name})});
     if(rr&&rr.ok){await refresh();openNote(rr.path);}});});
-  paintList();};
+  paintList();
+ }catch(err){console.error(err);toast("Ошибка открытия: "+(err&&err.message||err));}};
+ /* rewrite one image in the markdown source: size + alignment live in an
+    <img> tag (markdown has no syntax for either) */
+ const setImg=(src,attrs)=>{
+  let md=NT_ED.getMarkdown();
+  const escRe=src.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+  const mdRe=new RegExp("!\\[[^\\]]*\\]\\("+escRe+"\\)");
+  const htmlRe=new RegExp('<img[^>]*src="'+escRe+'"[^>]*>');
+  let tag2;
+  if(!attrs.w&&(!attrs.align||attrs.align==="left"))tag2=`![](${src})`;
+  else{
+   const st2=attrs.align==="center"?' style="margin:0 auto"':attrs.align==="right"?' style="margin-left:auto"':"";
+   tag2=`<img src="${src}"${attrs.w?` width="${attrs.w}"`:""}${st2}>`;}
+  if(htmlRe.test(md))md=md.replace(htmlRe,tag2);
+  else if(mdRe.test(md))md=md.replace(mdRe,tag2);
+  else return toast("Не нашёл картинку в тексте");
+  NT_ED.setMarkdown(md);schedSave();};
+ const imgAttrs=im=>{
+  const st2=im.getAttribute("style")||"";
+  return {w:im.getAttribute("width")||null,
+          align:/margin:\s*0\s*auto(?!.*margin-left)/.test(st2)?"center":/margin-left:\s*auto/.test(st2)?"right":"left"};};
  const ntImgMenu=(e,im)=>{
   const src=im.getAttribute("src")||"";
-  const setW=w=>{
-   /* rewrite the image in markdown: width lives in an <img> tag (md has no size syntax) */
-   let md=NT_ED.getMarkdown();
-   const escRe=src.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
-   const mdRe=new RegExp("!\\[([^\\]]*)\\]\\("+escRe+"\\)");
-   const htmlRe=new RegExp('<img src="'+escRe+'"[^>]*>');
-   const tag2=w?`<img src="${src}" width="${w}">`:null;
-   if(htmlRe.test(md))md=md.replace(htmlRe,w?tag2:`![](${src})`);
-   else if(mdRe.test(md))md=md.replace(mdRe,w?tag2:`![$1](${src})`);
-   else return toast("Не нашёл картинку в тексте");
-   NT_ED.setMarkdown(md);schedSave();};
+  const cur=imgAttrs(im);
   showMenu(e.clientX,e.clientY,[
    {label:"Открыть полностью",ic:svg("expand",15),act:()=>ntLightbox(src)},
    {sep:1},
-   {label:"Ширина 25%",act:()=>setW("25%")},
-   {label:"Ширина 50%",act:()=>setW("50%")},
-   {label:"Ширина 75%",act:()=>setW("75%")},
-   {label:"Оригинальный размер",act:()=>setW(null)},
+   {label:"Влево",act:()=>setImg(src,{w:cur.w,align:"left"})},
+   {label:"По центру",act:()=>setImg(src,{w:cur.w,align:"center"})},
+   {label:"Вправо",act:()=>setImg(src,{w:cur.w,align:"right"})},
+   {sep:1},
+   {label:"Ширина 25%",act:()=>setImg(src,{w:"25%",align:cur.align})},
+   {label:"Ширина 50%",act:()=>setImg(src,{w:"50%",align:cur.align})},
+   {label:"Ширина 100%",act:()=>setImg(src,{w:"100%",align:cur.align})},
+   {label:"Исходный размер",act:()=>setImg(src,{w:null,align:cur.align})},
   ]);};
+ /* drag-resize: click selects the image, the corner dot resizes it */
+ const ntImgWire=box=>{
+  let ov=null,img=null;
+  const clear=()=>{if(ov){ov.remove();ov=null;img=null;}};
+  const place=()=>{if(!ov||!img||!document.contains(img)){clear();return;}
+   const br=box.getBoundingClientRect(),ir=img.getBoundingClientRect();
+   ov.style.left=(ir.left-br.left)+"px";ov.style.top=(ir.top-br.top)+"px";
+   ov.style.width=ir.width+"px";ov.style.height=ir.height+"px";};
+  box.addEventListener("click",e=>{
+   const im=e.target.closest("img");
+   if(!im){clear();return;}
+   img=im;
+   if(!ov){ov=document.createElement("div");ov.className="nt-imgov";ov.innerHTML="<i></i>";box.appendChild(ov);
+    ov.querySelector("i").onpointerdown=ev=>{
+     ev.preventDefault();ev.stopPropagation();
+     if(!img)return;
+     const sw=img.getBoundingClientRect().width,sx=ev.clientX,theImg=img;
+     const mv=e2=>{const w=Math.max(40,Math.round(sw+e2.clientX-sx));theImg.style.width=w+"px";theImg.style.maxHeight="none";place();};
+     const up=e2=>{window.removeEventListener("pointermove",mv);window.removeEventListener("pointerup",up);
+      const w=Math.max(40,Math.round(sw+e2.clientX-sx));
+      setImg(theImg.getAttribute("src")||"",{w:w,align:imgAttrs(theImg).align});clear();};
+     window.addEventListener("pointermove",mv);window.addEventListener("pointerup",up);};}
+   place();},true);
+  box.addEventListener("scroll",place,true);};
  q("#ntNew").onclick=async()=>{
   const r=await api("/api/notes/new",{method:"POST",body:JSON.stringify({folder:fold,title:"Новая заметка"})});
   if(r&&r.ok){await refresh();openNote(r.path);const t=q("#ntTitle");if(t){t.focus();t.select();}}};
@@ -6132,6 +6205,7 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
   inp.onkeydown=ev=>{if(ev.key==="Enter")ok();};
   s.querySelector("#ntFX").onclick=()=>s.classList.remove("show");};
  q("#ntTrash").onclick=()=>ntTrash(refresh);
+ q("#ntSet").onclick=()=>winSettings("nts");
  winNotes._reopen=p2=>openNote(p2);
  let qT=null;
  q("#ntQ").oninput=()=>{clearTimeout(qT);qT=setTimeout(()=>{qstr=q("#ntQ").value.trim();paintList();},300);};
