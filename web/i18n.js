@@ -69,6 +69,7 @@ window.NAS_I18N = { en: {
 "размер": "size",
 "скрыть": "hide",
 "у значения": "with value",
+"под значением": "below value",
 "Фон": "Background",
 "карточка": "card",
 "цвет": "color",

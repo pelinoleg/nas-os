@@ -1570,9 +1570,9 @@ def _gl_spark(field, points=48):
         out.append(int(v) if v >= 100 else round(v, 1))
     return out
 
-# tile style: positions use the 9-grid (matches TFT_eSPI datums), "val" keeps
-# the unit glued to the value, "hide" hides the element
-_GL_POS = {"tl", "tc", "tr", "cl", "c", "cr", "bl", "bc", "br", "hide", "val"}
+# tile style: positions use the 9-grid (matches TFT_eSPI datums); the unit can
+# also be glued to the value: "val" = right after it, "valb" = under it
+_GL_POS = {"tl", "tc", "tr", "cl", "c", "cr", "bl", "bc", "br", "hide", "val", "valb"}
 
 # colors are #RRGGBB or #RRGGBBAA — the device blends the alpha against the
 # tile background itself (TFT has no true transparency)

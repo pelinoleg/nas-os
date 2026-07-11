@@ -5925,9 +5925,11 @@ function winGlance(){openWin("__glance","Экран NAS",async body=>{
   const col=k=>t.st&&t.st[k]?`;color:${t.st[k]}`:"";
   let inner="";
   if(lp!=="hide"&&lp!=="val")inner+=`<span class="e l" style="${POS[lp]};font-size:${fs(stv(t,"ls"))}${col("lc")}">${esc(names[t.id]||t.id)}</span>`;
-  const uIn=up==="val"?` <span class="u" style="font-size:${fs(stv(t,"us"))}${col("uc")}">${esc(live.unit||"")}</span>`:"";
-  if(vp!=="hide"&&vp!=="val")inner+=`<span class="e v" style="${POS[vp]};font-size:${fs(stv(t,"vs"))}${col("vc")}">${esc(live.value)}${uIn}</span>`;
-  if(up!=="val"&&up!=="hide")inner+=`<span class="e u2" style="${POS[up]};font-size:${fs(stv(t,"us"))}${col("uc")}">${esc(live.unit||"")}</span>`;
+  const uSt=`font-size:${fs(stv(t,"us"))}${col("uc")}`;
+  const uIn=up==="val"?` <span class="u" style="${uSt}">${esc(live.unit||"")}</span>`
+           :up==="valb"?`<span class="u" style="display:block;text-align:center;${uSt}">${esc(live.unit||"")}</span>`:"";
+  if(vp!=="hide"&&vp!=="val")inner+=`<span class="e v" style="${POS[vp]};font-size:${fs(stv(t,"vs"))}${col("vc")}${up==="valb"?";text-align:center":""}">${esc(live.value)}${uIn}</span>`;
+  if(up!=="val"&&up!=="valb"&&up!=="hide")inner+=`<span class="e u2" style="${POS[up]};${uSt}">${esc(live.unit||"")}</span>`;
   inner+=`<i class="d" style="background:${stColor(live.state)}"></i>`;
   if(MODE()==="free"&&i===sel)inner+=`<span class="rzh"></span>`;
   return `<div class="glc-tile${i===sel?" sel":""}" ${MODE()==="flow"?'draggable="true"':""} data-i="${i}" style="left:${px(b.x)}px;top:${px(b.y)}px;width:${px(b.w)}px;height:${px(b.h)}px;background:${bg==="none"?"transparent":(bg||"#151821")};border:${bw?Math.max(1,px(bw))+"px solid "+bc:"none"};z-index:${10+i}">${inner}</div>`;};
@@ -6017,7 +6019,7 @@ function winGlance(){openWin("__glance","Экран NAS",async body=>{
    <div class="glc-cap" style="margin-bottom:2px">${esc(names[t.id]||t.id)}</div>
    <div class="gi"><span>Заголовок</span>${g9("l",[["hide","скрыть"]])}<label>размер ${num("ls",6,60)}</label>${cw("lc","#8a90a0")}</div>
    <div class="gi"><span>Значение</span>${g9("v",[["hide","скрыть"]])}<label>размер ${num("vs",6,120)}</label>${cw("vc","#e8eaf0")}</div>
-   <div class="gi"><span>Единица</span>${g9("u",[["val","у значения"],["hide","скрыть"]])}<label>размер ${num("us",6,60)}</label>${cw("uc","#8a90a0")}</div>
+   <div class="gi"><span>Единица</span>${g9("u",[["val","у значения"],["valb","под значением"],["hide","скрыть"]])}<label>размер ${num("us",6,60)}</label>${cw("uc","#8a90a0")}</div>
    <div class="gi"><span>Фон</span><div class="seg" id="giBg">${[["def","карточка"],["none","нет"],["color","цвет"]].map(([v,l])=>`<button data-b="${v}" class="${bgMode===v?"on":""}">${l}</button>`).join("")}</div><label style="${bgMode==="color"?"":"display:none"}" id="giBgRow">цвет <input type="color" id="giBgC" value="${t.st&&t.st.bg&&t.st.bg!=="none"?t.st.bg.slice(0,7):"#151821"}"><input type="number" id="giBgA" min="5" max="100" value="${aOf(t.st&&t.st.bg!=="none"?t.st.bg:"")}" style="width:50px" title="прозрачность, %"></label></div>
    <div class="gi"><span>Рамка</span><label>толщина ${num("bw",0,6)}</label>${cw("bc","#262b36")}</div>
    ${MODE()==="free"?`<div class="gi"><span>Геометрия</span><label>x ${num("x",0,4096)}</label><label>y ${num("y",0,4096)}</label><label>w ${num("w",8,4096)}</label><label>h ${num("h",8,4096)}</label></div>`:""}

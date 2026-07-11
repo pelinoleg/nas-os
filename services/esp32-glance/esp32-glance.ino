@@ -165,7 +165,20 @@ void drawTile(JsonObject t, int x, int y, int w, int h) {
   if (strcmp(vp, "hide")) {
     int vf = pickFont(vs, val);
     Anchor a = posAnchor(vp, x, y, w, h);
-    if (!strcmp(up, "val") && unit.length()) {
+    if (!strcmp(up, "valb") && unit.length()) {
+      // unit centred under the value, both around the value's anchor
+      int uf = pickFont(us, unit);
+      int vh = tft.fontHeight(vf), uh = tft.fontHeight(uf);
+      int cy = a.datum / 3 == 0 ? a.y + (vh + uh) / 2 : (a.datum / 3 == 2 ? a.y - (vh + uh) / 2 : a.y);
+      int cx = a.datum % 3 == 0 ? a.x + tft.textWidth(val, vf) / 2 :
+               (a.datum % 3 == 2 ? a.x - tft.textWidth(val, vf) / 2 : a.x);
+      tft.setTextDatum(BC_DATUM);
+      tft.setTextColor(valC, tbg);
+      tft.drawString(val, cx, cy, vf);
+      tft.setTextDatum(TC_DATUM);
+      tft.setTextColor(uniC, tbg);
+      tft.drawString(unit, cx, cy + 1, uf);
+    } else if (!strcmp(up, "val") && unit.length()) {
       int uf = pickFont(us, unit);
       int total = tft.textWidth(val, vf) + 5 + tft.textWidth(unit, uf);
       int lx = a.datum % 3 == 0 ? a.x : (a.datum % 3 == 1 ? a.x - total / 2 : a.x - total);
@@ -182,7 +195,7 @@ void drawTile(JsonObject t, int x, int y, int w, int h) {
     }
   }
   // detached unit
-  if (strcmp(up, "val") && strcmp(up, "hide") && unit.length()) {
+  if (strcmp(up, "val") && strcmp(up, "valb") && strcmp(up, "hide") && unit.length()) {
     Anchor a = posAnchor(up, x, y, w, h);
     tft.setTextDatum(a.datum);
     tft.setTextColor(uniC, tbg);
