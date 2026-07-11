@@ -6229,34 +6229,37 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
   const kids=d=>TREE.dirs.filter(x=>{const pre=d?d+"/":"";return x!==d&&x.startsWith(pre)&&!x.slice(pre.length).includes("/");});
   const row=(d,depth)=>{
    const open=EXP.has(d),sub=kids(d);
-   let h=`<div class="nt-dir${fold===d&&!tag?" on":""}" data-d="${att(d)}" style="padding-left:${6+depth*14}px">`
-    +`<i class="nt-tw${open?" open":""}${(sub.length||cnt(d))?"":" empty"}" data-tw="${att(d)}"></i>`
+   let h=`<div class="nt-dir${fold===d&&!tag?" on":""}" data-d="${att(encodeURIComponent(d))}" style="padding-left:${6+depth*14}px">`
+    +`<i class="nt-tw${open?" open":""}${(sub.length||cnt(d))?"":" empty"}" data-tw="${att(encodeURIComponent(d))}"></i>`
     +`${svg("folder",13)} <span class="nm">${esc(d.split("/").pop())}</span><b class="nt-cnt">${cnt(d)||""}</b></div>`;
    if(open){
     sub.forEach(k=>h+=row(k,depth+1));
     TREE.notes.filter(n=>n.folder===d).forEach(n=>h+=
-     `<div class="nt-dnote${NT_PATH===n.path?" on":""}" data-p="${att(n.path)}" style="padding-left:${34+depth*14}px">${svg("note",12)} <span class="nm">${esc(n.title)}</span></div>`);}
+     `<div class="nt-dnote${NT_PATH===n.path?" on":""}" data-p="${att(encodeURIComponent(n.path))}" style="padding-left:${34+depth*14}px">${svg("note",12)} <span class="nm">${esc(n.title)}</span></div>`);}
    return h;};
   dirs.innerHTML=`<div class="nt-dir${fold===""&&!tag?" on":""}" data-d=""><i class="nt-tw empty"></i>${svg("home",13)} <span class="nm">Все заметки</span><b class="nt-cnt">${TREE.notes.length}</b></div>`
    +kids("").map(d=>row(d,0)).join("");
   dirs.querySelectorAll(".nt-tw:not(.empty)").forEach(tw=>tw.onclick=e=>{e.stopPropagation();
-   const d=tw.dataset.tw;EXP.has(d)?EXP.delete(d):EXP.add(d);paintSide();});
-  dirs.querySelectorAll(".nt-dnote").forEach(el2=>el2.onclick=()=>openNote(el2.dataset.p));
+   const d=decodeURIComponent(tw.dataset.tw);EXP.has(d)?EXP.delete(d):EXP.add(d);paintSide();});
+  /* data-p is percent-encoded: the i18n innerHTML hook translates Russian
+     dictionary phrases anywhere in the markup, including attribute values —
+     a raw path like «Новая заметка 2.md» would arrive as "New note 2.md" */
+  dirs.querySelectorAll(".nt-dnote").forEach(el2=>el2.onclick=()=>openNote(decodeURIComponent(el2.dataset.p)));
   dirs.querySelectorAll(".nt-dir").forEach(el2=>{
-   el2.onclick=()=>{fold=el2.dataset.d;tag=null;qstr="";q("#ntQ").value="";if(el2.dataset.d)EXP.add(el2.dataset.d);paintSide();paintList();};
+   el2.onclick=()=>{fold=decodeURIComponent(el2.dataset.d);tag=null;qstr="";q("#ntQ").value="";if(fold)EXP.add(fold);paintSide();paintList();};
    /* drag a note onto a folder to move it */
    el2.ondragover=e=>{e.preventDefault();el2.classList.add("drop");};
    el2.ondragleave=()=>el2.classList.remove("drop");
    el2.ondrop=async e=>{e.preventDefault();el2.classList.remove("drop");
     const src=e.dataTransfer.getData("text/plain");if(!src)return;
-    const name=src.split("/").pop();
-    const to=(el2.dataset.d?el2.dataset.d+"/":"")+name;
+    const name=src.split("/").pop(),dd=decodeURIComponent(el2.dataset.d);
+    const to=(dd?dd+"/":"")+name;
     if(to===src)return;
     const r=await api("/api/notes/move",{method:"POST",body:JSON.stringify({path:src,to})});
     if(r&&r.ok){if(NT_PATH===src)NT_PATH=to;refresh();}else toast("Ошибка: "+((r&&r.log)||r&&r.error||"не перенести"));};});
   const tl=tagsAll();
-  q("#ntTags").innerHTML=tl.length?tl.map(([t,n])=>`<span class="nt-tag${tag===t?" on":""}" data-t="${att(t)}">#${esc(t)} <i>${n}</i></span>`).join(""):`<span class="nt-mut">пока нет</span>`;
-  q("#ntTags").querySelectorAll(".nt-tag").forEach(el2=>el2.onclick=()=>{tag=tag===el2.dataset.t?null:el2.dataset.t;paintSide();paintList();});};
+  q("#ntTags").innerHTML=tl.length?tl.map(([t,n])=>`<span class="nt-tag${tag===t?" on":""}" data-t="${att(encodeURIComponent(t))}">#${esc(t)} <i>${n}</i></span>`).join(""):`<span class="nt-mut">пока нет</span>`;
+  q("#ntTags").querySelectorAll(".nt-tag").forEach(el2=>el2.onclick=()=>{const t=decodeURIComponent(el2.dataset.t);tag=tag===t?null:t;paintSide();paintList();});};
  const fmtD=t=>{const d=new Date(t*1000),n=new Date();return d.toDateString()===n.toDateString()?d.toTimeString().slice(0,5):d.toLocaleDateString();};
  const paintList=async()=>{
   let items;
@@ -6266,16 +6269,16 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
   const l=q("#ntList");
   const where=qstr?("Поиск: "+qstr):tag?("#"+tag):(fold||"Все заметки");
   l.innerHTML=`<div class="nt-lhead">${esc(where)}<span>${items.length}</span></div>`
-   +(items.length?items.map(n=>`<div class="nt-item${NT_PATH===n.path?" on":""}" data-p="${att(n.path)}" draggable="true">
+   +(items.length?items.map(n=>`<div class="nt-item${NT_PATH===n.path?" on":""}" data-p="${att(encodeURIComponent(n.path))}" draggable="true">
     <b>${n.pinned?svg("star",11)+" ":""}${esc(n.title)}</b>
     ${(n.snip||n.prev)?`<span class="nt-snip">${esc(n.snip||n.prev)}</span>`:""}
     <span class="nt-meta">${n.tags.slice(0,3).map(t=>`<i>#${esc(t)}</i>`).join("")}<span>${fmtD(n.mtime)}</span></span>
    </div>`).join(""):`<div class="nt-mut" style="padding:18px">пусто</div>`);
   l.querySelectorAll(".nt-item").forEach(el2=>{
-   el2.onclick=()=>openNote(el2.dataset.p);
-   el2.ondragstart=e=>e.dataTransfer.setData("text/plain",el2.dataset.p);
+   el2.onclick=()=>openNote(decodeURIComponent(el2.dataset.p));
+   el2.ondragstart=e=>e.dataTransfer.setData("text/plain",decodeURIComponent(el2.dataset.p));
    el2.oncontextmenu=e=>{e.preventDefault();
-    const pth=el2.dataset.p,note=TREE.notes.find(n=>n.path===pth);if(!note)return;
+    const pth=decodeURIComponent(el2.dataset.p),note=TREE.notes.find(n=>n.path===pth);if(!note)return;
     const mv=["",...TREE.dirs].filter(d=>d!==note.folder).map(d=>({label:(d||"Корень"),ic:svg("folder",15),act:async()=>{
      const to=(d?d+"/":"")+pth.split("/").pop();
      const r=await api("/api/notes/move",{method:"POST",body:JSON.stringify({path:pth,to})});
@@ -6315,7 +6318,7 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
   ed.innerHTML=`
    <div class="nt-crumb">${p.includes("/")?esc(p.slice(0,p.lastIndexOf("/")).split("/").join(" / "))+" /":"&nbsp;"}</div>
    <div class="nt-head">
-    <input id="ntTitle" placeholder="Заголовок" value="${att(r.title)}">
+    <input id="ntTitle" placeholder="Заголовок">
     <span id="ntSt" class="nt-mut"></span>
     <button class="iconbtn${r.pinned?" nt-pin-on":""}" id="ntPin" title="Закрепить">${svg("star",15)}</button>
     <button class="iconbtn" id="ntAtt" title="Прикрепить файл">${svg("clip",15)}</button>
@@ -6325,6 +6328,9 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
    <div class="nt-tagrow" id="ntTagRow"></div>
    <div class="nt-tb" id="ntTb"></div>
    <div class="nt-ed" id="ntEd"></div>`;
+  /* set as a property, not via markup: the i18n innerHTML hook would translate
+     a value= attribute and the autosave would then persist the translated title */
+  ed.querySelector("#ntTitle").value=r.title;
   ed.querySelector("#ntTitle").oninput=schedSave;
   NT_TAGS=(r.tags||[]).slice();
   const paintTags=()=>{const row=ed.querySelector("#ntTagRow");if(!row)return;

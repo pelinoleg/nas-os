@@ -2352,7 +2352,8 @@ def note_new(folder, title):
         i += 1
         name = "%s %d" % (base, i)
     rel = ((folder.strip("/") + "/") if (folder or "").strip("/") else "") + name + ".md"
-    note_save(rel, title or name, [], "")
+    # title = deduped file name ("Новая заметка 2"), so duplicates are tellable apart
+    note_save(rel, name, [], "")
     return {"ok": True, "path": rel}
 
 def note_mkdir(folder, name):
