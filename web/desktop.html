@@ -2785,7 +2785,7 @@ function winCtxMenu(id,x,y){const w=OPEN[id];if(!w)return;const min=w.style.disp
 function renderWinbar(){const wb=document.getElementById("winbar");if(!wb)return;const meta=winMeta();wb.innerHTML="";
  Object.keys(OPEN).forEach(id=>{const w=OPEN[id];const min=w.style.display==="none";const act=w.classList.contains("wfocus")&&!min;
   const title=w._title||(meta[id]&&meta[id].name)||id;const ic=meta[id]&&meta[id].ic;
-  const p=el(`<button class="wb-pill${act?" on":""}${min?" min":""}" title="${att(title)}">${ic?`<span class="wb-ic">${svg(ic,14)}</span>`:""}<span class="wb-t">${esc(title)}</span></button>`);
+  const p=el(`<button class="wb-pill${act?" on":""}${min?" min":""}" title="${att(title)}">${ic?`<span class="wb-ic">${appIcon(ic,14)}</span>`:""}<span class="wb-t">${esc(title)}</span></button>`);
   p.onclick=()=>{if(min)w.style.display="flex";focus(w);};
   p.oncontextmenu=e=>{e.preventDefault();winCtxMenu(id,e.clientX,e.clientY);};
   wb.appendChild(p);});}
