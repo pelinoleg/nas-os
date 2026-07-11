@@ -2417,7 +2417,7 @@ def note_get(rel):
 
 def _note_slug(name):
     name = re.sub(r"[\\/:*?\"<>|\n\r\t]", "", str(name or "").strip())
-    return name[:80] or "Заметка"
+    return name[:80] or "Note"
 
 def note_save(rel, title, tags, md, pinned=False, base_mtime=0, force=False, conflict_copy=False):
     p = _notes_abs(rel)
@@ -2434,8 +2434,10 @@ def note_save(rel, title, tags, md, pinned=False, base_mtime=0, force=False, con
             and int(os.stat(p).st_mtime) > base_mtime:
         if not conflict_copy:
             return {"ok": False, "conflict": True, "mtime": int(os.stat(p).st_mtime)}
-        # unload-flush can't ask the user — park this client's text in a sibling
-        stem = p[:-3] + time.strftime(" (конфликт %Y-%m-%d %H-%M)")
+        # unload-flush can't ask the user — park this client's text in a sibling;
+        # the file name is a disk artifact, so it follows the UI language
+        word = "конфликт" if (load_settings().get("lang") or "en") == "ru" else "conflict"
+        stem = p[:-3] + " (" + word + time.strftime(" %Y-%m-%d %H-%M") + ")"
         cp, i = stem + ".md", 1
         while os.path.exists(cp):
             i += 1
@@ -2455,7 +2457,8 @@ def note_save(rel, title, tags, md, pinned=False, base_mtime=0, force=False, con
     return out
 
 def note_new(folder, title):
-    base = _note_slug(title or "Новая заметка")
+    lang = load_settings().get("lang") or "en"
+    base = _note_slug(title or ("Новая заметка" if lang == "ru" else "New note"))
     d = _notes_abs(folder)
     os.makedirs(d, exist_ok=True)
     _chown_user(d)

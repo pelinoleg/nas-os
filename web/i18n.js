@@ -159,7 +159,7 @@ window.NAS_I18N = { en: {
 "Сохранить": "Save",
 "Входящие": "Inbox",
 "входящие": "inbox",
-"Заметка сохранена во «Входящие»": "Note saved to Inbox",
+"Заметка сохранена в «Inbox»": "Note saved to «Inbox»",
 "выберите версию слева": "select a version on the left",
 "Восстановить эту версию": "Restore this version",
 "История пока пуста — она появляется после правок (снимок не чаще раза в 10 минут).": "History is empty so far — it appears after edits (a snapshot at most every 10 minutes).",

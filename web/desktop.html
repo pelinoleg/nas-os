@@ -2560,8 +2560,11 @@ function applySettings(){
  // миниатюры: вписывать целиком (contain) или заполнять с обрезкой (cover)
  root.style.setProperty("--thumb-fit",SET.fmThumbFit==="cover"?"cover":"contain");
  if(SET.theme==="auto")root.removeAttribute("data-theme");else root.setAttribute("data-theme",SET.theme);
- // notes surfaces (window, quick-note popover) follow the panel theme live when ntTheme=auto
- try{document.querySelectorAll(".nt-root").forEach(n=>ntApplyTheme(n));}catch(e){}
+ // notes window follows the notes theme live (ntTheme=auto tracks the panel);
+ // the quick-note popover always follows the PANEL theme — it sits in the menubar
+ try{document.querySelectorAll(".nt-root").forEach(n=>{
+  if(n.classList.contains("qn"))n.dataset.theme=isLight()?"light":"dark";
+  else ntApplyTheme(n);});}catch(e){}
  // смена активной темы → снять текущие значения в профиль старой, поднять профиль новой
  const th=isLight()?"light":"dark";
  if(th!==CUR_THEME){
@@ -7089,7 +7092,7 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
     const d=decodeURIComponent(el2.dataset.d);
     showMenu(e.clientX,e.clientY,[
      {label:"Новая заметка здесь",ic:svg("plus",15),act:async()=>{
-      const r=await api("/api/notes/new",{method:"POST",body:JSON.stringify({folder:d,title:"Новая заметка"})});
+      const r=await api("/api/notes/new",{method:"POST",body:JSON.stringify({folder:d,title:nasTr("Новая заметка")})});
       if(r&&r.ok){fold=d;tag=null;EXP.add(d);await refresh();openNote(r.path);const t=q("#ntTitle");if(t){t.focus();t.select();}}}},
      {label:"Новая подпапка",ic:svg("folder",15),act:()=>newDirDlg(d)},
      {sep:1},
@@ -7188,6 +7191,11 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
   r.tags=r.tags||[];r.md=r.md||"";r.title=r.title||"";
   NT_PATH=p;NT_MTIME=r.mtime||0;
   if(SET.notesLast!==p){SET.notesLast=p;saveSettings();}   // server-side (desktop.json): same last note in every browser
+  // selection in the tree and the list follows the open note; expand the folder
+  // chain so the sidebar highlight is actually visible (it used to go stale
+  // when clicking notes of other folders in the list)
+  if(p.includes("/")){let acc="";p.split("/").slice(0,-1).forEach(s2=>{acc=acc?acc+"/"+s2:s2;EXP.add(acc);});}
+  paintSide();paintList();
   const ed=q("#ntEdit");
   ed.innerHTML=`
    <div class="nt-crumb"></div>
@@ -7364,7 +7372,7 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
    place();},true);
   box.addEventListener("scroll",place,true);};
  q("#ntNew").onclick=async()=>{
-  const r=await api("/api/notes/new",{method:"POST",body:JSON.stringify({folder:fold,title:"Новая заметка"})});
+  const r=await api("/api/notes/new",{method:"POST",body:JSON.stringify({folder:fold,title:nasTr("Новая заметка")})});
   if(r&&r.ok){await refresh();openNote(r.path);const t=q("#ntTitle");if(t){t.focus();t.select();}}};
  const newDirDlg=target=>{
   const s=document.getElementById("scrim");
@@ -7437,12 +7445,14 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
  /* save on window close / tab hide */
  const iv=setInterval(()=>{if(!document.contains(body)){clearInterval(iv);flushSave();if(NT_ED){try{NT_ED.destroy();}catch(e){}NT_ED=null;NT_PATH=null;}}},1500);
 },{w:1240,h:780});}
-/* quick note from the menu bar: dropped into the «Входящие» folder */
+/* quick note from the menu bar: dropped into the Inbox folder. Unlike the main
+   notes window it follows the PANEL theme, not the notes theme — it lives among
+   the menubar popovers, and a warm-paper card on a dark panel reads as a bug. */
 function qnotePop(){const b=document.getElementById("qnoteBtn");
  mbPop(b,box=>{
   box.classList.add("qn-pop");   // wrapper glass off: the popover IS the notes paper card
-  box.innerHTML=`<div class="nt-root qn" data-theme="${ntThemeMode()}">
-   <div class="qn-h">${svg("note",15)} Быстрая заметка<span class="qn-hint">→ «Входящие»</span></div>
+  box.innerHTML=`<div class="nt-root qn" data-theme="${isLight()?"light":"dark"}">
+   <div class="qn-h">${svg("note",15)} Быстрая заметка<span class="qn-hint">→ «Inbox»</span></div>
    <textarea id="qnT" rows="5" placeholder="Мысль, ссылка, список…"></textarea>
    <div class="qn-f"><button class="btn sm" id="qnOpen">Открыть заметки</button><button class="btn sm pri" id="qnSave">Сохранить</button></div></div>`;
   const ta=box.querySelector("#qnT");setTimeout(()=>ta.focus(),40);
@@ -7450,9 +7460,9 @@ function qnotePop(){const b=document.getElementById("qnoteBtn");
   box.querySelector("#qnSave").onclick=async()=>{
    const text=ta.value.trim();if(!text)return;
    const title=text.split("\n")[0].slice(0,60);
-   const r=await api("/api/notes/new",{method:"POST",body:JSON.stringify({folder:"Входящие",title})});
-   if(r&&r.ok){await api("/api/notes/save",{method:"POST",body:JSON.stringify({path:r.path,title,tags:["входящие"],md:text})});
-    toast("Заметка сохранена во «Входящие»");document.body.click();}
+   const r=await api("/api/notes/new",{method:"POST",body:JSON.stringify({folder:"Inbox",title})});
+   if(r&&r.ok){await api("/api/notes/save",{method:"POST",body:JSON.stringify({path:r.path,title,tags:["inbox"],md:text})});
+    toast("Заметка сохранена в «Inbox»");document.body.click();}
    else toast("Ошибка: "+((r&&r.error)||"?"));};});}
 /* history dialog: versions by date, preview + restore */
 async function ntHistory(path){
