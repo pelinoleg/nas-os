@@ -1571,13 +1571,19 @@
   .gl-head{display:flex;align-items:center;gap:8px;margin:6px 0}
   .gl-prob{color:var(--warn);font-size:12px;margin:4px 0}
   .gl-tiles{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
-  .gl-tile{display:flex;align-items:center;gap:7px;padding:8px 12px;border-radius:10px;background:var(--card);border:1px solid var(--line);font-size:13px}
-  .gl-tile b{font-size:15px}
-  .gl-lab{color:var(--dim)} .gl-unit{color:var(--dim);font-size:11px}
+  .gl-tile{font-size:13px;border-radius:10px;background:var(--card);border:1px solid var(--line)}
+  /* card: label in the corner, value big and centered (mirrors the ESP32 layout) */
+  .gl-tile.card{display:flex;flex-direction:column;gap:4px;padding:8px 12px 9px;min-width:118px}
+  .gl-top{display:flex;align-items:center;justify-content:space-between;gap:8px}
+  .gl-mid{display:flex;align-items:baseline;justify-content:center;gap:5px}
+  .gl-tile.card b{font-size:17px}
+  .gl-tile.card .gl-spark{align-self:center;width:80%;height:14px}
+  .gl-lab{color:var(--dim);font-size:11px} .gl-unit{color:var(--dim);font-size:11px}
   .gl-dot{width:9px;height:9px;border-radius:50%;display:inline-block;flex:none}
   .gl-spark{width:46px;height:18px;flex:none;opacity:.85}
-  .gl-tile.lg{flex-basis:100%;padding:12px 14px} .gl-tile.lg b{font-size:20px}
-  .gl-tile.sm{padding:5px 9px;font-size:11px} .gl-tile.sm b{font-size:12px}
+  .gl-tile.lg{flex-basis:100%;padding:12px 14px} .gl-tile.lg b{font-size:24px}
+  .gl-tile.sm{display:flex;align-items:center;gap:7px;padding:5px 9px;font-size:11px}
+  .gl-tile.sm b{font-size:12px} .gl-tile.sm .gl-sv{margin-left:auto}
   .gl-pgname{margin-top:12px;font-size:11px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--dim)}
   .gl-size{flex:none} .gl-size button{padding:3px 8px;font-size:10px}
   .gl-avwrap{margin-top:12px}
@@ -5797,7 +5803,9 @@ async function glanceTab(tc){
   const g=await api("/api/glance?lang="+(window.NAS_LANG||"ru"));
   if(!g||!g.tiles){prev.innerHTML=`<div class="set-load">нет данных</div>`;return;}
   const dot=s=>`<i class="gl-dot" style="background:var(--${s==="ok"?"good":s==="warn"?"warn":"danger"})"></i>`;
-  const tile=t=>`<div class="gl-tile${t.size==="l"?" lg":t.size==="s"?" sm":""}">${dot(t.state)}<span class="gl-lab">${esc(t.label)}</span><b>${esc(t.value)}</b><span class="gl-unit">${esc(t.unit||"")}</span>${t.spark?sparkSVG(t.spark):""}</div>`;
+  const tile=t=>t.size==="s"
+   ?`<div class="gl-tile sm">${dot(t.state)}<span class="gl-lab">${esc(t.label)}</span><span class="gl-sv"><b>${esc(t.value)}</b> <span class="gl-unit">${esc(t.unit||"")}</span></span></div>`
+   :`<div class="gl-tile card${t.size==="l"?" lg":""}"><span class="gl-top"><span class="gl-lab">${esc(t.label)}</span>${dot(t.state)}</span><span class="gl-mid"><b>${esc(t.value)}</b><span class="gl-unit">${esc(t.unit||"")}</span></span>${t.spark?sparkSVG(t.spark):""}</div>`;
   const pgs=g.pages&&g.pages.length?g.pages:[{name:"",tiles:g.tiles}];
   prev.innerHTML=`<div class="gl-head">${dot(g.status)}<b>${esc(g.host)}</b><span class="mono" style="color:var(--dim);font-size:11px">seq ${g.seq}</span></div>
    ${g.problems&&g.problems.length?`<div class="gl-prob">${g.problems.map(esc).join("<br>")}</div>`:""}

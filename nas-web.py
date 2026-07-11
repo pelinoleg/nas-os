@@ -1743,21 +1743,25 @@ def _nb_last_ok(pid):
 def _gl_backup_tile(best, en):
     if not best:
         return {"value": "—", "unit": "", "state": "warn",
-                "note": "ещё не было" if not en else "never ran"}
+                "note": "ещё не было" if not en else "never ran", "raw": None}
     age = time.time() - best
     st = "danger" if age > 7 * 86400 else ("warn" if age > 2 * 86400 else "ok")
-    return {"value": _gl_ago(age, en), "unit": "назад" if not en else "ago", "state": st}
+    return {"value": _gl_ago(age, en), "unit": "назад" if not en else "ago", "state": st,
+            "raw": {"ts": int(best), "age_s": int(age)}}
 
 def _glance_tile(tid, en):
-    """Build one tile -> {value, unit, state[, note]} or None to hide it."""
+    """Build one tile -> {value, unit, state, raw[, note]} or None to hide it.
+    value/unit are display-ready strings; raw is the machine-readable source
+    for anyone building their own UI on top of /api/glance."""
     if tid == "pool":
         di = disk_info(STORAGE) if os.path.ismount(STORAGE) else None
         if not di:
             return {"value": "—", "unit": "", "state": "danger",
-                    "note": "пул не смонтирован" if not en else "pool not mounted"}
+                    "note": "пул не смонтирован" if not en else "pool not mounted", "raw": None}
         v, u = _gl_gb(di["free"], en)
         st = "danger" if di["pct"] >= 90 else ("warn" if di["pct"] >= 80 else "ok")
-        return {"value": v, "unit": u + (" своб." if not en else " free"), "state": st}
+        return {"value": v, "unit": u + (" своб." if not en else " free"), "state": st,
+                "raw": {"free": di["free"], "used": di["used"], "pct": di["pct"]}}
     if tid == "backup":
         return _gl_backup_tile(max((_nb_last_ok(pr["id"]) for pr in nb_profiles()), default=0), en)
     if tid.startswith("nb:"):
@@ -1771,13 +1775,15 @@ def _glance_tile(tid, en):
         if best is None:
             return None
         return {"value": _gl_ago(best - time.time(), en),
-                "unit": "до запуска" if not en else "until run", "state": "ok", "note": name}
+                "unit": "до запуска" if not en else "until run", "state": "ok", "note": name,
+                "raw": {"ts": int(best), "in_s": int(best - time.time()), "profile": name}}
     if tid.startswith("sc:"):
         s = next((x for x in _glance_scripts() if x["id"] == tid), None)
         if not s:
             return None
         fall = {"ok": "OK", "warn": "WARN", "danger": "FAIL"}[s["state"]]
-        return {"value": s["text"] or fall, "unit": "", "state": s["state"]}
+        return {"value": s["text"] or fall, "unit": "", "state": s["state"],
+                "raw": {"state": s["state"], "text": s["text"]}}
     if tid in ("avail", "avail30"):
         hours = 24 if tid == "avail" else 720
         av = avail_bars(hours, 96)
@@ -1786,7 +1792,8 @@ def _glance_tile(tid, en):
         st = "ok" if av["pct"] >= 99 else ("warn" if av["pct"] >= 95 else "danger")
         unit = ("% / 24ч" if not en else "% / 24h") if tid == "avail" else \
                ("% / 30д" if not en else "% / 30d")
-        return {"value": "%.1f" % av["pct"], "unit": unit, "state": st}
+        return {"value": "%.1f" % av["pct"], "unit": unit, "state": st,
+                "raw": {"pct": av["pct"], "hours": hours}}
     if tid == "disktemp":
         temps = _hwmon_disk_temps()
         if not temps:
@@ -1797,49 +1804,59 @@ def _glance_tile(tid, en):
         except (TypeError, ValueError):
             warn_at = 60
         st = "danger" if t >= warn_at + 10 else ("warn" if t >= warn_at else "ok")
-        return {"value": "%d" % round(t), "unit": "°C", "state": st, "note": dev}
+        return {"value": "%d" % round(t), "unit": "°C", "state": st, "note": dev,
+                "raw": {"c": round(t, 1), "dev": dev,
+                        "all": [{"dev": d, "c": round(x, 1)} for d, x in temps]}}
     if tid == "cpu":
         pct = cpu_percent()
         st = "danger" if pct >= 95 else ("warn" if pct >= 80 else "ok")
-        return {"value": "%d" % round(pct), "unit": "%", "state": st}
+        return {"value": "%d" % round(pct), "unit": "%", "state": st, "raw": {"pct": pct}}
     if tid == "netspeed":
         r = net_rate(default_iface()) or {}
         return {"value": "↓%s ↑%s" % (_gl_bytes(r.get("rx"), en), _gl_bytes(r.get("tx"), en)),
-                "unit": "/с" if not en else "/s", "state": "ok"}
+                "unit": "/с" if not en else "/s", "state": "ok",
+                "raw": {"rx": r.get("rx", 0), "tx": r.get("tx", 0)}}
     if tid == "cputemp":
         t = temp_c()
         if t is None:
             return None
         thr = _safe(throttled) or {}
         st = "danger" if (t >= 75 or thr.get("throttle")) else ("warn" if t >= 65 else "ok")
-        return {"value": "%d" % round(t), "unit": "°C", "state": st}
+        return {"value": "%d" % round(t), "unit": "°C", "state": st,
+                "raw": {"c": round(t, 1), "throttle": bool(thr.get("throttle"))}}
     if tid == "load":
         la = os.getloadavg()[0]
         ncpu = os.cpu_count() or 4
         st = "danger" if la >= ncpu * 2 else ("warn" if la >= ncpu else "ok")
-        return {"value": "%.1f" % la, "unit": "load", "state": st}
+        return {"value": "%.1f" % la, "unit": "load", "state": st,
+                "raw": {"load1": round(la, 2), "ncpu": ncpu}}
     if tid == "ram":
-        pct = mem_info()["pct"]
+        mi = mem_info()
+        pct = mi["pct"]
         st = "danger" if pct >= 92 else ("warn" if pct >= 80 else "ok")
-        return {"value": "%d" % round(pct), "unit": "%", "state": st}
+        return {"value": "%d" % round(pct), "unit": "%", "state": st,
+                "raw": {"pct": pct, "used": mi["used"], "total": mi["total"]}}
     if tid == "rootfs":
         di = disk_info("/")
         if not di:
             return None
         st = "danger" if di["pct"] >= 90 else ("warn" if di["pct"] >= 80 else "ok")
         v, u = _gl_gb(di["free"], en)
-        return {"value": v, "unit": u + (" своб." if not en else " free"), "state": st}
+        return {"value": v, "unit": u + (" своб." if not en else " free"), "state": st,
+                "raw": {"free": di["free"], "used": di["used"], "pct": di["pct"]}}
     if tid == "uptime":
-        return {"value": _gl_ago(uptime_s(), en), "unit": "", "state": "ok"}
+        up = uptime_s()
+        return {"value": _gl_ago(up, en), "unit": "", "state": "ok", "raw": {"s": int(up)}}
     if tid == "net":
         ip = lan_ip()
         good = bool(ip) and not ip.startswith("127.")
         return {"value": ip or "—", "unit": default_iface() or "",
-                "state": "ok" if good else "danger"}
+                "state": "ok" if good else "danger",
+                "raw": {"ip": ip, "iface": default_iface(), "ok": good}}
     if tid == "inet":
         ok = _inet_ok()
         return {"value": ("есть" if not en else "up") if ok else ("нет" if not en else "down"),
-                "unit": "", "state": "ok" if ok else "danger"}
+                "unit": "", "state": "ok" if ok else "danger", "raw": {"ok": ok}}
     if tid == "traffic":
         v = _safe(vnstat_state) or {}
         if not v.get("ok"):
@@ -1847,14 +1864,17 @@ def _glance_tile(tid, en):
         td = v.get("today") or {}
         return {"value": "↓%s ↑%s" % (_gl_bytes(td.get("rx"), en).replace(" ", ""),
                                        _gl_bytes(td.get("tx"), en).replace(" ", "")),
-                "unit": "сегодня" if not en else "today", "state": "ok"}
+                "unit": "сегодня" if not en else "today", "state": "ok",
+                "raw": {"rx": td.get("rx", 0), "tx": td.get("tx", 0)}}
     if tid == "speed":
         m = _safe(myspeed_state) or {}
         if not m.get("ok") or m.get("download") is None:
             return None
         return {"value": "↓%s ↑%s" % (m.get("download"), m.get("upload")),
                 "unit": "Мбит" if not en else "Mbit",
-                "state": "warn" if m.get("failed") else "ok"}
+                "state": "warn" if m.get("failed") else "ok",
+                "raw": {"down": m.get("download"), "up": m.get("upload"),
+                        "ping": m.get("ping"), "created": m.get("created")}}
     if tid == "docker":
         ps = _safe(_docker_ps) or []
         if not ps:
@@ -1863,7 +1883,9 @@ def _glance_tile(tid, en):
         bad = [c for c in run if "unhealthy" in str(c.get("Status", ""))]
         st = "warn" if bad else "ok"
         note = ", ".join(c.get("Names", "?") for c in bad[:3]) if bad else None
-        out = {"value": "%d/%d" % (len(run), len(ps)), "unit": "", "state": st}
+        out = {"value": "%d/%d" % (len(run), len(ps)), "unit": "", "state": st,
+               "raw": {"running": len(run), "total": len(ps),
+                       "unhealthy": [c.get("Names") for c in bad]}}
         if note:
             out["note"] = note
         return out
@@ -1872,24 +1894,28 @@ def _glance_tile(tid, en):
         if not w.get("ok"):
             return None
         n = w.get("count", 0)
-        return {"value": str(n), "unit": "обнов." if not en else "upd", "state": "warn" if n else "ok"}
+        return {"value": str(n), "unit": "обнов." if not en else "upd",
+                "state": "warn" if n else "ok", "raw": {"count": n}}
     if tid == "updates":
         n = _safe(_apt_upgradable, 0) or 0
-        return {"value": str(n), "unit": "apt", "state": "warn" if n > 20 else "ok"}
+        return {"value": str(n), "unit": "apt", "state": "warn" if n > 20 else "ok",
+                "raw": {"count": n}}
     if tid == "snapraid":
         sr = _safe(snapraid_status) or {}
         if not sr.get("configured"):
             return None
         ls = sr.get("last_sync") or {}
         if not ls.get("date"):
-            return {"value": "—", "unit": "sync", "state": "warn"}
+            return {"value": "—", "unit": "sync", "state": "warn", "raw": None}
         try:
             age = time.time() - time.mktime(time.strptime(ls["date"], "%Y-%m-%d %H:%M:%S"))
         except ValueError:
             age = 0
         st = "danger" if (ls.get("result") == "err" or sr.get("blocked")) else \
              ("warn" if age > 8 * 86400 else "ok")
-        return {"value": _gl_ago(age, en), "unit": "sync", "state": st}
+        return {"value": _gl_ago(age, en), "unit": "sync", "state": st,
+                "raw": {"age_s": int(age), "result": ls.get("result"),
+                        "blocked": bool(sr.get("blocked"))}}
     if tid == "events":
         try:
             with open(EVENTS_FILE) as f:
@@ -1897,7 +1923,8 @@ def _glance_tile(tid, en):
             unseen = sum(1 for e in ev.get("items", []) if e.get("id", 0) > ev.get("seen", 0))
         except (OSError, ValueError):
             unseen = 0
-        return {"value": str(unseen), "unit": "новых" if not en else "new", "state": "ok"}
+        return {"value": str(unseen), "unit": "новых" if not en else "new", "state": "ok",
+                "raw": {"unseen": unseen}}
     return None
 
 # per-language cache: labels/values are localized, so each language keeps its

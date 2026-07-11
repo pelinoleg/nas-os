@@ -66,23 +66,56 @@ void drawSpark(JsonArray sp, int x, int y, int w, int h) {
   }
 }
 
-// one tile inside a w×h cell; big = double-height fonts (size "l")
-void drawTile(JsonObject t, int x, int y, int w, int h, bool big) {
-  tft.fillCircle(x + 8, y + h / 2, big ? 5 : 4, stColor(t["state"] | "ok"));
-  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
-  tft.drawString(t["label"] | "", x + 18, y + (big ? 12 : 9), 2);
-  tft.setTextColor(TFT_WHITE, TFT_BLACK);
+// fit text into maxW: try fonts big->small, then clip with a trailing dot
+String fitText(String s, int maxW, int &font, int fBig, int fSmall) {
+  font = fBig;
+  if (fBig == 6)  // font 6 is digits-only in TFT_eSPI
+    for (unsigned i = 0; i < s.length(); i++)
+      if (!strchr("0123456789.-", s[i])) { font = fSmall; break; }
+  if (tft.textWidth(s, font) <= maxW) return s;
+  font = fSmall;
+  while (s.length() > 1 && tft.textWidth(s + ".", font) > maxW) s.remove(s.length() - 1);
+  return s + ".";
+}
+
+// card tile: label in the top-left corner, status dot top-right,
+// value big and centered, unit under/next to it, spark along the bottom
+void drawTile(JsonObject t, int x, int y, int w, int h, bool big, bool slim) {
+  const uint16_t cardBg = 0x10A2, cardLine = 0x2965;   // dark grey card on black
+  if (slim) {                                          // size "s": one text row
+    tft.fillCircle(x + 8, y + h / 2, 3, stColor(t["state"] | "ok"));
+    tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
+    tft.drawString(t["label"] | "", x + 16, y + h / 2, 2);
+    String v = String(t["value"] | "") + " " + String(t["unit"] | "");
+    int f; v = fitText(v, w - 24 - tft.textWidth(t["label"] | "", 2) - 16, f, 2, 2);
+    tft.setTextColor(TFT_WHITE, TFT_BLACK);
+    tft.setTextDatum(MR_DATUM);
+    tft.drawString(v, x + w - 8, y + h / 2, 2);
+    tft.setTextDatum(ML_DATUM);
+    return;
+  }
+  tft.fillRoundRect(x + 2, y + 2, w - 4, h - 4, 8, cardBg);
+  tft.drawRoundRect(x + 2, y + 2, w - 4, h - 4, 8, cardLine);
+  tft.setTextColor(TFT_DARKGREY, cardBg);
+  int f2; String lab = fitText(String(t["label"] | ""), w - 30, f2, 2, 2);
+  tft.drawString(lab, x + 10, y + 12, 2);
+  tft.fillCircle(x + w - 13, y + 12, big ? 5 : 4, stColor(t["state"] | "ok"));
+  // centered value + unit
   String val = String(t["value"] | "");
-  int vfont = big ? 6 : 4;
-  // font 6 is digits-only in TFT_eSPI; fall back if the value has other chars
-  if (vfont == 6) for (unsigned i = 0; i < val.length(); i++)
-    if (!strchr("0123456789.-", val[i])) { vfont = 4; break; }
-  int vy = y + (big ? h - 22 : h - 13);
-  tft.drawString(val, x + 18, vy, vfont);
-  tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
-  tft.drawString(t["unit"] | "", x + 22 + tft.textWidth(val, vfont), vy + (big ? 8 : 4), 2);
+  String unit = String(t["unit"] | "");
+  int vf; val = fitText(val, w - 20 - (unit.length() ? tft.textWidth(unit, 2) + 6 : 0),
+                        vf, big ? 6 : 4, big ? 4 : 2);
+  int cx = x + w / 2, cy = y + 12 + (h - 24) / 2 + 2;
+  int total = tft.textWidth(val, vf) + (unit.length() ? 6 + tft.textWidth(unit, 2) : 0);
+  tft.setTextDatum(ML_DATUM);
+  tft.setTextColor(TFT_WHITE, cardBg);
+  tft.drawString(val, cx - total / 2, cy, vf);
+  if (unit.length()) {
+    tft.setTextColor(TFT_DARKGREY, cardBg);
+    tft.drawString(unit, cx - total / 2 + tft.textWidth(val, vf) + 6, cy + 4, 2);
+  }
   JsonArray sp = t["spark"];
-  if (sp.size() >= 2) drawSpark(sp, x + w - 48, y + 4, 44, big ? 22 : 14);
+  if (sp.size() >= 2 && h >= 52) drawSpark(sp, x + 10, y + h - 18, w - 20, 12);
 }
 
 void drawAvail(JsonObject avail, int y) {
@@ -117,21 +150,21 @@ void drawPage() {
     tft.drawString(pname, tft.width() - 14 - pages.size() * 12 - tft.textWidth(pname, 2), 13, 2);
   }
 
-  // flow layout: "l" = full row (tall), "m" = 1/cols row, "s" = same but slim.
-  // wide panel (T-Display-S3 Long, 640 px) gets 3 columns, narrow gets 2.
+  // flow layout: "l" = full row (tall card), "m" = card in a column,
+  // "s" = slim text row. Wide panel (T-Display-S3 Long, 640 px) → 3 columns.
   int cols = tft.width() >= 480 ? 3 : 2;
   int colW = tft.width() / cols;
   int y = 28, x = 0, rowH = 0;
-  const int hL = 52, hM = 42, hS = 28;
+  const int hL = 66, hM = 50, hS = 20;
   for (JsonObject t : pg["tiles"].as<JsonArray>()) {
     const char* sz = t["size"] | "m";
-    bool big = !strcmp(sz, "l");
-    int th = big ? hL : (!strcmp(sz, "s") ? hS : hM);
+    bool big = !strcmp(sz, "l"), slim = !strcmp(sz, "s");
+    int th = big ? hL : (slim ? hS : hM);
     int tw = big ? tft.width() : colW;
     if (big && x > 0) { y += rowH; x = 0; rowH = 0; }          // "l" starts a fresh row
     if (x + tw > tft.width()) { y += rowH; x = 0; rowH = 0; }
     if (y + th > tft.height() - 14) break;                      // keep room for avail strip
-    drawTile(t, x, y, tw, th, big);
+    drawTile(t, x, y, tw, th, big, slim);
     x += tw; rowH = max(rowH, th);
     if (big) { y += th; x = 0; rowH = 0; }
   }
