@@ -7548,7 +7548,7 @@ def fsw_accept():
 
 def fsw_status():
     cfg = fsw_load()
-    n = sz = fresh = nev = 0
+    n = sz = fresh = nev = ncor = 0
     oldest = None
     last = pend = None
     dbsz = 0
@@ -7562,6 +7562,7 @@ def fsw_status():
         try:
             n, sz = db.execute("SELECT COUNT(*), COALESCE(SUM(size),0) FROM files").fetchone()
             nev = db.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+            ncor = db.execute("SELECT COUNT(*) FROM events WHERE kind='corrupt'").fetchone()[0]
             last = json.loads(_fsw_meta(db, "last") or "null")
             p = _fsw_meta(db, "pending")
             pend = json.loads(p) if p else None
@@ -7576,7 +7577,7 @@ def fsw_status():
         prog = dict(_fsw)
     return {"ok": True, "config": cfg, "files": n, "size": sz, "last": last,
             "pending": pend, "oldest_verify": oldest, "verified_fresh": fresh,
-            "events": nev, "db_size": dbsz, "progress": prog}
+            "events": nev, "corrupt": ncor, "db_size": dbsz, "progress": prog}
 
 def _fsw_day_range(day):
     """'YYYY-MM-DD' -> (t0, t1) local-time epoch bounds, or None."""
@@ -7659,6 +7660,29 @@ def fsw_events(before=0, limit=100, kind="", q="", day="", ts=0, group=False):
     return {"ok": True, "counts": counts, "events": [
         {"id": i, "ts": t, "kind": k, "path": p, "dst": d, "size": s, "info": inf}
         for (i, t, k, p, d, s, inf) in rows]}
+
+def fsw_activity(days=60):
+    """Events per local day per kind — feeds the mini activity chart."""
+    try:
+        days = max(7, min(365, int(days or 60)))
+    except (ValueError, TypeError):
+        days = 60
+    out = {}
+    rows = []
+    try:
+        db = _fsw_db()
+        try:
+            rows = db.execute(
+                "SELECT date(ts,'unixepoch','localtime') d, kind, COUNT(*) "
+                "FROM events WHERE ts>=? GROUP BY d, kind",
+                (int(time.time()) - days * 86400,)).fetchall()
+        finally:
+            db.close()
+    except Exception:
+        pass
+    for d, k, n in rows:
+        out.setdefault(d, {})[k] = n
+    return {"ok": True, "days": out}
 
 def fsw_clear(mode):
     """mode='events' wipes the history journal; 'all' drops the whole index
@@ -10266,6 +10290,8 @@ class H(BaseHTTPRequestHandler):
                 self._json(fs_du((q.get("path") or [""])[0]))
             elif p == "/api/fsw/status":
                 self._json(fsw_status())
+            elif p == "/api/fsw/activity":
+                self._json(fsw_activity((q.get("days") or ["60"])[0]))
             elif p == "/api/fsw/events":
                 self._json(fsw_events((q.get("before") or ["0"])[0],
                                       (q.get("limit") or ["100"])[0],

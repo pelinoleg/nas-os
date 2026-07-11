@@ -1174,8 +1174,9 @@
   .du-row:hover .du-x{opacity:1}.du-x:hover{color:var(--danger);background:var(--danger-soft)}
   @media (max-width:900px){.du-cols{flex-direction:column;overflow:auto}.du-chart{align-self:center}}
   /* --- История файлов (fswatch): журнал изменений + контроль целостности --- */
-  .fsw{height:100%;display:flex;flex-direction:column;gap:10px}
-  .fsw-head{display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap}
+  .fsw{flex:1;min-width:0;height:100%;display:flex;flex-direction:column;gap:10px}
+  .fsw-head{display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap;padding:14px 16px 0}
+  .fsw>#fswGuard .fsw-guard{margin:0 16px}
   .fsw-stats{flex:1;min-width:0;display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start}
   .fsw-st{display:flex;flex-direction:column;gap:2px;min-width:0}
   .fsw-st b{font-size:13.5px;white-space:nowrap}
@@ -1225,6 +1226,34 @@
   .fsw-chev{flex:none;display:flex;color:var(--mut);transition:transform .15s}
   .fsw-grp.open .fsw-chev{transform:rotate(90deg)}
   .fsw-grpb{margin:0 0 4px 14px;padding-left:8px;border-left:2px solid var(--line)}
+  /* активная вкладка без акцента: адаптивный акцент на стекле бывает блёклым */
+  .fsw .set-nav button.on svg{color:inherit;opacity:.9}
+  .fsw-side{margin-top:auto;padding:12px 10px 6px;display:flex;flex-direction:column;gap:8px;
+    font-size:11px;color:var(--dim);border-top:1px solid var(--line)}
+  .fsw-side>div{display:flex;align-items:center;gap:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .fsw-side svg{flex:none;opacity:.7}
+  .fsw-side .bad{color:var(--danger);font-weight:650}
+  @media (max-width:1024px){.fsw-side{display:none}}
+  .fsw-nb{margin-left:auto;font-size:9.5px;font-weight:700;padding:1px 6px;border-radius:999px;
+    background:var(--sel);color:var(--dim)}
+  .fsw .set-nav button.on .fsw-nb{background:var(--card)}
+  .fsw-nb.bad{background:var(--danger);color:#fff}
+  .fsw-chart{display:flex;gap:2px;align-items:flex-end;height:52px;flex:none;padding:2px 2px 0}
+  .fsw-col{flex:1;max-width:18px;min-width:5px;height:100%;display:flex;flex-direction:column-reverse;
+    gap:1px;cursor:pointer;border-radius:4px;padding:2px;justify-content:flex-start}
+  .fsw-col:hover{background:var(--sel)}
+  .fsw-col.on{background:var(--accent-soft)}
+  .fsw-col i{display:block;border-radius:2px;flex:none}
+  .fsw-col i.trk{background:var(--track);height:2px}
+  .fsw-col i.add{background:var(--good)}
+  .fsw-col i.del{background:var(--danger)}
+  .fsw-col i.mod{background:var(--warn)}
+  .fsw-col i.move{background:var(--accent)}
+  .fsw-col i.corrupt{background:var(--danger);box-shadow:0 0 0 1px var(--card)}
+  .fsw-go{flex:none;border:none;background:none;color:var(--mut);padding:3px 5px;border-radius:6px;
+    opacity:0;cursor:pointer;display:flex}
+  .fsw-row:hover .fsw-go{opacity:1}
+  .fsw-go:hover{color:var(--accent);background:var(--sel)}
   .fsw .set-pane.fsw-flex{display:flex;flex-direction:column;gap:10px;overflow:hidden}
   .fsw textarea{font-size:12px;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-sm);
     background:var(--card);color:var(--text)}
@@ -6185,6 +6214,7 @@ function glSpark(v){if(!v||v.length<2)return "";
 const FSW_KINDS={add:{ic:"plus",t:"добавлен"},del:{ic:"trash",t:"удалён"},mod:{ic:"edit",t:"изменён"},
                  move:{ic:"sync",t:"перемещён"},corrupt:{ic:"warn",t:"повреждён"}};
 function winFsHistory(){openWin("__fsw","История файлов",(body,win)=>{
+ body.style.display="flex";body.style.padding="0";   // сайдбар сам задаёт отступы — без двойного паддинга
  let ST=null,KIND="",Q="",DAY="",qTimer=null,TAB="feed",wasRun=false;
  const g=s=>body.querySelector(s);
  const running=()=>ST&&ST.progress&&(ST.progress.status==="scan"||ST.progress.status==="verify");
@@ -6207,6 +6237,7 @@ function winFsHistory(){openWin("__fsw","История файлов",(body,win)
     <button data-t="integ">${svg("shield",17)}<span>Целостность</span></button>
     <button data-t="watch">${svg("eye",17)}<span>Наблюдение</span></button>
     <button data-t="sched">${svg("clock",17)}<span>Расписание</span></button>
+    <div class="fsw-side" id="fswSide"></div>
    </div>
    <div class="set-main"><div class="set-pane" id="fswPane"></div></div>
   </div></div>`;
@@ -6237,14 +6268,52 @@ function winFsHistory(){openWin("__fsw","История файлов",(body,win)
    <button class="btn sm warn" id="fswAcc">Подтвердить удаления</button></div>`;
   g("#fswAcc").onclick=async()=>{await api("/api/fsw/accept",{method:"POST",body:"{}"});toast("Принято — записываю…");refreshPane();};
  }
+ let ACT=null;   // события по дням (для графика и бейджей)
+ const dayKey=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+ function paintSide(){
+  const el=g("#fswSide");if(!el||!ST)return;
+  const c=ST.config||{};
+  let h=`<div>${svg("clock",12)} ${c.enabled?"скан в "+esc(c.time||"02:30"):"авто-скан выключен"}</div>
+   <div>${svg("refresh",12)} ${ST.last?"последний скан: "+ago(ST.last.ts):"ещё не было"}</div>
+   <div>${svg("db",12)} база ${fmtB(ST.db_size)}</div>`;
+  if(ST.corrupt)h+=`<div class="bad">${svg("warn",12)} повреждения: ${ST.corrupt}</div>`;
+  el.innerHTML=h;
+ }
+ function paintNav(){
+  const nav=g("#fswNav");if(!nav)return;
+  const set=(t,html)=>{const b=nav.querySelector(`button[data-t="${t}"]`);if(!b)return;
+   const old=b.querySelector(".fsw-nb");if(old)old.remove();
+   if(html)b.insertAdjacentHTML("beforeend",html);};
+  const td=(ACT&&ACT[dayKey(new Date())])||null;
+  const tn=td?Object.values(td).reduce((a,b)=>a+b,0):0;
+  set("feed",tn?`<span class="fsw-nb" title="событий сегодня">${tn>999?"999+":tn}</span>`:"");
+  set("integ",ST&&ST.corrupt?`<span class="fsw-nb bad">${ST.corrupt}</span>`:"");
+ }
+ async function loadAct(){const r=await api("/api/fsw/activity?days=60");ACT=(r&&r.days)||{};paintNav();
+  const ch=g("#fswChart");if(ch)ch.outerHTML=chartHTML();}
+ function chartHTML(){
+  const days=[];const now=new Date();
+  for(let i=29;i>=0;i--){const d=new Date(now.getTime()-i*864e5);days.push(dayKey(d));}
+  let max=1;
+  for(const k of days){const v=(ACT&&ACT[k])||{};max=Math.max(max,Object.values(v).reduce((a,b)=>a+b,0));}
+  const H=40,sc=n=>n?Math.max(3,Math.round(H*Math.sqrt(n)/Math.sqrt(max))):0;
+  return `<div class="fsw-chart" id="fswChart" title="Активность за 30 дней — клик по столбику покажет день">${days.map(k=>{
+   const v=(ACT&&ACT[k])||{};
+   const parts=["add","mod","move","del","corrupt"].map(t=>v[t]?`<i class="${t}" style="height:${sc(v[t])}px"></i>`:"").join("");
+   const tot=Object.values(v).reduce((a,b)=>a+b,0);
+   const tip=`${k.slice(8)}.${k.slice(5,7)}: ${tot?`+${v.add||0} −${v.del||0} ~${v.mod||0} →${v.move||0}${v.corrupt?" ⚠"+v.corrupt:""}`:"пусто"}`;
+   return `<div class="fsw-col${DAY===k?" on":""}" data-d="${k}" title="${att(tip)}">${parts||'<i class="trk"></i>'}</div>`;}).join("")}</div>`;
+ }
  const rowHTML=e=>{const k=FSW_KINDS[e.kind]||{ic:"file",t:e.kind};
   const nm=(e.path||"").split("/").pop();const dir=(e.path||"").slice(0,-(nm.length));
+  const goDir=e.kind==="move"?(e.dst||"").replace(/\/[^/]*$/,"/"):dir;   // после переноса файл живёт по новому пути
   const extra=e.kind==="move"?` → ${esc(e.dst||"")}`:(e.info?` · ${esc(e.info)}`:"");
   const dl=e.kind==="corrupt"?`<span style="color:var(--mut)"> · ${dayLbl(e.ts)}</span>`:"";
+  const go=e.kind==="del"?"":`<button class="fsw-go" data-d="${att(goDir)}" title="Показать в файлах">${svg("folder",12)}</button>`;
   return `<div class="fsw-row" title="${att(k.t+": "+e.path+(e.dst?" → "+e.dst:""))}">
    <div class="fsw-ki ${e.kind}">${svg(k.ic,13)}</div>
    <div class="fsw-nm"><div class="fsw-fn">${esc(nm)}${dl}</div><div class="fsw-fp">${esc(dir)}${extra}</div></div>
-   <div class="fsw-sz">${e.size!=null?fmtB(e.size):""}</div><div class="fsw-tm">${hm(e.ts)}</div></div>`;};
+   ${go}<div class="fsw-sz">${e.size!=null?fmtB(e.size):""}</div><div class="fsw-tm">${hm(e.ts)}</div></div>`;};
  function paintCounts(c){
   const bar=g("#fswF");if(!bar||!c)return;
   const tot=Object.values(c).reduce((a,b)=>a+b,0);
@@ -6303,7 +6372,7 @@ function winFsHistory(){openWin("__fsw","История файлов",(body,win)
  /* --- вкладки --- */
  function paneFeed(pane){
   pane.classList.add("fsw-flex");
-  pane.innerHTML=`<div class="fsw-bar">
+  pane.innerHTML=`${chartHTML()}<div class="fsw-bar">
     <div class="seg" id="fswF"><button data-k="">Все</button><button data-k="add">Добавлены</button><button data-k="del">Удалены</button><button data-k="mod">Изменены</button><button data-k="move">Перемещены</button><button data-k="corrupt">Повреждены</button></div>
     <input type="date" class="fsw-q" id="fswDay" style="flex:none" value="${att(DAY)}" title="Показать события конкретного дня">
     <input class="fsw-q" id="fswQ" placeholder="фильтр по пути…" value="${att(Q)}">
@@ -6311,10 +6380,16 @@ function winFsHistory(){openWin("__fsw","История файлов",(body,win)
   pane.querySelectorAll("#fswF button").forEach(b=>{
    b.classList.toggle("on",b.dataset.k===KIND);
    b.onclick=()=>{KIND=b.dataset.k;pane.querySelectorAll("#fswF button").forEach(z=>z.classList.toggle("on",z===b));loadFeed(true);};});
-  g("#fswDay").onchange=e=>{DAY=e.target.value||"";loadFeed(true);};
+  g("#fswDay").onchange=e=>{DAY=e.target.value||"";syncChart();loadFeed(true);};
   g("#fswQ").oninput=e=>{clearTimeout(qTimer);qTimer=setTimeout(()=>{Q=e.target.value.trim();loadFeed(true);},350);};
+  // клик по столбику графика = выбрать день (повторный клик — снять)
+  pane.addEventListener("click",e=>{const col=e.target.closest(".fsw-col");if(!col)return;
+   DAY=(DAY===col.dataset.d)?"":col.dataset.d;
+   const di=g("#fswDay");if(di)di.value=DAY;syncChart();loadFeed(true);});
   loadFeed(true);
  }
+ function syncChart(){const ch=g("#fswChart");if(!ch)return;
+  ch.querySelectorAll(".fsw-col").forEach(c=>c.classList.toggle("on",c.dataset.d===DAY));}
  async function paneInteg(pane){
   pane.classList.add("fsw-flex");
   const c=(ST&&ST.config)||{};
@@ -6404,20 +6479,23 @@ function winFsHistory(){openWin("__fsw","История файлов",(body,win)
  }
  const PANES={feed:paneFeed,integ:paneInteg,watch:paneWatch,sched:paneSched};
  function renderPane(){const pane=g("#fswPane");pane.classList.remove("fsw-flex");PANES[TAB](pane);}
- async function refreshPane(keepPane){ST=await api("/api/fsw/status");paintStats();paintGuard();if(!keepPane)renderPane();}
+ async function refreshPane(keepPane){ST=await api("/api/fsw/status");paintStats();paintGuard();paintSide();paintNav();if(!keepPane)renderPane();}
  g("#fswNav").querySelectorAll("button").forEach(b=>b.onclick=()=>{
   TAB=b.dataset.t;g("#fswNav").querySelectorAll("button").forEach(z=>z.classList.toggle("on",z===b));renderPane();});
  g("#fswScan").onclick=async()=>{
   if(running()){await api("/api/fsw/cancel",{method:"POST",body:"{}"});toast("Останавливаю…");}
   else{const r=await api("/api/fsw/scan",{method:"POST",body:"{}"});toast(r&&r.ok?"Скан запущен":(r&&r.log)||"не вышло");}
   setTimeout(()=>refreshPane(true),600);};
+ // «показать в файлах» на строках событий (делегирование: строки динамические)
+ body.addEventListener("click",e=>{const b=e.target.closest(".fsw-go");
+  if(b){e.stopPropagation();winFiles(b.dataset.d||"/");}});
  const t=setInterval(async()=>{
   if(!document.body.contains(body)){clearInterval(t);return;}
-  ST=await api("/api/fsw/status");paintStats();paintGuard();
-  if(wasRun&&!running()&&(TAB==="feed"||TAB==="integ"))renderPane();   // скан закончился — обновить
+  ST=await api("/api/fsw/status");paintStats();paintGuard();paintSide();
+  if(wasRun&&!running()){loadAct();if(TAB==="feed"||TAB==="integ")renderPane();}   // скан закончился — обновить
   wasRun=!!running();
  },4000);
- refreshPane();
+ refreshPane();loadAct();
 },{w:860,h:600});}
 
 function avBarsHTML(r,pct,hours){
