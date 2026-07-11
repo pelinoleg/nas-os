@@ -1173,6 +1173,50 @@
   .du-x{flex:none;border:none;background:none;color:var(--mut);padding:3px 5px;border-radius:6px;opacity:0;cursor:pointer}
   .du-row:hover .du-x{opacity:1}.du-x:hover{color:var(--danger);background:var(--danger-soft)}
   @media (max-width:900px){.du-cols{flex-direction:column;overflow:auto}.du-chart{align-self:center}}
+  /* --- История файлов (fswatch): журнал изменений + контроль целостности --- */
+  .fsw{height:100%;display:flex;flex-direction:column;gap:10px}
+  .fsw-head{display:flex;align-items:flex-start;gap:10px;flex-wrap:wrap}
+  .fsw-stats{flex:1;min-width:0;display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start}
+  .fsw-st{display:flex;flex-direction:column;gap:2px;min-width:0}
+  .fsw-st b{font-size:13.5px;white-space:nowrap}
+  .fsw-st span{font-size:10.5px;color:var(--mut);white-space:nowrap}
+  .fsw-st b.ok{color:var(--good)}.fsw-st b.warn{color:var(--warn)}.fsw-st b.bad{color:var(--danger)}
+  .fsw-actions{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+  .fsw-prog{font-family:var(--mono);font-size:11px;color:var(--mut);display:flex;gap:6px;align-items:center}
+  .fsw-prog svg{animation:wspin 1s linear infinite;color:var(--accent)}
+  .fsw-guard{border:1px solid var(--danger);background:var(--danger-soft);border-radius:var(--r-md);
+    padding:10px 12px;font-size:12.5px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  .fsw-guard b{color:var(--danger)}
+  .fsw-bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .fsw-bar .seg{flex-wrap:wrap}
+  .fsw-q{flex:1;min-width:130px;font-family:var(--mono);font-size:11.5px;padding:5px 9px;
+    border:1px solid var(--line);border-radius:7px;background:var(--card);color:var(--text)}
+  .fsw-feed{flex:1;min-height:0;overflow:auto;padding-right:2px}
+  .fsw-day{font-size:10.5px;font-weight:700;color:var(--dim);padding:10px 6px 4px}
+  .fsw-row{display:flex;align-items:center;gap:9px;padding:6px 8px;border-radius:var(--r-sm);font-size:12.5px}
+  .fsw-row:hover{background:var(--sel)}
+  .fsw-ki{flex:none;width:22px;height:22px;border-radius:7px;display:grid;place-items:center}
+  .fsw-ki.add{color:var(--good);background:var(--good-soft)}
+  .fsw-ki.del{color:var(--danger);background:var(--danger-soft)}
+  .fsw-ki.mod{color:var(--warn);background:var(--warn-soft)}
+  .fsw-ki.move{color:var(--accent);background:var(--accent-soft)}
+  .fsw-ki.corrupt{color:#fff;background:var(--danger)}
+  .fsw-nm{flex:1;min-width:0;display:flex;flex-direction:column}
+  .fsw-fn{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:550}
+  .fsw-fp{font-size:10.5px;color:var(--mut);font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .fsw-sz{flex:none;font-family:var(--mono);font-size:11px;color:var(--mut)}
+  .fsw-tm{flex:none;font-family:var(--mono);font-size:11px;color:var(--dim);min-width:38px;text-align:right}
+  .fsw-more{display:block;margin:10px auto}
+  .fsw-empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;
+    color:var(--dim);font-size:13px;text-align:center;padding:20px}
+  .fsw-empty svg{color:var(--accent);opacity:.8}
+  .fsw-rootrow{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:12px;padding:3px 0}
+  .fsw-rootrow span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .fsw .nbmain{min-height:0}
+  .fsw .set-pane.fsw-flex{display:flex;flex-direction:column;gap:10px;overflow:hidden}
+  .fsw textarea{font-size:12px;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-sm);
+    background:var(--card);color:var(--text)}
+  .fsw textarea:focus{outline:none;border-color:var(--accent-line)}
   .fm-cur{outline:2px solid var(--accent);outline-offset:-2px}
   .fm-top{display:flex;flex-direction:column;gap:7px;margin-bottom:8px}
   .fm-bar2{display:flex;gap:5px;align-items:center;flex-wrap:wrap}
@@ -2903,6 +2947,7 @@ const INTERNAL=[
  {id:"__term",name:"Терминал",color:"linear-gradient(135deg,#2b3444,#1a2230)",ic:"termc",bare:1,fn:()=>winTerminal()},
  {id:"__files",name:"Файлы",color:"linear-gradient(135deg,#FFC24B,#F0A128)",ic:"folderc",bare:1,fn:()=>winFiles()},
  {id:"__duscan",name:"Анализ места",color:"linear-gradient(135deg,#33BE86,#2a9d6e)",ic:"donut",bare:1,fn:()=>winDiskUsage()},
+ {id:"__fsw",name:"История файлов",color:"linear-gradient(135deg,#7c6cf2,#5847d6)",ic:"shield",bare:1,fn:()=>winFsHistory()},
  {id:"__nasbak",name:"Бэкап NAS",color:"linear-gradient(135deg,#2f9d70,#1f7d78)",ic:"backup",bare:1,fn:()=>winBackup()},
  {id:"__vault",name:"Доступы",color:"linear-gradient(135deg,#e0913c,#c96f22)",ic:"keyf",bare:1,fn:()=>winVault()},
  {id:"__notes",name:"Заметки",color:"linear-gradient(135deg,#F2C14E,#E09F2F)",ic:"notec",bare:1,fn:()=>winNotes()},
@@ -6122,6 +6167,191 @@ function glSpark(v){if(!v||v.length<2)return "";
  const mn=Math.min(...v),mx=Math.max(...v),sp=(mx-mn)||1;
  const pts=v.map((x,i)=>`${(i/(v.length-1)*46).toFixed(1)},${(17-(x-mn)/sp*14).toFixed(1)}`).join(" ");
  return `<svg class="gl-spark" viewBox="0 0 46 18" preserveAspectRatio="none"><polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="1.5" vector-effect="non-scaling-stroke"/></svg>`;}
+/* --- История файлов: журнал добавлений/удалений/изменений + контроль
+   целостности содержимого (ротационная перечитка хэшей, битрот). --- */
+const FSW_KINDS={add:{ic:"plus",t:"добавлен"},del:{ic:"trash",t:"удалён"},mod:{ic:"edit",t:"изменён"},
+                 move:{ic:"sync",t:"перемещён"},corrupt:{ic:"warn",t:"повреждён"}};
+function winFsHistory(){openWin("__fsw","История файлов",(body,win)=>{
+ let ST=null,KIND="",Q="",lastId=0,qTimer=null,TAB="feed",wasRun=false;
+ const g=s=>body.querySelector(s);
+ const running=()=>ST&&ST.progress&&(ST.progress.status==="scan"||ST.progress.status==="verify");
+ const hm=ts=>{const d=new Date(ts*1000);return String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0");};
+ const dayLbl=ts=>{const d=new Date(ts*1000),t=new Date(),y=new Date(Date.now()-864e5);
+  const same=(a,b)=>a.toDateString()===b.toDateString();
+  return same(d,t)?"сегодня":same(d,y)?"вчера":d.toLocaleDateString();};
+ const ago=ts=>{if(!ts)return "—";const s=(Date.now()/1000-ts);
+  if(s<90)return "только что";if(s<5400)return Math.round(s/60)+" мин назад";
+  if(s<172800)return Math.round(s/3600)+" ч назад";return Math.round(s/86400)+" дн назад";};
+ body.innerHTML=`<div class="fsw">
+  <div class="fsw-head">
+   <div class="fsw-stats" id="fswStats"></div>
+   <div class="fsw-actions"><button class="btn sm" id="fswScan">${svg("refresh",13)} Сканировать</button></div>
+  </div>
+  <div id="fswGuard"></div>
+  <div class="nbmain">
+   <div class="set-nav" id="fswNav">
+    <button data-t="feed" class="on">${svg("list",17)}<span>Хроника</span></button>
+    <button data-t="integ">${svg("shield",17)}<span>Целостность</span></button>
+    <button data-t="watch">${svg("eye",17)}<span>Наблюдение</span></button>
+    <button data-t="sched">${svg("clock",17)}<span>Расписание</span></button>
+   </div>
+   <div class="set-main"><div class="set-pane" id="fswPane"></div></div>
+  </div></div>`;
+ function paintStats(){
+  const b=g("#fswStats");if(!ST){b.innerHTML="";return;}
+  const l=ST.last,p=ST.progress||{};
+  const fresh=ST.files?Math.round(100*(ST.verified_fresh||0)/ST.files):0;
+  const fCls=fresh>=95?"ok":fresh>=60?"warn":"bad";
+  let cells=`<div class="fsw-st"><b>${ST.files||0} · ${fmtB(ST.size)}</b><span>файлов под наблюдением</span></div>`;
+  if(running()){
+   cells+=`<div class="fsw-st"><b class="fsw-prog">${svg("refresh",12)} ${p.status==="verify"?"проверка содержимого…":"идёт скан…"}</b><span>${p.files||0} файлов · ${fmtB(p.bytes||0)} прочитано</span></div>`;
+  }else{
+   cells+=`<div class="fsw-st"><b>${l?ago(l.ts):"ещё не было"}</b><span>последний скан${l&&l.dur!=null?" · "+l.dur+" с":""}</span></div>`;
+   if(l&&!l.baseline)cells+=`<div class="fsw-st"><b>+${l.added} −${l.removed} ~${l.modified}${l.moved?" →"+l.moved:""}</b><span>за последний скан</span></div>`;
+   cells+=`<div class="fsw-st"><b class="${fCls}">${fresh}%</b><span>содержимое проверено недавно</span></div>`;
+  }
+  if(ST.progress&&ST.progress.status==="error")cells+=`<div class="fsw-st"><b class="bad">ошибка</b><span>${esc(ST.progress.error||"")}</span></div>`;
+  b.innerHTML=cells;
+  g("#fswScan").innerHTML=running()?svg("stop",13)+" Остановить":svg("refresh",13)+" Сканировать";
+ }
+ function paintGuard(){
+  const b=g("#fswGuard");
+  if(!ST||!ST.pending){b.innerHTML="";return;}
+  const pd=ST.pending;
+  b.innerHTML=`<div class="fsw-guard" title="${att((pd.sample||[]).join("\n"))}">${svg("warn",15)}
+   <div style="flex:1;min-width:200px"><b>Массовая пропажа: ${pd.count} из ${pd.total} файлов.</b>
+   События не записаны. Если это отвалившийся диск — почини и запусти скан. Если файлы удалены осознанно — подтверди.</div>
+   <button class="btn sm warn" id="fswAcc">Подтвердить удаления</button></div>`;
+  g("#fswAcc").onclick=async()=>{await api("/api/fsw/accept",{method:"POST",body:"{}"});toast("Принято — записываю…");refreshPane();};
+ }
+ const rowHTML=e=>{const k=FSW_KINDS[e.kind]||{ic:"file",t:e.kind};
+  const nm=(e.path||"").split("/").pop();const dir=(e.path||"").slice(0,-(nm.length));
+  const extra=e.kind==="move"?` → ${esc(e.dst||"")}`:(e.info?` · ${esc(e.info)}`:"");
+  const dl=e.kind==="corrupt"?`<span style="color:var(--mut)"> · ${dayLbl(e.ts)}</span>`:"";
+  return `<div class="fsw-row" title="${att(k.t+": "+e.path+(e.dst?" → "+e.dst:""))}">
+   <div class="fsw-ki ${e.kind}">${svg(k.ic,13)}</div>
+   <div class="fsw-nm"><div class="fsw-fn">${esc(nm)}${dl}</div><div class="fsw-fp">${esc(dir)}${extra}</div></div>
+   <div class="fsw-sz">${e.size!=null?fmtB(e.size):""}</div><div class="fsw-tm">${hm(e.ts)}</div></div>`;};
+ async function loadFeed(reset){
+  const feed=g("#fswFeed");if(!feed)return;
+  if(reset){feed.innerHTML="";lastId=0;feed._day="";}
+  const r=await api(`/api/fsw/events?limit=100&kind=${KIND}&q=${encodeURIComponent(Q)}${lastId?"&before="+lastId:""}`);
+  const evs=(r&&r.events)||[];
+  const more=feed.querySelector(".fsw-more");if(more)more.remove();
+  if(!evs.length&&!feed.children.length){
+   feed.innerHTML=`<div class="fsw-empty">${svg("shield",34)}<div>${ST&&!ST.last?"Индекс ещё не построен — запусти первое сканирование.":"Событий нет — с файлами ничего не происходило."}</div></div>`;
+   return;}
+  let html="";
+  for(const e of evs){const dl=dayLbl(e.ts);
+   if(dl!==feed._day){html+=`<div class="fsw-day">${dl}</div>`;feed._day=dl;}
+   html+=rowHTML(e);lastId=e.id;}
+  feed.insertAdjacentHTML("beforeend",html);
+  if(evs.length===100)feed.insertAdjacentHTML("beforeend",`<button class="btn sm fsw-more">Показать ещё</button>`);
+  const mb=feed.querySelector(".fsw-more");if(mb)mb.onclick=()=>loadFeed(false);
+ }
+ /* --- вкладки --- */
+ function paneFeed(pane){
+  pane.classList.add("fsw-flex");
+  pane.innerHTML=`<div class="fsw-bar">
+    <div class="seg" id="fswF"><button data-k="">Все</button><button data-k="add">Добавлены</button><button data-k="del">Удалены</button><button data-k="mod">Изменены</button><button data-k="move">Перемещены</button><button data-k="corrupt">Повреждены</button></div>
+    <input class="fsw-q" id="fswQ" placeholder="фильтр по пути…" value="${att(Q)}">
+   </div><div class="fsw-feed" id="fswFeed"></div>`;
+  pane.querySelectorAll("#fswF button").forEach(b=>{
+   b.classList.toggle("on",b.dataset.k===KIND);
+   b.onclick=()=>{KIND=b.dataset.k;pane.querySelectorAll("#fswF button").forEach(z=>z.classList.toggle("on",z===b));loadFeed(true);};});
+  g("#fswQ").oninput=e=>{clearTimeout(qTimer);qTimer=setTimeout(()=>{Q=e.target.value.trim();loadFeed(true);},350);};
+  loadFeed(true);
+ }
+ async function paneInteg(pane){
+  pane.classList.add("fsw-flex");
+  const c=(ST&&ST.config)||{};
+  const fresh=ST&&ST.files?Math.round(100*(ST.verified_fresh||0)/ST.files):0;
+  const fCls=fresh>=95?"ok":fresh>=60?"warn":"bad";
+  pane.innerHTML=`
+   <div class="set-title" style="margin:0">Целостность содержимого</div>
+   <div class="set-sub">При индексации у каждого файла снимается хэш содержимого. По ночам самые давно проверенные файлы перечитываются заново, так что весь объём проходит круг за ~${c.verify_days||30} дней. Если содержимое изменилось, а дата и размер прежние — это похоже на тихую порчу (битрот): восстанови файл из бэкапа.</div>
+   <div class="fsw-stats" style="flex:none">
+    <div class="fsw-st"><b class="${fCls}">${fresh}%</b><span>проверено за последние ${c.verify_days||30} дн</span></div>
+    <div class="fsw-st"><b>${ST&&ST.oldest_verify?ago(ST.oldest_verify):"—"}</b><span>самая давняя проверка</span></div>
+   </div>
+   <div style="flex:none"><button class="btn sm" id="fswDeep" ${running()?"disabled":""}>${svg("shield",13)} Проверить всё содержимое сейчас</button></div>
+   <div class="set-h" style="flex:none">Найденные повреждения</div>
+   <div class="fsw-feed" id="fswCorr"></div>`;
+  g("#fswDeep").onclick=async()=>{const r=await api("/api/fsw/scan",{method:"POST",body:JSON.stringify({deep:true})});
+   toast(r&&r.ok?"Полная проверка запущена":(r&&r.log)||"не вышло");setTimeout(refreshPane,600);};
+  const r=await api("/api/fsw/events?kind=corrupt&limit=100");
+  const evs=(r&&r.events)||[];
+  g("#fswCorr").innerHTML=evs.length?evs.map(rowHTML).join(""):
+   `<div class="fsw-empty">${svg("check",30)}<div>Повреждений не найдено.</div></div>`;
+ }
+ function paneWatch(pane){
+  pane.classList.remove("fsw-flex");
+  const c=(ST&&ST.config)||{};let roots=(c.roots||[]).slice();
+  pane.innerHTML=`
+   <div class="set-title" style="margin:0">Наблюдение</div>
+   <div class="set-sub">Скан следит только за этими папками (не заходя в чужие точки монтирования). Исключения отсеивают мусор: имена и маски сравниваются с именем файла/папки, регулярные выражения — с полным путём.</div>
+   <div class="set-h">Папки</div>
+   <div id="fwRoots"></div>
+   <div style="margin-top:6px"><button class="btn sm" id="fwAdd">${svg("plus",12)} Добавить папку</button></div>
+   <div class="set-h">Исключения — имена и маски</div>
+   <textarea class="mono" id="fwEx" rows="7" style="width:100%;resize:vertical">${esc((c.exclude||[]).join("\n"))}</textarea>
+   <div class="set-h">Исключения — регулярные выражения</div>
+   <div class="set-sub">По одному на строку, синтаксис Python re, сверка по полному пути. Например <span class="mono">\\.bak$</span> или <span class="mono">/cache/</span>.</div>
+   <textarea class="mono" id="fwExR" rows="4" style="width:100%;resize:vertical" placeholder="\\.bak$">${esc((c.exclude_re||[]).join("\n"))}</textarea>
+   <div class="set-savebar"><span class="sb-left" id="fwStat"></span><button class="btn sm pri" id="fwSave">${svg("save",13)} Сохранить</button></div>`;
+  const drawRoots=()=>{g("#fwRoots").innerHTML=roots.map((r,i)=>
+   `<div class="fsw-rootrow"><span>${esc(r)}</span><button class="iconbtn" data-i="${i}" title="Убрать">${svg("x",12)}</button></div>`).join("")||`<div style="color:var(--mut);font-size:11.5px">пока пусто — добавь хотя бы одну папку</div>`;
+   pane.querySelectorAll("#fwRoots .iconbtn").forEach(b=>b.onclick=()=>{roots.splice(+b.dataset.i,1);drawRoots();});};
+  drawRoots();
+  g("#fwAdd").onclick=()=>pickFolder({start:roots[0]||"/mnt",title:"Следить за папкой",onPick:p=>{if(!roots.includes(p))roots.push(p);drawRoots();}});
+  g("#fwSave").onclick=async()=>{
+   const r=await api("/api/fsw/config",{method:"POST",body:JSON.stringify({roots,
+    exclude:g("#fwEx").value.split("\n").map(x=>x.trim()).filter(Boolean),
+    exclude_re:g("#fwExR").value.split("\n").map(x=>x.trim()).filter(Boolean)})});
+   const st=g("#fwStat");
+   if(r&&r.ok){st.style.color="var(--good)";st.textContent="✓ сохранено";refreshPane(true);}
+   else{st.style.color="var(--danger)";st.textContent=(r&&r.log)||"не сохранилось";}};
+ }
+ function paneSched(pane){
+  pane.classList.remove("fsw-flex");
+  const c=(ST&&ST.config)||{};
+  pane.innerHTML=`
+   <div class="set-title" style="margin:0">Расписание и защита</div>
+   <div class="mon-row"><span>Сканировать каждую ночь</span><label class="tgl"><input type="checkbox" id="fwEn"${c.enabled?" checked":""}><span class="sl"></span></label></div>
+   <div style="display:flex;gap:10px;flex-wrap:wrap">
+    <div class="field" style="flex:1;min-width:120px"><label>Время скана</label><input class="mono" id="fwTime" value="${att(c.time||"02:30")}"></div>
+    <div class="field" style="flex:1;min-width:120px"><label>Круг перечитки, дней</label><input class="mono" id="fwVd" value="${att(c.verify_days)}"></div>
+    <div class="field" style="flex:1;min-width:120px"><label>Перечитка за ночь, минут</label><input class="mono" id="fwVm" value="${att(c.verify_minutes)}"></div>
+    <div class="field" style="flex:1;min-width:120px"><label>Guard удалений, %</label><input class="mono" id="fwGp" value="${att(c.guard_pct)}"></div></div>
+   <div class="set-sub">Guard: если за один скан пропадает больше этого процента файлов (и не меньше 20 штук), удаления НЕ записываются, а наверху появляется красная плашка — защита от отвалившегося диска и от массового «само удалилось». Порог 0 отключает защиту.</div>
+   <div class="set-sub">Пуш-алерты (битрот, массовая пропажа, недоступная папка, много удалений) настраиваются в «Настройки → Уведомления», группа «Защита данных».</div>
+   <div class="set-savebar"><span class="sb-left" id="fwStat2"></span><button class="btn sm pri" id="fwSave2">${svg("save",13)} Сохранить</button></div>`;
+  g("#fwSave2").onclick=async()=>{
+   const r=await api("/api/fsw/config",{method:"POST",body:JSON.stringify({
+    enabled:g("#fwEn").checked,time:g("#fwTime").value.trim(),
+    verify_days:g("#fwVd").value,verify_minutes:g("#fwVm").value,guard_pct:g("#fwGp").value})});
+   const st=g("#fwStat2");
+   if(r&&r.ok){st.style.color="var(--good)";st.textContent="✓ сохранено";ST=null;refreshPane(true);}
+   else{st.style.color="var(--danger)";st.textContent=(r&&r.log)||"не сохранилось";}};
+ }
+ const PANES={feed:paneFeed,integ:paneInteg,watch:paneWatch,sched:paneSched};
+ function renderPane(){const pane=g("#fswPane");pane.classList.remove("fsw-flex");PANES[TAB](pane);}
+ async function refreshPane(keepPane){ST=await api("/api/fsw/status");paintStats();paintGuard();if(!keepPane)renderPane();}
+ g("#fswNav").querySelectorAll("button").forEach(b=>b.onclick=()=>{
+  TAB=b.dataset.t;g("#fswNav").querySelectorAll("button").forEach(z=>z.classList.toggle("on",z===b));renderPane();});
+ g("#fswScan").onclick=async()=>{
+  if(running()){await api("/api/fsw/cancel",{method:"POST",body:"{}"});toast("Останавливаю…");}
+  else{const r=await api("/api/fsw/scan",{method:"POST",body:"{}"});toast(r&&r.ok?"Скан запущен":(r&&r.log)||"не вышло");}
+  setTimeout(()=>refreshPane(true),600);};
+ const t=setInterval(async()=>{
+  if(!document.body.contains(body)){clearInterval(t);return;}
+  ST=await api("/api/fsw/status");paintStats();paintGuard();
+  if(wasRun&&!running()&&(TAB==="feed"||TAB==="integ"))renderPane();   // скан закончился — обновить
+  wasRun=!!running();
+ },4000);
+ refreshPane();
+},{w:860,h:600});}
+
 function avBarsHTML(r,pct,hours){
  if(Array.isArray(r))r={bars:r,pct:pct,hours:hours};   // legacy (bars,pct,hours) call shape
  const bars=r&&r.bars;if(!bars||!bars.length)return "";
@@ -7518,6 +7748,11 @@ const EVMETA=[
  {k:"snap_err",t:"SnapRAID sync — ошибка",d:"синхронизация чётности не удалась",dp:1},
  {k:"scrub_err",t:"SnapRAID нашёл повреждение",d:"scrub обнаружил ошибки данных — важно",dp:2},
  {k:"delete_block",t:"Sync остановлен защитой",d:"слишком много удалённых файлов — sync пропущен",dp:1},
+ {k:"fsw_corrupt",t:"Файл повреждён (битрот)",d:"история файлов: содержимое изменилось при прежних дате и размере",dp:2},
+ {k:"fsw_guard",t:"Массовая пропажа файлов",d:"история файлов: исчезло больше guard-порога — события ждут подтверждения",dp:2},
+ {k:"fsw_root",t:"Папка наблюдения недоступна",d:"история файлов: папка пуста или отсутствует — возможно, отвалился диск",dp:1},
+ {k:"fsw_del",t:"Много удалений за скан",d:"история файлов: удалено больше порога файлов за сутки",thr:"файлов",dp:0},
+ {k:"fsw_scan",t:"История файлов: итоги",d:"первичная индексация и заметные итоги скана",dp:-1},
  {k:"nas_backup",t:"Бэкап главного NAS",d:"итог бэкапа с главного NAS (ручного и по расписанию)",dp:0},
  {k:"nb_conn",t:"Источник бэкапа недоступен",d:"периодическая проверка связи с главным NAS (раз в ~30 мин)",dp:1},
  {k:"nb_srcmiss",t:"Пропала исходная папка",d:"выбранная для бэкапа папка исчезла на источнике",dp:1},

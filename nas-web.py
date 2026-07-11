@@ -12,7 +12,7 @@ nas-web.py — веб-бэкенд мастера настройки NAS и ра
 Системные изменения выполняет проверенный движок nas-wizard.sh (api-режим), поэтому
 сервер нужно запускать от root (launcher nas-setup.sh это делает).
 """
-import json, os, re, subprocess, time, shutil, socket, threading, pwd, mimetypes, glob, errno, heapq, sys
+import json, os, re, subprocess, time, shutil, socket, threading, pwd, mimetypes, glob, errno, heapq, sys, sqlite3, fnmatch
 import html as _htmllib
 import pty, select, struct, hashlib, base64, signal, fcntl, termios, secrets, hmac
 import urllib.request, urllib.error
@@ -2578,6 +2578,12 @@ def _def_monitor():
         "delete_block":{"on": True,  "priority": 1},
         "backup":      {"on": False, "priority": 0},
         "mergerfs":    {"on": True,  "priority": 1},
+        # --- история файлов (fswatch) ---
+        "fsw_corrupt": {"on": True,  "priority": 2},
+        "fsw_guard":   {"on": True,  "priority": 2},
+        "fsw_root":    {"on": True,  "priority": 1},
+        "fsw_del":     {"on": True,  "priority": 0, "threshold": 50},
+        "fsw_scan":    {"on": False, "priority": -1},
         # --- обслуживание ---
         "reboot_req":  {"on": True,  "priority": -1},
         "root_full":   {"on": True,  "priority": 1, "threshold": 90},
@@ -2821,7 +2827,8 @@ for _k in ("panel_new", "panel_fail", "ssh_login"):
 for _k in ("ip_changed", "link_changed", "vpn_offline", "traffic"):
     _EVENT_KIND[_k] = "net"
 for _k in ("snap_ok", "snap_err", "scrub_err", "delete_block", "backup", "mergerfs",
-           "nas_backup", "nb_conn", "nb_srcmiss", "nb_stale", "nb_size", "nb_dest", "nb_guard"):
+           "nas_backup", "nb_conn", "nb_srcmiss", "nb_stale", "nb_size", "nb_dest", "nb_guard",
+           "fsw_corrupt", "fsw_guard", "fsw_root", "fsw_del", "fsw_scan"):
     _EVENT_KIND[_k] = "protect"
 
 def log_event(event, title, msg="", lvl=None, kind=None, desk=None):
@@ -5675,7 +5682,8 @@ def monitor_loop():
         # без лишнего: истории/расписаний/самотестов не трогаем, у них свой график.
         funcs = ((monitor_tick, _automount_tick, usb_ops_sync) if poked else
                  (history_sample, monitor_tick, maintenance_daily, _smart_selftest_tick,
-                  _nb_sched_tick, _automount_tick, _summary_tick, _thermal_tick, usb_ops_sync))
+                  _nb_sched_tick, _automount_tick, _summary_tick, _thermal_tick, usb_ops_sync,
+                  _fsw_tick))
         for fn in funcs:
             try:
                 fn()
@@ -7119,6 +7127,499 @@ def duscan_dups(root):
     return {"ok": True, "root": root, "groups": groups[:300],
             "waste": sum(x["waste"] for x in groups), "truncated": truncated,
             "scanTs": data.get("ts")}
+
+# --------------------------------------------------------------------------- #
+#  File history & integrity ("История файлов"): incremental manifest of the
+#  user's folders (SQLite: path/size/mtime/BLAKE2b) + event journal
+#  (add / del / mod / move / corrupt) + rotating content re-verification to
+#  catch bitrot without SnapRAID parity. A scan is metadata-cheap: content is
+#  hashed only for new/changed files plus a time-boxed slice of the
+#  oldest-verified ones ("verify"), so the full pool gets re-read gradually.
+#  Guards: a missing/empty watched root (unmounted disk, detached mergerfs
+#  branch) skips deletion recording; a mass-delete above guard_pct holds the
+#  events until the user confirms in the UI.
+# --------------------------------------------------------------------------- #
+FSW_DB  = os.path.join(NAS_CONFIG, "fswatch.db")
+FSW_CFG = os.path.join(NAS_CONFIG, "fswatch.json")
+FSW_DEF_EXCLUDE = [".trash", ".recycle", "#recycle", "@eaDir", "lost+found",
+                   ".Trash-*", "node_modules", ".git", "__pycache__",
+                   ".DS_Store", "._*", "Thumbs.db", "desktop.ini",
+                   "*.tmp", "*.part", "*.crdownload", "*.!qB", "~$*"]
+_fsw = {"status": "idle"}      # scan progress, shared with the API
+_fsw_lock = threading.Lock()
+
+class _FswCancel(Exception):
+    pass
+
+def _fsw_human(n):
+    n = float(n or 0)
+    for u in ("Б", "КБ", "МБ", "ГБ"):
+        if n < 1024:
+            return ("%d %s" if u == "Б" else "%.1f %s") % (n, u)
+        n /= 1024
+    return "%.1f ТБ" % n
+
+def fsw_load():
+    d = {"enabled": True, "roots": [], "exclude": list(FSW_DEF_EXCLUDE),
+         "exclude_re": [], "time": "02:30", "verify_days": 30,
+         "verify_minutes": 20, "guard_pct": 25}
+    try:
+        with open(FSW_CFG) as f:
+            u = json.load(f)
+        for k in d:
+            if k in u:
+                d[k] = u[k]
+    except (OSError, ValueError):
+        pass
+    if not d["roots"] and os.path.isdir("/mnt/storage"):
+        d["roots"] = ["/mnt/storage"]
+    return d
+
+def fsw_save(patch):
+    cur = fsw_load()
+    if "roots" in patch:
+        rs = []
+        for p in (patch.get("roots") or []):
+            p = os.path.realpath(str(p))
+            if os.path.isdir(p) and p != "/" and p not in rs:
+                rs.append(p)
+        cur["roots"] = rs
+    if "exclude" in patch:
+        cur["exclude"] = [str(x).strip() for x in (patch.get("exclude") or [])
+                          if str(x).strip()][:200]
+    if "exclude_re" in patch:
+        rs = []
+        for r in (patch.get("exclude_re") or [])[:100]:
+            r = str(r).strip()
+            if not r:
+                continue
+            try:
+                re.compile(r)
+            except re.error as e:
+                return {"ok": False, "log": "regex «%s»: %s" % (r, e)}
+            rs.append(r)
+        cur["exclude_re"] = rs
+    if "time" in patch and re.match(r"^\d\d:\d\d$", str(patch.get("time") or "")):
+        cur["time"] = patch["time"]
+    for k, lo, hi in (("verify_days", 1, 365), ("verify_minutes", 1, 240),
+                      ("guard_pct", 0, 100)):
+        if k in patch:
+            try:
+                cur[k] = max(lo, min(hi, int(patch[k])))
+            except (ValueError, TypeError):
+                pass
+    if "enabled" in patch:
+        cur["enabled"] = bool(patch["enabled"])
+    _json_save(FSW_CFG, cur)
+    return {"ok": True, "config": cur}
+
+def _fsw_db():
+    db = sqlite3.connect(FSW_DB, timeout=30)
+    db.execute("PRAGMA journal_mode=WAL")
+    db.execute("PRAGMA synchronous=NORMAL")
+    db.executescript("""
+      CREATE TABLE IF NOT EXISTS files(path TEXT PRIMARY KEY, size INT,
+        mtime INT, hash TEXT, verified INT);
+      CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ts INT, kind TEXT, path TEXT, dst TEXT, size INT, info TEXT);
+      CREATE INDEX IF NOT EXISTS ev_kind ON events(kind, id);
+      CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT);""")
+    return db
+
+def _fsw_meta(db, k, v=None):
+    if v is None:
+        r = db.execute("SELECT v FROM meta WHERE k=?", (k,)).fetchone()
+        return r[0] if r else None
+    db.execute("INSERT INTO meta(k,v) VALUES(?,?) "
+               "ON CONFLICT(k) DO UPDATE SET v=excluded.v", (k, v))
+
+def _fsw_matcher(patterns, regexes=()):
+    """Split exclude patterns into plain names / basename globs / path globs
+    (+ user regexes matched against the full path); returns
+    (skip_entry(name, full), excluded_path(full)) — the latter also checks
+    every path component, for filtering stale manifest rows."""
+    rxs = []
+    for r in regexes:
+        try:
+            rxs.append(re.compile(r))
+        except re.error:
+            pass
+    names, globs, paths = set(), [], []
+    for p in patterns:
+        p = p.rstrip("/")
+        if not p:
+            continue
+        if "/" in p:
+            paths.append(p)
+        elif any(ch in p for ch in "*?["):
+            globs.append(p)
+        else:
+            names.add(p)
+    def _name_hit(nm):
+        return nm in names or any(fnmatch.fnmatch(nm, g) for g in globs)
+    def _re_hit(full):
+        return any(rx.search(full) for rx in rxs)
+    def skip_entry(nm, full):
+        if _name_hit(nm) or _re_hit(full):
+            return True
+        return any(full == pp or full.startswith(pp + "/") or
+                   fnmatch.fnmatch(full, pp) for pp in paths)
+    def excluded_path(full):
+        if any(_name_hit(c) for c in full.split("/") if c) or _re_hit(full):
+            return True
+        return any(full == pp or full.startswith(pp + "/") or
+                   fnmatch.fnmatch(full, pp) for pp in paths)
+    return skip_entry, excluded_path
+
+def _fsw_hash(path):
+    h = hashlib.blake2b(digest_size=16)
+    with open(path, "rb", buffering=0) as f:
+        while True:
+            b = f.read(1 << 20)
+            if not b:
+                break
+            h.update(b)
+            with _fsw_lock:
+                _fsw["bytes"] = _fsw.get("bytes", 0) + len(b)
+                if _fsw.get("cancel"):
+                    raise _FswCancel()
+    return h.hexdigest()
+
+def _fsw_fire(key, title, msg, lvl=None, priority=None):
+    """log_event + Pushover honoring the notifications settings (scan runs in
+    its own thread, outside monitor_tick's local fire())."""
+    try:
+        log_event(key, title, msg, lvl)
+    except Exception:
+        pass
+    try:
+        m = load_monitor()
+        ev = (m.get("events") or {}).get(key) or {}
+        if m.get("enabled") and ev.get("on"):
+            push_notify(title, msg, ev.get("priority", 0) if priority is None else priority)
+    except Exception:
+        pass
+
+def _fsw_run(deep=False):
+    cfg = fsw_load()
+    now = int(time.time())
+    t0 = time.time()
+    db = _fsw_db()
+    try:
+        skip_entry, excluded_path = _fsw_matcher(cfg["exclude"], cfg.get("exclude_re") or ())
+        man = {}
+        for path, size, mtime, hsh, ver in db.execute("SELECT * FROM files"):
+            man[path] = (size, mtime, hsh, ver)
+        baseline = not man and _fsw_meta(db, "baseline") != "1"
+        def under(p, root):
+            return p == root or p.startswith(root + "/")
+        # unmounted disk / detached mergerfs branch: root missing or suddenly
+        # empty while the manifest has files there -> scan it as "absent"
+        # would record thousands of false deletions; skip that root instead
+        ok_roots, bad_roots = [], []
+        for r in cfg["roots"]:
+            try:
+                nonempty = any(True for _ in os.scandir(r))
+            except OSError:
+                nonempty = False
+            had = any(under(p, r) for p in man)
+            (ok_roots if (os.path.isdir(r) and (nonempty or not had)) else bad_roots).append(r)
+        if bad_roots:
+            _fsw_fire("fsw_root", "NAS: папка наблюдения недоступна",
+                      "Не вижу содержимого: %s. Диск не смонтирован? Удаления не записаны."
+                      % ", ".join(bad_roots), lvl="warn")
+        added, mods, ev_rows, corrupt = [], [], [], []
+        seen = set()
+        pend_ops = 0
+        for r in ok_roots:
+            try:
+                dev = os.stat(r).st_dev
+            except OSError:
+                continue
+            stack = [r]
+            while stack:
+                d = stack.pop()
+                try:
+                    ents = list(os.scandir(d))
+                except OSError:
+                    continue
+                for e in ents:
+                    with _fsw_lock:
+                        if _fsw.get("cancel"):
+                            raise _FswCancel()
+                    nm = e.name
+                    if skip_entry(nm, e.path):
+                        continue
+                    try:
+                        if e.is_symlink():
+                            continue
+                        st = e.stat()
+                    except OSError:
+                        continue
+                    if e.is_dir(follow_symlinks=False):
+                        if st.st_dev == dev:      # do not cross into other mounts
+                            stack.append(e.path)
+                        continue
+                    if not e.is_file(follow_symlinks=False):
+                        continue
+                    p = e.path
+                    seen.add(p)
+                    with _fsw_lock:
+                        _fsw["files"] = _fsw.get("files", 0) + 1
+                        _fsw["cur"] = p
+                    size, mt = st.st_size, int(st.st_mtime)
+                    old = man.get(p)
+                    if old is None:
+                        try:
+                            h = _fsw_hash(p)
+                        except OSError:
+                            continue
+                        db.execute("INSERT OR REPLACE INTO files VALUES(?,?,?,?,?)",
+                                   (p, size, mt, h, now))
+                        added.append((p, size, h))
+                    elif old[0] != size or old[1] != mt:
+                        try:
+                            h = _fsw_hash(p)
+                        except OSError:
+                            continue
+                        db.execute("UPDATE files SET size=?,mtime=?,hash=?,verified=? WHERE path=?",
+                                   (size, mt, h, now, p))
+                        mods.append((p, old[0], size))
+                    pend_ops += 1
+                    if pend_ops >= 500:
+                        db.commit(); pend_ops = 0
+        db.commit()
+        # deletions: manifest rows not on disk. Rows outside the current watch
+        # list or matching a (new) exclude pattern are forgotten silently.
+        gone, dels, moves = [], [], []
+        for p in man:
+            if p in seen:
+                continue
+            if not any(under(p, r) for r in cfg["roots"]) or excluded_path(p):
+                db.execute("DELETE FROM files WHERE path=?", (p,))
+            elif any(under(p, r) for r in ok_roots):
+                gone.append(p)
+        accepted = _fsw_meta(db, "accept") == "1"
+        guard = (not baseline and not accepted and cfg["guard_pct"] > 0
+                 and len(gone) >= 20
+                 and 100.0 * len(gone) / max(1, len(man)) >= cfg["guard_pct"])
+        if guard:
+            _fsw_meta(db, "pending", json.dumps(
+                {"ts": now, "count": len(gone), "total": len(man), "sample": gone[:20]}))
+            _fsw_fire("fsw_guard", "NAS: массовая пропажа файлов",
+                      "Пропало %d из %d файлов под наблюдением. События не записаны — "
+                      "подтвердите удаление в «Истории файлов» или проверьте диски."
+                      % (len(gone), len(man)), lvl="crit")
+        else:
+            _fsw_meta(db, "pending", "")
+            if accepted:
+                _fsw_meta(db, "accept", "")
+            byh = {}
+            for (p, size, h) in added:
+                byh.setdefault((h, size), []).append(p)
+            for p in gone:
+                size, mt, h, ver = man[p]
+                tgt = byh.get((h, size))
+                if h and tgt:                     # same content appeared elsewhere = move
+                    moves.append((p, tgt.pop(0), size))
+                    if not tgt:
+                        byh.pop((h, size))
+                else:
+                    dels.append((p, size))
+                db.execute("DELETE FROM files WHERE path=?", (p,))
+        moved_dst = {dst for _, dst, _ in moves}
+        if not baseline:
+            ev_rows += [(now, "add", p, None, size, None)
+                        for (p, size, h) in added if p not in moved_dst]
+            ev_rows += [(now, "del", p, None, size, None) for (p, size) in dels]
+            ev_rows += [(now, "move", src, dst, size, None) for (src, dst, size) in moves]
+        ev_rows += [(now, "mod", p, None, ns, _fsw_human(o) + " → " + _fsw_human(ns))
+                    for (p, o, ns) in mods]
+        # verify phase: re-read the oldest-verified unchanged files within the
+        # nightly time budget (deep scan = no budget) to catch silent bitrot
+        with _fsw_lock:
+            _fsw["status"] = "verify"
+        vt0 = time.time()
+        vfiles = vbytes = 0
+        budget = None if deep else cfg["verify_minutes"] * 60
+        cutoff = now + 1 if deep else now - cfg["verify_days"] * 86400
+        rows = db.execute("SELECT path,size,mtime,hash FROM files WHERE verified<? "
+                          "ORDER BY verified", (cutoff,)).fetchall()
+        for p, size, mt, h in rows:
+            if budget is not None and time.time() - vt0 > budget:
+                break
+            with _fsw_lock:
+                if _fsw.get("cancel"):
+                    raise _FswCancel()
+                _fsw["cur"] = p
+            try:
+                st = os.stat(p)
+            except OSError:
+                continue
+            if st.st_size != size or int(st.st_mtime) != mt:
+                continue                          # legit change; next scan logs it
+            try:
+                h2 = _fsw_hash(p)
+                st2 = os.stat(p)
+            except OSError:
+                continue
+            if st2.st_size != size or int(st2.st_mtime) != mt:
+                continue                          # changed while hashing
+            vfiles += 1; vbytes += size
+            if h and h2 != h:
+                corrupt.append(p)
+                ev_rows.append((now, "corrupt", p, None, size,
+                                "содержимое изменилось при прежних дате и размере"))
+            db.execute("UPDATE files SET hash=?,verified=? WHERE path=?", (h2, now, p))
+        if ev_rows:
+            db.executemany("INSERT INTO events(ts,kind,path,dst,size,info) "
+                           "VALUES(?,?,?,?,?,?)", ev_rows)
+        db.execute("DELETE FROM events WHERE id <= "
+                   "(SELECT COALESCE(MAX(id),0)-40000 FROM events)")
+        n_files, n_size = db.execute(
+            "SELECT COUNT(*), COALESCE(SUM(size),0) FROM files").fetchone()
+        summary = {"ts": now, "dur": int(time.time() - t0),
+                   "added": len([1 for (p, s, h) in added if p not in moved_dst]),
+                   "removed": len(dels), "modified": len(mods), "moved": len(moves),
+                   "corrupt": len(corrupt), "verified": vfiles, "vbytes": vbytes,
+                   "files": n_files, "size": n_size, "baseline": baseline,
+                   "guard": bool(guard), "deep": bool(deep)}
+        _fsw_meta(db, "last", json.dumps(summary))
+        _fsw_meta(db, "baseline", "1")
+        db.commit()
+        if corrupt:
+            _fsw_fire("fsw_corrupt", "NAS: повреждены файлы (битрот)",
+                      "%d файл(ов) изменились без изменения даты/размера: %s"
+                      % (len(corrupt), ", ".join(os.path.basename(x) for x in corrupt[:3])),
+                      lvl="crit")
+        try:
+            thr = int(((load_monitor().get("events") or {}).get("fsw_del") or {})
+                      .get("threshold", 50))
+        except Exception:
+            thr = 50
+        if dels and thr and len(dels) >= thr:
+            _fsw_fire("fsw_del", "NAS: удалено %d файлов" % len(dels),
+                      "С прошлого скана исчезло %d файлов (%s). Подробности — в «Истории файлов»."
+                      % (len(dels), _fsw_human(sum(s for _, s in dels))), lvl="warn")
+        if baseline:
+            _fsw_fire("fsw_scan", "История файлов: индекс построен",
+                      "Проиндексировано %d файлов (%s)." % (n_files, _fsw_human(n_size)), lvl="ok")
+        with _fsw_lock:
+            _fsw.update({"status": "idle", "cancel": False})
+    except _FswCancel:
+        db.commit()
+        with _fsw_lock:
+            _fsw.update({"status": "idle", "cancel": False})
+    except Exception as e:
+        with _fsw_lock:
+            _fsw.update({"status": "error", "error": str(e)[:200], "cancel": False})
+    finally:
+        db.close()
+
+def fsw_start(deep=False):
+    with _fsw_lock:
+        if _fsw.get("status") in ("scan", "verify"):
+            return {"ok": False, "log": "скан уже идёт"}
+        _fsw.clear()
+        _fsw.update({"status": "scan", "started": int(time.time()),
+                     "files": 0, "bytes": 0, "deep": bool(deep)})
+    threading.Thread(target=_fsw_run, args=(bool(deep),), daemon=True).start()
+    return {"ok": True}
+
+def fsw_cancel():
+    with _fsw_lock:
+        if _fsw.get("status") in ("scan", "verify"):
+            _fsw["cancel"] = True
+    return {"ok": True}
+
+def fsw_accept():
+    """User confirmed the mass deletion: record it on the next scan."""
+    db = _fsw_db()
+    try:
+        _fsw_meta(db, "accept", "1")
+        _fsw_meta(db, "pending", "")
+        db.commit()
+    finally:
+        db.close()
+    return fsw_start()
+
+def fsw_status():
+    cfg = fsw_load()
+    n = sz = fresh = 0
+    oldest = None
+    last = pend = None
+    try:
+        db = _fsw_db()
+        try:
+            n, sz = db.execute("SELECT COUNT(*), COALESCE(SUM(size),0) FROM files").fetchone()
+            last = json.loads(_fsw_meta(db, "last") or "null")
+            p = _fsw_meta(db, "pending")
+            pend = json.loads(p) if p else None
+            oldest = db.execute("SELECT MIN(verified) FROM files").fetchone()[0]
+            fresh = db.execute("SELECT COUNT(*) FROM files WHERE verified>=?",
+                               (int(time.time()) - cfg["verify_days"] * 86400,)).fetchone()[0]
+        finally:
+            db.close()
+    except Exception:
+        pass
+    with _fsw_lock:
+        prog = dict(_fsw)
+    return {"ok": True, "config": cfg, "files": n, "size": sz, "last": last,
+            "pending": pend, "oldest_verify": oldest, "verified_fresh": fresh,
+            "progress": prog}
+
+def fsw_events(before=0, limit=100, kind="", q=""):
+    try:
+        before = int(before or 0)
+    except (ValueError, TypeError):
+        before = 0
+    try:
+        db = _fsw_db()
+        try:
+            sql, args = "SELECT id,ts,kind,path,dst,size,info FROM events", []
+            conds = []
+            if before:
+                conds.append("id<?"); args.append(int(before))
+            if kind:
+                conds.append("kind=?"); args.append(kind)
+            if q:
+                conds.append("(path LIKE ? OR dst LIKE ?)")
+                args += ["%" + q + "%"] * 2
+            if conds:
+                sql += " WHERE " + " AND ".join(conds)
+            sql += " ORDER BY id DESC LIMIT ?"
+            args.append(max(1, min(500, int(limit or 100))))
+            rows = db.execute(sql, args).fetchall()
+        finally:
+            db.close()
+    except Exception as e:
+        return {"ok": False, "log": str(e)[:200]}
+    return {"ok": True, "events": [
+        {"id": i, "ts": ts, "kind": k, "path": p, "dst": d, "size": s, "info": inf}
+        for (i, ts, k, p, d, s, inf) in rows]}
+
+_fsw_auto_day = ""
+def _fsw_tick():
+    """Nightly auto-scan at the configured time (called from monitor_loop)."""
+    global _fsw_auto_day
+    cfg = fsw_load()
+    if not cfg.get("enabled") or not cfg.get("roots"):
+        return
+    day = time.strftime("%Y-%m-%d")
+    if _fsw_auto_day == day or time.strftime("%H:%M") < cfg.get("time", "02:30"):
+        return
+    try:
+        db = _fsw_db()
+        try:
+            last = json.loads(_fsw_meta(db, "last") or "null")
+        finally:
+            db.close()
+    except Exception:
+        last = None
+    _fsw_auto_day = day
+    if last and time.strftime("%Y-%m-%d", time.localtime(last.get("ts", 0))) == day:
+        return                                    # already scanned today (manual)
+    fsw_start()
 
 def fs_grep(path, query, limit=200):
     path = os.path.realpath(path or "/")
@@ -9681,6 +10182,13 @@ class H(BaseHTTPRequestHandler):
                 self._json(fs_stat((q.get("path") or [""])[0]))
             elif p == "/api/fs/du":
                 self._json(fs_du((q.get("path") or [""])[0]))
+            elif p == "/api/fsw/status":
+                self._json(fsw_status())
+            elif p == "/api/fsw/events":
+                self._json(fsw_events((q.get("before") or ["0"])[0],
+                                      (q.get("limit") or ["100"])[0],
+                                      (q.get("kind") or [""])[0],
+                                      (q.get("q") or [""])[0]))
             elif p == "/api/fs/duscan/status":
                 self._json(duscan_status((q.get("root") or ["/"])[0]))
             elif p == "/api/fs/duscan/node":
@@ -9868,6 +10376,14 @@ class H(BaseHTTPRequestHandler):
                 b = self._body(); self._json({"maintenance": save_maintenance(b.get("maintenance", {}))})
             elif p == "/api/fs/thumbcache/clear":
                 self._json({"ok": True, "removed": thumbs_cache_clear()})
+            elif p == "/api/fsw/scan":
+                self._json(fsw_start(bool(self._body().get("deep"))))
+            elif p == "/api/fsw/cancel":
+                self._json(fsw_cancel())
+            elif p == "/api/fsw/accept":
+                self._json(fsw_accept())
+            elif p == "/api/fsw/config":
+                self._json(fsw_save(self._body()))
             elif p == "/api/fs/duscan/start":
                 self._json(duscan_start(self._body().get("root", "/")))
             elif p == "/api/fs/duscan/cancel":
