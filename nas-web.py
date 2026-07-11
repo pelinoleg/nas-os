@@ -1753,6 +1753,7 @@ def avail_bars(hours=24, slots=96):
     bars = [-1] * slots
     slot_w = hours * 3600.0 / slots
     up_t = known_t = 0
+    events = []              # exact non-up intervals for the widget tooltips
     for i, (t, s) in enumerate(segs):
         t2 = segs[i + 1][0] if i + 1 < len(segs) else now
         a, b = max(t, start), min(t2, now)
@@ -1761,13 +1762,16 @@ def avail_bars(hours=24, slots=96):
         known_t += b - a
         if s == "up":
             up_t += b - a
+        else:
+            events.append({"from": a, "to": b, "state": s})
         s0 = int((a - start) / slot_w)
         s1 = int((b - 1 - start) / slot_w)
         v = rank[s]
         for k in range(max(0, s0), min(slots - 1, s1) + 1):
             bars[k] = v if bars[k] < 0 else min(bars[k], v)
     pct = round(100.0 * up_t / known_t, 1) if known_t else None
-    return {"bars": bars, "pct": pct, "hours": hours}
+    return {"bars": bars, "pct": pct, "hours": hours, "start": start, "now": now,
+            "events": events[-40:]}   # cap: tooltips only need recent detail
 
 _INET_CACHE = {"t": 0, "ok": False}
 def _inet_ok():

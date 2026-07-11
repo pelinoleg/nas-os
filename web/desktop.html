@@ -6122,10 +6122,30 @@ function glSpark(v){if(!v||v.length<2)return "";
  const mn=Math.min(...v),mx=Math.max(...v),sp=(mx-mn)||1;
  const pts=v.map((x,i)=>`${(i/(v.length-1)*46).toFixed(1)},${(17-(x-mn)/sp*14).toFixed(1)}`).join(" ");
  return `<svg class="gl-spark" viewBox="0 0 46 18" preserveAspectRatio="none"><polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="1.5" vector-effect="non-scaling-stroke"/></svg>`;}
-function avBarsHTML(bars,pct,hours){if(!bars||!bars.length)return "";
+function avBarsHTML(r,pct,hours){
+ if(Array.isArray(r))r={bars:r,pct:pct,hours:hours};   // legacy (bars,pct,hours) call shape
+ const bars=r&&r.bars;if(!bars||!bars.length)return "";
  const c=v=>v===2?"var(--good)":v===1?"var(--warn)":v===0?"var(--danger)":"var(--track)";
- const span=(hours||24)>=48?`−${Math.round((hours||24)/24)}d`:`−${hours||24}h`;
- return `<div class="gl-avwrap"><div class="gl-bars">${bars.map(v=>`<i style="background:${c(v)}"></i>`).join("")}</div><div class="gl-avcap"><span>${span}</span><span>${pct==null?"":pct+"% доступность"}</span><span>сейчас</span></div></div>`;}
+ const h=r.hours||24;
+ const now=(r.now?r.now*1000:Date.now()),t0=(r.start?r.start*1000:now-h*3600e3);
+ const slotW=(now-t0)/bars.length,wDate=h>=48;
+ const p2=n=>String(n).padStart(2,"0");
+ const hm=t=>{const d=new Date(t),s=`${p2(d.getHours())}:${p2(d.getMinutes())}`;return wDate?`${p2(d.getDate())}.${p2(d.getMonth()+1)} ${s}`:s;};
+ const dur=s=>s>=5400?Math.round(s/3600)+" ч":s>=90?Math.round(s/60)+" мин":Math.max(1,Math.round(s))+" сек";
+ const word=v=>v===2?"онлайн":v===1?"без сети":v===0?"обесточен":"нет данных";
+ const ev=r.events||[];
+ /* native title per bar: slot time range + worst state; red/yellow bars also
+    list the exact outage intervals (r.events) overlapping the slot */
+ const tit=(v,i)=>{
+  const a=t0+i*slotW,b=a+slotW;
+  let s=`${hm(a)}–${hm(b)} · ${word(v)}`;
+  if(v===0||v===1)for(const e of ev){
+   const f=e.from*1000,t=e.to*1000;
+   if(f<b&&t>a)s+=`\n${word(e.state==="off"?0:1)}: ${hm(f)}–${hm(t)} (${dur((t-f)/1000)})`;
+  }
+  return s;};
+ const span=h>=48?`−${Math.round(h/24)}d`:`−${h}h`;
+ return `<div class="gl-avwrap"><div class="gl-bars">${bars.map((v,i)=>`<i style="background:${c(v)}" title="${tit(v,i)}"></i>`).join("")}</div><div class="gl-avcap"><span>${span}</span><span>${r.pct==null?"":r.pct+"% доступность"}</span><span>сейчас</span></div></div>`;}
 async function glanceTab(tc){
  tc.innerHTML=`<div class="set-load">загрузка…</div>`;
  const r=await api("/api/glance/config");
@@ -7953,7 +7973,7 @@ async function pollAvail(){
   let r=null;try{r=await api(`/api/avail?hours=${h}&slots=${n}`);}catch(e){}
   if(!r||r.pct==null){if(wdg)wdg.style.display="none";continue;}
   if(wdg)wdg.style.display="";
-  box.innerHTML=avBarsHTML(r.bars,r.pct,h);
+  box.innerHTML=avBarsHTML(r);
  }
 }
 
