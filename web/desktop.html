@@ -6116,8 +6116,9 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
    events:{change:schedSave}});
   }catch(err){box.innerHTML=`<div class="nt-empty">Редактор не запустился: ${esc(err&&err.message||err)}</div>`;console.error(err);return;}
   ntImgWire(box);
-  /* image interactions: click = size menu, double click = full-size lightbox */
-  box.addEventListener("click",e=>{const im=e.target.closest("img");if(!im)return;ntImgMenu(e,im);});
+  /* image interactions: click = select + resize handle, right click = menu,
+     double click = full-size lightbox */
+  box.addEventListener("contextmenu",e=>{const im=e.target.closest("img");if(!im)return;e.preventDefault();ntImgMenu(e,im);});
   box.addEventListener("dblclick",e=>{const im=e.target.closest("img");if(im)ntLightbox(im.getAttribute("src"));});
   /* wikilinks: [[Название заметки]] — click opens it (creates when missing) */
   box.addEventListener("click",async e=>{
