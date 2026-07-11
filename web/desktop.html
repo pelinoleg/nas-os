@@ -2346,7 +2346,9 @@ async function logout(){try{await fetch("/api/auth/logout",{method:"POST"});}cat
 /* helpers */
 const el=h=>{const t=document.createElement("template");t.innerHTML=h.trim();return t.content.firstChild;};
 const fmtB=n=>{if(n==null)return"—";const u=["B","KB","MB","GB","TB"];let i=0;n=+n;while(n>=1024&&i<4){n/=1024;i++;}return n.toFixed(n<10&&i>0?1:0)+" "+u[i];};
-const fmtR=n=>fmtB(n)+"/с";
+/* network rate: user-selectable units (Настройки → Сеть). Bytes are what a
+   file copy shows, bits are what the ISP sells — 7 МБ/с и 56 Мбит/с одно и то же */
+const fmtR=n=>{if(SET.netUnits==="bits"){n=(+n||0)*8/1e6;return (n>=100?Math.round(n):n>=10?n.toFixed(1):n.toFixed(2))+" Мбит/с";}return fmtB(n)+"/с";};
 const fmtUp=s=>{const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);return(d?d+"д ":"")+(h?h+"ч ":"")+m+"м";};
 function toast(m){const t=document.getElementById("toast");t.textContent=nasTr(m);t.classList.add("show");clearTimeout(toast._);toast._=setTimeout(()=>t.classList.remove("show"),2300);}
 // уведомление о завершении длинной операции: тост + системное уведомление, если вкладка не в фокусе
@@ -6681,12 +6683,16 @@ function networkTab(tc){withSysc(tc,()=>{const n=SYSC.network||{};const manual=n
     <button class="btn sm pri" id="nApply">Применить статический IP</button>
     <div class="mon-note">⚠ Сервер сменит адрес — эта страница может перестать отвечать. Откройте по новому адресу.</div>
   </div>
+  <div class="set-grp">Отображение</div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Единицы скорости сети${tipHTML("МБ/с — мегабайты, как показывает копирование файлов. Мбит/с — мегабиты, как считает провайдер. 7 МБ/с = 56 Мбит/с. Влияет на виджет «Сеть», менубар и плитку «Скорость сети» внешнего экрана.")}</div><div class="srow-d">7 МБ/с = 56 Мбит/с</div></div><div class="srow-c"><div class="seg" id="nUnits"><button data-u="bytes" class="${SET.netUnits!=="bits"?"on":""}">МБ/с</button><button data-u="bits" class="${SET.netUnits==="bits"?"on":""}">Мбит/с</button></div></div></div>
   <div class="set-grp">Беспроводная сеть</div>
   ${n.wifi?tglRow("Отключить энергосбережение Wi-Fi","РЕКОМЕНДУЕТСЯ. Wi-Fi-чип Pi при простое засыпает между беконами → периодические обрывы SSH/веб. Отключение убирает обрывы ценой ~0.1 Вт. Именно это чинило разрывы связи.","wifi_ps_off",n.wifi_ps_off,"убирает периодические обрывы связи"):`<div class="srow"><div class="srow-l"><div class="srow-d">Подключение по кабелю (${esc(n.iface||"")}) — энергосбережение Wi-Fi не применимо.</div></div></div>`}
   <div class="set-grp">Обнаружение в сети</div>
   ${svcRow("mDNS / .local (Avahi)","Позволяет обращаться к серверу по имени <хост>.local без запоминания IP. Удобно для доступа с телефонов и Mac.","avahi",n.avahi,"доступ по имени "+host+".local")}
    <div id="comitupBox"></div>`;
  wireSc(tc);
+ tc.querySelectorAll("#nUnits button").forEach(b=>b.onclick=()=>{SET.netUnits=b.dataset.u;saveSettings();
+  tc.querySelectorAll("#nUnits button").forEach(x=>x.classList.toggle("on",x===b));poll();});
  // comitup: точка доступа для первичной настройки без монитора (грузим отдельно)
  api("/api/comitup").then(c=>{const box=tc.querySelector("#comitupBox");if(!box||!c||!c.installed)return;
   const modeTxt={HOTSPOT:"режим точки доступа",CONNECTING:"подключается",CONNECTED:"подключено к Wi-Fi"}[c.mode]||c.mode||"—";
@@ -7158,7 +7164,8 @@ function paintDiskWidget(disks){const box=document.getElementById("wg-disk");if(
 }
 
 /* tray + clock + power */
-const netS=n=>{const u=["B","K","M","G"];let i=0;n=+n||0;while(n>=1024&&i<3){n/=1024;i++;}return (n<10&&i?n.toFixed(1):Math.round(n))+u[i];};
+const netS=n=>{if(SET.netUnits==="bits"){n=(+n||0)*8/1e6;return (n>=100?Math.round(n):n>=10?n.toFixed(1):n.toFixed(2))+"Mb";}
+ const u=["B","K","M","G"];let i=0;n=+n||0;while(n>=1024&&i<3){n/=1024;i++;}return (n<10&&i?n.toFixed(1):Math.round(n))+u[i];};
 const TRAY_DEFS={
  cpu:{name:"Загрузка CPU",ic:"cpu",val:s=>(s.cpu!=null?s.cpu:0)+"%"},
  temp:{name:"Температура",ic:"therm",val:s=>s.temp?s.temp+"°":"—",warn:s=>s.temp&&s.temp>=70},

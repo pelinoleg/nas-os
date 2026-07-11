@@ -1912,9 +1912,15 @@ def _glance_tile(tid, en):
         return {"value": "%d" % round(pct), "unit": "%", "state": st, "raw": {"pct": pct}}
     if tid == "netspeed":
         r = net_rate(default_iface()) or {}
-        return {"value": "↓%s ↑%s" % (_gl_bytes(r.get("rx"), en), _gl_bytes(r.get("tx"), en)),
-                "unit": "/с" if not en else "/s", "state": "ok",
-                "raw": {"rx": r.get("rx", 0), "tx": r.get("tx", 0)}}
+        raw = {"rx": r.get("rx", 0), "tx": r.get("tx", 0)}
+        if load_settings().get("netUnits") == "bits":  # panel-wide unit choice
+            def _mb(x):
+                x = (x or 0) * 8 / 1e6
+                return "%d" % x if x >= 100 else "%.1f" % x
+            return {"value": "↓%s ↑%s" % (_mb(raw["rx"]), _mb(raw["tx"])),
+                    "unit": "Мбит/с" if not en else "Mbit/s", "state": "ok", "raw": raw}
+        return {"value": "↓%s ↑%s" % (_gl_bytes(raw["rx"], en), _gl_bytes(raw["tx"], en)),
+                "unit": "/с" if not en else "/s", "state": "ok", "raw": raw}
     if tid == "cputemp":
         t = temp_c()
         if t is None:
