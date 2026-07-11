@@ -1725,13 +1725,14 @@
   /* ---- editor pane: same theme, the paper is a surface card ---- */
   .nt-edit{flex:1;display:flex;flex-direction:column;gap:0;padding:var(--sp-3) var(--sp-4) var(--sp-4);min-width:0;background:var(--bg);color:var(--text)}
   .nt-empty{margin:auto;color:var(--text-faint)}
-  .nt-crumb{padding:var(--sp-1) var(--sp-6) 0;font-size:var(--fs-meta);color:var(--text-muted);min-height:16px}
-  .nt-head{display:flex;align-items:center;gap:var(--sp-2);padding:0 var(--sp-6)}
-  .nt-head input{flex:1;font-size:var(--fs-h1);font-weight:700;letter-spacing:-.02em;height:44px;border:0;background:transparent;padding:0;color:var(--text)}
+  .nt-crumb{padding:var(--sp-1) var(--sp-6) 0;font-size:var(--fs-meta);color:var(--text-muted)}
+  .nt-crumb:empty{display:none}
+  .nt-head{display:flex;align-items:center;gap:var(--sp-2);padding:var(--sp-1) var(--sp-6) 0}
+  .nt-head input{flex:1;font-size:var(--fs-h2);font-weight:700;letter-spacing:-.02em;height:32px;border:0;background:transparent;padding:0;color:var(--text)}
   .nt-head input::placeholder{color:var(--text-faint)}
   .nt-head input:focus{outline:none}
   .nt-head .nt-pin-on{color:var(--warning)!important}
-  .nt-tagrow{display:flex;align-items:center;gap:var(--sp-1);flex-wrap:wrap;margin:0;padding:0 var(--sp-6) var(--sp-2)}
+  .nt-tagrow{display:flex;align-items:center;gap:var(--sp-1);flex-wrap:wrap;margin:0;padding:0 var(--sp-6) var(--sp-1)}
   .nt-chip{display:inline-flex;align-items:center;gap:var(--sp-1);padding:var(--sp-1) var(--sp-2);border-radius:var(--radius-sm);
    background:var(--accent-soft);color:var(--accent);font-size:var(--fs-meta);font-weight:600}
   .nt-chip i{font-style:normal;cursor:pointer;color:var(--text-muted)}
@@ -1746,7 +1747,8 @@
   .nt-root .nt-ed .toastui-editor-defaultUI{height:100%!important;display:flex;flex-direction:column;width:100%;font-family:var(--font-ui);border:0;border-radius:0;background:transparent}
   /* native toolbar is replaced by our own (#ntTb) */
   .nt-root .nt-ed .toastui-editor-defaultUI-toolbar,.nt-root .nt-ed .toastui-editor-toolbar{display:none}
-  .nt-tb{display:flex;align-items:center;gap:var(--sp-1);padding:0 var(--sp-6) var(--sp-2);flex-wrap:wrap}
+  .nt-tb{display:flex;align-items:center;gap:var(--sp-1);padding:0 var(--sp-6) var(--sp-1);flex-wrap:wrap}
+  .nt-tbsp{flex:1}
   .nt-tbb{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border:0;background:transparent;
    color:var(--text-muted);border-radius:var(--radius-sm);cursor:pointer;padding:0}
   .nt-tbb:hover{color:var(--text);background:var(--surface-2)}
@@ -1871,12 +1873,9 @@
   /* 11) selection */
   .nt-root .nt-ed .toastui-editor-contents ::selection,.nt-root .nt-ed .ProseMirror ::selection{background:var(--accent-soft)}
   /* mode tabs: quiet, accent-soft when active */
-  /* .nt-root prefix: tui-editor-dark.css loads after our <style> and its
-     .toastui-editor-dark selectors would otherwise win with a black plaque */
-  .nt-root .nt-ed .toastui-editor-mode-switch{background:var(--surface-2);border:0;border-top:1px solid var(--border);height:34px;padding-top:var(--sp-1)}
-  .nt-root .nt-ed .toastui-editor-mode-switch .tab-item{background:transparent;border:0;color:var(--text-muted);height:26px;line-height:26px;font-size:var(--fs-meta);border-radius:var(--radius-sm);margin-right:var(--sp-1);margin-top:0;width:auto;padding:0 var(--sp-3)}
-  .nt-root .nt-ed .toastui-editor-mode-switch .tab-item:hover{color:var(--text);background:var(--surface)}
-  .nt-root .nt-ed .toastui-editor-mode-switch .tab-item.active{color:var(--accent);background:var(--accent-soft);font-weight:600;border:0}
+  /* native mode-switch strip is gone — MD/WYSIWYG toggle lives in our toolbar
+     (.nt-root prefix: tui-editor-dark.css loads after our <style>) */
+  .nt-root .nt-ed .toastui-editor-mode-switch{display:none}
   /* editor popups */
   .nt-root .nt-ed .toastui-editor-popup{border-radius:var(--radius-lg);box-shadow:var(--shadow-2);font-family:var(--font-ui);background:var(--surface);border:1px solid var(--border);color:var(--text)}
   .nt-root .nt-ed .toastui-editor-popup-body,.nt-root .nt-ed .toastui-editor-popup-body label{color:var(--text)}
@@ -6205,7 +6204,17 @@ function ntToolbar(ed){
    const inp=document.createElement("input");inp.type="file";inp.accept="image/*";
    inp.onchange=()=>{const f=inp.files&&inp.files[0];if(f)ntUploadInsert(f);};
    inp.click();}),
-  B("tlink","Ссылка",()=>{
+  B("tlink","Ссылка",ntLinkDlg),
+ ].forEach(el2=>tb.appendChild(el2));
+ /* MD/WYSIWYG toggle: right edge of the toolbar (the native bottom strip is hidden) */
+ const sp=document.createElement("span");sp.className="nt-tbsp";tb.appendChild(sp);
+ const wyb=B("edit","Визуальный режим",()=>setMode("wysiwyg"));
+ const mdb=B("code","Markdown-исходник",()=>setMode("markdown"));
+ const paintMode=()=>{const md=!!(NT_ED.isMarkdownMode&&NT_ED.isMarkdownMode());
+  mdb.classList.toggle("on",md);wyb.classList.toggle("on",!md);};
+ const setMode=m=>{try{NT_ED.changeMode(m,true);}catch(e){}paintMode();};
+ tb.appendChild(wyb);tb.appendChild(mdb);paintMode();
+ function ntLinkDlg(){
    const sc=document.getElementById("scrim");
    sc.innerHTML=`<div class="dialog"><h3>Ссылка</h3>
     <input id="nlU" placeholder="https://…" style="width:100%"><input id="nlT" placeholder="Текст (необязательно)" style="width:100%;margin-top:8px">
@@ -6215,8 +6224,7 @@ function ntToolbar(ed){
     NT_ED.exec("addLink",{linkUrl:url,linkText:sc.querySelector("#nlT").value.trim()||url});
     sc.classList.remove("show");};
    sc.querySelector("#nlOk").onclick=ok;u.onkeydown=e=>{if(e.key==="Enter")ok();};
-   sc.querySelector("#nlX").onclick=()=>sc.classList.remove("show");}),
- ].forEach(el2=>tb.appendChild(el2));
+   sc.querySelector("#nlX").onclick=()=>sc.classList.remove("show");}
 }
 /* code-block language chip: vendor logic untouched — its <input> plus
    Enter/blur still commit the change. We only re-anchor the floating box
@@ -6414,7 +6422,7 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
   try{localStorage.setItem("nasNotesLast",p);}catch(e){}
   const ed=q("#ntEdit");
   ed.innerHTML=`
-   <div class="nt-crumb">&nbsp;</div>
+   <div class="nt-crumb"></div>
    <div class="nt-head">
     <input id="ntTitle" placeholder="Заголовок">
     <span id="ntSt" class="nt-mut"></span>
