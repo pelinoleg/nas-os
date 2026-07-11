@@ -173,6 +173,7 @@ window.NAS_I18N = { en: {
 "Редактор не запустился": "The editor failed to start",
 "Корень": "Root",
 "Ошибка открытия": "Open failed",
+"нет ответа сервера": "no answer from the server",
 "Влево": "Left",
 "По центру": "Center",
 "Вправо": "Right",

@@ -1644,6 +1644,17 @@
   .nt-dir:hover{background:var(--sel)}
   .nt-dir.on{background:var(--sel);color:var(--accent);font-weight:650;box-shadow:var(--sh-sm)}
   .nt-dir.drop{outline:2px dashed var(--accent)}
+  .nt-dir .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .nt-cnt{margin-left:auto;font-size:10.5px;font-weight:650;color:var(--mut);background:var(--glass);border:1px solid var(--line);border-radius:999px;padding:1px 7px;min-width:14px;text-align:center}
+  .nt-cnt:empty{display:none}
+  .nt-tw{width:13px;height:13px;flex:none;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;transition:transform .15s}
+  .nt-tw::before{content:"";border-left:5px solid var(--mut);border-top:4px solid transparent;border-bottom:4px solid transparent}
+  .nt-tw.open{transform:rotate(90deg)}
+  .nt-tw.empty::before{opacity:0}
+  .nt-dnote{display:flex;align-items:center;gap:6px;padding:4.5px 10px;border-radius:8px;cursor:pointer;font-size:12.5px;color:var(--dim)}
+  .nt-dnote:hover{background:var(--sel)}
+  .nt-dnote.on{color:var(--accent);background:var(--sel)}
+  .nt-dnote .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .nt-tag{display:inline-flex;align-items:center;gap:4px;margin:2px 3px 2px 0;padding:3px 9px;border-radius:999px;background:var(--glass);border:1px solid var(--line);font-size:12px;cursor:pointer}
   .nt-tag i{font-style:normal;color:var(--dim);font-size:10px}
   .nt-tag.on{background:var(--sel);color:var(--accent);box-shadow:var(--sh-sm)}
@@ -1662,41 +1673,67 @@
   .nt-edit{flex:1;display:flex;flex-direction:column;gap:8px;padding:14px;min-width:0}
   .nt-empty{margin:auto;color:var(--mut)}
   .nt-head{display:flex;align-items:center;gap:8px}
-  .nt-head input{flex:1;font-size:21px;font-weight:700;height:38px;border:0;background:transparent;padding:0 2px}
-  .nt-head input:focus{outline:none}
   .nt-ed{flex:1;min-height:0;border-radius:12px;overflow:hidden;display:flex;flex-direction:column;position:relative}
   .nt-ed .toastui-editor-defaultUI{height:100%!important;display:flex;flex-direction:column;width:100%;font-family:inherit}
   .nt-ed .toastui-editor-main{flex:1;min-height:0}
-  /* integrate Toast UI into the design system: our lines/radius/fonts and an
-     explicit ink colour per notes-theme — md-mode text used to inherit the
-     panel colour and vanish on the opposite background */
-  .nt-ed.light{--nt-ink:#23272f;--nt-dim:#6a7180;--nt-line:#e4e7ec;--nt-bg:#fff}
-  .nt-ed.dark{--nt-ink:#e8ebf2;--nt-dim:#8f96a6;--nt-line:#2b3140;--nt-bg:#14171e}
-  .nt-ed .toastui-editor-defaultUI{border:1px solid var(--nt-line);border-radius:12px;background:var(--nt-bg)}
-  .nt-ed .toastui-editor-defaultUI-toolbar{background:transparent;border-bottom:1px solid var(--nt-line);border-radius:12px 12px 0 0;padding:3px 8px}
-  .nt-ed .toastui-editor-toolbar-icons{border:0;background-color:transparent;border-radius:7px}
-  .nt-ed .toastui-editor-toolbar-icons:not(:disabled):hover{background-color:rgba(128,140,160,.16)}
-  .nt-ed .toastui-editor-toolbar-divider{background-color:var(--nt-line)}
+  /* The right pane is one continuous "paper" (macOS Notes-like), themed
+     independently of the panel. --nt-acc is a theme-local accent: the panel
+     accent is contrast-tuned for the WINDOW background and gets lost on the
+     opposite paper. md-mode ink is explicit for the same reason. */
+  .nt-edit.light{--nt-bg:#fff;--nt-ink:#23272f;--nt-dim:#79808f;--nt-line:#e7e9ee;--nt-acc:#0d8f86;--nt-code:#f4f5f8}
+  .nt-edit.dark{--nt-bg:#15181f;--nt-ink:#e8ebf2;--nt-dim:#8f96a6;--nt-line:#272c38;--nt-acc:#33c9be;--nt-code:#1d222c}
+  .nt-edit{background:var(--nt-bg);color:var(--nt-ink);padding:10px 4px 0 10px;gap:0;border-left:1px solid var(--line)}
+  .nt-empty{color:var(--nt-dim,var(--mut))}
+  .nt-head{padding:8px 14px 0}
+  .nt-head input{flex:1;font-size:22px;font-weight:700;height:40px;border:0;background:transparent;padding:0;color:var(--nt-ink)}
+  .nt-head input::placeholder{color:var(--nt-dim);opacity:.6}
+  .nt-head input:focus{outline:none}
+  .nt-head .iconbtn{color:var(--nt-dim);background:transparent;border-color:transparent}
+  .nt-head .iconbtn:hover{background:color-mix(in srgb,var(--nt-ink) 8%,transparent);color:var(--nt-ink)}
+  .nt-head .nt-pin-on{color:#E5A50A!important}
+  .nt-edit #ntTagsIn{margin:2px 14px 8px;height:26px;border:0;background:transparent;padding:0;font-size:12.5px;color:var(--nt-acc)}
+  .nt-edit #ntTagsIn::placeholder{color:var(--nt-dim);opacity:.55}
+  .nt-edit #ntTagsIn:focus{outline:none}
+  .nt-mut{color:var(--mut);font-size:12px}
+  .nt-edit .nt-mut{color:var(--nt-dim);font-size:11.5px;flex:none}
+  /* editor melts into the paper: no own borders, quiet toolbar */
+  .nt-ed{flex:1;min-height:0;display:flex;flex-direction:column;position:relative}
+  .nt-ed .toastui-editor-defaultUI{height:100%!important;display:flex;flex-direction:column;width:100%;font-family:inherit;border:0;border-radius:0;background:var(--nt-bg)}
+  .nt-ed .toastui-editor-defaultUI-toolbar{background:transparent;border-bottom:1px solid var(--nt-line);border-radius:0;padding:2px 8px;height:38px}
+  .nt-ed .toastui-editor-toolbar-group{gap:0}
+  .nt-ed .toastui-editor-toolbar-icons{border:0;background-color:transparent;border-radius:7px;width:28px;height:28px;background-size:400px 46px;margin:3px 0}
+  .nt-ed .toastui-editor-toolbar-icons:not(:disabled):hover{background-color:color-mix(in srgb,var(--nt-ink) 9%,transparent)}
+  .nt-ed .toastui-editor-toolbar-divider{background-color:var(--nt-line);margin:9px 6px;height:16px}
+  .nt-ed .toastui-editor-main{flex:1;min-height:0}
   .nt-ed .toastui-editor,.nt-ed .toastui-editor-ww-container,.nt-ed .toastui-editor-md-container{background:var(--nt-bg)}
-  .nt-ed .ProseMirror{color:var(--nt-ink);font-size:var(--nt-font,15px)}
-  .nt-ed .toastui-editor-md-container .ProseMirror{font-family:var(--mono);font-size:13px;line-height:1.6}
+  .nt-ed .ProseMirror{color:var(--nt-ink);font-size:var(--nt-font,15px);padding:16px 18px}
+  .nt-ed .toastui-editor-md-container .ProseMirror{font-family:var(--mono);font-size:13px;line-height:1.65}
+  .nt-ed .toastui-editor-md-preview{background:var(--nt-bg)}
   .nt-ed .toastui-editor-md-preview .toastui-editor-contents{color:var(--nt-ink)}
   .nt-ed .toastui-editor-contents{font-family:inherit;font-size:var(--nt-font,15px);color:var(--nt-ink)}
-  .nt-ed .toastui-editor-contents h1,.nt-ed .toastui-editor-contents h2{border-bottom:1px solid var(--nt-line);color:var(--nt-ink)}
-  .nt-ed .toastui-editor-contents h3,.nt-ed .toastui-editor-contents h4,.nt-ed .toastui-editor-contents p,.nt-ed .toastui-editor-contents li{color:var(--nt-ink)}
-  .nt-ed .toastui-editor-contents code{font-family:var(--mono)}
-  .nt-ed .toastui-editor-contents pre{font-family:var(--mono);border-radius:10px}
+  .nt-ed .toastui-editor-contents h1,.nt-ed .toastui-editor-contents h2,.nt-ed .toastui-editor-contents h3,
+  .nt-ed .toastui-editor-contents h4,.nt-ed .toastui-editor-contents p,.nt-ed .toastui-editor-contents li,
+  .nt-ed .toastui-editor-contents td,.nt-ed .toastui-editor-contents th{color:var(--nt-ink)}
+  .nt-ed .toastui-editor-contents h1,.nt-ed .toastui-editor-contents h2{border-bottom:1px solid var(--nt-line)}
+  .nt-ed .toastui-editor-contents blockquote{border-left:3px solid var(--nt-line);color:var(--nt-dim)}
+  .nt-ed .toastui-editor-contents a{color:var(--nt-acc)}
+  .nt-ed .toastui-editor-contents code{font-family:var(--mono);background:var(--nt-code);color:var(--nt-ink);border-radius:5px}
+  .nt-ed .toastui-editor-contents pre{font-family:var(--mono);background:var(--nt-code);border-radius:10px}
+  .nt-ed .toastui-editor-contents pre code{background:transparent}
   .nt-ed .toastui-editor-mode-switch{background:transparent;border-top:1px solid var(--nt-line);height:30px}
-  .nt-ed .toastui-editor-mode-switch .tab-item{background:transparent;border:1px solid var(--nt-line);border-bottom:0;color:var(--nt-dim);height:26px;line-height:24px}
-  .nt-ed .toastui-editor-mode-switch .tab-item.active{color:var(--accent);background:var(--nt-bg);font-weight:650}
-  .nt-ed .toastui-editor-popup{background:var(--nt-bg);border:1px solid var(--nt-line);border-radius:10px;box-shadow:var(--sh-sm);color:var(--nt-ink)}
+  .nt-ed .toastui-editor-mode-switch .tab-item{background:transparent;border:0;color:var(--nt-dim);height:28px;line-height:28px;font-size:12px}
+  .nt-ed .toastui-editor-mode-switch .tab-item.active{color:var(--nt-acc);font-weight:700}
+  .nt-ed .toastui-editor-popup{background:var(--nt-bg);border:1px solid var(--nt-line);border-radius:12px;box-shadow:0 12px 34px rgba(0,0,0,.24);color:var(--nt-ink);font-family:inherit}
   .nt-ed .toastui-editor-popup-body,.nt-ed .toastui-editor-popup-body label{color:var(--nt-ink)}
-  /* images: 25vh tall max, left-aligned by default, pointer affordance */
-  .nt-ed .toastui-editor-contents img{max-height:25vh;max-width:100%;display:block;border-radius:8px;cursor:pointer}
-  .nt-ed .toastui-editor-contents img.ProseMirror-selectednode{outline:2px solid var(--accent)}
-  /* drag-resize overlay handle */
-  .nt-imgov{position:absolute;z-index:40;border:1.5px dashed var(--accent);border-radius:8px;pointer-events:none}
-  .nt-imgov i{position:absolute;right:-7px;bottom:-7px;width:14px;height:14px;border-radius:50%;background:var(--accent);pointer-events:auto;cursor:nwse-resize}
+  .nt-ed .toastui-editor-popup-body input[type=text]{background:transparent;border:1px solid var(--nt-line);color:var(--nt-ink);border-radius:8px}
+  .nt-ed .toastui-editor-defaultUI .toastui-editor-ok-button{background:var(--nt-acc);color:#fff;border-radius:8px;outline:0}
+  .nt-ed .toastui-editor-defaultUI .toastui-editor-close-button{background:transparent;border:1px solid var(--nt-line);color:var(--nt-ink);border-radius:8px}
+  .nt-ed .toastui-editor-dropdown-toolbar{background:var(--nt-bg);border:1px solid var(--nt-line);border-radius:10px}
+  /* images: 300px tall max, left by default; selection + resize handle */
+  .nt-ed .toastui-editor-contents img{max-height:300px;max-width:100%;display:block;margin-right:auto;border-radius:8px;cursor:pointer}
+  .nt-ed .toastui-editor-contents img.ProseMirror-selectednode{outline:2px solid var(--nt-acc)}
+  .nt-imgov{position:absolute;z-index:40;border:1.5px dashed var(--nt-acc,var(--accent));border-radius:8px;pointer-events:none}
+  .nt-imgov i{position:absolute;right:-7px;bottom:-7px;width:14px;height:14px;border-radius:50%;background:var(--nt-acc,var(--accent));pointer-events:auto;cursor:nwse-resize}
   .nt-ed .toastui-editor-defaultUI{border-color:var(--line)}
   .nt-ed .toastui-editor-contents{font-size:var(--nt-font,15px)}
   .nt-ed .toastui-editor-contents img{cursor:pointer;border-radius:6px;max-width:100%}
@@ -5969,6 +6006,17 @@ function loadNotesLibs(){
  return NT_LIBS;
 }
 let NT_ED=null,NT_PATH=null,NT_SAVE_T=null,NT_DIRTY=false,NT_PIN=false;
+/* our notes are trusted local content; still strip scripts/handlers but keep
+   layout attributes (style/width on img) that the default sanitizer removes */
+function ntSanitize(html){
+ const doc=new DOMParser().parseFromString("<body>"+html,"text/html");
+ doc.querySelectorAll("script,iframe,object,embed,form").forEach(n=>n.remove());
+ doc.querySelectorAll("*").forEach(n=>{
+  [...n.attributes].forEach(a=>{
+   const nm=a.name.toLowerCase();
+   if(nm.startsWith("on")||(nm==="href"&&/^javascript:/i.test(a.value))||(nm==="src"&&/^javascript:/i.test(a.value)))n.removeAttribute(a.name);});});
+ return doc.body.innerHTML;
+}
 function winNotes(){openWin("__notes","Заметки",async body=>{
  body.style.padding="0";body.style.display="flex";
  if(isPhone())body.style.cssText+="flex-direction:column;overflow:auto";
@@ -5977,7 +6025,7 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
  let TREE={dirs:[],notes:[]},fold="",tag=null,qstr="";
  body.innerHTML=`
   <div class="nt-side">
-   <div class="nt-tools"><button class="btn sm pri" id="ntNew" title="Создать в текущей папке">${svg("plus",14)} Заметка</button><button class="btn sm" id="ntNewF">${svg("folder",14)} Папка</button></div>
+   <div class="nt-tools"><button class="btn sm pri" id="ntNew" title="Создать в текущей папке">${svg("plus",14)} Заметка</button><button class="btn sm" id="ntNewF">${svg("folder",14)} Папка</button><button class="iconbtn" id="ntThemeB" title="Тема заметок" style="margin-left:auto"></button></div>
    <input id="ntQ" placeholder="Поиск…">
    <div class="nt-cap">Папки</div><div id="ntDirs"></div>
    <div class="nt-cap">Теги</div><div id="ntTags"></div>
@@ -5990,12 +6038,28 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
  const flushSave=async()=>{if(NT_DIRTY&&NT_PATH)await saveNow();};
  const refresh=async()=>{const r=await api("/api/notes/tree");if(r&&r.notes){TREE=r;paintSide();paintList();}};
  const tagsAll=()=>{const m={};TREE.notes.forEach(n=>n.tags.forEach(t=>m[t]=(m[t]||0)+1));return Object.entries(m).sort((a,b)=>b[1]-a[1]);};
+ const EXP=winNotes._exp||(winNotes._exp=new Set());
  const paintSide=()=>{
   const dirs=q("#ntDirs");
-  dirs.innerHTML=`<div class="nt-dir${fold===""&&!tag?" on":""}" data-d="">${svg("home",13)} Все заметки</div>`
-   +TREE.dirs.map(d=>`<div class="nt-dir${fold===d?" on":""}" data-d="${att(d)}" style="padding-left:${10+d.split("/").length*10}px">${svg("folder",13)} ${esc(d.split("/").pop())}</div>`).join("");
+  const cnt=d=>TREE.notes.filter(n=>n.folder===d).length;
+  const kids=d=>TREE.dirs.filter(x=>{const pre=d?d+"/":"";return x!==d&&x.startsWith(pre)&&!x.slice(pre.length).includes("/");});
+  const row=(d,depth)=>{
+   const open=EXP.has(d),sub=kids(d);
+   let h=`<div class="nt-dir${fold===d&&!tag?" on":""}" data-d="${att(d)}" style="padding-left:${6+depth*14}px">`
+    +`<i class="nt-tw${open?" open":""}${(sub.length||cnt(d))?"":" empty"}" data-tw="${att(d)}"></i>`
+    +`${svg("folder",13)} <span class="nm">${esc(d.split("/").pop())}</span><b class="nt-cnt">${cnt(d)||""}</b></div>`;
+   if(open){
+    sub.forEach(k=>h+=row(k,depth+1));
+    TREE.notes.filter(n=>n.folder===d).forEach(n=>h+=
+     `<div class="nt-dnote${NT_PATH===n.path?" on":""}" data-p="${att(n.path)}" style="padding-left:${34+depth*14}px">${svg("note",12)} <span class="nm">${esc(n.title)}</span></div>`);}
+   return h;};
+  dirs.innerHTML=`<div class="nt-dir${fold===""&&!tag?" on":""}" data-d=""><i class="nt-tw empty"></i>${svg("home",13)} <span class="nm">Все заметки</span><b class="nt-cnt">${TREE.notes.length}</b></div>`
+   +kids("").map(d=>row(d,0)).join("");
+  dirs.querySelectorAll(".nt-tw:not(.empty)").forEach(tw=>tw.onclick=e=>{e.stopPropagation();
+   const d=tw.dataset.tw;EXP.has(d)?EXP.delete(d):EXP.add(d);paintSide();});
+  dirs.querySelectorAll(".nt-dnote").forEach(el2=>el2.onclick=()=>openNote(el2.dataset.p));
   dirs.querySelectorAll(".nt-dir").forEach(el2=>{
-   el2.onclick=()=>{fold=el2.dataset.d;tag=null;qstr="";q("#ntQ").value="";paintSide();paintList();};
+   el2.onclick=()=>{fold=el2.dataset.d;tag=null;qstr="";q("#ntQ").value="";if(el2.dataset.d)EXP.add(el2.dataset.d);paintSide();paintList();};
    /* drag a note onto a folder to move it */
    el2.ondragover=e=>{e.preventDefault();el2.classList.add("drop");};
    el2.ondragleave=()=>el2.classList.remove("drop");
@@ -6059,7 +6123,8 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
  const openNote=async p=>{try{
   await flushSave();
   const r=await api("/api/notes/get?path="+encodeURIComponent(p));
-  if(!r||r.error){toast("Не открыть: "+((r&&r.error)||"?"));return;}
+  if(!r||!r.path){toast("Не открыть: "+((r&&r.error)||"нет ответа сервера"));return;}
+  r.tags=r.tags||[];r.md=r.md||"";r.title=r.title||"";
   NT_PATH=p;
   try{localStorage.setItem("nasNotesLast",p);}catch(e){}
   const ed=q("#ntEdit");
@@ -6096,13 +6161,14 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
   if(NT_ED){try{NT_ED.destroy();}catch(e){}NT_ED=null;}
   const folder=p.includes("/")?p.slice(0,p.lastIndexOf("/")):"";
   const dark=SET.ntTheme==="dark"?true:SET.ntTheme==="light"?false:!isLight();
+  ed.classList.remove("light","dark");ed.classList.add(dark?"dark":"light");
   const box=ed.querySelector("#ntEd");
-  box.classList.add(dark?"dark":"light");
   box.style.setProperty("--nt-font",(SET.ntFont||15)+"px");
   const plugins=(window.toastui&&toastui.Editor.plugin&&toastui.Editor.plugin.codeSyntaxHighlight)?[toastui.Editor.plugin.codeSyntaxHighlight]:[];
   try{
   NT_ED=new toastui.Editor({
    el:box,height:"100%",usageStatistics:false,
+   customHTMLSanitizer:ntSanitize,
    initialEditType:SET.ntMode||"wysiwyg",previewStyle:"tab",
    language:(window.NAS_LANG||"en")==="en"?"en-US":"ru-RU",
    theme:dark?"dark":"light",
@@ -6205,6 +6271,11 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
   s.querySelector("#ntFOk").onclick=ok;
   inp.onkeydown=ev=>{if(ev.key==="Enter")ok();};
   s.querySelector("#ntFX").onclick=()=>s.classList.remove("show");};
+ const ntDark=()=>SET.ntTheme==="dark"?true:SET.ntTheme==="light"?false:!isLight();
+ const paintThemeB=()=>{const b=q("#ntThemeB");if(b)b.innerHTML=svg(ntDark()?"sun":"moon",15);};
+ q("#ntThemeB").onclick=()=>{SET.ntTheme=ntDark()?"light":"dark";saveSettings();paintThemeB();
+  if(NT_PATH)openNote(NT_PATH);};
+ paintThemeB();
  q("#ntTrash").onclick=()=>ntTrash(refresh);
  q("#ntSet").onclick=()=>winSettings("nts");
  winNotes._reopen=p2=>openNote(p2);
