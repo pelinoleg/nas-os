@@ -1636,9 +1636,17 @@
   .glc-9x{display:flex;gap:4px;flex-wrap:wrap}
   .glc-9x .btn.on{background:var(--sel);color:var(--accent);box-shadow:var(--sh-sm)}
   /* ===================== Notes app — DESIGN.md contract =====================
-     Tokens only (see /DESIGN.md). Scope = .nt-root (the notes window body).
-     One theme for chrome AND paper: dark notes are dark, never a white sheet. */
+     Notes owns its two palettes — LIGHT = warm paper, DARK = neutral dark —
+     with ONE emerald accent in both (the app's character). From the OS
+     appearance system it inherits only shape: radius slider and shadow scale.
+     data-theme (light|dark) is always set by ntApplyTheme(). */
   .nt-root{
+   --radius-sm:var(--r-sm);--radius-lg:var(--r-lg);
+   --sp-1:4px;--sp-2:8px;--sp-3:12px;--sp-4:16px;--sp-5:24px;--sp-6:32px;--sp-7:48px;
+   --font-ui:ui-sans-serif,-apple-system,"Inter",system-ui,sans-serif;
+   --font-mono:ui-monospace,"IBM Plex Mono","JetBrains Mono",monospace;
+   --fs-h1:28px;--fs-h2:22px;--fs-h3:18px;--fs-body:16px;--fs-meta:13px;
+   /* light (default) — warm paper */
    --bg:#F7F6F3;--surface:#FFFFFF;--surface-2:#F0EFEA;--surface-inset:#ECEBE6;
    --text:#1C1B1A;--text-muted:#6B6A66;--text-faint:#A3A29E;
    --border:#E4E2DD;--border-strong:#D2CFC8;
@@ -1646,27 +1654,29 @@
    --success:#1F9E6E;--warning:#C98A1B;--danger:#C0473B;
    --callout-bg:#FBF3D9;--callout-border:#F0E2AE;
    --checkbox-border:var(--border-strong);
-   --radius-sm:8px;--radius-lg:14px;
-   --sp-1:4px;--sp-2:8px;--sp-3:12px;--sp-4:16px;--sp-5:24px;--sp-6:32px;--sp-7:48px;
    --shadow-1:0 1px 2px rgba(0,0,0,.04),0 1px 3px rgba(0,0,0,.06);
    --shadow-2:0 4px 12px rgba(0,0,0,.08),0 2px 4px rgba(0,0,0,.04);
-   --font-ui:ui-sans-serif,-apple-system,"Inter",system-ui,sans-serif;
-   --font-mono:ui-monospace,"IBM Plex Mono","JetBrains Mono",monospace;
-   --fs-h1:28px;--fs-h2:22px;--fs-h3:18px;--fs-body:16px;--fs-meta:13px;
    background:var(--bg);color:var(--text);font-family:var(--font-ui)}
+  /* DARK notes = NEUTRAL dark surfaces (no green tint) + the same emerald
+     accent as light: the app's character is the accent, not the walls.
+     Palette fixed by owner (2026-07-11). */
   .nt-root[data-theme="dark"]{
-   --bg:#14201B;--surface:#1B2A23;--surface-2:#16241D;--surface-inset:#101B16;
-   --text:#E8EAE7;--text-muted:#9BAAA2;--text-faint:#667069;
-   --border:#26362E;--border-strong:#33453B;
-   --accent:#3FC48C;--accent-hover:#55D19C;--accent-soft:#1E3A2D;--on-accent:#0C130F;
+   --bg:#191918;--surface:#212120;--surface-2:#292928;--surface-inset:#171716;
+   --text:#E8E8E6;--text-muted:#9B9B97;--text-faint:#6E6E6A;
+   --border:#2E2E2C;--border-strong:#3A3A37;
+   --accent:#3FC48C;--accent-hover:#55D19C;--accent-soft:#223129;--on-accent:#0C130F;
    --success:#3FC48C;--warning:#E0B25A;--danger:#E27B6E;
    --callout-bg:#2A2A18;--callout-border:#4A4522;
-   --checkbox-border:#4E6B5C;
+   --checkbox-border:#4A4A46;
    --shadow-1:0 1px 2px rgba(0,0,0,.3),0 1px 3px rgba(0,0,0,.35);
    --shadow-2:0 4px 14px rgba(0,0,0,.4),0 2px 6px rgba(0,0,0,.3)}
+  /* window chrome follows the notes theme: seamless strip above the paper */
+  .win.nt-win{background:var(--bg)}
+  .win.nt-win .wbar{background:var(--bg);border-bottom:1px solid var(--border)}
+  .win.nt-win .ttl{color:var(--text-muted)}
   /* ---- sidebar (folders/tags) = surface-2 ---- */
   .nt-side{width:220px;flex:none;display:flex;flex-direction:column;gap:var(--sp-2);
-   padding:var(--sp-4);border-right:1px solid var(--border);overflow:auto;background:var(--surface-2)}
+   padding:var(--sp-4);border-right:1px solid var(--border);overflow:auto;background:transparent}
   .nt-tools{display:flex;gap:var(--sp-2);align-items:center}
   .nt-root .btn{background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm);box-shadow:none}
   .nt-root .btn:hover{background:var(--surface-inset)}
@@ -1712,7 +1722,6 @@
   .nt-meta>span{margin-left:auto}
   .nt-split{width:5px;flex:none;cursor:col-resize;touch-action:none;position:relative;z-index:5;margin:0 -2px;background:transparent}
   .nt-split:hover{background:var(--accent-soft)}
-  .nt-root{--sel:var(--accent-soft)}   /* panel hover token remapped inside notes */
   /* ---- editor pane: same theme, the paper is a surface card ---- */
   .nt-edit{flex:1;display:flex;flex-direction:column;gap:0;padding:var(--sp-3) var(--sp-4) var(--sp-4);min-width:0;background:var(--bg);color:var(--text)}
   .nt-empty{margin:auto;color:var(--text-faint)}
@@ -1725,16 +1734,18 @@
   .nt-tagrow{display:flex;align-items:center;gap:var(--sp-1);flex-wrap:wrap;margin:0;padding:0 var(--sp-6) var(--sp-2)}
   .nt-chip{display:inline-flex;align-items:center;gap:var(--sp-1);padding:var(--sp-1) var(--sp-2);border-radius:var(--radius-sm);
    background:var(--accent-soft);color:var(--accent);font-size:var(--fs-meta);font-weight:600}
-  .nt-chip i{font-style:normal;cursor:pointer;opacity:.6}
-  .nt-chip i:hover{opacity:1}
+  .nt-chip i{font-style:normal;cursor:pointer;color:var(--text-muted)}
+  .nt-chip i:hover{color:var(--text)}
+  .nt-chip.dup{animation:ntdup .35s ease 2}
+  @keyframes ntdup{50%{background:var(--accent);color:var(--on-accent)}}
   .nt-tagrow input{flex:1;min-width:110px;height:24px;border:0;background:transparent;color:var(--text-muted);font-size:var(--fs-meta);padding:0}
   .nt-tagrow input::placeholder{color:var(--text-faint)}
   .nt-tagrow input:focus{outline:none}
   .nt-edit .nt-mut{flex:none}
   .nt-ed{flex:1;min-height:0;display:flex;flex-direction:column;position:relative}
-  .nt-ed .toastui-editor-defaultUI{height:100%!important;display:flex;flex-direction:column;width:100%;font-family:var(--font-ui);border:0;border-radius:0;background:transparent}
+  .nt-root .nt-ed .toastui-editor-defaultUI{height:100%!important;display:flex;flex-direction:column;width:100%;font-family:var(--font-ui);border:0;border-radius:0;background:transparent}
   /* native toolbar is replaced by our own (#ntTb) */
-  .nt-ed .toastui-editor-defaultUI-toolbar,.nt-ed .toastui-editor-toolbar{display:none}
+  .nt-root .nt-ed .toastui-editor-defaultUI-toolbar,.nt-root .nt-ed .toastui-editor-toolbar{display:none}
   .nt-tb{display:flex;align-items:center;gap:var(--sp-1);padding:0 var(--sp-6) var(--sp-2);flex-wrap:wrap}
   .nt-tbb{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border:0;background:transparent;
    color:var(--text-muted);border-radius:var(--radius-sm);cursor:pointer;padding:0}
@@ -1742,26 +1753,26 @@
   .nt-tbb:active,.nt-tbb.on{color:var(--accent);background:var(--accent-soft)}
   .nt-tbs{width:1px;height:16px;background:var(--border);margin:0 var(--sp-1);flex:none}
   /* the paper: surface card, radius-lg, shadow-1 */
-  .nt-ed .toastui-editor-main{flex:1;min-height:0;background:var(--surface);border-radius:var(--radius-lg);overflow:hidden;border:1px solid var(--border);box-shadow:var(--shadow-1)}
-  .nt-ed .toastui-editor,.nt-ed .toastui-editor-ww-container,.nt-ed .toastui-editor-md-container{background:var(--surface)}
-  .nt-ed .ProseMirror{color:var(--text);font-size:var(--nt-font,var(--fs-body));line-height:1.6;padding:var(--sp-5) var(--sp-6) var(--sp-7)}
-  .nt-ed .toastui-editor-md-container .ProseMirror{font-family:var(--font-mono);font-size:var(--fs-meta);line-height:1.65;max-width:none}
-  .nt-ed .toastui-editor-md-preview{background:var(--surface)}
-  .nt-ed .toastui-editor-md-preview .toastui-editor-contents{padding:var(--sp-4) var(--sp-5);color:var(--text)}
-  .nt-ed .toastui-editor-md-splitter{background:var(--border)}
+  .nt-root .nt-ed .toastui-editor-main{flex:1;min-height:0;background:var(--surface);border-radius:var(--radius-lg);overflow:hidden;border:1px solid var(--border);box-shadow:var(--shadow-1)}
+  .nt-root .nt-ed .toastui-editor,.nt-root .nt-ed .toastui-editor-ww-container,.nt-root .nt-ed .toastui-editor-md-container{background:var(--surface)}
+  .nt-root .nt-ed .ProseMirror{color:var(--text);font-size:var(--nt-font,var(--fs-body));line-height:1.6;padding:var(--sp-5) var(--sp-6) var(--sp-7)}
+  .nt-root .nt-ed .toastui-editor-md-container .ProseMirror{font-family:var(--font-mono);font-size:var(--fs-meta);line-height:1.65;max-width:none}
+  .nt-root .nt-ed .toastui-editor-md-preview{background:var(--surface)}
+  .nt-root .nt-ed .toastui-editor-md-preview .toastui-editor-contents{padding:var(--sp-4) var(--sp-5);color:var(--text)}
+  .nt-root .nt-ed .toastui-editor-md-splitter{background:var(--border)}
   /* content typography (contract scale) */
-  .nt-ed .toastui-editor-contents{font-family:var(--font-ui);font-size:var(--nt-font,var(--fs-body));color:var(--text)}
-  .nt-ed .toastui-editor-contents h1,.nt-ed .toastui-editor-contents h2,.nt-ed .toastui-editor-contents h3,
-  .nt-ed .toastui-editor-contents h4,.nt-ed .toastui-editor-contents p,.nt-ed .toastui-editor-contents li,
-  .nt-ed .toastui-editor-contents td,.nt-ed .toastui-editor-contents th{color:var(--text)}
-  .nt-ed .toastui-editor-contents p{line-height:1.6;margin:var(--sp-2) 0}
-  .nt-ed .toastui-editor-contents h1{font-size:var(--fs-h1);line-height:1.25;font-weight:700;border:0;margin:var(--sp-5) 0 var(--sp-2);padding:0}
-  .nt-ed .toastui-editor-contents h2{font-size:var(--fs-h2);line-height:1.3;font-weight:600;border:0;margin:var(--sp-5) 0 var(--sp-2);padding:0}
-  .nt-ed .toastui-editor-contents h3{font-size:var(--fs-h3);line-height:1.4;font-weight:600;margin:var(--sp-4) 0 var(--sp-1)}
-  .nt-ed .toastui-editor-contents ul li::marker,.nt-ed .toastui-editor-contents ol li::marker{color:var(--text-muted)}
-  .nt-ed .toastui-editor-contents li{line-height:1.6}
-  .nt-ed .toastui-editor-contents blockquote{margin:var(--sp-3) 0;padding:var(--sp-4);border:1px solid var(--callout-border);border-radius:var(--radius-lg);background:var(--callout-bg)}
-  .nt-ed .toastui-editor-contents blockquote p,.nt-ed .toastui-editor-contents blockquote li{color:var(--text)}
+  .nt-root .nt-ed .toastui-editor-contents{font-family:var(--font-ui);font-size:var(--nt-font,var(--fs-body));color:var(--text)}
+  .nt-root .nt-ed .toastui-editor-contents h1,.nt-root .nt-ed .toastui-editor-contents h2,.nt-root .nt-ed .toastui-editor-contents h3,
+  .nt-root .nt-ed .toastui-editor-contents h4,.nt-root .nt-ed .toastui-editor-contents p,.nt-root .nt-ed .toastui-editor-contents li,
+  .nt-root .nt-ed .toastui-editor-contents td,.nt-root .nt-ed .toastui-editor-contents th{color:var(--text)}
+  .nt-root .nt-ed .toastui-editor-contents p{line-height:1.6;margin:var(--sp-2) 0}
+  .nt-root .nt-ed .toastui-editor-contents h1{font-size:var(--fs-h1);line-height:1.25;font-weight:700;border:0;margin:var(--sp-5) 0 var(--sp-2);padding:0}
+  .nt-root .nt-ed .toastui-editor-contents h2{font-size:var(--fs-h2);line-height:1.3;font-weight:600;border:0;margin:var(--sp-5) 0 var(--sp-2);padding:0}
+  .nt-root .nt-ed .toastui-editor-contents h3{font-size:var(--fs-h3);line-height:1.4;font-weight:600;margin:var(--sp-4) 0 var(--sp-1)}
+  .nt-root .nt-ed .toastui-editor-contents ul li::marker,.nt-root .nt-ed .toastui-editor-contents ol li::marker{color:var(--text-muted)}
+  .nt-root .nt-ed .toastui-editor-contents li{line-height:1.6}
+  .nt-root .nt-ed .toastui-editor-contents blockquote{margin:var(--sp-3) 0;padding:var(--sp-4);border:1px solid var(--callout-border);border-radius:var(--radius-lg);background:var(--callout-bg)}
+  .nt-root .nt-ed .toastui-editor-contents blockquote p,.nt-root .nt-ed .toastui-editor-contents blockquote li{color:var(--text)}
   /* checkboxes: FULL 1.5px border on --checkbox-border, 16x16, inset bg.
      .nt-root prefix beats the vendor css that loads after our <style>. */
   .nt-root .nt-ed .toastui-editor-contents .task-list-item{gap:var(--sp-2);margin:var(--sp-1) 0}
@@ -1771,21 +1782,48 @@
    background-image:none;width:16px;height:16px}
   .nt-root .nt-ed .toastui-editor-contents .task-list-item.checked::before{background-color:var(--accent);border-color:var(--accent);background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E");background-size:11px;background-position:center;background-repeat:no-repeat}
   .nt-root .nt-ed .toastui-editor-contents .task-list-item.checked{color:var(--text-muted);text-decoration:line-through}
-  .nt-ed .toastui-editor-contents hr{border:0;border-top:1px solid var(--border);margin:var(--sp-5) 0}
-  .nt-ed .toastui-editor-contents table{border-collapse:collapse}
-  .nt-ed .toastui-editor-contents th{background:var(--surface-inset);font-weight:600}
-  .nt-ed .toastui-editor-contents th,.nt-ed .toastui-editor-contents td{border:1px solid var(--border);padding:var(--sp-2) var(--sp-3)}
-  .nt-ed .toastui-editor-contents ::selection,.nt-ed .ProseMirror ::selection{background:var(--accent-soft)}
-  .nt-ed .toastui-editor-contents a{color:var(--accent)}
-  .nt-ed .toastui-editor-contents a:hover{color:var(--accent-hover)}
-  .nt-ed .toastui-editor-contents code{font-family:var(--font-mono);background:var(--surface-inset);color:var(--text);border-radius:var(--radius-sm)}
-  .nt-ed .toastui-editor-contents pre{font-family:var(--font-mono);background:var(--surface-inset);border-radius:var(--radius-lg);padding:var(--sp-4)}
-  .nt-ed .toastui-editor-contents pre code{background:transparent}
-  /* ww code block: the language badge + pencil are editor chrome — show them
-     only on hover, quietly, per contract (they used to hang on every block) */
+  .nt-root .nt-ed .toastui-editor-contents hr{border:0;border-top:1px solid var(--border);margin:var(--sp-5) 0}
+  .nt-root .nt-ed .toastui-editor-contents table{border-collapse:collapse}
+  .nt-root .nt-ed .toastui-editor-contents th{background:var(--surface-inset);font-weight:600}
+  .nt-root .nt-ed .toastui-editor-contents th,.nt-root .nt-ed .toastui-editor-contents td{border:1px solid var(--border);padding:var(--sp-2) var(--sp-3)}
+  .nt-root .nt-ed .toastui-editor-contents ::selection,.nt-root .nt-ed .ProseMirror ::selection{background:var(--accent-soft)}
+  .nt-root .nt-ed .toastui-editor-contents a{color:var(--accent)}
+  .nt-root .nt-ed .toastui-editor-contents a:hover{color:var(--accent-hover)}
+  .nt-root .nt-ed .toastui-editor-contents code{font-family:var(--font-mono);background:var(--surface-inset);color:var(--text);border-radius:var(--radius-sm)}
+  .nt-root .nt-ed .toastui-editor-contents pre{font-family:var(--font-mono);background:var(--surface-inset);border-radius:var(--radius-lg);padding:var(--sp-4)}
+  .nt-root .nt-ed .toastui-editor-contents pre code{background:transparent}
+  /* ww code block, trigger chip [lang ⌄]: one compact button, pencil gone.
+     The vendor opens the editor only when the clicked target's ::after has a
+     background-image — keep a non-none transparent gradient to stay clickable. */
   .nt-root .nt-ed .toastui-editor-ww-code-block:after{opacity:0;transition:opacity .12s;
-   background:var(--surface);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text-muted)}
-  .nt-root .nt-ed .toastui-editor-ww-code-block:hover:after{opacity:1}
+   content:attr(data-language);position:absolute;right:10px;top:10px;height:24px;
+   padding:2px 24px 2px var(--sp-2);border:0;border-radius:var(--radius-sm);cursor:pointer;
+   background:transparent;background-image:linear-gradient(transparent,transparent);
+   color:var(--text-muted);font-family:var(--font-mono);font-size:12px;font-weight:400;line-height:20px}
+  .nt-root .nt-ed .toastui-editor-ww-code-block:before{content:"";position:absolute;z-index:1;
+   right:19px;top:17px;width:5px;height:5px;transform:rotate(45deg);pointer-events:none;
+   border-right:1.5px solid var(--text-faint);border-bottom:1.5px solid var(--text-faint);
+   opacity:0;transition:opacity .12s}
+  .nt-root .nt-ed .toastui-editor-ww-code-block:hover:after{opacity:1;background-color:var(--surface-2)}
+  .nt-root .nt-ed .toastui-editor-ww-code-block:hover:before{opacity:1}
+  .nt-root .nt-ed .toastui-editor-ww-code-block.nt-lang-open:after{opacity:1;background-color:var(--accent-soft);color:var(--accent)}
+  .nt-root .nt-ed .toastui-editor-ww-code-block.nt-lang-open:before{opacity:1;border-color:var(--accent)}
+  /* language dropdown: vendor <span><input></span> re-anchored under the chip,
+     our filterable list appended inside; popup surface = system menu level */
+  .nt-root .nt-ed .toastui-editor-ww-code-block-language{background:var(--surface-2);border:1px solid var(--border);
+   border-radius:var(--radius-lg);box-shadow:var(--shadow-2);padding:var(--sp-1);height:auto;z-index:60;
+   animation:ntpop .12s ease}
+  @keyframes ntpop{from{opacity:0;transform:scale(.97) translateY(-3px)}}
+  .nt-root .nt-ed .toastui-editor-ww-code-block-language input{background:var(--surface-inset);border:1px solid var(--border);
+   border-radius:var(--radius-sm);height:26px;padding:0 var(--sp-2);font-family:var(--font-mono);font-size:12px;color:var(--text)}
+  .nt-root .nt-ed .toastui-editor-ww-code-block-language input:focus{border-color:var(--accent)}
+  .nt-langs{max-height:240px;overflow-y:auto;margin-top:var(--sp-1);display:flex;flex-direction:column}
+  .nt-langs button{display:flex;align-items:center;gap:var(--sp-1);padding:var(--sp-1) var(--sp-2);border:0;background:transparent;
+   color:var(--text);font-family:var(--font-mono);font-size:13px;border-radius:var(--radius-sm);cursor:pointer;text-align:left;width:100%}
+  .nt-langs button::before{content:"";width:13px;flex:none;color:var(--accent)}
+  .nt-langs button:hover{background:var(--surface)}
+  .nt-langs button.on{background:var(--accent-soft);color:var(--accent)}
+  .nt-langs button.on::before{content:"✓"}
   /* ===== Part A polish: every content block, tokens only (2026-07-11) ===== */
   /* 1) block rhythm: sp-4 between top-level blocks, sp-5 before / sp-2 after headings */
   .nt-root .nt-ed .toastui-editor-contents>*{margin-top:0;margin-bottom:0}
@@ -1833,19 +1871,22 @@
   /* 11) selection */
   .nt-root .nt-ed .toastui-editor-contents ::selection,.nt-root .nt-ed .ProseMirror ::selection{background:var(--accent-soft)}
   /* mode tabs: quiet, accent-soft when active */
-  .nt-ed .toastui-editor-mode-switch{background:transparent;border:0;height:34px;padding-top:var(--sp-1)}
-  .nt-ed .toastui-editor-mode-switch .tab-item{background:transparent;border:0;color:var(--text-muted);height:26px;line-height:26px;font-size:var(--fs-meta);border-radius:var(--radius-sm);margin-right:var(--sp-1)}
-  .nt-ed .toastui-editor-mode-switch .tab-item.active{color:var(--accent);background:var(--accent-soft);font-weight:600}
+  /* .nt-root prefix: tui-editor-dark.css loads after our <style> and its
+     .toastui-editor-dark selectors would otherwise win with a black plaque */
+  .nt-root .nt-ed .toastui-editor-mode-switch{background:var(--surface-2);border:0;border-top:1px solid var(--border);height:34px;padding-top:var(--sp-1)}
+  .nt-root .nt-ed .toastui-editor-mode-switch .tab-item{background:transparent;border:0;color:var(--text-muted);height:26px;line-height:26px;font-size:var(--fs-meta);border-radius:var(--radius-sm);margin-right:var(--sp-1);margin-top:0;width:auto;padding:0 var(--sp-3)}
+  .nt-root .nt-ed .toastui-editor-mode-switch .tab-item:hover{color:var(--text);background:var(--surface)}
+  .nt-root .nt-ed .toastui-editor-mode-switch .tab-item.active{color:var(--accent);background:var(--accent-soft);font-weight:600;border:0}
   /* editor popups */
-  .nt-ed .toastui-editor-popup{border-radius:var(--radius-lg);box-shadow:var(--shadow-2);font-family:var(--font-ui);background:var(--surface);border:1px solid var(--border);color:var(--text)}
-  .nt-ed .toastui-editor-popup-body,.nt-ed .toastui-editor-popup-body label{color:var(--text)}
-  .nt-ed .toastui-editor-popup-body input[type=text]{background:var(--surface-inset);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm)}
-  .nt-ed .toastui-editor-defaultUI .toastui-editor-ok-button{background:var(--accent);color:var(--on-accent);border-radius:var(--radius-sm);outline:0}
-  .nt-ed .toastui-editor-defaultUI .toastui-editor-close-button{background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm)}
-  .nt-ed .toastui-editor-dropdown-toolbar{border-radius:var(--radius-sm);background:var(--surface);border:1px solid var(--border);box-shadow:var(--shadow-2)}
+  .nt-root .nt-ed .toastui-editor-popup{border-radius:var(--radius-lg);box-shadow:var(--shadow-2);font-family:var(--font-ui);background:var(--surface);border:1px solid var(--border);color:var(--text)}
+  .nt-root .nt-ed .toastui-editor-popup-body,.nt-root .nt-ed .toastui-editor-popup-body label{color:var(--text)}
+  .nt-root .nt-ed .toastui-editor-popup-body input[type=text]{background:var(--surface-inset);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm)}
+  .nt-root .nt-ed .toastui-editor-defaultUI .toastui-editor-ok-button{background:var(--accent);color:var(--on-accent);border-radius:var(--radius-sm);outline:0}
+  .nt-root .nt-ed .toastui-editor-defaultUI .toastui-editor-close-button{background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:var(--radius-sm)}
+  .nt-root .nt-ed .toastui-editor-dropdown-toolbar{border-radius:var(--radius-sm);background:var(--surface);border:1px solid var(--border);box-shadow:var(--shadow-2)}
   /* images */
-  .nt-ed .toastui-editor-contents img{max-height:300px;max-width:100%;display:block;border-radius:var(--radius-sm);cursor:pointer}
-  .nt-ed .toastui-editor-contents img.ProseMirror-selectednode{outline:2px solid var(--accent)}
+  .nt-root .nt-ed .toastui-editor-contents img{max-height:300px;max-width:100%;display:block;border-radius:var(--radius-sm);cursor:pointer}
+  .nt-root .nt-ed .toastui-editor-contents img.ProseMirror-selectednode{outline:2px solid var(--accent)}
   .nt-imgov{position:absolute;z-index:40;border:1.5px dashed var(--accent);border-radius:var(--radius-sm);pointer-events:none}
   .nt-imgov i{position:absolute;right:-7px;bottom:-7px;width:14px;height:14px;border-radius:50%;background:var(--accent);pointer-events:auto;cursor:nwse-resize}
   /* history / trash dialog internals (panel dialogs) */
@@ -1854,7 +1895,7 @@
   .nt-hv:hover{background:var(--sel)}
   .nt-hv.on{background:var(--sel);color:var(--accent);box-shadow:var(--sh-sm)}
   .nt-hprev{flex:1;overflow:auto;max-height:340px;font-size:12px;background:var(--glass);border:1px solid var(--line);border-radius:10px;padding:10px;white-space:pre-wrap}
-  .nt-pin-on{color:#E5A50A!important}
+  .nt-pin-on{color:var(--warning)!important}
   .nt-root.qn{display:flex;flex-direction:column;gap:var(--sp-2);width:300px;padding:var(--sp-3);border-radius:var(--radius-lg);background:var(--bg)}
   .qn-h{display:flex;align-items:center;gap:var(--sp-2);font-size:var(--fs-meta);font-weight:600;color:var(--text)}
   .qn-hint{margin-left:auto;font-weight:400;color:var(--text-faint)}
@@ -6100,7 +6141,7 @@ async function notesTab(tc){
   <div class="srow"><div class="srow-l"><div class="srow-t">Заметок / папок</div></div><div class="srow-c mono" id="ntsN">—</div></div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Занято вместе с файлами</div><div class="srow-d" id="ntsBk">—</div></div><div class="srow-c mono" id="ntsSz">—</div></div>
   <div class="set-h">Редактор</div>
-  <div class="srow"><div class="srow-l"><div class="srow-t">Тема заметок</div><div class="srow-d">своя тема редактора, независимо от темы панели</div></div><div class="srow-c"><div class="seg" id="ntsTheme">${[["auto","Как панель"],["light","Светлая"],["dark","Тёмная"]].map(([v,l])=>`<button data-v="${v}" class="${(SET.ntTheme||"auto")===v?"on":""}">${l}</button>`).join("")}</div></div></div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Тема заметок</div><div class="srow-d">светлая — тёплая «бумага»; тёмная и «как панель» — материал системы</div></div><div class="srow-c"><div class="seg" id="ntsTheme">${[["auto","Как панель"],["light","Светлая"],["dark","Тёмная"]].map(([v,l])=>`<button data-v="${v}" class="${(SET.ntTheme||"auto")===v?"on":""}">${l}</button>`).join("")}</div></div></div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Режим по умолчанию</div><div class="srow-d">визуальный или markdown-исходник (переключается и в самом редакторе)</div></div><div class="srow-c"><div class="seg" id="ntsMode"><button data-m="wysiwyg" class="${(SET.ntMode||"wysiwyg")==="wysiwyg"?"on":""}">Визуальный</button><button data-m="markdown" class="${SET.ntMode==="markdown"?"on":""}">Markdown</button></div></div></div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Размер текста</div><div class="srow-d">базовый размер шрифта заметки, px</div></div><div class="srow-c"><div class="seg" id="ntsFont">${[13,14,15,16,18].map(v=>`<button data-v="${v}" class="${(SET.ntFont||15)===v?"on":""}">${v}</button>`).join("")}</div></div></div>`;
  const st=(tr&&tr.stats)||{};
@@ -6108,6 +6149,7 @@ async function notesTab(tc){
  tc.querySelector("#ntsSz").textContent=fmtB(st.size||0);
  tc.querySelector("#ntsBk").textContent="картинки и файлы "+fmtB(st.assets||0)+" · история "+fmtB(st.history||0)+" · корзина "+fmtB(st.trash||0);
  tc.querySelectorAll("#ntsTheme button").forEach(b=>b.onclick=()=>{SET.ntTheme=b.dataset.v;saveSettings();tc.querySelectorAll("#ntsTheme button").forEach(x=>x.classList.toggle("on",x===b));
+  const nb=document.querySelector(".win .nt-root");if(nb)ntApplyTheme(nb);
   if(winNotes._reopen&&NT_PATH)winNotes._reopen(NT_PATH);});
  tc.querySelector("#ntsPick").onclick=()=>pickFolder({title:"Папка для заметок",start:root||"/mnt/storage",onPick:p=>{tc.querySelector("#ntsRoot").value=p;}});
  tc.querySelector("#ntsSolo").onclick=()=>window.open("/notes","_blank");
@@ -6176,6 +6218,47 @@ function ntToolbar(ed){
    sc.querySelector("#nlX").onclick=()=>sc.classList.remove("show");}),
  ].forEach(el2=>tb.appendChild(el2));
 }
+/* code-block language chip: vendor logic untouched — its <input> plus
+   Enter/blur still commit the change. We only re-anchor the floating box
+   under the badge of the clicked block (vendor drops it at coordsAtPos of
+   the node START, i.e. the top-LEFT, off into nowhere) and append a
+   filterable list that fills the input and presses Enter. */
+/* notes theme: 'auto' follows the panel, LIGHT = warm paper, DARK = neutral
+   dark; the emerald accent is identical in both (the app's character).
+   The attribute is mirrored onto the .win element so the window chrome
+   (title bar) follows the notes theme too. */
+function ntThemeMode(){return SET.ntTheme==="dark"?"dark":SET.ntTheme==="light"?"light":(!isLight()?"dark":"light");}
+function ntApplyTheme(el){const m=ntThemeMode();
+ el.dataset.theme=m;
+ const w=el.closest&&el.closest(".win");
+ if(w&&w.classList.contains("nt-win"))w.dataset.theme=m;}
+const NT_LANGS=["text","bash","python","javascript","typescript","json","yaml","html","css","sql","dockerfile","ini","diff","markdown","go","rust","c","cpp","java","php"];
+function ntLangWire(box){
+ let anchor=null;
+ box.addEventListener("mousedown",e=>{const cb=e.target.closest(".toastui-editor-ww-code-block");if(cb)anchor=cb;},true);
+ new MutationObserver(ms=>ms.forEach(m=>{
+  m.addedNodes.forEach(n=>{if(n.nodeType===1&&n.classList.contains("toastui-editor-ww-code-block-language"))ntLangDress(n,anchor);});
+  m.removedNodes.forEach(n=>{if(n.nodeType===1&&n.classList&&n.classList.contains("toastui-editor-ww-code-block-language")&&anchor)anchor.classList.remove("nt-lang-open");});
+ })).observe(box,{childList:true,subtree:true});
+}
+function ntLangDress(sp,anchor){
+ const inp=sp.querySelector("input");if(!inp)return;
+ if(anchor){anchor.classList.add("nt-lang-open");
+  const r=anchor.getBoundingClientRect(),W=190;
+  sp.style.top=Math.min(r.top+38,innerHeight-290)+"px";
+  sp.style.left=Math.max(8,r.right-10-W)+"px";sp.style.width=W+"px";}
+ const cur=(inp.value||"text").toLowerCase();
+ const ls=document.createElement("div");ls.className="nt-langs";
+ NT_LANGS.forEach(l=>{const b=document.createElement("button");b.type="button";b.textContent=l;
+  if(l===cur)b.classList.add("on");
+  /* mousedown, not click: keeps focus in the input so vendor blur doesn't fire first */
+  b.onmousedown=e=>{e.preventDefault();inp.value=l==="text"?"":l;
+   inp.dispatchEvent(new KeyboardEvent("keydown",{key:"Enter",bubbles:true}));};
+  ls.appendChild(b);});
+ sp.appendChild(ls);
+ inp.addEventListener("input",()=>{const v=inp.value.trim().toLowerCase();
+  ls.querySelectorAll("button").forEach(b=>{b.style.display=!v||b.textContent.includes(v)?"":"none";});});
+}
 /* our notes are trusted local content; still strip scripts/handlers but keep
    layout attributes (style/width on img) that the default sanitizer removes */
 function ntSanitize(html){
@@ -6231,11 +6314,11 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
    const open=EXP.has(d),sub=kids(d);
    let h=`<div class="nt-dir${fold===d&&!tag?" on":""}" data-d="${att(encodeURIComponent(d))}" style="padding-left:${6+depth*14}px">`
     +`<i class="nt-tw${open?" open":""}${(sub.length||cnt(d))?"":" empty"}" data-tw="${att(encodeURIComponent(d))}"></i>`
-    +`${svg("folder",13)} <span class="nm">${esc(d.split("/").pop())}</span><b class="nt-cnt">${cnt(d)||""}</b></div>`;
+    +`${svg("folder",13)} <span class="nm"></span><b class="nt-cnt">${cnt(d)||""}</b></div>`;
    if(open){
     sub.forEach(k=>h+=row(k,depth+1));
     TREE.notes.filter(n=>n.folder===d).forEach(n=>h+=
-     `<div class="nt-dnote${NT_PATH===n.path?" on":""}" data-p="${att(encodeURIComponent(n.path))}" style="padding-left:${34+depth*14}px">${svg("note",12)} <span class="nm">${esc(n.title)}</span></div>`);}
+     `<div class="nt-dnote${NT_PATH===n.path?" on":""}" data-p="${att(encodeURIComponent(n.path))}" style="padding-left:${34+depth*14}px">${svg("note",12)} <span class="nm"></span></div>`);}
    return h;};
   dirs.innerHTML=`<div class="nt-dir${fold===""&&!tag?" on":""}" data-d=""><i class="nt-tw empty"></i>${svg("home",13)} <span class="nm">Все заметки</span><b class="nt-cnt">${TREE.notes.length}</b></div>`
    +kids("").map(d=>row(d,0)).join("");
@@ -6243,9 +6326,14 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
    const d=decodeURIComponent(tw.dataset.tw);EXP.has(d)?EXP.delete(d):EXP.add(d);paintSide();});
   /* data-p is percent-encoded: the i18n innerHTML hook translates Russian
      dictionary phrases anywhere in the markup, including attribute values —
-     a raw path like «Новая заметка 2.md» would arrive as "New note 2.md" */
-  dirs.querySelectorAll(".nt-dnote").forEach(el2=>el2.onclick=()=>openNote(decodeURIComponent(el2.dataset.p)));
+     a raw path like «Новая заметка 2.md» would arrive as "New note 2.md".
+     Names are filled via textContent for the same reason. */
+  dirs.querySelectorAll(".nt-dnote").forEach(el2=>{
+   const p2=decodeURIComponent(el2.dataset.p),n2=TREE.notes.find(n=>n.path===p2);
+   el2.querySelector(".nm").textContent=n2?n2.title:p2.split("/").pop().replace(/\.md$/,"");
+   el2.onclick=()=>openNote(p2);});
   dirs.querySelectorAll(".nt-dir").forEach(el2=>{
+   if(el2.dataset.d)el2.querySelector(".nm").textContent=decodeURIComponent(el2.dataset.d).split("/").pop();
    el2.onclick=()=>{fold=decodeURIComponent(el2.dataset.d);tag=null;qstr="";q("#ntQ").value="";if(fold)EXP.add(fold);paintSide();paintList();};
    /* drag a note onto a folder to move it */
    el2.ondragover=e=>{e.preventDefault();el2.classList.add("drop");};
@@ -6258,8 +6346,10 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
     const r=await api("/api/notes/move",{method:"POST",body:JSON.stringify({path:src,to})});
     if(r&&r.ok){if(NT_PATH===src)NT_PATH=to;refresh();}else toast("Ошибка: "+((r&&r.log)||r&&r.error||"не перенести"));};});
   const tl=tagsAll();
-  q("#ntTags").innerHTML=tl.length?tl.map(([t,n])=>`<span class="nt-tag${tag===t?" on":""}" data-t="${att(encodeURIComponent(t))}">#${esc(t)} <i>${n}</i></span>`).join(""):`<span class="nt-mut">пока нет</span>`;
-  q("#ntTags").querySelectorAll(".nt-tag").forEach(el2=>el2.onclick=()=>{const t=decodeURIComponent(el2.dataset.t);tag=tag===t?null:t;paintSide();paintList();});};
+  q("#ntTags").innerHTML=tl.length?tl.map(([t,n])=>`<span class="nt-tag${tag===t?" on":""}" data-t="${att(encodeURIComponent(t))}"><span class="t"></span> <i>${n}</i></span>`).join(""):`<span class="nt-mut">пока нет</span>`;
+  q("#ntTags").querySelectorAll(".nt-tag").forEach(el2=>{const t=decodeURIComponent(el2.dataset.t);
+   el2.querySelector(".t").textContent="#"+t;
+   el2.onclick=()=>{tag=tag===t?null:t;paintSide();paintList();};});};
  const fmtD=t=>{const d=new Date(t*1000),n=new Date();return d.toDateString()===n.toDateString()?d.toTimeString().slice(0,5):d.toLocaleDateString();};
  const paintList=async()=>{
   let items;
@@ -6267,13 +6357,21 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
   else{items=TREE.notes.filter(n=>tag?n.tags.includes(tag):(fold===""?true:n.folder===fold));}
   items=items.slice().sort((a,b)=>(b.pinned?1:0)-(a.pinned?1:0)||b.mtime-a.mtime);
   const l=q("#ntList");
-  const where=qstr?("Поиск: "+qstr):tag?("#"+tag):(fold||"Все заметки");
-  l.innerHTML=`<div class="nt-lhead">${esc(where)}<span>${items.length}</span></div>`
+  l.innerHTML=`<div class="nt-lhead"><span class="w"></span><span>${items.length}</span></div>`
    +(items.length?items.map(n=>`<div class="nt-item${NT_PATH===n.path?" on":""}" data-p="${att(encodeURIComponent(n.path))}" draggable="true">
-    <b>${n.pinned?svg("star",11)+" ":""}${esc(n.title)}</b>
-    ${(n.snip||n.prev)?`<span class="nt-snip">${esc(n.snip||n.prev)}</span>`:""}
-    <span class="nt-meta">${n.tags.slice(0,3).map(t=>`<i>#${esc(t)}</i>`).join("")}<span>${fmtD(n.mtime)}</span></span>
+    <b>${n.pinned?svg("star",11)+" ":""}<span class="t"></span></b>
+    ${(n.snip||n.prev)?`<span class="nt-snip"></span>`:""}
+    <span class="nt-meta">${n.tags.slice(0,3).map(()=>`<i></i>`).join("")}<span>${fmtD(n.mtime)}</span></span>
    </div>`).join(""):`<div class="nt-mut" style="padding:18px">пусто</div>`);
+  /* user strings (titles, previews, tags, folder name) go in via textContent
+     AFTER innerHTML — the i18n hook must not translate note data (it used to
+     turn «Новая заметка» into "New note" in the list while the editor showed
+     the real title) */
+  l.querySelector(".nt-lhead .w").textContent=qstr?(nasTr("Поиск: ")+qstr):tag?("#"+tag):(fold||nasTr("Все заметки"));
+  l.querySelectorAll(".nt-item").forEach((el2,i)=>{const n=items[i];
+   el2.querySelector(".t").textContent=n.title;
+   const sn=el2.querySelector(".nt-snip");if(sn)sn.textContent=n.snip||n.prev;
+   el2.querySelectorAll(".nt-meta i").forEach((ti,k)=>ti.textContent="#"+n.tags[k]);});
   l.querySelectorAll(".nt-item").forEach(el2=>{
    el2.onclick=()=>openNote(decodeURIComponent(el2.dataset.p));
    el2.ondragstart=e=>e.dataTransfer.setData("text/plain",decodeURIComponent(el2.dataset.p));
@@ -6316,7 +6414,7 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
   try{localStorage.setItem("nasNotesLast",p);}catch(e){}
   const ed=q("#ntEdit");
   ed.innerHTML=`
-   <div class="nt-crumb">${p.includes("/")?esc(p.slice(0,p.lastIndexOf("/")).split("/").join(" / "))+" /":"&nbsp;"}</div>
+   <div class="nt-crumb">&nbsp;</div>
    <div class="nt-head">
     <input id="ntTitle" placeholder="Заголовок">
     <span id="ntSt" class="nt-mut"></span>
@@ -6328,24 +6426,32 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
    <div class="nt-tagrow" id="ntTagRow"></div>
    <div class="nt-tb" id="ntTb"></div>
    <div class="nt-ed" id="ntEd"></div>`;
-  /* set as a property, not via markup: the i18n innerHTML hook would translate
+  /* set as properties, not via markup: the i18n innerHTML hook would translate
      a value= attribute and the autosave would then persist the translated title */
+  if(p.includes("/"))ed.querySelector(".nt-crumb").textContent=p.slice(0,p.lastIndexOf("/")).split("/").join(" / ")+" /";
   ed.querySelector("#ntTitle").value=r.title;
   ed.querySelector("#ntTitle").oninput=schedSave;
   NT_TAGS=(r.tags||[]).slice();
-  const paintTags=()=>{const row=ed.querySelector("#ntTagRow");if(!row)return;
-   row.innerHTML=NT_TAGS.map((t,i)=>`<span class="nt-chip">#${esc(t)}<i data-i="${i}">×</i></span>`).join("")
+  const paintTags=focus=>{const row=ed.querySelector("#ntTagRow");if(!row)return;
+   row.innerHTML=NT_TAGS.map((t,i)=>`<span class="nt-chip"><span class="t"></span><i data-i="${i}">×</i></span>`).join("")
     +`<input id="ntTagAdd" placeholder="${NT_TAGS.length?"":"добавить тег…"}">`;
-   row.querySelectorAll(".nt-chip i").forEach(x=>x.onclick=()=>{NT_TAGS.splice(+x.dataset.i,1);paintTags();schedSave();});
+   /* tag text via textContent: user data must never pass the i18n dictionary */
+   row.querySelectorAll(".nt-chip .t").forEach((x,i)=>x.textContent="#"+NT_TAGS[i]);
+   row.querySelectorAll(".nt-chip i").forEach(x=>x.onclick=()=>{NT_TAGS.splice(+x.dataset.i,1);paintTags(true);schedSave();});
    const inp=row.querySelector("#ntTagAdd");
+   const commit=()=>{const v=inp.value.trim().replace(/^#/,"").replace(/,+$/,"");
+    if(!v){inp.value="";return;}
+    const i=NT_TAGS.indexOf(v);
+    if(i>=0){inp.value="";  // duplicate: flash the existing chip instead of adding
+     const ch=row.querySelectorAll(".nt-chip")[i];
+     if(ch){ch.classList.add("dup");setTimeout(()=>ch.classList.remove("dup"),700);}return;}
+    inp.onblur=null;   // re-render below would fire a ghost blur commit
+    NT_TAGS.push(v);paintTags(true);schedSave();};
    inp.onkeydown=ev=>{
-    if(ev.key==="Enter"||ev.key===","){ev.preventDefault();
-     const v=inp.value.trim().replace(/^#/,"").replace(/,+$/,"");
-     if(v&&!NT_TAGS.includes(v)){NT_TAGS.push(v);paintTags();schedSave();
-      const ni=ed.querySelector("#ntTagAdd");if(ni)ni.focus();}
-     else inp.value="";}
-    else if(ev.key==="Backspace"&&!inp.value&&NT_TAGS.length){NT_TAGS.pop();paintTags();schedSave();
-     const ni=ed.querySelector("#ntTagAdd");if(ni)ni.focus();}};};
+    if(ev.key==="Enter"||ev.key===","){ev.preventDefault();commit();}
+    else if(ev.key==="Backspace"&&!inp.value&&NT_TAGS.length){inp.onblur=null;NT_TAGS.pop();paintTags(true);schedSave();}};
+   inp.onblur=()=>{if(inp.value.trim())commit();};
+   if(focus)inp.focus();};
   paintTags();
   NT_PIN=!!r.pinned;
   ed.querySelector("#ntPin").onclick=()=>{NT_PIN=!NT_PIN;ed.querySelector("#ntPin").classList.toggle("nt-pin-on",NT_PIN);schedSave();};
@@ -6368,7 +6474,6 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
   if(NT_ED){try{NT_ED.destroy();}catch(e){}NT_ED=null;}
   const folder=p.includes("/")?p.slice(0,p.lastIndexOf("/")):"";
   const dark=ntDark();
-  body.dataset.theme=dark?"dark":"light";
   const box=ed.querySelector("#ntEd");
   box.style.setProperty("--nt-font",(SET.ntFont||15)+"px");
   const plugins=(window.toastui&&toastui.Editor.plugin&&toastui.Editor.plugin.codeSyntaxHighlight)?[toastui.Editor.plugin.codeSyntaxHighlight]:[];
@@ -6391,6 +6496,7 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
   setTimeout(()=>ntApplyImgs(box),80);
   }catch(err){box.innerHTML=`<div class="nt-empty">Редактор не запустился: ${esc(err&&err.message||err)}</div>`;console.error(err);return;}
   ntImgWire(box);
+  ntLangWire(box);
   ntToolbar(ed);
   /* image interactions: click = select + resize handle, right click = menu,
      double click = full-size lightbox */
@@ -6493,15 +6599,16 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
   s.querySelector("#ntFOk").onclick=ok;
   inp.onkeydown=ev=>{if(ev.key==="Enter")ok();};
   s.querySelector("#ntFX").onclick=()=>s.classList.remove("show");};
- const ntDark=()=>SET.ntTheme==="dark"?true:SET.ntTheme==="light"?false:!isLight();
- /* the tokens live on .nt-root[data-theme=...] — class AND attribute must be
-    on this very element, otherwise no token applies at all */
+ const ntDark=()=>ntThemeMode()==="dark";
  body.classList.add("nt-root");
- body.dataset.theme=ntDark()?"dark":"light";
+ /* the window element carries the tokens too, so the title bar strip can be
+    painted from the same palette (it used to stay window-glass dark) */
+ const winEl=body.closest(".win");if(winEl)winEl.classList.add("nt-root","nt-win");
+ ntApplyTheme(body);
  const paintThemeB=()=>{const b=q("#ntThemeB");if(b)b.innerHTML=svg(ntDark()?"sun":"moon",15);};
  q("#ntThemeB").onclick=()=>{SET.ntTheme=ntDark()?"light":"dark";saveSettings();paintThemeB();
-  body.dataset.theme=ntDark()?"dark":"light";
-  if(NT_PATH)openNote(NT_PATH);};
+  ntApplyTheme(body);
+  if(NT_PATH)openNote(NT_PATH);};   // editor needs its theme option re-applied
  paintThemeB();
  q("#ntTrash").onclick=()=>ntTrash(refresh);
  q("#ntSet").onclick=()=>winSettings("nts");
@@ -6517,8 +6624,7 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
 /* quick note from the menu bar: dropped into the «Входящие» folder */
 function qnotePop(){const b=document.getElementById("qnoteBtn");
  mbPop(b,box=>{
-  const dk=SET.ntTheme==="dark"?"dark":SET.ntTheme==="light"?"light":(!isLight()?"dark":"light");
-  box.innerHTML=`<div class="nt-root qn" data-theme="${dk}">
+  box.innerHTML=`<div class="nt-root qn" data-theme="${ntThemeMode()}">
    <div class="qn-h">${svg("note",15)} Быстрая заметка<span class="qn-hint">→ «Входящие»</span></div>
    <textarea id="qnT" rows="5" placeholder="Мысль, ссылка, список…"></textarea>
    <div class="qn-f"><button class="btn sm" id="qnOpen">Открыть заметки</button><button class="btn sm pri" id="qnSave">Сохранить</button></div></div>`;

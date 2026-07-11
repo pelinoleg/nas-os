@@ -25,97 +25,39 @@
 
 ## 2. Цветовые токены
 
-Задаются один раз. Компоненты используют **только** семантические имена
-(`--surface`, `--text`, `--accent`), а не сырые hex.
+**Notes владеет двумя палитрами** — светлая = тёплая «бумага», тёмная =
+**нейтральный** тёмный (никакой зелёной/цветной мути в фонах). **Акцент —
+один изумруд в обеих темах**: это характер приложения, он НЕ наследует
+системный акцент ОС. От системы наследуются только форма (слайдер радиуса
+`--r-sm/--r-lg`) и шкала теней. Компоненты используют **только**
+семантические имена (`--surface`, `--text`, `--accent`).
 
 ```css
-:root {
-  /* ---------- LIGHT (default) ---------- */
-  /* surfaces: от «дальнего» фона к «ближнему» */
-  --bg:            #F7F6F3;  /* фон окна */
-  --surface:       #FFFFFF;  /* карточки, редактор */
-  --surface-2:     #F0EFEA;  /* сайдбар, hover-фон */
-  --surface-inset: #ECEBE6;  /* code block, поля ввода */
+/* LIGHT (default, на .nt-root) — тёплая бумага */
+--bg: #F7F6F3;  --surface: #FFFFFF;  --surface-2: #F0EFEA;  --surface-inset: #ECEBE6;
+--text: #1C1B1A;  --text-muted: #6B6A66;  --text-faint: #A3A29E;
+--border: #E4E2DD;  --border-strong: #D2CFC8;
+--accent: #1F9E6E;  --accent-hover: #178A5F;  --accent-soft: #E3F3EC;  --on-accent: #FFF;
+--success: #1F9E6E;  --warning: #C98A1B;  --danger: #C0473B;
+--callout-bg: #FBF3D9;  --callout-border: #F0E2AE;
 
-  /* text */
-  --text:          #1C1B1A;  /* основной */
-  --text-muted:    #6B6A66;  /* вторичный, meta */
-  --text-faint:    #A3A29E;  /* плейсхолдеры, disabled */
+/* DARK (.nt-root[data-theme="dark"]) — нейтральные стены, тот же изумруд */
+--bg: #191918;  --surface: #212120;  --surface-2: #292928;  --surface-inset: #171716;
+--text: #E8E8E6;  --text-muted: #9B9B97;  --text-faint: #6E6E6A;
+--border: #2E2E2C;  --border-strong: #3A3A37;
+--accent: #3FC48C;  --accent-hover: #55D19C;  --accent-soft: #223129;  --on-accent: #0C130F;
+--success: #3FC48C;  --warning: #E0B25A;  --danger: #E27B6E;
+--callout-bg: #2A2A18;  --callout-border: #4A4522;  --checkbox-border: #4A4A46;
 
-  /* lines */
-  --border:        #E4E2DD;
-  --border-strong: #D2CFC8;
-
-  /* accent (emerald) */
-  --accent:        #1F9E6E;
-  --accent-hover:  #178A5F;
-  --accent-soft:   #E3F3EC;  /* фон под accent-элементами */
-  --on-accent:     #FFFFFF;  /* текст/иконка на accent */
-
-  /* states */
-  --success: #1F9E6E;
-  --warning: #C98A1B;
-  --danger:  #C0473B;
-
-  /* callout (жёлтый блок как в референсе) */
-  --callout-bg:     #FBF3D9;
-  --callout-border: #F0E2AE;
-
-  /* controls */
-  --checkbox-border: var(--border-strong);  /* рамка пустого чекбокса */
-
-  /* ---------- shape ---------- */
-  --radius-sm: 8px;
-  --radius-lg: 14px;
-
-  /* ---------- spacing (шкала, ничего вне неё) ---------- */
-  --sp-1: 4px;
-  --sp-2: 8px;
-  --sp-3: 12px;
-  --sp-4: 16px;
-  --sp-5: 24px;
-  --sp-6: 32px;
-  --sp-7: 48px;
-
-  /* ---------- shadow (2 уровня, не больше) ---------- */
-  --shadow-1: 0 1px 2px rgba(0,0,0,.04), 0 1px 3px rgba(0,0,0,.06);
-  --shadow-2: 0 4px 12px rgba(0,0,0,.08), 0 2px 4px rgba(0,0,0,.04);
-}
-
-/* ---------- DARK ---------- */
-[data-theme="dark"] {
-  --bg:            #14201B;  /* тёмно-зелёный, как Emerald тема */
-  --surface:       #1B2A23;  /* редактор — НЕ белый! */
-  --surface-2:     #16241D;
-  --surface-inset: #101B16;
-
-  --text:          #E8EAE7;
-  --text-muted:    #9BAAA2;
-  --text-faint:    #667069;
-
-  --border:        #26362E;
-  --border-strong: #33453B;
-
-  --accent:        #3FC48C;
-  --accent-hover:  #55D19C;
-  --accent-soft:   #1E3A2D;
-  --on-accent:     #0C130F;
-
-  --success: #3FC48C;
-  --warning: #E0B25A;
-  --danger:  #E27B6E;
-
-  --callout-bg:     #2A2A18;
-  --callout-border: #4A4522;
-
-  --checkbox-border: #4E6B5C;  /* заметно ярче surface — иначе квадрат тонет */
-
-  --shadow-1: 0 1px 2px rgba(0,0,0,.3), 0 1px 3px rgba(0,0,0,.35);
-  --shadow-2: 0 4px 14px rgba(0,0,0,.4), 0 2px 6px rgba(0,0,0,.3);
-}
+/* форма и spacing (общие) */
+--radius-sm: var(--r-sm);  --radius-lg: var(--r-lg);   /* системный слайдер */
+--sp-1..--sp-7: 4 8 12 16 24 32 48px;
 ```
 
----
+Режимы («Тема заметок»: как панель / светлая / тёмная): auto следует теме
+панели, light/dark — принудительно. Верхняя полоса окна (`.win.nt-win .wbar`)
+и нижняя плашка Markdown/WYSIWYG красятся из той же палитры — хром окна
+следует теме заметок, не остаётся тёмным в светлой.
 
 ## 3. Типографика
 
@@ -194,8 +136,18 @@
 
 - Токены объявлены в `web/desktop.html` в скоупе `.nt-root` (корневой элемент окна
   Заметок) — контракт распространяется на всё внутри окна и на /notes (solo).
-- Тема: атрибут `data-theme` на `.nt-root`; настройка «Тема заметок»
-  (как панель / светлая / тёмная) резолвится в light/dark и ставит атрибут.
+- Из системы наследуются только `--r-sm/--r-lg` (слайдер радиуса) — остальные
+  значения палитр локальные (см. §2).
+- Тема: `ntApplyTheme()` всегда ставит `data-theme` (light|dark) на `.nt-root`
+  И зеркалит его на `.win` (класс `nt-win`) — так красится полоса заголовка.
+- Правила для тост-редактора обязаны иметь префикс `.nt-root .nt-ed …`:
+  vendor-CSS (`tui-editor-dark.css`) грузится ПОСЛЕ инлайн-стилей и селекторы
+  `.toastui-editor-dark …` (0,2,0) перебивают правила без префикса.
 - Редактор Toast UI получает `theme:"dark"` при тёмной теме (нужен светлый спрайт
   иконок), всё остальное красится токенами.
+- Плавающие поповеры внутри Notes (список языков код-блока) — на `--surface-2`
+  с рамкой `--border` и тенью `--shadow-2`.
+- Пользовательские данные (заголовки, теги, пути, превью) рендерятся ТОЛЬКО через
+  `textContent` / `.value` / percent-encoded data-атрибуты: i18n-хук переводит весь
+  innerHTML, включая атрибуты, и словарные фразы («Новая заметка») искажаются.
 - Размер текста заметки: настройка `SET.ntFont` (дефолт = `--fs-body` 16px).
