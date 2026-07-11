@@ -7310,7 +7310,10 @@ def _fsw_run(deep=False):
         man = {}
         for path, size, mtime, hsh, ver in db.execute("SELECT * FROM files"):
             man[path] = (size, mtime, hsh, ver)
-        baseline = not man and _fsw_meta(db, "baseline") != "1"
+        # the flag is set only after a COMPLETE scan: a restart mid-baseline
+        # resumes as baseline (already-hashed files are skipped by mtime/size)
+        # instead of flooding the journal with "add" events
+        baseline = _fsw_meta(db, "baseline") != "1"
         def under(p, root):
             return p == root or p.startswith(root + "/")
         # unmounted disk / detached mergerfs branch: root missing or suddenly
@@ -7545,13 +7548,20 @@ def fsw_accept():
 
 def fsw_status():
     cfg = fsw_load()
-    n = sz = fresh = 0
+    n = sz = fresh = nev = 0
     oldest = None
     last = pend = None
+    dbsz = 0
+    for suf in ("", "-wal"):
+        try:
+            dbsz += os.path.getsize(FSW_DB + suf)
+        except OSError:
+            pass
     try:
         db = _fsw_db()
         try:
             n, sz = db.execute("SELECT COUNT(*), COALESCE(SUM(size),0) FROM files").fetchone()
+            nev = db.execute("SELECT COUNT(*) FROM events").fetchone()[0]
             last = json.loads(_fsw_meta(db, "last") or "null")
             p = _fsw_meta(db, "pending")
             pend = json.loads(p) if p else None
@@ -7566,37 +7576,109 @@ def fsw_status():
         prog = dict(_fsw)
     return {"ok": True, "config": cfg, "files": n, "size": sz, "last": last,
             "pending": pend, "oldest_verify": oldest, "verified_fresh": fresh,
-            "progress": prog}
+            "events": nev, "db_size": dbsz, "progress": prog}
 
-def fsw_events(before=0, limit=100, kind="", q=""):
+def _fsw_day_range(day):
+    """'YYYY-MM-DD' -> (t0, t1) local-time epoch bounds, or None."""
     try:
-        before = int(before or 0)
-    except (ValueError, TypeError):
-        before = 0
+        t0 = int(time.mktime(time.strptime(day, "%Y-%m-%d")))
+        return t0, t0 + 86400
+    except (ValueError, OverflowError):
+        return None
+
+def fsw_events(before=0, limit=100, kind="", q="", day="", ts=0, group=False):
+    def _i(v):
+        try:
+            return int(v or 0)
+        except (ValueError, TypeError):
+            return 0
+    before, ts, limit = _i(before), _i(ts), max(1, min(500, _i(limit) or 100))
+    # scope conditions (q/day) are shared by the feed, the per-kind counters
+    # and the group view; kind/pagination narrow the feed only
+    scope, sargs = [], []
+    if q:
+        scope.append("(path LIKE ? OR dst LIKE ?)")
+        sargs += ["%" + q + "%"] * 2
+    if day:
+        dr = _fsw_day_range(day)
+        if dr:
+            scope.append("ts>=? AND ts<?"); sargs += list(dr)
     try:
         db = _fsw_db()
         try:
-            sql, args = "SELECT id,ts,kind,path,dst,size,info FROM events", []
-            conds = []
-            if before:
-                conds.append("id<?"); args.append(int(before))
+            counts = dict(db.execute(
+                "SELECT kind, COUNT(*) FROM events" +
+                (" WHERE " + " AND ".join(scope) if scope else "") +
+                " GROUP BY kind", sargs).fetchall())
+            conds, args = list(scope), list(sargs)
             if kind:
                 conds.append("kind=?"); args.append(kind)
-            if q:
-                conds.append("(path LIKE ? OR dst LIKE ?)")
-                args += ["%" + q + "%"] * 2
-            if conds:
-                sql += " WHERE " + " AND ".join(conds)
-            sql += " ORDER BY id DESC LIMIT ?"
-            args.append(max(1, min(500, int(limit or 100))))
-            rows = db.execute(sql, args).fetchall()
+            if ts:
+                conds.append("ts=?"); args.append(ts)
+            if group:
+                # one group per (scan ts, kind): up to 5 sample rows + totals;
+                # pagination by ts (before = ts of the previous page's tail)
+                if before:
+                    conds.append("ts<?"); args.append(before)
+                sql = ("SELECT id,ts,kind,path,dst,size,info,cnt,tot FROM ("
+                       "SELECT id,ts,kind,path,dst,size,info,"
+                       " ROW_NUMBER() OVER (PARTITION BY ts,kind ORDER BY id) rn,"
+                       " COUNT(*) OVER (PARTITION BY ts,kind) cnt,"
+                       " SUM(COALESCE(size,0)) OVER (PARTITION BY ts,kind) tot"
+                       " FROM events" +
+                       (" WHERE " + " AND ".join(conds) if conds else "") +
+                       ") WHERE rn<=5 ORDER BY ts DESC, kind, id LIMIT 300")
+                rows = db.execute(sql, args).fetchall()
+                full = len(rows) == 300
+                groups, order = {}, []
+                for (i, t, k, p, d, s, inf, cnt, tot) in rows:
+                    key = (t, k)
+                    if key not in groups:
+                        groups[key] = {"ts": t, "kind": k, "n": cnt, "size": tot,
+                                       "items": []}
+                        order.append(key)
+                    groups[key]["items"].append(
+                        {"id": i, "ts": t, "kind": k, "path": p, "dst": d,
+                         "size": s, "info": inf})
+                if full and order:
+                    tail = order[-1][0]          # ts may be cut mid-batch
+                    order = [k for k in order if k[0] != tail] or order
+                nxt = order[-1][0] if (full and order) else None
+                return {"ok": True, "groups": [groups[k] for k in order],
+                        "counts": counts, "next": nxt}
+            if before:
+                conds.append("id<?"); args.append(before)
+            sql = ("SELECT id,ts,kind,path,dst,size,info FROM events" +
+                   (" WHERE " + " AND ".join(conds) if conds else "") +
+                   " ORDER BY id DESC LIMIT ?")
+            rows = db.execute(sql, args + [limit]).fetchall()
         finally:
             db.close()
     except Exception as e:
         return {"ok": False, "log": str(e)[:200]}
-    return {"ok": True, "events": [
-        {"id": i, "ts": ts, "kind": k, "path": p, "dst": d, "size": s, "info": inf}
-        for (i, ts, k, p, d, s, inf) in rows]}
+    return {"ok": True, "counts": counts, "events": [
+        {"id": i, "ts": t, "kind": k, "path": p, "dst": d, "size": s, "info": inf}
+        for (i, t, k, p, d, s, inf) in rows]}
+
+def fsw_clear(mode):
+    """mode='events' wipes the history journal; 'all' drops the whole index
+    (files + events + meta) so the next scan starts a fresh baseline."""
+    if _fsw.get("status") in ("scan", "verify"):
+        return {"ok": False, "log": "скан уже идёт"}
+    try:
+        db = _fsw_db()
+        try:
+            db.execute("DELETE FROM events")
+            if mode == "all":
+                db.execute("DELETE FROM files")
+                db.execute("DELETE FROM meta")
+            db.commit()
+            db.execute("VACUUM")
+        finally:
+            db.close()
+    except Exception as e:
+        return {"ok": False, "log": str(e)[:200]}
+    return {"ok": True}
 
 _fsw_auto_day = ""
 def _fsw_tick():
@@ -10188,7 +10270,10 @@ class H(BaseHTTPRequestHandler):
                 self._json(fsw_events((q.get("before") or ["0"])[0],
                                       (q.get("limit") or ["100"])[0],
                                       (q.get("kind") or [""])[0],
-                                      (q.get("q") or [""])[0]))
+                                      (q.get("q") or [""])[0],
+                                      (q.get("day") or [""])[0],
+                                      (q.get("ts") or ["0"])[0],
+                                      (q.get("group") or [""])[0] == "1"))
             elif p == "/api/fs/duscan/status":
                 self._json(duscan_status((q.get("root") or ["/"])[0]))
             elif p == "/api/fs/duscan/node":
@@ -10382,6 +10467,8 @@ class H(BaseHTTPRequestHandler):
                 self._json(fsw_cancel())
             elif p == "/api/fsw/accept":
                 self._json(fsw_accept())
+            elif p == "/api/fsw/clear":
+                self._json(fsw_clear(self._body().get("mode") or "events"))
             elif p == "/api/fsw/config":
                 self._json(fsw_save(self._body()))
             elif p == "/api/fs/duscan/start":

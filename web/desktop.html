@@ -1213,6 +1213,18 @@
   .fsw-rootrow{display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:12px;padding:3px 0}
   .fsw-rootrow span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .fsw .nbmain{min-height:0}
+  .fsw-bar .seg button{display:inline-flex;align-items:center;gap:5px}
+  .fsw-cnt{font-size:9.5px;font-weight:700;padding:1px 6px;border-radius:999px;background:var(--sel);color:var(--dim)}
+  .fsw-cnt.add{background:var(--good-soft);color:var(--good)}
+  .fsw-cnt.del{background:var(--danger-soft);color:var(--danger)}
+  .fsw-cnt.mod{background:var(--warn-soft);color:var(--warn)}
+  .fsw-cnt.move{background:var(--accent-soft);color:var(--accent)}
+  .fsw-cnt.corrupt{background:var(--danger);color:#fff}
+  .fsw-grph{cursor:pointer}
+  .fsw-grph .fsw-fn{font-weight:700}
+  .fsw-chev{flex:none;display:flex;color:var(--mut);transition:transform .15s}
+  .fsw-grp.open .fsw-chev{transform:rotate(90deg)}
+  .fsw-grpb{margin:0 0 4px 14px;padding-left:8px;border-left:2px solid var(--line)}
   .fsw .set-pane.fsw-flex{display:flex;flex-direction:column;gap:10px;overflow:hidden}
   .fsw textarea{font-size:12px;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-sm);
     background:var(--card);color:var(--text)}
@@ -2318,6 +2330,7 @@ const AP={
  termc:'<rect x=".8" y=".8" width="22.4" height="22.4" rx="7.4" fill="#232C3B"/><path fill="#FFFFFF" opacity=".07" d="M.8 8.2A7.4 7.4 0 0 1 8.2.8h7.6a7.4 7.4 0 0 1 7.4 7.4Z"/><circle cx="5.4" cy="4.9" r=".85" fill="#FF5F57"/><circle cx="8.1" cy="4.9" r=".85" fill="#FEBC2E"/><circle cx="10.8" cy="4.9" r=".85" fill="#28C840"/><path fill="#E9EFF7" d="M5.6 11.6a1.25 1.25 0 0 1 1.77 0l2.6 2.6a1.25 1.25 0 0 1 0 1.77l-2.6 2.6a1.25 1.25 0 1 1-1.77-1.77l1.72-1.72-1.72-1.72a1.25 1.25 0 0 1 0-1.76Z"/><rect x="11.6" y="16.7" width="6.2" height="2.1" rx="1.05" fill="#35C9C0"/>',
  folderc:'<path fill="#D98E1F" d="M1.4 6.1a2.7 2.7 0 0 1 2.7-2.7h5.3a2.3 2.3 0 0 1 1.9.95l1.65 2.25h7a2.7 2.7 0 0 1 2.7 2.7v9.4a2.7 2.7 0 0 1-2.7 2.7H4.1a2.7 2.7 0 0 1-2.7-2.7V6.1Z"/><path fill="#FFC24B" d="M4.3 8.7h15.4a2.5 2.5 0 0 1 2.5 2.5v7.3a2.7 2.7 0 0 1-2.7 2.7H4.5a2.7 2.7 0 0 1-2.7-2.7v-7.3a2.5 2.5 0 0 1 2.5-2.5Z"/><path fill="#FFFFFF" opacity=".22" d="M4.3 8.7h15.4a2.5 2.5 0 0 1 2.5 2.5v.55a2.5 2.5 0 0 0-2.5-2.5H4.3a2.5 2.5 0 0 0-2.5 2.5v-.55a2.5 2.5 0 0 1 2.5-2.5Z"/>',
  notec:'<path fill="#F5C351" d="M3 4.6A2.6 2.6 0 0 1 5.6 2h12.8A2.6 2.6 0 0 1 21 4.6v9.9L14.5 21H5.6A2.6 2.6 0 0 1 3 18.4V4.6Z"/><path fill="#E3A93C" d="M21 14.5 14.5 21v-4.4a2.1 2.1 0 0 1 2.1-2.1H21Z"/><path fill="#8A6D1F" opacity=".55" d="M6.6 7.2h10.8v1.5H6.6zM6.6 10.6h10.8v1.5H6.6zM6.6 14h5.4v1.5H6.6z"/>',
+ histf:'<path fill="#DCD6FF" d="M12 2.2c2.2 1.6 4.9 2.6 7.4 2.7.5 0 .9.4.9.9v6.6c0 4.7-3.3 7.3-7.9 9.3a1 1 0 0 1-.8 0c-4.6-2-7.9-4.6-7.9-9.3V5.8c0-.5.4-.9.9-.9 2.5-.1 5.2-1.1 7.4-2.7Z"/><circle cx="12" cy="11.4" r="4.8" fill="#5847D6" opacity=".28"/><path fill="#3A2B9E" d="M12 7.9a.9.9 0 0 1 .9.9v2.3l1.7 1.55a.9.9 0 1 1-1.2 1.33l-2-1.8a.9.9 0 0 1-.3-.67V8.8a.9.9 0 0 1 .9-.9Z"/>',
  donut:'<path fill="#2FA36F" d="M10.06 0.97A11.2 11.2 0 0 1 22.52 15.83L19.14 14.60A7.6 7.6 0 0 0 10.68 4.52Z"/><path fill="#46B98A" d="M22.07 16.91A11.2 11.2 0 0 1 3.42 19.20L6.18 16.89A7.6 7.6 0 0 0 18.83 15.33Z"/><path fill="#8FDCBC" d="M2.71 18.26A11.2 11.2 0 0 1 11.22 0.83L11.47 4.42A7.6 7.6 0 0 0 5.70 16.25Z"/><path fill="#1F7D78" d="M10.82 5.30A6.8 6.8 0 0 1 16.37 17.21L14.06 14.45A3.2 3.2 0 0 0 11.44 8.85Z"/><path fill="#33BE86" d="M15.80 17.64A6.8 6.8 0 1 1 11.53 5.22L11.78 8.81A3.2 3.2 0 1 0 13.79 14.65Z"/>',
  backup:'<circle cx="12" cy="12" r="8.4" fill="#EAF6EF"/><rect x="11.55" y="4.9" width="0.9" height="1.7" rx=".45" fill="#9AD1B4" transform="rotate(0 12 12)"/><rect x="11.55" y="4.9" width="0.9" height="1.7" rx=".45" fill="#9AD1B4" transform="rotate(30 12 12)"/><rect x="11.55" y="4.9" width="0.9" height="1.7" rx=".45" fill="#9AD1B4" transform="rotate(60 12 12)"/><rect x="11.55" y="4.9" width="0.9" height="1.7" rx=".45" fill="#9AD1B4" transform="rotate(90 12 12)"/><rect x="11.55" y="4.9" width="0.9" height="1.7" rx=".45" fill="#9AD1B4" transform="rotate(120 12 12)"/><rect x="11.55" y="4.9" width="0.9" height="1.7" rx=".45" fill="#9AD1B4" transform="rotate(150 12 12)"/><rect x="11.55" y="4.9" width="0.9" height="1.7" rx=".45" fill="#9AD1B4" transform="rotate(180 12 12)"/><rect x="11.55" y="4.9" width="0.9" height="1.7" rx=".45" fill="#9AD1B4" transform="rotate(210 12 12)"/><rect x="11.55" y="4.9" width="0.9" height="1.7" rx=".45" fill="#9AD1B4" transform="rotate(240 12 12)"/><rect x="11.55" y="4.9" width="0.9" height="1.7" rx=".45" fill="#9AD1B4" transform="rotate(270 12 12)"/><rect x="11.55" y="4.9" width="0.9" height="1.7" rx=".45" fill="#9AD1B4" transform="rotate(300 12 12)"/><rect x="11.55" y="4.9" width="0.9" height="1.7" rx=".45" fill="#9AD1B4" transform="rotate(330 12 12)"/><path fill="#1E7A50" d="M12 7.4a1 1 0 0 1 1 1V12a1 1 0 0 1-.33.74l-2.3 2.1a1 1 0 1 1-1.34-1.48l1.97-1.8V8.4a1 1 0 0 1 1-1Z"/><circle cx="12" cy="12" r="1.1" fill="#1E7A50"/><path fill="#2E9160" d="M6.55 1.76A11.6 11.6 0 1 1 1.95 17.80L5.25 15.90A7.8 7.8 0 1 0 8.34 5.11ZM-0.30 19.10L2.94 15.48L7.50 14.60Z"/>',
  keyf:'<path fill-rule="evenodd" fill="#E8A33C" d="M8.6 2.4a6.1 6.1 0 1 1 0 12.2 6.1 6.1 0 0 1 0-12.2Zm0 3.4a2.7 2.7 0 1 0 0 5.4 2.7 2.7 0 0 0 0-5.4Z"/><path fill="#D98E1F" d="m12.6 11 2.1-2.1 7.5 7.5a1.4 1.4 0 0 1 0 2l-.8.8a1.4 1.4 0 0 1-2 0l-.8-.8-1.7 1.7-2.1-2.1 1.7-1.7-1.4-1.4-1.6 1.6-2.1-2.1 1.6-1.6-.4-.4Z"/>',
@@ -2947,7 +2960,7 @@ const INTERNAL=[
  {id:"__term",name:"Терминал",color:"linear-gradient(135deg,#2b3444,#1a2230)",ic:"termc",bare:1,fn:()=>winTerminal()},
  {id:"__files",name:"Файлы",color:"linear-gradient(135deg,#FFC24B,#F0A128)",ic:"folderc",bare:1,fn:()=>winFiles()},
  {id:"__duscan",name:"Анализ места",color:"linear-gradient(135deg,#33BE86,#2a9d6e)",ic:"donut",bare:1,fn:()=>winDiskUsage()},
- {id:"__fsw",name:"История файлов",color:"linear-gradient(135deg,#7c6cf2,#5847d6)",ic:"shield",bare:1,fn:()=>winFsHistory()},
+ {id:"__fsw",name:"История файлов",color:"linear-gradient(135deg,#7c6cf2,#5847d6)",ic:"histf",bare:1,fn:()=>winFsHistory()},
  {id:"__nasbak",name:"Бэкап NAS",color:"linear-gradient(135deg,#2f9d70,#1f7d78)",ic:"backup",bare:1,fn:()=>winBackup()},
  {id:"__vault",name:"Доступы",color:"linear-gradient(135deg,#e0913c,#c96f22)",ic:"keyf",bare:1,fn:()=>winVault()},
  {id:"__notes",name:"Заметки",color:"linear-gradient(135deg,#F2C14E,#E09F2F)",ic:"notec",bare:1,fn:()=>winNotes()},
@@ -6172,7 +6185,7 @@ function glSpark(v){if(!v||v.length<2)return "";
 const FSW_KINDS={add:{ic:"plus",t:"добавлен"},del:{ic:"trash",t:"удалён"},mod:{ic:"edit",t:"изменён"},
                  move:{ic:"sync",t:"перемещён"},corrupt:{ic:"warn",t:"повреждён"}};
 function winFsHistory(){openWin("__fsw","История файлов",(body,win)=>{
- let ST=null,KIND="",Q="",lastId=0,qTimer=null,TAB="feed",wasRun=false;
+ let ST=null,KIND="",Q="",DAY="",qTimer=null,TAB="feed",wasRun=false;
  const g=s=>body.querySelector(s);
  const running=()=>ST&&ST.progress&&(ST.progress.status==="scan"||ST.progress.status==="verify");
  const hm=ts=>{const d=new Date(ts*1000);return String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0");};
@@ -6232,33 +6245,73 @@ function winFsHistory(){openWin("__fsw","История файлов",(body,win)
    <div class="fsw-ki ${e.kind}">${svg(k.ic,13)}</div>
    <div class="fsw-nm"><div class="fsw-fn">${esc(nm)}${dl}</div><div class="fsw-fp">${esc(dir)}${extra}</div></div>
    <div class="fsw-sz">${e.size!=null?fmtB(e.size):""}</div><div class="fsw-tm">${hm(e.ts)}</div></div>`;};
+ function paintCounts(c){
+  const bar=g("#fswF");if(!bar||!c)return;
+  const tot=Object.values(c).reduce((a,b)=>a+b,0);
+  bar.querySelectorAll("button").forEach(b=>{
+   const k=b.dataset.k,n=k?(c[k]||0):tot;
+   const old=b.querySelector(".fsw-cnt");if(old)old.remove();
+   if(n)b.insertAdjacentHTML("beforeend",`<i class="fsw-cnt ${k||"all"}">${n>999?"999+":n}</i>`);});
+ }
+ async function loadGrpPage(grp,box,before){
+  const r=await api(`/api/fsw/events?kind=${grp.dataset.kind}&ts=${grp.dataset.ts}&limit=200${before?"&before="+before:""}${Q?"&q="+encodeURIComponent(Q):""}`);
+  const evs=(r&&r.events)||[];
+  if(!before)box.innerHTML="";
+  const mb=box.querySelector(".fsw-more");if(mb)mb.remove();
+  box.insertAdjacentHTML("beforeend",evs.map(rowHTML).join(""));
+  if(evs.length===200){box.insertAdjacentHTML("beforeend",`<button class="btn sm fsw-more">Показать ещё</button>`);
+   box.querySelector(".fsw-more").onclick=()=>loadGrpPage(grp,box,evs[evs.length-1].id);}
+ }
+ const grpHTML=gr=>{
+  if(gr.n<=5)return gr.items.map(rowHTML).join("");
+  const k=FSW_KINDS[gr.kind]||{ic:"file"};
+  const pl={add:"Добавлено",del:"Удалено",mod:"Изменено",move:"Перемещено",corrupt:"Повреждено"}[gr.kind]||gr.kind;
+  const first=gr.items.slice(0,3).map(i=>(i.path||"").split("/").pop()).join(", ");
+  return `<div class="fsw-grp" data-ts="${gr.ts}" data-kind="${gr.kind}">
+   <div class="fsw-row fsw-grph">
+    <div class="fsw-ki ${gr.kind}">${svg(k.ic,13)}</div>
+    <div class="fsw-nm"><div class="fsw-fn">${pl}: ${gr.n} файлов</div><div class="fsw-fp">${esc(first)}…</div></div>
+    <div class="fsw-sz">${fmtB(gr.size)}</div><div class="fsw-tm">${hm(gr.ts)}</div>
+    <span class="fsw-chev">${svg("chev",12)}</span></div>
+   <div class="fsw-grpb" style="display:none"></div></div>`;};
+ let nextTs=null;
  async function loadFeed(reset){
   const feed=g("#fswFeed");if(!feed)return;
-  if(reset){feed.innerHTML="";lastId=0;feed._day="";}
-  const r=await api(`/api/fsw/events?limit=100&kind=${KIND}&q=${encodeURIComponent(Q)}${lastId?"&before="+lastId:""}`);
-  const evs=(r&&r.events)||[];
+  if(reset){feed.innerHTML="";nextTs=null;feed._day="";}
+  const r=await api(`/api/fsw/events?group=1&kind=${KIND}&q=${encodeURIComponent(Q)}&day=${DAY}${nextTs?"&before="+nextTs:""}`);
+  paintCounts(r&&r.counts);
+  const grs=(r&&r.groups)||[];
   const more=feed.querySelector(".fsw-more");if(more)more.remove();
-  if(!evs.length&&!feed.children.length){
-   feed.innerHTML=`<div class="fsw-empty">${svg("shield",34)}<div>${ST&&!ST.last?"Индекс ещё не построен — запусти первое сканирование.":"Событий нет — с файлами ничего не происходило."}</div></div>`;
+  if(!grs.length&&!feed.children.length){
+   feed.innerHTML=`<div class="fsw-empty">${svg("shield",34)}<div>${ST&&!ST.last?"Индекс ещё не построен — запусти первое сканирование.":(DAY?"За этот день событий нет.":"Событий нет — с файлами ничего не происходило.")}</div></div>`;
    return;}
   let html="";
-  for(const e of evs){const dl=dayLbl(e.ts);
+  for(const gr of grs){const dl=dayLbl(gr.ts);
    if(dl!==feed._day){html+=`<div class="fsw-day">${dl}</div>`;feed._day=dl;}
-   html+=rowHTML(e);lastId=e.id;}
+   html+=grpHTML(gr);}
   feed.insertAdjacentHTML("beforeend",html);
-  if(evs.length===100)feed.insertAdjacentHTML("beforeend",`<button class="btn sm fsw-more">Показать ещё</button>`);
-  const mb=feed.querySelector(".fsw-more");if(mb)mb.onclick=()=>loadFeed(false);
+  feed.querySelectorAll(".fsw-grp:not([data-w])").forEach(grp=>{grp.dataset.w=1;
+   const box=grp.querySelector(".fsw-grpb");
+   grp.querySelector(".fsw-grph").onclick=()=>{
+    const open=box.style.display!=="none";
+    box.style.display=open?"none":"";grp.classList.toggle("open",!open);
+    if(!open&&!box._loaded){box._loaded=1;box.innerHTML=`<div class="fsw-fp" style="padding:4px 8px">загрузка…</div>`;loadGrpPage(grp,box,0);}};});
+  if(r&&r.next){nextTs=r.next;
+   feed.insertAdjacentHTML("beforeend",`<button class="btn sm fsw-more">Показать ещё</button>`);
+   feed.querySelector(".fsw-more").onclick=()=>loadFeed(false);}
  }
  /* --- вкладки --- */
  function paneFeed(pane){
   pane.classList.add("fsw-flex");
   pane.innerHTML=`<div class="fsw-bar">
     <div class="seg" id="fswF"><button data-k="">Все</button><button data-k="add">Добавлены</button><button data-k="del">Удалены</button><button data-k="mod">Изменены</button><button data-k="move">Перемещены</button><button data-k="corrupt">Повреждены</button></div>
+    <input type="date" class="fsw-q" id="fswDay" style="flex:none" value="${att(DAY)}" title="Показать события конкретного дня">
     <input class="fsw-q" id="fswQ" placeholder="фильтр по пути…" value="${att(Q)}">
    </div><div class="fsw-feed" id="fswFeed"></div>`;
   pane.querySelectorAll("#fswF button").forEach(b=>{
    b.classList.toggle("on",b.dataset.k===KIND);
    b.onclick=()=>{KIND=b.dataset.k;pane.querySelectorAll("#fswF button").forEach(z=>z.classList.toggle("on",z===b));loadFeed(true);};});
+  g("#fswDay").onchange=e=>{DAY=e.target.value||"";loadFeed(true);};
   g("#fswQ").oninput=e=>{clearTimeout(qTimer);qTimer=setTimeout(()=>{Q=e.target.value.trim();loadFeed(true);},350);};
   loadFeed(true);
  }
@@ -6325,7 +6378,13 @@ function winFsHistory(){openWin("__fsw","История файлов",(body,win)
     <div class="field" style="flex:1;min-width:120px"><label>Guard удалений, %</label><input class="mono" id="fwGp" value="${att(c.guard_pct)}"></div></div>
    <div class="set-sub">Guard: если за один скан пропадает больше этого процента файлов (и не меньше 20 штук), удаления НЕ записываются, а наверху появляется красная плашка — защита от отвалившегося диска и от массового «само удалилось». Порог 0 отключает защиту.</div>
    <div class="set-sub">Пуш-алерты (битрот, массовая пропажа, недоступная папка, много удалений) настраиваются в «Настройки → Уведомления», группа «Защита данных».</div>
-   <div class="set-savebar"><span class="sb-left" id="fwStat2"></span><button class="btn sm pri" id="fwSave2">${svg("save",13)} Сохранить</button></div>`;
+   <div class="set-savebar"><span class="sb-left" id="fwStat2"></span><button class="btn sm pri" id="fwSave2">${svg("save",13)} Сохранить</button></div>
+   <div class="set-h">Данные</div>
+   <div class="set-sub">База: ${fmtB(ST&&ST.db_size)} · событий в журнале: ${(ST&&ST.events)||0} (хранится до 40 000 последних).</div>
+   <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <button class="btn sm" id="fwClrEv">${svg("eraser",13)} Очистить журнал событий</button>
+    <button class="btn sm warn" id="fwClrAll">${svg("trash",13)} Сбросить индекс полностью</button></div>
+   <div class="set-sub">Очистка журнала стирает только историю. Сброс индекса стирает и хэши: следующий скан заново проиндексирует всё (без событий «добавлен») и начнёт новый круг проверки целостности.</div>`;
   g("#fwSave2").onclick=async()=>{
    const r=await api("/api/fsw/config",{method:"POST",body:JSON.stringify({
     enabled:g("#fwEn").checked,time:g("#fwTime").value.trim(),
@@ -6333,6 +6392,15 @@ function winFsHistory(){openWin("__fsw","История файлов",(body,win)
    const st=g("#fwStat2");
    if(r&&r.ok){st.style.color="var(--good)";st.textContent="✓ сохранено";ST=null;refreshPane(true);}
    else{st.style.color="var(--danger)";st.textContent=(r&&r.log)||"не сохранилось";}};
+  // destructive: first click arms the button, second within 4 s fires
+  for(const [id,mode] of [["#fwClrEv","events"],["#fwClrAll","all"]]){
+   const b=g(id),orig=b.innerHTML;
+   b.onclick=async()=>{
+    if(!b._arm){b._arm=1;b.innerHTML=svg("warn",13)+" Точно? Ещё раз";
+     setTimeout(()=>{b._arm=0;b.innerHTML=orig;},4000);return;}
+    b._arm=0;b.innerHTML=orig;
+    const r=await api("/api/fsw/clear",{method:"POST",body:JSON.stringify({mode})});
+    toast(r&&r.ok?"Готово":(r&&r.log)||"не вышло");refreshPane();};}
  }
  const PANES={feed:paneFeed,integ:paneInteg,watch:paneWatch,sched:paneSched};
  function renderPane(){const pane=g("#fswPane");pane.classList.remove("fsw-flex");PANES[TAB](pane);}
