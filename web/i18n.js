@@ -81,6 +81,8 @@ window.NAS_I18N = { en: {
 "Полоска доступности за 24ч внизу экрана (зелёное — онлайн, красное — недоступен)": "24h availability strip at the bottom of the display (green — online, red — was unreachable)",
 "Доступность за 24ч — устройство рисует её внизу сам": "24h availability — the device draws it at the bottom itself",
 "прозрачность": "opacity",
+"Единицы скорости сети": "Network speed units",
+"МБ/с — мегабайты, как показывает копирование файлов. Мбит/с — мегабиты, как считает провайдер. 7 МБ/с = 56 Мбит/с. Влияет на виджет «Сеть», менубар и плитку «Скорость сети» внешнего экрана.": "MB/s — megabytes, like a file copy shows. Mbit/s — megabits, like your ISP counts. 7 MB/s = 56 Mbit/s. Affects the Network widget, the menu bar and the external display's Net speed tile.",
 "Сделать по умолчанию": "Set as default",
 "Новые плитки этого экрана будут получать этот стиль": "New tiles on this screen will get this style",
 "Стиль по умолчанию сохранён": "Default style saved",
