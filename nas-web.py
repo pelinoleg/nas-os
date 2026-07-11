@@ -2158,35 +2158,152 @@ def _note_parse(text):
     tags = [t.strip().lstrip("#") for t in (meta.get("tags") or "").split(",") if t.strip()]
     return meta.get("title") or "", tags, body
 
-def _note_dump(title, tags, body):
-    return "---\ntitle: %s\ntags: %s\nupdated: %s\n---\n%s" % (
+def _note_dump(title, tags, body, pinned=False):
+    return "---\ntitle: %s\ntags: %s\nupdated: %s%s\n---\n%s" % (
         str(title).replace("\n", " "), ", ".join(tags),
-        time.strftime("%Y-%m-%d %H:%M"), body)
+        time.strftime("%Y-%m-%d %H:%M"),
+        "\npinned: 1" if pinned else "", body)
 
 def notes_tree():
     root = notes_root()
     dirs, notes = [], []
+    stats = {"notes": 0, "dirs": 0, "size": 0, "assets": 0, "trash": 0, "history": 0}
     for dp, dn, fn in os.walk(root):
-        dn[:] = sorted(d for d in dn if d != "_assets" and not d.startswith("."))
         rel = os.path.relpath(dp, root)
         rel = "" if rel == "." else rel.replace(os.sep, "/")
+        top = rel.split("/")[0]
+        # service trees are only counted for the stats, not listed
+        if top in (".trash", ".history") or "/_assets" in "/" + rel:
+            key = "trash" if top == ".trash" else ("history" if top == ".history" else "assets")
+            for f in fn:
+                try:
+                    n = os.stat(os.path.join(dp, f)).st_size
+                    stats[key] += n
+                    stats["size"] += n
+                except OSError:
+                    pass
+            continue
+        # keep .trash/.history walkable so their size lands in the stats
+        dn[:] = sorted(d for d in dn if not d.startswith(".") or d in (".trash", ".history"))
         if rel:
             dirs.append(rel)
+            stats["dirs"] += 1
         for f in sorted(fn):
-            if not f.lower().endswith(".md"):
-                continue
             fp = os.path.join(dp, f)
             try:
                 st = os.stat(fp)
+            except OSError:
+                continue
+            stats["size"] += st.st_size
+            if not f.lower().endswith(".md"):
+                continue
+            try:
                 with open(fp, encoding="utf-8", errors="replace") as fh:
                     head = fh.read(2048)
             except OSError:
                 continue
             title, tags, _ = _note_parse(head)
+            stats["notes"] += 1
             notes.append({"path": (rel + "/" if rel else "") + f, "folder": rel,
                           "title": title or f[:-3], "tags": tags,
+                          "pinned": _note_meta(head).get("pinned") == "1",
                           "mtime": int(st.st_mtime), "size": st.st_size})
-    return {"root": root, "dirs": dirs, "notes": notes}
+    return {"root": root, "dirs": dirs, "notes": notes, "stats": stats}
+
+def _note_meta(text):
+    m = _NOTE_FM.match(text)
+    meta = {}
+    if m:
+        for line in m.group(1).splitlines():
+            k, _, v = line.partition(":")
+            meta[k.strip()] = v.strip()
+    return meta
+
+# --- history: .history/<note path>/<date_time>.md, one snapshot per 10 min ---
+_NT_VER = re.compile(r"^\d{4}-\d\d-\d\d_\d\d-\d\d-\d\d\.md$")
+
+def _nt_hist_dir(rel):
+    return os.path.join(notes_root(), ".history", rel.strip("/"))
+
+def _nt_snapshot(rel, force=False):
+    p = _notes_abs(rel)
+    if not os.path.isfile(p):
+        return
+    hd = _nt_hist_dir(rel)
+    snaps = sorted(f for f in os.listdir(hd)) if os.path.isdir(hd) else []
+    if snaps and not force:
+        try:
+            if time.time() - os.path.getmtime(os.path.join(hd, snaps[-1])) < 600:
+                return
+        except OSError:
+            pass
+    os.makedirs(hd, exist_ok=True)
+    dst = os.path.join(hd, time.strftime("%Y-%m-%d_%H-%M-%S") + ".md")
+    shutil.copy2(p, dst)
+    _chown_user(dst)
+    for old in sorted(os.listdir(hd))[:-60]:      # keep the last 60 versions
+        try:
+            os.remove(os.path.join(hd, old))
+        except OSError:
+            pass
+
+def notes_history(rel):
+    hd = _nt_hist_dir(rel)
+    vs = sorted((f for f in os.listdir(hd) if _NT_VER.match(f)), reverse=True) \
+        if os.path.isdir(hd) else []
+    return {"versions": vs}
+
+def notes_hist_get(rel, ver):
+    if not _NT_VER.match(ver or ""):
+        raise ValueError("плохая версия")
+    fp = os.path.join(_nt_hist_dir(rel), ver)
+    if not os.path.isfile(fp):
+        raise ValueError("нет такой версии")
+    with open(fp, encoding="utf-8", errors="replace") as f:
+        title, tags, body = _note_parse(f.read())
+    return {"title": title, "tags": tags, "md": body, "ver": ver}
+
+def notes_restore(rel, ver):
+    v = notes_hist_get(rel, ver)
+    _nt_snapshot(rel, force=True)                 # keep what we are replacing
+    cur = note_get(rel)
+    return note_save(rel, v["title"] or cur["title"], v["tags"], v["md"])
+
+# --- trash: .trash/<YYYY-MM-DD>/<name> ---
+def notes_trash_list():
+    tr = os.path.join(notes_root(), ".trash")
+    out = []
+    if os.path.isdir(tr):
+        for day in sorted(os.listdir(tr), reverse=True):
+            dd = os.path.join(tr, day)
+            if not os.path.isdir(dd):
+                continue
+            for f in sorted(os.listdir(dd)):
+                fp = os.path.join(dd, f)
+                out.append({"path": ".trash/" + day + "/" + f, "name": f, "day": day,
+                            "isdir": os.path.isdir(fp),
+                            "size": os.path.getsize(fp) if os.path.isfile(fp) else 0})
+    return {"items": out}
+
+def notes_trash_restore(rel):
+    src = _notes_abs(rel)
+    parts = rel.strip("/").split("/")
+    if parts[0] != ".trash" or not os.path.exists(src):
+        raise ValueError("это не корзина")
+    name = parts[-1]
+    dst = os.path.join(notes_root(), name)
+    i, stem = 1, os.path.splitext(name)
+    while os.path.exists(dst):
+        i += 1
+        dst = os.path.join(notes_root(), "%s (%d)%s" % (stem[0], i, stem[1]))
+    os.rename(src, dst)
+    return {"ok": True}
+
+def notes_trash_clear():
+    tr = os.path.join(notes_root(), ".trash")
+    if os.path.isdir(tr):
+        shutil.rmtree(tr)
+    return {"ok": True}
 
 def note_get(rel):
     p = _notes_abs(rel)
@@ -2196,21 +2313,23 @@ def note_get(rel):
         text = f.read()
     title, tags, body = _note_parse(text)
     return {"path": rel.strip("/"), "title": title, "tags": tags, "md": body,
+            "pinned": _note_meta(text).get("pinned") == "1",
             "mtime": int(os.stat(p).st_mtime)}
 
 def _note_slug(name):
     name = re.sub(r"[\\/:*?\"<>|\n\r\t]", "", str(name or "").strip())
     return name[:80] or "Заметка"
 
-def note_save(rel, title, tags, md):
+def note_save(rel, title, tags, md, pinned=False):
     p = _notes_abs(rel)
     if not p.lower().endswith(".md"):
         raise ValueError("не .md")
+    _safe(lambda: _nt_snapshot(rel))            # history before overwriting
     os.makedirs(os.path.dirname(p), exist_ok=True)
     tags = [_note_slug(t) for t in (tags or []) if str(t).strip()][:20]
     tmp = p + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
-        f.write(_note_dump(title or "", tags, str(md or "")))
+        f.write(_note_dump(title or "", tags, str(md or ""), pinned))
     os.replace(tmp, p)
     _chown_user(p)
     return {"ok": True, "mtime": int(os.stat(p).st_mtime)}
@@ -2242,15 +2361,27 @@ def note_move(rel, to):
         raise ValueError("такое имя уже занято")
     os.makedirs(os.path.dirname(dst), exist_ok=True)
     os.rename(src, dst)
+    hd = _nt_hist_dir(rel)                      # history follows the note
+    if os.path.isdir(hd):
+        nh = _nt_hist_dir(to)
+        os.makedirs(os.path.dirname(nh), exist_ok=True)
+        if not os.path.exists(nh):
+            os.rename(hd, nh)
     return {"ok": True}
 
 def note_delete(rel):
     p = _notes_abs(rel)
     if not os.path.exists(p):
         raise ValueError("нет такого пути")
-    tr = os.path.join(notes_root(), ".trash")
+    tr = os.path.join(notes_root(), ".trash", time.strftime("%Y-%m-%d"))
     os.makedirs(tr, exist_ok=True)
-    os.rename(p, os.path.join(tr, time.strftime("%Y%m%d-%H%M%S") + "-" + os.path.basename(p)))
+    name, i = os.path.basename(p), 1
+    stem, ext = os.path.splitext(name)
+    dst = os.path.join(tr, name)
+    while os.path.exists(dst):
+        i += 1
+        dst = os.path.join(tr, "%s (%d)%s" % (stem, i, ext))
+    os.rename(p, dst)
     return {"ok": True}
 
 def note_upload(folder, name, data_b64):
@@ -9447,6 +9578,13 @@ class H(BaseHTTPRequestHandler):
                 self._json(note_get((q.get("path") or [""])[0]))
             elif p == "/api/notes/search":
                 self._json(notes_search((q.get("q") or [""])[0]))
+            elif p == "/api/notes/history":
+                self._json(notes_history((q.get("path") or [""])[0]))
+            elif p == "/api/notes/histget":
+                self._json(notes_hist_get((q.get("path") or [""])[0],
+                                          (q.get("v") or [""])[0]))
+            elif p == "/api/notes/trash":
+                self._json(notes_trash_list())
             elif p == "/api/notes/file":
                 fp = _notes_abs((q.get("path") or [""])[0])
                 if os.path.isfile(fp):
@@ -9640,6 +9778,10 @@ class H(BaseHTTPRequestHandler):
                 self._json(engine("state"))
             elif p.startswith("/api/"):
                 self._json({"error": "unknown endpoint"}, 404)
+            elif p in ("/notes", "/notes/"):
+                # standalone notes URL (for a tunnel/reverse proxy): the same
+                # desktop shell, but the client hides everything except notes
+                self._static("/desktop.html")
             else:
                 self._static(p)
         except ValueError as e:
@@ -9684,7 +9826,15 @@ class H(BaseHTTPRequestHandler):
             elif p == "/api/notes/save":
                 b = self._body()
                 self._json(note_save(b.get("path", ""), b.get("title", ""),
-                                     b.get("tags") or [], b.get("md", "")))
+                                     b.get("tags") or [], b.get("md", ""),
+                                     bool(b.get("pinned"))))
+            elif p == "/api/notes/restore":
+                b = self._body()
+                self._json(notes_restore(b.get("path", ""), b.get("v", "")))
+            elif p == "/api/notes/trash/restore":
+                self._json(notes_trash_restore(self._body().get("path", "")))
+            elif p == "/api/notes/trash/clear":
+                self._json(notes_trash_clear())
             elif p == "/api/notes/new":
                 b = self._body()
                 self._json(note_new(b.get("folder", ""), b.get("title", "")))

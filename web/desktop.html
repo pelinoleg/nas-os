@@ -1665,6 +1665,18 @@
   .nt-ed .toastui-editor-defaultUI{border-color:var(--line)}
   .nt-ed .toastui-editor-contents{font-size:var(--nt-font,15px)}
   .nt-ed .toastui-editor-contents img{cursor:pointer;border-radius:6px;max-width:100%}
+  /* /notes standalone: only the notes window, fullscreen, no shell */
+  body.nt-solo .menubar,body.nt-solo .dock,body.nt-solo .desk,body.nt-solo .phone-nav{display:none!important}
+  body.nt-solo .win{inset:0 0 0 0!important;width:auto!important;height:auto!important;border-radius:0!important;max-width:100%}
+  body.nt-solo .win .wbar .lights{display:none}
+  body.nt-solo .win .wgrip,body.nt-solo .win>.rz{display:none!important}
+  .nt-hlist{display:flex;flex-direction:column;gap:3px;overflow:auto;max-height:340px;min-width:180px}
+  .nt-hv{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;cursor:pointer;font-size:12.5px}
+  .nt-hv:hover{background:var(--sel)}
+  .nt-hv.on{background:var(--sel);color:var(--accent);box-shadow:var(--sh-sm)}
+  .nt-hprev{flex:1;overflow:auto;max-height:340px;font-size:12px;background:var(--glass);border:1px solid var(--line);border-radius:10px;padding:10px;white-space:pre-wrap}
+  .nt-pin-on{color:#E5A50A!important}
+  .nt-item b svg{color:#E5A50A;vertical-align:-1px}
   .nt-lb{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;cursor:zoom-out}
   .nt-lb img{max-width:94vw;max-height:92vh;border-radius:10px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
   @media(max-width:1024px){
@@ -1872,6 +1884,7 @@
   <span class="mb-sep"></span>
   <div class="tray" id="tray"></div>
   <span class="mb-sep"></span>
+  <button class="mb-theme mbi" id="qnoteBtn" title="Быстрая заметка"></button>
   <button class="mb-theme mbi" id="healthBtn" title="Здоровье системы"></button>
   <button class="mb-theme mbi" id="opsBtn" title="Операции"></button>
   <button class="mb-theme mbi" id="bellBtn" title="Уведомления"></button>
@@ -1908,6 +1921,8 @@ const P={
  edit:'<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
  x:'<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
  home:'<path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/>',
+ star:'<path d="M11.5 2.6a.55.55 0 0 1 1 0l2.5 5.1 5.6.8a.55.55 0 0 1 .3.94l-4 3.95 1 5.6a.55.55 0 0 1-.8.58L12 16.9l-5 2.66a.55.55 0 0 1-.8-.58l1-5.6-4-3.94a.55.55 0 0 1 .3-.95l5.6-.8Z"/>',
+ clip:'<path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/>',
  plus:'<path d="M12 5v14"/><path d="M5 12h14"/>',
  expand:'<path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/>',
  shrink:'<path d="M4 14h6v6"/><path d="M20 10h-6V4"/><path d="m14 10 7-7"/><path d="m3 21 7-7"/>',
@@ -1986,6 +2001,7 @@ const AP={
  clockf:'<circle cx="12" cy="12" r="10.6" fill="#5A67E8"/><circle cx="12" cy="12" r="8.2" fill="#EEF0FF"/><path fill="#39429C" d="M12 6.5a1.1 1.1 0 0 1 1.1 1.1v4l2.8 1.7a1.1 1.1 0 1 1-1.1 1.9l-3.4-2a1.1 1.1 0 0 1-.5-1V7.6A1.1 1.1 0 0 1 12 6.5Z"/>',
  termc:'<rect x=".8" y=".8" width="22.4" height="22.4" rx="7.4" fill="#232C3B"/><path fill="#FFFFFF" opacity=".07" d="M.8 8.2A7.4 7.4 0 0 1 8.2.8h7.6a7.4 7.4 0 0 1 7.4 7.4Z"/><circle cx="5.4" cy="4.9" r=".85" fill="#FF5F57"/><circle cx="8.1" cy="4.9" r=".85" fill="#FEBC2E"/><circle cx="10.8" cy="4.9" r=".85" fill="#28C840"/><path fill="#E9EFF7" d="M5.6 11.6a1.25 1.25 0 0 1 1.77 0l2.6 2.6a1.25 1.25 0 0 1 0 1.77l-2.6 2.6a1.25 1.25 0 1 1-1.77-1.77l1.72-1.72-1.72-1.72a1.25 1.25 0 0 1 0-1.76Z"/><rect x="11.6" y="16.7" width="6.2" height="2.1" rx="1.05" fill="#35C9C0"/>',
  folderc:'<path fill="#D98E1F" d="M1.4 6.1a2.7 2.7 0 0 1 2.7-2.7h5.3a2.3 2.3 0 0 1 1.9.95l1.65 2.25h7a2.7 2.7 0 0 1 2.7 2.7v9.4a2.7 2.7 0 0 1-2.7 2.7H4.1a2.7 2.7 0 0 1-2.7-2.7V6.1Z"/><path fill="#FFC24B" d="M4.3 8.7h15.4a2.5 2.5 0 0 1 2.5 2.5v7.3a2.7 2.7 0 0 1-2.7 2.7H4.5a2.7 2.7 0 0 1-2.7-2.7v-7.3a2.5 2.5 0 0 1 2.5-2.5Z"/><path fill="#FFFFFF" opacity=".22" d="M4.3 8.7h15.4a2.5 2.5 0 0 1 2.5 2.5v.55a2.5 2.5 0 0 0-2.5-2.5H4.3a2.5 2.5 0 0 0-2.5 2.5v-.55a2.5 2.5 0 0 1 2.5-2.5Z"/>',
+ notec:'<path fill="#F5C351" d="M3 4.6A2.6 2.6 0 0 1 5.6 2h12.8A2.6 2.6 0 0 1 21 4.6v9.9L14.5 21H5.6A2.6 2.6 0 0 1 3 18.4V4.6Z"/><path fill="#E3A93C" d="M21 14.5 14.5 21v-4.4a2.1 2.1 0 0 1 2.1-2.1H21Z"/><path fill="#8A6D1F" opacity=".55" d="M6.6 7.2h10.8v1.5H6.6zM6.6 10.6h10.8v1.5H6.6zM6.6 14h5.4v1.5H6.6z"/>',
  donut:'<path fill="#2FA36F" d="M10.06 0.97A11.2 11.2 0 0 1 22.52 15.83L19.14 14.60A7.6 7.6 0 0 0 10.68 4.52Z"/><path fill="#46B98A" d="M22.07 16.91A11.2 11.2 0 0 1 3.42 19.20L6.18 16.89A7.6 7.6 0 0 0 18.83 15.33Z"/><path fill="#8FDCBC" d="M2.71 18.26A11.2 11.2 0 0 1 11.22 0.83L11.47 4.42A7.6 7.6 0 0 0 5.70 16.25Z"/><path fill="#1F7D78" d="M10.82 5.30A6.8 6.8 0 0 1 16.37 17.21L14.06 14.45A3.2 3.2 0 0 0 11.44 8.85Z"/><path fill="#33BE86" d="M15.80 17.64A6.8 6.8 0 1 1 11.53 5.22L11.78 8.81A3.2 3.2 0 1 0 13.79 14.65Z"/>',
  backup:'<circle cx="12" cy="12" r="8.4" fill="#EAF6EF"/><rect x="11.55" y="4.9" width="0.9" height="1.7" rx=".45" fill="#9AD1B4" transform="rotate(0 12 12)"/><rect x="11.55" y="4.9" width="0.9" height="1.7" rx=".45" fill="#9AD1B4" transform="rotate(30 12 12)"/><rect x="11.55" y="4.9" width="0.9" height="1.7" rx=".45" fill="#9AD1B4" transform="rotate(60 12 12)"/><rect x="11.55" y="4.9" width="0.9" height="1.7" rx=".45" fill="#9AD1B4" transform="rotate(90 12 12)"/><rect x="11.55" y="4.9" width="0.9" height="1.7" rx=".45" fill="#9AD1B4" transform="rotate(120 12 12)"/><rect x="11.55" y="4.9" width="0.9" height="1.7" rx=".45" fill="#9AD1B4" transform="rotate(150 12 12)"/><rect x="11.55" y="4.9" width="0.9" height="1.7" rx=".45" fill="#9AD1B4" transform="rotate(180 12 12)"/><rect x="11.55" y="4.9" width="0.9" height="1.7" rx=".45" fill="#9AD1B4" transform="rotate(210 12 12)"/><rect x="11.55" y="4.9" width="0.9" height="1.7" rx=".45" fill="#9AD1B4" transform="rotate(240 12 12)"/><rect x="11.55" y="4.9" width="0.9" height="1.7" rx=".45" fill="#9AD1B4" transform="rotate(270 12 12)"/><rect x="11.55" y="4.9" width="0.9" height="1.7" rx=".45" fill="#9AD1B4" transform="rotate(300 12 12)"/><rect x="11.55" y="4.9" width="0.9" height="1.7" rx=".45" fill="#9AD1B4" transform="rotate(330 12 12)"/><path fill="#1E7A50" d="M12 7.4a1 1 0 0 1 1 1V12a1 1 0 0 1-.33.74l-2.3 2.1a1 1 0 1 1-1.34-1.48l1.97-1.8V8.4a1 1 0 0 1 1-1Z"/><circle cx="12" cy="12" r="1.1" fill="#1E7A50"/><path fill="#2E9160" d="M6.55 1.76A11.6 11.6 0 1 1 1.95 17.80L5.25 15.90A7.8 7.8 0 1 0 8.34 5.11ZM-0.30 19.10L2.94 15.48L7.50 14.60Z"/>',
  keyf:'<path fill-rule="evenodd" fill="#E8A33C" d="M8.6 2.4a6.1 6.1 0 1 1 0 12.2 6.1 6.1 0 0 1 0-12.2Zm0 3.4a2.7 2.7 0 1 0 0 5.4 2.7 2.7 0 0 0 0-5.4Z"/><path fill="#D98E1F" d="m12.6 11 2.1-2.1 7.5 7.5a1.4 1.4 0 0 1 0 2l-.8.8a1.4 1.4 0 0 1-2 0l-.8-.8-1.7 1.7-2.1-2.1 1.7-1.7-1.4-1.4-1.6 1.6-2.1-2.1 1.6-1.6-.4-.4Z"/>',
@@ -2617,6 +2633,7 @@ const INTERNAL=[
  {id:"__duscan",name:"Анализ места",color:"linear-gradient(135deg,#33BE86,#2a9d6e)",ic:"donut",bare:1,fn:()=>winDiskUsage()},
  {id:"__nasbak",name:"Бэкап NAS",color:"linear-gradient(135deg,#2f9d70,#1f7d78)",ic:"backup",bare:1,fn:()=>winBackup()},
  {id:"__vault",name:"Доступы",color:"linear-gradient(135deg,#e0913c,#c96f22)",ic:"keyf",bare:1,fn:()=>winVault()},
+ {id:"__notes",name:"Заметки",color:"linear-gradient(135deg,#F2C14E,#E09F2F)",ic:"notec",bare:1,fn:()=>winNotes()},
  {id:"__trash",name:"Корзина",color:"linear-gradient(135deg,#8592a6,#5f6b7d)",ic:"trashf",bare:1,fn:()=>winTrash()},
  {id:"__set",name:"Настройки",color:"linear-gradient(135deg,#7183a0,#55647d)",ic:"gearf",bare:1,fn:()=>winSettings()},
  {id:"__wiz",name:"Мастер",color:"linear-gradient(135deg,#46B98A,#2f9d70)",ic:"wandf",bare:1,fn:()=>location.href="/setup.html"},
@@ -5873,13 +5890,24 @@ async function notesTab(tc){
  tc.innerHTML=`
   <div class="set-title">Заметки</div>
   <div class="set-sub">Заметки — обычные markdown-файлы в папке: их видно по SMB, в файловом менеджере, они попадают в бэкапы и открываются любым редактором.</div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Отдельный адрес</div><div class="srow-d">только окно заметок, без рабочего стола — удобно выносить наружу (Pangolin и т.п.)</div><div class="srow-d mono" style="user-select:all">http://${location.host}/notes</div></div><div class="srow-c"><button class="btn sm" id="ntsSolo">Открыть</button></div></div>
   <div class="set-h">Хранение</div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Папка заметок</div><div class="srow-d mono">${esc(root)}</div></div><div class="srow-c"><button class="btn sm" id="ntsPick">Выбрать…</button></div></div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Перенос</div><div class="srow-d">существующие заметки переедут в новую папку целиком</div></div><div class="srow-c"><input class="mono" id="ntsRoot" style="width:230px" value="${att(root)}"><button class="btn sm pri" id="ntsMove">Перенести</button></div></div>
+  <div class="set-h">Статистика</div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Заметок / папок</div></div><div class="srow-c mono" id="ntsN">—</div></div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Занято вместе с файлами</div><div class="srow-d" id="ntsBk">—</div></div><div class="srow-c mono" id="ntsSz">—</div></div>
   <div class="set-h">Редактор</div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Тема заметок</div><div class="srow-d">своя тема редактора, независимо от темы панели</div></div><div class="srow-c"><div class="seg" id="ntsTheme">${[["auto","Как панель"],["light","Светлая"],["dark","Тёмная"]].map(([v,l])=>`<button data-v="${v}" class="${(SET.ntTheme||"auto")===v?"on":""}">${l}</button>`).join("")}</div></div></div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Режим по умолчанию</div><div class="srow-d">визуальный или markdown-исходник (переключается и в самом редакторе)</div></div><div class="srow-c"><div class="seg" id="ntsMode"><button data-m="wysiwyg" class="${(SET.ntMode||"wysiwyg")==="wysiwyg"?"on":""}">Визуальный</button><button data-m="markdown" class="${SET.ntMode==="markdown"?"on":""}">Markdown</button></div></div></div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Размер текста</div><div class="srow-d">базовый размер шрифта заметки, px</div></div><div class="srow-c"><div class="seg" id="ntsFont">${[13,14,15,16,18].map(v=>`<button data-v="${v}" class="${(SET.ntFont||15)===v?"on":""}">${v}</button>`).join("")}</div></div></div>`;
+ const st=(tr&&tr.stats)||{};
+ tc.querySelector("#ntsN").textContent=(st.notes||0)+" / "+(st.dirs||0);
+ tc.querySelector("#ntsSz").textContent=fmtB(st.size||0);
+ tc.querySelector("#ntsBk").textContent="картинки и файлы "+fmtB(st.assets||0)+" · история "+fmtB(st.history||0)+" · корзина "+fmtB(st.trash||0);
+ tc.querySelectorAll("#ntsTheme button").forEach(b=>b.onclick=()=>{SET.ntTheme=b.dataset.v;saveSettings();tc.querySelectorAll("#ntsTheme button").forEach(x=>x.classList.toggle("on",x===b));});
  tc.querySelector("#ntsPick").onclick=()=>pickFolder({title:"Папка для заметок",start:root||"/mnt/storage",onPick:p=>{tc.querySelector("#ntsRoot").value=p;}});
+ tc.querySelector("#ntsSolo").onclick=()=>window.open("/notes","_blank");
  tc.querySelector("#ntsMove").onclick=async()=>{
   const to=tc.querySelector("#ntsRoot").value.trim();if(!to)return;
   const r=await api("/api/notes/root",{method:"POST",body:JSON.stringify({root:to})});
@@ -5889,6 +5917,8 @@ async function notesTab(tc){
   const ed=document.querySelector("#ntEd");if(ed)ed.style.setProperty("--nt-font",SET.ntFont+"px");});
 }
 /* ===================== Notes app ===================== */
+const NOTES_SOLO=location.pathname.replace(/\/$/,"")==="/notes";
+
 /* Plain .md files on the pool (see nas-web.py notes module). Editor = vendored
    Toast UI (dual WYSIWYG/Markdown) + code highlight plugin, loaded lazily. */
 let NT_LIBS=null;
@@ -5900,7 +5930,7 @@ function loadNotesLibs(){
  NT_LIBS=js("/tui-editor.js").then(()=>Promise.all([js("/tui-hl.js"),js("/tui-editor-ru.js")]));
  return NT_LIBS;
 }
-let NT_ED=null,NT_PATH=null,NT_SAVE_T=null,NT_DIRTY=false;
+let NT_ED=null,NT_PATH=null,NT_SAVE_T=null,NT_DIRTY=false,NT_PIN=false;
 function winNotes(){openWin("__notes","Заметки",async body=>{
  body.style.padding="0";body.style.display="flex";
  if(isPhone())body.style.cssText+="flex-direction:column;overflow:auto";
@@ -5913,6 +5943,7 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
    <input id="ntQ" placeholder="Поиск…">
    <div class="nt-cap">Папки</div><div id="ntDirs"></div>
    <div class="nt-cap">Теги</div><div id="ntTags"></div>
+   <div style="margin-top:auto"><div class="nt-dir" id="ntTrash">${svg("trash",13)} Корзина</div></div>
   </div>
   <div class="nt-list" id="ntList"></div>
   <div class="nt-edit" id="ntEdit"><div class="nt-empty">Выберите заметку или создайте новую</div></div>`;
@@ -5944,10 +5975,10 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
   let items;
   if(qstr){const r=await api("/api/notes/search?q="+encodeURIComponent(qstr));items=(r&&r.hits)||[];}
   else{items=TREE.notes.filter(n=>tag?n.tags.includes(tag):(fold===""?true:n.folder===fold));}
-  items=items.slice().sort((a,b)=>b.mtime-a.mtime);
+  items=items.slice().sort((a,b)=>(b.pinned?1:0)-(a.pinned?1:0)||b.mtime-a.mtime);
   const l=q("#ntList");
   l.innerHTML=items.length?items.map(n=>`<div class="nt-item${NT_PATH===n.path?" on":""}" data-p="${att(n.path)}" draggable="true">
-    <b>${esc(n.title)}</b>
+    <b>${n.pinned?svg("star",11)+" ":""}${esc(n.title)}</b>
     ${n.snip?`<span class="nt-snip">${esc(n.snip)}</span>`:""}
     <span class="nt-meta">${n.tags.map(t=>`<i>#${esc(t)}</i>`).join(" ")}<span>${fmtD(n.mtime)}</span></span>
    </div>`).join(""):`<div class="nt-mut" style="padding:18px">пусто</div>`;
@@ -5959,10 +5990,10 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
   NT_DIRTY=false;clearTimeout(NT_SAVE_T);
   const title=q("#ntTitle")?q("#ntTitle").value.trim():"";
   const tags=(q("#ntTagsIn")?q("#ntTagsIn").value:"").split(",").map(s2=>s2.trim().replace(/^#/,"")).filter(Boolean);
-  const r=await api("/api/notes/save",{method:"POST",body:JSON.stringify({path:NT_PATH,title,tags,md:NT_ED.getMarkdown()})});
+  const r=await api("/api/notes/save",{method:"POST",body:JSON.stringify({path:NT_PATH,title,tags,pinned:NT_PIN,md:NT_ED.getMarkdown()})});
   const st=q("#ntSt");if(st)st.textContent=r&&r.ok?"сохранено "+new Date().toTimeString().slice(0,5):"ошибка сохранения";
   const n=TREE.notes.find(x=>x.path===NT_PATH);
-  if(n){n.title=title||n.title;n.tags=tags;n.mtime=Math.floor(Date.now()/1000);paintSide();paintList();}};
+  if(n){n.title=title||n.title;n.tags=tags;n.pinned=NT_PIN;n.mtime=Math.floor(Date.now()/1000);paintSide();paintList();}};
  const schedSave=()=>{NT_DIRTY=true;clearTimeout(NT_SAVE_T);NT_SAVE_T=setTimeout(saveNow,1200);
   const st=q("#ntSt");if(st)st.textContent="…";};
  const openNote=async p=>{
@@ -5975,18 +6006,35 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
    <div class="nt-head">
     <input id="ntTitle" placeholder="Заголовок" value="${att(r.title)}">
     <span id="ntSt" class="nt-mut"></span>
+    <button class="iconbtn${r.pinned?" nt-pin-on":""}" id="ntPin" title="Закрепить">${svg("star",15)}</button>
+    <button class="iconbtn" id="ntAtt" title="Прикрепить файл">${svg("clip",15)}</button>
+    <button class="iconbtn" id="ntHist" title="История версий">${svg("clock",15)}</button>
     <button class="iconbtn" id="ntDel" title="В корзину">${svg("trash",15)}</button>
    </div>
    <input id="ntTagsIn" placeholder="теги, через, запятую" value="${att(r.tags.join(", "))}">
    <div class="nt-ed" id="ntEd"></div>`;
   ed.querySelector("#ntTitle").oninput=schedSave;
   ed.querySelector("#ntTagsIn").oninput=schedSave;
+  NT_PIN=!!r.pinned;
+  ed.querySelector("#ntPin").onclick=()=>{NT_PIN=!NT_PIN;ed.querySelector("#ntPin").classList.toggle("nt-pin-on",NT_PIN);schedSave();};
+  ed.querySelector("#ntAtt").onclick=()=>{
+   const inp=document.createElement("input");inp.type="file";
+   inp.onchange=async()=>{const f=inp.files&&inp.files[0];if(!f)return;
+    if(f.size>30*1024*1024)return toast("Файл больше 30 МБ");
+    const b64=await new Promise(res=>{const fr=new FileReader();fr.onload=()=>res(fr.result);fr.readAsDataURL(f);});
+    const rr=await api("/api/notes/upload",{method:"POST",body:JSON.stringify({folder,name:f.name,data:b64})});
+    if(!(rr&&rr.ok))return toast("Ошибка загрузки: "+((rr&&rr.error)||"?"));
+    if(/^image\//.test(f.type))NT_ED.insertText("![]("+rr.url+")");
+    else NT_ED.insertText("["+f.name+"]("+rr.url+")");
+    schedSave();};
+   inp.click();};
+  ed.querySelector("#ntHist").onclick=()=>ntHistory(p);
   ed.querySelector("#ntDel").onclick=()=>confirmDlg("Удалить заметку","«"+(r.title||p)+"» уедет в корзину (папка .trash в заметках).",async()=>{
    await api("/api/notes/delete",{method:"POST",body:JSON.stringify({path:p})});
    NT_PATH=null;ed.innerHTML=`<div class="nt-empty">Выберите заметку или создайте новую</div>`;refresh();},true);
   if(NT_ED){try{NT_ED.destroy();}catch(e){}NT_ED=null;}
   const folder=p.includes("/")?p.slice(0,p.lastIndexOf("/")):"";
-  const dark=!isLight();
+  const dark=SET.ntTheme==="dark"?true:SET.ntTheme==="light"?false:!isLight();
   const box=ed.querySelector("#ntEd");
   box.style.setProperty("--nt-font",(SET.ntFont||15)+"px");
   NT_ED=new toastui.Editor({
@@ -6005,6 +6053,17 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
   /* image interactions: click = size menu, double click = full-size lightbox */
   box.addEventListener("click",e=>{const im=e.target.closest("img");if(!im)return;ntImgMenu(e,im);});
   box.addEventListener("dblclick",e=>{const im=e.target.closest("img");if(im)ntLightbox(im.getAttribute("src"));});
+  /* wikilinks: [[Название заметки]] — click opens it (creates when missing) */
+  box.addEventListener("click",async e=>{
+   const txt=(e.target.textContent||"");
+   const m=txt.match(/\[\[([^\[\]]{1,80})\]\]/);
+   if(!m||e.target.closest("img"))return;
+   const name=m[1].trim();
+   const hit=TREE.notes.find(n2=>n2.title===name)||TREE.notes.find(n2=>n2.path.endsWith("/"+name+".md")||n2.path===name+".md");
+   if(hit){openNote(hit.path);return;}
+   confirmDlg("Создать заметку?","Заметки «"+name+"» ещё нет — создать?",async()=>{
+    const rr=await api("/api/notes/new",{method:"POST",body:JSON.stringify({folder:fold,title:name})});
+    if(rr&&rr.ok){await refresh();openNote(rr.path);}});});
   paintList();};
  const ntImgMenu=(e,im)=>{
   const src=im.getAttribute("src")||"";
@@ -6040,12 +6099,76 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
   s.querySelector("#ntFOk").onclick=ok;
   inp.onkeydown=ev=>{if(ev.key==="Enter")ok();};
   s.querySelector("#ntFX").onclick=()=>s.classList.remove("show");};
+ q("#ntTrash").onclick=()=>ntTrash(refresh);
+ winNotes._reopen=p2=>openNote(p2);
  let qT=null;
  q("#ntQ").oninput=()=>{clearTimeout(qT);qT=setTimeout(()=>{qstr=q("#ntQ").value.trim();paintList();},300);};
  await refresh();
  /* save on window close / tab hide */
  const iv=setInterval(()=>{if(!document.contains(body)){clearInterval(iv);flushSave();if(NT_ED){try{NT_ED.destroy();}catch(e){}NT_ED=null;NT_PATH=null;}}},1500);
 },{w:1240,h:780});}
+/* quick note from the menu bar: dropped into the «Входящие» folder */
+function qnotePop(){const b=document.getElementById("qnoteBtn");
+ mbPop(b,box=>{
+  box.innerHTML=`<div style="padding:10px;display:flex;flex-direction:column;gap:8px;width:280px">
+   <b style="font-size:13px">Быстрая заметка</b>
+   <textarea id="qnT" rows="5" placeholder="Мысль, ссылка, список…" style="resize:vertical"></textarea>
+   <div style="display:flex;gap:6px;justify-content:flex-end"><button class="btn sm" id="qnOpen">Открыть заметки</button><button class="btn sm pri" id="qnSave">Сохранить</button></div></div>`;
+  const ta=box.querySelector("#qnT");setTimeout(()=>ta.focus(),40);
+  box.querySelector("#qnOpen").onclick=()=>{document.body.click();winNotes();};
+  box.querySelector("#qnSave").onclick=async()=>{
+   const text=ta.value.trim();if(!text)return;
+   const title=text.split("\n")[0].slice(0,60);
+   const r=await api("/api/notes/new",{method:"POST",body:JSON.stringify({folder:"Входящие",title})});
+   if(r&&r.ok){await api("/api/notes/save",{method:"POST",body:JSON.stringify({path:r.path,title,tags:["входящие"],md:text})});
+    toast("Заметка сохранена во «Входящие»");document.body.click();}
+   else toast("Ошибка: "+((r&&r.error)||"?"));};});}
+/* history dialog: versions by date, preview + restore */
+async function ntHistory(path){
+ const r=await api("/api/notes/history?path="+encodeURIComponent(path));
+ const vs=(r&&r.versions)||[];
+ const sc=document.getElementById("scrim");
+ const fmtV=v=>v.replace(".md","").replace("_"," ").replace(/-(\d\d)-(\d\d)$/," $1:$2");
+ sc.innerHTML=`<div class="dialog" style="max-width:640px;width:92vw"><h3>История версий</h3>
+  ${vs.length?`<div style="display:flex;gap:10px;min-height:260px">
+   <div class="nt-hlist">${vs.map(v=>`<div class="nt-hv" data-v="${att(v)}">${fmtV(v)}</div>`).join("")}</div>
+   <pre class="nt-hprev mono" id="ntHP">выберите версию слева</pre></div>
+  <div class="r"><button class="btn" id="ntHX">Закрыть</button><button class="btn pri" id="ntHR" disabled>Восстановить эту версию</button></div>`
+  :`<p>История пока пуста — она появляется после правок (снимок не чаще раза в 10 минут).</p><div class="r"><button class="btn" id="ntHX">Закрыть</button></div>`}</div>`;
+ sc.classList.add("show");
+ let cur=null;
+ sc.querySelectorAll(".nt-hv").forEach(el2=>el2.onclick=async()=>{
+  sc.querySelectorAll(".nt-hv").forEach(x=>x.classList.toggle("on",x===el2));
+  cur=el2.dataset.v;
+  const g=await api("/api/notes/histget?path="+encodeURIComponent(path)+"&v="+encodeURIComponent(cur));
+  const pr=sc.querySelector("#ntHP");if(pr)pr.textContent=(g&&g.md)||"…";
+  const rb=sc.querySelector("#ntHR");if(rb)rb.disabled=!cur;});
+ sc.querySelector("#ntHX").onclick=()=>sc.classList.remove("show");
+ const rb=sc.querySelector("#ntHR");
+ if(rb)rb.onclick=async()=>{
+  const rr=await api("/api/notes/restore",{method:"POST",body:JSON.stringify({path,v:cur})});
+  sc.classList.remove("show");
+  if(rr&&rr.ok){toast("Версия восстановлена");if(winNotes._reopen)winNotes._reopen(path);}
+  else toast("Ошибка: "+((rr&&rr.error)||"?"));};
+}
+/* trash browser */
+async function ntTrash(refresh){
+ const r=await api("/api/notes/trash");
+ const items=(r&&r.items)||[];
+ const sc=document.getElementById("scrim");
+ sc.innerHTML=`<div class="dialog" style="max-width:560px;width:92vw"><h3>Корзина заметок</h3>
+  ${items.length?`<div class="nt-hlist" style="max-height:300px">${items.map(it=>`<div class="nt-hv"><span style="flex:1;overflow:hidden;text-overflow:ellipsis">${esc(it.name)}</span><span class="nt-mut">${esc(it.day)}</span><button class="btn sm" data-r="${att(it.path)}">Вернуть</button></div>`).join("")}</div>
+   <div class="r"><button class="btn dng" id="ntTC">Очистить корзину</button><button class="btn" id="ntTX">Закрыть</button></div>`
+  :`<p>Корзина пуста.</p><div class="r"><button class="btn" id="ntTX">Закрыть</button></div>`}</div>`;
+ sc.classList.add("show");
+ sc.querySelector("#ntTX").onclick=()=>sc.classList.remove("show");
+ sc.querySelectorAll("[data-r]").forEach(b=>b.onclick=async()=>{
+  const rr=await api("/api/notes/trash/restore",{method:"POST",body:JSON.stringify({path:b.dataset.r})});
+  if(rr&&rr.ok){toast("Возвращено");refresh&&refresh();ntTrash(refresh);}else toast("Ошибка: "+((rr&&rr.error)||"?"));});
+ const tc=sc.querySelector("#ntTC");
+ if(tc)tc.onclick=()=>confirmDlg("Очистить корзину","Удалённые заметки исчезнут безвозвратно.",async()=>{
+  await api("/api/notes/trash/clear",{method:"POST",body:"{}"});ntTrash(refresh);},true);
+}
 function ntLightbox(src){
  if(!src)return;
  const s=document.getElementById("scrim");
@@ -7826,6 +7949,7 @@ function maybeOnboard(){let done=false;try{done=!!SET.onboarded||localStorage.ge
    {label:"Выключить",ic:svg("power",17),act:poweroff,dng:1}]);};}
  const xb=document.getElementById("expoBtn");if(xb){xb.innerHTML=svg("grid",17);xb.onclick=toggleExpo;}
  const hb=document.getElementById("healthBtn");if(hb){paintHealthBtn();hb.onclick=healthPop;}
+ const qn=document.getElementById("qnoteBtn");if(qn){qn.innerHTML=svg("note",16);qn.onclick=qnotePop;}
  const blb=document.getElementById("bellBtn");if(blb){paintBell();blb.onclick=bellPop;}
  const opb=document.getElementById("opsBtn");if(opb)opb.onclick=()=>{OPS.autoOpened=false;opsPop();};
  document.addEventListener("keydown",e=>{if(e.key==="F9"){e.preventDefault();toggleExpo();}else if(e.key==="Escape"&&EXPO){exitExpo();}});
@@ -7838,6 +7962,7 @@ function maybeOnboard(){let done=false;try{done=!!SET.onboarded||localStorage.ge
  if(!snInit){seedSnips();try{localStorage.setItem("nassnipinit","1");}catch(e){}saveSnips();}
  document.querySelectorAll("[title]").forEach(n=>{if(n.title)n.title=nasTr(n.title);});   // статические title из HTML
  renderRail();renderApps();renderDock();renderWinbar();renderPhoneNav();tickClock();
+ if(NOTES_SOLO){document.body.classList.add("nt-solo");winNotes();}
  opsLoad().catch(()=>paintOps(true));      // иконка операций нужна в любом случае
  poll();pollApps();pollDisks();maybeOnboard();
  refreshFmHideBk();
