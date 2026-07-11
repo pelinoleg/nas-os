@@ -137,6 +137,7 @@ window.NAS_I18N = { en: {
 "корзина": "trash",
 "Тема заметок": "Notes theme",
 "Визуальный режим": "Visual mode",
+"поиск языка…": "search language…",
 "Markdown-исходник": "Markdown source",
 "своя тема редактора, независимо от темы панели": "editor theme of its own, independent of the panel theme",
 "светлая — тёплая «бумага»; тёмная и «как панель» — материал системы": "light — warm “paper”; dark and “match panel” — system material",

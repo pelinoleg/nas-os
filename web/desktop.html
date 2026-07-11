@@ -1828,14 +1828,15 @@
    border-radius:var(--radius-lg);box-shadow:var(--shadow-2);padding:var(--sp-1);height:auto;z-index:60;
    animation:ntpop .12s ease}
   @keyframes ntpop{from{opacity:0;transform:scale(.97) translateY(-3px)}}
-  .nt-root .nt-ed .toastui-editor-ww-code-block-language input{background:var(--surface-inset);border:1px solid var(--border);
-   border-radius:var(--radius-sm);height:26px;padding:0 var(--sp-2);font-family:var(--font-mono);font-size:12px;color:var(--text)}
-  .nt-root .nt-ed .toastui-editor-ww-code-block-language input:focus{border-color:var(--accent)}
+  .nt-root .nt-ed .toastui-editor-ww-code-block-language input{background:var(--surface-inset);border:0;
+   border-radius:var(--radius-sm);height:28px;padding:0 var(--sp-2);font-family:var(--font-mono);font-size:12px;color:var(--text)}
+  .nt-root .nt-ed .toastui-editor-ww-code-block-language input::placeholder{color:var(--text-faint)}
+  .nt-root .nt-ed .toastui-editor-ww-code-block-language input:focus{outline:none;box-shadow:inset 0 0 0 1.5px var(--accent)}
   .nt-langs{max-height:240px;overflow-y:auto;margin-top:var(--sp-1);display:flex;flex-direction:column}
   .nt-langs button{display:flex;align-items:center;gap:var(--sp-1);padding:var(--sp-1) var(--sp-2);border:0;background:transparent;
    color:var(--text);font-family:var(--font-mono);font-size:13px;border-radius:var(--radius-sm);cursor:pointer;text-align:left;width:100%}
   .nt-langs button::before{content:"";width:13px;flex:none;color:var(--accent)}
-  .nt-langs button:hover{background:var(--veil)}
+  .nt-langs button:hover,.nt-langs button.sel{background:var(--veil)}
   .nt-langs button.on{background:var(--accent-soft);color:var(--accent)}
   .nt-langs button.on::before{content:"✓"}
   /* ===== Part A polish: every content block, tokens only (2026-07-11) ===== */
@@ -6262,6 +6263,9 @@ function ntLangWire(box){
   if(!sp)box.querySelectorAll(".nt-lang-open").forEach(b=>b.classList.remove("nt-lang-open"));
  }).observe(box,{childList:true,subtree:true});
 }
+/* custom select on top of the vendor mechanics: its <input> stays as the
+   commit path (Enter/blur) AND doubles as the search field; around it — our
+   list with keyboard navigation, check mark and Escape-cancel */
 function ntLangDress(box,sp,anchor){
  const inp=sp.querySelector("input");if(!inp)return;
  /* re-parent into .nt-ed (position:relative) and place absolutely under the
@@ -6269,22 +6273,38 @@ function ntLangDress(box,sp,anchor){
     escaping the window (and ancestor filters break fixed altogether) */
  if(anchor){anchor.classList.add("nt-lang-open");
   box.appendChild(sp);
-  const bb=box.getBoundingClientRect(),ab=anchor.getBoundingClientRect(),W=180;
+  const bb=box.getBoundingClientRect(),ab=anchor.getBoundingClientRect(),W=200;
   sp.style.position="absolute";
   sp.style.left=Math.max(8,Math.min(ab.right-bb.left-10-W,bb.width-W-8))+"px";
-  sp.style.top=Math.max(8,Math.min(ab.top-bb.top+38,bb.height-300))+"px";
+  sp.style.top=Math.max(8,Math.min(ab.top-bb.top+38,bb.height-320))+"px";
   sp.style.width=W+"px";}
- const cur=(inp.value||"text").toLowerCase();
+ const orig=inp.value,cur=(orig||"text").toLowerCase();
+ inp.placeholder=nasTr("поиск языка…");
  const ls=document.createElement("div");ls.className="nt-langs";
- NT_LANGS.forEach(l=>{const b=document.createElement("button");b.type="button";b.textContent=l;
+ const items=NT_LANGS.map(l=>{const b=document.createElement("button");b.type="button";b.textContent=l;
   if(l===cur)b.classList.add("on");
   /* mousedown, not click: keeps focus in the input so vendor blur doesn't fire first */
   b.onmousedown=e=>{e.preventDefault();inp.value=l==="text"?"":l;
    inp.dispatchEvent(new KeyboardEvent("keydown",{key:"Enter",bubbles:true}));};
-  ls.appendChild(b);});
+  ls.appendChild(b);return b;});
  sp.appendChild(ls);
+ const on=ls.querySelector(".on");if(on)setTimeout(()=>on.scrollIntoView({block:"nearest"}),0);
+ setTimeout(()=>inp.select(),30);   // after the vendor focuses it: typing replaces the old value
+ const vis=()=>items.filter(b=>b.style.display!=="none");
+ const setHi=b=>{items.forEach(x=>x.classList.toggle("sel",x===b));if(b)b.scrollIntoView({block:"nearest"});};
+ /* capture phase: runs before the vendor's Enter handler on the same event,
+    so a keyboard-highlighted item lands in input.value just in time */
+ inp.addEventListener("keydown",e=>{
+  const v=vis(),hi=v.find(x=>x.classList.contains("sel"));
+  if(e.key==="ArrowDown"||e.key==="ArrowUp"){e.preventDefault();
+   let i=v.indexOf(hi);i=e.key==="ArrowDown"?Math.min(v.length-1,i+1):Math.max(0,i-1);
+   setHi(v[i]);}
+  else if(e.key==="Enter"&&hi){const l=hi.textContent;inp.value=l==="text"?"":l;}
+  else if(e.key==="Escape"){inp.value=orig;inp.blur();}   // blur commits = cancel with the old value
+ },true);
  inp.addEventListener("input",()=>{const v=inp.value.trim().toLowerCase();
-  ls.querySelectorAll("button").forEach(b=>{b.style.display=!v||b.textContent.includes(v)?"":"none";});});
+  items.forEach(b=>{b.style.display=!v||b.textContent.includes(v)?"":"none";});
+  setHi(v?vis()[0]:null);});
 }
 /* our notes are trusted local content; still strip scripts/handlers but keep
    layout attributes (style/width on img) that the default sanitizer removes */
