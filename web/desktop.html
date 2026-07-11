@@ -1567,6 +1567,7 @@
   .gl-tile b{font-size:15px}
   .gl-lab{color:var(--dim)} .gl-unit{color:var(--dim);font-size:11px}
   .gl-dot{width:9px;height:9px;border-radius:50%;display:inline-block;flex:none}
+  .gl-spark{width:46px;height:18px;flex:none;opacity:.85}
   .gl-avwrap{margin-top:12px}
   .gl-bars{display:flex;gap:1px;height:14px}
   .gl-bars i{flex:1;border-radius:2px;min-width:1px}
@@ -5708,6 +5709,10 @@ let SYSC=null, PENDING_REBOOT=false;
    Config lives server-side (~/nas-config/glance.json): the device polls
    /api/glance with a read-only token and just renders what the server sends,
    so changing tiles here never requires reflashing the device. */
+function sparkSVG(v){if(!v||v.length<2)return "";
+ const mn=Math.min(...v),mx=Math.max(...v),sp=(mx-mn)||1;
+ const pts=v.map((x,i)=>`${(i/(v.length-1)*46).toFixed(1)},${(17-(x-mn)/sp*14).toFixed(1)}`).join(" ");
+ return `<svg class="gl-spark" viewBox="0 0 46 18" preserveAspectRatio="none"><polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="1.5" vector-effect="non-scaling-stroke"/></svg>`;}
 function avBarsHTML(bars,pct,hours){if(!bars||!bars.length)return "";
  const c=v=>v===2?"var(--good)":v===1?"var(--warn)":v===0?"var(--danger)":"var(--track)";
  const span=(hours||24)>=48?`−${Math.round((hours||24)/24)}d`:`−${hours||24}h`;
@@ -5731,7 +5736,7 @@ async function glanceTab(tc){
   <div class="set-sub">Журнал доступности ведёт сторож сети: пингует шлюз и пишет состояние (онлайн / без сети / выключен). Полоски — в виджетах «Доступность · 24h / 30d» и в плитках avail.</div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Интервал проверки</div><div class="srow-d">чаще — точнее полоски, реже — меньше фоновой работы</div></div><div class="srow-c"><div class="seg" id="glPing">${[15,30,60,120].map(v=>`<button data-v="${v}" class="${(cfg.ping_interval||30)===v?"on":""}">${v}с</button>`).join("")}</div></div></div>
   <div class="set-h">Плитки</div>
-  <div class="set-sub">Что и в каком порядке отдаётся на экран. Плитки отсутствующих сервисов (vnstat, MySpeed, WUD…) пропускаются сами.</div>
+  <div class="set-sub">Что и в каком порядке отдаётся на экран. Плитки отсутствующих сервисов (vnstat, MySpeed, WUD…) пропускаются сами. Свои проверки: исполняемый скрипт в <span class="mono">~/nas-config/scripts/glance/</span> — первая строка вывода <span class="mono">ok|warn|danger текст</span> станет плиткой и влияет на общий статус.</div>
   <div id="glList"></div>
   <div class="set-h">Предпросмотр</div>
   <div id="glPrev" class="gl-prev"><div class="set-load">загрузка…</div></div>`;
@@ -5756,12 +5761,13 @@ async function glanceTab(tc){
  paintList();
  const prev=tc.querySelector("#glPrev");
  const paintPrev=async()=>{
-  const g=await api("/api/glance");
+  /* request the panel's language so server-side units/values arrive localized */
+  const g=await api("/api/glance?lang="+(window.NAS_LANG||"ru"));
   if(!g||!g.tiles){prev.innerHTML=`<div class="set-load">нет данных</div>`;return;}
   const dot=s=>`<i class="gl-dot" style="background:var(--${s==="ok"?"good":s==="warn"?"warn":"danger"})"></i>`;
   prev.innerHTML=`<div class="gl-head">${dot(g.status)}<b>${esc(g.host)}</b><span class="mono" style="color:var(--dim);font-size:11px">seq ${g.seq}</span></div>
    ${g.problems&&g.problems.length?`<div class="gl-prob">${g.problems.map(esc).join("<br>")}</div>`:""}
-   <div class="gl-tiles">${g.tiles.map(t=>`<div class="gl-tile">${dot(t.state)}<span class="gl-lab">${esc(t.label)}</span><b>${esc(t.value)}</b><span class="gl-unit">${esc(t.unit||"")}</span></div>`).join("")}</div>
+   <div class="gl-tiles">${g.tiles.map(t=>`<div class="gl-tile">${dot(t.state)}<span class="gl-lab">${esc(t.label)}</span><b>${esc(t.value)}</b><span class="gl-unit">${esc(t.unit||"")}</span>${t.spark?sparkSVG(t.spark):""}</div>`).join("")}</div>
    ${avBarsHTML(g.avail&&g.avail.bars,g.avail&&g.avail.pct24)}`;
  };
  paintPrev();

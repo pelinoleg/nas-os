@@ -76,6 +76,22 @@ void drawGlance(JsonDocument& doc) {
     tft.drawString(val, x + 18, ty + 30, 4);
     tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
     tft.drawString(unit, x + 22 + tft.textWidth(val, 4), ty + 34, 2);
+    // optional 24h sparkline in the tile's top-right corner
+    JsonArray sp = t["spark"];
+    int m = sp.size();
+    if (m >= 2) {
+      const int sw = 42, sh = 14, sx = x + colW - sw - 4, sy = ty + 6;
+      float mn = 1e30, mx = -1e30;
+      for (int k = 0; k < m; k++) { float v = sp[k].as<float>(); if (v < mn) mn = v; if (v > mx) mx = v; }
+      float span = (mx - mn) > 0 ? (mx - mn) : 1;
+      int px = -1, py = -1;
+      for (int k = 0; k < m; k++) {
+        int gx = sx + k * (sw - 1) / (m - 1);
+        int gy = sy + sh - 1 - (int)((sp[k].as<float>() - mn) / span * (sh - 1));
+        if (px >= 0) tft.drawLine(px, py, gx, gy, TFT_DARKGREY);
+        px = gx; py = gy;
+      }
+    }
     i++;
   }
 

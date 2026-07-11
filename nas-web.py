@@ -1445,6 +1445,7 @@ AVAIL_LOG = "/var/lib/nas-wizard/avail.log"   # written by nas-netguard.sh
 GLANCE_TILES = [
     ("pool",     "Пул",              "Pool"),
     ("backup",   "Бэкап (общий)",    "Backup (all)"),
+    ("nbnext",   "Следующий бэкап",  "Next backup"),
     ("avail",    "Доступность · 24h", "Uptime 24h"),
     ("avail30",  "Доступность · 30d", "Uptime 30d"),
     ("cputemp",  "Температура CPU",  "CPU temp"),
@@ -1468,7 +1469,8 @@ GLANCE_TILES = [
 GLANCE_DEF_TILES = ["pool", "backup", "avail", "cputemp", "net", "docker"]
 
 def glance_catalog():
-    """Static tiles + one dynamic tile per backup profile (named like its tab)."""
+    """Static tiles + one per backup profile (named like its tab) + one per
+    user check script in ~/nas-config/scripts/glance/."""
     cat = []
     for t in GLANCE_TILES:
         cat.append(t)
@@ -1476,7 +1478,97 @@ def glance_catalog():
             for pr in _safe(nb_profiles, []) or []:
                 nm = pr.get("name") or pr["id"]
                 cat.append(("nb:" + pr["id"], "Бэкап · " + nm, "Backup · " + nm))
+    for s in _glance_scripts():
+        cat.append((s["id"], s["name"], s["name"]))
     return cat
+
+# User check scripts: any executable in ~/nas-config/scripts/glance/ becomes a
+# tile. First stdout line: "ok|warn|danger <short text>"; otherwise the exit
+# code decides (0=ok, 1=warn, else danger). Refreshed in a background thread so
+# a slow script can never stall the glance response.
+GLANCE_SCRIPTS_DIR = os.path.join(NAS_CONFIG, "scripts", "glance")
+_SC_CACHE = {"t": 0, "busy": False, "data": []}
+
+def _sc_refresh():
+    out = []
+    try:
+        names = sorted(os.listdir(GLANCE_SCRIPTS_DIR))
+    except OSError:
+        names = []
+    for n in names:
+        fp = os.path.join(GLANCE_SCRIPTS_DIR, n)
+        if not (os.path.isfile(fp) and os.access(fp, os.X_OK)):
+            continue
+        st, txt = "danger", ""
+        try:
+            r = subprocess.run([fp], capture_output=True, text=True, timeout=10)
+            lines = (r.stdout or "").strip().splitlines()
+            line = lines[0].strip() if lines else ""
+            w = line.split(None, 1)
+            if w and w[0].lower() in ("ok", "warn", "danger"):
+                st = w[0].lower()
+                txt = w[1] if len(w) > 1 else ""
+            else:
+                st = {0: "ok", 1: "warn"}.get(r.returncode, "danger")
+                txt = line
+        except subprocess.TimeoutExpired:
+            st, txt = "warn", "таймаут"
+        except OSError as e:
+            st, txt = "danger", str(e)
+        out.append({"id": "sc:" + n, "name": os.path.splitext(n)[0],
+                    "state": st, "text": txt[:60]})
+    _SC_CACHE["data"] = out
+    _SC_CACHE["t"] = time.time()
+    _SC_CACHE["busy"] = False
+
+def _glance_scripts():
+    if time.time() - _SC_CACHE["t"] >= 60 and not _SC_CACHE["busy"]:
+        _SC_CACHE["busy"] = True
+        threading.Thread(target=_sc_refresh, daemon=True).start()
+    return _SC_CACHE["data"]
+
+def _nb_next_run(cfg):
+    """Next scheduled run (epoch) for a backup profile, None if not scheduled."""
+    s = (cfg or {}).get("schedule") or {}
+    if not s.get("enabled") or not s.get("time"):
+        return None
+    try:
+        hh, mm = map(int, str(s["time"]).split(":"))
+    except ValueError:
+        return None
+    now = time.localtime()
+    base = time.mktime((now.tm_year, now.tm_mon, now.tm_mday, hh, mm, 0, 0, 0, -1))
+    dows = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    for d in range(8):
+        t = base + d * 86400
+        if t <= time.time():
+            continue
+        if s.get("freq") == "weekly" and dows[time.localtime(t).tm_wday] != s.get("dow", "Sun"):
+            continue
+        return t
+    return None
+
+# tile id -> history.json field for the 24h sparkline ("net" = rx+tx)
+GLANCE_SPARKS = {"cputemp": "temp", "cpu": "cpu", "ram": "mem",
+                 "netspeed": "net", "pool": "pool"}
+
+def _gl_spark(field, points=48):
+    h = history_snapshot("24h").get("history") or []
+    if len(h) < 4:
+        return None
+    if field == "net":
+        raw = [(p.get("rx") or 0) + (p.get("tx") or 0) for p in h]
+    else:
+        raw = [p.get(field) or 0 for p in h]
+    n = len(raw)
+    out = []
+    for i in range(points):
+        a = i * n // points
+        b = max(a + 1, (i + 1) * n // points)
+        seg = raw[a:b]
+        v = sum(seg) / len(seg)
+        out.append(int(v) if v >= 100 else round(v, 1))
+    return out
 
 def load_glance():
     d = _json_load_strict(GLANCE_FILE, {})
@@ -1645,6 +1737,22 @@ def _glance_tile(tid, en):
         return _gl_backup_tile(max((_nb_last_ok(pr["id"]) for pr in nb_profiles()), default=0), en)
     if tid.startswith("nb:"):
         return _gl_backup_tile(_nb_last_ok(tid[3:]), en)
+    if tid == "nbnext":
+        best, name = None, ""
+        for pr in nb_profiles():
+            t = _nb_next_run(pr)
+            if t and (best is None or t < best):
+                best, name = t, pr.get("name") or pr["id"]
+        if best is None:
+            return None
+        return {"value": _gl_ago(best - time.time(), en),
+                "unit": "до запуска" if not en else "until run", "state": "ok", "note": name}
+    if tid.startswith("sc:"):
+        s = next((x for x in _glance_scripts() if x["id"] == tid), None)
+        if not s:
+            return None
+        fall = {"ok": "OK", "warn": "WARN", "danger": "FAIL"}[s["state"]]
+        return {"value": s["text"] or fall, "unit": "", "state": s["state"]}
     if tid in ("avail", "avail30"):
         hours = 24 if tid == "avail" else 720
         av = avail_bars(hours, 96)
@@ -1789,6 +1897,10 @@ def glance_payload(lang="ru"):
         if not d:
             continue
         d = dict(d, id=tid, label=labels[tid])
+        if tid in GLANCE_SPARKS:
+            sp = _safe(lambda: _gl_spark(GLANCE_SPARKS[tid]))
+            if sp:
+                d["spark"] = sp
         tiles.append(d)
         if d["state"] != "ok":
             problems.append("%s: %s %s" % (d["label"], d["value"], d.get("note") or d["unit"]))
