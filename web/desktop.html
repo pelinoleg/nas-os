@@ -334,7 +334,7 @@
     .dm2-item{flex:0 0 auto;width:auto;min-width:132px;max-width:200px}
     .dm2-detail{padding:16px 16px}
     /* менубар: лишние кнопки прячем (статус — в поповере здоровья) */
-    #expoBtn,#themeBtn,.tray{display:none}
+    #expoBtn,#themeBtn,#lpBtn,.tray{display:none}
     .menubar .mb-sep{display:none}.menubar{gap:5px}
     /* поповеры здоровья/уведомлений/операций — шторка на всю ширину под баром */
     .mbpop{position:fixed!important;left:8px!important;right:8px!important;top:46px!important;
@@ -1268,6 +1268,24 @@
   .fsw-fpl:hover{color:var(--accent);text-decoration:underline}
   .fsw-fn[data-p]{cursor:pointer}
   .fsw-fn[data-p]:hover{text-decoration:underline}
+  /* --- Launchpad: все приложения на весь экран (кнопка в верхнем баре) --- */
+  .launchpad{position:fixed;inset:0;z-index:2500;display:none;flex-direction:column;align-items:center;
+    padding:64px 26px 30px;background:color-mix(in srgb, var(--bg) 62%, transparent);
+    -webkit-backdrop-filter:blur(28px) saturate(1.15);backdrop-filter:blur(28px) saturate(1.15);
+    animation:lppop .14s ease}
+  @keyframes lppop{from{opacity:0;transform:scale(1.03)}to{opacity:1;transform:none}}
+  .launchpad.show{display:flex}
+  .lp-q{width:min(420px,84vw);font-size:14px;padding:9px 14px;border-radius:11px;border:1px solid var(--line);
+    background:var(--card);color:var(--text);margin-bottom:24px;flex:none}
+  .lp-q:focus{outline:none;border-color:var(--accent-line)}
+  .lp-grid{flex:1;min-height:0;overflow-y:auto;width:min(940px,94vw);align-content:start;
+    display:grid;grid-template-columns:repeat(auto-fill,minmax(94px,1fr));gap:16px 6px;padding:6px}
+  .lp-grid .lp-h{grid-column:1/-1;font-size:11px;font-weight:700;color:var(--dim);padding:8px 6px 0}
+  .lp-grid .app{width:auto}
+  .lp-grid .lp-empty{grid-column:1/-1;color:var(--dim);font-size:13px;text-align:center;padding:30px}
+  .lp-pin{position:absolute;top:4px;right:10px;width:8px;height:8px;border-radius:50%;background:var(--accent);opacity:.85}
+  .lp-grid .tile.lp-bare{background:none!important;box-shadow:none!important}
+  .lp-grid .tile.lp-bare svg{filter:drop-shadow(0 1px 2px rgba(0,0,0,.25))}
   .fsw .set-pane.fsw-flex{display:flex;flex-direction:column;gap:10px;overflow:hidden}
   .fsw textarea{font-size:12px;padding:8px 10px;border:1px solid var(--line);border-radius:var(--r-sm);
     background:var(--card);color:var(--text)}
@@ -2235,6 +2253,7 @@
 <div class="menubar">
   <div class="mb-brand"><img class="mb-logo" src="/icon-flat.svg" alt="Raspberry Pi" draggable="false"><span id="brandName">pi5.local</span></div>
   <span class="mb-sep"></span>
+  <button class="mb-theme" id="lpBtn" title="Все приложения"></button>
   <button class="mb-theme" id="expoBtn" title="Все окна (F9)"></button>
   <div class="winbar" id="winbar"></div>
   <span class="mb-sep"></span>
@@ -2257,6 +2276,7 @@
 </div>
 
 <div class="dock" id="dock"></div>
+<div class="launchpad" id="launchpad"><input class="lp-q" id="lpQ" placeholder="Поиск приложений…"><div class="lp-grid" id="lpGrid"></div></div>
 <nav class="phone-nav" id="phoneNav"></nav>
 <div class="scrim" id="scrim"></div>
 <div class="toast" id="toast"></div>
@@ -3091,15 +3111,62 @@ function dockDragAfter(d,x,y){const vert=(SET.dockPos==="left"||SET.dockPos==="r
  return best;}
 function renderDock(){
  const d=document.getElementById("dock");if(!d)return;d.innerHTML="";
- dockItems().forEach(a=>{const busy=a.id==="__nasbak"&&NB_RUNNING;const b=el(`<button title="${esc(a.name)}${busy?" — идёт бэкап":""}" draggable="true" data-did="${a.id}"><span class="di${busy?" di-busy":""}${a.bare?" di-bare":""}"${a.bare?"":` style="background:${a.color}"`}>${appIcon(a.ic)}${OPEN[a.id]?'<span class="run"></span>':''}${busy?'<span class="di-spin"></span>':''}</span><span class="dl">${esc(a.name)}</span></button>`);
+ dockItems().filter(a=>!(SET.dockHidden||[]).includes(a.id)).forEach(a=>{const busy=a.id==="__nasbak"&&NB_RUNNING;const b=el(`<button title="${esc(a.name)}${busy?" — идёт бэкап":""}" draggable="true" data-did="${a.id}"><span class="di${busy?" di-busy":""}${a.bare?" di-bare":""}"${a.bare?"":` style="background:${a.color}"`}>${appIcon(a.ic)}${OPEN[a.id]?'<span class="run"></span>':''}${busy?'<span class="di-spin"></span>':''}</span><span class="dl">${esc(a.name)}</span></button>`);
   b.onclick=a.fn;
   if(a.id==="__nasbak")b.oncontextmenu=e=>{e.preventDefault();nbDockMenu(e.clientX,e.clientY);};
-  else if(OPEN[a.id])b.oncontextmenu=e=>{e.preventDefault();winCtxMenu(a.id,e.clientX,e.clientY);};
+  else b.oncontextmenu=e=>{e.preventDefault();dockCtxMenu(a,e.clientX,e.clientY);};
   b.ondragstart=()=>b.classList.add("dragging");
   b.ondragend=()=>{b.classList.remove("dragging");SET.dockOrder=[...d.querySelectorAll("button[data-did]")].map(x=>x.dataset.did);saveSettings();};
   d.appendChild(b);});
  d.ondragover=e=>{e.preventDefault();const dragging=d.querySelector(".dragging");if(!dragging)return;
   const after=dockDragAfter(d,e.clientX,e.clientY);if(after)d.insertBefore(dragging,after);else d.appendChild(dragging);};
+}
+
+/* --- Launchpad: все приложения на весь экран; правым кликом — закрепить/убрать из дока --- */
+function dockCtxMenu(a,x,y){
+ const items=[];const w=OPEN[a.id];
+ if(w){const min=w.style.display==="none";
+  items.push({label:min?"Показать":"На передний план",ic:svg(min?"eye":"grid",16),act:()=>{if(min)w.style.display="flex";focus(w);}});
+  items.push({label:"Закрыть окно",ic:svg("x",16),act:()=>closeW(a.id)});
+  items.push({sep:1});}
+ items.push({label:"Убрать из дока",ic:svg("eject",16),act:()=>{
+  SET.dockHidden=[...(SET.dockHidden||[]),a.id];saveSettings();renderDock();
+  toast("Вернуть можно через Launchpad — кнопка в верхнем баре");}});
+ showMenu(x,y,items);
+}
+function lpClose(){document.getElementById("launchpad").classList.remove("show");}
+function lpDraw(){
+ const grid=document.getElementById("lpGrid");
+ const q=(document.getElementById("lpQ").value||"").trim().toLowerCase();
+ const f=n=>!q||(n||"").toLowerCase().includes(q);
+ const hid=SET.dockHidden||[];
+ grid.innerHTML="";
+ const sys=dockItems().filter(a=>f(a.name));
+ if(sys.length)grid.insertAdjacentHTML("beforeend",`<div class="lp-h">Инструменты NAS</div>`);
+ sys.forEach(a=>{
+  const inDock=!hid.includes(a.id);
+  const b=el(`<button class="app" style="position:relative" title="${att(a.name)}">${inDock?'<span class="lp-pin" title="в доке"></span>':""}
+   <div class="tile${a.bare?" lp-bare":""}"${a.bare?"":` style="background:${a.color}"`}>${appIcon(a.ic,a.bare?44:30)}</div>
+   <div class="lbl">${esc(a.name)}</div></button>`);
+  b.onclick=()=>{lpClose();a.fn();};
+  b.oncontextmenu=e=>{e.preventDefault();showMenu(e.clientX,e.clientY,[
+   inDock?{label:"Убрать из дока",ic:svg("eject",16),act:()=>{SET.dockHidden=[...(SET.dockHidden||[]),a.id];saveSettings();renderDock();lpDraw();}}
+         :{label:"Закрепить в доке",ic:svg("plus",16),act:()=>{SET.dockHidden=(SET.dockHidden||[]).filter(x=>x!==a.id);saveSettings();renderDock();lpDraw();}}]);};
+  grid.appendChild(b);});
+ const apps=(APPS||[]).filter(a=>a.url&&f(a.name));
+ if(apps.length)grid.insertAdjacentHTML("beforeend",`<div class="lp-h">Приложения (Docker)</div>`);
+ apps.forEach(app=>{
+  const b=el(`<button class="app" title="${att(app.container||app.name)}"><div class="tile applbl" style="background:${tileColor(app.name)}">${appIconHTML(app)}</div><div class="lbl">${esc(app.name)}</div><span class="st ${app.running?"on":"off"}"></span></button>`);
+  b.onclick=()=>{lpClose();window.open(app.url,"_blank");};
+  grid.appendChild(b);});
+ if(!sys.length&&!apps.length)grid.innerHTML=`<div class="lp-empty">Ничего не найдено.</div>`;
+}
+function lpToggle(){
+ const lp=document.getElementById("launchpad");
+ if(lp.classList.contains("show")){lpClose();return;}
+ const q=document.getElementById("lpQ");q.value="";
+ lpDraw();lp.classList.add("show");
+ if(!isTouch())q.focus();
 }
 
 /* windows */
@@ -9073,6 +9140,14 @@ function maybeOnboard(){let done=false;try{done=!!SET.onboarded||localStorage.ge
    {label:"Перезагрузить",ic:svg("power",17),act:reboot,dng:1},
    {label:"Выключить",ic:svg("power",17),act:poweroff,dng:1}]);};}
  const xb=document.getElementById("expoBtn");if(xb){xb.innerHTML=svg("grid",17);xb.onclick=toggleExpo;}
+ const lb=document.getElementById("lpBtn");
+ if(lb){lb.innerHTML='<svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor">'+
+   [5,12,19].map(y=>[5,12,19].map(x=>`<circle cx="${x}" cy="${y}" r="2"/>`).join("")).join("")+'</svg>';
+  lb.onclick=lpToggle;}
+ const lpEl=document.getElementById("launchpad");
+ if(lpEl){lpEl.addEventListener("pointerdown",e=>{if(e.target===lpEl||e.target.id==="lpGrid")lpClose();});
+  document.getElementById("lpQ").oninput=lpDraw;
+  document.addEventListener("keydown",e=>{if(e.key==="Escape"&&lpEl.classList.contains("show"))lpClose();});}
  const hb=document.getElementById("healthBtn");if(hb){paintHealthBtn();hb.onclick=healthPop;}
  const qn=document.getElementById("qnoteBtn");if(qn){qn.innerHTML=svg("note",16);qn.onclick=qnotePop;}
  const blb=document.getElementById("bellBtn");if(blb){paintBell();blb.onclick=bellPop;}
