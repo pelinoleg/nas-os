@@ -1829,7 +1829,7 @@
   .nt-side input::placeholder{color:var(--text-faint)}
   .nt-side input:focus{outline:none;box-shadow:inset 0 0 0 1.5px var(--accent)}
   .nt-cap{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);margin-top:var(--sp-2)}
-  .nt-dir{display:flex;align-items:center;gap:var(--sp-2);padding:var(--sp-1) var(--sp-2);border-radius:var(--radius-sm);cursor:pointer;font-size:14px;color:var(--text)}
+  .nt-dir{display:flex;align-items:center;gap:var(--sp-2);min-height:32px;padding:var(--sp-1) var(--sp-2);border-radius:var(--radius-sm);cursor:pointer;font-size:14px;color:var(--text)}
   .nt-dir:hover{background:var(--surface)}
   .nt-dir.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
   .nt-dir.drop{outline:2px dashed var(--accent)}
@@ -2053,7 +2053,12 @@
   .nt-hv.on{background:var(--sel);color:var(--accent);box-shadow:var(--sh-sm)}
   .nt-hprev{flex:1;overflow:auto;max-height:340px;font-size:12px;background:var(--glass);border:1px solid var(--line);border-radius:10px;padding:10px;white-space:pre-wrap}
   .nt-pin-on{color:var(--warning)!important}
-  .nt-root.qn{display:flex;flex-direction:column;gap:var(--sp-2);width:300px;padding:var(--sp-3);border-radius:var(--radius-lg);background:var(--bg)}
+  /* quick-note popover = a piece of the Notes app, not panel glass: the wrapper
+     drops its own material so the paper card renders edge-to-edge */
+  .menu.mbpop.qn-pop{padding:0;background:transparent;border:0;box-shadow:none;
+   backdrop-filter:none;-webkit-backdrop-filter:none;min-width:0}
+  .nt-root.qn{display:flex;flex-direction:column;gap:var(--sp-2);width:340px;max-width:100%;padding:var(--sp-4);
+   border-radius:var(--radius-lg);background:var(--bg);border:1px solid var(--border);box-shadow:var(--shadow-2)}
   .qn-h{display:flex;align-items:center;gap:var(--sp-2);font-size:var(--fs-meta);font-weight:600;color:var(--text)}
   .qn-hint{margin-left:auto;font-weight:400;color:var(--text-faint)}
   .nt-root.qn textarea{resize:vertical;min-height:96px;border:1px solid var(--border);border-radius:var(--radius-sm);
@@ -2554,6 +2559,8 @@ function applySettings(){
  // миниатюры: вписывать целиком (contain) или заполнять с обрезкой (cover)
  root.style.setProperty("--thumb-fit",SET.fmThumbFit==="cover"?"cover":"contain");
  if(SET.theme==="auto")root.removeAttribute("data-theme");else root.setAttribute("data-theme",SET.theme);
+ // notes surfaces (window, quick-note popover) follow the panel theme live when ntTheme=auto
+ try{document.querySelectorAll(".nt-root").forEach(n=>ntApplyTheme(n));}catch(e){}
  // смена активной темы → снять текущие значения в профиль старой, поднять профиль новой
  const th=isLight()?"light":"dark";
  if(th!==CUR_THEME){
@@ -7057,6 +7064,11 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
   dirs.querySelectorAll(".nt-dir").forEach(el2=>{
    if(el2.dataset.d)el2.querySelector(".nm").textContent=decodeURIComponent(el2.dataset.d).split("/").pop();
    el2.onclick=()=>{fold=decodeURIComponent(el2.dataset.d);tag=null;qstr="";q("#ntQ").value="";if(fold)EXP.add(fold);paintSide();paintList();};
+   if(el2.dataset.d)el2.oncontextmenu=e=>{e.preventDefault();e.stopPropagation();
+    const d=decodeURIComponent(el2.dataset.d);
+    showMenu(e.clientX,e.clientY,[
+     {label:"Переименовать",ic:svg("edit",15),act:()=>renameDir(d)},
+     {label:"Удалить",ic:svg("trash",15),dng:1,act:()=>deleteDir(d)}]);};
    /* drag a note onto a folder to move it */
    el2.ondragover=e=>{e.preventDefault();el2.classList.add("drop");};
    el2.ondragleave=()=>el2.classList.remove("drop");
@@ -7322,6 +7334,33 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
   s.querySelector("#ntFOk").onclick=ok;
   inp.onkeydown=ev=>{if(ev.key==="Enter")ok();};
   s.querySelector("#ntFX").onclick=()=>s.classList.remove("show");};
+ /* folder rename: /api/notes/move handles directories too (history follows) */
+ const renameDir=d=>{
+  const s=document.getElementById("scrim"),old=d.split("/").pop();
+  s.innerHTML=`<div class="dialog"><h3>Переименовать папку</h3><input id="ntFR" style="width:100%"><div class="r"><button class="btn" id="ntFX">Отмена</button><button class="btn pri" id="ntFOk">Переименовать</button></div></div>`;
+  s.classList.add("show");const inp=s.querySelector("#ntFR");inp.value=old;inp.focus();inp.select();
+  const ok=async()=>{const nm=inp.value.trim().replace(/[\\/]/g," ").trim();
+   if(!nm||nm===old){s.classList.remove("show");return;}
+   const to=(d.includes("/")?d.slice(0,d.lastIndexOf("/")+1):"")+nm;
+   const r=await api("/api/notes/move",{method:"POST",body:JSON.stringify({path:d,to})});
+   s.classList.remove("show");
+   if(!(r&&r.ok)){toast("Ошибка: "+((r&&r.error)||"не переименовать"));return;}
+   // open note / active filter / expanded state follow the renamed path
+   if(NT_PATH&&(NT_PATH+"/").startsWith(d+"/"))NT_PATH=to+NT_PATH.slice(d.length);
+   if((fold+"/").startsWith(d+"/"))fold=to+fold.slice(d.length);
+   if(EXP.has(d)){EXP.delete(d);EXP.add(to);}
+   refresh();};
+  s.querySelector("#ntFOk").onclick=ok;inp.onkeydown=ev=>{if(ev.key==="Enter")ok();};
+  s.querySelector("#ntFX").onclick=()=>s.classList.remove("show");};
+ /* folder delete: whole directory goes to .trash as one item (restorable) */
+ const deleteDir=d=>{
+  const n=TREE.notes.filter(x=>x.folder===d||x.folder.startsWith(d+"/")).length;
+  confirmDlg("Удалить папку","Папка «"+d.split("/").pop()+"»"+(n?" и заметки внутри ("+n+" шт.)":"")+" уедет в корзину.",async()=>{
+   const r=await api("/api/notes/delete",{method:"POST",body:JSON.stringify({path:d})});
+   if(!(r&&r.ok)){toast("Ошибка: "+((r&&r.error)||"не удалить"));return;}
+   if(NT_PATH&&(NT_PATH+"/").startsWith(d+"/")){NT_PATH=null;q("#ntEdit").innerHTML=`<div class="nt-empty">Выберите заметку или создайте новую</div>`;}
+   if((fold+"/").startsWith(d+"/"))fold="";
+   EXP.delete(d);refresh();},true);};
  const ntDark=()=>ntThemeMode()==="dark";
  body.classList.add("nt-root");
  /* the window element carries the tokens too, so the title bar strip can be
@@ -7347,6 +7386,7 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
 /* quick note from the menu bar: dropped into the «Входящие» folder */
 function qnotePop(){const b=document.getElementById("qnoteBtn");
  mbPop(b,box=>{
+  box.classList.add("qn-pop");   // wrapper glass off: the popover IS the notes paper card
   box.innerHTML=`<div class="nt-root qn" data-theme="${ntThemeMode()}">
    <div class="qn-h">${svg("note",15)} Быстрая заметка<span class="qn-hint">→ «Входящие»</span></div>
    <textarea id="qnT" rows="5" placeholder="Мысль, ссылка, список…"></textarea>
