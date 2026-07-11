@@ -1358,6 +1358,9 @@
   /* внутри SSH-маунта папки сине-бирюзовые, чтобы не путать с локальными */
   .fm-list.fm-remote .fmico path[fill="#E0A63C"]{fill:#2E86AB}
   .fm-list.fm-remote .fmico path[fill="#F5C24C"]{fill:#4FA8CF}
+  /* диски вне пула (USB, отдельные члены пула, чётность) — фиолетовые */
+  .fm-list.fm-extdisk .fmico path[fill="#E0A63C"]{fill:#7E57C2}
+  .fm-list.fm-extdisk .fmico path[fill="#F5C24C"]{fill:#9E7CD6}
   .fm-row.dragover,.fm-tile.dragover,.fm-fav-i.dragover{background:var(--accent-soft)!important;outline:2px solid var(--accent);outline-offset:-2px;color:var(--accent)}
   .fm-row[draggable],.fm-tile[draggable]{-webkit-user-drag:element}
   .fm-band{position:absolute;border:1px solid var(--accent);background:var(--accent-soft);opacity:.55;pointer-events:none;z-index:5;border-radius:2px}
@@ -5388,7 +5391,11 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    lastSig=dirSig(entries);
    const si=body.querySelector("#fSearch");if(si)si.value="";
    cursor=-1;renderTabs();renderCrumb();renderFav();renderVols();renderRemotes(false);
-   listBox.classList.toggle("fm-remote",cwd==="/mnt/remote"||cwd.startsWith("/mnt/remote/"));
+   const isRem=cwd==="/mnt/remote"||cwd.startsWith("/mnt/remote/");
+   // вне пула = USB-автомаунты (/media/…) и всё под /mnt, кроме пула и SSH-маунтов
+   const isExt=!isRem&&(cwd.startsWith("/media/")||(cwd.startsWith("/mnt/")&&cwd!=="/mnt/storage"&&!cwd.startsWith("/mnt/storage/")));
+   listBox.classList.toggle("fm-remote",isRem);
+   listBox.classList.toggle("fm-extdisk",isExt);
    renderList();selUpdate();listBox.focus();}
 
  /* Auto-refresh: the folder can change under us (uploads, USB import, rsync, another
