@@ -2117,6 +2117,204 @@ def glance_payload(lang="ru", screen=""):
         c["payload"] = payload
     return payload
 
+# --------------------------------------------------------------------------- #
+#  Notes: folders of plain .md files (default on the pool) with a tiny
+#  frontmatter (title/tags). Readable over SMB, portable, zero lock-in;
+#  images live next to the note in _assets/, deletes go to .trash/.
+# --------------------------------------------------------------------------- #
+NOTES_CONF = os.path.join(NAS_CONFIG, "notes.json")
+
+def load_notes_conf():
+    return _json_load_strict(NOTES_CONF, {})
+
+def notes_root(create=True):
+    root = (load_notes_conf().get("root") or "").strip()
+    if not root:
+        root = os.path.join(STORAGE, "notes") if os.path.ismount(STORAGE) \
+            else os.path.join(HOME, "nas-notes")
+    if create and not os.path.isdir(root):
+        os.makedirs(root, exist_ok=True)
+        _chown_user(root)
+    return os.path.realpath(root)
+
+def _notes_abs(rel):
+    root = notes_root()
+    rel = (rel or "").replace("\\", "/").strip("/")
+    p = os.path.realpath(os.path.join(root, rel))
+    if p != root and not p.startswith(root + os.sep):
+        raise ValueError("путь вне папки заметок")
+    return p
+
+_NOTE_FM = re.compile(r"^---\n(.*?)\n---\n?", re.S)
+
+def _note_parse(text):
+    meta, body = {}, text
+    m = _NOTE_FM.match(text)
+    if m:
+        body = text[m.end():]
+        for line in m.group(1).splitlines():
+            k, _, v = line.partition(":")
+            meta[k.strip()] = v.strip()
+    tags = [t.strip().lstrip("#") for t in (meta.get("tags") or "").split(",") if t.strip()]
+    return meta.get("title") or "", tags, body
+
+def _note_dump(title, tags, body):
+    return "---\ntitle: %s\ntags: %s\nupdated: %s\n---\n%s" % (
+        str(title).replace("\n", " "), ", ".join(tags),
+        time.strftime("%Y-%m-%d %H:%M"), body)
+
+def notes_tree():
+    root = notes_root()
+    dirs, notes = [], []
+    for dp, dn, fn in os.walk(root):
+        dn[:] = sorted(d for d in dn if d != "_assets" and not d.startswith("."))
+        rel = os.path.relpath(dp, root)
+        rel = "" if rel == "." else rel.replace(os.sep, "/")
+        if rel:
+            dirs.append(rel)
+        for f in sorted(fn):
+            if not f.lower().endswith(".md"):
+                continue
+            fp = os.path.join(dp, f)
+            try:
+                st = os.stat(fp)
+                with open(fp, encoding="utf-8", errors="replace") as fh:
+                    head = fh.read(2048)
+            except OSError:
+                continue
+            title, tags, _ = _note_parse(head)
+            notes.append({"path": (rel + "/" if rel else "") + f, "folder": rel,
+                          "title": title or f[:-3], "tags": tags,
+                          "mtime": int(st.st_mtime), "size": st.st_size})
+    return {"root": root, "dirs": dirs, "notes": notes}
+
+def note_get(rel):
+    p = _notes_abs(rel)
+    if not os.path.isfile(p):
+        raise ValueError("нет такой заметки")
+    with open(p, encoding="utf-8", errors="replace") as f:
+        text = f.read()
+    title, tags, body = _note_parse(text)
+    return {"path": rel.strip("/"), "title": title, "tags": tags, "md": body,
+            "mtime": int(os.stat(p).st_mtime)}
+
+def _note_slug(name):
+    name = re.sub(r"[\\/:*?\"<>|\n\r\t]", "", str(name or "").strip())
+    return name[:80] or "Заметка"
+
+def note_save(rel, title, tags, md):
+    p = _notes_abs(rel)
+    if not p.lower().endswith(".md"):
+        raise ValueError("не .md")
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    tags = [_note_slug(t) for t in (tags or []) if str(t).strip()][:20]
+    tmp = p + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(_note_dump(title or "", tags, str(md or "")))
+    os.replace(tmp, p)
+    _chown_user(p)
+    return {"ok": True, "mtime": int(os.stat(p).st_mtime)}
+
+def note_new(folder, title):
+    base = _note_slug(title or "Новая заметка")
+    d = _notes_abs(folder)
+    os.makedirs(d, exist_ok=True)
+    _chown_user(d)
+    name, i = base, 1
+    while os.path.exists(os.path.join(d, name + ".md")):
+        i += 1
+        name = "%s %d" % (base, i)
+    rel = ((folder.strip("/") + "/") if (folder or "").strip("/") else "") + name + ".md"
+    note_save(rel, title or name, [], "")
+    return {"ok": True, "path": rel}
+
+def note_mkdir(folder, name):
+    d = os.path.join(_notes_abs(folder), _note_slug(name))
+    os.makedirs(d, exist_ok=True)
+    _chown_user(d)
+    return {"ok": True}
+
+def note_move(rel, to):
+    src, dst = _notes_abs(rel), _notes_abs(to)
+    if not os.path.exists(src):
+        raise ValueError("нет источника")
+    if os.path.exists(dst):
+        raise ValueError("такое имя уже занято")
+    os.makedirs(os.path.dirname(dst), exist_ok=True)
+    os.rename(src, dst)
+    return {"ok": True}
+
+def note_delete(rel):
+    p = _notes_abs(rel)
+    if not os.path.exists(p):
+        raise ValueError("нет такого пути")
+    tr = os.path.join(notes_root(), ".trash")
+    os.makedirs(tr, exist_ok=True)
+    os.rename(p, os.path.join(tr, time.strftime("%Y%m%d-%H%M%S") + "-" + os.path.basename(p)))
+    return {"ok": True}
+
+def note_upload(folder, name, data_b64):
+    raw = base64.b64decode((data_b64 or "").split(",")[-1])
+    if len(raw) > 30 * 1024 * 1024:
+        raise ValueError("файл больше 30 МБ")
+    ad = os.path.join(_notes_abs(folder), "_assets")
+    os.makedirs(ad, exist_ok=True)
+    _chown_user(ad)
+    stem, ext = os.path.splitext(_note_slug(name or "img"))
+    fn, i = stem + ext, 1
+    while os.path.exists(os.path.join(ad, fn)):
+        i += 1
+        fn = "%s-%d%s" % (stem, i, ext)
+    fp = os.path.join(ad, fn)
+    with open(fp, "wb") as f:
+        f.write(raw)
+    _chown_user(fp)
+    rel = ((folder.strip("/") + "/") if (folder or "").strip("/") else "") + "_assets/" + fn
+    return {"ok": True, "path": rel, "url": "/api/notes/file?path=" + quote(rel)}
+
+def notes_search(q):
+    q = (q or "").strip().lower()
+    out = []
+    if not q:
+        return {"hits": out}
+    for n in notes_tree()["notes"]:
+        try:
+            with open(_notes_abs(n["path"]), encoding="utf-8", errors="replace") as f:
+                text = f.read(200000)
+        except (OSError, ValueError):
+            continue
+        low = text.lower()
+        if q in low or q in n["title"].lower() or any(q in t.lower() for t in n["tags"]):
+            i = low.find(q)
+            out.append(dict(n, snip=text[max(0, i - 40):i + 80].replace("\n", " ") if i >= 0 else ""))
+        if len(out) >= 60:
+            break
+    return {"hits": out}
+
+def notes_migrate(new_root):
+    """Move the whole notes tree to another folder (Настройки → Заметки)."""
+    old = notes_root()
+    new_root = (new_root or "").strip()
+    if not new_root.startswith("/"):
+        raise ValueError("нужен абсолютный путь")
+    new = os.path.realpath(new_root)
+    if new == old:
+        return {"ok": True, "log": "уже там", "root": new}
+    if old.startswith(new + os.sep) or new.startswith(old + os.sep):
+        raise ValueError("папки вложены друг в друга")
+    os.makedirs(new, exist_ok=True)
+    _chown_user(new)
+    moved = 0
+    for name in os.listdir(old):
+        if os.path.exists(os.path.join(new, name)):
+            raise ValueError("в новой папке уже есть «%s»" % name)
+        shutil.move(os.path.join(old, name), os.path.join(new, name))
+        moved += 1
+    cur = load_notes_conf()
+    cur["root"] = new
+    _json_save(NOTES_CONF, cur, indent=2)
+    return {"ok": True, "log": "перенесено объектов: %d" % moved, "root": new}
+
 FAV_FILE = os.path.join(NAS_CONFIG, "fm-favorites.json")
 def load_favs():
     try:
@@ -9243,6 +9441,18 @@ class H(BaseHTTPRequestHandler):
             elif p == "/api/avail":
                 self._json(avail_bars(int((q.get("hours") or ["24"])[0]),
                                       int((q.get("slots") or ["96"])[0])))
+            elif p == "/api/notes/tree":
+                self._json(notes_tree())
+            elif p == "/api/notes/get":
+                self._json(note_get((q.get("path") or [""])[0]))
+            elif p == "/api/notes/search":
+                self._json(notes_search((q.get("q") or [""])[0]))
+            elif p == "/api/notes/file":
+                fp = _notes_abs((q.get("path") or [""])[0])
+                if os.path.isfile(fp):
+                    self._sendraw(fp)
+                else:
+                    self._json({"error": "нет файла"}, 404)
             elif p == "/api/net":
                 self._json(net_info())
             elif p == "/api/net/speedtest":
@@ -9471,6 +9681,26 @@ class H(BaseHTTPRequestHandler):
                 self._json({"ok": True})
             elif p == "/api/glance/config":
                 self._json({"ok": True, "config": save_glance(self._body())})
+            elif p == "/api/notes/save":
+                b = self._body()
+                self._json(note_save(b.get("path", ""), b.get("title", ""),
+                                     b.get("tags") or [], b.get("md", "")))
+            elif p == "/api/notes/new":
+                b = self._body()
+                self._json(note_new(b.get("folder", ""), b.get("title", "")))
+            elif p == "/api/notes/mkdir":
+                b = self._body()
+                self._json(note_mkdir(b.get("folder", ""), b.get("name", "")))
+            elif p == "/api/notes/move":
+                b = self._body()
+                self._json(note_move(b.get("path", ""), b.get("to", "")))
+            elif p == "/api/notes/delete":
+                self._json(note_delete(self._body().get("path", "")))
+            elif p == "/api/notes/upload":
+                b = self._body()
+                self._json(note_upload(b.get("folder", ""), b.get("name", ""), b.get("data", "")))
+            elif p == "/api/notes/root":
+                self._json(notes_migrate(self._body().get("root", "")))
             elif p == "/api/maintenance":
                 b = self._body(); self._json({"maintenance": save_maintenance(b.get("maintenance", {}))})
             elif p == "/api/fs/thumbcache/clear":

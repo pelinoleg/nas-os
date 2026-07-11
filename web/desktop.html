@@ -1635,6 +1635,46 @@
   .glc-9 button.on{background:var(--accent);border-color:var(--accent)}
   .glc-9x{display:flex;gap:4px;flex-wrap:wrap}
   .glc-9x .btn.on{background:var(--sel);color:var(--accent);box-shadow:var(--sh-sm)}
+  /* notes app */
+  .nt-side{width:220px;flex:none;display:flex;flex-direction:column;gap:8px;padding:14px 10px 14px 14px;border-right:1px solid var(--line);overflow:auto}
+  .nt-tools{display:flex;gap:6px}
+  .nt-side input,#ntEdit input{height:30px;border-radius:8px;border:1px solid var(--line);background:var(--glass);color:var(--ink);padding:0 9px;font-size:13px}
+  .nt-cap{font-size:10.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;color:var(--dim);margin-top:6px}
+  .nt-dir{display:flex;align-items:center;gap:7px;padding:6px 10px;border-radius:8px;cursor:pointer;font-size:13px;color:var(--ink)}
+  .nt-dir:hover{background:var(--sel)}
+  .nt-dir.on{background:var(--sel);color:var(--accent);font-weight:650;box-shadow:var(--sh-sm)}
+  .nt-dir.drop{outline:2px dashed var(--accent)}
+  .nt-tag{display:inline-flex;align-items:center;gap:4px;margin:2px 3px 2px 0;padding:3px 9px;border-radius:999px;background:var(--glass);border:1px solid var(--line);font-size:12px;cursor:pointer}
+  .nt-tag i{font-style:normal;color:var(--dim);font-size:10px}
+  .nt-tag.on{background:var(--sel);color:var(--accent);box-shadow:var(--sh-sm)}
+  .nt-mut{color:var(--mut);font-size:12px}
+  .nt-list{width:270px;flex:none;overflow:auto;border-right:1px solid var(--line);padding:10px}
+  .nt-item{display:flex;flex-direction:column;gap:4px;padding:10px 12px;border-radius:10px;cursor:pointer;border:1px solid transparent}
+  .nt-item:hover{background:var(--sel)}
+  .nt-item.on{background:var(--sel);border-color:var(--line);box-shadow:var(--sh-sm)}
+  .nt-item b{font-size:13.5px}
+  .nt-snip{font-size:11.5px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .nt-meta{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--dim)}
+  .nt-meta i{font-style:normal;color:var(--accent)}
+  .nt-meta>span{margin-left:auto}
+  .nt-edit{flex:1;display:flex;flex-direction:column;gap:8px;padding:14px;min-width:0}
+  .nt-empty{margin:auto;color:var(--mut)}
+  .nt-head{display:flex;align-items:center;gap:8px}
+  .nt-head input{flex:1;font-size:16px;font-weight:650}
+  .nt-ed{flex:1;min-height:0;border-radius:12px;overflow:hidden}
+  .nt-ed .toastui-editor-defaultUI{border-color:var(--line)}
+  .nt-ed .toastui-editor-contents{font-size:var(--nt-font,15px)}
+  .nt-ed .toastui-editor-contents img{cursor:pointer;border-radius:6px;max-width:100%}
+  .nt-lb{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;cursor:zoom-out}
+  .nt-lb img{max-width:94vw;max-height:92vh;border-radius:10px;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+  @media(max-width:1024px){
+   .nt-side{width:170px}
+   .nt-list{width:200px}
+  }
+  @media(max-width:640px){
+   .nt-side{width:100%;border-right:0;border-bottom:1px solid var(--line)}
+   .nt-list{width:100%;border-right:0;max-height:200px}
+  }
   @media(max-width:1024px){
    .glc-main{flex-direction:column}
    .glc-pal-wrap{width:auto;max-height:150px}
@@ -1867,6 +1907,7 @@ const P={
  search:'<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
  edit:'<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
  x:'<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+ home:'<path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/>',
  plus:'<path d="M12 5v14"/><path d="M5 12h14"/>',
  expand:'<path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/>',
  shrink:'<path d="M4 14h6v6"/><path d="M20 10h-6V4"/><path d="m14 10 7-7"/><path d="m3 21 7-7"/>',
@@ -5824,6 +5865,195 @@ async function glanceTab(tc){
  tc.querySelector("#glFw").onclick=()=>winFiles("/opt/nas-os/services/esp32-glance");
  tc.querySelectorAll("#glPing button").forEach(b=>b.onclick=()=>{tc.querySelectorAll("#glPing button").forEach(x=>x.classList.toggle("on",x===b));post({ping_interval:+b.dataset.v});toast("Интервал обновлён");});
 }
+/* Settings tab «Заметки»: storage location + editor prefs */
+async function notesTab(tc){
+ tc.innerHTML=`<div class="set-load">загрузка…</div>`;
+ const tr=await api("/api/notes/tree");
+ const root=(tr&&tr.root)||"";
+ tc.innerHTML=`
+  <div class="set-title">Заметки</div>
+  <div class="set-sub">Заметки — обычные markdown-файлы в папке: их видно по SMB, в файловом менеджере, они попадают в бэкапы и открываются любым редактором.</div>
+  <div class="set-h">Хранение</div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Папка заметок</div><div class="srow-d mono">${esc(root)}</div></div><div class="srow-c"><button class="btn sm" id="ntsPick">Выбрать…</button></div></div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Перенос</div><div class="srow-d">существующие заметки переедут в новую папку целиком</div></div><div class="srow-c"><input class="mono" id="ntsRoot" style="width:230px" value="${att(root)}"><button class="btn sm pri" id="ntsMove">Перенести</button></div></div>
+  <div class="set-h">Редактор</div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Режим по умолчанию</div><div class="srow-d">визуальный или markdown-исходник (переключается и в самом редакторе)</div></div><div class="srow-c"><div class="seg" id="ntsMode"><button data-m="wysiwyg" class="${(SET.ntMode||"wysiwyg")==="wysiwyg"?"on":""}">Визуальный</button><button data-m="markdown" class="${SET.ntMode==="markdown"?"on":""}">Markdown</button></div></div></div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Размер текста</div><div class="srow-d">базовый размер шрифта заметки, px</div></div><div class="srow-c"><div class="seg" id="ntsFont">${[13,14,15,16,18].map(v=>`<button data-v="${v}" class="${(SET.ntFont||15)===v?"on":""}">${v}</button>`).join("")}</div></div></div>`;
+ tc.querySelector("#ntsPick").onclick=()=>pickFolder({title:"Папка для заметок",start:root||"/mnt/storage",onPick:p=>{tc.querySelector("#ntsRoot").value=p;}});
+ tc.querySelector("#ntsMove").onclick=async()=>{
+  const to=tc.querySelector("#ntsRoot").value.trim();if(!to)return;
+  const r=await api("/api/notes/root",{method:"POST",body:JSON.stringify({root:to})});
+  if(r&&r.ok){toast("✓ "+(r.log||"готово"));rerSet();}else toast("Ошибка: "+((r&&r.error)||(r&&r.log)||"?"));};
+ tc.querySelectorAll("#ntsMode button").forEach(b=>b.onclick=()=>{SET.ntMode=b.dataset.m;saveSettings();tc.querySelectorAll("#ntsMode button").forEach(x=>x.classList.toggle("on",x===b));});
+ tc.querySelectorAll("#ntsFont button").forEach(b=>b.onclick=()=>{SET.ntFont=+b.dataset.v;saveSettings();tc.querySelectorAll("#ntsFont button").forEach(x=>x.classList.toggle("on",x===b));
+  const ed=document.querySelector("#ntEd");if(ed)ed.style.setProperty("--nt-font",SET.ntFont+"px");});
+}
+/* ===================== Notes app ===================== */
+/* Plain .md files on the pool (see nas-web.py notes module). Editor = vendored
+   Toast UI (dual WYSIWYG/Markdown) + code highlight plugin, loaded lazily. */
+let NT_LIBS=null;
+function loadNotesLibs(){
+ if(NT_LIBS)return NT_LIBS;
+ const css=h=>{const l=document.createElement("link");l.rel="stylesheet";l.href=h;document.head.appendChild(l);};
+ const js=h=>new Promise((res,rej)=>{const sc=document.createElement("script");sc.src=h;sc.onload=res;sc.onerror=rej;document.head.appendChild(sc);});
+ css("/tui-editor.css");css("/tui-editor-dark.css");css("/tui-hl.css");
+ NT_LIBS=js("/tui-editor.js").then(()=>Promise.all([js("/tui-hl.js"),js("/tui-editor-ru.js")]));
+ return NT_LIBS;
+}
+let NT_ED=null,NT_PATH=null,NT_SAVE_T=null,NT_DIRTY=false;
+function winNotes(){openWin("__notes","Заметки",async body=>{
+ body.style.padding="0";body.style.display="flex";
+ if(isPhone())body.style.cssText+="flex-direction:column;overflow:auto";
+ body.innerHTML=`<div class="set-load" style="padding:20px">загрузка редактора…</div>`;
+ try{await loadNotesLibs();}catch(e){body.innerHTML=`<div class="set-load" style="padding:20px">не удалось загрузить редактор</div>`;return;}
+ let TREE={dirs:[],notes:[]},fold="",tag=null,qstr="";
+ body.innerHTML=`
+  <div class="nt-side">
+   <div class="nt-tools"><button class="btn sm pri" id="ntNew">${svg("plus",14)} Заметка</button><button class="btn sm" id="ntNewF">${svg("folder",14)} Папка</button></div>
+   <input id="ntQ" placeholder="Поиск…">
+   <div class="nt-cap">Папки</div><div id="ntDirs"></div>
+   <div class="nt-cap">Теги</div><div id="ntTags"></div>
+  </div>
+  <div class="nt-list" id="ntList"></div>
+  <div class="nt-edit" id="ntEdit"><div class="nt-empty">Выберите заметку или создайте новую</div></div>`;
+ const q=sel=>body.querySelector(sel);
+ const flushSave=async()=>{if(NT_DIRTY&&NT_PATH)await saveNow();};
+ const refresh=async()=>{const r=await api("/api/notes/tree");if(r&&r.notes){TREE=r;paintSide();paintList();}};
+ const tagsAll=()=>{const m={};TREE.notes.forEach(n=>n.tags.forEach(t=>m[t]=(m[t]||0)+1));return Object.entries(m).sort((a,b)=>b[1]-a[1]);};
+ const paintSide=()=>{
+  const dirs=q("#ntDirs");
+  dirs.innerHTML=`<div class="nt-dir${fold===""&&!tag?" on":""}" data-d="">${svg("home",13)} Все заметки</div>`
+   +TREE.dirs.map(d=>`<div class="nt-dir${fold===d?" on":""}" data-d="${att(d)}" style="padding-left:${10+d.split("/").length*10}px">${svg("folder",13)} ${esc(d.split("/").pop())}</div>`).join("");
+  dirs.querySelectorAll(".nt-dir").forEach(el2=>{
+   el2.onclick=()=>{fold=el2.dataset.d;tag=null;qstr="";q("#ntQ").value="";paintSide();paintList();};
+   /* drag a note onto a folder to move it */
+   el2.ondragover=e=>{e.preventDefault();el2.classList.add("drop");};
+   el2.ondragleave=()=>el2.classList.remove("drop");
+   el2.ondrop=async e=>{e.preventDefault();el2.classList.remove("drop");
+    const src=e.dataTransfer.getData("text/plain");if(!src)return;
+    const name=src.split("/").pop();
+    const to=(el2.dataset.d?el2.dataset.d+"/":"")+name;
+    if(to===src)return;
+    const r=await api("/api/notes/move",{method:"POST",body:JSON.stringify({path:src,to})});
+    if(r&&r.ok){if(NT_PATH===src)NT_PATH=to;refresh();}else toast("Ошибка: "+((r&&r.log)||r&&r.error||"не перенести"));};});
+  const tl=tagsAll();
+  q("#ntTags").innerHTML=tl.length?tl.map(([t,n])=>`<span class="nt-tag${tag===t?" on":""}" data-t="${att(t)}">#${esc(t)} <i>${n}</i></span>`).join(""):`<span class="nt-mut">пока нет</span>`;
+  q("#ntTags").querySelectorAll(".nt-tag").forEach(el2=>el2.onclick=()=>{tag=tag===el2.dataset.t?null:el2.dataset.t;paintSide();paintList();});};
+ const fmtD=t=>{const d=new Date(t*1000),n=new Date();return d.toDateString()===n.toDateString()?d.toTimeString().slice(0,5):d.toLocaleDateString();};
+ const paintList=async()=>{
+  let items;
+  if(qstr){const r=await api("/api/notes/search?q="+encodeURIComponent(qstr));items=(r&&r.hits)||[];}
+  else{items=TREE.notes.filter(n=>tag?n.tags.includes(tag):(fold===""?true:n.folder===fold));}
+  items=items.slice().sort((a,b)=>b.mtime-a.mtime);
+  const l=q("#ntList");
+  l.innerHTML=items.length?items.map(n=>`<div class="nt-item${NT_PATH===n.path?" on":""}" data-p="${att(n.path)}" draggable="true">
+    <b>${esc(n.title)}</b>
+    ${n.snip?`<span class="nt-snip">${esc(n.snip)}</span>`:""}
+    <span class="nt-meta">${n.tags.map(t=>`<i>#${esc(t)}</i>`).join(" ")}<span>${fmtD(n.mtime)}</span></span>
+   </div>`).join(""):`<div class="nt-mut" style="padding:18px">пусто</div>`;
+  l.querySelectorAll(".nt-item").forEach(el2=>{
+   el2.onclick=()=>openNote(el2.dataset.p);
+   el2.ondragstart=e=>e.dataTransfer.setData("text/plain",el2.dataset.p);});};
+ const saveNow=async()=>{
+  if(!NT_PATH||!NT_ED)return;
+  NT_DIRTY=false;clearTimeout(NT_SAVE_T);
+  const title=q("#ntTitle")?q("#ntTitle").value.trim():"";
+  const tags=(q("#ntTagsIn")?q("#ntTagsIn").value:"").split(",").map(s2=>s2.trim().replace(/^#/,"")).filter(Boolean);
+  const r=await api("/api/notes/save",{method:"POST",body:JSON.stringify({path:NT_PATH,title,tags,md:NT_ED.getMarkdown()})});
+  const st=q("#ntSt");if(st)st.textContent=r&&r.ok?"сохранено "+new Date().toTimeString().slice(0,5):"ошибка сохранения";
+  const n=TREE.notes.find(x=>x.path===NT_PATH);
+  if(n){n.title=title||n.title;n.tags=tags;n.mtime=Math.floor(Date.now()/1000);paintSide();paintList();}};
+ const schedSave=()=>{NT_DIRTY=true;clearTimeout(NT_SAVE_T);NT_SAVE_T=setTimeout(saveNow,1200);
+  const st=q("#ntSt");if(st)st.textContent="…";};
+ const openNote=async p=>{
+  await flushSave();
+  const r=await api("/api/notes/get?path="+encodeURIComponent(p));
+  if(!r||r.error){toast("Не открыть: "+((r&&r.error)||"?"));return;}
+  NT_PATH=p;
+  const ed=q("#ntEdit");
+  ed.innerHTML=`
+   <div class="nt-head">
+    <input id="ntTitle" placeholder="Заголовок" value="${att(r.title)}">
+    <span id="ntSt" class="nt-mut"></span>
+    <button class="iconbtn" id="ntDel" title="В корзину">${svg("trash",15)}</button>
+   </div>
+   <input id="ntTagsIn" placeholder="теги, через, запятую" value="${att(r.tags.join(", "))}">
+   <div class="nt-ed" id="ntEd"></div>`;
+  ed.querySelector("#ntTitle").oninput=schedSave;
+  ed.querySelector("#ntTagsIn").oninput=schedSave;
+  ed.querySelector("#ntDel").onclick=()=>confirmDlg("Удалить заметку","«"+(r.title||p)+"» уедет в корзину (папка .trash в заметках).",async()=>{
+   await api("/api/notes/delete",{method:"POST",body:JSON.stringify({path:p})});
+   NT_PATH=null;ed.innerHTML=`<div class="nt-empty">Выберите заметку или создайте новую</div>`;refresh();},true);
+  if(NT_ED){try{NT_ED.destroy();}catch(e){}NT_ED=null;}
+  const folder=p.includes("/")?p.slice(0,p.lastIndexOf("/")):"";
+  const dark=!isLight();
+  const box=ed.querySelector("#ntEd");
+  box.style.setProperty("--nt-font",(SET.ntFont||15)+"px");
+  NT_ED=new toastui.Editor({
+   el:box,height:"100%",usageStatistics:false,
+   initialEditType:SET.ntMode||"wysiwyg",previewStyle:"tab",
+   language:(window.NAS_LANG||"en")==="en"?"en-US":"ru-RU",
+   theme:dark?"dark":"light",
+   initialValue:r.md,
+   plugins:[toastui.Editor.plugin.codeSyntaxHighlight],
+   hooks:{addImageBlobHook:async(blob,cb)=>{
+    const b64=await new Promise(res=>{const fr=new FileReader();fr.onload=()=>res(fr.result);fr.readAsDataURL(blob);});
+    const rr=await api("/api/notes/upload",{method:"POST",body:JSON.stringify({folder,name:blob.name||"img.png",data:b64})});
+    if(rr&&rr.ok)cb(rr.url,blob.name||"");else toast("Ошибка загрузки: "+((rr&&rr.error)||"?"));
+   }},
+   events:{change:schedSave}});
+  /* image interactions: click = size menu, double click = full-size lightbox */
+  box.addEventListener("click",e=>{const im=e.target.closest("img");if(!im)return;ntImgMenu(e,im);});
+  box.addEventListener("dblclick",e=>{const im=e.target.closest("img");if(im)ntLightbox(im.getAttribute("src"));});
+  paintList();};
+ const ntImgMenu=(e,im)=>{
+  const src=im.getAttribute("src")||"";
+  const setW=w=>{
+   /* rewrite the image in markdown: width lives in an <img> tag (md has no size syntax) */
+   let md=NT_ED.getMarkdown();
+   const escRe=src.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+   const mdRe=new RegExp("!\\[([^\\]]*)\\]\\("+escRe+"\\)");
+   const htmlRe=new RegExp('<img src="'+escRe+'"[^>]*>');
+   const tag2=w?`<img src="${src}" width="${w}">`:null;
+   if(htmlRe.test(md))md=md.replace(htmlRe,w?tag2:`![](${src})`);
+   else if(mdRe.test(md))md=md.replace(mdRe,w?tag2:`![$1](${src})`);
+   else return toast("Не нашёл картинку в тексте");
+   NT_ED.setMarkdown(md);schedSave();};
+  showMenu(e.clientX,e.clientY,[
+   {label:"Открыть полностью",ic:svg("expand",15),act:()=>ntLightbox(src)},
+   {sep:1},
+   {label:"Ширина 25%",act:()=>setW("25%")},
+   {label:"Ширина 50%",act:()=>setW("50%")},
+   {label:"Ширина 75%",act:()=>setW("75%")},
+   {label:"Оригинальный размер",act:()=>setW(null)},
+  ]);};
+ q("#ntNew").onclick=async()=>{
+  const r=await api("/api/notes/new",{method:"POST",body:JSON.stringify({folder:fold,title:"Новая заметка"})});
+  if(r&&r.ok){await refresh();openNote(r.path);const t=q("#ntTitle");if(t){t.focus();t.select();}}};
+ q("#ntNewF").onclick=()=>{
+  const s=document.getElementById("scrim");
+  s.innerHTML=`<div class="dialog"><h3>Новая папка</h3><input id="ntFN" placeholder="Название" style="width:100%"><div class="r"><button class="btn" id="ntFX">Отмена</button><button class="btn pri" id="ntFOk">Создать</button></div></div>`;
+  s.classList.add("show");const inp=s.querySelector("#ntFN");inp.focus();
+  const ok=async()=>{const name=inp.value.trim();if(!name)return;
+   const r=await api("/api/notes/mkdir",{method:"POST",body:JSON.stringify({folder:fold,name})});
+   s.classList.remove("show");if(r&&r.ok)refresh();else toast("Ошибка: "+((r&&r.error)||"?"));};
+  s.querySelector("#ntFOk").onclick=ok;
+  inp.onkeydown=ev=>{if(ev.key==="Enter")ok();};
+  s.querySelector("#ntFX").onclick=()=>s.classList.remove("show");};
+ let qT=null;
+ q("#ntQ").oninput=()=>{clearTimeout(qT);qT=setTimeout(()=>{qstr=q("#ntQ").value.trim();paintList();},300);};
+ await refresh();
+ /* save on window close / tab hide */
+ const iv=setInterval(()=>{if(!document.contains(body)){clearInterval(iv);flushSave();if(NT_ED){try{NT_ED.destroy();}catch(e){}NT_ED=null;NT_PATH=null;}}},1500);
+},{w:1240,h:780});}
+function ntLightbox(src){
+ if(!src)return;
+ const s=document.getElementById("scrim");
+ s.innerHTML=`<div class="nt-lb"><img src="${att(src)}"></div>`;
+ s.classList.add("show");
+ s.querySelector(".nt-lb").onclick=()=>{s.classList.remove("show");s.innerHTML="";};
+}
+
 /* Glance constructor: visual editor for external displays. Screens (size
    presets) -> pages -> tiles; the canvas repeats the ESP32 flow layout at true
    proportions, so what overflows the device is listed separately. Click a tile
@@ -6139,6 +6369,7 @@ function winSettings(initTab){openWin("__set","Настройки",body=>{
   {id:"files",name:"Файлы",ic:"folder"},
   {id:"notify",name:"Уведомления",ic:"bell"},
   {id:"glance",name:"Экран",ic:"monitor"},
+  {id:"nts",name:"Заметки",ic:"note"},
   {id:"system",name:"Система",ic:"activity"},
   {id:"motd",name:"Приветствие SSH",ic:"term"},
   {id:"maint",name:"Обслуживание",ic:"heart"},
@@ -6149,7 +6380,7 @@ function winSettings(initTab){openWin("__set","Настройки",body=>{
   {id:"pi",name:"Raspberry Pi",ic:"cpu"},
   {id:"timemachine",name:"Time Machine",ic:"timemachine"},
  ];
- const FN={look:lookTab,files:filesTab,notify:notifyTab,glance:glanceTab,timemachine:timemachineTab,system:systemTab,motd:motdTab,maint:maintTab,network:networkTab,security:securityTab,usb:usbTab,backup:backupTab,pi:piTab};
+ const FN={look:lookTab,files:filesTab,notify:notifyTab,glance:glanceTab,nts:notesTab,timemachine:timemachineTab,system:systemTab,motd:motdTab,maint:maintTab,network:networkTab,security:securityTab,usb:usbTab,backup:backupTab,pi:piTab};
  let footMo=null;
  const render=()=>{
   if(footMo){footMo.disconnect();footMo=null;}
@@ -7484,6 +7715,7 @@ function opsPop(){const b=document.getElementById("opsBtn");if(!b)return;
 document.querySelector(".desk").addEventListener("contextmenu",e=>{e.preventDefault();
  showMenu(e.clientX,e.clientY,[
   {label:"Система",ic:svg("gauge",17),act:winMon},{label:"Диски",ic:svg("disks",17),act:winDisks},
+  {label:"Заметки",ic:svg("note",17),act:winNotes},
   {label:"Экран NAS",ic:svg("monitor",17),act:winGlance},
   {label:"Персонализация",ic:svg("cog",17),act:winSettings},{sep:1},
   {label:"Обновить ярлыки",ic:svg("refresh",17),act:()=>{pollApps();toast("Ярлыки обновлены");}},
