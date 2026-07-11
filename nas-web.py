@@ -14,7 +14,7 @@ nas-web.py — веб-бэкенд мастера настройки NAS и ра
 """
 import json, os, re, subprocess, time, shutil, socket, threading, pwd, mimetypes, glob, errno, heapq, sys, sqlite3, fnmatch
 import html as _htmllib
-import pty, select, struct, hashlib, base64, signal, fcntl, termios, secrets, hmac
+import pty, select, struct, hashlib, base64, signal, fcntl, termios, secrets, hmac, shlex
 import urllib.request, urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs, quote, urlencode
@@ -5210,7 +5210,8 @@ _BK_SECTIONS = (
     ("stacks",    "Docker-стеки",              False, ("opt/stacks/",)),
     ("disks",     "Диски и пул",               False, ("nas-config/fstab.",)),
     ("webauth",   "Пароль панели",             True,  ("etc/nas-os/webauth.json",)),
-    ("nasbackup", "Бэкап главного NAS",        True,  ("etc/nas-os/nas-backup.json", "nas-config/nas-backup-")),
+    ("nasbackup", "Бэкап главного NAS",        True,  ("etc/nas-os/nas-backup.json", "nas-config/nas-backup-",
+                                                       "nas-config/store.json")),   # store.json: пароль SSH реплики
     ("other",     "Прочее",                    False, ()),      # всё, что не подошло выше
 )
 
@@ -6071,6 +6072,256 @@ def container_action(cid, action):
     return _run(["docker", *args], timeout=60)
 
 # --------------------------------------------------------------------------- #
+#  Магазин приложений: каталог services/ (compose + meta.json) → /opt/stacks.
+#  Установка = копия папки + .env из полей диалога + docker compose up (стрим).
+#  store.json: карточки «своих» стеков (custom) и конфиги реплик (replica).
+# --------------------------------------------------------------------------- #
+SERVICES_DIR = os.path.join(HERE, "services")
+STORE_FILE = os.path.join(NAS_CONFIG, "store.json")
+
+def _store_load():
+    return _json_load_strict(STORE_FILE, {})
+
+def _store_save(d):
+    _json_save(STORE_FILE, d, indent=2)
+
+def _store_compose_src(sid):
+    d = os.path.join(SERVICES_DIR, sid)
+    for fn in ("docker-compose.yml", "docker-compose.yaml", "compose.yaml", "compose.yml"):
+        p = os.path.join(d, fn)
+        if os.path.isfile(p):
+            return p
+    return None
+
+def _store_meta(sid):
+    return _json_load_strict(os.path.join(SERVICES_DIR, sid, "meta.json"), {})
+
+def _store_subst(val):
+    """Placeholders in meta defaults: {storage} {tz} {host} {rand}."""
+    if not isinstance(val, str):
+        return val
+    if "{tz}" in val:
+        val = val.replace("{tz}", _read("/etc/timezone") or "UTC")
+    if "{rand}" in val:
+        val = val.replace("{rand}", secrets.token_urlsafe(12))
+    return val.replace("{storage}", STORAGE).replace("{host}", lan_ip())
+
+def _replica_dir(sid):
+    return os.path.join(NAS_CONFIG, "replica", sid)
+
+def _replica_state(sid):
+    """Last sync facts, read from files the sync script leaves behind."""
+    rd = _replica_dir(sid)
+    ver, ts = _read(os.path.join(rd, "version")), None
+    dump = os.path.join(rd, "dump.sql.gz")
+    if os.path.isfile(dump):
+        ts = int(os.path.getmtime(dump))
+    return {"version": ver, "synced": ts,
+            "dump_mb": round(os.path.getsize(dump) / 1048576, 1) if ts else None}
+
+def store_catalog():
+    stacks = {s["name"]: s for s in docker_stacks().get("stacks", [])}
+    st = _store_load()
+    out = []
+    try:
+        ids = sorted(os.listdir(SERVICES_DIR))
+    except OSError:
+        ids = []
+    for sid in ids:
+        if not _store_compose_src(sid):
+            continue
+        m = _store_meta(sid)
+        if m.get("hidden"):
+            continue
+        s = stacks.get(sid)
+        rep = m.get("replica")
+        item = {"id": sid, "name": m.get("name") or sid, "desc": m.get("desc") or "",
+                "category": m.get("category") or "tools", "icon": m.get("icon") or "",
+                "port": m.get("port"),
+                "fields": [dict(f, default=_store_subst(f.get("default")))
+                           for f in (m.get("fields") or []) if f.get("key")],
+                "installed": bool(s), "running": bool(s and s["running"]),
+                "total": (s or {}).get("total", 0)}
+        if rep:
+            cfg = (st.get("replica") or {}).get(sid) or {}
+            item["replica"] = {"desc": rep.get("desc") or "",
+                               "cfg": {k: v for k, v in cfg.items() if k != "pass"},
+                               "has_pass": bool(cfg.get("pass")),
+                               "dest_default": _stack_env(sid).get(rep.get("data_env") or "", ""),
+                               "state": _replica_state(sid)}
+        out.append(item)
+    # свои стеки (не из каталога) — кандидаты на карточку/ярлык
+    custom = st.get("custom") or {}
+    others = [{"id": n, "installed": True, "running": bool(s["running"]),
+               "total": s["total"], "custom": custom.get(n)}
+              for n, s in sorted(stacks.items()) if not _store_compose_src(n)]
+    return {"ok": True, "apps": out, "own": others}
+
+def _stack_env(name):
+    """KEY=VALUE map from the installed stack's .env (empty if none)."""
+    out = {}
+    for line in _read(os.path.join(STACKS_DIR, name, ".env")).splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            k, _, v = line.partition("=")
+            out[k.strip()] = v.strip()
+    return out
+
+def store_install(sid, values):
+    src = _store_compose_src(sid) if _STACK_RE.match(sid or "") else None
+    if not src:
+        return {"ok": False, "log": "нет такого приложения"}
+    m = _store_meta(sid)
+    src_dir, dst = os.path.join(SERVICES_DIR, sid), os.path.join(STACKS_DIR, sid)
+    os.makedirs(dst, exist_ok=True)
+    for f in os.listdir(src_dir):          # extra files (custom.css etc.) go along
+        sp = os.path.join(src_dir, f)
+        if f == "meta.json" or f.endswith(".example") or not os.path.isfile(sp):
+            continue
+        shutil.copy2(sp, os.path.join(dst, "compose.yaml" if sp == src else f))
+    # .env: dialog values win, empty ones fall back to meta defaults; merge over
+    # an existing .env so reinstall keeps manual edits it doesn't know about
+    env = _stack_env(sid)
+    for f in (m.get("fields") or []):
+        k = f.get("key")
+        if not k:
+            continue
+        v = (values or {}).get(k)
+        if v in (None, ""):
+            v = env.get(k) or _store_subst(f.get("default") or "")
+        env[k] = str(v).replace("\n", " ")
+        if f.get("type") == "path" and str(v).startswith("/"):
+            try:
+                os.makedirs(v, exist_ok=True)
+                _chown_user(v)
+            except OSError:
+                pass
+    with open(os.path.join(dst, ".env"), "w") as fh:   # env_file: .env must exist
+        fh.write("\n".join("%s=%s" % kv for kv in env.items()) + "\n")
+    log_event("action", "Магазин: установка %s" % (m.get("name") or sid), "", "ok",
+              kind="svc", desk=False)
+    return {"ok": True}
+
+def store_custom_save(stack, name, icon, port):
+    if not _STACK_RE.match(stack or ""):
+        return {"ok": False, "log": "имя"}
+    st = _store_load()
+    cust = st.setdefault("custom", {})
+    if not (name or "").strip():
+        cust.pop(stack, None)
+    else:
+        try:
+            port = int(port) if port else None
+        except (TypeError, ValueError):
+            port = None
+        cust[stack] = {"name": str(name).strip()[:40], "icon": str(icon or "").strip(),
+                       "port": port}
+    _store_save(st)
+    return {"ok": True}
+
+# ---- реплика приложения с другого NAS (рецепт в meta.json:replica) ----
+def store_replica_save(sid, cfg):
+    if not _store_meta(sid).get("replica"):
+        return {"ok": False, "log": "у приложения нет рецепта реплики"}
+    st = _store_load()
+    cur = st.setdefault("replica", {}).setdefault(sid, {})
+    for k in ("host", "user", "src_data", "dest_data"):
+        if k in cfg:
+            cur[k] = str(cfg.get(k) or "").strip()
+    if cfg.get("pass"):                     # пустое поле = пароль не трогаем
+        cur["pass"] = str(cfg["pass"])
+    if cfg.get("clear_pass"):
+        cur.pop("pass", None)
+    _store_save(st)
+    return {"ok": True}
+
+def _replica_ssh(cfg):
+    """(ssh-команда, env) — sshpass при пароле, иначе ключевой вход."""
+    tgt = "%s@%s" % (cfg.get("user") or "root", cfg["host"])
+    opts = "-o StrictHostKeyChecking=accept-new -o ConnectTimeout=10"
+    if cfg.get("pass"):
+        if not shutil.which("sshpass"):
+            raise ValueError("для входа по паролю нужен sshpass: sudo apt install sshpass")
+        return "sshpass -e ssh %s %s" % (opts, tgt), {"SSHPASS": cfg["pass"]}
+    return "ssh %s %s" % (opts, tgt), {}
+
+def store_replica_script(sid, mode):
+    """(bash-скрипт, env) для стрима: mode=sync (дамп+rsync) | restore (поднять реплику).
+    ValueError с человекочитаемым текстом, если что-то не настроено."""
+    rep = _store_meta(sid).get("replica") or {}
+    if not rep:
+        raise ValueError("у приложения нет рецепта реплики")
+    cfg = (_store_load().get("replica") or {}).get(sid) or {}
+    rd = _replica_dir(sid)
+    dump = os.path.join(rd, "dump.sql.gz")
+    if mode == "sync":
+        if not cfg.get("host") or not cfg.get("src_data"):
+            raise ValueError("реплика не настроена: адрес источника и путь медиатеки")
+        dest = cfg.get("dest_data") or _stack_env(sid).get(rep.get("data_env") or "", "")
+        if not dest:
+            raise ValueError("не задана папка данных на этом NAS (установите приложение или укажите путь)")
+        os.makedirs(rd, exist_ok=True)
+        ssh, env = _replica_ssh(cfg)
+        rsync_e = ssh.rsplit(" ", 1)[0]     # та же команда без host — для rsync -e
+        q = shlex.quote
+        script = """set -e
+echo "== версия на источнике"
+VER=$(%(ssh)s %(vcmd)s); echo "$VER"
+printf '%%s' "$VER" > %(vfile)s
+echo "== дамп базы на источнике (pg_dumpall | gzip)"
+%(ssh)s %(dcmd)s > %(dump)s.part
+mv %(dump)s.part %(dump)s
+ls -lh %(dump)s
+echo "== rsync медиатеки (первый раз может быть долго)"
+mkdir -p %(dest)s
+rsync -a --delete --info=progress2 -e %(re)s %(tgt)s:%(srcd)s/ %(dest)s/
+echo "== синхронизация завершена: версия источника $VER"
+""" % {"ssh": ssh, "vcmd": q(rep["version_cmd"]), "vfile": q(os.path.join(rd, "version")),
+       "dcmd": q(rep["dump_cmd"]), "dump": q(dump), "re": q(rsync_e),
+       "tgt": "%s@%s" % (cfg.get("user") or "root", cfg["host"]),
+       "srcd": q(cfg["src_data"].rstrip("/")), "dest": q(dest.rstrip("/"))}
+        return script, env
+    # restore: поднять реплику той же версией, что источник в момент дампа
+    comp = _compose_path(sid)
+    if not os.path.isfile(comp):
+        raise ValueError("приложение не установлено на этом NAS — сначала «Установить»")
+    if not os.path.isfile(dump):
+        raise ValueError("нет дампа — сначала «Синхронизировать»")
+    ver = _read(os.path.join(rd, "version"))
+    tag = ver.rsplit(":", 1)[-1] if ":" in ver else ""
+    if not tag:
+        raise ValueError("не удалось определить версию источника — повторите синхронизацию")
+    q = shlex.quote
+    script = """set -e
+cd %(dir)s
+echo "== реплика поднимается версией источника: %(tag)s"
+if grep -q '^%(vkey)s=' .env 2>/dev/null; then
+  sed -i 's|^%(vkey)s=.*|%(vkey)s=%(tag)s|' .env
+else
+  echo '%(vkey)s=%(tag)s' >> .env
+fi
+DC="docker compose -f %(comp)s -p %(sid)s"
+echo "== останавливаем стек"
+$DC down --remove-orphans
+echo "== поднимаем базу"
+$DC up -d %(dbsvc)s
+echo "== ждём готовность Postgres"
+docker exec %(dbc)s %(wait)s
+echo "== восстанавливаем дамп (вывод psql скрыт)"
+gunzip -c %(dump)s | docker exec -i %(dbc)s %(psql)s > /dev/null
+echo "== тянем образы и запускаем всё"
+$DC pull --quiet || true
+$DC up -d
+echo "== реплика обновлена: версия %(tag)s, дамп от $(date -r %(dump)s '+%%F %%T')"
+""" % {"dir": q(os.path.join(STACKS_DIR, sid)), "comp": q(comp), "sid": q(sid),
+       "tag": tag, "vkey": rep.get("version_env") or "VERSION",
+       "dbsvc": rep.get("db_service") or "database",
+       "dbc": rep.get("db_container") or (sid + "_db"),
+       "wait": rep.get("wait_db_cmd") or "true", "psql": rep.get("psql_cmd") or "psql",
+       "dump": q(dump)}
+    return script, {}
+
+# --------------------------------------------------------------------------- #
 #  Docker-сервисы
 # --------------------------------------------------------------------------- #
 def _docker_ps():
@@ -6124,7 +6375,26 @@ def discover_desktop_apps():
             "icon": g("icon") or "",
             "running": status == "running",
             "status": status,
+            "_proj": labels.get("com.docker.compose.project") or "",
         })
+    # свои стеки, оформленные карточкой в магазине (store.json: custom) — ярлык
+    # без правки чужого compose; стек с готовыми web-desktop-метками не дублируем
+    cust = _safe(lambda: _store_load().get("custom") or {}, {})
+    if cust:
+        labeled = {a["_proj"] for a in apps if a["_proj"]}
+        ps = _docker_ps()
+        for stack, c in sorted(cust.items()):
+            if stack in labeled:
+                continue
+            running = any(x.get("State") == "running" for x in ps
+                          if ("com.docker.compose.project=%s" % stack) in (x.get("Labels") or ""))
+            port = c.get("port")
+            apps.append({"container": stack, "name": c.get("name") or stack,
+                         "url": ("http://%s:%d" % (lan_ip(), port)) if port else "",
+                         "icon": c.get("icon") or "", "running": running,
+                         "status": "running" if running else "exited"})
+    for a in apps:
+        a.pop("_proj", None)
     apps.sort(key=lambda a: a["name"].lower())
     return apps
 
@@ -10554,6 +10824,8 @@ class H(BaseHTTPRequestHandler):
                 self._json(unit_read((q.get("name") or [""])[0]))
             elif p == "/api/stacks":
                 self._json(docker_stacks())
+            elif p == "/api/store":
+                self._json(store_catalog())
             elif p == "/api/stack":
                 self._json(stack_read((q.get("name") or [""])[0]))
             elif p == "/api/stack/logs":
@@ -10971,6 +11243,47 @@ class H(BaseHTTPRequestHandler):
             elif re.match(r"^/api/cron/job/[\w.\-:]+$", p):
                 jid = p.rsplit("/", 1)[1]
                 self._json(cron_update(jid, self._body()))
+            elif p == "/api/store/install":
+                b = self._body()
+                self._json(store_install(b.get("id", ""), b.get("values") or {}))
+            elif p == "/api/store/custom":
+                b = self._body()
+                self._json(store_custom_save(b.get("stack", ""), b.get("name", ""),
+                                             b.get("icon", ""), b.get("port")))
+            elif p == "/api/store/replica":
+                b = self._body()
+                self._json(store_replica_save(b.get("id", ""), b))
+            elif p == "/api/store/replica/run":
+                # синхронизация/восстановление реплики — долгий bash со стримом лога
+                b = self._body()
+                try:
+                    script, env = store_replica_script(b.get("id", ""),
+                                                       "restore" if b.get("mode") == "restore" else "sync")
+                except ValueError as e:
+                    self._json({"ok": False, "log": str(e)}); return
+                log_event("action", "Реплика %s: %s" % (b.get("id", ""),
+                          "восстановление" if b.get("mode") == "restore" else "синхронизация"),
+                          "", "ok", kind="svc", desk=False)
+                self._stream_cmd(["bash", "-c", script],
+                                 env=dict(_C_ENV, **env), timeout=86400)
+            elif p == "/api/stack/stream":
+                # долгие compose-действия (up при установке, pull) — стримом
+                b = self._body()
+                name, action = b.get("name", ""), b.get("action", "")
+                amap = {"up": ["up", "-d"], "pull": ["pull"], "update": ["pull"],
+                        "rebuild": ["up", "-d", "--build"]}
+                if not _STACK_RE.match(name) or not os.path.isfile(_compose_path(name)) \
+                        or action not in amap:
+                    self._json({"ok": False, "log": "недопустимый стек/действие"}); return
+                wud_invalidate()
+                args = ["docker", "compose", "-f", _compose_path(name), "-p", name] + amap[action]
+                if action == "update":       # pull + перезапуск одной кнопкой
+                    self._stream_cmd(["bash", "-c",
+                        "%s && docker compose -f %s -p %s up -d" %
+                        (" ".join(map(shlex.quote, args)),
+                         shlex.quote(_compose_path(name)), shlex.quote(name))], timeout=3600)
+                else:
+                    self._stream_cmd(args, timeout=3600)
             elif p == "/api/updates/apply":
                 # установка обновлений apt со стримом лога; DEBIAN_FRONTEND чтобы не задавало вопросов
                 self._body()

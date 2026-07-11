@@ -1,0 +1,7 @@
+{
+  "name": "qBittorrent",
+  "desc": "Торрент-клиент с веб-интерфейсом",
+  "category": "files",
+  "icon": "https://cdn.jsdelivr.net/gh/selfhst/icons@main/svg/qbittorrent.svg",
+  "port": 8080
+}

@@ -1,0 +1,7 @@
+{
+  "name": "Scrutiny",
+  "desc": "Здоровье дисков: SMART-мониторинг с историей и оценками",
+  "category": "monitor",
+  "icon": "https://cdn.jsdelivr.net/gh/selfhst/icons@main/svg/scrutiny.svg",
+  "port": 8084
+}

@@ -1,0 +1,7 @@
+{
+  "name": "Zerobyte",
+  "desc": "Бэкапы наружу: restic-снимки в облако/на другой диск, веб-интерфейс",
+  "category": "backup",
+  "icon": "https://cdn.jsdelivr.net/gh/selfhst/icons@main/svg/zerobyte.svg",
+  "port": 4096
+}

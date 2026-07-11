@@ -930,6 +930,18 @@
   /* история метрик */
   .grow{flex:1;min-width:8px}
   .dk-tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-top:14px}
+  /* ---- магазин приложений ---- */
+  .st-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;margin-bottom:4px}
+  .st-card{background:var(--card);border-radius:var(--r-lg);padding:12px;display:flex;flex-direction:column;gap:8px;box-shadow:var(--sh-sm)}
+  .st-top{display:flex;gap:10px;align-items:center;min-width:0}
+  .st-ic{width:34px;height:34px;border-radius:8px;object-fit:contain;flex:none}
+  .st-fb{width:34px;height:34px;border-radius:8px;background:var(--sel);color:var(--accent);font-weight:700;font-size:16px;align-items:center;justify-content:center;flex:none;display:none}
+  .st-tt{display:flex;flex-direction:column;min-width:0}
+  .st-tt b{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .st-status{display:flex;align-items:center;gap:5px;font-size:11.5px;color:var(--mut)}
+  .st-status .dot{width:7px;height:7px;border-radius:50%;flex:none}
+  .st-desc{font-size:12.5px;color:var(--dim);line-height:1.45;flex:1}
+  .st-acts{display:flex;gap:6px;flex-wrap:wrap}
   .dk-tile{background:var(--card);border:1px solid var(--line);border-radius:var(--r-md);padding:12px 13px;display:flex;flex-direction:column;gap:2px}
   .dk-tile b{font-size:19px;font-weight:750;line-height:1.15}
   .dk-tile span{font-size:11.5px;color:var(--dim)}
@@ -2373,6 +2385,7 @@ const P={
  copy:'<rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/>',
  power:'<path d="M12 2v10"/><path d="M18.36 6.64a9 9 0 1 1-12.73 0"/>',
  zap:'<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>',
+ bag:'<path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/>',
  refresh:'<path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/>',
  list:'<path d="M8 6h13"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M3 6h.01"/><path d="M3 12h.01"/><path d="M3 18h.01"/>',
  play:'<polygon points="6 3 20 12 6 21 6 3"/>',
@@ -4126,6 +4139,7 @@ function winServices(initTab){openWin("__services","Docker",(body,win)=>{
  function paintSide(){
   side.innerHTML="";
   side.appendChild(item("overview","gauge","Обзор","статистика и очистка"));
+  side.appendChild(item("store","bag","Магазин","приложения в 1 клик"));
   const h=el(`<div class="dm2-side-h" style="display:flex;align-items:center;gap:6px">Стеки · ${stacks.length}<span class="grow"></span><button class="mbp-hb" title="Новый стек" style="padding:2px 4px">${svg("plus",13)}</button></div>`);
   h.querySelector("button").onclick=()=>editStack(null,reload);
   side.appendChild(h);
@@ -4145,6 +4159,7 @@ function winServices(initTab){openWin("__services","Docker",(body,win)=>{
   detail.innerHTML="";
   if(!ok){detail.innerHTML=`<div class="dempty">${svg("cube",16)} Docker не установлен или недоступен.<br>Пройдите этап «Система» в Мастере.</div>`;return;}
   if(DK_SEL==="overview")dkOverview(detail,reload);
+  else if(DK_SEL==="store")storeTab(detail,reload);
   else if(DK_SEL==="images")imagesTab(detail);
   else if(DK_SEL==="volumes")volumesTab(detail);
   else{const s=stacks.find(y=>"stack:"+y.name===DK_SEL);
@@ -4160,6 +4175,145 @@ function winServices(initTab){openWin("__services","Docker",(body,win)=>{
   load();},5000);
 },{w:840,h:640});}
 /* дашборд Docker: сводка + очистка */
+/* ---- Магазин приложений: каталог services/ репозитория + свои стеки ---- */
+const ST_CATS={media:"Медиа",files:"Файлы",monitor:"Мониторинг",tools:"Инструменты",backup:"Бэкап"};
+async function storeTab(tc,reload){
+ tc.innerHTML=`<div class="dd"><div class="dd-head">
+   <div class="dd-ic" style="background:linear-gradient(135deg,#34b27b,#1f9e6e)">${svg("bag",20)}</div>
+   <div class="dd-hmain"><div class="dd-name">Магазин приложений</div><div class="dd-sub">docker-приложения в один клик · настройки в /opt/stacks, данные в пуле</div></div></div>
+  <div id="stBody"><div class="set-load">загрузка…</div></div></div>`;
+ const r=await api("/api/store");if(!document.body.contains(tc))return;
+ const box=tc.querySelector("#stBody");
+ if(!(r&&r.ok)){box.innerHTML=`<div class="dempty">${svg("cube",16)} Docker недоступен</div>`;return;}
+ box.innerHTML="";
+ const apps=r.apps||[];
+ const cats=[...new Set(apps.map(a=>a.category))].sort((a,b)=>(ST_CATS[a]||a).localeCompare(ST_CATS[b]||b));
+ cats.forEach(cat=>{
+  box.appendChild(el(`<div class="dd-grp">${esc(nasTr(ST_CATS[cat]||cat))}</div>`));
+  const g=el(`<div class="st-grid"></div>`);
+  apps.filter(a=>a.category===cat).forEach(a=>g.appendChild(stCard(a,tc,reload)));
+  box.appendChild(g);});
+ const own=r.own||[];
+ if(own.length){
+  box.appendChild(el(`<div class="dd-grp">Свои стеки</div>`));
+  box.appendChild(el(`<div class="mon-note">Любая папка с compose.yaml в /opt/stacks — уже приложение: панель умеет её запускать и собирать (up/build, вкладка «Стеки»). «Ярлык» добавляет его на рабочий стол с иконкой и ссылкой — compose не трогаем.</div>`));
+  const g=el(`<div class="st-grid"></div>`);
+  own.forEach(o=>g.appendChild(stOwnCard(o,tc,reload)));
+  box.appendChild(g);}
+}
+function stCard(a,tc,reload){
+ const dot=a.installed?(a.running?"var(--good)":"var(--mut)"):"transparent";
+ const c=el(`<div class="st-card">
+   <div class="st-top"><img class="st-ic" src="${att(iconSrc(a.icon))}" alt=""><span class="st-fb">${esc((a.name||"?")[0])}</span>
+    <div class="st-tt"><b>${esc(a.name)}</b><span class="st-status"><i class="dot" style="background:${dot};${a.installed?"":"box-shadow:inset 0 0 0 1.5px var(--mut)"}"></i>${a.installed?(a.running?"запущено":"остановлено"):"не установлено"}</span></div></div>
+   <div class="st-desc"></div>
+   <div class="st-acts"></div></div>`);
+ const im=c.querySelector(".st-ic");im.onerror=()=>{im.style.display="none";c.querySelector(".st-fb").style.display="flex";};
+ c.querySelector(".st-desc").textContent=nasTr(a.desc||"");
+ const acts=c.querySelector(".st-acts");
+ const btn=(label,ic,cls,fn)=>{const b=el(`<button class="btn sm ${cls||""}">${ic?svg(ic,13)+" ":""}${label}</button>`);b.onclick=fn;acts.appendChild(b);return b;};
+ if(!a.installed)btn("Установить","download","pri",()=>stInstallDlg(a,tc,reload));
+ else{
+  if(a.port&&a.running)btn("Открыть","expand","",()=>window.open(`http://${host()}:${a.port}`,"_blank"));
+  if(!a.running)btn("Запустить","play","pri",()=>stRunDlg(a.name+" — запуск",{name:a.id,action:"up"},tc,reload));
+  btn("Обновить","arrowup","",()=>stRunDlg(a.name+" — обновление (pull + up)",{name:a.id,action:"update"},tc,reload));
+  if(a.replica)btn("Реплика…","sync","",()=>stReplicaDlg(a,tc,reload));
+  btn("Удалить","trash","dng",()=>confirmDlg("Удалить "+a.name,"Стек будет остановлен, папка /opt/stacks/"+a.id+" удалена. Данные приложения (тома и папки в пуле) останутся на диске.",async()=>{
+   const r2=await api("/api/stack/delete",{method:"POST",body:JSON.stringify({name:a.id})});
+   if(r2&&r2.ok){toast(a.name+" удалён");storeTab(tc,reload);reload();pollApps();}else toast("Ошибка: "+((r2&&r2.log)||"?"));},true));}
+ return c;
+}
+/* стрим долгого compose-действия в маленьком диалоге с консолью */
+function stRunDlg(title,body,tc,reload){
+ const s=document.getElementById("scrim");
+ s.innerHTML=`<div class="dialog" style="max-width:640px;width:92vw"><h3>${esc(title)}</h3>
+  <div class="mcon" id="stCon" style="display:block;min-height:120px"></div>
+  <div class="r"><button class="btn" id="stX" disabled>Закрыть</button></div></div>`;
+ s.classList.add("show");
+ const x=s.querySelector("#stX");x.onclick=()=>s.classList.remove("show");
+ streamPost("/api/stack/stream",s.querySelector("#stCon"),code=>{
+  x.disabled=false;
+  if(code===0){toast("Готово");storeTab(tc,reload);reload();pollApps();}},body);
+}
+function stInstallDlg(a,tc,reload){
+ const s=document.getElementById("scrim");
+ const flds=a.fields||[],main=flds.filter(f=>!f.adv),adv=flds.filter(f=>f.adv);
+ const row=f=>`<div class="field"><label>${esc(nasTr(f.label||f.key))}${f.hint?` <span style="color:var(--mut);font-weight:400">— ${esc(nasTr(f.hint))}</span>`:""}</label><input data-k="${att(f.key)}"${f.secret?' type="password"':""} value="${att(f.default||"")}" autocomplete="off" spellcheck="false"></div>`;
+ s.innerHTML=`<div class="dialog" style="max-width:560px;width:92vw"><h3>${esc(a.name)} — установка</h3>
+  ${main.map(row).join("")||`<p style="color:var(--mut);font-size:13px">Настройки не требуются — приложение готово к запуску.</p>`}
+  ${adv.length?`<details><summary style="cursor:pointer;color:var(--mut);font-size:13px;margin:6px 0">Дополнительно (${adv.length})</summary>${adv.map(row).join("")}</details>`:""}
+  <div class="r"><button class="btn" id="stX">Отмена</button><button class="btn pri" id="stGo">${svg("download",14)} Установить</button></div>
+  <div class="mcon" id="stCon"></div></div>`;
+ s.classList.add("show");
+ s.querySelector("#stX").onclick=()=>s.classList.remove("show");
+ s.querySelector("#stGo").onclick=async()=>{
+  const values={};s.querySelectorAll("input[data-k]").forEach(i=>values[i.dataset.k]=i.value.trim());
+  const go=s.querySelector("#stGo");go.disabled=true;
+  const r=await api("/api/store/install",{method:"POST",body:JSON.stringify({id:a.id,values})});
+  if(!(r&&r.ok)){toast("Ошибка: "+((r&&r.log)||"?"));go.disabled=false;return;}
+  streamPost("/api/stack/stream",s.querySelector("#stCon"),code=>{
+   if(code===0){toast(a.name+": установлено");s.classList.remove("show");storeTab(tc,reload);reload();pollApps();}
+   else go.disabled=false;},{name:a.id,action:"up"});};
+}
+/* реплика с другого NAS: конфиг + синхронизация + восстановление */
+function stReplicaDlg(a,tc,reload){
+ const rp=a.replica||{},cfg=rp.cfg||{},stt=rp.state||{};
+ const s=document.getElementById("scrim");
+ const last=stt.synced?new Date(stt.synced*1000).toLocaleString()+(stt.version?" · "+stt.version.split("/").pop():"")+(stt.dump_mb?" · дамп "+stt.dump_mb+" МБ":""):"ещё не было";
+ s.innerHTML=`<div class="dialog" style="max-width:640px;width:92vw"><h3>${svg("sync",16)} Реплика: ${esc(a.name)}</h3>
+  <p style="color:var(--mut);font-size:13px;margin:4px 0 10px">${esc(nasTr(rp.desc||""))}</p>
+  <div class="field"><label>Источник (адрес главного NAS)</label><input id="rpHost" value="${att(cfg.host||"")}" placeholder="192.168.1.95" autocomplete="off"></div>
+  <div class="field"><label>Пользователь SSH</label><input id="rpUser" value="${att(cfg.user||"")}" placeholder="root" autocomplete="off"></div>
+  <div class="field"><label>Пароль SSH</label><input id="rpPass" type="password" placeholder="${rp.has_pass?"•••••• (задан; пусто = не менять)":"пусто = вход по ключу"}" autocomplete="new-password"></div>
+  <div class="field"><label>Медиатека на источнике <span style="color:var(--mut);font-weight:400">— путь на главном NAS</span></label><input id="rpSrc" value="${att(cfg.src_data||"")}" placeholder="/mnt/pool/immich/library" autocomplete="off"></div>
+  <div class="field"><label>Медиатека на этом NAS</label><input id="rpDst" value="${att(cfg.dest_data||rp.dest_default||"")}" placeholder="${att(rp.dest_default||"/mnt/storage/immich")}" autocomplete="off"></div>
+  <div class="krow" style="margin:6px 0"><span>Последняя синхронизация</span><b>${esc(last)}</b></div>
+  <div class="r" style="flex-wrap:wrap;gap:6px">
+   <button class="btn" id="rpX">Закрыть</button><span style="flex:1"></span>
+   <button class="btn" id="rpSync">${svg("refresh",13)} Синхронизировать</button>
+   <button class="btn pri" id="rpRestore">${svg("play",13)} Обновить реплику</button></div>
+  <div class="mcon" id="rpCon"></div></div>`;
+ s.classList.add("show");
+ s.querySelector("#rpX").onclick=()=>s.classList.remove("show");
+ const save=async()=>{const b={id:a.id,host:s.querySelector("#rpHost").value.trim(),user:s.querySelector("#rpUser").value.trim(),
+   src_data:s.querySelector("#rpSrc").value.trim(),dest_data:s.querySelector("#rpDst").value.trim()};
+  const pw=s.querySelector("#rpPass").value;if(pw)b.pass=pw;
+  const r2=await api("/api/store/replica",{method:"POST",body:JSON.stringify(b)});
+  if(!(r2&&r2.ok)){toast("Ошибка: "+((r2&&r2.log)||"?"));return false;}
+  return true;};
+ const run=async mode=>{if(!await save())return;
+  streamPost("/api/store/replica/run",s.querySelector("#rpCon"),code=>{
+   if(code===0){toast(mode==="restore"?"Реплика обновлена":"Синхронизация завершена");reload();}},{id:a.id,mode});};
+ s.querySelector("#rpSync").onclick=()=>run("sync");
+ s.querySelector("#rpRestore").onclick=()=>confirmDlg("Обновить реплику","База данных на этом NAS будет перезаписана дампом с источника. Приложение перезапустится той же версией, что и источник.",()=>run("restore"),true);
+}
+/* карточка своего стека: ярлык на рабочий стол без правки compose */
+function stOwnCard(o,tc,reload){
+ const cu=o.custom||null,nm=(cu&&cu.name)||o.id;
+ const c=el(`<div class="st-card">
+   <div class="st-top">${cu&&cu.icon?`<img class="st-ic" src="${att(iconSrc(cu.icon))}" alt="">`:""}<span class="st-fb" style="${cu&&cu.icon?"display:none":"display:flex"}">${esc(nm[0]||"?")}</span>
+    <div class="st-tt"><b>${esc(nm)}</b><span class="st-status"><i class="dot" style="background:${o.running?"var(--good)":"var(--mut)"}"></i>${o.running?"запущено":"остановлено"} · ${esc(o.id)}</span></div></div>
+   <div class="st-acts"></div></div>`);
+ const im=c.querySelector(".st-ic");if(im)im.onerror=()=>{im.style.display="none";c.querySelector(".st-fb").style.display="flex";};
+ const acts=c.querySelector(".st-acts");
+ const b=el(`<button class="btn sm">${svg("star",13)} ${cu?"Ярлык…":"На рабочий стол…"}</button>`);
+ b.onclick=()=>{
+  const s=document.getElementById("scrim");
+  s.innerHTML=`<div class="dialog"><h3>Ярлык: ${esc(o.id)}</h3>
+   <div class="field"><label>Название</label><input id="cuN" value="${att((cu&&cu.name)||o.id)}"></div>
+   <div class="field"><label>Иконка (URL, необязательно)</label><input id="cuI" value="${att((cu&&cu.icon)||"")}" placeholder="https://cdn.jsdelivr.net/gh/selfhst/icons@main/svg/….svg"></div>
+   <div class="field"><label>Порт веб-интерфейса</label><input id="cuP" value="${att((cu&&cu.port)||"")}" placeholder="8080"></div>
+   <div class="r">${cu?`<button class="btn dng" id="cuDel">Убрать ярлык</button>`:""}<span style="flex:1"></span><button class="btn" id="cuX">Отмена</button><button class="btn pri" id="cuOk">Сохранить</button></div></div>`;
+  s.classList.add("show");
+  s.querySelector("#cuX").onclick=()=>s.classList.remove("show");
+  const fin=async body=>{const r2=await api("/api/store/custom",{method:"POST",body:JSON.stringify(body)});
+   s.classList.remove("show");
+   if(r2&&r2.ok){toast("Сохранено");storeTab(tc,reload);pollApps();}else toast("Ошибка: "+((r2&&r2.log)||"?"));};
+  s.querySelector("#cuOk").onclick=()=>fin({stack:o.id,name:s.querySelector("#cuN").value.trim(),icon:s.querySelector("#cuI").value.trim(),port:s.querySelector("#cuP").value.trim()});
+  const del=s.querySelector("#cuDel");if(del)del.onclick=()=>fin({stack:o.id,name:""});};
+ acts.appendChild(b);
+ return c;
+}
 async function dkOverview(tc,reload){
  tc.innerHTML=`<div class="dd">
   <div class="dd-head"><div class="dd-ic" style="background:linear-gradient(135deg,#4C8DF6,#2563eb)">${svg("cube",20)}</div>

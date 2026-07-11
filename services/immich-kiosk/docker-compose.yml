@@ -1,0 +1,67 @@
+# Immich Kiosk — цифровая фоторамка поверх Immich (слайдшоу на ТВ/планшете).
+# http://<pi>:3001. Требует работающий Immich и его API-ключ (Immich →
+# Account Settings → API Keys). Секреты и персональные списки — в .env.
+name: immich-kiosk
+
+services:
+  immich-kiosk:
+    image: ghcr.io/damongolding/immich-kiosk:0.41.0
+    container_name: immich-kiosk
+    environment:
+      TZ: ${TZ:-Europe/Madrid}
+      # -- подключение к Immich (задаётся в .env) --
+      KIOSK_IMMICH_URL: ${KIOSK_IMMICH_URL}
+      KIOSK_IMMICH_API_KEY: ${KIOSK_IMMICH_API_KEY}
+      # внешний адрес для ссылок/QR-кодов на фото (пусто = не показывать)
+      KIOSK_IMMICH_EXTERNAL_URL: ${KIOSK_IMMICH_EXTERNAL_URL:-}
+      # -- что показывать --
+      KIOSK_ALBUMS: ${KIOSK_ALBUMS:-}            # id альбомов через запятую (пусто = все)
+      KIOSK_EXCLUDED_ALBUMS: ${KIOSK_EXCLUDED_ALBUMS:-}
+      KIOSK_PEOPLE: ${KIOSK_PEOPLE:-}            # id людей через запятую
+      KIOSK_DATES: ${KIOSK_DATES:-}              # напр. "last-7-days, last-30-days"
+      KIOSK_MEMORIES: ${KIOSK_MEMORIES:-true}
+      KIOSK_SHOW_ARCHIVED: "false"
+      KIOSK_ALBUM_ORDER: random
+      # -- часы и подписи --
+      KIOSK_SHOW_TIME: "true"
+      KIOSK_TIME_FORMAT: 24
+      KIOSK_SHOW_DATE: "true"
+      KIOSK_DATE_FORMAT: DD/MM/YYYY
+      KIOSK_SHOW_PERSON_NAME: "true"
+      KIOSK_SHOW_PERSON_AGE: "true"
+      KIOSK_SHOW_IMAGE_DATE: "true"
+      KIOSK_IMAGE_DATE_FORMAT: DD-MM-YYYY
+      KIOSK_SHOW_IMAGE_DESCRIPTION: "true"
+      KIOSK_SHOW_IMAGE_LOCATION: "true"
+      KIOSK_SHOW_MORE_INFO: "true"
+      KIOSK_SHOW_MORE_INFO_IMAGE_LINK: "true"
+      KIOSK_SHOW_MORE_INFO_QR_CODE: "true"
+      # -- поведение и вид --
+      KIOSK_DURATION: ${KIOSK_DURATION:-15}      # секунд на кадр
+      KIOSK_DISABLE_SCREENSAVER: "true"
+      KIOSK_OPTIMIZE_IMAGES: "true"
+      KIOSK_USE_GPU: "true"
+      KIOSK_HIDE_CURSOR: "true"
+      KIOSK_BACKGROUND_BLUR: "true"
+      KIOSK_THEME: ${KIOSK_THEME:-bubble}
+      KIOSK_LAYOUT: ${KIOSK_LAYOUT:-splitview}
+      KIOSK_TRANSITION: none
+      KIOSK_SHOW_PROGRESS_BAR: "true"
+      KIOSK_FONT_SIZE: ${KIOSK_FONT_SIZE:-200}
+      # -- служебное --
+      KIOSK_PORT: 3001
+      KIOSK_PREFETCH: "true"
+      KIOSK_FETCHED_ASSETS_SIZE: 500
+      KIOSK_HTTP_TIMEOUT: 20
+      KIOSK_ASSET_WEIGHTING: "true"
+      KIOSK_PASSWORD: ${KIOSK_PASSWORD:-}
+    env_file:
+      - .env
+    ports:
+      - "3001:3001"
+    labels:
+      - "diun.enable=true"
+      - "web-desktop.name=Immich Kiosk"
+      - "web-desktop.url=http://pi5.local:3001"
+      - "web-desktop.icon=https://cdn.jsdelivr.net/gh/selfhst/icons@main/png/immich-kiosk.png"
+    restart: unless-stopped

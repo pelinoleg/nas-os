@@ -1,0 +1,7 @@
+{
+  "name": "NextExplorer",
+  "desc": "Веб-файловый менеджер с предпросмотром и шарингом",
+  "category": "files",
+  "icon": "https://cdn.jsdelivr.net/gh/selfhst/icons@main/svg/nextexplorer.svg",
+  "port": 3000
+}

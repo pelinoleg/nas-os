@@ -1,0 +1,7 @@
+{
+  "name": "MySpeed",
+  "desc": "Спидтесты интернета по расписанию с историей",
+  "category": "monitor",
+  "icon": "https://cdn.jsdelivr.net/gh/selfhst/icons@main/png/myspeed.png",
+  "port": 5216
+}
