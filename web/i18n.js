@@ -700,6 +700,7 @@ window.NAS_I18N = { en: {
 "Копируется прямо сейчас — сколько уже скопировано, видно в строке и в полосе выше.": "Being copied right now — how much is already copied is shown in the row and in the bar above.",
 "Ждёт очереди: начнётся, когда закончится текущая папка.": "Waiting its turn: it starts when the current folder finishes.",
 "Уже скопировано в этой папке за текущий прогон": "Already copied from this folder during the current run",
+"Скорость копирования прямо сейчас": "Copy speed right now",
 "Столько лежит в приёмнике": "That much is in the destination now",
 "смотрю, что изменилось…": "checking what changed…",
 "меньше минуты": "less than a minute",

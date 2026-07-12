@@ -848,7 +848,9 @@
   .nb-prog-cur svg{flex:none}
   .nb-prog-cur b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .nb-prog-n{font-family:var(--mono);font-size:10.5px;font-weight:700;opacity:.65;flex:none}
-  .nb-prog-pct{margin-left:auto;font-family:var(--mono);font-weight:700;flex:none}
+  /* speed lives in the header, next to the percent: in the grey details line below it was lost */
+  .nb-prog-rate{margin-left:auto;font-family:var(--mono);font-weight:700;font-size:12.5px;flex:none;font-variant-numeric:tabular-nums}
+  .nb-prog-pct{font-family:var(--mono);font-weight:700;flex:none;opacity:.7}
   .nb-pbar{height:6px;border-radius:999px;background:var(--line-2);overflow:hidden;margin:6px 0 4px}
   .nb-pbar i{display:block;height:100%;background:var(--accent);border-radius:999px;transition:width .4s}
   /* вторая строка — байты/скорость/остаток: на узком экране лучше перенести, чем обрезать */
@@ -6619,11 +6621,12 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
       op.style.display="block";
       op.innerHTML=`<div class="nb-prog-cur">${svg("folder",13)} <b>${esc(r.cur||"…")}</b>`
         +(tn>1?`<span class="nb-prog-n" title="Папка ${dn+1} из ${tn}">${dn+1}/${tn}</span>`:"")
+        // скорость — в шапке, крупная: это главное число прогона, в серой строке ниже её не видно
+        +(P?`<span class="nb-prog-rate" title="Скорость копирования прямо сейчас">${esc(P.rate)}</span>`:"")
         +(P?`<span class="nb-prog-pct">${P.pct}%</span>`:"")+`</div>`
         +(P?`<div class="nb-pbar"><i style="width:${P.pct}%"></i></div>`:"")
         // «сколько уже скопировано» из этой папки; полный размер rsync не знает — оценка «~»
         +`<div class="nb-prog-l">${P?`<b class="mono">${fmtB(P.bytes)}</b>${tot?` из ~<span class="mono">${fmtB(tot)}</span>`:""}`
-            +` · <span class="mono">${esc(P.rate)}</span>`
             +(P.eta?` · осталось ~${etaTxt(P.eta)}`:"")
             +(P.left?` · <span class="mono">${P.left}</span> файлов`:"")
           :`смотрю, что изменилось…`}</div>`;
