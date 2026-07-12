@@ -456,6 +456,11 @@
   .bar{height:9px;border-radius:6px;background:var(--line);overflow:hidden}
   .bar i{display:block;height:100%;border-radius:6px;background:linear-gradient(90deg,var(--accent),var(--accent-2));transition:width .6s}
   .krow{display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:9px;gap:12px}.krow:last-child{margin-bottom:0}
+  /* «сеть ограничивает скорость» — заметно, но без паники: рамка на цвете предупреждения */
+  .wg-lanwarn{display:flex;align-items:center;gap:6px;margin-top:7px;padding:5px 8px;border-radius:var(--r-sm);
+    font-size:11px;font-weight:600;color:var(--warn);border:1px solid color-mix(in srgb,var(--warn) 35%,transparent);
+    background:color-mix(in srgb,var(--warn) 10%,transparent);cursor:help}
+  .wg-lanwarn svg{flex:none}
   .krow span{color:var(--dim);display:inline-flex;align-items:center;gap:6px}.krow span svg{opacity:.65;flex:none}.krow b{font-family:var(--mono);font-variant-numeric:tabular-nums}
   .dline{display:flex;align-items:center;gap:9px;font-size:12.5px;padding:6px 0}
   .dline.sys{opacity:.8}
@@ -9407,6 +9412,19 @@ let NS_AT=0, NS_HTML="";
 const nsPaint=()=>{const e=document.getElementById("wg-nsres");
   if(!e||!NS_HTML)return;
   e.innerHTML=NS_HTML+` · <span style="color:var(--mut)">${opAgo(NS_AT)}</span>`;};
+/* «Локальная сеть»: отклик до роутера + вердикт «путь до сети не прямой».
+   Гигабитный свитч отвечает быстрее 1 мс. Миллисекунды и/или proxy-ARP (несколько
+   адресов отвечают MAC-адресом роутера) = между NAS и сетью мост/репитер — он и будет
+   потолком любого копирования, сколько бы ни обещал линк. */
+function lanHTML(L){
+ if(L.rtt==null)return "";
+ const bad=!!L.slow||L.relay>0;
+ const row=`<div class="krow" style="margin-top:2px" title="${att("Отклик до роутера. Гигабитный свитч отвечает быстрее 1 мс.")}"><span style="color:var(--mut);font-size:11px">Локальная сеть</span><b style="font-size:11px;color:${bad?"var(--warn)":"var(--good)"}">${L.rtt} мс</b></div>`;
+ if(!bad)return row;
+ const why=(L.slow?"Кабель гигабитный, но локальная сеть отвечает медленно. ":"")
+  +(L.relay?"Несколько адресов отвечают MAC-адресом роутера (proxy-ARP): трафик идёт через мост, а не через свитч. ":"")
+  +"Между NAS и остальной сетью стоит посредник — Wi-Fi мост, репитер или powerline. Копирование и бэкап упрутся в него, а не в диски. Воткните NAS кабелем в тот же роутер или свитч, где стоят другие устройства.";
+ return row+`<div class="wg-lanwarn" title="${att(why)}">${svg("warn",12)}<span>Сеть ограничивает скорость</span></div>`;}
 async function pollNet(){const box=document.getElementById("wg-netlink");if(!box)return;
  const n=await api("/api/net");if(!n)return;
  // скорость сети измеряется в Мбит/с — так её называет провайдер, драйвер и MySpeed.
@@ -9415,7 +9433,10 @@ async function pollNet(){const box=document.getElementById("wg-netlink");if(!box
  const name=wifi?((n.ssid||"Wi-Fi")+(n.band?" · "+n.band:"")):"Кабель (Ethernet)";
  const spdCol=wifi?(n.link_mbit>=800?"var(--good)":"var(--warn)"):"var(--good)";
  box.innerHTML=`<div class="krow"><span style="display:inline-flex;align-items:center;gap:6px;min-width:0"><span style="flex:none;display:flex">${svg(wifi?"wifi":"net",13)}</span><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(name)}</span></span><b style="color:${spdCol};flex:none" title="${n.link_mbit?Math.round(n.link_mbit/8)+" МБ/с":""}">${spd}</b></div>`
-  +(wifi&&n.signal!=null?`<div class="krow" style="margin-top:2px"><span style="color:var(--mut);font-size:11px">Сигнал</span><b style="font-size:11px">${n.signal_pct}% · ${n.signal} dBm</b></div>`:"");
+  +(wifi&&n.signal!=null?`<div class="krow" style="margin-top:2px"><span style="color:var(--mut);font-size:11px">Сигнал</span><b style="font-size:11px">${n.signal_pct}% · ${n.signal} dBm</b></div>`:"")
+  // скорость линка ничего не обещает: за кабелем может стоять мост/репитер по Wi-Fi,
+  // и тогда потолок копирования — он, а не диски. Признаки — отклик до роутера и proxy-ARP
+  +lanHTML(n.lan||{});
  const btn=document.getElementById("wg-nstest"),res=document.getElementById("wg-nsres");
  if(btn&&!btn._wired){btn._wired=1;btn.onclick=async()=>{btn.disabled=true;const o=btn.textContent;btn.textContent="Тест… (~15 c)";if(res)res.textContent="меряю…";
    const r=await api("/api/net/speedtest");btn.disabled=false;btn.textContent=o;

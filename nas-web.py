@@ -146,6 +146,71 @@ def net_rate(iface):
     dt = now - prev[0] or 1
     return {"rx": max(0, int((rx - prev[1]) / dt)), "tx": max(0, int((tx - prev[2]) / dt))}
 
+# --------------------------------------------------------------------------- #
+#  LAN quality — is the negotiated link speed the REAL ceiling?
+#  A gigabit NIC says nothing about what sits between us and the rest of the LAN.
+#  Real case (2026-07-12): the Pi was cabled into a GL.iNet box that bridged to the
+#  home network over Wi-Fi. eth0 negotiated 1000 Mb/s, yet a backup pull from the
+#  other NAS (gigabit too) never passed ~38 MB/s, LAN RTT was 5-30 ms and a second
+#  parallel stream added nothing — the radio hop was the ceiling, not the disks.
+#  Two tells, both free (no traffic needed):
+#    * RTT to the gateway: a real switch answers well under a millisecond;
+#    * proxy-ARP: a bridging repeater answers ARP for every remote host with its OWN
+#      MAC, so several LAN addresses end up sharing the gateway's MAC.
+# --------------------------------------------------------------------------- #
+LAN_RTT_BAD = 2.5                              # ms — above this a wired LAN has a hop in it
+_LAN_CACHE = {"t": 0.0, "d": None}
+
+def _gateway_ip():
+    for line in _read("/proc/net/route").splitlines()[1:]:
+        f = line.split()
+        if len(f) > 3 and f[1] == "00000000" and f[2] != "00000000":
+            g = int(f[2], 16)                  # little-endian hex, as the kernel prints it
+            return "%d.%d.%d.%d" % (g & 0xFF, (g >> 8) & 0xFF, (g >> 16) & 0xFF, (g >> 24) & 0xFF)
+    return ""
+
+def _arp_relay(gw, iface):
+    """How many OTHER hosts answer with the gateway's MAC (proxy-ARP = we sit behind
+    a bridge/repeater, not a switch). 0 → clean L2."""
+    mac, shared = "", 0
+    rows = []
+    for line in _read("/proc/net/arp").splitlines()[1:]:
+        f = line.split()
+        if len(f) < 6 or f[2] == "0x0" or f[5] != iface:   # 0x0 = incomplete entry
+            continue
+        rows.append((f[0], f[3].lower()))
+        if f[0] == gw:
+            mac = f[3].lower()
+    if not mac or mac in ("00:00:00:00:00:00",):
+        return 0
+    for ip, m in rows:
+        if m == mac and ip != gw:
+            shared += 1
+    return shared
+
+def lan_quality(is_wifi, ttl=120):
+    """Отклик до роутера + признак «мы за мостом/репитером». Кэш: пинг раз в 2 минуты."""
+    now = time.time()
+    if _LAN_CACHE["d"] is not None and now - _LAN_CACHE["t"] < ttl:
+        return _LAN_CACHE["d"]
+    gw, iface = _gateway_ip(), default_iface() or ""
+    d = {"gw": gw, "rtt": None, "relay": 0, "slow": False}
+    if gw:
+        try:
+            out = subprocess.run(["ping", "-qc", "4", "-i", "0.2", "-W", "1", gw],
+                                 capture_output=True, text=True, timeout=8).stdout
+            m = re.search(r"=\s*[\d.]+/([\d.]+)/", out)
+            if m:
+                d["rtt"] = round(float(m.group(1)), 1)
+        except (OSError, subprocess.SubprocessError):
+            pass
+        d["relay"] = _arp_relay(gw, iface)
+    # Wi-Fi is expected to answer in milliseconds — only a CABLE promises a clean path,
+    # so the "your link speed is a lie" verdict is for wired links only.
+    d["slow"] = bool(not is_wifi and d["rtt"] is not None and d["rtt"] > LAN_RTT_BAD)
+    _LAN_CACHE.update(t=now, d=d)
+    return d
+
 def net_info():
     """Тип активного подключения (Wi-Fi/кабель), скорость линка (Мбит/с),
     для Wi-Fi — SSID/диапазон/сигнал. Чтобы наглядно видеть эффект кабеля."""
@@ -183,6 +248,7 @@ def net_info():
                 info["link_mbit"] = int(sp)
         except ValueError:
             pass
+    info["lan"] = lan_quality(is_wifi)
     return info
 
 def net_speedtest():
