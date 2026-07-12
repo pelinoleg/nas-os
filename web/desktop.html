@@ -6158,6 +6158,9 @@ function nbPickSource(preselected,preExcl,onPick,opts){const s=document.getEleme
 function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
  body.style.display="flex";body.style.flexDirection="column";body.style.padding="0";
  let tab="overview",CFG={},JOBS=[],PROFS=[],nbFootMo=null;
+ // окно открыли → показать тот профиль, который сейчас важен: идёт прогон (или ждёт
+ // очереди), иначе — тот, что последним правили/гоняли. Дальше выбор за пользователем
+ let autoPick=true;
  // profile direction: pull = grab from another NAS here, push = send from this NAS
  const isPush=()=>CFG.direction==="push",isPushSsh=()=>isPush()&&CFG.transport==="ssh";
  let nbCursor=0,nbStarted=null;   // курсор лога: общий для окна, сбрасывается при смене профиля
@@ -6693,6 +6696,12 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
  const render=async()=>{const r=await nbG("/api/backup/config");
   CFG=(r&&r.config)||{};JOBS=(CFG.jobs||[]).slice();
   PROFS=(r&&r.profiles)||[];NB_PID=(r&&r.profile)||NB_PID;
+  if(autoPick){autoPick=false;
+   const act=PROFS.find(p=>p.running)||PROFS.find(p=>p.queued);
+   const touched=p=>Math.max(p.saved||0,p.last_run||0);
+   const last=PROFS.slice().sort((x,y)=>touched(y)-touched(x))[0];
+   const want=((act||last)||{}).id;
+   if(want&&want!==NB_PID){NB_PID=want;tab="overview";nbCursor=0;nbStarted=null;return render();}}
   const multi=PROFS.length>1;
   if(nbFootMo){nbFootMo.disconnect();nbFootMo=null;}
   body.innerHTML=`<div class="nbtabs" id="nbTabs"></div>

@@ -4215,6 +4215,7 @@ def nb_save(patch, pid=None):
     cur["jobs"] = [j for j in (cur.get("jobs") or []) if final_ok(j.get("dest", ""))]
     if cur["delete_mode"] not in ("archive", "mirror", "add"): cur["delete_mode"] = "archive"
     if cur["dest_mode"] not in ("single", "per"): cur["dest_mode"] = "single"
+    cur["saved"] = int(time.time())   # какой профиль трогали последним — его и открывать
     profs = [cur if p["id"] == cur["id"] else p for p in nb_profiles()]
     _nb_write_profiles(profs)
     return cur
@@ -4248,10 +4249,14 @@ def nb_profiles_public():
         # push на локальный диск настроен без хоста — достаточно приёмника и задач
         conn = bool(p.get("host")) or (p.get("direction") == "push" and p.get("transport") == "local"
                                        and bool(p.get("dest_base")))
+        st = _nb_run_state_read(pid)
         out.append({"id": pid, "name": p["name"], "direction": p.get("direction") or "pull",
                     "running": nb_run_active(pid), "queued": nb_queued(pid),
                     "jobs": len(p.get("jobs") or []),
-                    "configured": bool(conn and p.get("jobs"))})
+                    "configured": bool(conn and p.get("jobs")),
+                    # чем окно открывать: «последний, что трогали» = правка конфига или прогон
+                    "saved": int(p.get("saved") or 0),
+                    "last_run": int(st.get("started") or 0)})
     return out
 
 def _nb_new_pid(existing):
