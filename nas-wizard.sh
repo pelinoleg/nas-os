@@ -1726,13 +1726,15 @@ detect_usb_storage_ids() {
         done
     done | sort -u
 }
-# Отключить UAS для USB-SATA-мостов (флаки-адаптеры сбрасываются под нагрузкой) через usb-storage.quirks в cmdline
-pi_uas_quirks() {
+# Seed usb-storage.quirks in cmdline with the bridges attached right now, so they come up
+# on usb-storage from the very first boot. Everything plugged in LATER is handled at runtime
+# by the udev hook (nas-uas-off.sh) — see install_uas_off().
+uas_seed_cmdline() {
     local cl=/boot/firmware/cmdline.txt
     [ -f "$cl" ] || cl=/boot/cmdline.txt
     [ -f "$cl" ] || { warn "cmdline.txt не найден — UAS-quirks пропущены"; return 0; }
     local ids; ids="${NASW_QUIRKS:-$(detect_usb_storage_ids)}"
-    [ -n "$ids" ] || { warn "USB-накопители не найдены — UAS-quirks пропущены"; return 0; }
+    [ -n "$ids" ] || { info "USB-дисков сейчас нет — quirks добавит udev при подключении"; return 0; }
     local want="" id
     for id in $ids; do want="${want:+$want,}${id}:u"; done
     local line cur merged
@@ -1749,6 +1751,85 @@ pi_uas_quirks() {
     fi
     printf '%s\n' "$line" > "$cl"
     info "UAS отключён для USB-мостов: $merged (в $cl; нужен reboot)"
+}
+# Disable UAS for every USB-SATA bridge — current and future. NOT optional, on purpose.
+#
+# Why UAS must go: its error recovery resets the WHOLE usb device. One command that hangs
+# (a SMART ATA pass-through issued while rsync is writing is enough) aborts every in-flight
+# write, the disk is offlined and ext4 flips to emergency read-only IN THE MIDDLE of a backup.
+# Real case 2026-07-12: Ugreen RTL9210 + ST4000LM024. usb-storage (BOT) has no device-wide
+# reset — a stuck command fails alone. BOT is slower in theory, but the ceiling here is the
+# gigabit LAN and the HDD itself, so it costs nothing in practice.
+#
+# Why it can't be one global switch: uas is BUILT INTO the Pi kernel (not a module), so
+# `blacklist uas` is a no-op. The only lever the kernel offers is usb-storage.quirks, and it
+# takes explicit VID:PID — no wildcards. So the list has to exist; the trick is to never let
+# it go stale. Hence the udev hook: a hand-maintained list is exactly what let the Ugreen
+# bridge stay on UAS and eat the backup.
+install_uas_off() {
+    write_file /usr/local/bin/nas-uas-off.sh <<'UASOFF'
+#!/bin/sh
+# nas-wizard: disable UAS for one USB mass-storage bridge (from udev via systemd-run).
+# Adds VID:PID to the live usb-storage quirks parameter AND to cmdline.txt, then
+# re-enumerates the device so it re-probes and lands on usb-storage instead of uas.
+# Runs once per bridge: on every later plug the quirk is already there and we exit early.
+set -u
+VID="${1:-}"; PID="${2:-}"; DEV="${3:-}"
+[ -n "$VID" ] && [ -n "$PID" ] && [ -n "$DEV" ] || exit 0
+LOG=/var/log/nas-automount.log
+log(){ printf '%s nas-uas-off: %s\n' "$(date '+%F %T')" "$*" >>"$LOG" 2>/dev/null
+       logger -t nas-uas-off -- "$*" 2>/dev/null || true; }
+
+Q=/sys/module/usb_storage/parameters/quirks
+[ -w "$Q" ] || { log "нет $Q — пропуск"; exit 0; }
+cur="$(tr -d '\n' <"$Q" 2>/dev/null)"
+# Already quirked (the normal path on every boot after the first) — nothing to do.
+case ",$cur," in *",$VID:$PID:u,"*) exit 0 ;; esac
+new="${cur:+$cur,}$VID:$PID:u"
+printf '%s' "$new" >"$Q" 2>/dev/null || { log "не записать $Q"; exit 0; }
+
+CL=/boot/firmware/cmdline.txt; [ -f "$CL" ] || CL=/boot/cmdline.txt
+if [ -f "$CL" ]; then
+  line="$(head -1 "$CL")"
+  case "$line" in
+    *usb-storage.quirks=*) line="$(printf '%s' "$line" | sed "s#usb-storage\.quirks=[^ ]*#usb-storage.quirks=$new#")" ;;
+    *)                     line="$line usb-storage.quirks=$new" ;;
+  esac
+  printf '%s\n' "$line" >"$CL" 2>/dev/null || log "не записать $CL"
+fi
+
+# The bridge is bound to uas right now; only a re-enumeration makes the kernel re-probe it.
+# We run at plug time, so nothing should be using the disk — but the automount hook fires on
+# the same event, so drop any mount it just made rather than yank a mounted filesystem.
+SYS="/sys/bus/usb/devices/$DEV"
+for blk in "$SYS"/*/host*/target*/*/block/*; do
+  [ -e "$blk" ] || continue
+  b="$(basename "$blk")"
+  for p in /dev/"$b" /dev/"$b"[0-9]*; do
+    [ -b "$p" ] || continue
+    t="$(findmnt -rn -S "$p" -o TARGET 2>/dev/null | head -1)"
+    [ -n "$t" ] && { umount -l "$t" 2>/dev/null && log "снят $t перед переподнятием"; }
+  done
+done
+sync
+[ -w "$SYS/authorized" ] || { log "нет $SYS/authorized — переподнять нечем"; exit 0; }
+log "UAS выключен для $VID:$PID — переподнимаю $DEV (вернётся на usb-storage)"
+echo 0 >"$SYS/authorized" 2>/dev/null
+sleep 2
+echo 1 >"$SYS/authorized" 2>/dev/null
+UASOFF
+    run chmod +x /usr/local/bin/nas-uas-off.sh
+    # Separate rules file on purpose: turning automount OFF must not turn this protection off.
+    write_file /etc/udev/rules.d/99-nas-uas-off.rules <<'RULES'
+# nas-wizard: любой USB-мост, УМЕЮЩИЙ UAS, переводим на usb-storage (см. install_uas_off).
+# Матчим по ID_USB_INTERFACES: ":080662:" = mass-storage/UAS. У моста без UAS его нет,
+# и правило его не трогает; обычные флешки (только ":080650:" = BOT) тоже не задеваются.
+# systemd-run --no-block обязателен: скрипт переподнимает устройство и ждёт, а udev
+# убивает своих детей по таймауту — блокировать udev нельзя.
+ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_USB_INTERFACES}=="*:080662:*", RUN+="/usr/bin/systemd-run --no-block /usr/local/bin/nas-uas-off.sh $env{ID_VENDOR_ID} $env{ID_MODEL_ID} %k"
+RULES
+    run udevadm control --reload-rules
+    uas_seed_cmdline
 }
 # Точное время: chrony вместо systemd-timesyncd
 pi_chrony() {
@@ -1817,7 +1898,6 @@ stage_pi() {
         "cgroup"   "Memory cgroup — лимиты памяти для docker" OFF \
         "sysctl"   "Sysctl-тюнинг (swappiness, somaxconn, tcp)" OFF \
         "zram"     "zram-swap (zstd, 50% RAM)" OFF \
-        "uasquirks" "Отключить UAS для USB-дисков (флаки-мосты)" OFF \
         "chrony"   "chrony вместо timesyncd (точное время)" OFF \
         "governor" "Адаптивный CPU governor по температуре" OFF \
         "eeprom"   "Обновить прошивку EEPROM (rpi-eeprom)" OFF \
@@ -1832,7 +1912,6 @@ stage_pi() {
     case "$sel" in *" cgroup "*)   pi_cgroup; need_reboot=1 ;; esac
     case "$sel" in *" sysctl "*)   pi_sysctl ;; esac
     case "$sel" in *" zram "*)     pi_zram ;; esac
-    case "$sel" in *" uasquirks "*) pi_uas_quirks; need_reboot=1 ;; esac
     case "$sel" in *" chrony "*)   pi_chrony ;; esac
     case "$sel" in *" governor "*) pi_governor ;; esac
     case "$sel" in *" eeprom "*)   run rpi-eeprom-update -a; need_reboot=1 ;; esac
@@ -2939,6 +3018,9 @@ stage_system_apply() {
     # dead until someone hits the power button. Applied by default for reliability
     # (still listed in pi-tuning so it can be toggled). Harmless without a watchdog device.
     pi_watchdog
+    # USB-SATA bridges always go through usb-storage, never UAS. Not a toggle: UAS error
+    # recovery resets the whole device and takes a running backup down with it. See install_uas_off().
+    install_uas_off
     # Time Machine target: rebuild the SMB share + Avahi advert if it was configured
     # before (settings backup restores /etc/nas-wizard/timemachine.conf).
     tm_reapply_if_configured
@@ -3178,7 +3260,7 @@ api_pi() {
         usbpower) pi_usb_power "$cfg" ;;   pcie3) pi_pcie3 "$cfg" ;;
         trim)     enable_service fstrim.timer ;; eeprom) run rpi-eeprom-update -a ;;
         cgroup)   pi_cgroup ;;  sysctl) pi_sysctl ;;  zram) pi_zram ;;
-        uasquirks) pi_uas_quirks ;; chrony) pi_chrony ;; governor) pi_governor ;;
+        chrony)   pi_chrony ;;  governor) pi_governor ;;
         wifips)   pi_wifi_powersave_off ;;  watchdog) pi_watchdog ;;
     esac; done
 }

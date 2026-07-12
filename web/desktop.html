@@ -2786,7 +2786,7 @@ const MOCK={
  sysconf:{system:{hostname:"pi5",timezone:"Europe/Madrid",time_synced:true,chrony:{installed:false,active:false},fstrim:{installed:true,active:true,enabled:true},unattended:false,journald_max:""},
    network:{iface:"wlan0",ip:"192.168.1.48",prefix:"24",gw:"192.168.1.1",dns:"192.168.1.1",method:"auto",wifi:true,wifi_ps_off:true,avahi:{installed:true,active:true,enabled:true}},
    security:{ufw:{installed:false,active:false,ports:[]},fail2ban:{installed:false,active:false},log2ram:{installed:false,active:false}},
-   pi:{model:"Raspberry Pi 5 Model B Rev 1.0",firmware:"2026/05/26",eeprom:"2026/05/26",temp:52.4,throttled:{raw:"0x0",now:[],ever:[]},usbpower:false,pcie3:false,cgroup:false,uasquirks:{on:false,detected:["05e3:0764"]},watchdog:false,zram:{installed:false,active:false},governor:{current:"ondemand",available:["conservative","ondemand","userspace","powersave","performance","schedutil"],adaptive:{installed:false,active:false}}}},
+   pi:{model:"Raspberry Pi 5 Model B Rev 1.0",firmware:"2026/05/26",eeprom:"2026/05/26",temp:52.4,throttled:{raw:"0x0",now:[],ever:[]},usbpower:false,pcie3:false,cgroup:false,watchdog:false,zram:{installed:false,active:false},governor:{current:"ondemand",available:["conservative","ondemand","userspace","powersave","performance","schedutil"],adaptive:{installed:false,active:false}}}},
  stats:{host:"pi5",ip:"192.168.1.48",cpu:6.4,temp:55.1,throttled:{raw:"0x0",ok:true},psu_ma:5000,mem:{total:8455000000,used:760000000,pct:9},
    disk_pool:{path:"/mnt/storage",total:1000000000000,used:3200000000,pct:0.3},net:{rx:184000,tx:42000},iface:"wlan0",uptime:19218},
  desktop:{apps:[
@@ -9240,7 +9240,7 @@ function motdTab(tc){
     toast(LIVE?(rr&&rr.ok?"Сохранено ✓":"Ошибка: "+((rr&&rr.log)||"?")):"Демо");};}
 }
 /* --- settings: Raspberry Pi --- */
-function piTab(tc){withSysc(tc,()=>{const p=SYSC.pi||{};const g=p.governor||{};const thr=p.throttled||{};const uq=p.uasquirks||{};
+function piTab(tc){withSysc(tc,()=>{const p=SYSC.pi||{};const g=p.governor||{};const thr=p.throttled||{};
  const chips=(arr,cls)=>arr&&arr.length?arr.map(x=>`<span class="sbadge ${cls}">${esc(x)}</span>`).join(""):`<span class="sbadge ok">нет</span>`;
  const govBtns=(g.available||[]).map(x=>`<button data-g="${x}" class="${g.current===x?"on":""}">${esc(x)}</button>`).join("")||"—";
  tc.innerHTML=`${rebootBan()}
@@ -9258,7 +9258,6 @@ function piTab(tc){withSysc(tc,()=>{const p=SYSC.pi||{};const g=p.governor||{};c
   <div class="set-grp">Питание и шина <span class="pill-rb">после ребута</span></div>
   ${tglRow("Полный ток на USB","Разрешает USB-портам Pi 5 отдавать полный ток (1.6 А вместо 600 мА). Нужно для USB-SSD/HDD без внешнего питания — иначе просадки и отвалы дисков. usb_max_current_enable.","usbpower",p.usbpower,"питание USB-дисков без просадок")}
   ${tglRow("PCIe Gen 3 для NVMe","Разгоняет слот NVMe с Gen2 до Gen3 — заметно быстрее диск. Формально вне спецификации Pi 5: на большинстве плат стабильно, но с некоторыми SSD возможны сбои.","pcie3",p.pcie3,"ускоряет NVMe (вне спеки)")}
-  ${tglRow("Отключить UAS для USB-мостов","Отключает UAS для флаки USB-SATA переходников, которые сбрасываются под нагрузкой. Медленнее, но надёжнее."+(uq.detected&&uq.detected.length?" Найдено: "+uq.detected.join(", "):""),"uasquirks",uq.on,"надёжность дешёвых USB-SATA адаптеров")}
   ${tglRow("Memory cgroup для Docker","Включает cgroup памяти в ядре — без него docker не может ограничивать RAM контейнерам (mem_limit). Правит cmdline.txt.","cgroup",p.cgroup,"лимиты памяти контейнеров")}
   <div class="set-grp">Термика и производительность</div>
   ${svcRow("Адаптивный CPU governor","Каждые 2 мин: при ≥80 °C или троттлинге → powersave, иначе ondemand. Для безвентиляторных корпусов, чтобы плата не перегревалась.","governor_adaptive",g.adaptive,"авто-снижение частоты при нагреве")}

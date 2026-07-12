@@ -7085,9 +7085,35 @@ def _remotes_save(lst):
 def _remote_mp(rid):
     return os.path.join(REMOTE_MNT, rid)
 
-def _remote_mounted(rid):
+def _remote_unit(rid):
+    return "nas-remote-%s.service" % rid
+
+def _remote_listed(rid):
     mp = _remote_mp(rid)
     return any(l.split()[1:2] == [mp] for l in _read("/proc/mounts").splitlines())
+
+def _remote_alive(rid):
+    """A dead sshfs leaves its mountpoint in /proc/mounts, but every syscall on it fails
+    with ENOTCONN — so "is it in /proc/mounts" is NOT the same as "does it work". statvfs
+    on a broken FUSE mount is answered by the kernel right away (no round trip to the
+    server), so this stays cheap."""
+    try:
+        os.statvfs(_remote_mp(rid))
+        return True
+    except OSError:
+        return False
+
+def _remote_mounted(rid):
+    return _remote_listed(rid) and _remote_alive(rid)
+
+def _remote_unstale(rid):
+    """Tear down a mountpoint whose sshfs daemon is gone, so it can be mounted afresh.
+    Without this the FM sees the stale entry, calls it mounted and never heals it."""
+    if _remote_listed(rid) and not _remote_alive(rid):
+        _run(["systemctl", "stop", _remote_unit(rid)], timeout=15)
+        _run(["umount", "-l", _remote_mp(rid)], timeout=10)
+        return True
+    return False
 
 def remotes_list():
     out = []
@@ -7146,6 +7172,7 @@ def remote_mount(rid):
         return {"ok": False, "log": "нет такого подключения"}
     if _remote_mounted(rid):
         return {"ok": True, "mount": _remote_mp(rid)}
+    _remote_unstale(rid)          # dead daemon still in /proc/mounts → clear it, then remount
     if not shutil.which("sshfs"):
         return {"ok": False, "log": "sshfs не установлен: sudo apt install sshfs"}
     mp = _remote_mp(rid)
@@ -7157,16 +7184,45 @@ def remote_mount(rid):
     if r.get("pass"):
         opts += ",password_stdin"
     src = "%s@%s:%s" % (r.get("user") or "root", r["host"], r.get("path") or "")
+    # Own systemd unit per server, NOT a child of nas-web. A child would live in the
+    # nas-web.service cgroup, and systemd kills that whole cgroup on restart — so every
+    # `systemctl restart nas-web` silently killed the sshfs daemons and left stale
+    # mountpoints behind (2026-07-12). As a unit it survives our restarts, and systemd
+    # brings it back by itself if the daemon dies. sshfs runs with -f (foreground) so
+    # systemd can actually supervise it instead of losing track after it daemonizes.
+    unit = _remote_unit(rid)
+    _run(["systemctl", "reset-failed", unit], timeout=10)
+    inner = " ".join(shlex.quote(a) for a in
+                     ["sshfs", "-f", src, mp, "-p", str(r.get("port") or 22), "-o", opts])
+    cmd = ["systemd-run", "--unit", unit, "--collect",
+           "--property=Restart=on-failure", "--property=RestartSec=5",
+           "--property=ExecStopPost=/bin/umount -l %s" % mp]
+    if r.get("pass"):
+        # The password goes through the unit's environment, never argv — argv is readable
+        # by anyone via /proc, the environment only by root. systemd re-applies it on every
+        # restart, so a reconnect is fed the password as well. (StandardInputText would be
+        # the obvious way, but systemd-run refuses it on a transient unit.)
+        inner = 'printf %s "$NAS_SSHFS_PW" | ' + inner
+        cmd += ["--setenv=NAS_SSHFS_PW=%s" % r["pass"]]
+    cmd += ["/bin/sh", "-c", inner]
     try:
-        p = subprocess.run(["sshfs", src, mp, "-p", str(r.get("port") or 22), "-o", opts],
-                           input=(r.get("pass") or "") + "\n" if r.get("pass") else None,
-                           capture_output=True, text=True, timeout=30)
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
     except subprocess.TimeoutExpired:
         return {"ok": False, "log": "сервер не ответил за 30 с"}
     except OSError as e:
         return {"ok": False, "log": str(e)}
-    if p.returncode != 0 or not _remote_mounted(rid):
-        msg = (p.stderr or p.stdout or "не смонтировалось").strip()[:300]
+    # systemd-run returns as soon as the unit starts; the mount appears a moment later.
+    ok = False
+    for _ in range(50):
+        if _remote_mounted(rid):
+            ok = True
+            break
+        time.sleep(0.2)
+    if not ok:
+        msg = (_run(["systemctl", "status", "--no-pager", "-n", "10", unit],
+                    timeout=10).get("log") or p.stderr or p.stdout
+               or "не смонтировалось").strip()[-300:]
+        _run(["systemctl", "stop", unit], timeout=15)
         # sshfs = SFTP: если SSH пускает, а данные не идут — на сервере, скорее
         # всего, выключена служба SFTP (частый случай на Synology)
         if "Input/output error" in msg or "Connection reset" in msg:
@@ -7333,10 +7389,14 @@ def remote_realpath(rid, local_path):
 def remote_umount(rid):
     if not _REMOTE_ID.match(rid or ""):
         return {"ok": False, "log": "id"}
-    if not _remote_mounted(rid):
-        return {"ok": True}
-    p = _run(["fusermount", "-uz", _remote_mp(rid)], timeout=15)   # lazy: не ждём зависший io
-    return {"ok": p["ok"] or not _remote_mounted(rid), "log": p.get("log", "")}
+    # Stop the unit first — it owns the sshfs process and would otherwise restart it.
+    # ExecStopPost unmounts; fusermount stays as the fallback for a mount left over by
+    # an older build (or one whose daemon already died).
+    _run(["systemctl", "stop", _remote_unit(rid)], timeout=20)
+    if _remote_listed(rid):
+        _run(["fusermount", "-uz", _remote_mp(rid)], timeout=15)   # lazy: не ждём зависший io
+    ok = not _remote_listed(rid)
+    return {"ok": ok, "log": "" if ok else "не размонтировалось"}
 
 # --------------------------------------------------------------------------- #
 #  Docker-сервисы
@@ -9844,19 +9904,6 @@ def _throttled_decode():
             "now": [bits[b] for b in bits if v & (1 << b)],
             "ever": [bits[b] for b in bits if v & (1 << (b + 16))]}
 
-def _usb_ids():
-    ids = set()
-    for b in glob.glob("/sys/block/sd*"):
-        p = os.path.realpath(os.path.join(b, "device"))
-        while p and p != "/":
-            if os.path.isfile(os.path.join(p, "idVendor")) and \
-               os.path.isfile(os.path.join(p, "idProduct")):
-                ids.add(_read(os.path.join(p, "idVendor")) + ":" +
-                        _read(os.path.join(p, "idProduct")))
-                break
-            p = os.path.dirname(p)
-    return sorted(ids)
-
 def _governor():
     base = "/sys/devices/system/cpu/cpu0/cpufreq/"
     return {"current": _read(base + "scaling_governor") or None,
@@ -10057,8 +10104,6 @@ def sysconf():
             "usbpower": _cfg_has(cfg, "usb_max_current_enable=1"),
             "pcie3": _cfg_has(cfg, "dtparam=pciex1_gen=3"),
             "cgroup": "cgroup_enable=memory" in _read(cl),
-            "uasquirks": {"on": "usb-storage.quirks=" in _read(cl),
-                          "detected": _usb_ids()},
             "watchdog": os.path.isfile("/etc/systemd/system.conf.d/watchdog.conf"),
             "zram": _zram_status(),
             "governor": _governor(),
@@ -10211,12 +10256,6 @@ def sysconf_set(key, val, extra=None):
         if key == "cgroup":
             return _cmdline_set(add=["cgroup_enable=memory", "cgroup_memory=1"]) if b \
                 else _cmdline_set(remove_prefixes=["cgroup_enable=memory", "cgroup_memory=1"])
-        if key == "uasquirks":
-            if b:
-                r = engine("pi", {"keys": "uasquirks"})
-                r["reboot"] = True
-                return r
-            return _cmdline_set(remove_prefixes=["usb-storage.quirks="])
         if key == "watchdog":
             return _watchdog(b)
         if key == "zram":
