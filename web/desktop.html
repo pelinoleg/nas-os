@@ -2573,7 +2573,7 @@ function applyFx(){
  const dim=document.getElementById("wallDim"),nz=document.getElementById("wallNoise");
  if(dim)dim.style.opacity=d/100;if(nz)nz.style.opacity=n/100;
 }
-function paintThemeBtn(){const b=document.getElementById("themeBtn");if(!b)return;const ic={auto:"contrast",light:"sun",dark:"moon"}[SET.theme]||"sun";b.innerHTML=svg(ic,17);b.title="Тема: "+({auto:"авто",light:"светлая",dark:"тёмная"}[SET.theme]||"");}
+function paintThemeBtn(){const b=document.getElementById("themeBtn");if(!b)return;const ic={auto:"contrast",light:"sun",dark:"moon"}[SET.theme]||"sun";b.innerHTML=svg(ic,17);b.title=nasTr("Тема: "+({auto:"авто",light:"светлая",dark:"тёмная"}[SET.theme]||""));}
 function cycleTheme(){SET.theme=(SET.theme==="dark"?"light":"dark");applySettings();saveSettings();}
 function paintWallRefresh(){const wr=document.getElementById("wallRefresh");if(!wr)return;if(!wr._wired){wr.onclick=refreshWall;wr._wired=1;}wr.innerHTML=svg("refresh",18);wr.style.display=(SET.wpType==="url"&&SET.wpVer)?"flex":"none";}
 function applySettings(){
@@ -2826,11 +2826,11 @@ async function authGate(){
   e.preventDefault();
   const err=ov.querySelector("#authErr");err.textContent="";
   const pw=ov.querySelector("#authPw").value;
-  if(setup&&pw!==ov.querySelector("#authPw2").value){err.textContent="Пароли не совпадают";return;}
+  if(setup&&pw!==ov.querySelector("#authPw2").value){err.textContent=nasTr("Пароли не совпадают");return;}
   let r=null;
   try{r=await(await fetch(setup?"/api/auth/setup":"/api/auth/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({password:pw})})).json();}catch(ex){}
   if(r&&r.ok)location.reload();
-  else err.textContent=(r&&r.log)||"Не удалось войти";
+  else err.textContent=nasTr((r&&r.log)||"Не удалось войти");
  };
 }
 async function logout(){try{await fetch("/api/auth/logout",{method:"POST"});}catch(e){}location.reload();}
@@ -3373,7 +3373,7 @@ async function updatesDlg(){
      <div class="upd-list">${ps.map(p=>`<div class="upd-row"><span class="upd-n">${esc(p.name)}${p.security?' <span class="upd-sec">безопасность</span>':''}</span><span class="upd-v mono">${esc(p.cur)} → ${esc(p.new)}</span></div>`).join("")}</div>`;
    go.disabled=false;}
  ref.onclick=()=>{ref.disabled=true;toast("Проверяю обновления…");load(true).finally(()=>ref.disabled=false);};
- go.onclick=()=>{go.disabled=true;ref.disabled=true;s.querySelector("#updX").textContent="В фоне";
+ go.onclick=()=>{go.disabled=true;ref.disabled=true;s.querySelector("#updX").textContent=nasTr("В фоне");
    body.innerHTML=`<div class="upd-con" id="updCon"></div>`;
    streamPost("/api/updates/apply",body.querySelector("#updCon"),code=>{
      notifyDone(code===0?"Обновление завершено":"Обновление завершилось с ошибкой",code===0?"пакеты обновлены":"");
@@ -3540,7 +3540,7 @@ function diskDetail(x,reload){
      if(!document.body.contains(sc))return;
      const sub=sc.querySelector(".dd-scr-sub"),grid=sc.querySelector(".dd-scr-grid");
      if(!d||!d.ok){sc.remove();return;}
-     sub.textContent=d.status===0?"диск здоров":"внимание — есть риск";
+     sub.textContent=nasTr(d.status===0?"диск здоров":"внимание — есть риск");
      sub.style.color=d.status===0?"var(--good)":"var(--danger)";
      const lvlIco={good:"check",warn:"warn",bad:"warn",info:"info"};
      const cell=(h)=>{const lv=h.level||"info";
@@ -3570,7 +3570,7 @@ function diskDetail(x,reload){
         :`<span class="dd-spd-t" style="color:var(--mut)">Скорость этого диска ещё не измерялась</span>`)
       +`<span class="grow"></span>`;
      const b=el(`<button class="btn sm"${busy?" disabled":""}>${busy?"измеряю…":svg("gauge",13)+" "+(cur?"Измерить заново":"Тест скорости")}</button>`);
-     b.title="Последовательное чтение с устройства + запись временного файла (сразу удаляется)"+(x.role==="system"?". Для системной карты запись идёт во временный каталог /var/tmp":"");
+     b.title=nasTr("Последовательное чтение с устройства + запись временного файла (сразу удаляется)"+(x.role==="system"?". Для системной карты запись идёт во временный каталог /var/tmp":""));
      b.onclick=async()=>{paintSpd(true);
        const r=await api("/api/disk/speedtest",{method:"POST",body:JSON.stringify({dev:x.path})});
        if(LIVE&&r&&r.ok){cur={read:r.read_mbps,write:r.write_mbps,t:r.t};}
@@ -3584,21 +3584,21 @@ function diskDetail(x,reload){
  const acts=el(`<div class="dd-acts"></div>`);
  if(x.role!=="system"){
    if(!hasParts){
-     if(x.mounted){const b=el(`<button class="btn sm">${svg("eject",15)} Отмонтировать</button>`);b.title="Отключить файловую систему, диск остаётся с питанием";b.onclick=()=>diskCall("/api/disk/mount",{target:x.mount,unmount:true},reload,"отмонтировано");acts.appendChild(b);}
+     if(x.mounted){const b=el(`<button class="btn sm">${svg("eject",15)} Отмонтировать</button>`);b.title=nasTr("Отключить файловую систему, диск остаётся с питанием");b.onclick=()=>diskCall("/api/disk/mount",{target:x.mount,unmount:true},reload,"отмонтировано");acts.appendChild(b);}
      else if(x.fstype){const b=el(`<button class="btn sm">${svg("play",13)} Смонтировать</button>`);b.onclick=()=>diskCall(x.in_fstab?"/api/disk/mount":"/api/disk/mount-dev",x.in_fstab?{target:x.mount}:{dev:x.path},reload,"смонтировано");acts.appendChild(b);}
      if(x.fstype){const b=el(`<button class="btn sm">${svg("edit",13)} Переименовать</button>`);b.onclick=()=>renameDlg(x.path,x.label||"",reload);acts.appendChild(b);}
    }
    // безопасно извлечь — отмонтировать И снять питание перед физическим отключением
    if(x.mounted&&(x.role==="removable"||x.role==="free")){
      const ej=el(`<button class="btn sm pri">${svg("power",13)} Извлечь безопасно</button>`);
-     ej.title="Отмонтировать и обесточить — после этого диск можно физически отключить";
+     ej.title=nasTr("Отмонтировать и обесточить — после этого диск можно физически отключить");
      ej.onclick=()=>confirmDlg("Безопасно извлечь диск?","Диск будет отмонтирован и обесточен — после этого можно физически отключить.",async()=>{
        const r=await api("/api/disk/eject",{method:"POST",body:JSON.stringify({dev:x.path})});
        toast(LIVE?((r&&r.ok)?r.log:("Ошибка: "+((r&&r.log)||""))):"Демо");if(r&&r.ok)reload();},false);
      acts.appendChild(ej);
    }
    // свободный диск → одним действием отформатировать в ext4 и подключить к пулу /mnt/storage
-   if(x.role==="free"){const pb=el(`<button class="btn sm pri">${svg("layers",13)} Добавить в пул</button>`);pb.title="Отформатировать (ext4) и подключить диск к пулу /mnt/storage";pb.onclick=()=>formatDlg(x,reload,"pool");acts.appendChild(pb);}
+   if(x.role==="free"){const pb=el(`<button class="btn sm pri">${svg("layers",13)} Добавить в пул</button>`);pb.title=nasTr("Отформатировать (ext4) и подключить диск к пулу /mnt/storage");pb.onclick=()=>formatDlg(x,reload,"pool");acts.appendChild(pb);}
    acts.appendChild(el(`<span class="grow"></span>`));
    const fb=el(`<button class="btn sm dng">${svg("trash",13)} Форматировать</button>`);fb.onclick=()=>formatDlg(x,reload);acts.appendChild(fb);
  }else acts.appendChild(el(`<span class="dd-note">${svg("shield",13)} Системный диск — размонтирование и форматирование недоступны</span>`));
@@ -3639,8 +3639,8 @@ function partRow(pt,reload,readOnly){
  const a=el(`<div style="display:flex;gap:5px;flex:none"></div>`);
  // системные разделы (корень/boot) — только для чтения, без опасных действий
  if(pt.fstype&&!readOnly&&!sysMount){
-   if(pt.mounted){const b=el(`<button class="btn sm ghost">${svg("eject",14)} Отмонт.</button>`);b.title="Отмонтировать раздел";b.onclick=()=>diskCall("/api/disk/mount",{target:pt.mount,unmount:true},reload,"отмонтировано");a.appendChild(b);}
-   else{const b=el(`<button class="btn sm ghost">${svg("play",13)} Смонт.</button>`);b.title="Смонтировать раздел";b.onclick=()=>diskCall("/api/disk/mount-dev",{dev:pt.path},reload,"смонтировано");a.appendChild(b);}
+   if(pt.mounted){const b=el(`<button class="btn sm ghost">${svg("eject",14)} Отмонт.</button>`);b.title=nasTr("Отмонтировать раздел");b.onclick=()=>diskCall("/api/disk/mount",{target:pt.mount,unmount:true},reload,"отмонтировано");a.appendChild(b);}
+   else{const b=el(`<button class="btn sm ghost">${svg("play",13)} Смонт.</button>`);b.title=nasTr("Смонтировать раздел");b.onclick=()=>diskCall("/api/disk/mount-dev",{dev:pt.path},reload,"смонтировано");a.appendChild(b);}
    const rn=el(`<button class="iconbtn" title="Переименовать метку">${svg("edit",14)}</button>`);rn.onclick=()=>renameDlg(pt.path,pt.label||"",reload);a.appendChild(rn);
  }else if(sysMount)a.appendChild(el(`<span class="rbadge system" title="Системный раздел — защищён">системный</span>`));
  r.appendChild(a);return r;
@@ -4088,7 +4088,7 @@ function svcAct(unit,action,after){const dng=action==="stop"||action==="disable"
 function svcJournal(unit){openWin("jr:"+unit,"Журнал · "+unit.replace(".service",""),body=>{
  body.style.display="flex";body.style.flexDirection="column";body.style.padding="0";
  body.innerHTML=`<div style="display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line)"><span class="mono" style="font-size:11px;color:var(--dim);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">journalctl -u ${esc(unit)}</span><button class="btn sm" id="jref">${svg("refresh",13)} Обновить</button></div><div class="logbox" id="jlog" style="margin:0;border-radius:0">загрузка…</div>`;
- const load=async()=>{const box=body.querySelector("#jlog");const r=await api("/api/systemd/journal?unit="+encodeURIComponent(unit)+"&lines=400");box.textContent=(r&&r.log)||"пусто";box.scrollTop=box.scrollHeight;};
+ const load=async()=>{const box=body.querySelector("#jlog");const r=await api("/api/systemd/journal?unit="+encodeURIComponent(unit)+"&lines=400");box.textContent=(r&&r.log)||nasTr("пусто");box.scrollTop=box.scrollHeight;};
  body.querySelector("#jref").onclick=load;load();
 },{w:780,h:540});}
 
@@ -4114,7 +4114,7 @@ function editUnit(name,after){openWin("unit:"+name,"Юнит · "+name,body=>{
  body.querySelector("#uSave").onclick=()=>save(after);
  body.querySelector("#uUp").onclick=()=>save(async()=>{await api("/api/systemd",{method:"POST",body:JSON.stringify({unit:name,action:"restart"})});await api("/api/systemd",{method:"POST",body:JSON.stringify({unit:name,action:"enable"})});toast(LIVE?"Запущено + автозапуск включён":"Демо");after&&after();});
  (async()=>{const r=await api("/api/unit?name="+encodeURIComponent(name)),host=body.querySelector("#uEd");
-   if(r&&r.base){const b=body.querySelector("#uBase");b.style.display="inline-block";b.textContent="базовый — сохранение создаст override";}
+   if(r&&r.base){const b=body.querySelector("#uBase");b.style.display="inline-block";b.textContent=nasTr("базовый — сохранение создаст override");}
    ensureCM(()=>{cm=CodeMirror(host,{value:(r&&r.content)||"",mode:"properties",lineNumbers:true,tabSize:2,styleActiveLine:true});setTimeout(()=>cm.refresh(),40);if(window.ResizeObserver)new ResizeObserver(()=>cm&&cm.refresh()).observe(host);});})();
 },{w:720,h:600});}
 /* ===== Менеджер docker-стеков (создание/редактирование/управление через GUI) ===== */
@@ -4373,7 +4373,7 @@ async function dkOverview(tc,reload){
  if(!document.body.contains(tc))return;
  const tiles=tc.querySelector("#dkTiles"),ver=tc.querySelector("#dkVer");
  if(!d||!d.ok){tiles.innerHTML=`<div class="dempty">${svg("cube",16)} ${esc((d&&d.log)||"Docker недоступен")}</div>`;if(ver)ver.textContent="—";return;}
- if(ver)ver.textContent="версия "+(d.version||"?");
+ if(ver)ver.textContent=nasTr("версия ")+(d.version||"?");
  const c=d.containers||{},df=d.df||{},im=df.images||{},vo=df.volumes||{},ca=df.cache||{};
  const tile=(v,l,sub,col)=>`<div class="dk-tile"><b style="color:${col||"var(--text)"}">${v}</b><span>${l}</span>${sub?`<small>${sub}</small>`:""}</div>`;
  const wud=d.wud||{};
@@ -4512,7 +4512,7 @@ function stackDelete(name,after){api("/api/stack/delete",{method:"POST",body:JSO
 function stackLogs(name){openWin("slog:"+name,"Логи · "+name,(body,win)=>{
  body.style.display="flex";body.style.flexDirection="column";body.style.padding="0";let raw="",flt="",follow=true;
  body.innerHTML=`<div style="display:flex;align-items:center;gap:8px;padding:12px 14px;border-bottom:1px solid var(--line)"><b style="font-size:13px;flex:none">${esc(name)}</b><input id="lflt" placeholder="фильтр строк…" style="flex:1;padding:6px 10px;font-size:12px"><button class="btn sm" id="lfol">${svg("play",13)} Live</button><button class="btn sm" id="lref">${svg("refresh",13)}</button></div><div class="logbox" id="slbox" style="margin:0;border-radius:0">загрузка…</div>`;
- const paint=()=>{const b=body.querySelector("#slbox");const lines=flt?raw.split("\n").filter(l=>l.toLowerCase().includes(flt)):raw.split("\n");b.textContent=lines.join("\n")||"пусто";b.scrollTop=b.scrollHeight;};
+ const paint=()=>{const b=body.querySelector("#slbox");const lines=flt?raw.split("\n").filter(l=>l.toLowerCase().includes(flt)):raw.split("\n");b.textContent=lines.join("\n")||nasTr("пусто");b.scrollTop=b.scrollHeight;};
  const load=async()=>{const r=await api("/api/stack/logs?name="+encodeURIComponent(name)+"&tail=400");raw=(r&&r.log)||"";paint();};
  body.querySelector("#lflt").oninput=e=>{flt=e.target.value.toLowerCase();paint();};
  body.querySelector("#lref").onclick=load;
@@ -4666,7 +4666,7 @@ function cronEdit(job,after){const s=document.getElementById("scrim");
   const r=await cronCall(`/api/cron/job/${encodeURIComponent(job.id)}`,body,"Задача сохранена",null);
   const ok=r&&(r.ok||(r.data&&r.data.success));
   if(ok){s.classList.remove("show");after&&after();}
-  else{const c=s.querySelector("#cerr");c.style.display="block";c.textContent=(r&&r.log)||(r&&r.data&&r.data.message)||"ошибка";}};}
+  else{const c=s.querySelector("#cerr");c.style.display="block";c.textContent=nasTr((r&&r.log)||(r&&r.data&&r.data.message)||"ошибка");}};}
 function cronLogs(runId,title){const s=document.getElementById("scrim");
  s.innerHTML=`<div class="dialog" style="max-width:660px;width:100%"><h3>Лог запуска</h3><p class="mono" style="font-size:11px;color:var(--mut);margin:0 0 10px">${esc(title||"")}</p>
    <div class="mcon" id="lg" style="display:block;max-height:340px;white-space:pre-wrap;min-height:80px">загрузка…</div>
@@ -4674,9 +4674,9 @@ function cronLogs(runId,title){const s=document.getElementById("scrim");
  s.classList.add("show");const box=s.querySelector("#lg");let off=0,timer=null,dead=false;
  const tick=async()=>{const r=await api(`/api/cron/logs?runId=${encodeURIComponent(runId)}&offset=${off}`);
    if(dead)return;
-   if(!r||r.ok===false){box.textContent=(r&&r.log)||"Cronmaster недоступен";return;}
+   if(!r||r.ok===false){box.textContent=(r&&r.log)||nasTr("Cronmaster недоступен");return;}
    const txt=off===0?(r.content||""):(r.newContent||"");
-   if(off===0)box.textContent=txt||"(пусто — включите «Вести лог запусков» в задаче)";
+   if(off===0)box.textContent=txt||nasTr("(пусто — включите «Вести лог запусков» в задаче)");
    else if(txt)box.textContent+=txt;
    if(r.offset!=null)off=r.offset;box.scrollTop=box.scrollHeight;
    const done=r.isComplete||r.status==="completed"||r.status==="failed";
@@ -4718,7 +4718,7 @@ function winVault(){openWin("__vault","Хранилище доступов",body
    const pw=row.querySelector(".pw");let sh=false;const acts=row.lastElementChild;
    const e=el(`<button class="copy">${svg("eye",15)}</button>`);e.onclick=()=>{sh=!sh;pw.textContent=sh?(c.pass||"—"):"••••••••";};
    const cp=el(`<button class="copy">${svg("copy",15)}</button>`);cp.onclick=()=>{copyText(c.pass||"");toast("Скопировано");};
-   const del=el(`<button class="copy" style="color:var(--danger)">${svg("trash",14)}</button>`);del.title="Удалить";del.onclick=async()=>{creds.splice(i,1);await save();render();};
+   const del=el(`<button class="copy" style="color:var(--danger)">${svg("trash",14)}</button>`);del.title=nasTr("Удалить");del.onclick=async()=>{creds.splice(i,1);await save();render();};
    acts.appendChild(e);acts.appendChild(cp);acts.appendChild(del);list.appendChild(row);});
   body.querySelector("#add").onclick=addForm;};
  api("/api/creds").then(d=>{creds=d.creds||[];render();});
@@ -5326,7 +5326,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
      if(n>1)mk("Переименовать","save",()=>doBulkRename(curArr.filter(e=>sel.has(e.path))));
      mk("В корзину","trash",()=>doDelete([...sel]),"dng");
      const x=el(`<button class="iconbtn" title="Снять выделение">${svg("x",16)}</button>`);x.onclick=()=>{sel.clear();renderList();selUpdate();};sb.appendChild(x);}
-   const pb=body.querySelector("#fPaste");if(clip&&clip.items.length){pb.style.display="inline-flex";pb.textContent="Вставить ("+clip.items.length+")";}else pb.style.display="none";
+   const pb=body.querySelector("#fPaste");if(clip&&clip.items.length){pb.style.display="inline-flex";pb.textContent=nasTr("Вставить")+" ("+clip.items.length+")";}else pb.style.display="none";
    renderStatus();}
  function renderList(){const srcArr=searchRes||entries;let arr=srcArr.slice();
    arr=arr.filter(e=>!fmNever(e.name));   // lost+found, ._AppleDouble, Spotlight и т.п. — никогда
@@ -5492,7 +5492,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    if(rmt){api("/api/remotes/realpath",{method:"POST",body:JSON.stringify({id:rmt.id,path:e.path})}).then(rp=>{
      const sp=sc.querySelector("#pSrv");if(sp)sp.textContent=(rp&&rp.ok&&rp.path)||"—";});}
    const du=sc.querySelector("#pDu");if(du)du.onclick=async()=>{du.textContent="…";const r2=await api("/api/fs/du?path="+encodeURIComponent(e.path));
-     const box=sc.querySelector("#pRs");if(box)box.textContent=(r2&&r2.ok)?`${fmtB(r2.size)}  ·  ${r2.files} файлов, ${r2.dirs} папок`:"—";};}
+     const box=sc.querySelector("#pRs");if(box)box.textContent=(r2&&r2.ok)?nasTr(`${fmtB(r2.size)}  ·  ${r2.files} файлов, ${r2.dirs} папок`):"—";};}
  async function doDup(e){const r=await api("/api/fs/copy",{method:"POST",body:JSON.stringify({src:e.path,dest:cwd})});toast(LIVE?(r&&r.ok?"Дубликат создан":("Ошибка: "+((r&&r.log)||""))):"Демо");if(r&&r.ok)load(cwd);}
  function doArchive(paths){if(!paths.length)return;const sc=document.getElementById("scrim");
    sc.innerHTML=`<div class="dialog"><h3>Создать архив</h3><p>${paths.length} объ. → zip в текущей папке.</p><div class="field"><label>Имя архива</label><input id="az" value="archive.zip"></div><div class="r"><button class="btn" id="ax">Отмена</button><button class="btn pri" id="ao">Создать</button></div></div>`;
@@ -5676,7 +5676,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    const o=opAdd("Скачивание по ссылке…",{cancel:()=>api("/api/fs/fetch/cancel",{method:"POST",body:JSON.stringify({id})})});
    while(true){const r=await api("/api/fs/fetch/status?id="+encodeURIComponent(id)),j=r&&r.job;
      if(!j){opEnd(o,false,"задача потеряна");return;}
-     o.title="Скачиваю: "+(j.name||"…");
+     o.title=nasTr("Скачиваю: ")+(j.name||"…");
      opSet(o,j.total?j.got/j.total:null,fmtB(j.got)+(j.total?" из "+fmtB(j.total):""));
      if(j.done){opEnd(o,j.ok,j.ok?"":(j.log||"ошибка"));
        notifyDone(j.ok?"Скачано":"Ошибка загрузки",j.ok?j.name:(j.name+" · "+(j.log||"?")));
@@ -5826,7 +5826,7 @@ function winDiskUsage(initRoot){const existed=!!OPEN["__duscan"];const w=openWin
  function renderScanning(st){mainEl.innerHTML=`<div class="du-empty"><div class="du-spin">${svg("refresh",30)}</div><p>Сканирую <span class="mono">${esc(root)}</span>…</p><p class="du-prog" id="duProg">${(st.scanned||0)} папок · ${fmtB(st.bytes||0)}</p><button class="btn sm" id="duCancel">Отмена</button></div>`;
    const c=mainEl.querySelector("#duCancel");if(c)c.onclick=async()=>{await api("/api/fs/duscan/cancel",{method:"POST",body:JSON.stringify({root})});setTimeout(refresh,500);};}
  function pollScan(){clearInterval(win._pi);win._pi=setInterval(async()=>{const st=await api("/api/fs/duscan/status?root="+encodeURIComponent(root));
-   if(!st)return;if(st.status==="scanning"){const pe=mainEl.querySelector("#duProg");if(pe)pe.textContent=`${st.scanned||0} папок · ${fmtB(st.bytes||0)}`;}else{clearInterval(win._pi);refresh();}},1200);}
+   if(!st)return;if(st.status==="scanning"){const pe=mainEl.querySelector("#duProg");if(pe)pe.textContent=nasTr(`${st.scanned||0} папок · ${fmtB(st.bytes||0)}`);}else{clearInterval(win._pi);refresh();}},1200);}
  async function drill(path){let d=cache[path];
    if(!d){d=await api("/api/fs/duscan/node?root="+encodeURIComponent(root)+"&path="+encodeURIComponent(path)+"&depth=2");if(d&&d.ok)cache[path]=d;}
    if(!d||!d.ok){if(norm(path)!==root){drill(root);return;}toast((d&&d.log)||"нет данных");return;}
@@ -6052,9 +6052,9 @@ function pickFolder(opts){
  draw();}
 // старое имя — чтобы не переписывать все точки вызова
 const nbPickLocal=(start,onPick)=>pickFolder({start,onPick,title:"Куда копировать"});
-// пикер папки-приёмника push-ssh: ходим по удалённому серверу rsync-листингом
-// (работает и на «модульных» NAS — сервер сам определяет корень). Папки создаются
-// при прогоне, поэтому в поле пути можно дописать ещё не существующий хвост.
+// push-ssh destination folder picker: walks the remote server via rsync listing
+// (works on "module" NAS too — the server detects the root itself). Folders are
+// created at run time, so a not-yet-existing tail can be typed into the path field.
 function nbPickDest(start,onPick){const s=document.getElementById("scrim");
  let cur=String(start||"").replace(/\/+$/,""),absRoot=null,busy=false;
  const parent=p=>{p=p.replace(/\/+$/,"");const i=p.lastIndexOf("/");return i<=0?"":p.slice(0,i);};
@@ -6075,7 +6075,7 @@ function nbPickDest(start,onPick){const s=document.getElementById("scrim");
   const r=await nbP("/api/backup/browse",{path:cur,dest:1});busy=false;
   if(r&&r.abs!==undefined)absRoot=r.abs;
   const pi=$("#pdPath");if(document.activeElement!==pi)pi.value=cur;
-  const cu=$("#pdCur");if(cu){cu.textContent=cur||(absRoot===false?"корень (модули)":"/");cu.title=cu.textContent;}
+  const cu=$("#pdCur");if(cu){cu.textContent=cur||(absRoot===false?nasTr("корень (модули)"):"/");cu.title=cu.textContent;}
   if(!(r&&r.ok)){list.innerHTML=`<div class="pf-empty">${esc((r&&r.log)||"нет доступа")}</div>`;return;}
   cur=r.path;
   const dirs=(r.entries||[]).filter(e=>e.dir);
@@ -6108,7 +6108,7 @@ function nbPickSource(preselected,preExcl,onPick,opts){const s=document.getEleme
      if(e.dir&&expanded.has(full))buildRows(full,depth+1,out);});};
  function refresh(){
    s.querySelector("#nbsC").textContent=sel.size;
-   const info=s.querySelector("#nbSelInfo");if(info)info.textContent=(sel.size?(sel.size+" выбрано"):"ничего не выбрано")+(excl.size?(" · "+excl.size+" исключено"):"");
+   const info=s.querySelector("#nbSelInfo");if(info)info.textContent=nasTr((sel.size?(sel.size+" выбрано"):"ничего не выбрано")+(excl.size?(" · "+excl.size+" исключено"):""));
    if(kids[""]===null){treeEl.innerHTML=`<div class="er" style="padding:10px">нет связи с источником — проверьте подключение</div>`;return;}
    const out=[];buildRows("",0,out);
    if(!out.length){treeEl.innerHTML='<div style="color:var(--mut);padding:10px">пусто</div>';return;}
@@ -6118,9 +6118,9 @@ function nbPickSource(preselected,preExcl,onPick,opts){const s=document.getEleme
      const {e,full,depth}=row,st=state(full),exp=expanded.has(full);
      const n=el(`<div class="nb-trow ${st}" style="padding-left:${depth*18+10}px"><span class="nb-tw">${e.dir?`<button class="nb-tchev ${exp?"open":""}" title="Развернуть">${svg("chev",14)}</button>`:""}</span><input type="checkbox" class="nb-tck" style="pointer-events:none">${svg(e.dir?"folder":"file",15)}<span class="nb-tn">${esc(e.name)}</span></div>`);
      const ck=n.querySelector(".nb-tck");ck.checked=(st==="checked"||st==="covered");ck.indeterminate=(st==="indet");
-     if(st==="covered")n.title="входит в выбранную папку — снимите галочку, чтобы исключить только её";
-     else if(st==="excluded")n.title="исключено из копирования — нажмите, чтобы вернуть";
-     else if(st==="exout")n.title="внутри исключённой папки — сначала верните её";
+     if(st==="covered")n.title=nasTr("входит в выбранную папку — снимите галочку, чтобы исключить только её");
+     else if(st==="excluded")n.title=nasTr("исключено из копирования — нажмите, чтобы вернуть");
+     else if(st==="exout")n.title=nasTr("внутри исключённой папки — сначала верните её");
      const chev=n.querySelector(".nb-tchev");
      if(chev)chev.onclick=async ev=>{ev.stopPropagation();
        if(expanded.has(full))expanded.delete(full);
@@ -6159,9 +6159,9 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
  if(SET.nbTab&&CATS.some(c=>c.id===SET.nbTab))tab=SET.nbTab;   // запоминаем последний открытый таб
  const saveCfg=async patch=>{const r=await nbP("/api/backup/config",{config:patch});CFG=(r&&r.config)||CFG;JOBS=(CFG.jobs||[]).slice();return CFG;};
  const wireSeg=(tc,id,cb)=>{const seg=tc.querySelector(id);if(!seg)return;seg.querySelectorAll("button").forEach(b=>b.onclick=()=>{seg.querySelectorAll("button").forEach(x=>x.classList.toggle("on",x===b));cb(b.dataset.v);});};
- // единая папка: воссоздаём ВСЁ дерево источника под базой (Cloud/Desktop → base/Cloud/Desktop),
- // а не только последнюю папку — иначе теряется структура и совпадают имена.
- // push: привычный префикс пула mnt/storage срезаем (base/photos, не base/mnt/storage/photos)
+ // single folder mode: recreate the WHOLE source tree under the base (Cloud/Desktop →
+ // base/Cloud/Desktop), not just the last folder — otherwise structure is lost and names clash.
+ // push: strip the familiar pool prefix mnt/storage (base/photos, not base/mnt/storage/photos)
  const destFor=src=>{const base=(CFG.dest_base||(isPush()?"":"/mnt/storage/nas-backup")).replace(/\/$/,"");
   const rel=String(src).replace(/^\/+/,"");
   return base+"/"+(isPush()?rel.replace(/^mnt\/storage\//,""):rel);};
@@ -6189,9 +6189,13 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
    <div class="nb-testr" id="cTestR"></div>`;
   const g=s=>tc.querySelector(s);
   wireSeg(tc,"#cTr",v=>saveCfg({transport:v}).then(()=>tabConnPush(tc)));
-  // база сменилась → в режиме единой папки переложить приёмники всех задач под новую
-  const saveBase=async v=>{await saveCfg({dest_base:v});
-   if(CFG.dest_mode!=="per"&&JOBS.length){JOBS.forEach(j=>{j.dest=destFor(j.src);});await saveCfg({jobs:JOBS});}};
+  // base changed → in single-folder mode remap every job's dest under the new base.
+  // An empty base is saved as-is but jobs are NOT remapped (dest would become server root)
+  const saveBase=async v=>{
+   if(v&&CFG.transport==="local"&&!/^\/(mnt|media|srv|home)\//.test(v)){
+     toast("Папка-приёмник должна быть в /mnt, /media, /srv или /home");return;}
+   await saveCfg({dest_base:v});
+   if(v&&CFG.dest_mode!=="per"&&JOBS.length){JOBS.forEach(j=>{j.dest=destFor(j.src);});await saveCfg({jobs:JOBS});}};
   const cb=g("#cBase");if(cb)cb.onchange=()=>saveBase(cb.value.trim());
   const cbB=g("#cBaseB");if(cbB)cbB.onclick=()=>pickFolder({start:cb.value||"/media",title:"Куда копировать",onPick:p=>{cb.value=p;saveBase(p);}});
   if(ssh){g("#cHost").onchange=()=>saveCfg({host:g("#cHost").value.trim()});
@@ -6231,7 +6235,7 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
   // явное сохранение всех полей + подтверждение (поля также сохраняются по blur)
   const saveConn=async()=>{const patch={host:g("#cHost").value.trim(),user:g("#cUser").value.trim(),ssh_port:+g("#cPort").value||22};
     if(g("#cPw").value)patch.password=g("#cPw").value;await saveCfg(patch);
-    const sv=g("#cSaved");sv.textContent="✓ сохранено";sv.classList.add("show");setTimeout(()=>sv.classList.remove("show"),2000);};
+    const sv=g("#cSaved");sv.textContent=nasTr("✓ сохранено");sv.classList.add("show");setTimeout(()=>sv.classList.remove("show"),2000);};
   g("#cSave").onclick=saveConn;
   g("#cHost").onchange=()=>saveCfg({host:g("#cHost").value.trim()});
   g("#cUser").onchange=()=>saveCfg({user:g("#cUser").value.trim()});
@@ -6367,6 +6371,7 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
    <div style="margin-top:12px"><button class="btn sm" id="oLog">${svg("logs",13)} <span id="oLogT">Показать журнал</span></button></div>
    <div class="upd-con" id="oCon" style="display:none;margin-top:8px"></div>`;
   const g=s=>tc.querySelector(s);
+  const qCaption=st=>`<span style="color:var(--warn)">в очереди${st.queue_after?` — начнётся после «${esc(st.queue_after)}»`:""}${st.queue_ahead?`, впереди ещё ${st.queue_ahead}`:""}</span>`;
   // папки со статусом последнего прогона (перекрашиваем и после завершения бэкапа)
   const paintStatus=()=>Promise.all([nbG("/api/backup/status"),nbG("/api/backup/dest-state")]).then(([st,ds])=>{const jn=g("#oJobs");if(!jn)return;
    const byS={};((st&&st.jobs)||[]).forEach(j=>byS[j.src]=j);
@@ -6384,8 +6389,9 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
    // предупреждение о приёмнике + строка «Приёмник» в сводке
    const rd=g("#oRecvDot"),rv=g("#oRecvV"),dw=g("#oDwarn");
    const notMnt=ds&&ds.base_mounted===false;
-   if(rd&&rv){rv.title="";   // textContent идёт мимо innerHTML-хука перевода — переводим сами
-    if(ds&&ds.remote){rd.style.background="var(--accent)";rv.textContent=nasTr("на другом сервере");}
+   if(rd&&rv){rv.title="";   // textContent bypasses the innerHTML translation hook — translate by hand
+    if(ds&&ds.unset){rd.style.background="var(--mut)";rv.textContent=nasTr("не выбран");}
+    else if(ds&&ds.remote){rd.style.background="var(--accent)";rv.textContent=nasTr("на другом сервере");}
     else if(notMnt){rd.style.background="var(--danger)";rv.textContent=nasTr("не смонтирован");}
     else if(miss){rd.style.background="var(--danger)";rv.textContent=miss+nasTr(" без папки");}
     else if(emptyN){rd.style.background="var(--warn)";rv.textContent=emptyN+nasTr(" пусто");}
@@ -6393,13 +6399,15 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
     else{rd.style.background="var(--mut)";rv.textContent="—";}
     rv.title=rv.textContent;}
    if(dw){let m="",cls="nb-dwarn";
-    if(notMnt){m=`⚠ Приёмник не смонтирован (${esc(ds.base||"")}) — бэкап не запустится.`;}
+    if(ds&&ds.unset){m=`Приёмник ещё не выбран — задайте его на вкладке «Приёмник», иначе бэкап не запустится.`;cls="nb-dwarn wrn";}
+    else if(notMnt){m=`⚠ Приёмник не смонтирован (${esc(ds.base||"")}) — бэкап не запустится.`;}
     else if(miss){m=`⚠ Папок нет в приёмнике: ${miss}. Похоже, удалены вручную. Запусти бэкап — они восстановятся.`;}
     else if(emptyN){m=`Папок пусто в приёмнике: ${emptyN}.`;cls="nb-dwarn wrn";}
     dw.className=cls;dw.style.display=m?"block":"none";dw.innerHTML=m;}
    const sn=g("#oStatus");if(sn){if(st&&st.running)sn.innerHTML=`<span style="color:var(--accent)">идёт сейчас…</span>`;
+    else if(st&&st.queued)sn.innerHTML=qCaption(st);
     else if(st&&st.ts){const ok=(st.jobs||[]).filter(x=>x.ok).length,tot=(st.jobs||[]).length;sn.innerHTML=`${fmDate(st.ts)} · <b style="color:${ok===tot?"var(--good)":"var(--warn)"}">${ok}/${tot}</b> задач успешно`;}
-    else sn.textContent="ещё не запускался";}});
+    else sn.textContent=nasTr("ещё не запускался");}});
   paintStatus();
   const con=g("#oCon");
   // фон + переподключение к логу (переживает перезагрузку страницы)
@@ -6432,16 +6440,29 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
      else paintStatus();}   // реальный прогон → перекрасить точки/итог/размеры без перезагрузки
    },1500);}
   // журнал (терминал) скрыт по умолчанию — открывается кнопкой; лог копится в фоне
-  {const lb2=g("#oLog");if(lb2)lb2.onclick=()=>{const open=con.style.display==="none";con.style.display=open?"block":"none";const t=g("#oLogT");if(t)t.textContent=open?"Скрыть журнал":"Показать журнал";if(open)con.scrollTop=con.scrollHeight;};}
+  {const lb2=g("#oLog");if(lb2)lb2.onclick=()=>{const open=con.style.display==="none";con.style.display=open?"block":"none";const t=g("#oLogT");if(t)t.textContent=nasTr(open?"Скрыть журнал":"Показать журнал");if(open)con.scrollTop=con.scrollHeight;};}
+  // waiting in the queue: keep the caption fresh and attach to the log when our turn
+  // comes; full paintStatus (2 extra API calls) only on state transitions
+  function waitQueue(){clearInterval(win._nbpi);
+   win._nbpi=setInterval(async()=>{if(!document.body.contains(con)){clearInterval(win._nbpi);win._nbpi=null;return;}
+    const st=await nbG("/api/backup/status");if(!st)return;
+    if(st.running){clearInterval(win._nbpi);win._nbpi=null;con.innerHTML="";nbCursor=0;nbStarted=null;attachLog();paintStatus();}
+    else if(!st.queued){clearInterval(win._nbpi);win._nbpi=null;setBusy(false);paintStatus();}   // removed from the queue
+    else{const sn=g("#oStatus");if(sn)sn.innerHTML=qCaption(st);}},3000);}
   const run=async dry=>{if(!(c.jobs||[]).length){toast("Сначала выберите источники (вкладка «Источники»)");return;}
+   if(isPush()&&!CFG.dest_base){toast("Сначала выберите приёмник (вкладка «Приёмник»)");return;}
    con.innerHTML="";nbCursor=0;nbStarted=null;setBusy(true);
    const rr=await nbP("/api/backup/run-bg",{dry});
-   if(rr&&rr.queued){toast("Другой бэкап уже идёт — поставлено в очередь");return;}
+   if(rr&&rr.queued){toast("Другой бэкап уже идёт — поставлено в очередь");waitQueue();return;}
    attachLog();};
   g("#oRun").onclick=()=>run(false);g("#oDry").onclick=()=>run(true);
   g("#oCancel").onclick=()=>{nbP("/api/backup/cancel");toast("Останавливаю…");};
-  // если бэкап уже идёт (в т.ч. после перезагрузки) — подключаемся к его логу (журнал остаётся скрыт)
-  nbG("/api/backup/log?since=0").then(r=>{if(r&&r.running){con.innerHTML="";nbCursor=0;nbStarted=null;setBusy(true);attachLog();}});
+  // on tab open: preload the LAST run's log so «Показать журнал» is never empty,
+  // then reattach if a run is active or waiting in the queue (journal stays hidden)
+  nbG("/api/backup/log?since=0").then(r=>{if(!r)return;
+   if(r.lines&&r.lines.length){nbAppend(r.lines);nbCursor=r.seq;nbStarted=r.started;}
+   if(r.running){setBusy(true);attachLog();}
+   else if(r.queued){setBusy(true);waitQueue();}});
   g("#oTest").onclick=async()=>{toast("Проверяю связь…");const t=await nbP("/api/backup/test");toast(t&&t.ok?"✓ связь работает":("✗ "+((t&&t.log)||"нет связи")));};
  }
 
@@ -6483,8 +6504,11 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
   const dirSeg=s.querySelector("#npDir"),clone=s.querySelector("#npClone");
   dirSeg.querySelectorAll("button").forEach(b=>b.onclick=()=>{if(clone.checked)return;
     dirSeg.querySelectorAll("button").forEach(x=>x.classList.toggle("on",x===b));
-    dir=b.dataset.v;s.querySelector("#npDirHelp").textContent=DHELP[dir];});
-  clone.onchange=()=>{dirSeg.style.opacity=clone.checked?".45":"";};  // клон наследует направление источника
+    dir=b.dataset.v;s.querySelector("#npDirHelp").textContent=nasTr(DHELP[dir]);});
+  clone.onchange=()=>{dirSeg.style.opacity=clone.checked?".45":"";   // a clone inherits the source profile's direction
+    if(clone.checked){dir=src.direction||"pull";
+      dirSeg.querySelectorAll("button").forEach(x=>x.classList.toggle("on",x.dataset.v===dir));
+      s.querySelector("#npDirHelp").textContent=nasTr(DHELP[dir]);}};
   s.querySelector("#npX").onclick=()=>s.classList.remove("show");
   s.querySelector("#npOk").onclick=async()=>{
     const r=await api("/api/backup/profile",{method:"POST",body:JSON.stringify(
@@ -6614,12 +6638,12 @@ function timemachineTab(tc){
   const q=s=>tc.querySelector(s);
   q("#tmPathB").onclick=()=>pickFolder({title:"Папка для бэкапов Time Machine",start:q("#tmPath").value||"/mnt/storage",onPick:p=>{q("#tmPath").value=p;}});
   q("#tmApply").onclick=async()=>{
-   const btn=q("#tmApply");btn.disabled=true;btn.textContent="Применяю…";
+   const btn=q("#tmApply");btn.disabled=true;btn.textContent=nasTr("Применяю…");
    const body={path:q("#tmPath").value.trim(),user:q("#tmUser").value.trim(),
      password:q("#tmPass").value,quota_gb:+q("#tmQuota").value||0};
    const r=await api("/api/timemachine/apply",{method:"POST",body:JSON.stringify(body)});
    if(r&&r.ok){toast("Time Machine настроен");draw(r.status||st);}
-   else{toast("Ошибка: "+((r&&(r.log||"").trim().split("\n").pop())||"?"));btn.disabled=false;btn.textContent="Включить Time Machine";}
+   else{toast("Ошибка: "+((r&&(r.log||"").trim().split("\n").pop())||"?"));btn.disabled=false;btn.textContent=nasTr("Включить Time Machine");}
   };
   const off=q("#tmOff");if(off)off.onclick=()=>confirmDlg("Выключить Time Machine?","Шара и анонс по сети будут убраны, Mac перестанет видеть NAS. Сами бэкапы (файлы) останутся на месте.",async()=>{
    const r=await api("/api/timemachine/disable",{method:"POST",body:"{}"});
@@ -6661,7 +6685,7 @@ function backupTab(tc){
   const m=await api("/api/maintenance");const mm=(m&&m.maintenance)||{};
   if(document.activeElement!==dir)dir.value=mm.settings_backup_dir||"";
   hide.checked=!!mm.settings_backup_hide;
-  note.textContent=`Папка: ${r.dir} · ${r.days?`автоматически раз в ${r.days} дн`:"автобэкап выключен"} · хранится ${r.keep} последних`;
+  note.textContent=nasTr(`Папка: ${r.dir} · ${r.days?`автоматически раз в ${r.days} дн`:"автобэкап выключен"} · хранится ${r.keep} последних`);
   list.innerHTML=(r.list&&r.list.length)?"":`<div class="dempty">${svg("save",16)} Бэкапов ещё нет — нажмите «Создать»</div>`;
   (r.list||[]).forEach(b=>{
    const row=el(`<div class="stk-cont" style="margin-bottom:6px"><span class="nico">${svg("save",14)}</span><span class="cn">${esc(b.name)}</span><span class="cstat">${ruWhen(b.t)} · ${fmtB(b.size)}</span>
@@ -6674,7 +6698,7 @@ function backupTab(tc){
    row.querySelector('[data-a="del"]').onclick=()=>confirmDlg("Удалить бэкап?",esc(b.name),async()=>{
      await api("/api/settings-backup/delete",{method:"POST",body:JSON.stringify({name:b.name})});load();},true);
    list.appendChild(row);});};
- tc.querySelector("#bkMake").onclick=async function(){this.disabled=true;this.textContent="создаю…";
+ tc.querySelector("#bkMake").onclick=async function(){this.disabled=true;this.textContent=nasTr("создаю…");
   const r=await api("/api/settings-backup/make",{method:"POST",body:"{}"});
   this.disabled=false;this.innerHTML=svg("save",13)+" Создать бэкап сейчас";
   toast(LIVE?((r&&r.ok)?`Бэкап создан (${r.files} файлов)`:("Ошибка: "+((r&&r.log)||""))):"Демо");load();};
@@ -7187,7 +7211,7 @@ async function notesTab(tc){
  const st=(tr&&tr.stats)||{};
  tc.querySelector("#ntsN").textContent=(st.notes||0)+" / "+(st.dirs||0);
  tc.querySelector("#ntsSz").textContent=fmtB(st.size||0);
- tc.querySelector("#ntsBk").textContent="картинки и файлы "+fmtB(st.assets||0)+" · история "+fmtB(st.history||0)+" · корзина "+fmtB(st.trash||0);
+ tc.querySelector("#ntsBk").textContent=nasTr("картинки и файлы "+fmtB(st.assets||0)+" · история "+fmtB(st.history||0)+" · корзина "+fmtB(st.trash||0));
  tc.querySelectorAll("#ntsTheme button").forEach(b=>b.onclick=()=>{SET.ntTheme=b.dataset.v;saveSettings();tc.querySelectorAll("#ntsTheme button").forEach(x=>x.classList.toggle("on",x===b));
   const nb=document.querySelector(".win .nt-root");if(nb)ntApplyTheme(nb);
   if(winNotes._reopen&&NT_PATH)winNotes._reopen(NT_PATH);});
@@ -7552,11 +7576,11 @@ function winNotes(){openWin("__notes","Заметки",async body=>{
    s.querySelector("#ntCO").onclick=()=>{s.classList.remove("show");ntConflict=false;saveNow(true);};
    return;}
   if(r&&r.ok&&r.mtime)NT_MTIME=r.mtime;
-  const st=q("#ntSt");if(st)st.textContent=r&&r.ok?"сохранено "+new Date().toTimeString().slice(0,5):"ошибка сохранения";
+  const st=q("#ntSt");if(st)st.textContent=r&&r.ok?nasTr("сохранено ")+new Date().toTimeString().slice(0,5):nasTr("ошибка сохранения");
   const n=TREE.notes.find(x=>x.path===NT_PATH);
   if(n){n.title=title||n.title;n.tags=tags;n.pinned=NT_PIN;n.mtime=Math.floor(Date.now()/1000);paintSide();paintList();}};
  const schedSave=()=>{NT_DIRTY=true;clearTimeout(NT_SAVE_T);NT_SAVE_T=setTimeout(saveNow,1200);
-  const st=q("#ntSt");if(st)st.textContent="сохранение…";};
+  const st=q("#ntSt");if(st)st.textContent=nasTr("сохранение…");};
  const openNote=async p=>{try{
   await flushSave();
   const r=await api("/api/notes/get?path="+encodeURIComponent(p));
@@ -8311,7 +8335,7 @@ function baseOpPct(){return Math.round(clampf(isLight()?(SET.elevBaseLight??.55)
 function opSlider(label,key,tip){const v=(SET[key]==null||SET[key]==="")?null:+SET[key];
  return `<div class="fx-row"><div class="fx-top"><span>${esc(label)}${tip?tipHTML(tip):""}</span><span class="fx-val" id="o_${key}">${v==null?"как у окон":v+"%"}</span></div><input type="range" class="fx-range" data-op="${key}" min="0" max="100" step="1" value="${v==null?baseOpPct():v}"></div>
  <div style="display:flex;justify-content:flex-end;margin:-2px 0 8px"><button class="btn sm" data-opreset="${key}" ${v==null?"disabled":""}>Сброс — как у окон</button></div>`;}
-function paintWpPrev(box){if(!box)return;if(SET.wpVer){box.style.backgroundImage=`url(/api/wallpaper/img?v=${SET.wpVer})`;box.classList.remove("empty");box.textContent="";}else{box.style.backgroundImage="";box.classList.add("empty");box.textContent="обои не заданы";}}
+function paintWpPrev(box){if(!box)return;if(SET.wpVer){box.style.backgroundImage=`url(/api/wallpaper/img?v=${SET.wpVer})`;box.classList.remove("empty");box.textContent="";}else{box.style.backgroundImage="";box.classList.add("empty");box.textContent=nasTr("обои не заданы");}}
 function cfgList(box,getCfg,setCfg,defs,after){const cfg=getCfg();box.innerHTML="";cfg.forEach((w,i)=>{const d=defs[w.id];
   const row=el(`<div class="wg-cfg"><span class="nm">${svg(d.ic,15)} ${esc(d.name)}</span><div class="ord"><button data-u ${i===0?"disabled":""} title="Выше">${svg("arrowup",14)}</button><button data-dn ${i===cfg.length-1?"disabled":""} title="Ниже" style="transform:rotate(180deg)">${svg("arrowup",14)}</button></div><label class="tgl"><input type="checkbox" ${w.on?"checked":""}><span class="sl"></span></label></div>`);
   const commit=()=>{setCfg(cfg);saveSettings();after&&after();cfgList(box,getCfg,setCfg,defs,after);};
@@ -8330,7 +8354,7 @@ function wireLook(lb){
   sl.onchange=saveSettings;});
  lb.querySelectorAll("[data-opreset]").forEach(b=>b.onclick=()=>{const k=b.dataset.opreset;SET[k]=null;applySettings();saveSettings();
   const sl=lb.querySelector(`input[data-op="${k}"]`),out=lb.querySelector("#o_"+k);
-  if(out)out.textContent="как у окон";if(sl){sl.value=baseOpPct();paintRange(sl);}b.disabled=true;});
+  if(out)out.textContent=nasTr("как у окон");if(sl){sl.value=baseOpPct();paintRange(sl);}b.disabled=true;});
 }
 function filesTab(tc){
  const SZ=SET.fmIconSize||"m",CL=SET.fmClick||"single",SK=SET.fmSortKey||"name",SD=SET.fmSortDir===-1?-1:1,
@@ -8381,7 +8405,7 @@ function filesTab(tc){
  wireSeg("fmThumbFit",v=>{SET.fmThumbFit=v;saveSettings();document.documentElement.style.setProperty("--thumb-fit",v==="cover"?"cover":"contain");});wireSeg("fmUpPar",setK("fmUpPar",v=>+v));wireSeg("fmTabSize",setK("fmTabSize",v=>+v));
  const st=tc.querySelector("#fmStart");st.onchange=()=>{SET.fmStart=st.value.trim()||"/mnt/storage";saveSettings();};
  const statEl=tc.querySelector("#fmCacheStat");
- const refreshStat=async()=>{const s=await api("/api/fs/thumbcache");if(statEl&&s)statEl.textContent=fmtB(s.bytes||0)+" · "+(s.count||0)+" файлов";};
+ const refreshStat=async()=>{const s=await api("/api/fs/thumbcache");if(statEl&&s)statEl.textContent=nasTr(fmtB(s.bytes||0)+" · "+(s.count||0)+" файлов");};
  refreshStat();
  api("/api/maintenance").then(r=>{const mb=r&&r.maintenance&&r.maintenance.thumb_cache_mb;if(mb!=null)tc.querySelectorAll("#fmCacheLim button").forEach(x=>x.classList.toggle("on",+x.dataset.v===+mb));});
  wireSeg("fmCacheLim",v=>{api("/api/maintenance",{method:"POST",body:JSON.stringify({maintenance:{thumb_cache_mb:+v}})});toast("Лимит кэша: "+(+v?(+v+" МБ"):"без лимита"));});
