@@ -6151,7 +6151,7 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
    <div class="srow"><div class="srow-l"><div class="srow-t">Пользователь</div></div><div class="srow-c"><input class="mono" id="cUser" value="${att(c.user||"")}" placeholder="oleg"></div></div>
    <div class="srow"><div class="srow-l"><div class="srow-t">Пароль</div><div class="srow-d">пусто = вход по ключу</div></div><div class="srow-c"><input type="password" class="mono" id="cPw" placeholder="${c.has_password?"•••••• (задан)":"пароль"}"></div></div>
    <div class="srow"><div class="srow-l"><div class="srow-t">SSH-порт</div></div><div class="srow-c"><input class="mono" id="cPort" style="max-width:90px" value="${c.ssh_port||22}"></div></div>
-   <div class="nb-field" style="margin-top:10px"><label>Папка на сервере${tipHTML("Абсолютный путь на приёмнике, куда складывать копии (каждый источник — своей подпапкой). Папка создастся сама.")}</label><input class="mono" id="cBase" value="${att(c.dest_base||"")}" placeholder="/mnt/backup/${esc(host())}"></div>`
+   <div class="nb-field" style="margin-top:10px"><label>Папка на сервере${tipHTML("Куда складывать копии (каждый источник — своей подпапкой), папки создаются сами. Обычный Linux-сервер — абсолютный путь: /mnt/backup/nas. NAS вроде UGREEN/Synology принудительно заворачивают rsync в «модули» — там путь пишется ОТ модуля, без ведущего /: например HDD6TB/Downloads/backup. Нажмите «Проверить» — покажет доступные корни.")}</label><input class="mono" id="cBase" value="${att(c.dest_base||"")}" placeholder="/mnt/backup/${esc(host())}"></div>`
    :`<div class="nb-field" style="margin-top:10px"><label>Папка-приёмник${tipHTML("Папка на этом NAS, куда складывать копии — обычно на внешнем USB-диске. Если диск не подключён, прогон пропустится и ничего не зальёт системный раздел.")}</label><div class="nb-field-row"><input class="mono" id="cBase" value="${att(c.dest_base||"")}" placeholder="/media/usb-disk/backup"><button class="btn sm" id="cBaseB">${svg("folder",13)} Выбрать</button></div></div>`}
    <div class="srow"><div class="srow-l"><div class="srow-t">Ограничение скорости${tipHTML("Лимит скорости передачи в КБ/с (rsync --bwlimit), чтобы бэкап не забивал сеть и диск. 0 — без ограничения.")}</div><div class="srow-d">чтобы не забивать сеть/диск</div></div><div class="srow-c"><input class="mono" id="cBw" style="max-width:90px" value="${c.bwlimit||0}"><span style="color:var(--mut);font-size:12px">КБ/с</span></div></div>
    ${verifyRow(c)}
@@ -6278,7 +6278,7 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
      <div class="usb-chips"><span class="usb-lbl">Готовые:</span><button class="usb-pre" data-t="_deleted/{date}">по дате</button><button class="usb-pre" data-t="_deleted/{year}/{month}">год / месяц</button><button class="usb-pre" data-t="_deleted/{datetime}">дата и время</button></div>
    </div>
    <div class="srow" id="dRetRow"><div class="srow-l"><div class="srow-t">Хранить архив удалённых${tipHTML("Старые снимки чистятся по возрасту И по суммарному размеру — что наступит раньше. 0 в поле — этот лимит не применять.")}</div><div class="srow-d">чистка по возрасту и по размеру</div></div><div class="srow-c"><input class="mono" id="dRd" style="max-width:60px" value="${c.retention_days||0}"><span style="color:var(--mut);font-size:12px">дней</span><input class="mono" id="dRg" style="max-width:60px" value="${c.retention_gb||0}"><span style="color:var(--mut);font-size:12px">ГБ</span></div></div>
-   ${isPushSsh()?`<div class="mon-note">На SSH-приёмнике применяется только срок в днях: считать размер архива по сети слишком дорого, лимит в ГБ не действует.</div>`:""}
+   ${isPushSsh()?`<div class="mon-note">На SSH-приёмнике применяется только срок в днях: считать размер архива по сети слишком дорого, лимит в ГБ не действует. Если путь приёмника «от модуля» (без ведущего /), автоочистка архива недоступна вовсе — старые снимки удаляйте вручную.</div>`:""}
    </div>`;
   const g=s=>tc.querySelector(s);
   wireSeg(tc,"#dDel",v=>{g("#dArch").style.display=v==="archive"?"":"none";g("#dGuardRow").style.display=v==="add"?"none":"";const hh=HELP[v];g("#dHelp").innerHTML=`<b>${esc(hh.t)}</b><span>${esc(hh.d)}</span>`;saveCfg({delete_mode:v});});
@@ -6351,12 +6351,12 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
    // предупреждение о приёмнике + строка «Приёмник» в сводке
    const rd=g("#oRecvDot"),rv=g("#oRecvV"),dw=g("#oDwarn");
    const notMnt=ds&&ds.base_mounted===false;
-   if(rd&&rv){rv.title="";
-    if(ds&&ds.remote){rd.style.background="var(--accent)";rv.textContent="на другом сервере";}
-    else if(notMnt){rd.style.background="var(--danger)";rv.textContent="не смонтирован";}
-    else if(miss){rd.style.background="var(--danger)";rv.textContent=miss+" без папки";}
-    else if(emptyN){rd.style.background="var(--warn)";rv.textContent=emptyN+" пусто";}
-    else if((c.jobs||[]).length){rd.style.background="var(--good)";rv.textContent="в порядке";}
+   if(rd&&rv){rv.title="";   // textContent идёт мимо innerHTML-хука перевода — переводим сами
+    if(ds&&ds.remote){rd.style.background="var(--accent)";rv.textContent=nasTr("на другом сервере");}
+    else if(notMnt){rd.style.background="var(--danger)";rv.textContent=nasTr("не смонтирован");}
+    else if(miss){rd.style.background="var(--danger)";rv.textContent=miss+nasTr(" без папки");}
+    else if(emptyN){rd.style.background="var(--warn)";rv.textContent=emptyN+nasTr(" пусто");}
+    else if((c.jobs||[]).length){rd.style.background="var(--good)";rv.textContent=nasTr("в порядке");}
     else{rd.style.background="var(--mut)";rv.textContent="—";}
     rv.title=rv.textContent;}
    if(dw){let m="",cls="nb-dwarn";

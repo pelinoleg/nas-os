@@ -4141,9 +4141,11 @@ def _nb_push_ssh(cfg):
     return _nb_push(cfg) and (cfg or {}).get("transport") == "ssh"
 
 def _nb_valid_push_dest(p):
-    """Приёмник push-ssh — абсолютный путь на удалённой стороне."""
-    p = str(p or "")
-    return p.startswith("/") and ".." not in p
+    """Приёмник push-ssh: абсолютный путь на удалённой стороне ИЛИ путь от модуля
+    (без ведущего /) — NAS вроде UGREEN/Synology принудительно заворачивают
+    rsync-по-SSH в daemon-режим, где пути считаются от «модуля»."""
+    p = str(p or "").strip()
+    return bool(p) and ".." not in p and not p.startswith("-")
 
 def nb_save(patch, pid=None):
     cur = nb_load(pid)
@@ -4375,6 +4377,9 @@ def _nb_err(raw):
         if "command not found" in low:
             return "на источнике не найден sudo"
         return "на источнике sudo требует пароль/TTY — нужен NOPASSWD sudo для rsync (см. подсказку у тумблера)"
+    if "invalid path" in low:
+        return ("приёмник принимает только пути от «модуля» (NAS с принудительным rsync-демоном) — "
+                "укажите путь БЕЗ ведущего /, напр. HDD6TB/Downloads/backup; «Проверить» покажет доступные корни")
     if "permission denied" in low or "auth" in low or "password" in low:
         return "доступ отклонён — проверьте пользователя и пароль (или ключ)"
     if "connection refused" in low:
@@ -4409,8 +4414,19 @@ def nb_test(cfg=None):
         if cfg.get("password") and not shutil.which("sshpass"):
             return {"ok": False, "log": "для пароля по SSH нужен sshpass (переустановите/обновите систему) — или используйте ключ"}
         extra = ["--rsync-path=sudo rsync"] if cfg.get("remote_sudo") else []   # проверяем и сам sudo-путь
-        r = _run(["rsync"] + rsh + extra + ["--list-only", remote + "/"], timeout=25, env=env)
+        # push: листаем корень без «/» — у NAS с принудительным rsync-демоном
+        # (UGREEN/Synology) «/» — invalid path, а пустой путь отдаёт список модулей
+        r = _run(["rsync"] + rsh + extra + ["--list-only", remote if _nb_push(cfg) else remote + "/"],
+                 timeout=25, env=env)
         ok_msg = "SSH-подключение работает" + (" · sudo на источнике ок" if cfg.get("remote_sudo") else "")
+        if r["ok"] and _nb_push(cfg):
+            roots = []
+            for l in (r.get("log") or "").splitlines():
+                m = re.match(r"^d\S*\s+[\d,]+\s+\S+\s+\S+\s+(.+)$", l)
+                if m and m.group(1) not in (".", ""):
+                    roots.append(m.group(1))
+            if roots:
+                ok_msg += " · корни: " + ", ".join(roots[:8])
         return {"ok": r["ok"], "log": ok_msg if r["ok"] else _nb_err(r["log"])}
     r = subprocess.run(["rsync", remote], capture_output=True, text=True, env=env, timeout=25)
     out = (r.stdout + r.stderr).strip()
@@ -4572,6 +4588,8 @@ def nb_build_cmd(cfg, job, dry, prev_files=0):
         args.append("--bwlimit=%d" % bw)                 # КБ/с
     if cfg.get("transport") == "ssh" and cfg.get("remote_sudo"):
         args.append("--rsync-path=sudo rsync")   # читать файлы без доступа у пользователя (нужен NOPASSWD sudo на источнике)
+    if _nb_push_ssh(cfg) and not job["dest"].startswith("/"):
+        args.append("--mkpath")                  # модульный путь: папки создаёт сам rsync (демон ≥3.2.3)
     if dry:
         args.append("--dry-run")
     args += _nb_src_dst(cfg, job, remote)
@@ -4643,10 +4661,14 @@ def nb_run(cfg, dry, writer, cancel=lambda: False):
                    "или диск не смонтирован." % j["src"].lstrip("/"))
             results.append({"src": j["src"], "ok": False, "src_missing": True}); continue
         if push_ssh:
-            mk = _nb_ssh_run(cfg, "mkdir -p " + shlex.quote(j["dest"]), timeout=25)
-            if not mk["ok"]:
-                writer("не создать папку на приёмнике: %s" % (mk.get("log") or "").strip()[-160:])
-                results.append({"src": j["src"], "ok": False}); continue
+            # абсолютный путь = обычный сервер: mkdir по SSH. Модульный путь (без
+            # ведущего /) = принудительный rsync-демон: shell-путей у него нет,
+            # папки внутри модуля создаёт сам rsync (--mkpath в nb_build_cmd)
+            if j["dest"].startswith("/"):
+                mk = _nb_ssh_run(cfg, "mkdir -p " + shlex.quote(j["dest"]), timeout=25)
+                if not mk["ok"]:
+                    writer("не создать папку на приёмнике: %s" % (mk.get("log") or "").strip()[-160:])
+                    results.append({"src": j["src"], "ok": False}); continue
         else:
             if _dest_disk_absent(j["dest"]):
                 writer("⚠ ПРОПУЩЕНО: целевой диск не смонтирован (%s ведёт в системный "
@@ -4756,8 +4778,16 @@ def _nb_prune_remote(cfg, writer):
     top = nb_deleted_top(cfg)
     dests = set(j["dest"] for j in cfg.get("jobs", [])) | {cfg.get("dest_base", "")}
     removed = 0
+    warned = False
     for base in dests:
-        if not _nb_valid_push_dest(base):
+        if not base:
+            continue
+        if not base.startswith("/"):
+            # модульный путь принудительного rsync-демона: shell его не видит,
+            # find/rm по SSH бессильны — архив удалённых чистится только вручную
+            if not warned:
+                writer("модульный приёмник: автоочистка архива удалённых недоступна — чистите %s вручную" % top)
+                warned = True
             continue
         d = base.rstrip("/") + "/" + top
         find = "[ -d %s ] && find %s -mindepth 1 -maxdepth 1 -type d -mtime +%d" % (
