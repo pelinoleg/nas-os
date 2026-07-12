@@ -2228,7 +2228,9 @@ bk_smartd() {
 # nas-wizard: вызывается smartd при проблеме с диском
 LOG=/var/log/nas-smart.log
 echo "$(date '+%F %T') SMART ALERT: ${SMARTD_MESSAGE:-unknown} (${SMARTD_DEVICE:-?})" >> "$LOG"
-[ -x /usr/local/bin/nas-notify.sh ] && /usr/local/bin/nas-notify.sh "SMART: проблема диска" "${SMARTD_DEVICE:-?}: ${SMARTD_MESSAGE:-error}" 1 || true
+# event/key match the panel monitor's SMART scan ("smart:/dev/sdX") so the
+# same failing disk is reported once, not by both watchers
+[ -x /usr/local/bin/nas-notify.sh ] && /usr/local/bin/nas-notify.sh "SMART: проблема диска" "${SMARTD_DEVICE:-?}: ${SMARTD_MESSAGE:-error}" 1 smart "smart:${SMARTD_DEVICE:-?}" || true
 ALERT
     run chmod +x /usr/local/bin/nas-smart-alert.sh
     install_notify_helper
@@ -2252,6 +2254,12 @@ set -uo pipefail
 LOG=/var/log/nas-health.log
 DISK_PCT_MAX=90
 TEMP_MAX=75
+# The panel monitor already watches pool fill and temperature continuously
+# (with UI-configurable thresholds) — this hourly check is only the fallback
+# for when the panel is down, otherwise every alert arrived twice (RU + EN).
+PORT="$(sed -n 's/^Environment=NAS_WEB_PORT=//p' /etc/systemd/system/nas-web.service 2>/dev/null | tail -n1)"
+code="$(curl -s -o /dev/null -m 5 -w '%{http_code}' "http://127.0.0.1:${PORT:-80}/" 2>/dev/null)" || code=000
+case "$code" in ''|000|5*) ;; *) exit 0 ;; esac
 alert=0; msg=""
 if mountpoint -q /mnt/storage; then
     pct=$(df --output=pcent /mnt/storage 2>/dev/null | tr -dc '0-9')
@@ -2372,8 +2380,25 @@ notify_conf_set() {
 install_notify_helper() {
     write_file /usr/local/bin/nas-notify.sh <<'NOTIFY'
 #!/usr/bin/env bash
-# nas-wizard: уведомление через Pushover.  nas-notify.sh "Заголовок" "Текст" [priority]
+# nas-wizard: alert helper.  nas-notify.sh "Title" "Message" [priority] [event] [key] [journal]
+# Prefers the panel's local API (/api/agent/notify): it translates the text,
+# writes the event journal and dedups against the panel's own monitor via the
+# shared cooldown key, so one incident never yields two pushes (RU + EN).
+# Direct Pushover stays as the fallback for when the panel itself is down.
 CONF=/etc/nas-wizard/notify.conf
+PORT="$(sed -n 's/^Environment=NAS_WEB_PORT=//p' /etc/systemd/system/nas-web.service 2>/dev/null | tail -n1)"
+BODY="$(python3 - "${1:-NAS}" "${2:-}" "${3:-0}" "${4:-}" "${5:-}" "${6:-1}" <<'PY' 2>/dev/null
+import json, sys
+a = sys.argv
+print(json.dumps({"title": a[1], "msg": a[2], "priority": a[3],
+                  "event": a[4], "key": a[5], "journal": a[6]}))
+PY
+)"
+if [ -n "$BODY" ]; then
+  curl -fsS -m 8 --retry 2 --retry-connrefused -H 'Content-Type: application/json' \
+    -d "$BODY" "http://127.0.0.1:${PORT:-80}/api/agent/notify" >/dev/null 2>&1 && exit 0
+fi
+# panel is down or rejected the call -> raw Pushover (untranslated), as before
 PUSHOVER_USER=""; PUSHOVER_TOKEN=""
 [ -f "$CONF" ] && . "$CONF"
 [ -n "$PUSHOVER_USER" ] && [ -n "$PUSHOVER_TOKEN" ] || exit 0
@@ -2411,7 +2436,9 @@ AVLOG="${NAS_NETGUARD_AVAIL:-/var/lib/nas-wizard/avail.log}"
 BEAT="${NAS_NETGUARD_BEAT:-/var/lib/nas-wizard/avail.beat}"
 LOCK="${NAS_NETGUARD_LOCK:-/run/nas-netguard.lock}"
 
-notify(){ [ -x /usr/local/bin/nas-notify.sh ] && /usr/local/bin/nas-notify.sh "$1" "$2" "${3:-0}" >/dev/null 2>&1 || true; }
+# args 4-5 (event, key) let the panel dedup this alert against its own
+# monitor events (link_changed/ip_changed use the monitor's cooldown keys)
+notify(){ [ -x /usr/local/bin/nas-notify.sh ] && /usr/local/bin/nas-notify.sh "$1" "$2" "${3:-0}" "${4:-}" "${5:-}" >/dev/null 2>&1 || true; }
 logj(){ logger -t nas-netguard -- "$*" 2>/dev/null || true; }
 
 # таймер и NM-dispatcher могут выстрелить одновременно
@@ -2580,10 +2607,10 @@ OLD_IF=""; OLD_IP=""
 [ -r "$STATE" ] && . "$STATE"
 if [ "$OLD_IF" != "$CUR_IF" ] || [ "$OLD_IP" != "$CUR_IP" ]; then
   if [ -n "$OLD_IF" ] && [ "$OLD_IF" != "$CUR_IF" ]; then
-    notify "NAS: сеть переключилась" "Активный интерфейс: $OLD_IF → $CUR_IF"
+    notify "NAS: смена сети" "Активный интерфейс: $OLD_IF → $CUR_IF" 0 link_changed
   fi
   if [ -n "$OLD_IP" ] && [ "$OLD_IP" != "$CUR_IP" ]; then
-    notify "NAS: изменился IP" "Было $OLD_IP → стало $CUR_IP"
+    notify "NAS: сменился IP" "Было $OLD_IP → стало $CUR_IP" 0 ip_changed
   fi
   mkdir -p "$(dirname "$STATE")" 2>/dev/null || true
   printf 'OLD_IF=%s\nOLD_IP=%s\n' "$CUR_IF" "$CUR_IP" > "$STATE"

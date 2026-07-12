@@ -2886,8 +2886,9 @@ def push_notify(title, msg, priority=0):
             return True
         except OSError:
             pass
-    if os.path.exists("/usr/local/bin/nas-notify.sh"):
-        return _run(["/usr/local/bin/nas-notify.sh", title, msg, str(priority)], timeout=15)["ok"]
+    # No nas-notify.sh fallback here: it reads the SAME notify.conf, so it can't
+    # help when keys are missing, and on a send timeout it re-sent the raw RU
+    # text after the EN one already went through (duplicate pushes).
     return False
 
 # --------------------------------------------------------------------------- #
@@ -5862,6 +5863,41 @@ def notify_event(name, key, title, msg, lvl=None, priority=None, cooldown=1800):
     if cfg.get("enabled") and ev.get("on"):
         push_notify(title, msg, priority)
     return True
+
+def agent_notify(b):
+    """Alerts from local shell agents (nas-notify.sh: netguard/smartd/usb-import).
+    Routing them through the panel translates the text (tr in push_notify),
+    writes the event journal and — via the shared _MON_LAST cooldown keys —
+    dedups against the panel's own monitor, so one incident no longer produces
+    two pushes (raw RU from the agent + translated EN from the monitor)."""
+    title = str(b.get("title") or "NAS")[:200]
+    msg = str(b.get("msg") or "")[:2000]
+    name = re.sub(r"[^a-z0-9_]", "", str(b.get("event") or ""))
+    try:
+        priority = max(-2, min(2, int(b.get("priority") or 0)))
+    except (ValueError, TypeError):
+        priority = 0
+    key = (str(b.get("key") or "") or name or "agent:" + title)[:120]
+    cfg = load_monitor()
+    if name in cfg.get("events", {}):
+        # monitor-catalog event: same key + cooldown as monitor_tick's fire(),
+        # whichever watcher fires first wins and the other stays silent
+        sent = notify_event(name, key, title, msg,
+                            cooldown=cfg.get("cooldown", 1800))
+        return {"ok": True, "sent": bool(sent)}
+    # agent-only alert (wifi rescue, usb-import, …): push regardless of the
+    # monitor toggle — these were always-on before; journal unless the agent
+    # already has its own journal feed (usb-import log is parsed by the monitor)
+    now = time.time()
+    if now - _MON_LAST.get(key, 0) < 90:       # guard against tight agent loops
+        return {"ok": True, "sent": False}
+    _MON_LAST[key] = now
+    if b.get("journal", 1) not in (0, "0", False):
+        try:
+            log_event(name or "agent", title, msg)
+        except Exception:
+            pass
+    return {"ok": True, "sent": bool(push_notify(title, msg, priority))}
 
 # ---- надёжность: авто-перемонтирование отвалившегося диска ----
 _MOUNT_TRY = {}   # mp -> время последней попытки (не чаще раза в 5 мин)
@@ -10149,7 +10185,9 @@ CONF=/etc/nas-wizard/usb-import.conf
 dev="$1"; [ -b "$dev" ] || exit 0
 LOG=/var/log/nas-usb-import.log
 log(){ echo "$(date '+%F %T') $*" >> "$LOG" 2>/dev/null; }
-notify(){ [ "${IMPORT_NOTIFY:-0}" = "1" ] && [ -x /usr/local/bin/nas-notify.sh ] && /usr/local/bin/nas-notify.sh "$1" "$2" 2>/dev/null || true; }
+# journal=0: the panel monitor already journals import results from LOG,
+# a second journal entry from the notify route would duplicate the desk plate
+notify(){ [ "${IMPORT_NOTIFY:-0}" = "1" ] && [ -x /usr/local/bin/nas-notify.sh ] && /usr/local/bin/nas-notify.sh "$1" "$2" 0 "" "" 0 2>/dev/null || true; }
 # At boot udev replays ACTION=add for every medium that is already plugged in
 # (coldplug). Importing those is a duplicate of the import done when the card was
 # first inserted, so auto-import must fire on hot-plug only. USEC_INITIALIZED is
@@ -10284,7 +10322,7 @@ else
 fi
 mkdir -p "$stage" 2>>"$LOG"
 log "import $dev ($label) -> $dest"
-notify "USB-импорт начат" "Копирую «$label» в $dest"
+notify "USB-импорт начат" "Копирую «$label» → $dest"
 
 # --- прогресс для панели -----------------------------------------------------
 # rsync --info=progress2 обновляет строку через \r; гоним её в файл в /run.
@@ -11692,6 +11730,11 @@ class H(BaseHTTPRequestHandler):
             if not self._auth_endpoints(p):
                 self._json({"error": "unknown endpoint"}, 404)
             return
+        if p == "/api/agent/notify":
+            # local shell agents (nas-notify.sh) — pre-auth, loopback only
+            if self.client_address[0] not in ("127.0.0.1", "::1", "::ffff:127.0.0.1"):
+                self._json({"error": "forbidden"}, 403); return
+            self._json(agent_notify(self._body())); return
         if not self._authed():
             self._json({"error": "auth", "configured": auth_configured()}, 401); return
         # журналирование действий: кэшируем тело и перехватываем ответ; в finally
