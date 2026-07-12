@@ -6402,6 +6402,9 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
     +(stopped?li("warn",`прогон не дошёл до конца: обработано папок ${jobs.length} из ${tot}`):"");
    return `<div class="nb-sum warn">${when}<b>есть проблемы</b> · папок скопировано: ${okN} из ${tot} · ${moved}</div>${items}`
     +`<div class="nb-sum-h">Что именно пошло не так — видно в журнале прогона (кнопка ниже).</div>`;};
+  // подсказка ставится из JS, а не через innerHTML → хук перевода её не увидит: переводим руками.
+  // data-tip важнее title для пузыря, поэтому обновляем именно его (title мог уже «съесться» хуком)
+  const setTip=(n,t)=>{t=nasTr(t);n.setAttribute("title",t);if(n.hasAttribute("data-tip"))n.setAttribute("data-tip",t);};
   // папки со статусом последнего прогона (перекрашиваем и после завершения бэкапа)
   const paintStatus=()=>Promise.all([nbG("/api/backup/status"),nbG("/api/backup/dest-state")]).then(([st,ds])=>{const jn=g("#oJobs");if(!jn)return;
    const byS={};((st&&st.jobs)||[]).forEach(j=>byS[j.src]=j);
@@ -6409,24 +6412,26 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
    if(!(c.jobs||[]).length){jn.innerHTML='<div style="color:var(--mut);font-size:12px;padding:4px 0">Источники не выбраны — добавьте на вкладке «Источники».</div>';}
    else jn.innerHTML="";
    let miss=0,emptyN=0;
-   (c.jobs||[]).forEach(j=>{const r=byS[j.src],d=byD[j.src];let dot,badge="";
-    if(d&&!d.exists){dot="var(--danger)";badge=`<span class="nb-warn dng" title="Папки нет в приёмнике — удалена вручную? Запусти бэкап, чтобы восстановить.">нет папки</span>`;miss++;}
-    else if(d&&d.empty){dot="var(--warn)";badge=`<span class="nb-warn wrn" title="Папка в приёмнике есть, но пуста.">пусто</span>`;emptyN++;}
-    else dot=r?(r.ok?"var(--good)":"var(--danger)"):"var(--mut)";
+   (c.jobs||[]).forEach(j=>{const r=byS[j.src],d=byD[j.src];let dot,badge="",tip;
+    if(d&&!d.exists){dot="var(--danger)";tip="Красная: папки нет в приёмнике. Её удалили вручную или диск был не тот — запустите бэкап, она создастся заново.";badge=`<span class="nb-warn dng" title="Папки нет в приёмнике — удалена вручную? Запусти бэкап, чтобы восстановить.">нет папки</span>`;miss++;}
+    else if(d&&d.empty){dot="var(--warn)";tip="Жёлтая: папка в приёмнике есть, но она пустая — похоже, в неё ещё ничего не скопировалось.";badge=`<span class="nb-warn wrn" title="Папка в приёмнике есть, но пуста.">пусто</span>`;emptyN++;}
+    else if(r&&r.ok){dot="var(--good)";tip="Зелёная: в прошлый прогон папка скопировалась без ошибок.";}
+    else if(r){dot="var(--danger)";tip="Красная: в прошлый прогон папку скопировать не удалось — "+jobIssue(r)+". Подробности в журнале.";}
+    else{dot="var(--mut)";tip="Серая: папку ещё ни разу не копировали — запустите бэкап.";}
     const vb=r&&(r.verify_err?`<span class="nb-warn wrn" title="Сверка контрольных сумм не смогла завершиться — см. журнал.">сверка не удалась</span>`:r.verify_bad?`<span class="nb-warn dng" title="Содержимое ${r.verify_bad} файла(ов) отличается от источника — см. журнал прогона.">≠ ${r.verify_bad}</span>`:"")||"";
     const srcT=(push?"/":"")+j.src;
-    jn.appendChild(el(`<div class="nb-job" data-src="${att(j.src)}"><span class="ovh-dot" style="background:${dot};flex:none"></span><span class="nb-src mono" title="${att(srcT)}">${esc(srcT)}</span><span class="nb-arr">→</span><span class="nb-dst mono" title="${att(j.dest)}">${esc(j.dest)}</span>${badge}${vb}${r&&r.size?`<span class="nb-sz mono">${fmtB(r.size)}</span>`:""}</div>`));});
+    jn.appendChild(el(`<div class="nb-job" data-src="${att(j.src)}"><span class="ovh-dot" style="background:${dot};flex:none" title="${att(tip)}"></span><span class="nb-src mono" title="${att(srcT)}">${esc(srcT)}</span><span class="nb-arr">→</span><span class="nb-dst mono" title="${att(j.dest)}">${esc(j.dest)}</span>${badge}${vb}${r&&r.size?`<span class="nb-sz mono">${fmtB(r.size)}</span>`:""}</div>`));});
    // предупреждение о приёмнике + строка «Приёмник» в сводке
    const rd=g("#oRecvDot"),rv=g("#oRecvV"),dw=g("#oDwarn");
    const notMnt=ds&&ds.base_mounted===false;
    if(rd&&rv){rv.title="";   // textContent bypasses the innerHTML translation hook — translate by hand
-    if(ds&&ds.unset){rd.style.background="var(--mut)";rv.textContent=nasTr("не выбран");}
-    else if(ds&&ds.remote){rd.style.background="var(--accent)";rv.textContent=nasTr("на другом сервере");}
-    else if(notMnt){rd.style.background="var(--danger)";rv.textContent=nasTr("не смонтирован");}
-    else if(miss){rd.style.background="var(--danger)";rv.textContent=miss+nasTr(" без папки");}
-    else if(emptyN){rd.style.background="var(--warn)";rv.textContent=emptyN+nasTr(" пусто");}
-    else if((c.jobs||[]).length){rd.style.background="var(--good)";rv.textContent=nasTr("в порядке");}
-    else{rd.style.background="var(--mut)";rv.textContent="—";}
+    if(ds&&ds.unset){rd.style.background="var(--mut)";rv.textContent=nasTr("не выбран");setTip(rd,"Приёмник не задан — бэкапу некуда складывать копии.");}
+    else if(ds&&ds.remote){rd.style.background="var(--accent)";rv.textContent=nasTr("на другом сервере");setTip(rd,"Копии уезжают на другой сервер по SSH — состояние папок панель проверит уже во время прогона.");}
+    else if(notMnt){rd.style.background="var(--danger)";rv.textContent=nasTr("не смонтирован");setTip(rd,"Диск приёмника не смонтирован — бэкап пропустится, чтобы не залить системный раздел.");}
+    else if(miss){rd.style.background="var(--danger)";rv.textContent=miss+nasTr(" без папки");setTip(rd,"В приёмнике не хватает папок — запустите бэкап, они создадутся заново.");}
+    else if(emptyN){rd.style.background="var(--warn)";rv.textContent=emptyN+nasTr(" пусто");setTip(rd,"Папки в приёмнике есть, но пустые — в них ещё ничего не скопировалось.");}
+    else if((c.jobs||[]).length){rd.style.background="var(--good)";rv.textContent=nasTr("в порядке");setTip(rd,"Приёмник на месте, все папки бэкапа в нём есть и не пустые.");}
+    else{rd.style.background="var(--mut)";rv.textContent="—";setTip(rd,"Источники ещё не выбраны — добавьте папки на вкладке «Источники».");}
     rv.title=rv.textContent;}
    if(dw){let m="",cls="nb-dwarn";
     if(ds&&ds.unset){m=`Приёмник ещё не выбран — задайте его на вкладке «Приёмник», иначе бэкап не запустится.`;cls="nb-dwarn wrn";}
@@ -6455,12 +6460,14 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
    jn.querySelectorAll(".nb-job").forEach(row=>{const d=by[row.dataset.src],dot=row.querySelector(".ovh-dot");if(!dot)return;
     let tag=row.querySelector(".nb-live");
     if(d){dot.style.background=d.ok?"var(--good)":"var(--danger)";
+     setTip(dot,d.ok?"Зелёная: папка скопирована в этом прогоне, ошибок не было.":"Красная: папку скопировать не удалось — "+jobIssue(d)+". Подробности в журнале.");
      if(tag){tag.remove();tag=null;}
      if(d.ok)row.querySelectorAll(".nb-warn").forEach(x=>x.remove());   // «нет папки»/«пусто» уже неправда
      else if(!row.querySelector(".nb-warn"))row.appendChild(el(`<span class="nb-warn dng">${esc(nasTr(jobIssue(d)))}</span>`));}
     else if(row.dataset.src===cur){dot.style.background="var(--accent)";
+     setTip(dot,"Синяя: эту папку копируем прямо сейчас — прогресс виден выше.");
      if(!tag)row.appendChild(el(`<span class="nb-warn nb-live">копируется…</span>`));}
-    else{dot.style.background="var(--mut)";if(tag)tag.remove();}});};
+    else{dot.style.background="var(--mut)";setTip(dot,"Серая: папка ждёт своей очереди в этом прогоне.");if(tag)tag.remove();}});};
   function attachLog(){clearInterval(win._nbpi);
    win._nbpi=setInterval(async()=>{if(!document.body.contains(con)){clearInterval(win._nbpi);win._nbpi=null;return;}
     const r=await nbG("/api/backup/log?since="+nbCursor);if(!r)return;
