@@ -1089,7 +1089,7 @@ window.NAS_I18N = { en: {
 "Ярлык…": "Shortcut…",
 "Ярлык:": "Shortcut:",
 "Ярлык убран со стола": "Shortcut removed from the desktop",
-"стек «%s» удалён — его карточка больше не нужна": "the \"%s\" stack is gone — its card is no longer needed",
+"стек удалён, карточка ярлыка больше не нужна": "the stack is gone, its shortcut card is no longer needed",
 "Иконка (URL, необязательно)": "Icon (URL, optional)",
 "Иконка": "Icon",
 "— URL или свой файл": "— a URL or your own file",

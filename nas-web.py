@@ -6703,8 +6703,10 @@ def _store_custom_forget(stacks):
         cust.pop(s, None)
     st["custom"] = cust
     _store_save(st)
+    # the stack name goes last: tr() substitutes literal Cyrillic fragments, so a
+    # %s in the middle of the phrase would break the dictionary match
     log_event("user_action", "Ярлык убран со стола",
-              "стек «%s» удалён — его карточка больше не нужна" % "», «".join(gone),
+              "стек удалён, карточка ярлыка больше не нужна: %s" % ", ".join(gone),
               lvl="info", kind="docker", desk=False)
 
 # ---- реплика приложения с другого NAS (рецепт в meta.json:replica) ----
