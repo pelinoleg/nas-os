@@ -3667,14 +3667,18 @@ function renameDlg(dev,cur,after){const s=document.getElementById("scrim");
  s.querySelector("#rc").onclick=()=>s.classList.remove("show");
  s.querySelector("#ro").onclick=async()=>{const r=await diskCall("/api/disk/label",{dev,label:inp.value.trim()},null,"переименовано");
    if(r&&r.ok&&LIVE){s.classList.remove("show");after&&after();}else s.querySelector("#rcon").textContent=(r&&r.log||"").trim();};}
-const FS_BY_ROLE={data:["ext4","xfs","btrfs"],parity:["ext4","xfs"],removable:["exfat","ntfs","vfat","ext4"]};
+// ext4 первым в КАЖДОЙ роли = выбор по умолчанию: он один хранит симлинки, права и любые
+// имена файлов. exFAT/NTFS остаются в списке для дисков, которые носят на Windows/Mac.
+const FS_BY_ROLE={data:["ext4","xfs","btrfs"],parity:["ext4","xfs"],removable:["ext4","exfat","ntfs","vfat"]};
 let FS_AVAIL=null;
 function formatDlg(x,after,mode){const s=document.getElementById("scrim");
  const pool=mode==="pool";   // «Добавить в пул»: роль зафиксирована как «данные»
  const avail=r=>{const a=FS_BY_ROLE[r].filter(f=>!FS_AVAIL||FS_AVAIL.includes(f));return a.length?a:FS_BY_ROLE[r];};
  let role="data",fs=avail("data")[0];
  const fsOpts=r=>avail(r).map(f=>`<option value="${f}">${f}</option>`).join("");
- s.innerHTML=`<div class="dialog"><h3>${pool?"Добавить в пул: "+x.path:"Форматировать "+x.path+"?"}</h3><p>${(x.model||"")} · ${x.size}. ${pool?"Диск будет отформатирован (ext4) и подключён к пулу <b>/mnt/storage</b>. ":""}<b style="color:var(--danger)">Все данные будут удалены безвозвратно.</b></p>
+ s.innerHTML=`<div class="dialog"><h3>${pool?"Добавить в пул: "+x.path:"Форматировать "+x.path+"?"}</h3>
+  <p style="margin-bottom:2px">${(x.model||"")} · ${x.size}${pool?". Диск будет отформатирован (ext4) и подключён к пулу <b>/mnt/storage</b>":""}</p>
+  <p style="margin-top:0"><b style="color:var(--danger)">Все данные будут удалены безвозвратно.</b> Если диск смонтирован, панель отмонтирует его сама.</p>
   ${pool?"":`<div class="field"><label>Роль</label><div class="seg" id="fr"><button class="on" data-r="data">Данные</button><button data-r="parity">Чётность</button><button data-r="removable">Съёмный</button></div></div>`}
   <div class="field"><label>Файловая система</label><select id="ffs">${fsOpts("data")}</select></div>
   <div class="field"><label>Метка (необязательно)</label><input id="flabel" placeholder="авто: disk1 / parity1 / USB" autocomplete="off"></div>

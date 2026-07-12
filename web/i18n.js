@@ -632,6 +632,7 @@ window.NAS_I18N = { en: {
 "выполняется": "running",
 "последний прогон": "last run",
 "ещё не запускался": "never run yet",
+"Если диск смонтирован, панель отмонтирует его сама.": "If the disk is mounted, the panel unmounts it for you.",
 "ФС не приняла": "FS rejected",
 "скопирована, но": "copied, but",
 "файлов приёмник не принял: файловая система": "files were rejected by the destination: its filesystem",

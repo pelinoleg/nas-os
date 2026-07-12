@@ -457,6 +457,33 @@ disk_in_use() {
     [ "$mps" -gt 0 ]
 }
 
+# Who holds the device mounted (process names) — for an honest "busy" message
+# instead of a bare umount error. Never kills anything.
+dev_holders() {
+    local dev="$1" mp out=""
+    while read -r mp; do
+        [ -n "$mp" ] || continue
+        out="$out $(fuser -m "$mp" 2>/dev/null | tr -s ' ' '\n' | grep -E '^[0-9]+$' \
+                    | while read -r p; do ps -o comm= -p "$p" 2>/dev/null; done | sort -u | tr '\n' ' ')"
+    done < <(lsblk -nro MOUNTPOINT "$dev" 2>/dev/null | grep .)
+    out="$(echo "$out" | tr -s ' ')"
+    [ -n "${out// /}" ] && echo "$out" || echo "неизвестно"
+}
+
+# Отмонтировать все точки устройства и его разделов. Без lazy-umount: ленивый umount
+# оставляет открытые файлы, а следом идёт mkfs — так можно потерять данные молча.
+unmount_dev() {
+    local dev="$1" mp rc=0
+    while read -r mp; do
+        [ -n "$mp" ] || continue
+        if ! run umount "$mp"; then
+            sleep 2                      # дать доотпустить (индексатор/автомонтировщик)
+            run umount "$mp" || rc=1
+        fi
+    done < <(lsblk -nro MOUNTPOINT "$dev" 2>/dev/null | grep .)
+    return $rc
+}
+
 is_protected() {
     local dev="$1" p
     while read -r p; do
@@ -2923,9 +2950,19 @@ api_format_disk() {
     # защитить и разделы системного диска: проверить родительское устройство
     parent="$(lsblk -no PKNAME "$dev" 2>/dev/null | head -1)"
     [ -n "$parent" ] && is_protected "/dev/$parent" && { echo "ОТКАЗ: $dev — раздел системного диска"; return 2; }
-    disk_in_use "$dev"  && { echo "ОТКАЗ: $dev смонтирован (сначала отмонтируйте)"; return 2; }
-    # НЕ переформатировать уже настроенный диск (мог временно отвалиться от mount из-за nofail)
+    # НЕ переформатировать уже настроенный диск (мог временно отвалиться от mount из-за nofail).
+    # ВАЖНО: этот отказ — ДО размонтирования, иначе пуловый диск сначала отвалился бы от
+    # /mnt/diskN, а форматирование всё равно отменилось — оставили бы пул сломанным.
     disk_already_configured "$dev" && { echo "ОТКАЗ: $dev уже настроен (его UUID есть в /etc/fstab) — форматирование отменено во избежание потери данных"; return 2; }
+    # Смонтирован? Раньше отказывали и просили отмонтировать руками — лишний шаг: диск
+    # всё равно будет затёрт. Системный и настроенные диски отсечены выше, так что здесь
+    # остаются только съёмные/чужие — их безопасно отмонтировать самим.
+    if disk_in_use "$dev"; then
+        echo "отмонтирую $dev перед форматированием…"
+        unmount_dev "$dev" || {
+            echo "ОТКАЗ: $dev занят, отмонтировать не вышло. Держат: $(dev_holders "$dev")"
+            return 2; }
+    fi
     case "$role" in
         parity)
             n="$(next_parity_number)"; mp="/mnt/parity${n}"; label="${NASW_LABEL:-parity${n}}"
