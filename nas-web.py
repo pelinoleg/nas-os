@@ -6691,6 +6691,22 @@ def store_custom_save(stack, name, icon, port):
     _store_save(st)
     return {"ok": True}
 
+def _store_custom_forget(stacks):
+    """Forget cards of stacks that no longer exist (called from discover_desktop_apps).
+    Without this the desktop shortcut of a deleted stack lives on forever."""
+    st = _store_load()
+    cust = st.get("custom") or {}
+    gone = [s for s in stacks if s in cust]
+    if not gone:
+        return
+    for s in gone:
+        cust.pop(s, None)
+    st["custom"] = cust
+    _store_save(st)
+    log_event("user_action", "Ярлык убран со стола",
+              "стек «%s» удалён — его карточка больше не нужна" % "», «".join(gone),
+              lvl="info", kind="docker", desk=False)
+
 # ---- реплика приложения с другого NAS (рецепт в meta.json:replica) ----
 def store_replica_save(sid, cfg):
     if not _store_meta(sid).get("replica"):
@@ -7171,7 +7187,7 @@ def discover_desktop_apps():
     # без правки чужого compose; стек с готовыми web-desktop-метками не дублируем
     cust = _safe(lambda: _store_load().get("custom") or {}, {})
     if cust:
-        ps = None
+        ps, stale = None, []
         for stack, c in sorted(cust.items()):
             hit = [a for a in apps if a.get("_proj") == stack]
             if hit:
@@ -7187,13 +7203,24 @@ def discover_desktop_apps():
                 continue
             if ps is None:
                 ps = _docker_ps()
-            running = any(x.get("State") == "running" for x in ps
-                          if ("com.docker.compose.project=%s" % stack) in (x.get("Labels") or ""))
+            conts = [x for x in ps
+                     if ("com.docker.compose.project=%s" % stack) in (x.get("Labels") or "")]
+            if not conts and not os.path.isdir(os.path.join(STACKS_DIR, stack)):
+                # Стек снесли (ни контейнеров, ни папки в /opt/stacks) — карточка-призрак:
+                # ярлык на столе живёт вечно, пока не почистить store.json. Чистим только
+                # если docker вообще ответил (ps непустой), иначе мёртвый демон = пустой ps
+                # и мы бы стёрли карточки живых стеков.
+                if ps:
+                    stale.append(stack)
+                continue
+            running = any(x.get("State") == "running" for x in conts)
             port = c.get("port")
             apps.append({"container": stack, "name": c.get("name") or stack,
                          "url": ("http://%s:%d" % (lan_ip(), port)) if port else "",
                          "icon": c.get("icon") or "", "running": running,
                          "status": "running" if running else "exited"})
+        if stale:
+            _store_custom_forget(stale)
     for a in apps:
         a.pop("_proj", None)
     apps.sort(key=lambda a: a["name"].lower())
