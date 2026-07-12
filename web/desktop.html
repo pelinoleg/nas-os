@@ -889,6 +889,15 @@
   .nb-warn{flex:none;font-family:var(--mono);font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;padding:1px 6px;border-radius:5px}
   .nb-warn.dng{color:var(--danger);border:1px solid var(--danger)}
   .nb-warn.wrn{color:var(--warn);border:1px solid var(--warn)}
+  .nb-warn.nb-live{color:var(--accent);border:1px solid var(--accent);animation:nbliv 1.4s ease-in-out infinite}
+  @keyframes nbliv{50%{opacity:.35}}
+  /* итог прогона: одна строка-вердикт + строки проблем под ней */
+  .nb-sum{font-size:12.5px;line-height:1.5;color:var(--text)}
+  .nb-sum.good b{color:var(--good)}
+  .nb-sum.warn b{color:var(--warn)}
+  .nb-sum.bad b{color:var(--danger)}
+  .nb-sum-i{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--dim);padding:2px 0 0 2px}
+  .nb-sum-h{font-size:11.5px;color:var(--mut);padding-top:4px}
   .nb-dwarn{font-size:12px;line-height:1.45;border-radius:var(--r-sm);padding:8px 10px;margin-bottom:8px;color:var(--text);
     background:color-mix(in srgb,var(--danger) 12%,transparent);border:1px solid color-mix(in srgb,var(--danger) 35%,transparent)}
   .nb-dwarn.wrn{background:color-mix(in srgb,var(--warn) 12%,transparent);border-color:color-mix(in srgb,var(--warn) 35%,transparent)}
@@ -6372,6 +6381,27 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
    <div class="upd-con" id="oCon" style="display:none;margin-top:8px"></div>`;
   const g=s=>tc.querySelector(s);
   const qCaption=st=>`<span style="color:var(--warn)">в очереди${st.queue_after?` — начнётся после «${esc(st.queue_after)}»`:""}${st.queue_ahead?`, впереди ещё ${st.queue_ahead}`:""}</span>`;
+  /* итог прогона человеческим языком: скопировалось всё или есть проблемы и какие */
+  const jobIssue=j=>j.src_missing?"источника нет на этом NAS":j.not_mounted?"диск приёмника не смонтирован"
+    :j.code===25?"остановлено защитой от массового удаления":j.verify_err?"сверка не смогла завершиться"
+    :j.verify_bad?`сверка: файлов не совпало — ${j.verify_bad}`:(j.ok?"":`ошибка rsync, код ${j.code==null?"?":j.code}`);
+  const runSumm=(jobs,ts,result,total)=>{jobs=jobs||[];
+   const tot=total||jobs.length,okN=jobs.filter(j=>j.ok).length,bad=jobs.filter(j=>!j.ok);
+   const vb=jobs.reduce((a,j)=>a+(+j.verify_bad||0),0),ve=jobs.some(j=>j.verify_err);
+   const files=jobs.reduce((a,j)=>a+(+j.xfer||0),0),bytes=jobs.reduce((a,j)=>a+(+j.xfer_bytes||0),0);
+   const when=ts?fmDate(ts)+" · ":"";
+   if(result==="unreachable")return `<div class="nb-sum bad">${when}<b>${push?"приёмник недоступен":"главный NAS недоступен"}</b> — ничего не скопировано</div>`;
+   const moved=`передано файлов: ${files} · ${fmtB(bytes)}`;
+   const stopped=jobs.length<tot;
+   if(!bad.length&&!vb&&!ve&&!stopped)
+    return `<div class="nb-sum good">${when}<b>всё скопировано, проблем нет</b> · папок: ${okN} из ${tot} · ${moved}</div>`;
+   const li=(color,text)=>`<div class="nb-sum-i"><span class="ovh-dot" style="background:var(--${color});flex:none"></span>${text}</div>`;
+   const items=bad.map(j=>li("danger",`<span class="mono">${esc(j.src)}</span> — ${esc(jobIssue(j))}`)).join("")
+    +(vb?li("warn",`сверка нашла отличия: файлов ${vb} — в приёмнике они не совпали с источником`):"")
+    +(ve&&!vb?li("warn","сверка не смогла завершиться"):"")
+    +(stopped?li("warn",`прогон не дошёл до конца: обработано папок ${jobs.length} из ${tot}`):"");
+   return `<div class="nb-sum warn">${when}<b>есть проблемы</b> · папок скопировано: ${okN} из ${tot} · ${moved}</div>${items}`
+    +`<div class="nb-sum-h">Что именно пошло не так — видно в журнале прогона (кнопка ниже).</div>`;};
   // папки со статусом последнего прогона (перекрашиваем и после завершения бэкапа)
   const paintStatus=()=>Promise.all([nbG("/api/backup/status"),nbG("/api/backup/dest-state")]).then(([st,ds])=>{const jn=g("#oJobs");if(!jn)return;
    const byS={};((st&&st.jobs)||[]).forEach(j=>byS[j.src]=j);
@@ -6385,7 +6415,7 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
     else dot=r?(r.ok?"var(--good)":"var(--danger)"):"var(--mut)";
     const vb=r&&(r.verify_err?`<span class="nb-warn wrn" title="Сверка контрольных сумм не смогла завершиться — см. журнал.">сверка не удалась</span>`:r.verify_bad?`<span class="nb-warn dng" title="Содержимое ${r.verify_bad} файла(ов) отличается от источника — см. журнал прогона.">≠ ${r.verify_bad}</span>`:"")||"";
     const srcT=(push?"/":"")+j.src;
-    jn.appendChild(el(`<div class="nb-job"><span class="ovh-dot" style="background:${dot};flex:none"></span><span class="nb-src mono" title="${att(srcT)}">${esc(srcT)}</span><span class="nb-arr">→</span><span class="nb-dst mono" title="${att(j.dest)}">${esc(j.dest)}</span>${badge}${vb}${r&&r.size?`<span class="nb-sz mono">${fmtB(r.size)}</span>`:""}</div>`));});
+    jn.appendChild(el(`<div class="nb-job" data-src="${att(j.src)}"><span class="ovh-dot" style="background:${dot};flex:none"></span><span class="nb-src mono" title="${att(srcT)}">${esc(srcT)}</span><span class="nb-arr">→</span><span class="nb-dst mono" title="${att(j.dest)}">${esc(j.dest)}</span>${badge}${vb}${r&&r.size?`<span class="nb-sz mono">${fmtB(r.size)}</span>`:""}</div>`));});
    // предупреждение о приёмнике + строка «Приёмник» в сводке
    const rd=g("#oRecvDot"),rv=g("#oRecvV"),dw=g("#oDwarn");
    const notMnt=ds&&ds.base_mounted===false;
@@ -6406,7 +6436,7 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
     dw.className=cls;dw.style.display=m?"block":"none";dw.innerHTML=m;}
    const sn=g("#oStatus");if(sn){if(st&&st.running)sn.innerHTML=`<span style="color:var(--accent)">идёт сейчас…</span>`;
     else if(st&&st.queued)sn.innerHTML=qCaption(st);
-    else if(st&&st.ts){const ok=(st.jobs||[]).filter(x=>x.ok).length,tot=(st.jobs||[]).length;sn.innerHTML=`${fmDate(st.ts)} · <b style="color:${ok===tot?"var(--good)":"var(--warn)"}">${ok}/${tot}</b> задач успешно`;}
+    else if(st&&st.ts)sn.innerHTML=runSumm(st.jobs||[],st.ts);
     else sn.textContent=nasTr("ещё не запускался");}});
   paintStatus();
   const con=g("#oCon");
@@ -6415,7 +6445,22 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
   const nbAppend=lines=>{const st=con.scrollHeight-con.scrollTop-con.clientHeight<40;
     lines.forEach(l=>con.appendChild(el(`<div class="${nbErr(l)?"er":""}">${(l||"").replace(/</g,"&lt;")||"&nbsp;"}</div>`)));if(st)con.scrollTop=con.scrollHeight;};
   nbCursor=0;nbStarted=null;
-  const setBusy=b=>{const r=g("#oRun"),d=g("#oDry"),cb=g("#oCancel");if(r)r.disabled=b;if(d)d.disabled=b;if(cb)cb.style.display=b?"":"none";};
+  // идёт прогон → нечего предлагать, кроме «Остановить»: запуск/пробный/проверка связи
+  // всё равно упрутся в «уже выполняется», а кнопка «Проверить связь» ещё и дёргает канал
+  const setBusy=b=>{["#oRun","#oDry","#oTest"].forEach(s=>{const n=g(s);if(n)n.style.display=b?"none":"";});
+   const cb=g("#oCancel");if(cb)cb.style.display=b?"":"none";};
+  // точки папок по ходу прогона: готовые — зелёная/красная, текущая — акцент, остальные ждут
+  const liveDots=(done,cur)=>{const jn=g("#oJobs");if(!jn)return;
+   const by={};(done||[]).forEach(r=>{if(r&&r.src)by[r.src]=r;});
+   jn.querySelectorAll(".nb-job").forEach(row=>{const d=by[row.dataset.src],dot=row.querySelector(".ovh-dot");if(!dot)return;
+    let tag=row.querySelector(".nb-live");
+    if(d){dot.style.background=d.ok?"var(--good)":"var(--danger)";
+     if(tag){tag.remove();tag=null;}
+     if(d.ok)row.querySelectorAll(".nb-warn").forEach(x=>x.remove());   // «нет папки»/«пусто» уже неправда
+     else if(!row.querySelector(".nb-warn"))row.appendChild(el(`<span class="nb-warn dng">${esc(nasTr(jobIssue(d)))}</span>`));}
+    else if(row.dataset.src===cur){dot.style.background="var(--accent)";
+     if(!tag)row.appendChild(el(`<span class="nb-warn nb-live">копируется…</span>`));}
+    else{dot.style.background="var(--mut)";if(tag)tag.remove();}});};
   function attachLog(){clearInterval(win._nbpi);
    win._nbpi=setInterval(async()=>{if(!document.body.contains(con)){clearInterval(win._nbpi);win._nbpi=null;return;}
     const r=await nbG("/api/backup/log?since="+nbCursor);if(!r)return;
@@ -6434,10 +6479,14 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
         +(pct!=null?`<div class="nb-pbar"><i style="width:${pct}%"></i></div>`:"")
         +`<div class="nb-prog-l mono">${esc(rate)}${left!=null?` · осталось ${left} файлов`:""}</div>`;
     }else op.style.display="none";}
+    if(r.running)liveDots(r.jobs,r.cur);   // папки красятся по мере готовности, а не в конце
     if(!r.running){clearInterval(win._nbpi);win._nbpi=null;setBusy(false);
      notifyDone(r.dry?"Пробный прогон завершён":(r.result==="ok"?"Бэкап завершён":r.result==="unreachable"?(push?"Приёмник недоступен":"Главный NAS недоступен"):"Бэкап с ошибками"),"");
-     if(r.dry){const sn=g("#oStatus");if(sn)sn.innerHTML=`<b>пробный прогон завершён</b>`;}
-     else paintStatus();}   // реальный прогон → перекрасить точки/итог/размеры без перезагрузки
+     if(r.dry){const sn=g("#oStatus");if(sn)sn.innerHTML=`<b>пробный прогон завершён</b> — ничего не изменено`;}
+     // реальный прогон → перекрасить точки/размеры и показать итог: всё ли скопировалось.
+     // итог берём из состояния прогона (там есть unreachable и сверка), а не из файла статуса
+     else paintStatus().then(()=>{const sn=g("#oStatus");
+      if(sn&&(r.result==="unreachable"||(r.jobs||[]).length))sn.innerHTML=runSumm(r.jobs,0,r.result,r.total);});}
    },1500);}
   // журнал (терминал) скрыт по умолчанию — открывается кнопкой; лог копится в фоне
   {const lb2=g("#oLog");if(lb2)lb2.onclick=()=>{const open=con.style.display==="none";con.style.display=open?"block":"none";const t=g("#oLogT");if(t)t.textContent=nasTr(open?"Скрыть журнал":"Показать журнал");if(open)con.scrollTop=con.scrollHeight;};}

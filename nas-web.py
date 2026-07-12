@@ -4696,8 +4696,10 @@ def _dest_disk_absent(dest):
     его mountpoint не '/', проверка проходит. Так безопасны и съёмные диски."""
     return bool(re.match(r"^/(mnt|media|srv)/", dest or "")) and _mountpoint_of(dest) == "/"
 
-def nb_run(cfg, dry, writer, cancel=lambda: False):
-    """Прогнать все включённые задачи. writer(line) — вывод; cancel() — прерывание."""
+def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None):
+    """Прогнать все включённые задачи. writer(line) — вывод; cancel() — прерывание.
+    on_job(done, total) — after every finished job, so the UI can paint folder dots
+    live instead of waiting for the whole run to end."""
     cfg = cfg or nb_load()
     jobs = [j for j in cfg.get("jobs", []) if j.get("enabled", True)]
     if not jobs:
@@ -4719,6 +4721,11 @@ def nb_run(cfg, dry, writer, cancel=lambda: False):
         if not shell_fs:
             writer("приёмник — rsync-демон с «модулями»: папки создаст сам rsync")
     results = []
+    def emit(r):
+        results.append(r)
+        if on_job:
+            try: on_job(list(results), len(jobs))
+            except Exception: pass
     for j in jobs:
         if cancel():
             writer("— отменено —"); break
@@ -4727,7 +4734,7 @@ def nb_run(cfg, dry, writer, cancel=lambda: False):
         if push and not os.path.exists("/" + j["src"].lstrip("/")):
             writer("⚠ ПРОПУЩЕНО: источника нет на этом NAS (/%s) — папку удалили "
                    "или диск не смонтирован." % j["src"].lstrip("/"))
-            results.append({"src": j["src"], "ok": False, "src_missing": True}); continue
+            emit({"src": j["src"], "ok": False, "src_missing": True}); continue
         if push_ssh:
             # plain server: mkdir over SSH (works with any remote rsync).
             # Forced daemon (UGREEN/Synology): the shell lives in a DIFFERENT path
@@ -4736,23 +4743,23 @@ def nb_run(cfg, dry, writer, cancel=lambda: False):
                 mk = _nb_ssh_run(cfg, "mkdir -p " + shlex.quote(j["dest"]), timeout=25)
                 if not mk["ok"]:
                     writer("не создать папку на приёмнике: %s" % (mk.get("log") or "").strip()[-160:])
-                    results.append({"src": j["src"], "ok": False}); continue
+                    emit({"src": j["src"], "ok": False}); continue
         else:
             # belt: a local destination must be an absolute allowed path — a relative
             # one (left over from a transport switch) would be created under cwd (/)
             if not _nb_valid_dest(j["dest"]):
                 writer("⚠ ПРОПУЩЕНО: недопустимый локальный приёмник (%s) — выберите "
                        "папку в /mnt, /media, /srv или /home." % j["dest"])
-                results.append({"src": j["src"], "ok": False}); continue
+                emit({"src": j["src"], "ok": False}); continue
             if _dest_disk_absent(j["dest"]):
                 writer("⚠ ПРОПУЩЕНО: целевой диск не смонтирован (%s ведёт в системный "
                        "раздел). Бэкап пропущен, чтобы НЕ заполнить системный диск — "
                        "подключите диск назначения." % j["dest"])
-                results.append({"src": j["src"], "ok": False, "not_mounted": True}); continue
+                emit({"src": j["src"], "ok": False, "not_mounted": True}); continue
             try:
                 os.makedirs(j["dest"], exist_ok=True)
             except OSError as e:
-                writer("не создать папку: %s" % e); results.append({"src": j["src"], "ok": False}); continue
+                writer("не создать папку: %s" % e); emit({"src": j["src"], "ok": False}); continue
         args, env = nb_build_cmd(cfg, j, dry, prev_files=prevf.get(j["src"], 0),
                                  mkpath=bool(push_ssh and not shell_fs))
         stat_lines = []
@@ -4760,7 +4767,7 @@ def nb_run(cfg, dry, writer, cancel=lambda: False):
             p = subprocess.Popen(args, env=env, stdout=subprocess.PIPE,
                                  stderr=subprocess.STDOUT, text=True, bufsize=1)
         except OSError as e:
-            writer("не запустить rsync: %s" % e); results.append({"src": j["src"], "ok": False}); continue
+            writer("не запустить rsync: %s" % e); emit({"src": j["src"], "ok": False}); continue
         for line in iter(p.stdout.readline, ""):
             line = line.rstrip("\n")
             writer(line)
@@ -4790,7 +4797,7 @@ def nb_run(cfg, dry, writer, cancel=lambda: False):
         if ok and not dry and cfg.get("verify") and not cancel():
             vb, vn, ve = _nb_verify_job(cfg, j, writer, cancel)
             res["verify_bad"], res["verify_new"], res["verify_err"] = vb, vn, ve
-        results.append(res)
+        emit(res)
         extra = " · %d файлов, передано %s" % (stt.get("xfer", 0), fmt_bytes(stt.get("xfer_bytes", 0))) if stt else ""
         writer("[%s] %s%s%s" % ("ок" if ok else ("остановлено" if p.returncode == 25 else "ошибка %d" % p.returncode),
                                 j["src"], (" · " + fmt_bytes(sz)) if sz else "", extra))
@@ -5036,6 +5043,7 @@ def nb_log_tail(since, pid=None):
     return {"running": running, "queued": nb_queued(pid),
             "started": rs.get("started", 0), "dry": rs.get("dry", False),
             "result": rs.get("result"), "cur": rs.get("cur", ""), "line": cur_line,
+            "jobs": rs.get("jobs") or [], "total": rs.get("total") or 0,
             "seq": end, "base": base, "lines": lines[start:]}
 
 # --------------------------------------------------------------------------- #
@@ -5249,13 +5257,22 @@ def nb_run_cli(pid=None, dry=False):
         if l.startswith("=== ") and " → " in l:
             st = _nb_run_state_read(pid); st["cur"] = l[4:].split(" → ")[0].strip()
             _nb_run_state_write(pid, st)
+    def on_job(done, total):
+        """Live per-folder result → run state: the panel paints the dots as folders
+        finish, instead of staying grey until the whole run ends."""
+        st = _nb_run_state_read(pid)
+        st["jobs"] = [{k: r.get(k) for k in ("src", "ok", "code", "xfer", "xfer_bytes",
+                                             "size", "verify_bad", "verify_err",
+                                             "src_missing", "not_mounted")} for r in done]
+        st["total"] = total
+        _nb_run_state_write(pid, st)
     def cancel():
         return os.path.exists(nb_run_cancel(pid))
     push = _nb_push(cfg)
     title = ("Бэкап с этого NAS" if push else "Бэкап главного NAS") + sfx
     res = None
     try:
-        r = nb_run(cfg, dry, w, cancel)
+        r = nb_run(cfg, dry, w, cancel, on_job)
         res = "ok" if r.get("ok") else ("unreachable" if r.get("unreachable") else "warn")
         if not dry:
             guarded = [j.get("src") for j in r.get("jobs", []) if j.get("code") == 25]
