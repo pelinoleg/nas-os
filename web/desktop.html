@@ -6526,6 +6526,12 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
    const by={};(done||[]).forEach(r=>{if(r&&r.src)by[r.src]=r;});
    jn.querySelectorAll(".nb-job").forEach(row=>{const d=by[row.dataset.src],dot=row.querySelector(".ovh-dot");if(!dot)return;
     let tag=row.querySelector(".nb-live");
+    // Размер в строке — из статуса ПОСЛЕДНЕГО ЗАВЕРШЁННОГО прогона. Пока идёт новый, он врёт:
+    // после форматирования диска в строке Cloud висело 163 ГБ, хотя лежит 9. Для уже готовых
+    // папок ставим живой размер, для ещё не тронутых — убираем совсем.
+    const szc=row.querySelector(".nb-sz");
+    if(d&&d.size){if(szc)szc.textContent=fmtB(d.size);else row.appendChild(el(`<span class="nb-sz mono">${fmtB(d.size)}</span>`));}
+    else if(szc)szc.remove();
     if(d){const soft=d.stopped||(d.code!=null&&d.code<0)||jobFsOnly(d);
      dot.style.background=d.ok?"var(--good)":soft?"var(--warn)":"var(--danger)";
      setTip(dot,d.ok?`Скопирована в этом прогоне: файлов ${d.xfer||0} · ${fmtB(d.xfer_bytes||0)}`
