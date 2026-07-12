@@ -846,10 +846,13 @@
   .nb-prog{font-size:12px;padding:9px 12px;background:var(--accent-soft);border-radius:var(--r-sm)}
   .nb-prog-cur{display:flex;align-items:center;gap:5px;color:var(--accent);font-weight:600;min-width:0}
   .nb-prog-cur svg{flex:none}
-  .nb-prog-pct{margin-left:auto;font-family:var(--mono);font-weight:700}
+  .nb-prog-cur b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .nb-prog-n{font-family:var(--mono);font-size:10.5px;font-weight:700;opacity:.65;flex:none}
+  .nb-prog-pct{margin-left:auto;font-family:var(--mono);font-weight:700;flex:none}
   .nb-pbar{height:6px;border-radius:999px;background:var(--line-2);overflow:hidden;margin:6px 0 4px}
   .nb-pbar i{display:block;height:100%;background:var(--accent);border-radius:999px;transition:width .4s}
-  .nb-prog-l{color:var(--mut);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* вторая строка — байты/скорость/остаток: на узком экране лучше перенести, чем обрезать */
+  .nb-prog-l{color:var(--mut);font-size:11px;line-height:1.5}
   /* дерево-выбор источников */
   /* .dialog{max-width:440px} объявлен ниже по файлу → при равной специфичности перебивал .nb-pick.
      .dialog.nb-pick (специфичность выше) фиксит ширину. */
@@ -878,8 +881,10 @@
   .nb-tck{width:15px;height:15px;accent-color:var(--accent);flex:none}
   .nb-tn{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .nb-trow>svg{flex:none;color:var(--accent-2)}
-  .nb-job{display:flex;align-items:center;gap:8px;padding:7px 0;border-top:1px solid var(--line);font-size:12px}
+  .nb-job{position:relative;display:flex;align-items:center;gap:8px;padding:7px 0;border-top:1px solid var(--line);font-size:12px}
   .nb-job:first-child{border-top:none}
+  /* полоса заполнения прямо в строке папки, пока она копируется */
+  .nb-job>.nb-rowbar{position:absolute;left:0;bottom:0;height:2px;background:var(--accent);opacity:.6;border-radius:999px;transition:width .5s}
   .nb-src{flex:none;max-width:38%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--accent)}
   .nb-exc{flex:none;font-size:10.5px;color:var(--dim);background:var(--sel);border-radius:6px;padding:1px 6px;cursor:help;white-space:nowrap}
   .nb-arr{color:var(--mut);flex:none}
@@ -6427,6 +6432,26 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
   const jobWhy=j=>jobIssue(j)+(j.fs_limit&&(j.fs_files||[]).length
     ? ". Не приняты, например: "+(j.fs_files||[]).slice(0,5).join(", ")+((j.fs_files||[]).length<j.fs_limit?" …":"")
     : (j.err?` · ${j.err}`:""));
+  // rsync --info=progress2 пишет строку на каждый файл, и она про ВСЮ текущую папку:
+  //   « 82,571,057,831   4%   30.71MB/s    0:42:44 (xfr#15228, to-chk=414183/434742)»
+  //   байты пройдено · % от папки · скорость · остаток времени · передано файлов / осталось
+  const nbProg=ln=>{const m=/(?:^|\s)([\d,]{1,})\s+(\d+)%\s+([\d.]+[kKMGTP]?B\/s)(?:\s+(\d+:\d\d:\d\d))?/.exec(ln||"");
+   if(!m)return null;
+   const tk=/to-chk=(\d+)\/(\d+)/.exec(ln),xf=/xfr#(\d+)/.exec(ln);
+   return {bytes:+m[1].replace(/\D/g,""),pct:+m[2],rate:m[3],
+     eta:m[4]?m[4].split(":").reduce((a,x)=>a*60+(+x),0):null,
+     left:tk?+tk[1]:null,xfr:xf?+xf[1]:null};};
+  const etaTxt=s=>{s=Math.round(+s||0);if(s<60)return "меньше минуты";
+   const h=Math.floor(s/3600),m=Math.round(s%3600/60);
+   return h?`${h} ч ${m} мин`:`${m} мин`;};
+  // Полного размера папки rsync не сообщает — считаем его из «байты ÷ процент». На 1–2%
+  // оценка гуляет (процент целый), поэтому показываем её от 3% и переписываем, только если
+  // ушла больше чем на 8%: иначе «из ~27 ГБ» дёргалось бы каждую секунду.
+  const nbTot={};
+  const estTotal=(src,p)=>{if(!p||!p.bytes||p.pct<3)return null;
+   const e=p.bytes*100/p.pct,cur=nbTot[src];
+   if(!cur||Math.abs(e-cur)/cur>0.08)nbTot[src]=e;
+   return nbTot[src];};
   const runSumm=(jobs,ts,result,total)=>{jobs=jobs||[];
    const isStop=j=>j.stopped||(j.code!=null&&j.code<0);   // убит нашим же «Стопом» — не ошибка
    const tot=total||jobs.length,okN=jobs.filter(j=>j.ok).length;
@@ -6544,17 +6569,23 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
    if(s&&!stopShown){const op=g("#oProg");if(op){op.style.display="block";
      op.innerHTML=`<div class="nb-prog-cur">Останавливаю прогон…</div><div class="nb-prog-l">Ждём, пока rsync закроет текущий файл — обычно это пара секунд. Уже скопированное останется на месте.</div>`;}}
    stopShown=s;};
-  // точки папок по ходу прогона: готовые — зелёная/красная, текущая — акцент, остальные ждут
-  const liveDots=(done,cur)=>{const jn=g("#oJobs");if(!jn)return;
+  // точки папок по ходу прогона: готовые — зелёная/красная, текущая — акцент, остальные ждут.
+  // p — разобранная строка прогресса rsync (текущая папка): даёт ей процент, полосу и байты
+  const liveDots=(done,cur,p)=>{const jn=g("#oJobs");if(!jn)return;
    const by={};(done||[]).forEach(r=>{if(r&&r.src)by[r.src]=r;});
    jn.querySelectorAll(".nb-job").forEach(row=>{const d=by[row.dataset.src],dot=row.querySelector(".ovh-dot");if(!dot)return;
-    let tag=row.querySelector(".nb-live");
+    let tag=row.querySelector(".nb-live"),bar=row.querySelector(".nb-rowbar");
+    const live=!d&&row.dataset.src===cur;
     // Размер в строке — из статуса ПОСЛЕДНЕГО ЗАВЕРШЁННОГО прогона. Пока идёт новый, он врёт:
     // после форматирования диска в строке Cloud висело 163 ГБ, хотя лежит 9. Для уже готовых
-    // папок ставим живой размер, для ещё не тронутых — убираем совсем.
-    const szc=row.querySelector(".nb-sz");
-    if(d&&d.size){if(szc)szc.textContent=fmtB(d.size);else row.appendChild(el(`<span class="nb-sz mono">${fmtB(d.size)}</span>`));}
+    // папок ставим живой размер, для текущей — сколько уже прошли, для нетронутых — убираем.
+    const sz=(d&&d.size)?fmtB(d.size):(live&&p&&p.bytes?fmtB(p.bytes):null);
+    let szc=row.querySelector(".nb-sz");
+    if(sz){if(!szc){szc=el(`<span class="nb-sz mono"></span>`);row.appendChild(szc);}
+     szc.textContent=sz;
+     setTip(szc,live?"Уже скопировано в этой папке за текущий прогон":"Столько лежит в приёмнике");}
     else if(szc)szc.remove();
+    if(!live&&bar){bar.remove();bar=null;}
     if(d){const soft=d.stopped||(d.code!=null&&d.code<0)||jobFsOnly(d);
      dot.style.background=d.ok?"var(--good)":soft?"var(--warn)":"var(--danger)";
      setTip(dot,d.ok?`Скопирована в этом прогоне: файлов ${d.xfer||0} · ${fmtB(d.xfer_bytes||0)}`
@@ -6563,9 +6594,13 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
      if(d.ok)row.querySelectorAll(".nb-warn").forEach(x=>x.remove());   // «нет папки»/«пусто» уже неправда
      // бейдж — короткая метка (в строке папки нет места на роман), разбор причины — в подсказке
      else if(!row.querySelector(".nb-warn"))row.appendChild(el(`<span class="nb-warn ${soft?"wrn":"dng"}" title="${att(nasTr(jobWhy(d)))}">${esc(nasTr(jobTag(d)))}</span>`));}
-    else if(row.dataset.src===cur){dot.style.background="var(--accent)";
-     setTip(dot,"Копируется прямо сейчас — скорость и остаток видны выше.");
-     if(!tag)row.appendChild(el(`<span class="nb-warn nb-live">копируется…</span>`));}
+    else if(live){dot.style.background="var(--accent)";
+     setTip(dot,"Копируется прямо сейчас — сколько уже скопировано, видно в строке и в полосе выше.");
+     if(!tag){tag=el(`<span class="nb-warn nb-live">копируется…</span>`);row.appendChild(tag);}
+     // процент — прямо в бейдже, полоса заполнения — по нижней кромке строки
+     if(p&&p.pct!=null){tag.innerHTML=`копируется… ${p.pct}%`;
+      if(!bar){bar=el(`<i class="nb-rowbar"></i>`);row.appendChild(bar);}
+      bar.style.width=p.pct+"%";}}
     else{dot.style.background="var(--mut)";setTip(dot,"Ждёт очереди: начнётся, когда закончится текущая папка.");if(tag)tag.remove();}});};
   function attachLog(){clearInterval(win._nbpi);
    win._nbpi=setInterval(async()=>{if(!document.body.contains(con)){clearInterval(win._nbpi);win._nbpi=null;return;}
@@ -6577,17 +6612,23 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
     nbCursor=r.seq;
     if(r.running&&r.stopping)setStopping(true);   // остановку начали в другой вкладке / до перезагрузки
     const op=g("#oProg");
+    const P=r.running?nbProg(r.line||""):null;
     if(op&&r.stopping&&r.running){}              // полосу прогресса не трогаем: там уже «останавливаю…»
-    else if(op){if(r.running){const ln=r.line||"";
-      const pm=/(\d+)%/.exec(ln),pct=pm?+pm[1]:null;
-      const rm=/([\d.]+[KMGT]?B\/s)/.exec(ln),rate=rm?rm[1]:"";
-      const tk=/to-chk=(\d+)\/(\d+)/.exec(ln),left=tk?+tk[1]:null;
+    else if(op){if(r.running){
+      const tot=estTotal(r.cur||"",P),dn=(r.jobs||[]).length,tn=r.total||0;
       op.style.display="block";
-      op.innerHTML=`<div class="nb-prog-cur">${svg("folder",13)} ${esc(r.cur||"…")}${pct!=null?`<span class="nb-prog-pct">${pct}%</span>`:""}</div>`
-        +(pct!=null?`<div class="nb-pbar"><i style="width:${pct}%"></i></div>`:"")
-        +`<div class="nb-prog-l mono">${esc(rate)}${left!=null?` · осталось ${left} файлов`:""}</div>`;
+      op.innerHTML=`<div class="nb-prog-cur">${svg("folder",13)} <b>${esc(r.cur||"…")}</b>`
+        +(tn>1?`<span class="nb-prog-n" title="Папка ${dn+1} из ${tn}">${dn+1}/${tn}</span>`:"")
+        +(P?`<span class="nb-prog-pct">${P.pct}%</span>`:"")+`</div>`
+        +(P?`<div class="nb-pbar"><i style="width:${P.pct}%"></i></div>`:"")
+        // «сколько уже скопировано» из этой папки; полный размер rsync не знает — оценка «~»
+        +`<div class="nb-prog-l">${P?`<b class="mono">${fmtB(P.bytes)}</b>${tot?` из ~<span class="mono">${fmtB(tot)}</span>`:""}`
+            +` · <span class="mono">${esc(P.rate)}</span>`
+            +(P.eta?` · осталось ~${etaTxt(P.eta)}`:"")
+            +(P.left?` · <span class="mono">${P.left}</span> файлов`:"")
+          :`смотрю, что изменилось…`}</div>`;
     }else op.style.display="none";}
-    if(r.running){liveDots(r.jobs,r.cur);paintDelGuard(r.jobs||[]);}   // папки красятся по ходу
+    if(r.running){liveDots(r.jobs,r.cur,P);paintDelGuard(r.jobs||[]);}   // папки красятся по ходу
     if(!r.running){clearInterval(win._nbpi);win._nbpi=null;setBusy(false);
      notifyDone(r.dry?"Пробный прогон завершён":(r.result==="ok"?"Бэкап завершён":r.result==="stopped"?"Бэкап остановлен":r.result==="unreachable"?(push?"Приёмник недоступен":"Главный NAS недоступен"):"Бэкап с ошибками"),"");
      if(r.dry){const sn=g("#oStatus");if(sn)sn.innerHTML=`<b>пробный прогон завершён</b> — ничего не изменено`;}
