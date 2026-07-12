@@ -2537,14 +2537,36 @@ wifi_rescue(){
   systemctl start --no-block comitup >/dev/null 2>&1 || true
 }
 
+# Одного `nmcli device disconnect` мало: у домашнего Wi-Fi-профиля autoconnect=yes,
+# и NM поднимает его снова через пару минут — сторож гасит, NM поднимает... (реальный
+# случай: 63 «отключаю wlan0» за 12 часов). Каждый такой всплеск = второй адрес в ТОЙ ЖЕ
+# подсети на несколько секунд — ровно та беда, из-за которой HTTP виснет, а ping идёт.
+# Поэтому пока провод жив, autoconnect домашнего Wi-Fi выключаем совсем, и возвращаем
+# его, как только провод отвалился (сторож крутится каждые 30 с — фолбэк не теряется).
+wifi_autoconnect(){
+  local want="$1" name type cur
+  has_nm || return 0
+  while IFS=: read -r name type; do
+    case "$name" in ''|comitup*) continue ;; esac        # хотспот comitup не трогаем
+    [ "$type" = "802-11-wireless" ] || continue
+    [ "$(nmcli -g 802-11-wireless.mode connection show "$name" 2>/dev/null)" = "ap" ] && continue
+    cur="$(nmcli -g connection.autoconnect connection show "$name" 2>/dev/null)"
+    [ "$cur" = "$want" ] && continue
+    nmcli connection modify "$name" connection.autoconnect "$want" >/dev/null 2>&1 \
+      && logj "автоподключение Wi-Fi «$name» → $want"
+  done < <(nmcli -t -f NAME,TYPE connection show 2>/dev/null)
+}
+
 if eth_healthy; then
   ACTIVE="$ETH"
+  wifi_autoconnect no
   if has_nm && [ "$(dev_state "$WIFI")" = "connected" ]; then
     logj "провод рабочий — отключаю $WIFI"
     nmcli device disconnect "$WIFI" >/dev/null 2>&1 || true
   fi
 else
   ACTIVE="$WIFI"
+  wifi_autoconnect yes            # провода нет — Wi-Fi снова разрешён как запасной путь
   if has_nm && [ "$(dev_state "$WIFI")" != "connected" ]; then
     logj "провода нет — поднимаю $WIFI"
     nmcli device connect "$WIFI" >/dev/null 2>&1 || true

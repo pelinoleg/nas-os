@@ -6461,8 +6461,11 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
    else jn.innerHTML="";
    let miss=0,emptyN=0;
    (c.jobs||[]).forEach(j=>{const r=byS[j.src],d=byD[j.src];let dot,badge="",tip;
-    const moved=r?`Передано в прошлый прогон: файлов ${r.xfer||0} · ${fmtB(r.xfer_bytes||0)}${r.size?` · в приёмнике лежит ${fmtB(r.size)}`:""}`:"";
-    if(d&&!d.exists){dot="var(--danger)";tip="Папки нет в приёмнике: её удалили вручную или подключён другой диск. Запустите бэкап — она создастся заново.";badge=`<span class="nb-warn dng" title="Папки нет в приёмнике — удалена вручную? Запусти бэкап, чтобы восстановить.">нет папки</span>`;miss++;}
+    // папки в приёмнике НЕТ (диск переформатировали / подменили) → цифры прошлого прогона
+    // врут: размер показывал бы «163 ГБ» там, где не лежит ничего. Прячем их совсем
+    const gone=!!(d&&!d.exists);
+    const moved=(r&&!gone)?`Передано в прошлый прогон: файлов ${r.xfer||0} · ${fmtB(r.xfer_bytes||0)}${r.size?` · в приёмнике лежит ${fmtB(r.size)}`:""}`:"";
+    if(gone){dot="var(--danger)";tip="Папки нет в приёмнике: диск отформатировали, подменили или папку удалили вручную. Данных этой папки в приёмнике сейчас НЕТ — запустите бэкап, она скопируется заново.";badge=`<span class="nb-warn dng" title="Папки нет в приёмнике — диск отформатирован или папку удалили. Запустите бэкап, чтобы скопировать заново.">нет папки</span>`;miss++;}
     else if(d&&d.empty){dot="var(--warn)";tip="Папка в приёмнике есть, но пустая: в неё ещё ничего не скопировалось.";badge=`<span class="nb-warn wrn" title="Папка в приёмнике есть, но пуста.">пусто</span>`;emptyN++;}
     else if(r&&r.ok){dot="var(--good)";tip="Скопирована без ошибок. "+moved;}
     else if(r&&jobFsOnly(r)){dot="var(--warn)";tip=jobWhy(r)+". "+moved;badge=`<span class="nb-warn wrn" title="${att(nasTr(jobWhy(r)))}">${esc(nasTr(jobTag(r)))}</span>`;}
@@ -6470,7 +6473,7 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
     else{dot="var(--mut)";tip="Эту папку ещё ни разу не копировали — запустите бэкап.";}
     const vb=r&&(r.verify_err?`<span class="nb-warn wrn" title="Сверка контрольных сумм не смогла завершиться — см. журнал.">сверка не удалась</span>`:r.verify_bad?`<span class="nb-warn dng" title="Содержимое ${r.verify_bad} файла(ов) отличается от источника — см. журнал прогона.">≠ ${r.verify_bad}</span>`:"")||"";
     const srcT=(push?"/":"")+j.src;
-    jn.appendChild(el(`<div class="nb-job" data-src="${att(j.src)}"><span class="ovh-dot" style="background:${dot};flex:none" title="${att(tip)}"></span><span class="nb-src mono" title="${att(srcT)}">${esc(srcT)}</span><span class="nb-arr">→</span><span class="nb-dst mono" title="${att(j.dest)}">${esc(j.dest)}</span>${badge}${vb}${r&&r.size?`<span class="nb-sz mono">${fmtB(r.size)}</span>`:""}</div>`));});
+    jn.appendChild(el(`<div class="nb-job" data-src="${att(j.src)}"><span class="ovh-dot" style="background:${dot};flex:none" title="${att(tip)}"></span><span class="nb-src mono" title="${att(srcT)}">${esc(srcT)}</span><span class="nb-arr">→</span><span class="nb-dst mono" title="${att(j.dest)}">${esc(j.dest)}</span>${badge}${vb}${r&&r.size&&!gone?`<span class="nb-sz mono">${fmtB(r.size)}</span>`:""}</div>`));});
    // предупреждение о приёмнике + строка «Приёмник» в сводке
    const rd=g("#oRecvDot"),rv=g("#oRecvV"),dw=g("#oDwarn");
    const notMnt=ds&&ds.base_mounted===false;
