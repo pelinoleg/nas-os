@@ -5875,12 +5875,15 @@ def docker_stacks():
         m = re.search(r"com\.docker\.compose\.project=([^,]+)", proj)
         key = m.group(1) if m else None
         url = re.search(r"web-desktop\.url=([^,]+)", proj)
+        ico = re.search(r"web-desktop\.icon=([^,]+)", proj)
         cmap.setdefault(key, []).append({
             "name": c.get("Names", ""), "state": c.get("State", ""),
             "status": c.get("Status", ""), "ports": c.get("Ports", ""),
             "image": c.get("Image", ""), "url": url.group(1) if url else "",
+            "icon": ico.group(1) if ico else "",
             "health": _health_of(c.get("Status", ""))})
     notes = load_notes()
+    custom = _safe(lambda: _store_load().get("custom") or {}, {})
     out = []
     try:
         names = sorted(os.listdir(STACKS_DIR))
@@ -5893,9 +5896,13 @@ def docker_stacks():
         conts = cmap.get(nm, [])
         running = sum(1 for c in conts if c["state"] == "running")
         url = next((c["url"] for c in conts if c["url"]), "")
+        # stack icon: web-desktop.icon label → catalog meta.json → store.json custom card
+        icon = (next((c["icon"] for c in conts if c["icon"]), "")
+                or _safe(lambda: _store_meta(nm).get("icon") or "", "")
+                or (custom.get(nm) or {}).get("icon", ""))
         out.append({"name": nm, "path": d, "has_compose": os.path.isfile(_compose_path(nm)),
                     "containers": conts, "running": running, "total": len(conts),
-                    "url": url, "note": notes.get(nm, "")})
+                    "url": url, "icon": icon, "note": notes.get(nm, "")})
     return {"ok": True, "stacks": out, "dir": STACKS_DIR}
 
 def stack_validate(name):

@@ -722,6 +722,8 @@
   .dm2-item .li-temp{font-family:var(--mono);font-size:11px;font-weight:650;flex:none}
   .li-temp:empty,.htemp:empty{display:none}   /* нет температуры — не занимать место/зазор во flex */
   .dm2-item .li-pi{width:16px;height:16px;flex:none;margin:0 -4px}
+  .dm2-item .li-ico{width:17px;height:17px;flex:none;display:flex;align-items:center;justify-content:center;color:var(--dim)}
+  .dm2-item .li-ico img{width:100%;height:100%;object-fit:contain;border-radius:4px}
   .dd-ic-pi{background:transparent!important;box-shadow:none!important}.dd-ic-pi img{width:100%;height:100%}
   .dm2-slots{font-size:11px;color:var(--mut);padding:10px 9px;line-height:1.5}
   .dm2-detail{flex:1;min-width:0;overflow-y:auto;padding:18px 20px}
@@ -4153,6 +4155,9 @@ function winServices(initTab){openWin("__services","Docker",(body,win)=>{
    const full=s.total>0&&s.running===s.total,part=s.running>0&&!full;
    const dot=s.total?(full?"var(--good)":part?"var(--warn)":"var(--mut)"):"transparent";
    const it=item("stack:"+s.name,null,s.name,s.total?`${s.running} из ${s.total} запущено`:"нет контейнеров",dot);
+   // app icon (web-desktop.icon label / catalog meta / custom card), cube as fallback
+   const ico=el(`<span class="li-ico">${svg("cube",14)}${s.icon?`<img src="${att(iconSrc(s.icon))}" alt="" onload="this.previousElementSibling.style.display='none'" onerror="this.remove()">`:""}</span>`);
+   it.querySelector(".dot").after(ico);
    const nu=(s.containers||[]).filter(c=>WUD[c.name]).length;   // точка «есть обновление» у стека
    if(nu){const lm=it.querySelector(".li-main");if(lm)lm.insertAdjacentHTML("beforeend",`<span class="cupd" title="${att(nu+" обновлений образов в стеке")}">${svg("arrowup",10)} ${nu}</span>`);}
    side.appendChild(it);});
