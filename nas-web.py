@@ -2731,6 +2731,7 @@ def _def_monitor():
         "nb_size":     {"on": False, "priority": 0, "threshold": 40, "desk": True},
         "nb_dest":     {"on": True,  "priority": 1, "threshold": 95, "desk": True},
         "nb_guard":    {"on": True,  "priority": 2, "desk": True},   # сработала защита --max-delete
+        "nb_verify":   {"on": True,  "priority": 1, "desk": True},   # сверка контрольных сумм нашла расхождения
         # --- надёжность: диск сам переподключился (авто-mount) ---
         "disk_remount":{"on": True, "priority": 0, "desk": True},
         # --- активная термозащита (предупреждение/действие) ---
@@ -2945,7 +2946,7 @@ for _k in ("panel_new", "panel_fail", "ssh_login"):
 for _k in ("ip_changed", "link_changed", "vpn_offline", "traffic"):
     _EVENT_KIND[_k] = "net"
 for _k in ("snap_ok", "snap_err", "scrub_err", "delete_block", "backup", "mergerfs",
-           "nas_backup", "nb_conn", "nb_srcmiss", "nb_stale", "nb_size", "nb_dest", "nb_guard",
+           "nas_backup", "nb_conn", "nb_srcmiss", "nb_stale", "nb_size", "nb_dest", "nb_guard", "nb_verify",
            "fsw_corrupt", "fsw_guard", "fsw_root", "fsw_del", "fsw_scan"):
     _EVENT_KIND[_k] = "protect"
 
@@ -4040,7 +4041,10 @@ def _nb_queue_remove(pid):
 _NB_DEST_OK = ("/mnt/", "/media/", "/srv/", "/home/")
 
 def _nb_defaults():
-    return {"transport": "rsync", "host": "", "user": "", "password": "", "ssh_port": 22,
+    # direction: pull = забрать с другого NAS сюда; push = отправить с этого NAS
+    # на внешний диск (transport=local) или другой сервер (transport=ssh)
+    return {"direction": "pull", "verify": False,
+         "transport": "rsync", "host": "", "user": "", "password": "", "ssh_port": 22,
          "remote_sudo": False,
          "dest_mode": "single", "dest_base": "/mnt/storage/nas-backup",
          "jobs": [],
@@ -4130,8 +4134,23 @@ def _nb_valid_dest(p):
     p = os.path.normpath(str(p or ""))
     return p.startswith(_NB_DEST_OK) and ".." not in p
 
+def _nb_push(cfg):
+    return (cfg or {}).get("direction") == "push"
+
+def _nb_push_ssh(cfg):
+    return _nb_push(cfg) and (cfg or {}).get("transport") == "ssh"
+
+def _nb_valid_push_dest(p):
+    """Приёмник push-ssh — абсолютный путь на удалённой стороне."""
+    p = str(p or "")
+    return p.startswith("/") and ".." not in p
+
 def nb_save(patch, pid=None):
     cur = nb_load(pid)
+    if patch.get("direction") in ("pull", "push"):
+        cur["direction"] = patch["direction"]
+    if "verify" in patch:
+        cur["verify"] = bool(patch["verify"])
     for k in ("transport", "host", "user", "password", "dest_base", "delete_mode", "dest_mode"):
         if k in patch and isinstance(patch[k], str):
             cur[k] = patch[k].strip()
@@ -4149,11 +4168,12 @@ def nb_save(patch, pid=None):
         cur["remote_sudo"] = bool(patch["remote_sudo"])
     if isinstance(patch.get("jobs"), list):
         jobs = []
+        dst_ok = _nb_valid_push_dest if _nb_push_ssh(cur) else _nb_valid_dest
         for j in patch["jobs"][:200]:
             if not isinstance(j, dict): continue
             src = str(j.get("src", "")).strip().rstrip("/")   # ведущий / сохраняем (SSH abs-пути)
             dst = os.path.normpath(str(j.get("dest", "")).strip())
-            if not src or not _nb_valid_dest(dst): continue
+            if not src or not dst_ok(dst): continue
             job = {"src": src, "dest": dst, "enabled": bool(j.get("enabled", True))}
             # per-job исключения: анкорные rsync-паттерны относительно src (ведущий /).
             # так снятие галочки с вложенной папки исключает её, а родитель копирует
@@ -4177,7 +4197,9 @@ def nb_save(patch, pid=None):
         if s.get("freq") in ("daily", "weekly"): cur["schedule"]["freq"] = s["freq"]
         if re.match(r"^([01]\d|2[0-3]):[0-5]\d$", str(s.get("time", ""))): cur["schedule"]["time"] = s["time"]
         if s.get("dow") in ("Mon","Tue","Wed","Thu","Fri","Sat","Sun"): cur["schedule"]["dow"] = s["dow"]
-    if cur["transport"] not in ("rsync", "ssh"): cur["transport"] = "rsync"
+    if cur.get("direction") not in ("pull", "push"): cur["direction"] = "pull"
+    tr_ok = ("local", "ssh") if _nb_push(cur) else ("rsync", "ssh")
+    if cur["transport"] not in tr_ok: cur["transport"] = tr_ok[0]
     if cur["delete_mode"] not in ("archive", "mirror", "add"): cur["delete_mode"] = "archive"
     if cur["dest_mode"] not in ("single", "per"): cur["dest_mode"] = "single"
     profs = [cur if p["id"] == cur["id"] else p for p in nb_profiles()]
@@ -4210,10 +4232,13 @@ def nb_profiles_public():
     out = []
     for p in nb_profiles():
         pid = p["id"]
-        out.append({"id": pid, "name": p["name"],
+        # push на локальный диск настроен без хоста — достаточно приёмника и задач
+        conn = bool(p.get("host")) or (p.get("direction") == "push" and p.get("transport") == "local"
+                                       and bool(p.get("dest_base")))
+        out.append({"id": pid, "name": p["name"], "direction": p.get("direction") or "pull",
                     "running": nb_run_active(pid), "queued": nb_queued(pid),
                     "jobs": len(p.get("jobs") or []),
-                    "configured": bool(p.get("host") and p.get("jobs"))})
+                    "configured": bool(conn and p.get("jobs"))})
     return out
 
 def _nb_new_pid(existing):
@@ -4231,7 +4256,7 @@ def _nb_free_dest(base, taken):
         cand = "%s-%d" % (base.rstrip("/"), n); n += 1
     return cand
 
-def nb_profile_add(name="", clone_from=""):
+def nb_profile_add(name="", clone_from="", direction=""):
     profs = nb_profiles()
     if len(profs) >= NB_MAX_PROFILES:
         return {"ok": False, "log": "больше %d профилей нельзя" % NB_MAX_PROFILES}
@@ -4258,10 +4283,14 @@ def nb_profile_add(name="", clone_from=""):
         new["schedule"] = dict(src.get("schedule") or {}, enabled=False)
     else:
         new = _nb_defaults()
+        if direction == "push":
+            # push: приёмник выбирает пользователь (внешний диск/сервер) — дефолт не угадать
+            new["direction"] = "push"; new["transport"] = "local"; new["dest_base"] = ""
     new["id"] = pid
     new["name"] = name
-    taken = {p.get("dest_base") for p in profs}
-    new["dest_base"] = _nb_free_dest(new.get("dest_base") or "/mnt/storage/nas-backup", taken)
+    if not _nb_push(new):
+        taken = {p.get("dest_base") for p in profs}
+        new["dest_base"] = _nb_free_dest(new.get("dest_base") or "/mnt/storage/nas-backup", taken)
     profs.append(new)
     _nb_write_profiles(profs)
     log_event("action", "Бэкап NAS: создан профиль «%s»" % name, "", "ok", kind="backup", desk=False)
@@ -4309,6 +4338,8 @@ def nb_profile_delete(pid, confirm=""):
 def _nb_remote_env(cfg):
     """(префикс удалённого пути, env, доп.аргументы rsync) для выбранного транспорта."""
     user, host = cfg.get("user", ""), cfg.get("host", "")
+    if cfg.get("transport") == "local":          # push на диск этого NAS — без сети
+        return ("", dict(_C_ENV), [])
     if cfg.get("transport") == "ssh":
         port = int(cfg.get("ssh_port", 22) or 22)
         pw = cfg.get("password", "")
@@ -4318,6 +4349,20 @@ def _nb_remote_env(cfg):
         return ("%s@%s:" % (user, host), _C_ENV, ["-e", base + " -o BatchMode=yes"])   # без пароля — по ключу
     env = dict(_C_ENV, RSYNC_PASSWORD=cfg.get("password", ""))
     return ("%s@%s::" % (user, host), env, [])            # rsync-демон — пароль через RSYNC_PASSWORD
+
+def _nb_ssh_run(cfg, remote_cmd, timeout=30):
+    """Выполнить команду на удалённой стороне push-ssh профиля (mkdir/чистка архива)."""
+    port = int(cfg.get("ssh_port", 22) or 22)
+    argv = ["ssh", "-p", str(port), "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=10"]
+    env = dict(_C_ENV)
+    pw = cfg.get("password", "")
+    if pw and shutil.which("sshpass"):
+        env["SSHPASS"] = pw
+        argv = ["sshpass", "-e"] + argv
+    else:
+        argv += ["-o", "BatchMode=yes"]
+    tgt = "%s@%s" % (cfg.get("user", ""), cfg.get("host", ""))
+    return _run(argv + [tgt, remote_cmd], timeout=timeout, env=env)
 
 def _nb_err(raw):
     """Короткое человекочитаемое объяснение ошибки rsync/ssh (без простыни на весь экран)."""
@@ -4344,8 +4389,16 @@ def _nb_err(raw):
     return (lines[-1] if lines else "неизвестная ошибка")[:180]
 
 def nb_test(cfg=None):
-    """Проверка связи + (для rsync-демона) список модулей."""
+    """Проверка связи + (для rsync-демона) список модулей. Для push-local —
+    проверка, что папка-приёмник выбрана и её диск смонтирован."""
     cfg = cfg or nb_load()
+    if cfg.get("transport") == "local":
+        base = cfg.get("dest_base") or ""
+        if not base:
+            return {"ok": False, "log": "не выбрана папка-приёмник"}
+        if _dest_disk_absent(base):
+            return {"ok": False, "log": "диск приёмника не смонтирован (%s)" % base}
+        return {"ok": True, "log": "приёмник на месте"}
     if not cfg.get("host") or not cfg.get("user"):
         return {"ok": False, "log": "не заданы адрес/пользователь"}
     if subprocess.run(["ping", "-c", "1", "-W", "3", "--", cfg["host"]],
@@ -4372,11 +4425,35 @@ def _nb_is_junk(name):
     # мусорные служебные файлы ОС — не показываем в пикере (AppleDouble ._*, .DS_Store и пр.)
     return name in _NB_JUNK or name.startswith("._")
 
+_NB_ROOT_SKIP = {"proc", "sys", "dev", "run", "tmp", "boot", "lost+found"}
+
 def nb_browse(cfg, path):
-    """Список папок/файлов источника для визуального выбора (path='' → корень)."""
+    """Список папок/файлов источника для визуального выбора (path='' → корень).
+    push: источник — ЭТОТ NAS, ходим по локальной ФС (пути без ведущего /)."""
     cfg = cfg or nb_load()
-    remote, env, rsh = _nb_remote_env(cfg)
     path = str(path or "").strip().rstrip("/")
+    if _nb_push(cfg):
+        path = path.lstrip("/")
+        if ".." in path:
+            return {"ok": False, "log": "недопустимый путь"}
+        base = "/" + path if path else "/"
+        entries = []
+        try:
+            with os.scandir(base) as it:
+                for e in it:
+                    if _nb_is_junk(e.name):
+                        continue
+                    if not path and (e.name in _NB_ROOT_SKIP or e.name.startswith(".")):
+                        continue   # в корне показываем только осмысленные ветки
+                    try:
+                        entries.append({"name": e.name, "dir": e.is_dir(follow_symlinks=False)})
+                    except OSError:
+                        pass
+        except OSError as e:
+            return {"ok": False, "log": str(e)}
+        entries.sort(key=lambda e: (not e["dir"], e["name"].lower()))
+        return {"ok": True, "path": path, "entries": entries}
+    remote, env, rsh = _nb_remote_env(cfg)
     if cfg.get("transport") == "rsync" and not path:
         # корень rsync-демона = список модулей
         t = nb_test(cfg)
@@ -4471,7 +4548,9 @@ def nb_build_cmd(cfg, job, dry, prev_files=0):
     dest = job["dest"].rstrip("/") + "/"
     owner = TARGET_USER
     args = ["rsync", "-rltD", "--info=progress2", "--stats", "--no-inc-recursive",
-            "--no-owner", "--no-group", "--no-perms", "--chown=%s:%s" % (owner, owner)] + rsh
+            "--no-owner", "--no-group", "--no-perms"] + rsh
+    if not _nb_push_ssh(cfg):   # приёмник локальный — файлы кладём под владельцем панели
+        args.append("--chown=%s:%s" % (owner, owner))
     dm = cfg.get("delete_mode", "archive")
     if dm in ("archive", "mirror"):
         args.append("--delete")
@@ -4495,7 +4574,31 @@ def nb_build_cmd(cfg, job, dry, prev_files=0):
         args.append("--rsync-path=sudo rsync")   # читать файлы без доступа у пользователя (нужен NOPASSWD sudo на источнике)
     if dry:
         args.append("--dry-run")
-    args += [remote + job["src"] + "/", dest]
+    args += _nb_src_dst(cfg, job, remote)
+    return args, env
+
+def _nb_src_dst(cfg, job, remote):
+    """[src, dst] для rsync с учётом направления: pull — удалённый источник → локальный
+    приёмник; push — локальный источник → приёмник (локальный диск или remote-префикс)."""
+    dest = job["dest"].rstrip("/") + "/"
+    if _nb_push(cfg):
+        return ["/" + job["src"].lstrip("/") + "/", remote + dest]
+    return [remote + job["src"] + "/", dest]
+
+def nb_verify_cmd(cfg, job):
+    """Команда сверки после прогона: rsync --checksum --dry-run перечитывает файлы с
+    обеих сторон; каждая строка «>f…» = файл, чьё содержимое отличается от источника."""
+    remote, env, rsh = _nb_remote_env(cfg)
+    args = ["rsync", "-rltDn", "--checksum", "--out-format=%i %n"] + rsh
+    if cfg.get("delete_mode", "archive") == "archive":
+        args.append("--exclude=/" + nb_deleted_top(cfg))
+    for ex in cfg.get("excludes", []):
+        args.append("--exclude=" + ex)
+    for ex in job.get("excludes", []):
+        args.append("--exclude=" + str(ex))
+    if cfg.get("transport") == "ssh" and cfg.get("remote_sudo"):
+        args.append("--rsync-path=sudo rsync")
+    args += _nb_src_dst(cfg, job, remote)
     return args, env
 
 def _mountpoint_of(p):
@@ -4528,21 +4631,32 @@ def nb_run(cfg, dry, writer, cancel=lambda: False):
     except (OSError, ValueError):
         prevf = {}
     t0 = time.time()
+    push, push_ssh = _nb_push(cfg), _nb_push_ssh(cfg)
     results = []
     for j in jobs:
         if cancel():
             writer("— отменено —"); break
         writer("")
         writer("=== %s → %s ===" % (j["src"], j["dest"]))
-        if _dest_disk_absent(j["dest"]):
-            writer("⚠ ПРОПУЩЕНО: целевой диск не смонтирован (%s ведёт в системный "
-                   "раздел). Бэкап пропущен, чтобы НЕ заполнить системный диск — "
-                   "подключите диск назначения." % j["dest"])
-            results.append({"src": j["src"], "ok": False, "not_mounted": True}); continue
-        try:
-            os.makedirs(j["dest"], exist_ok=True)
-        except OSError as e:
-            writer("не создать папку: %s" % e); results.append({"src": j["src"], "ok": False}); continue
+        if push and not os.path.exists("/" + j["src"].lstrip("/")):
+            writer("⚠ ПРОПУЩЕНО: источника нет на этом NAS (/%s) — папку удалили "
+                   "или диск не смонтирован." % j["src"].lstrip("/"))
+            results.append({"src": j["src"], "ok": False, "src_missing": True}); continue
+        if push_ssh:
+            mk = _nb_ssh_run(cfg, "mkdir -p " + shlex.quote(j["dest"]), timeout=25)
+            if not mk["ok"]:
+                writer("не создать папку на приёмнике: %s" % (mk.get("log") or "").strip()[-160:])
+                results.append({"src": j["src"], "ok": False}); continue
+        else:
+            if _dest_disk_absent(j["dest"]):
+                writer("⚠ ПРОПУЩЕНО: целевой диск не смонтирован (%s ведёт в системный "
+                       "раздел). Бэкап пропущен, чтобы НЕ заполнить системный диск — "
+                       "подключите диск назначения." % j["dest"])
+                results.append({"src": j["src"], "ok": False, "not_mounted": True}); continue
+            try:
+                os.makedirs(j["dest"], exist_ok=True)
+            except OSError as e:
+                writer("не создать папку: %s" % e); results.append({"src": j["src"], "ok": False}); continue
         args, env = nb_build_cmd(cfg, j, dry, prev_files=prevf.get(j["src"], 0))
         stat_lines = []
         try:
@@ -4566,27 +4680,98 @@ def nb_run(cfg, dry, writer, cancel=lambda: False):
             writer("⚠ ОСТАНОВЛЕНО ЗАЩИТОЙ: rsync попытался удалить слишком много файлов "
                    "(> %d%%). Ничего не удалено. Проверьте источник." % int(cfg.get("max_delete_pct", 20) or 0))
         sz = None
-        if not dry:
+        if not dry and not push_ssh:
             try: sz = _du_bytes(j["dest"])
             except Exception: sz = None
         res = {"src": j["src"], "dest": j["dest"], "ok": ok, "code": p.returncode, "size": sz,
                "files": stt.get("files", prevf.get(j["src"], 0)), "xfer": stt.get("xfer", 0),
                "xfer_bytes": stt.get("xfer_bytes", 0), "deleted": stt.get("deleted", 0)}
+        if ok and not dry and cfg.get("verify") and not cancel():
+            vb, vn, ve = _nb_verify_job(cfg, j, writer, cancel)
+            res["verify_bad"], res["verify_new"], res["verify_err"] = vb, vn, ve
         results.append(res)
         extra = " · %d файлов, передано %s" % (stt.get("xfer", 0), fmt_bytes(stt.get("xfer_bytes", 0))) if stt else ""
         writer("[%s] %s%s%s" % ("ок" if ok else ("остановлено" if p.returncode == 25 else "ошибка %d" % p.returncode),
                                 j["src"], (" · " + fmt_bytes(sz)) if sz else "", extra))
+    vbad = sum(int(r.get("verify_bad") or 0) for r in results)
+    verr = any(r.get("verify_err") for r in results)
+    allok = (all(r["ok"] for r in results) and len(results) == len(jobs)
+             and not vbad and not verr)
     if not dry:
-        try: pruned = _nb_prune(cfg)
+        try: pruned = _nb_prune_remote(cfg, writer) if push_ssh else _nb_prune(cfg)
         except Exception: pruned = 0
         if pruned: writer("очищено старых снимков удалённых: %d" % pruned)
         _nb_write_status(pid, results)
-        allok = all(r["ok"] for r in results) and len(results) == len(jobs)
         try: _nb_history_add(pid, {"ts": int(time.time()), "dur": int(time.time() - t0),
                               "result": "ok" if allok else "warn", "jobs": results})
         except Exception: pass
-    allok = all(r["ok"] for r in results) and len(results) == len(jobs)
-    return {"ok": allok, "jobs": results}
+    return {"ok": allok, "jobs": results, "verify_bad": vbad, "verify_err": verr}
+
+def _nb_verify_job(cfg, job, writer, cancel):
+    """Пост-сверка задачи: rsync -c -n перечитывает файлы с обеих сторон и сравнивает
+    контрольные суммы. Возвращает (расхождений, новых-после-прогона, ошибка-сверки).
+    «>f» без «+» = содержимое отличается; «>f+++» = файл появился уже после прогона."""
+    writer("— сверка контрольных сумм (перечитывает все файлы — может быть долго)…")
+    args, env = nb_verify_cmd(cfg, job)
+    try:
+        p = subprocess.Popen(args, env=env, stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT, text=True, bufsize=1)
+    except OSError as e:
+        writer("сверка не запустилась: %s" % e); return 0, 0, True
+    bad, new = [], 0
+    for line in iter(p.stdout.readline, ""):
+        line = line.rstrip("\n")
+        if cancel():
+            p.kill(); break
+        tok = line.split(" ", 1)
+        if not tok[0].startswith((">f", "<f")):
+            continue
+        name = tok[1] if len(tok) > 1 else line
+        if "+" in tok[0]:
+            new += 1
+        else:
+            bad.append(name)
+            if len(bad) <= 20:
+                writer("  ≠ " + name)
+    p.wait()
+    try: p.stdout.close()
+    except OSError: pass
+    if p.returncode not in (0, 24):
+        writer("сверка завершилась с ошибкой (код %d)" % p.returncode)
+        return len(bad), new, True
+    if bad:
+        writer("⚠ СВЕРКА: содержимое %d файла(ов) отличается от источника%s" %
+               (len(bad), " (показаны первые 20)" if len(bad) > 20 else ""))
+    else:
+        writer("сверка ок — расхождений нет" +
+               (" · %d новых файлов появилось после прогона" % new if new else ""))
+    return len(bad), new, False
+
+def _nb_prune_remote(cfg, writer):
+    """Ретеншен архива удалённых на push-ssh приёмнике — только по возрасту (дням):
+    считать размеры снимков по SSH слишком дорого, лимит в ГБ тут не применяется."""
+    days = int(cfg.get("retention_days", 0) or 0)
+    if days <= 0:
+        return 0
+    top = nb_deleted_top(cfg)
+    dests = set(j["dest"] for j in cfg.get("jobs", [])) | {cfg.get("dest_base", "")}
+    removed = 0
+    for base in dests:
+        if not _nb_valid_push_dest(base):
+            continue
+        d = base.rstrip("/") + "/" + top
+        find = "[ -d %s ] && find %s -mindepth 1 -maxdepth 1 -type d -mtime +%d" % (
+            shlex.quote(d), shlex.quote(d), days)
+        r = _nb_ssh_run(cfg, find, timeout=60)
+        olds = [l.strip() for l in (r.get("log") or "").splitlines()
+                if l.strip().startswith(d + "/")]
+        for p in olds:
+            rr = _nb_ssh_run(cfg, "rm -rf " + shlex.quote(p), timeout=300)
+            if rr["ok"]:
+                removed += 1
+            else:
+                writer("не удалить старый снимок %s: %s" % (p, (rr.get("log") or "").strip()[-120:]))
+    return removed
 
 def _nb_parse_stats(lines):
     """Вытащить числа из блока rsync --stats."""
@@ -4669,7 +4854,13 @@ def nb_dest_state(pid=None):
     Быстро (isdir/listdir, без du). Ловит ручное удаление папок из приёмника —
     точки последнего прогона этого не видят."""
     cfg = nb_load(pid)
-    base = cfg.get("dest_base") or "/mnt/storage/nas-backup"
+    base = cfg.get("dest_base") or ("" if _nb_push(cfg) else "/mnt/storage/nas-backup")
+    if _nb_push_ssh(cfg):
+        # приёмник на другом сервере — по SSH папки не щупаем (дорого для тика UI)
+        return {"base": base, "remote": True, "base_mounted": True, "base_exists": True,
+                "jobs": [{"src": j.get("src", ""), "dest": j.get("dest", ""),
+                          "enabled": j.get("enabled", True) is not False,
+                          "exists": True, "empty": False} for j in cfg.get("jobs", [])]}
     arch = nb_deleted_top(cfg)
     jobs = []
     for j in cfg.get("jobs", []):
@@ -4684,7 +4875,9 @@ def nb_dest_state(pid=None):
         jobs.append({"src": j.get("src", ""), "dest": dest,
                      "enabled": j.get("enabled", True) is not False,
                      "exists": exists, "empty": empty})
-    return {"base": base, "base_mounted": os.path.ismount(STORAGE),
+    # «смонтирован» = путь приёмника не проваливается в системный корень
+    # (для пула это эквивалент ismount(/mnt/storage), для USB-диска — честная проверка)
+    return {"base": base, "base_mounted": bool(base) and not _dest_disk_absent(base),
             "base_exists": os.path.isdir(base), "jobs": jobs}
 
 def nb_log_tail(since, pid=None):
@@ -4769,33 +4962,38 @@ def _nb_health_one(cfg, many, fire, ev, pri, thr, now):
     def fire_p(key, title, msg, priority, ev_name=None, lvl=None):
         fire(key + ":" + pid, title + sfx, msg, priority, ev_name=ev_name or key, lvl=lvl)
     jobs = [j for j in cfg.get("jobs", []) if j.get("enabled", True)]
-    if not cfg.get("host") or not jobs:
+    push, push_ssh = _nb_push(cfg), _nb_push_ssh(cfg)
+    if not jobs or (not cfg.get("host") and not (push and cfg.get("transport") == "local")):
         return
     hs = _nb_health_load(pid)
     remote, env, rsh = _nb_remote_env(cfg)
     extra = ["--rsync-path=sudo rsync"] if (cfg.get("transport") == "ssh" and cfg.get("remote_sudo")) else []
     conn_ok = None
-    # --- связь с источником ---
-    if ev.get("nb_conn", {}).get("on"):
+    # --- связь с удалённой стороной (pull: источник; push-ssh: приёмник) ---
+    if ev.get("nb_conn", {}).get("on") and cfg.get("transport") != "local":
         t = nb_test(cfg)
         conn_ok = t.get("ok")
         if not conn_ok:
-            fire_p("nb_conn", "NAS-бэкап: источник недоступен",
+            fire_p("nb_conn", "Бэкап: приёмник недоступен" if push else "NAS-бэкап: источник недоступен",
                  "Не удаётся подключиться к %s: %s" % (cfg.get("host"), t.get("log", "")),
                  pri("nb_conn"), ev_name="nb_conn", lvl="warn")
-    # --- исходные папки на месте (только если связь есть) ---
+    # --- исходные папки на месте (push: локально; pull: только если связь есть) ---
     if ev.get("nb_srcmiss", {}).get("on"):
-        if conn_ok is None:
-            conn_ok = nb_test(cfg).get("ok")
-        if conn_ok:
-            missing = []
-            for j in jobs[:20]:
-                r = _run(["rsync"] + rsh + extra + ["--list-only", remote + j["src"] + "/"], timeout=20, env=env)
-                if not r["ok"] and re.search(r"no such file|not found|failed to", r["log"].lower()):
-                    missing.append(j["src"])
-            if missing:
-                fire_p("nb_srcmiss", "NAS-бэкап: пропала исходная папка",
-                     "Нет на источнике: " + ", ".join(missing), pri("nb_srcmiss"), ev_name="nb_srcmiss", lvl="warn")
+        missing = []
+        if push:
+            missing = ["/" + j["src"].lstrip("/") for j in jobs[:50]
+                       if not os.path.exists("/" + j["src"].lstrip("/"))]
+        else:
+            if conn_ok is None:
+                conn_ok = nb_test(cfg).get("ok")
+            if conn_ok:
+                for j in jobs[:20]:
+                    r = _run(["rsync"] + rsh + extra + ["--list-only", remote + j["src"] + "/"], timeout=20, env=env)
+                    if not r["ok"] and re.search(r"no such file|not found|failed to", r["log"].lower()):
+                        missing.append(j["src"])
+        if missing:
+            fire_p("nb_srcmiss", "NAS-бэкап: пропала исходная папка",
+                 "Нет на источнике: " + ", ".join(missing), pri("nb_srcmiss"), ev_name="nb_srcmiss", lvl="warn")
     # --- давно не было прогона ---
     if ev.get("nb_stale", {}).get("on"):
         days = thr("nb_stale", 7)
@@ -4812,6 +5010,8 @@ def _nb_health_one(cfg, many, fire, ev, pri, thr, now):
                 fire_p("nb_stale", "NAS-бэкап: давно не обновлялся",
                      "Последний прогон %d дн назад (порог %d)" % (int((now - ts) / 86400), days),
                      pri("nb_stale"), ev_name="nb_stale", lvl="warn")
+    if push_ssh:
+        return   # размер/место приёмника на чужом сервере по SSH не мониторим
     # --- резкое изменение размера приёмника ---
     if ev.get("nb_size", {}).get("on") and not nb_run_active(pid):
         base_dir = cfg.get("dest_base") or "/mnt/storage/nas-backup"
@@ -4921,6 +5121,8 @@ def nb_run_cli(pid=None, dry=False):
             _nb_run_state_write(pid, st)
     def cancel():
         return os.path.exists(nb_run_cancel(pid))
+    push = _nb_push(cfg)
+    title = ("Бэкап с этого NAS" if push else "Бэкап главного NAS") + sfx
     res = None
     try:
         r = nb_run(cfg, dry, w, cancel)
@@ -4933,12 +5135,22 @@ def nb_run_cli(pid=None, dry=False):
                                   ". Ничего не удалено — проверьте источник (не стёрли/размонтировали ли его).",
                                   "crit", cooldown=0)
                 except Exception: pass
-            msg = "все задачи выполнены" if r.get("ok") else ("главный NAS недоступен — пропущено" if r.get("unreachable") else "часть задач с ошибками")
-            try: log_event("nas_backup", "Бэкап главного NAS" + sfx, msg, "ok" if r.get("ok") else "warn", kind="backup", desk=True)
+            vbad, verr = int(r.get("verify_bad") or 0), bool(r.get("verify_err"))
+            if vbad or verr:      # сверка контрольных сумм нашла расхождения / не завершилась
+                try: notify_event("nb_verify", "nb_verify:" + pid, "Бэкап: сверка нашла проблемы" + sfx,
+                                  ("Содержимое %d файла(ов) в копии отличается от источника — "
+                                   "подробности в журнале прогона." % vbad) if vbad
+                                  else "Сверка не смогла завершиться — см. журнал прогона.",
+                                  "warn", cooldown=0)
+                except Exception: pass
+            msg = ("все задачи выполнены" + (" · сверка ок" if cfg.get("verify") and not vbad and not verr else "")) if r.get("ok") \
+                else (("приёмник недоступен — пропущено" if push else "главный NAS недоступен — пропущено") if r.get("unreachable")
+                      else ("сверка: %d расхождений" % vbad if vbad else "часть задач с ошибками"))
+            try: log_event("nas_backup", title, msg, "ok" if r.get("ok") else "warn", kind="backup", desk=True)
             except Exception: pass
     except Exception as e:
         res = "warn"; w("сбой: %s" % e)
-        try: log_event("nas_backup", "Бэкап главного NAS" + sfx, "сбой: %s" % e, "warn", kind="backup", desk=True)
+        try: log_event("nas_backup", title, "сбой: %s" % e, "warn", kind="backup", desk=True)
         except Exception: pass
     finally:
         st = _nb_run_state_read(pid)
@@ -11800,7 +12012,8 @@ class H(BaseHTTPRequestHandler):
             elif p == "/api/backup/profile":
                 b = self._body(); act = b.get("action", "")
                 if act == "add":
-                    self._json(nb_profile_add(b.get("name", ""), b.get("clone_from", "")))
+                    self._json(nb_profile_add(b.get("name", ""), b.get("clone_from", ""),
+                                              str(b.get("direction") or "")))
                 elif act == "rename":
                     self._json(nb_profile_rename(_nb_bpid(b), b.get("name", "")))
                 elif act == "delete":
