@@ -60,7 +60,6 @@ services:
     ports:
       - "3001:3001"
     labels:
-      - "diun.enable=true"
       - "web-desktop.name=Immich Kiosk"
       - "web-desktop.url=http://pi5.local:3001"
       - "web-desktop.icon=https://cdn.jsdelivr.net/gh/selfhst/icons@main/png/immich-kiosk.png"

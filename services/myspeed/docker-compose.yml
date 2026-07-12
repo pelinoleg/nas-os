@@ -20,7 +20,6 @@ services:
     volumes:
       - /opt/docker/myspeed/data:/myspeed/data
     labels:
-      - "diun.enable=true"
       - "web-desktop.name=MySpeed"
       - "web-desktop.url=http://pi5.local:5216"
       - "web-desktop.icon=https://cdn.jsdelivr.net/gh/selfhst/icons@main/png/myspeed.png"

@@ -11,7 +11,6 @@ services:
     cap_add:
       - SYS_ADMIN
     labels:
-      - "diun.enable=true"
       - "web-desktop.name=Zerobyte"
       - "web-desktop.url=http://pi5.local:4096"
       - "web-desktop.icon=https://cdn.jsdelivr.net/gh/selfhst/icons@main/svg/zerobyte.svg"

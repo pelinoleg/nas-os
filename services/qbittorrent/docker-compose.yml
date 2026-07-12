@@ -7,7 +7,6 @@ services:
     container_name: qbittorrent
     restart: unless-stopped
     labels:
-      - "diun.enable=true"
       - "web-desktop.name=qBittorrent"
       - "web-desktop.url=http://pi5.local:8080"
       - "web-desktop.icon=https://cdn.jsdelivr.net/gh/selfhst/icons@main/svg/qbittorrent.svg"
