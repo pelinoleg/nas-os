@@ -4153,8 +4153,8 @@ function winServices(initTab){openWin("__services","Docker",(body,win)=>{
   side.appendChild(h);
   stacks.forEach(s=>{
    const full=s.total>0&&s.running===s.total,part=s.running>0&&!full;
-   const dot=s.total?(full?"var(--good)":part?"var(--warn)":"var(--mut)"):"transparent";
-   const it=item("stack:"+s.name,null,s.name,s.total?`${s.running} из ${s.total} запущено`:"нет контейнеров",dot);
+   const dot=s.orphan?"var(--warn)":s.total?(full?"var(--good)":part?"var(--warn)":"var(--mut)"):"transparent";
+   const it=item("stack:"+s.name,null,s.name,s.orphan?"папка удалена":s.total?`${s.running} из ${s.total} запущено`:"нет контейнеров",dot);
    // app icon (web-desktop.icon label / catalog meta / custom card), cube as fallback
    const ico=el(`<span class="li-ico">${svg("cube",14)}${s.icon?`<img src="${att(iconSrc(s.icon))}" alt="" onload="this.previousElementSibling.style.display='none'" onerror="this.remove()">`:""}</span>`);
    it.querySelector(".dot").after(ico);
@@ -4429,7 +4429,7 @@ function dkStackPane(tc,s,reload){
  const box=el(`<div class="dd"></div>`);
  const hasNote=!!(s.note&&s.note.trim());
  box.appendChild(el(`<div class="dd-head"><div class="dd-ic" style="background:${col}">${svg("cube",19)}</div>
-   <div class="dd-hmain"><div class="dd-name">${esc(s.name)} ${health}</div><div class="dd-sub"><span class="mono">${esc(s.path||"/opt/stacks/"+s.name)}</span>${s.has_compose?"":" · нет compose"}</div></div>
+   <div class="dd-hmain"><div class="dd-name">${esc(s.name)} ${health}</div><div class="dd-sub"><span class="mono">${esc(s.path||"/opt/stacks/"+s.name)}</span>${s.orphan?" · папка удалена":s.has_compose?"":" · нет compose"}</div></div>
    ${running&&s.url?`<button class="btn sm" data-a="open" style="flex:none">${svg("globe",13)} Открыть</button>`:""}
    <button class="mbp-hb" data-a="note" title="${hasNote?att(s.note):"Добавить заметку"}"${hasNote?' style="color:var(--accent)"':""}>${svg("file",15)}</button></div>`));
  const busy=()=>{box.style.opacity=".55";box.style.pointerEvents="none";};
@@ -4437,6 +4437,13 @@ function dkStackPane(tc,s,reload){
  // действия стека
  const acts=el(`<div class="dd-acts" style="border:none;padding-top:0"></div>`);
  const mk=(l,ic,fn,cls)=>{const b=el(`<button class="btn sm ${cls||""}">${svg(ic,13)} ${l}</button>`);b.onclick=fn;acts.appendChild(b);};
+ if(s.orphan){
+  // orphaned project: compose actions need the (deleted) folder — offer cleanup only,
+  // per-container menus below still work (plain docker, no compose)
+  box.appendChild(el(`<div class="mon-note" style="margin:0 0 10px">${svg("warn",13)} Папка стека удалена, но docker продолжает держать его контейнеры — папка нужна только в момент запуска. Если стек больше не нужен, остановите и удалите контейнеры; именованные тома с данными не удаляются.</div>`));
+  mk("Остановить и удалить контейнеры","trash",()=>confirmDlg("Убрать осиротевший стек?",`«${esc(s.name)}»: контейнеры и сети стека будут остановлены и удалены. Тома останутся.`,()=>stackDelete(s.name,reload),true),"dng");
+  box.appendChild(acts);
+ }else{
  if(running){mk("Стоп","stop",A("down"),"warn");mk("Рестарт","refresh",A("restart"));}
  else if(s.has_compose)mk("Запустить","play",A("up"),"ok");
  const more=el(`<button class="btn sm">${svg("cog",13)} Ещё ▾</button>`);
@@ -4456,6 +4463,7 @@ function dkStackPane(tc,s,reload){
  acts.appendChild(el(`<span class="grow"></span>`));
  mk("Удалить","trash",()=>confirmDlg("Удалить стек?",`«${esc(s.name)}» будет остановлен и удалён из /opt/stacks.`,()=>stackDelete(s.name,reload),true),"dng");
  box.appendChild(acts);
+ }
  if(hasNote)box.appendChild(el(`<div class="stk-note">${esc(s.note)}</div>`));
  // контейнеры
  box.appendChild(el(`<div class="dd-grp">Контейнеры${s.total?` · ${s.total}`:""}</div>`));

@@ -5869,11 +5869,14 @@ def _health_of(status):
     return ""
 
 def docker_stacks():
-    cmap = {}
+    cmap, wdmap = {}, {}
     for c in _docker_ps():
         proj = (c.get("Labels", "") or "")
         m = re.search(r"com\.docker\.compose\.project=([^,]+)", proj)
         key = m.group(1) if m else None
+        wd = re.search(r"com\.docker\.compose\.project\.working_dir=([^,]+)", proj)
+        if key and wd and key not in wdmap:
+            wdmap[key] = wd.group(1)
         url = re.search(r"web-desktop\.url=([^,]+)", proj)
         ico = re.search(r"web-desktop\.icon=([^,]+)", proj)
         cmap.setdefault(key, []).append({
@@ -5903,6 +5906,25 @@ def docker_stacks():
         out.append({"name": nm, "path": d, "has_compose": os.path.isfile(_compose_path(nm)),
                     "containers": conts, "running": running, "total": len(conts),
                     "url": url, "icon": icon, "note": notes.get(nm, "")})
+    # orphans: compose projects whose containers are alive but the folder is gone
+    # (deleted from /opt/stacks by hand) — docker keeps them running regardless.
+    # A live project elsewhere on disk (working_dir exists) is not our business.
+    seen = {s["name"] for s in out}
+    for key, conts in sorted(cmap.items()):
+        if not key or key in seen or not _STACK_RE.match(key):
+            continue
+        wd = wdmap.get(key, "")
+        if wd and os.path.isdir(wd):
+            continue
+        running = sum(1 for c in conts if c["state"] == "running")
+        icon = (next((c["icon"] for c in conts if c["icon"]), "")
+                or _safe(lambda: _store_meta(key).get("icon") or "", "")
+                or (custom.get(key) or {}).get("icon", ""))
+        out.append({"name": key, "path": wd or os.path.join(STACKS_DIR, key),
+                    "has_compose": False, "orphan": True,
+                    "containers": conts, "running": running, "total": len(conts),
+                    "url": next((c["url"] for c in conts if c["url"]), ""),
+                    "icon": icon, "note": notes.get(key, "")})
     return {"ok": True, "stacks": out, "dir": STACKS_DIR}
 
 def stack_validate(name):
@@ -6053,12 +6075,33 @@ def stack_delete(name):
     d = os.path.realpath(os.path.join(STACKS_DIR, name))
     if not d.startswith(STACKS_DIR + os.sep):
         return {"ok": False, "log": "путь вне каталога стеков"}
+    if not os.path.isdir(d):
+        return _stack_zap(name)
     _dc(name, "down")
     try:
         shutil.rmtree(d)
     except OSError as e:
         return {"ok": False, "log": str(e)}
     return {"ok": True}
+
+def _stack_zap(name):
+    """Remove containers/networks of a compose project whose folder is gone:
+    `compose down` needs the folder, so we go via the project label instead.
+    Named volumes are left alone — they may hold user data."""
+    flt = "label=com.docker.compose.project=" + name
+    r = _run(["docker", "ps", "-aq", "--filter", flt], timeout=15)
+    ids = (r.get("log") or "").split()
+    if ids:
+        r = _run(["docker", "rm", "-f", *ids], timeout=120)
+        if not r["ok"]:
+            return r
+    n = _run(["docker", "network", "ls", "-q", "--filter", flt], timeout=15)
+    nids = (n.get("log") or "").split()
+    if nids:
+        _run(["docker", "network", "rm", *nids], timeout=60)
+    log_event("action", "Docker: убран осиротевший стек %s" % name,
+              "контейнеров: %d" % len(ids), "ok", kind="svc", desk=False)
+    return {"ok": True, "log": "контейнеров удалено: %d" % len(ids)}
 
 def stack_logs(name, tail=200):
     if not _STACK_RE.match(name or ""):
