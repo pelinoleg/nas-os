@@ -4220,6 +4220,17 @@ def _nb_valid_push_dest(p):
     p = str(p or "").strip()
     return bool(p) and ".." not in p and not p.startswith("-")
 
+def _nb_dest_for(cfg, src):
+    """Where one source lands under the common destination folder. Same rule as destFor() in
+    the UI: recreate the WHOLE source tree under the base (base/Cloud/Desktop, not base/Desktop)
+    so trees can't collide; on push drop the familiar pool prefix, so it reads base/photos
+    instead of base/mnt/storage/photos."""
+    base = (cfg.get("dest_base") or "").rstrip("/")
+    rel = str(src).lstrip("/")
+    if _nb_push(cfg):
+        rel = re.sub(r"^mnt/storage/", "", rel)
+    return os.path.normpath(base + "/" + rel)
+
 def nb_save(patch, pid=None):
     cur = nb_load(pid)
     if patch.get("direction") in ("pull", "push"):
@@ -4278,10 +4289,20 @@ def nb_save(patch, pid=None):
     # re-validate jobs against the FINAL direction/transport: switching e.g. push-ssh →
     # local must not keep module-relative dests ("HDD6TB/…") that a local run would
     # happily create relative to cwd and fill the system disk with
-    final_ok = _nb_valid_push_dest if _nb_push_ssh(cur) else _nb_valid_dest
-    cur["jobs"] = [j for j in (cur.get("jobs") or []) if final_ok(j.get("dest", ""))]
     if cur["delete_mode"] not in ("archive", "mirror", "add"): cur["delete_mode"] = "archive"
     if cur["dest_mode"] not in ("single", "per"): cur["dest_mode"] = "single"
+    # In single-folder mode a job's dest is a pure function of (dest_base, src), so derive it
+    # rather than trust the copy stored when the source was added. Otherwise changing the common
+    # destination folder moves the base but leaves every existing job writing to the OLD path:
+    # the panel shows the new folder while rsync silently keeps filling the previous one
+    # (real case 2026-07-12 — base said /media/nas/UNTITLED_2, jobs still went to
+    # /mnt/storage/nas-backup-2). Per-job mode is the one where dests are edited by hand.
+    per_mode = cur["dest_mode"] == "per" and not _nb_push_ssh(cur)   # same rule as the UI
+    if not per_mode and (cur.get("dest_base") or "").strip():
+        for j in cur.get("jobs") or []:
+            j["dest"] = _nb_dest_for(cur, j["src"])
+    final_ok = _nb_valid_push_dest if _nb_push_ssh(cur) else _nb_valid_dest
+    cur["jobs"] = [j for j in (cur.get("jobs") or []) if final_ok(j.get("dest", ""))]
     cur["saved"] = int(time.time())   # какой профиль трогали последним — его и открывать
     profs = [cur if p["id"] == cur["id"] else p for p in nb_profiles()]
     _nb_write_profiles(profs)

@@ -6299,8 +6299,10 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
     box.appendChild(row);});};
   drawJobs();
   wireSeg(tc,"#sDm",v=>saveCfg({dest_mode:v}).then(()=>tabSources(tc)));
-  const bb=g("#sBase");if(bb)bb.onchange=()=>saveCfg({dest_base:bb.value.trim()});
-  const bbB=g("#sBaseB");if(bbB)bbB.onclick=()=>nbPickLocal(bb.value||"/mnt",p=>{bb.value=p;saveCfg({dest_base:p});});
+  // redraw after saving: the server re-derives every job's dest from the new base, so the
+  // list must be repainted — otherwise it keeps showing the destinations of the old folder
+  const bb=g("#sBase");if(bb)bb.onchange=()=>saveCfg({dest_base:bb.value.trim()}).then(drawJobs);
+  const bbB=g("#sBaseB");if(bbB)bbB.onclick=()=>nbPickLocal(bb.value||"/mnt",p=>{bb.value=p;saveCfg({dest_base:p}).then(drawJobs);});
   g("#sAdd").onclick=()=>{
     if(push&&!CFG.dest_base){toast("Сначала выберите приёмник (вкладка «Приёмник»)");return;}
     // существующие per-job исключения → абсолютные пути для преселекта дерева
