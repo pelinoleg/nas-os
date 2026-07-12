@@ -6381,6 +6381,7 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
    <div id="oStatus" style="font-size:12.5px;color:var(--dim);padding:2px 2px 6px">загрузка…</div>
    <div class="nb-foot"><button class="btn" id="oDry">Пробный прогон</button><button class="btn pri" id="oRun">${svg("sync",14)} Запустить бэкап</button><button class="btn sm dng" id="oCancel" style="display:none">${svg("x",13)} Остановить</button><button class="btn sm" id="oTest" style="margin-left:auto">${svg("refresh",13)} Проверить связь</button></div>
    <div class="nb-prog" id="oProg" style="display:none;margin-top:10px"></div>
+   <div id="oGuard" class="nb-dwarn" style="display:none"></div>
    <div class="set-h">Папки</div>
    <div id="oDwarn" class="nb-dwarn" style="display:none"></div>
    <div id="oJobs"></div>
@@ -6401,7 +6402,7 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
    22:"не хватило памяти",
    23:"часть файлов не передана: чаще всего у них нет прав на чтение или они исчезли во время копирования",
    24:"часть файлов исчезла во время копирования — обычное дело для живых папок",
-   25:"остановлено защитой: rsync хотел удалить слишком много файлов",
+   25:"защита остановила удаление: в копии оказалось слишком много лишних файлов (больше порога от прошлого прогона). Ничего не удалено — копия цела",
    30:"таймаут: та сторона перестала отвечать",
    35:"таймаут ожидания rsync-демона",
    255:"SSH не подключился — проверьте адрес, порт и пароль или ключ"};
@@ -6456,6 +6457,27 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
   // подсказка ставится из JS, а не через innerHTML → хук перевода её не увидит: переводим руками.
   // data-tip важнее title для пузыря, поэтому обновляем именно его (title мог уже «съесться» хуком)
   const setTip=(n,t)=>{t=nasTr(t);n.setAttribute("title",t);if(n.hasAttribute("data-tip"))n.setAttribute("data-tip",t);};
+  /* Защита от массового удаления сработала: rsync хотел стереть в копии больше файлов,
+     чем разрешает порог. Молча ругаться кодом 25 бесполезно — объясняем и даём кнопку
+     «разрешаю»: одноразовый прогон без --max-delete, конфиг не трогаем. */
+  const paintDelGuard=jobs=>{const gn=g("#oGuard");if(!gn)return;
+   const hit=(jobs||[]).filter(j=>j.code===25);
+   if(!hit.length){gn.style.display="none";gn.innerHTML="";return;}
+   const pct=hit[0].guard_pct||20,lim=hit[0].guard_limit||0;
+   const names=hit.map(j=>j.src).join(", ");
+   const arch=CFG.delete_mode==="archive";
+   gn.className="nb-dwarn wrn";gn.style.display="block";
+   gn.innerHTML=`<b>Удаление остановлено защитой.</b> В копии оказалось больше лишних файлов, чем разрешает порог`
+    +`${lim?` (${lim} файлов = ${pct}% от прошлого прогона)`:` (${pct}% от прошлого прогона)`}: `
+    +`<span class="mono">${esc(names)}</span>. <b>Ничего не удалено</b> — копия цела.`
+    +`<div style="margin-top:6px">Так бывает в двух случаях: вы сами убрали много файлов на источнике — тогда удаление законно; либо источник отвалился (диск не смонтирован, папку снесли по ошибке) — тогда удалять НЕЛЬЗЯ, иначе копия повторит потерю.</div>`
+    +`<div style="margin-top:8px;display:flex;gap:8px;align-items:center">`
+    +`<button class="btn sm dng" id="oAllow">${svg("check",13)} Я удалил это сам — синхронизировать</button>`
+    +`<span style="font-size:11.5px;color:var(--mut)">${arch?"Удалённое переедет в архив удалённых, а не пропадёт":"Режим «зеркало»: лишнее будет стёрто безвозвратно"}</span></div>`;
+   const ab=gn.querySelector("#oAllow");
+   if(ab)ab.onclick=()=>confirmDlg("Разрешить удаление?",
+     `Бэкап пройдёт БЕЗ защиты от массового удаления — один раз, только этот прогон. Лишние файлы в копии ${arch?"переедут в архив удалённых":"будут стёрты безвозвратно"}. Убедитесь, что источник на месте и файлы удалили вы, а не сбой.`,
+     ()=>{run(false,true);},true);};
   // папки со статусом последнего прогона (перекрашиваем и после завершения бэкапа)
   const paintStatus=()=>Promise.all([nbG("/api/backup/status"),nbG("/api/backup/dest-state")]).then(([st,ds])=>{const jn=g("#oJobs");if(!jn)return;
    const byS={};((st&&st.jobs)||[]).forEach(j=>byS[j.src]=j);
@@ -6501,7 +6523,8 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
    const sn=g("#oStatus");if(sn){if(st&&st.running)sn.innerHTML=`<span style="color:var(--accent)">идёт сейчас…</span>`;
     else if(st&&st.queued)sn.innerHTML=qCaption(st);
     else if(st&&st.ts)sn.innerHTML=runSumm(st.jobs||[],st.ts);
-    else sn.textContent=nasTr("ещё не запускался");}});
+    else sn.textContent=nasTr("ещё не запускался");}
+   paintDelGuard((st&&st.jobs)||[]);});
   paintStatus();
   const con=g("#oCon");
   // фон + переподключение к логу (переживает перезагрузку страницы)
@@ -6564,7 +6587,7 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
         +(pct!=null?`<div class="nb-pbar"><i style="width:${pct}%"></i></div>`:"")
         +`<div class="nb-prog-l mono">${esc(rate)}${left!=null?` · осталось ${left} файлов`:""}</div>`;
     }else op.style.display="none";}
-    if(r.running)liveDots(r.jobs,r.cur);   // папки красятся по мере готовности, а не в конце
+    if(r.running){liveDots(r.jobs,r.cur);paintDelGuard(r.jobs||[]);}   // папки красятся по ходу
     if(!r.running){clearInterval(win._nbpi);win._nbpi=null;setBusy(false);
      notifyDone(r.dry?"Пробный прогон завершён":(r.result==="ok"?"Бэкап завершён":r.result==="stopped"?"Бэкап остановлен":r.result==="unreachable"?(push?"Приёмник недоступен":"Главный NAS недоступен"):"Бэкап с ошибками"),"");
      if(r.dry){const sn=g("#oStatus");if(sn)sn.innerHTML=`<b>пробный прогон завершён</b> — ничего не изменено`;}
@@ -6583,10 +6606,13 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
     if(st.running){clearInterval(win._nbpi);win._nbpi=null;con.innerHTML="";nbCursor=0;nbStarted=null;attachLog();paintStatus();}
     else if(!st.queued){clearInterval(win._nbpi);win._nbpi=null;setBusy(false);paintStatus();}   // removed from the queue
     else{const sn=g("#oStatus");if(sn)sn.innerHTML=qCaption(st);}},3000);}
-  const run=async dry=>{if(!(c.jobs||[]).length){toast("Сначала выберите источники (вкладка «Источники»)");return;}
+  // allow — одноразовое «я сам удалил это на источнике»: прогон без --max-delete.
+  // В конфиг не пишется: следующий прогон снова под защитой
+  const run=async (dry,allow)=>{if(!(c.jobs||[]).length){toast("Сначала выберите источники (вкладка «Источники»)");return;}
    if(isPush()&&!CFG.dest_base){toast("Сначала выберите приёмник (вкладка «Приёмник»)");return;}
    con.innerHTML="";nbCursor=0;nbStarted=null;setBusy(true);
-   const rr=await nbP("/api/backup/run-bg",{dry});
+   const gn=g("#oGuard");if(gn&&allow){gn.style.display="none";gn.innerHTML="";}
+   const rr=await nbP("/api/backup/run-bg",{dry,allow_delete:!!allow});
    if(rr&&rr.queued){toast("Другой бэкап уже идёт — поставлено в очередь");waitQueue();return;}
    attachLog();};
   g("#oRun").onclick=()=>run(false);g("#oDry").onclick=()=>run(true);

@@ -4030,11 +4030,12 @@ def _nb_queue_write(q):
 def nb_queued(pid):
     return any(x["pid"] == pid for x in _nb_queue_read())
 
-def _nb_queue_add(pid, dry):
+def _nb_queue_add(pid, dry, allow_delete=False):
     q = _nb_queue_read()
     if any(x["pid"] == pid for x in q):
         return False
-    q.append({"pid": pid, "dry": bool(dry), "ts": int(time.time())})
+    q.append({"pid": pid, "dry": bool(dry), "allow_delete": bool(allow_delete),
+              "ts": int(time.time())})
     _nb_queue_write(q)
     return True
 
@@ -4621,7 +4622,7 @@ def nb_deleted_rel(cfg, t=None):
     rel = _nb_render_tpl(cfg.get("deleted_dir") or "_deleted/{date}", t)
     return rel or ("_deleted/" + time.strftime("%Y-%m-%d", t or time.localtime()))
 
-def nb_build_cmd(cfg, job, dry, prev_files=0, mkpath=False):
+def nb_build_cmd(cfg, job, dry, prev_files=0, mkpath=False, allow_delete=False):
     """rsync-команда (+env) для одной задачи. prev_files — число файлов в прошлый
     прогон (для защиты --max-delete по проценту)."""
     remote, env, rsh = _nb_remote_env(cfg)
@@ -4647,7 +4648,7 @@ def nb_build_cmd(cfg, job, dry, prev_files=0, mkpath=False):
         # защита: не удалять больше N% файлов (от числа в прошлый прогон) — иначе rsync
         # выходит с кодом 25 и НИЧЕГО не удаляет. Спасает от «источник стёрли/размонтировали».
         pct = int(cfg.get("max_delete_pct", 20) or 0)
-        if pct > 0 and prev_files > 0:
+        if pct > 0 and prev_files > 0 and not allow_delete:
             args.append("--max-delete=%d" % max(1, int(prev_files * pct / 100.0)))
     if dm == "archive":
         # template with tokens, default _deleted/{date}. A RELATIVE --backup-dir is
@@ -4745,10 +4746,13 @@ def _dest_disk_absent(dest):
     его mountpoint не '/', проверка проходит. Так безопасны и съёмные диски."""
     return bool(re.match(r"^/(mnt|media|srv)/", dest or "")) and _mountpoint_of(dest) == "/"
 
-def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None):
+def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None, allow_delete=False):
     """Прогнать все включённые задачи. writer(line) — вывод; cancel() — прерывание.
     on_job(done, total) — after every finished job, so the UI can paint folder dots
-    live instead of waiting for the whole run to end."""
+    live instead of waiting for the whole run to end.
+    allow_delete — ОДНОРАЗОВОЕ разрешение от пользователя: снять защиту --max-delete для
+    этого прогона (он сам стёр много файлов на источнике и подтвердил это в панели).
+    В конфиг НЕ пишется: следующий прогон снова под защитой."""
     cfg = cfg or nb_load()
     jobs = [j for j in cfg.get("jobs", []) if j.get("enabled", True)]
     if not jobs:
@@ -4769,6 +4773,9 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None):
         shell_fs = _nb_remote_shell_fs(cfg)
         if not shell_fs:
             writer("приёмник — rsync-демон с «модулями»: папки создаст сам rsync")
+    if allow_delete:
+        writer("РАЗРЕШЕНИЕ ПОЛЬЗОВАТЕЛЯ: защита от массового удаления снята на ЭТОТ прогон — "
+               "лишнее в копии будет удалено (в режиме «архив» — перенесено в архив удалённых)")
     dest_fs = nb_dest_fs(cfg)
     if dest_fs in NB_FS_LIMITED:
         writer("приёмник в %s: эта файловая система не хранит симлинки, спецфайлы и права — "
@@ -4815,7 +4822,8 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None):
             except OSError as e:
                 writer("не создать папку: %s" % e); emit({"src": j["src"], "ok": False}); continue
         args, env = nb_build_cmd(cfg, j, dry, prev_files=prevf.get(j["src"], 0),
-                                 mkpath=bool(push_ssh and not shell_fs))
+                                 mkpath=bool(push_ssh and not shell_fs),
+                                 allow_delete=allow_delete)
         stat_lines = []
         try:
             p = subprocess.Popen(args, env=env, stdout=subprocess.PIPE,
@@ -4867,6 +4875,11 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None):
             writer("подсказка: если выше «unknown option» — на приёмнике старый rsync "
                    "без --mkpath; создайте папки на нём вручную (файловым менеджером NAS)")
         if p.returncode == 25:           # сработала защита --max-delete
+            pf = prevf.get(j["src"], 0)
+            pctv = int(cfg.get("max_delete_pct", 20) or 0)
+            res_limit = max(1, int(pf * pctv / 100.0)) if (pf and pctv) else 0
+            stt.setdefault("guard_limit", res_limit)
+            stt.setdefault("guard_pct", pctv)
             writer("⚠ ОСТАНОВЛЕНО ЗАЩИТОЙ: rsync попытался удалить слишком много файлов "
                    "(> %d%%). Ничего не удалено. Проверьте источник." % int(cfg.get("max_delete_pct", 20) or 0))
         sz = None
@@ -4876,6 +4889,9 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None):
         res = {"src": j["src"], "dest": j["dest"], "ok": ok, "code": p.returncode, "size": sz,
                "files": stt.get("files", prevf.get(j["src"], 0)), "xfer": stt.get("xfer", 0),
                "xfer_bytes": stt.get("xfer_bytes", 0), "deleted": stt.get("deleted", 0)}
+        if p.returncode == 25:      # UI покажет, какой был порог, и предложит разрешить удаление
+            res["guard_limit"] = stt.get("guard_limit", 0)
+            res["guard_pct"] = stt.get("guard_pct", 0)
         if cancel():
             # мы сами убили rsync по «Стопу» — это не ошибка передачи (иначе в панели
             # висело бы «ошибка rsync, код -9», и поди догадайся, что это твой же стоп)
@@ -5288,7 +5304,7 @@ def _nb_health_one(cfg, many, fire, ev, pri, thr, now):
                 pass
     _nb_health_save(pid, hs)
 
-def _nb_start_unit(pid, dry):
+def _nb_start_unit(pid, dry, allow_delete=False):
     """Поднять транзиентный юнит с драйвером прогона. True — процесс стартовал."""
     try:
         if os.path.exists(nb_run_cancel(pid)):
@@ -5300,7 +5316,8 @@ def _nb_start_unit(pid, dry):
                               "cur": "", "result": None})
     cmd = ["systemd-run", "--collect", "--quiet", "--unit", nb_unit(pid),
            "--setenv=SUDO_USER=" + TARGET_USER, "--setenv=HOME=" + HOME,   # тот же NAS_CONFIG, что у службы
-           sys.executable, os.path.join(HERE, "nas-web.py"), "backup-run", pid] + (["dry"] if dry else [])
+           sys.executable, os.path.join(HERE, "nas-web.py"), "backup-run", pid] \
+        + (["dry"] if dry else []) + (["allow-delete"] if allow_delete else [])
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
     except (OSError, subprocess.SubprocessError):
@@ -5311,17 +5328,17 @@ def _nb_start_unit(pid, dry):
         return False
     return True
 
-def nb_run_bg(pid=None, dry=False):
+def nb_run_bg(pid=None, dry=False, allow_delete=False):
     """Запустить прогон профиля. Одновременно идёт РОВНО ОДИН прогон: пока занято,
     остальные ждут в очереди (два rsync на одном HDD только мешают друг другу)."""
     cfg = nb_load(pid); pid = cfg["id"]
     if nb_run_active(pid):
         return {"ok": False, "log": "уже выполняется"}
     if nb_any_active():
-        _nb_queue_add(pid, dry)
+        _nb_queue_add(pid, dry, allow_delete)
         return {"ok": True, "queued": True, "log": "поставлено в очередь"}
     _nb_queue_remove(pid)
-    if not _nb_start_unit(pid, dry):
+    if not _nb_start_unit(pid, dry, allow_delete):
         return {"ok": False, "log": "не удалось запустить"}
     return {"ok": True, "queued": False, "log": "запущено"}
 
@@ -5335,11 +5352,11 @@ def _nb_queue_drain():
         item = q.pop(0)
         if item["pid"] in known:
             _nb_queue_write(q)
-            _nb_start_unit(item["pid"], item.get("dry", False))
+            _nb_start_unit(item["pid"], item.get("dry", False), item.get("allow_delete", False))
             return
     _nb_queue_write(q)
 
-def nb_run_cli(pid=None, dry=False):
+def nb_run_cli(pid=None, dry=False, allow_delete=False):
     """Драйвер прогона (запускается в транзиентном юните). Пишет лог в файл и
     статус в json — независимо от того, жив ли основной процесс nas-web."""
     cfg = nb_load(pid); pid = cfg["id"]
@@ -5366,7 +5383,8 @@ def nb_run_cli(pid=None, dry=False):
         st["jobs"] = [{k: r.get(k) for k in ("src", "ok", "code", "xfer", "xfer_bytes",
                                              "size", "verify_bad", "verify_err",
                                              "src_missing", "not_mounted", "stopped",
-                                             "err", "errn", "fs_limit", "fs_files", "fs")}
+                                             "err", "errn", "fs_limit", "fs_files", "fs",
+                                             "guard_limit", "guard_pct")}
                       for r in done]
         st["total"] = total
         _nb_run_state_write(pid, st)
@@ -5376,7 +5394,7 @@ def nb_run_cli(pid=None, dry=False):
     title = ("Бэкап с этого NAS" if push else "Бэкап главного NAS") + sfx
     res = None
     try:
-        r = nb_run(cfg, dry, w, cancel, on_job)
+        r = nb_run(cfg, dry, w, cancel, on_job, allow_delete)
         res = ("ok" if r.get("ok") else "stopped" if r.get("stopped")
                else "unreachable" if r.get("unreachable") else "warn")
         if not dry and r.get("stopped"):
@@ -12291,7 +12309,8 @@ class H(BaseHTTPRequestHandler):
                            else nb_browse(cfg, b.get("path", "")))
             elif p == "/api/backup/run-bg":
                 b = self._body()
-                self._json(nb_run_bg(_nb_bpid(b), dry=bool(b.get("dry", False))))
+                self._json(nb_run_bg(_nb_bpid(b), dry=bool(b.get("dry", False)),
+                                     allow_delete=bool(b.get("allow_delete", False))))
             elif p == "/api/backup/cancel":
                 b = self._body()
                 pid = nb_load(_nb_bpid(b))["id"]
@@ -12421,7 +12440,7 @@ if __name__ == "__main__":
         print("thumbs-sweep: сгенерировано", thumbs_sweep(sys.argv[2:]), "превью")
     elif len(sys.argv) > 1 and sys.argv[1] == "backup-run":
         _args = sys.argv[2:]
-        _pid = next((a for a in _args if a != "dry"), NB_MAIN)
-        nb_run_cli(_pid, dry=("dry" in _args))
+        _pid = next((a for a in _args if a not in ("dry", "allow-delete")), NB_MAIN)
+        nb_run_cli(_pid, dry=("dry" in _args), allow_delete=("allow-delete" in _args))
     else:
         main()
