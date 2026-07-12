@@ -2447,6 +2447,31 @@ NOTIFY
 # половину TCP-сессии, впрыскивает RST. Симптом: ping идёт, а HTTP висит.
 # Лечится тем, что активным держим ровно один интерфейс.
 # ---------------------------------------------------------------------------
+# comitup ships with the Pi image for headless Wi-Fi provisioning, but on a NAS that lives on
+# ethernet it does more harm than good: while the wire is up netguard keeps the home Wi-Fi
+# profile's autoconnect off, comitup reads "wlan0 has no connection" as "no network" and raises
+# a comitup-* hotspot; netguard tears it down; comitup raises it again — dozens of times an hour.
+# And when the wire really does blink, wlan0 comes back up INSIDE that hotspot instead of the
+# home network (the 2026-07-11 lockout: box alive, LAN unreachable for six hours). The Wi-Fi
+# fallback does not need comitup — the home profile lives in NM and netguard brings it up itself.
+disable_comitup() {
+    local units u c found=0
+    # имена юнитов у разных образов разные (comitup / comitup-watch / comitup-web) — гасим те, что есть
+    units="$(systemctl list-unit-files --no-legend 2>/dev/null | awk '$1 ~ /^comitup/ {print $1}')"
+    [ -n "$units" ] || return 0
+    for u in $units; do
+        run systemctl disable --now "$u" || true
+        run systemctl mask "$u" || true
+        found=1
+    done
+    # без демона хотспот-профили всё равно мертвы, но пусть не мозолят глаза в списке сетей
+    for c in $(nmcli -t -f NAME connection show 2>/dev/null | grep '^comitup-' || true); do
+        run nmcli connection delete "$c" || true
+    done
+    [ "$found" -eq 1 ] && info "comitup выключен: Wi-Fi-резерв поднимает netguard, аварийный хотспот больше не мешает"
+    return 0
+}
+
 install_netguard() {
     write_file /usr/local/bin/nas-netguard.sh <<'GUARD'
 #!/bin/bash
@@ -2462,6 +2487,8 @@ WSTATE="${NAS_NETGUARD_WIFI_STATE:-/var/lib/nas-wizard/netguard.wifi}"
 AVLOG="${NAS_NETGUARD_AVAIL:-/var/lib/nas-wizard/avail.log}"
 BEAT="${NAS_NETGUARD_BEAT:-/var/lib/nas-wizard/avail.beat}"
 LOCK="${NAS_NETGUARD_LOCK:-/run/nas-netguard.lock}"
+GWMISS="${NAS_NETGUARD_GWMISS:-/run/nas-netguard.gwmiss}"
+GWMISS_MAX="${NAS_NETGUARD_GWMISS_MAX:-3}"
 
 # args 4-5 (event, key) let the panel dedup this alert against its own
 # monitor events (link_changed/ip_changed use the monitor's cooldown keys)
@@ -2476,16 +2503,33 @@ has_nm(){ command -v nmcli >/dev/null 2>&1; }
 dev_state(){ nmcli -t -f DEVICE,STATE device 2>/dev/null | awk -F: -v d="$1" '$1==d{print $2; exit}'; }
 ip4(){ ip -4 -o addr show dev "$1" scope global 2>/dev/null | awk '{print $4; exit}'; }
 
+gw_miss_reset(){ rm -f "$GWMISS" 2>/dev/null || true; }
+
+# Hard failure (no carrier / no address / no default route) = the wire is gone right now:
+# fail over immediately. Soft failure (link is up, but the gateway went quiet) is NOT proof
+# of a dead wire — under load the router drops the odd ICMP/ARP (the hourly MySpeed
+# speedtest did exactly this every hour on the hour). Failing over on one miss put a second
+# address of the SAME subnet on the box for ~15 s — precisely the split-route mess this
+# guard exists to prevent. So: believe the gateway only after GWMISS_MAX misses in a row.
 eth_healthy(){
-  [ -e "/sys/class/net/$ETH" ] || return 1
-  [ "$(cat "/sys/class/net/$ETH/carrier" 2>/dev/null || echo 0)" = "1" ] || return 1
-  [ -n "$(ip4 "$ETH")" ] || return 1
-  local g
+  [ -e "/sys/class/net/$ETH" ] || { gw_miss_reset; return 1; }
+  [ "$(cat "/sys/class/net/$ETH/carrier" 2>/dev/null || echo 0)" = "1" ] || { gw_miss_reset; return 1; }
+  [ -n "$(ip4 "$ETH")" ] || { gw_miss_reset; return 1; }
+  local g n
   g="$(ip -4 route show default dev "$ETH" 2>/dev/null | awk '{print $3; exit}')"
-  [ -n "$g" ] || return 1
+  [ -n "$g" ] || { gw_miss_reset; return 1; }
   # шлюз может не отвечать на ICMP — тогда пробуем достучаться на канальном уровне
-  ping -c1 -W2 -I "$ETH" "$g" >/dev/null 2>&1 && return 0
-  arping -c1 -w2 -I "$ETH" "$g" >/dev/null 2>&1
+  if ping -c1 -W2 -I "$ETH" "$g" >/dev/null 2>&1 || arping -c1 -w2 -I "$ETH" "$g" >/dev/null 2>&1; then
+    gw_miss_reset; return 0
+  fi
+  n=$(( $(cat "$GWMISS" 2>/dev/null || echo 0) + 1 ))
+  echo "$n" > "$GWMISS" 2>/dev/null || true
+  if [ "$n" -ge "$GWMISS_MAX" ]; then
+    logj "шлюз $g молчит $n проверки подряд — считаю провод мёртвым"
+    return 1
+  fi
+  logj "шлюз $g не ответил ($n/$GWMISS_MAX) — провод держим, ждём следующую проверку"
+  return 0
 }
 
 # NM иногда снимает on-link маршрут подсети (ложный ACD-конфликт при двух
@@ -2719,6 +2763,7 @@ SYSCTL
     run systemctl daemon-reload
     run systemctl enable --now nas-netguard.timer
     info "сторож сети включён: eth0 главный, wlan0 резерв, уведомления о смене IP"
+    disable_comitup
     # честно предупреждаем: если сейчас подняты оба линка, Wi-Fi будет отключён,
     # и открытая по нему сессия (SSH/панель) оборвётся — надо зайти по адресу eth0
     if [ "$(cat /sys/class/net/eth0/carrier 2>/dev/null || echo 0)" = "1" ] \
