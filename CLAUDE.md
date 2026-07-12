@@ -89,6 +89,17 @@ HTML отдаётся `Cache-Control: no-store` (мобильные при `no-c
 ## Ключевые грабли
 - **USB-SATA мосты (UAS)** отдают диск как `ID_BUS=ata`, а не `usb` → udev-правила матчить по
   `ENV{ID_USB_DRIVER}=="?*"` (ловит usb-storage и uas), НЕ по `ID_BUS==usb`.
+- **USB-диск уходит ОФЛАЙН посреди бэкапа → ext4 в аварийный read-only.** 2026-07-12 18:46:
+  Ugreen (RTL9210) + Seagate ST4000LM024 (2.5" **SMR**): команда записи висела 68 с (SMR-диск
+  ушёл во внутреннюю перетасовку), ядро на 30-й секунде (дефолтный таймаут SCSI) объявило
+  ошибку → `Device offlined - not ready after error recovery` → `Remounting filesystem read-only`.
+  Симптом в панели обманчив: прогон обрывается, а СЛЕДУЮЩИЙ красит ВСЕ папки красным — rsync не
+  может даже `readdir` приёмника (`Input/output error (5)`), выглядит как «бэкап всё сломал».
+  Диагноз — `dmesg` (`cmd_age=68s`, `offlined`) + `mount` (флаг `emergency_ro`). SMART при этом
+  ЧИСТЫЙ (Reallocated/Pending/Uncorrect/CRC = 0, error log пуст) — носитель ни при чём, виноват
+  таймаут. Лечение — udev-правило в `install_automount`: `device/timeout` = 180 с для USB-дисков.
+  После такого обрыва обязательно `umount` + `e2fsck -fp` (журнал оборван). Если повторится —
+  следующий шаг отключить UAS для моста (`usb-storage.quirks=0bda:9201:u`, нужен ребут).
 - `getComputedStyle().getPropertyValue('--x')` НЕ резолвит `var()` внутри кастом-проперти —
   читай уже-вычисленные `--{surface}-good/…` с `:root` (они хексы, поставлены `setProperty`).
 - `.menu button{width:100%}` растягивает любую кнопку в поповере — для компактных нужен оверрайд.
