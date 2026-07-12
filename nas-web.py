@@ -4622,10 +4622,20 @@ def nb_build_cmd(cfg, job, dry, prev_files=0, mkpath=False):
     remote, env, rsh = _nb_remote_env(cfg)
     dest = job["dest"].rstrip("/") + "/"
     owner = TARGET_USER
-    args = ["rsync", "-rltD", "--info=progress2", "--stats", "--no-inc-recursive",
-            "--no-owner", "--no-group", "--no-perms"] + rsh
-    if not _nb_push_ssh(cfg):   # local receiver — store files under the panel owner
-        args.append("--chown=%s:%s" % (owner, owner))
+    limited = nb_dest_fs(cfg, job.get("dest")) in NB_FS_LIMITED
+    if limited:
+        # exFAT/NTFS/FAT: симлинков и спецфайлов там не бывает — не «-l»/«-D», и rsync
+        # просто пропустит их (код 0), вместо того чтобы падать в 23 каждый прогон.
+        # --modify-window=1: у FAT-подобных время файла округлено до 2 с, без этого
+        # rsync считает файлы изменившимися и гоняет их заново КАЖДЫЙ раз.
+        # --chown тоже не нужен: владельца такая ФС не хранит (он берётся из uid= в mount)
+        args = ["rsync", "-rt", "--modify-window=1", "--info=progress2", "--stats",
+                "--no-inc-recursive", "--no-owner", "--no-group", "--no-perms"] + rsh
+    else:
+        args = ["rsync", "-rltD", "--info=progress2", "--stats", "--no-inc-recursive",
+                "--no-owner", "--no-group", "--no-perms"] + rsh
+        if not _nb_push_ssh(cfg):   # local receiver — store files under the panel owner
+            args.append("--chown=%s:%s" % (owner, owner))
     dm = cfg.get("delete_mode", "archive")
     if dm in ("archive", "mirror"):
         args.append("--delete")
@@ -4689,6 +4699,40 @@ def _mountpoint_of(p):
         p = os.path.dirname(p)
     return p
 
+# Filesystems that cannot hold what a Linux backup normally carries: no symlinks,
+# no sockets/fifos, no owner/perms, and они запрещают «:» и CR в именах. rsync
+# упирается в это КАЖДЫЙ прогон и выходит с кодом 23 — поэтому такие приёмники
+# обслуживаем иначе (см. nb_build_cmd), а не делаем вид, что это случайный сбой.
+NB_FS_LIMITED = {"exfat", "vfat", "msdos", "fat", "fat32", "ntfs", "ntfs3", "fuseblk", "hfsplus"}
+# «файл не лезет в эту ФС», а не «сбой»: запрещённое имя (22), симлинк/сокет (1),
+# нет такой возможности у ФС (ENOSYS)
+_NB_FS_ERR_RX = re.compile(r"failed: (Invalid argument \(22\)|Operation not permitted \(1\)|"
+                           r"Function not implemented)")
+
+def _fs_type(path):
+    """Тип ФС для пути (по /proc/mounts, ближайшая точка монтирования). "" — не знаем."""
+    mp = _mountpoint_of(path)
+    best, best_len = "", -1
+    try:
+        with open("/proc/mounts") as f:
+            for line in f:
+                parts = line.split()
+                if len(parts) < 3:
+                    continue
+                mnt = parts[1].replace("\\040", " ")
+                if (mnt == mp or mp.startswith(mnt.rstrip("/") + "/")) and len(mnt) > best_len:
+                    best, best_len = parts[2], len(mnt)
+    except OSError:
+        return ""
+    return best
+
+def nb_dest_fs(cfg, dest=None):
+    """Тип ФС приёмника — только когда он ЛОКАЛЕН (push по SSH мы не щупаем)."""
+    if _nb_push_ssh(cfg):
+        return ""
+    d = dest or cfg.get("dest_base") or ""
+    return _fs_type(d) if d.startswith("/") else ""
+
 def _dest_disk_absent(dest):
     """dest под /mnt|/media|/srv подразумевает отдельный носитель. Если он НЕ
     смонтирован, точка проваливается в корень (mountpoint = '/') — писать туда
@@ -4720,6 +4764,11 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None):
         shell_fs = _nb_remote_shell_fs(cfg)
         if not shell_fs:
             writer("приёмник — rsync-демон с «модулями»: папки создаст сам rsync")
+    dest_fs = nb_dest_fs(cfg)
+    if dest_fs in NB_FS_LIMITED:
+        writer("приёмник в %s: эта файловая система не хранит симлинки, спецфайлы и права — "
+               "они будут пропущены; имена с «:» и переносом строки она тоже не принимает"
+               % dest_fs)
     results = []
     def emit(r):
         results.append(r)
@@ -4779,17 +4828,26 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None):
                     except OSError: pass
                     return
         threading.Thread(target=_watch_cancel, daemon=True).start()
-        err_lines = []
+        err_lines, errs, fs_bad, fs_files = [], 0, 0, []
         try:
             for line in iter(p.stdout.readline, ""):
                 line = line.rstrip("\n")
                 writer(line)
                 if "Number of" in line or "Total transferred" in line or "Total file size" in line:
                     stat_lines.append(line)
-                # the first rsync complaint IS the answer to "so what went wrong?" —
-                # keep it for the panel instead of making the user dig through the log
-                elif len(err_lines) < 3 and (line.startswith("rsync:") or " failed: " in line):
-                    err_lines.append(line.strip())
+                elif line.startswith("rsync:") or " failed: " in line:
+                    # the first rsync complaint IS the answer to "so what went wrong?" —
+                    # keep it for the panel instead of making the user dig through the log
+                    errs += 1
+                    if len(err_lines) < 3:
+                        err_lines.append(line.strip())
+                    if _NB_FS_ERR_RX.search(line):
+                        # приёмник физически не может принять этот файл (имя с «:» или CR,
+                        # симлинк, сокет) — это не поломка, это предел его файловой системы
+                        fs_bad += 1
+                        mm = re.search(r'"([^"]+)"', line)
+                        if mm and len(fs_files) < 8:
+                            fs_files.append(mm.group(1))
                 if cancel():
                     p.kill(); break
             p.wait()
@@ -4817,9 +4875,16 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None):
             # мы сами убили rsync по «Стопу» — это не ошибка передачи (иначе в панели
             # висело бы «ошибка rsync, код -9», и поди догадайся, что это твой же стоп)
             res["stopped"] = True
-        elif not ok and err_lines:
-            res["err"] = err_lines[0][:180]
-            res["errn"] = len(err_lines)
+        elif not ok:
+            if err_lines:
+                res["err"] = err_lines[0][:180]
+                res["errn"] = errs
+            if p.returncode == 23 and fs_bad and fs_bad == errs:
+                # ВСЕ жалобы — про предел ФС приёмника. Остальное скопировалось; красная
+                # точка тут врала бы каждый прогон, поэтому это отдельный, жёлтый исход
+                res["fs_limit"] = fs_bad
+                res["fs_files"] = fs_files
+                res["fs"] = dest_fs
         if ok and not dry and cfg.get("verify") and not cancel():
             vb, vn, ve = _nb_verify_job(cfg, j, writer, cancel)
             res["verify_bad"], res["verify_new"], res["verify_err"] = vb, vn, ve
@@ -5041,8 +5106,10 @@ def nb_dest_state(pid=None):
                      "exists": exists, "empty": empty})
     # "mounted" = the destination path does not fall through to the system root
     # (equivalent to ismount(/mnt/storage) for the pool; an honest check for USB disks)
+    fs = _fs_type(base) if base.startswith("/") else ""
     return {"base": base, "base_mounted": bool(base) and not _dest_disk_absent(base),
-            "base_exists": os.path.isdir(base), "jobs": jobs}
+            "base_exists": os.path.isdir(base), "jobs": jobs,
+            "fs": fs, "fs_limited": fs in NB_FS_LIMITED}
 
 def nb_log_tail(since, pid=None):
     """Хвост лога текущего/последнего прогона (из файла) — для переподключения UI."""
@@ -5294,7 +5361,8 @@ def nb_run_cli(pid=None, dry=False):
         st["jobs"] = [{k: r.get(k) for k in ("src", "ok", "code", "xfer", "xfer_bytes",
                                              "size", "verify_bad", "verify_err",
                                              "src_missing", "not_mounted", "stopped",
-                                             "err", "errn")} for r in done]
+                                             "err", "errn", "fs_limit", "fs_files", "fs")}
+                      for r in done]
         st["total"] = total
         _nb_run_state_write(pid, st)
     def cancel():

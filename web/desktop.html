@@ -6401,21 +6401,29 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
   /* короткая метка для бейджа в строке папки; полный разбор — в подсказке (jobIssue) */
   const jobTag=j=>j.src_missing?"нет источника":j.not_mounted?"нет диска"
    :(j.stopped||(j.code!=null&&j.code<0))?"остановлена":j.code===25?"защита"
+   :j.fs_limit?`ФС не приняла ${j.fs_limit}`
    :j.verify_err?"сверка":j.verify_bad?`≠ ${j.verify_bad}`:`код ${j.code==null?"?":j.code}`;
+  // «файл не лезет в файловую систему приёмника» — не ошибка бэкапа: данные скопированы,
+  // а эти файлы такая ФС (exFAT/NTFS) физически хранить не может. Отдельный, жёлтый исход
+  const jobFsOnly=j=>!!j.fs_limit;
   const jobIssue=j=>{
    if(j.src_missing)return "источника нет на этом NAS: папку удалили или диск не смонтирован";
    if(j.not_mounted)return "диск приёмника не смонтирован, папку пропустили";
    if(j.stopped||(j.code!=null&&j.code<0))return "остановлена вами — уже скопированное осталось на месте";
+   if(j.fs_limit)return `скопирована, но ${j.fs_limit} файлов приёмник не принял: файловая система ${j.fs||""} не хранит такие имена (с «:» или переносом строки), симлинки и спецфайлы`;
    if(j.verify_err)return "сверка контрольных сумм не смогла завершиться";
    if(j.verify_bad)return `сверка: файлов не совпало — ${j.verify_bad}`;
    if(j.ok)return "";
    return RSC[j.code]||`rsync вернул код ${j.code==null?"?":j.code}`;};
   // тот же разбор + дословная жалоба самого rsync (путь и причина) — только для подсказки
-  const jobWhy=j=>jobIssue(j)+(j.err?` · ${j.err}`:"");
+  const jobWhy=j=>jobIssue(j)+(j.fs_limit&&(j.fs_files||[]).length
+    ? ". Не приняты, например: "+(j.fs_files||[]).slice(0,5).join(", ")+((j.fs_files||[]).length<j.fs_limit?" …":"")
+    : (j.err?` · ${j.err}`:""));
   const runSumm=(jobs,ts,result,total)=>{jobs=jobs||[];
    const isStop=j=>j.stopped||(j.code!=null&&j.code<0);   // убит нашим же «Стопом» — не ошибка
    const tot=total||jobs.length,okN=jobs.filter(j=>j.ok).length;
-   const bad=jobs.filter(j=>!j.ok&&!isStop(j)),killed=jobs.filter(isStop);
+   const bad=jobs.filter(j=>!j.ok&&!isStop(j)&&!jobFsOnly(j)),killed=jobs.filter(isStop);
+   const fsj=jobs.filter(jobFsOnly),fsn=fsj.reduce((a,j)=>a+(+j.fs_limit||0),0);
    const vb=jobs.reduce((a,j)=>a+(+j.verify_bad||0),0),ve=jobs.some(j=>j.verify_err);
    const files=jobs.reduce((a,j)=>a+(+j.xfer||0),0),bytes=jobs.reduce((a,j)=>a+(+j.xfer_bytes||0),0);
    const when=ts?fmDate(ts)+" · ":"";
@@ -6423,8 +6431,12 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
    const moved=`передано файлов: ${files} · ${fmtB(bytes)}`;
    const cut=result==="stopped"||killed.length||jobs.length<tot;
    const li=(color,text)=>`<div class="nb-sum-i"><span class="ovh-dot" style="background:var(--${color});flex:none"></span>${text}</div>`;
-   if(!bad.length&&!vb&&!ve&&!cut)
+   if(!bad.length&&!vb&&!ve&&!cut&&!fsn)
     return `<div class="nb-sum good">${when}<b>всё скопировано, проблем нет</b> · папок: ${okN} из ${tot} · ${moved}</div>`;
+   if(!bad.length&&!vb&&!ve&&!cut)   // всё скопировалось, но часть файлов не влезла в ФС приёмника
+    return `<div class="nb-sum good">${when}<b>данные скопированы</b> · папок: ${okN+fsj.length} из ${tot} · ${moved}</div>`
+     +li("warn",`<span title="${att(nasTr(jobWhy(fsj[0])))}">файлов не принял приёмник: ${fsn} — их имена или тип не поддерживает его файловая система (${esc(fsj[0].fs||"")})</span>`)
+     +`<div class="nb-sum-h">Это не сбой бэкапа: остальные файлы на месте. Наведите на бейдж папки — увидите, какие именно файлы пропущены.</div>`;
    const items=bad.map(j=>li("danger",`<span class="mono">${esc(j.src)}</span> — <span title="${att(jobWhy(j))}">${esc(jobIssue(j))}</span>`)).join("")
     +(vb?li("warn",`сверка нашла отличия: файлов ${vb} — в приёмнике они не совпали с источником`):"")
     +(ve&&!vb?li("warn","сверка не смогла завершиться"):"")
@@ -6449,6 +6461,7 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
     if(d&&!d.exists){dot="var(--danger)";tip="Папки нет в приёмнике: её удалили вручную или подключён другой диск. Запустите бэкап — она создастся заново.";badge=`<span class="nb-warn dng" title="Папки нет в приёмнике — удалена вручную? Запусти бэкап, чтобы восстановить.">нет папки</span>`;miss++;}
     else if(d&&d.empty){dot="var(--warn)";tip="Папка в приёмнике есть, но пустая: в неё ещё ничего не скопировалось.";badge=`<span class="nb-warn wrn" title="Папка в приёмнике есть, но пуста.">пусто</span>`;emptyN++;}
     else if(r&&r.ok){dot="var(--good)";tip="Скопирована без ошибок. "+moved;}
+    else if(r&&jobFsOnly(r)){dot="var(--warn)";tip=jobWhy(r)+". "+moved;badge=`<span class="nb-warn wrn" title="${att(nasTr(jobWhy(r)))}">${esc(nasTr(jobTag(r)))}</span>`;}
     else if(r){dot="var(--danger)";tip="Не скопирована: "+jobWhy(r)+". "+moved;}
     else{dot="var(--mut)";tip="Эту папку ещё ни разу не копировали — запустите бэкап.";}
     const vb=r&&(r.verify_err?`<span class="nb-warn wrn" title="Сверка контрольных сумм не смогла завершиться — см. журнал.">сверка не удалась</span>`:r.verify_bad?`<span class="nb-warn dng" title="Содержимое ${r.verify_bad} файла(ов) отличается от источника — см. журнал прогона.">≠ ${r.verify_bad}</span>`:"")||"";
@@ -6471,6 +6484,9 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
     else if(notMnt){m=`⚠ Приёмник не смонтирован (${esc(ds.base||"")}) — бэкап не запустится.`;}
     else if(miss){m=`⚠ Папок нет в приёмнике: ${miss}. Похоже, удалены вручную. Запусти бэкап — они восстановятся.`;}
     else if(emptyN){m=`Папок пусто в приёмнике: ${emptyN}.`;cls="nb-dwarn wrn";}
+    // диск-приёмник на exFAT/NTFS: часть файлов туда просто не влезет — лучше сказать это
+    // ЗАРАНЕЕ, а не оставлять человека гадать над вечным «код 23»
+    else if(ds&&ds.fs_limited){m=`Диск приёмника отформатирован в ${esc(ds.fs||"")}. Такая файловая система не хранит симлинки, спецфайлы и права, а имена с «:» и переносом строки просто не принимает — эти файлы будут пропускаться каждый прогон (остальное копируется нормально). Для полноценного бэкапа диск лучше переформатировать в ext4.`;cls="nb-dwarn wrn";}
     dw.className=cls;dw.style.display=m?"block":"none";dw.innerHTML=m;}
    const sn=g("#oStatus");if(sn){if(st&&st.running)sn.innerHTML=`<span style="color:var(--accent)">идёт сейчас…</span>`;
     else if(st&&st.queued)sn.innerHTML=qCaption(st);
@@ -6500,13 +6516,14 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
    const by={};(done||[]).forEach(r=>{if(r&&r.src)by[r.src]=r;});
    jn.querySelectorAll(".nb-job").forEach(row=>{const d=by[row.dataset.src],dot=row.querySelector(".ovh-dot");if(!dot)return;
     let tag=row.querySelector(".nb-live");
-    if(d){const stop=d.stopped||(d.code!=null&&d.code<0);
-     dot.style.background=d.ok?"var(--good)":stop?"var(--warn)":"var(--danger)";
-     setTip(dot,d.ok?`Скопирована в этом прогоне: файлов ${d.xfer||0} · ${fmtB(d.xfer_bytes||0)}`:"Не скопирована: "+jobWhy(d));
+    if(d){const soft=d.stopped||(d.code!=null&&d.code<0)||jobFsOnly(d);
+     dot.style.background=d.ok?"var(--good)":soft?"var(--warn)":"var(--danger)";
+     setTip(dot,d.ok?`Скопирована в этом прогоне: файлов ${d.xfer||0} · ${fmtB(d.xfer_bytes||0)}`
+       :jobFsOnly(d)?jobWhy(d):"Не скопирована: "+jobWhy(d));
      if(tag){tag.remove();tag=null;}
      if(d.ok)row.querySelectorAll(".nb-warn").forEach(x=>x.remove());   // «нет папки»/«пусто» уже неправда
      // бейдж — короткая метка (в строке папки нет места на роман), разбор причины — в подсказке
-     else if(!row.querySelector(".nb-warn"))row.appendChild(el(`<span class="nb-warn ${stop?"wrn":"dng"}" title="${att(nasTr(jobWhy(d)))}">${esc(nasTr(jobTag(d)))}</span>`));}
+     else if(!row.querySelector(".nb-warn"))row.appendChild(el(`<span class="nb-warn ${soft?"wrn":"dng"}" title="${att(nasTr(jobWhy(d)))}">${esc(nasTr(jobTag(d)))}</span>`));}
     else if(row.dataset.src===cur){dot.style.background="var(--accent)";
      setTip(dot,"Копируется прямо сейчас — скорость и остаток видны выше.");
      if(!tag)row.appendChild(el(`<span class="nb-warn nb-live">копируется…</span>`));}
