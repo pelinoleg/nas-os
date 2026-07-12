@@ -3148,6 +3148,14 @@ AM
 # (UAS) отдают диск как ID_BUS=ata, и старое правило для них не срабатывало.
 ACTION=="add",    SUBSYSTEM=="block", ENV{ID_FS_USAGE}=="filesystem", ENV{ID_USB_DRIVER}=="?*", RUN+="/usr/bin/systemd-run --no-block /usr/local/bin/nas-automount.sh add %k"
 ACTION=="remove", SUBSYSTEM=="block", ENV{ID_USB_DRIVER}=="?*", RUN+="/usr/bin/systemd-run --no-block /usr/local/bin/nas-automount.sh remove %k"
+
+# Таймаут SCSI-команды для USB-дисков: 30 с (по умолчанию) → 180 с.
+# 2.5" SMR-диск под сплошной записью уходит во внутреннюю перетасовку и может не отвечать
+# минуту. Ядро на 30-й секунде объявляет ошибку, error recovery не помогает, диск уходит
+# ОФЛАЙН, ext4 — в аварийный read-only ПОСРЕДИ бэкапа (реальный случай 2026-07-12: Ugreen
+# RTL9210 + ST4000LM024, команда висела 68 с; SMART при этом чистый — диск ошибок не видел).
+# %S/%p = путь sysfs самого блочного устройства; device/timeout — уже scsi-устройство за ним.
+ACTION=="add|change", SUBSYSTEM=="block", KERNEL=="sd*", ENV{ID_USB_DRIVER}=="?*", RUN+="/bin/sh -c 'echo 180 > /sys/%p/device/timeout'"
 RULES
     run udevadm control --reload-rules
     run udevadm trigger --subsystem-match=block --action=add 2>/dev/null || true
