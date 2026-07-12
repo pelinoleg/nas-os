@@ -4768,14 +4768,33 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None):
                                  stderr=subprocess.STDOUT, text=True, bufsize=1)
         except OSError as e:
             writer("не запустить rsync: %s" % e); emit({"src": j["src"], "ok": False}); continue
-        for line in iter(p.stdout.readline, ""):
-            line = line.rstrip("\n")
-            writer(line)
-            if "Number of" in line or "Total transferred" in line or "Total file size" in line:
-                stat_lines.append(line)
-            if cancel():
-                p.kill(); break
-        p.wait()
+        # «Стоп» = флаг-файл, а rsync умеет молчать минутами (строит список файлов) —
+        # проверки внутри цикла чтения там не случается вовсе. Сторож смотрит флаг сам,
+        # поэтому остановка занимает ≤1 с, а не «сколько-нибудь»
+        done_ev = threading.Event()
+        def _watch_cancel(proc=p):
+            while not done_ev.wait(0.5):
+                if cancel():
+                    try: proc.kill()
+                    except OSError: pass
+                    return
+        threading.Thread(target=_watch_cancel, daemon=True).start()
+        err_lines = []
+        try:
+            for line in iter(p.stdout.readline, ""):
+                line = line.rstrip("\n")
+                writer(line)
+                if "Number of" in line or "Total transferred" in line or "Total file size" in line:
+                    stat_lines.append(line)
+                # the first rsync complaint IS the answer to "so what went wrong?" —
+                # keep it for the panel instead of making the user dig through the log
+                elif len(err_lines) < 3 and (line.startswith("rsync:") or " failed: " in line):
+                    err_lines.append(line.strip())
+                if cancel():
+                    p.kill(); break
+            p.wait()
+        finally:
+            done_ev.set()
         try: p.stdout.close()
         except OSError: pass
         ok = p.returncode in (0, 24)     # 24 = vanished files — не ошибка
@@ -4794,6 +4813,13 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None):
         res = {"src": j["src"], "dest": j["dest"], "ok": ok, "code": p.returncode, "size": sz,
                "files": stt.get("files", prevf.get(j["src"], 0)), "xfer": stt.get("xfer", 0),
                "xfer_bytes": stt.get("xfer_bytes", 0), "deleted": stt.get("deleted", 0)}
+        if cancel():
+            # мы сами убили rsync по «Стопу» — это не ошибка передачи (иначе в панели
+            # висело бы «ошибка rsync, код -9», и поди догадайся, что это твой же стоп)
+            res["stopped"] = True
+        elif not ok and err_lines:
+            res["err"] = err_lines[0][:180]
+            res["errn"] = len(err_lines)
         if ok and not dry and cfg.get("verify") and not cancel():
             vb, vn, ve = _nb_verify_job(cfg, j, writer, cancel)
             res["verify_bad"], res["verify_new"], res["verify_err"] = vb, vn, ve
@@ -4803,17 +4829,20 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None):
                                 j["src"], (" · " + fmt_bytes(sz)) if sz else "", extra))
     vbad = sum(int(r.get("verify_bad") or 0) for r in results)
     verr = any(r.get("verify_err") for r in results)
+    stopped = cancel()          # остановлен пользователем — это не «бэкап с ошибками»
     allok = (all(r["ok"] for r in results) and len(results) == len(jobs)
-             and not vbad and not verr)
+             and not vbad and not verr and not stopped)
     if not dry:
         try: pruned = _nb_prune_remote(cfg, writer, shell_fs) if push_ssh else _nb_prune(cfg)
         except Exception: pruned = 0
         if pruned: writer("очищено старых снимков удалённых: %d" % pruned)
         _nb_write_status(pid, results)
         try: _nb_history_add(pid, {"ts": int(time.time()), "dur": int(time.time() - t0),
-                              "result": "ok" if allok else "warn", "jobs": results})
+                              "result": "stopped" if stopped else ("ok" if allok else "warn"),
+                              "jobs": results})
         except Exception: pass
-    return {"ok": allok, "jobs": results, "verify_bad": vbad, "verify_err": verr}
+    return {"ok": allok, "jobs": results, "verify_bad": vbad, "verify_err": verr,
+            "stopped": stopped}
 
 def _nb_verify_job(cfg, job, writer, cancel):
     """Post-run verify of one job: rsync -c -n re-reads both sides and compares
@@ -5044,6 +5073,7 @@ def nb_log_tail(since, pid=None):
             "started": rs.get("started", 0), "dry": rs.get("dry", False),
             "result": rs.get("result"), "cur": rs.get("cur", ""), "line": cur_line,
             "jobs": rs.get("jobs") or [], "total": rs.get("total") or 0,
+            "stopping": bool(running and rs.get("stopping")),
             "seq": end, "base": base, "lines": lines[start:]}
 
 # --------------------------------------------------------------------------- #
@@ -5263,7 +5293,8 @@ def nb_run_cli(pid=None, dry=False):
         st = _nb_run_state_read(pid)
         st["jobs"] = [{k: r.get(k) for k in ("src", "ok", "code", "xfer", "xfer_bytes",
                                              "size", "verify_bad", "verify_err",
-                                             "src_missing", "not_mounted")} for r in done]
+                                             "src_missing", "not_mounted", "stopped",
+                                             "err", "errn")} for r in done]
         st["total"] = total
         _nb_run_state_write(pid, st)
     def cancel():
@@ -5273,8 +5304,12 @@ def nb_run_cli(pid=None, dry=False):
     res = None
     try:
         r = nb_run(cfg, dry, w, cancel, on_job)
-        res = "ok" if r.get("ok") else ("unreachable" if r.get("unreachable") else "warn")
-        if not dry:
+        res = ("ok" if r.get("ok") else "stopped" if r.get("stopped")
+               else "unreachable" if r.get("unreachable") else "warn")
+        if not dry and r.get("stopped"):
+            try: log_event("nas_backup", title, "остановлен вручную", "info", kind="backup", desk=True)
+            except Exception: pass
+        if not dry and not r.get("stopped"):
             guarded = [j.get("src") for j in r.get("jobs", []) if j.get("code") == 25]
             if guarded:      # сработала защита от массового удаления — отдельное важное уведомление
                 try: notify_event("nb_guard", "nb_guard:" + pid, "NAS-бэкап: остановлен защитой" + sfx,
@@ -12192,6 +12227,12 @@ class H(BaseHTTPRequestHandler):
                     open(nb_run_cancel(pid), "w").close()    # флаг для процесса-драйвера в юните
                 except OSError:
                     pass
+                # пометить остановку в состоянии: панель показывает «останавливаю…» даже
+                # если страницу перезагрузили, пока rsync доумирает
+                st = _nb_run_state_read(pid)
+                if st.get("running"):
+                    st["stopping"] = int(time.time())
+                    _nb_run_state_write(pid, st)
                 self._json({"ok": True})
             elif p == "/api/timemachine/apply":
                 b = self._body()

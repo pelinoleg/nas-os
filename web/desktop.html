@@ -6381,27 +6381,54 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
    <div class="upd-con" id="oCon" style="display:none;margin-top:8px"></div>`;
   const g=s=>tc.querySelector(s);
   const qCaption=st=>`<span style="color:var(--warn)">в очереди${st.queue_after?` — начнётся после «${esc(st.queue_after)}»`:""}${st.queue_ahead?`, впереди ещё ${st.queue_ahead}`:""}</span>`;
-  /* итог прогона человеческим языком: скопировалось всё или есть проблемы и какие */
-  const jobIssue=j=>j.src_missing?"источника нет на этом NAS":j.not_mounted?"диск приёмника не смонтирован"
-    :j.code===25?"остановлено защитой от массового удаления":j.verify_err?"сверка не смогла завершиться"
-    :j.verify_bad?`сверка: файлов не совпало — ${j.verify_bad}`:(j.ok?"":`ошибка rsync, код ${j.code==null?"?":j.code}`);
+  /* итог прогона человеческим языком: скопировалось всё или есть проблемы и какие.
+     Голый «код 23» ничего не говорит — расшифровываем коды rsync и добавляем ЕГО же
+     первую строку ошибки (она английская и переводу не подлежит — это вывод rsync). */
+  const RSC={1:"rsync не понял команду — обычно приёмник со старым rsync",
+   2:"на этом NAS и на той стороне несовместимые версии rsync",
+   5:"не удалось начать обмен: неверный модуль rsync-демона или пароль",
+   10:"обрыв сети во время передачи",
+   11:"ошибка записи на диск — обычно кончилось место или не хватает прав",
+   12:"связь с той стороной оборвалась посреди передачи",
+   20:"передачу прервали сигналом",
+   22:"не хватило памяти",
+   23:"часть файлов не передана: чаще всего у них нет прав на чтение или они исчезли во время копирования",
+   24:"часть файлов исчезла во время копирования — обычное дело для живых папок",
+   25:"остановлено защитой: rsync хотел удалить слишком много файлов",
+   30:"таймаут: та сторона перестала отвечать",
+   35:"таймаут ожидания rsync-демона",
+   255:"SSH не подключился — проверьте адрес, порт и пароль или ключ"};
+  const jobIssue=j=>{
+   if(j.src_missing)return "источника нет на этом NAS: папку удалили или диск не смонтирован";
+   if(j.not_mounted)return "диск приёмника не смонтирован, папку пропустили";
+   if(j.stopped||(j.code!=null&&j.code<0))return "остановлена вами — уже скопированное осталось на месте";
+   if(j.verify_err)return "сверка контрольных сумм не смогла завершиться";
+   if(j.verify_bad)return `сверка: файлов не совпало — ${j.verify_bad}`;
+   if(j.ok)return "";
+   const base=RSC[j.code]||`rsync вернул код ${j.code==null?"?":j.code}`;
+   return base+(j.err?` · ${j.err}`:"");};
   const runSumm=(jobs,ts,result,total)=>{jobs=jobs||[];
-   const tot=total||jobs.length,okN=jobs.filter(j=>j.ok).length,bad=jobs.filter(j=>!j.ok);
+   const isStop=j=>j.stopped||(j.code!=null&&j.code<0);   // убит нашим же «Стопом» — не ошибка
+   const tot=total||jobs.length,okN=jobs.filter(j=>j.ok).length;
+   const bad=jobs.filter(j=>!j.ok&&!isStop(j)),killed=jobs.filter(isStop);
    const vb=jobs.reduce((a,j)=>a+(+j.verify_bad||0),0),ve=jobs.some(j=>j.verify_err);
    const files=jobs.reduce((a,j)=>a+(+j.xfer||0),0),bytes=jobs.reduce((a,j)=>a+(+j.xfer_bytes||0),0);
    const when=ts?fmDate(ts)+" · ":"";
    if(result==="unreachable")return `<div class="nb-sum bad">${when}<b>${push?"приёмник недоступен":"главный NAS недоступен"}</b> — ничего не скопировано</div>`;
    const moved=`передано файлов: ${files} · ${fmtB(bytes)}`;
-   const stopped=jobs.length<tot;
-   if(!bad.length&&!vb&&!ve&&!stopped)
-    return `<div class="nb-sum good">${when}<b>всё скопировано, проблем нет</b> · папок: ${okN} из ${tot} · ${moved}</div>`;
+   const cut=result==="stopped"||killed.length||jobs.length<tot;
    const li=(color,text)=>`<div class="nb-sum-i"><span class="ovh-dot" style="background:var(--${color});flex:none"></span>${text}</div>`;
+   if(!bad.length&&!vb&&!ve&&!cut)
+    return `<div class="nb-sum good">${when}<b>всё скопировано, проблем нет</b> · папок: ${okN} из ${tot} · ${moved}</div>`;
    const items=bad.map(j=>li("danger",`<span class="mono">${esc(j.src)}</span> — ${esc(jobIssue(j))}`)).join("")
     +(vb?li("warn",`сверка нашла отличия: файлов ${vb} — в приёмнике они не совпали с источником`):"")
     +(ve&&!vb?li("warn","сверка не смогла завершиться"):"")
-    +(stopped?li("warn",`прогон не дошёл до конца: обработано папок ${jobs.length} из ${tot}`):"");
-   return `<div class="nb-sum warn">${when}<b>есть проблемы</b> · папок скопировано: ${okN} из ${tot} · ${moved}</div>${items}`
-    +`<div class="nb-sum-h">Что именно пошло не так — видно в журнале прогона (кнопка ниже).</div>`;};
+    +(cut?li("warn",`успели скопировать папок: ${okN} из ${tot}${killed.length?`, прервали на «${esc(killed[0].src)}»`:""}`):"");
+   // остановка вручную — не «бэкап с ошибками»: разделяем эти два исхода явно
+   const head=(cut&&!bad.length&&!vb&&!ve)
+    ?`<div class="nb-sum warn">${when}<b>прогон остановлен вами</b> · ${moved} · уже скопированное на месте</div>`
+    :`<div class="nb-sum warn">${when}<b>есть проблемы</b> · папок скопировано: ${okN} из ${tot} · ${moved}</div>`;
+   return head+items+`<div class="nb-sum-h">Что именно пошло не так — видно в журнале прогона (кнопка ниже).</div>`;};
   // подсказка ставится из JS, а не через innerHTML → хук перевода её не увидит: переводим руками.
   // data-tip важнее title для пузыря, поэтому обновляем именно его (title мог уже «съесться» хуком)
   const setTip=(n,t)=>{t=nasTr(t);n.setAttribute("title",t);if(n.hasAttribute("data-tip"))n.setAttribute("data-tip",t);};
@@ -6413,11 +6440,12 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
    else jn.innerHTML="";
    let miss=0,emptyN=0;
    (c.jobs||[]).forEach(j=>{const r=byS[j.src],d=byD[j.src];let dot,badge="",tip;
-    if(d&&!d.exists){dot="var(--danger)";tip="Красная: папки нет в приёмнике. Её удалили вручную или диск был не тот — запустите бэкап, она создастся заново.";badge=`<span class="nb-warn dng" title="Папки нет в приёмнике — удалена вручную? Запусти бэкап, чтобы восстановить.">нет папки</span>`;miss++;}
-    else if(d&&d.empty){dot="var(--warn)";tip="Жёлтая: папка в приёмнике есть, но она пустая — похоже, в неё ещё ничего не скопировалось.";badge=`<span class="nb-warn wrn" title="Папка в приёмнике есть, но пуста.">пусто</span>`;emptyN++;}
-    else if(r&&r.ok){dot="var(--good)";tip="Зелёная: в прошлый прогон папка скопировалась без ошибок.";}
-    else if(r){dot="var(--danger)";tip="Красная: в прошлый прогон папку скопировать не удалось — "+jobIssue(r)+". Подробности в журнале.";}
-    else{dot="var(--mut)";tip="Серая: папку ещё ни разу не копировали — запустите бэкап.";}
+    const moved=r?`Передано в прошлый прогон: файлов ${r.xfer||0} · ${fmtB(r.xfer_bytes||0)}${r.size?` · в приёмнике лежит ${fmtB(r.size)}`:""}`:"";
+    if(d&&!d.exists){dot="var(--danger)";tip="Папки нет в приёмнике: её удалили вручную или подключён другой диск. Запустите бэкап — она создастся заново.";badge=`<span class="nb-warn dng" title="Папки нет в приёмнике — удалена вручную? Запусти бэкап, чтобы восстановить.">нет папки</span>`;miss++;}
+    else if(d&&d.empty){dot="var(--warn)";tip="Папка в приёмнике есть, но пустая: в неё ещё ничего не скопировалось.";badge=`<span class="nb-warn wrn" title="Папка в приёмнике есть, но пуста.">пусто</span>`;emptyN++;}
+    else if(r&&r.ok){dot="var(--good)";tip="Скопирована без ошибок. "+moved;}
+    else if(r){dot="var(--danger)";tip="Не скопирована: "+jobIssue(r)+". "+moved;}
+    else{dot="var(--mut)";tip="Эту папку ещё ни разу не копировали — запустите бэкап.";}
     const vb=r&&(r.verify_err?`<span class="nb-warn wrn" title="Сверка контрольных сумм не смогла завершиться — см. журнал.">сверка не удалась</span>`:r.verify_bad?`<span class="nb-warn dng" title="Содержимое ${r.verify_bad} файла(ов) отличается от источника — см. журнал прогона.">≠ ${r.verify_bad}</span>`:"")||"";
     const srcT=(push?"/":"")+j.src;
     jn.appendChild(el(`<div class="nb-job" data-src="${att(j.src)}"><span class="ovh-dot" style="background:${dot};flex:none" title="${att(tip)}"></span><span class="nb-src mono" title="${att(srcT)}">${esc(srcT)}</span><span class="nb-arr">→</span><span class="nb-dst mono" title="${att(j.dest)}">${esc(j.dest)}</span>${badge}${vb}${r&&r.size?`<span class="nb-sz mono">${fmtB(r.size)}</span>`:""}</div>`));});
@@ -6453,21 +6481,30 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
   // идёт прогон → нечего предлагать, кроме «Остановить»: запуск/пробный/проверка связи
   // всё равно упрутся в «уже выполняется», а кнопка «Проверить связь» ещё и дёргает канал
   const setBusy=b=>{["#oRun","#oDry","#oTest"].forEach(s=>{const n=g(s);if(n)n.style.display=b?"none":"";});
-   const cb=g("#oCancel");if(cb)cb.style.display=b?"":"none";};
+   const cb=g("#oCancel");if(cb){cb.style.display=b?"":"none";if(!b)setStopping(false);}};
+  // «Стоп» нажат, но rsync ещё доумирает: без этого кнопка выглядела мёртвой — непонятно,
+  // не сработало или просто долго. Флаг живёт на сервере, поэтому переживает перезагрузку страницы
+  let stopShown=false;
+  const setStopping=s=>{const cb=g("#oCancel");if(!cb)return;
+   cb.disabled=s;cb.innerHTML=(s?svg("clock",13):svg("x",13))+" "+(s?"Останавливаю…":"Остановить");
+   if(s&&!stopShown){const op=g("#oProg");if(op){op.style.display="block";
+     op.innerHTML=`<div class="nb-prog-cur">Останавливаю прогон…</div><div class="nb-prog-l">Ждём, пока rsync закроет текущий файл — обычно это пара секунд. Уже скопированное останется на месте.</div>`;}}
+   stopShown=s;};
   // точки папок по ходу прогона: готовые — зелёная/красная, текущая — акцент, остальные ждут
   const liveDots=(done,cur)=>{const jn=g("#oJobs");if(!jn)return;
    const by={};(done||[]).forEach(r=>{if(r&&r.src)by[r.src]=r;});
    jn.querySelectorAll(".nb-job").forEach(row=>{const d=by[row.dataset.src],dot=row.querySelector(".ovh-dot");if(!dot)return;
     let tag=row.querySelector(".nb-live");
-    if(d){dot.style.background=d.ok?"var(--good)":"var(--danger)";
-     setTip(dot,d.ok?"Зелёная: папка скопирована в этом прогоне, ошибок не было.":"Красная: папку скопировать не удалось — "+jobIssue(d)+". Подробности в журнале.");
+    if(d){const stop=d.stopped||(d.code!=null&&d.code<0);
+     dot.style.background=d.ok?"var(--good)":stop?"var(--warn)":"var(--danger)";
+     setTip(dot,d.ok?`Скопирована в этом прогоне: файлов ${d.xfer||0} · ${fmtB(d.xfer_bytes||0)}`:"Не скопирована: "+jobIssue(d));
      if(tag){tag.remove();tag=null;}
      if(d.ok)row.querySelectorAll(".nb-warn").forEach(x=>x.remove());   // «нет папки»/«пусто» уже неправда
-     else if(!row.querySelector(".nb-warn"))row.appendChild(el(`<span class="nb-warn dng">${esc(nasTr(jobIssue(d)))}</span>`));}
+     else if(!row.querySelector(".nb-warn"))row.appendChild(el(`<span class="nb-warn ${stop?"wrn":"dng"}">${esc(nasTr(jobIssue(d)))}</span>`));}
     else if(row.dataset.src===cur){dot.style.background="var(--accent)";
-     setTip(dot,"Синяя: эту папку копируем прямо сейчас — прогресс виден выше.");
+     setTip(dot,"Копируется прямо сейчас — скорость и остаток видны выше.");
      if(!tag)row.appendChild(el(`<span class="nb-warn nb-live">копируется…</span>`));}
-    else{dot.style.background="var(--mut)";setTip(dot,"Серая: папка ждёт своей очереди в этом прогоне.");if(tag)tag.remove();}});};
+    else{dot.style.background="var(--mut)";setTip(dot,"Ждёт очереди: начнётся, когда закончится текущая папка.");if(tag)tag.remove();}});};
   function attachLog(){clearInterval(win._nbpi);
    win._nbpi=setInterval(async()=>{if(!document.body.contains(con)){clearInterval(win._nbpi);win._nbpi=null;return;}
     const r=await nbG("/api/backup/log?since="+nbCursor);if(!r)return;
@@ -6476,8 +6513,10 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
     if(r.base>nbCursor&&nbCursor>0)con.innerHTML="";
     if(r.lines&&r.lines.length)nbAppend(r.lines);
     nbCursor=r.seq;
+    if(r.running&&r.stopping)setStopping(true);   // остановку начали в другой вкладке / до перезагрузки
     const op=g("#oProg");
-    if(op){if(r.running){const ln=r.line||"";
+    if(op&&r.stopping&&r.running){}              // полосу прогресса не трогаем: там уже «останавливаю…»
+    else if(op){if(r.running){const ln=r.line||"";
       const pm=/(\d+)%/.exec(ln),pct=pm?+pm[1]:null;
       const rm=/([\d.]+[KMGT]?B\/s)/.exec(ln),rate=rm?rm[1]:"";
       const tk=/to-chk=(\d+)\/(\d+)/.exec(ln),left=tk?+tk[1]:null;
@@ -6488,7 +6527,7 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
     }else op.style.display="none";}
     if(r.running)liveDots(r.jobs,r.cur);   // папки красятся по мере готовности, а не в конце
     if(!r.running){clearInterval(win._nbpi);win._nbpi=null;setBusy(false);
-     notifyDone(r.dry?"Пробный прогон завершён":(r.result==="ok"?"Бэкап завершён":r.result==="unreachable"?(push?"Приёмник недоступен":"Главный NAS недоступен"):"Бэкап с ошибками"),"");
+     notifyDone(r.dry?"Пробный прогон завершён":(r.result==="ok"?"Бэкап завершён":r.result==="stopped"?"Бэкап остановлен":r.result==="unreachable"?(push?"Приёмник недоступен":"Главный NAS недоступен"):"Бэкап с ошибками"),"");
      if(r.dry){const sn=g("#oStatus");if(sn)sn.innerHTML=`<b>пробный прогон завершён</b> — ничего не изменено`;}
      // реальный прогон → перекрасить точки/размеры и показать итог: всё ли скопировалось.
      // итог берём из состояния прогона (там есть unreachable и сверка), а не из файла статуса
@@ -6512,7 +6551,7 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
    if(rr&&rr.queued){toast("Другой бэкап уже идёт — поставлено в очередь");waitQueue();return;}
    attachLog();};
   g("#oRun").onclick=()=>run(false);g("#oDry").onclick=()=>run(true);
-  g("#oCancel").onclick=()=>{nbP("/api/backup/cancel");toast("Останавливаю…");};
+  g("#oCancel").onclick=()=>{setStopping(true);nbP("/api/backup/cancel");toast("Останавливаю…");};
   // on tab open: preload the LAST run's log so «Показать журнал» is never empty,
   // then reattach if a run is active or waiting in the queue (journal stays hidden)
   nbG("/api/backup/log?since=0").then(r=>{if(!r)return;
@@ -6530,7 +6569,9 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
     box.innerHTML="";
     list.forEach(run=>{const ok=(run.jobs||[]).filter(x=>x.ok).length,tot=(run.jobs||[]).length;
      const bad=run.result!=="ok";
-     const meta=run.result==="aborted"?"прерван (сбой или перезагрузка)":`${ok}/${tot} · ${esc(dur(run.dur))}`;
+     const meta=run.result==="aborted"?"прерван (сбой или перезагрузка)"
+       :run.result==="stopped"?`остановлен вручную · ${ok}/${tot} · ${esc(dur(run.dur))}`
+       :`${ok}/${tot} · ${esc(dur(run.dur))}`;
      const head=el(`<div class="nb-hrun"><span class="ovh-dot" style="background:${bad?"var(--warn)":"var(--good)"};flex:none"></span><span class="nb-hdate">${fmDate(run.ts)}</span><span class="nb-hmeta mono">${meta}</span><button class="iconbtn nb-hdel" title="Удалить запись">${svg("x",13)}</button></div>`);
      head.querySelector(".nb-hdel").onclick=async()=>{const r=await nbP("/api/backup/history-del",{ts:run.ts});draw((r&&r.history)||[]);};
      box.appendChild(head);
