@@ -6052,6 +6052,36 @@ function pickFolder(opts){
  draw();}
 // старое имя — чтобы не переписывать все точки вызова
 const nbPickLocal=(start,onPick)=>pickFolder({start,onPick,title:"Куда копировать"});
+// пикер папки-приёмника push-ssh: ходим по удалённому серверу rsync-листингом
+// (работает и на «модульных» NAS — сервер сам определяет корень). Папки создаются
+// при прогоне, поэтому в поле пути можно дописать ещё не существующий хвост.
+function nbPickDest(start,onPick){const s=document.getElementById("scrim");
+ let cur=String(start||"").replace(/\/+$/,""),absRoot=null,busy=false;
+ const parent=p=>{p=p.replace(/\/+$/,"");const i=p.lastIndexOf("/");return i<=0?"":p.slice(0,i);};
+ s.innerHTML=`<div class="dialog pf-dlg"><h3>${svg("net",16)} Папка на приёмнике</h3>
+   <div class="mon-note" style="margin:0 0 10px">Выберите существующую папку — или допишите новую в поле пути: недостающие папки создадутся при первом прогоне.</div>
+   <div class="pf-main" style="width:100%">
+     <div class="pf-bar"><button class="iconbtn" id="pdUp" title="Наверх">${svg("arrowup",15)}</button><input class="mono" id="pdPath" spellcheck="false"></div>
+     <div class="pf-list" id="pdList"></div></div>
+   <div class="pf-foot"><span class="pf-cur" id="pdCur"></span><button class="btn" id="pdX">Отмена</button><button class="btn pri" id="pdO">Выбрать эту папку</button></div></div>`;
+ s.classList.add("show");
+ const $=q=>s.querySelector(q);
+ $("#pdX").onclick=()=>s.classList.remove("show");
+ $("#pdO").onclick=()=>{s.classList.remove("show");onPick(($("#pdPath").value||cur).trim().replace(/\/+$/,""));};
+ $("#pdUp").onclick=()=>{if(cur){cur=parent(cur);draw();}};
+ $("#pdPath").onkeydown=ev=>{if(ev.key==="Enter"){ev.preventDefault();cur=$("#pdPath").value.trim().replace(/\/+$/,"");draw();}};
+ const draw=async()=>{if(busy)return;busy=true;
+  const list=$("#pdList");list.innerHTML=`<div class="pf-empty">загрузка…</div>`;
+  const r=await nbP("/api/backup/browse",{path:cur,dest:1});busy=false;
+  if(r&&r.abs!==undefined)absRoot=r.abs;
+  const pi=$("#pdPath");if(document.activeElement!==pi)pi.value=cur;
+  const cu=$("#pdCur");if(cu){cu.textContent=cur||(absRoot===false?"корень (модули)":"/");cu.title=cu.textContent;}
+  if(!(r&&r.ok)){list.innerHTML=`<div class="pf-empty">${esc((r&&r.log)||"нет доступа")}</div>`;return;}
+  cur=r.path;
+  const dirs=(r.entries||[]).filter(e=>e.dir);
+  list.innerHTML=dirs.map(d=>`<div class="pf-row" data-n="${att(d.name)}">${svg("folder",15)}<span>${esc(d.name)}</span></div>`).join("")||`<div class="pf-empty">Здесь нет вложенных папок — можно выбрать эту</div>`;
+  list.querySelectorAll("[data-n]").forEach(n=>n.onclick=()=>{cur=(cur?cur+"/":(absRoot?"/":""))+n.dataset.n;draw();});};
+ draw();}
 // модалка визуального выбора папок ИСТОЧНИКА (чекбоксы) — навигация по главному NAS
 function nbPickSource(preselected,preExcl,onPick,opts){const s=document.getElementById("scrim");opts=opts||{};
  const sel=new Set(preselected||[]),excl=new Set(preExcl||[]),expanded=new Set(),kids={};   // kids[path]: массив | null(ошибка) | undefined(не грузили)
@@ -6151,7 +6181,7 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
    <div class="srow"><div class="srow-l"><div class="srow-t">Пользователь</div></div><div class="srow-c"><input class="mono" id="cUser" value="${att(c.user||"")}" placeholder="oleg"></div></div>
    <div class="srow"><div class="srow-l"><div class="srow-t">Пароль</div><div class="srow-d">пусто = вход по ключу</div></div><div class="srow-c"><input type="password" class="mono" id="cPw" placeholder="${c.has_password?"•••••• (задан)":"пароль"}"></div></div>
    <div class="srow"><div class="srow-l"><div class="srow-t">SSH-порт</div></div><div class="srow-c"><input class="mono" id="cPort" style="max-width:90px" value="${c.ssh_port||22}"></div></div>
-   <div class="nb-field" style="margin-top:10px"><label>Папка на сервере${tipHTML("Куда складывать копии (каждый источник — своей подпапкой), папки создаются сами. Обычный Linux-сервер — абсолютный путь: /mnt/backup/nas. NAS вроде UGREEN/Synology принудительно заворачивают rsync в «модули» — там путь пишется ОТ модуля, без ведущего /: например HDD6TB/Downloads/backup. Нажмите «Проверить» — покажет доступные корни.")}</label><input class="mono" id="cBase" value="${att(c.dest_base||"")}" placeholder="/mnt/backup/${esc(host())}"></div>`
+   <div class="nb-field" style="margin-top:10px"><label>Папка на сервере${tipHTML("Куда складывать копии (каждый источник — своей подпапкой), папки создаются сами. Проще всего — кнопка «Выбрать»: покажет папки сервера как есть. Если писать руками: обычный Linux-сервер — абсолютный путь (/mnt/backup/nas), а NAS вроде UGREEN/Synology заворачивают rsync в «модули», и путь пишется ОТ модуля без ведущего /: например HDD6TB/Downloads/backup.")}</label><div class="nb-field-row"><input class="mono" id="cBase" value="${att(c.dest_base||"")}" placeholder="/mnt/backup/${esc(host())}"><button class="btn sm" id="cBaseR">${svg("folder",13)} Выбрать</button></div></div>`
    :`<div class="nb-field" style="margin-top:10px"><label>Папка-приёмник${tipHTML("Папка на этом NAS, куда складывать копии — обычно на внешнем USB-диске. Если диск не подключён, прогон пропустится и ничего не зальёт системный раздел.")}</label><div class="nb-field-row"><input class="mono" id="cBase" value="${att(c.dest_base||"")}" placeholder="/media/usb-disk/backup"><button class="btn sm" id="cBaseB">${svg("folder",13)} Выбрать</button></div></div>`}
    <div class="srow"><div class="srow-l"><div class="srow-t">Ограничение скорости${tipHTML("Лимит скорости передачи в КБ/с (rsync --bwlimit), чтобы бэкап не забивал сеть и диск. 0 — без ограничения.")}</div><div class="srow-d">чтобы не забивать сеть/диск</div></div><div class="srow-c"><input class="mono" id="cBw" style="max-width:90px" value="${c.bwlimit||0}"><span style="color:var(--mut);font-size:12px">КБ/с</span></div></div>
    ${verifyRow(c)}
@@ -6167,7 +6197,10 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
   if(ssh){g("#cHost").onchange=()=>saveCfg({host:g("#cHost").value.trim()});
    g("#cUser").onchange=()=>saveCfg({user:g("#cUser").value.trim()});
    g("#cPw").onchange=()=>{if(g("#cPw").value)saveCfg({password:g("#cPw").value});};
-   g("#cPort").onchange=()=>saveCfg({ssh_port:+g("#cPort").value||22});}
+   g("#cPort").onchange=()=>saveCfg({ssh_port:+g("#cPort").value||22});
+   const rb=g("#cBaseR");if(rb)rb.onclick=()=>{
+     if(!CFG.host||!CFG.user){toast("Сначала заполните адрес и пользователя");return;}
+     nbPickDest(cb.value.trim(),p=>{cb.value=p;saveBase(p);});};}
   {const bw=g("#cBw");if(bw)bw.onchange=()=>saveCfg({bwlimit:+bw.value||0});}
   wireVerify(tc);
   g("#cTest").onclick=async()=>{const rr=g("#cTestR");rr.innerHTML=`<span class="nb-ok" style="color:var(--mut)">проверяю…</span>`;

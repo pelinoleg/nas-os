@@ -4443,6 +4443,51 @@ def _nb_is_junk(name):
 
 _NB_ROOT_SKIP = {"proc", "sys", "dev", "run", "tmp", "boot", "lost+found"}
 
+def _nb_ls(cfg, spec, timeout=30):
+    """--list-only по удалённому пути (spec подставляется после префикса как есть)."""
+    remote, env, rsh = _nb_remote_env(cfg)
+    r = subprocess.run(["rsync"] + rsh + ["--list-only", "--no-h", remote + spec],
+                       capture_output=True, text=True, env=env, timeout=timeout)
+    if r.returncode != 0:
+        return {"ok": False, "log": (r.stderr or r.stdout)[-300:]}
+    entries = []
+    for l in r.stdout.splitlines():
+        m = re.match(r"^(.)\S*\s+[\d,]+\s+\S+\s+\S+\s+(.+)$", l)
+        if not m: continue
+        name = m.group(2)
+        if name in (".", "") or _nb_is_junk(name): continue
+        entries.append({"name": name, "dir": m.group(1) == "d"})
+    entries.sort(key=lambda e: (not e["dir"], e["name"].lower()))
+    return {"ok": True, "entries": entries}
+
+def _nb_remote_shell_fs(cfg):
+    """True = rsync на удалённой стороне видит настоящую ФС (обычный shell-режим).
+    False = принудительный rsync-демон (UGREEN/Synology): пути только от «модулей»,
+    и shell-команды по SSH живут в ДРУГОМ пространстве путей. Пробник — /etc/:
+    он есть на любом Linux, а модуль с таким именем — экзотика."""
+    return bool(_nb_ls(cfg, "/etc/", timeout=15).get("ok"))
+
+def nb_browse_dest(cfg, path):
+    """Пикер папки-приёмника push-ssh: ходим по удалённой стороне. Корень зависит
+    от режима сервера: shell — «/», принудительный демон — список модулей."""
+    if (cfg or {}).get("transport") != "ssh":
+        return {"ok": False, "log": "приёмник не SSH"}
+    path = str(path or "").strip().rstrip("/")
+    if ".." in path:
+        return {"ok": False, "log": "недопустимый путь"}
+    if not path:
+        if _nb_remote_shell_fs(cfg):
+            r = _nb_ls(cfg, "/")
+            return dict(r, path="", abs=True) if r.get("ok") else \
+                {"ok": False, "log": _nb_err(r.get("log") or "")}
+        r = _nb_ls(cfg, "")
+        return dict(r, path="", abs=False) if r.get("ok") else \
+            {"ok": False, "log": _nb_err(r.get("log") or "")}
+    r = _nb_ls(cfg, path + "/")
+    if not r.get("ok"):
+        return {"ok": False, "log": _nb_err(r.get("log") or "")}
+    return dict(r, path=path)
+
 def nb_browse(cfg, path):
     """Список папок/файлов источника для визуального выбора (path='' → корень).
     push: источник — ЭТОТ NAS, ходим по локальной ФС (пути без ведущего /)."""
@@ -4557,7 +4602,7 @@ def nb_deleted_rel(cfg, t=None):
     rel = _nb_render_tpl(cfg.get("deleted_dir") or "_deleted/{date}", t)
     return rel or ("_deleted/" + time.strftime("%Y-%m-%d", t or time.localtime()))
 
-def nb_build_cmd(cfg, job, dry, prev_files=0):
+def nb_build_cmd(cfg, job, dry, prev_files=0, mkpath=False):
     """rsync-команда (+env) для одной задачи. prev_files — число файлов в прошлый
     прогон (для защиты --max-delete по проценту)."""
     remote, env, rsh = _nb_remote_env(cfg)
@@ -4588,8 +4633,8 @@ def nb_build_cmd(cfg, job, dry, prev_files=0):
         args.append("--bwlimit=%d" % bw)                 # КБ/с
     if cfg.get("transport") == "ssh" and cfg.get("remote_sudo"):
         args.append("--rsync-path=sudo rsync")   # читать файлы без доступа у пользователя (нужен NOPASSWD sudo на источнике)
-    if _nb_push_ssh(cfg) and not job["dest"].startswith("/"):
-        args.append("--mkpath")                  # модульный путь: папки создаёт сам rsync (демон ≥3.2.3)
+    if mkpath:
+        args.append("--mkpath")   # принудительный демон: папки в модуле создаёт сам rsync (≥3.2.3)
     if dry:
         args.append("--dry-run")
     args += _nb_src_dst(cfg, job, remote)
@@ -4650,6 +4695,11 @@ def nb_run(cfg, dry, writer, cancel=lambda: False):
         prevf = {}
     t0 = time.time()
     push, push_ssh = _nb_push(cfg), _nb_push_ssh(cfg)
+    shell_fs = None   # push-ssh: настоящая ФС (mkdir по SSH) или принудительный демон (--mkpath)
+    if push_ssh:
+        shell_fs = _nb_remote_shell_fs(cfg)
+        if not shell_fs:
+            writer("приёмник — rsync-демон с «модулями»: папки создаст сам rsync")
     results = []
     for j in jobs:
         if cancel():
@@ -4661,10 +4711,10 @@ def nb_run(cfg, dry, writer, cancel=lambda: False):
                    "или диск не смонтирован." % j["src"].lstrip("/"))
             results.append({"src": j["src"], "ok": False, "src_missing": True}); continue
         if push_ssh:
-            # абсолютный путь = обычный сервер: mkdir по SSH. Модульный путь (без
-            # ведущего /) = принудительный rsync-демон: shell-путей у него нет,
-            # папки внутри модуля создаёт сам rsync (--mkpath в nb_build_cmd)
-            if j["dest"].startswith("/"):
+            # обычный сервер: mkdir по SSH (работает с любым rsync на той стороне).
+            # Принудительный демон (UGREEN/Synology): shell живёт в ДРУГОМ пространстве
+            # путей — mkdir туда не попадёт, папки внутри модуля создаёт rsync --mkpath
+            if shell_fs:
                 mk = _nb_ssh_run(cfg, "mkdir -p " + shlex.quote(j["dest"]), timeout=25)
                 if not mk["ok"]:
                     writer("не создать папку на приёмнике: %s" % (mk.get("log") or "").strip()[-160:])
@@ -4679,7 +4729,8 @@ def nb_run(cfg, dry, writer, cancel=lambda: False):
                 os.makedirs(j["dest"], exist_ok=True)
             except OSError as e:
                 writer("не создать папку: %s" % e); results.append({"src": j["src"], "ok": False}); continue
-        args, env = nb_build_cmd(cfg, j, dry, prev_files=prevf.get(j["src"], 0))
+        args, env = nb_build_cmd(cfg, j, dry, prev_files=prevf.get(j["src"], 0),
+                                 mkpath=bool(push_ssh and not shell_fs))
         stat_lines = []
         try:
             p = subprocess.Popen(args, env=env, stdout=subprocess.PIPE,
@@ -4776,18 +4827,15 @@ def _nb_prune_remote(cfg, writer):
     if days <= 0:
         return 0
     top = nb_deleted_top(cfg)
+    if not _nb_remote_shell_fs(cfg):
+        # принудительный rsync-демон: shell живёт в другом пространстве путей,
+        # find/rm по SSH до модуля не достанут — архив чистится только вручную
+        writer("модульный приёмник: автоочистка архива удалённых недоступна — чистите %s вручную" % top)
+        return 0
     dests = set(j["dest"] for j in cfg.get("jobs", [])) | {cfg.get("dest_base", "")}
     removed = 0
-    warned = False
     for base in dests:
         if not base:
-            continue
-        if not base.startswith("/"):
-            # модульный путь принудительного rsync-демона: shell его не видит,
-            # find/rm по SSH бессильны — архив удалённых чистится только вручную
-            if not warned:
-                writer("модульный приёмник: автоочистка архива удалённых недоступна — чистите %s вручную" % top)
-                warned = True
             continue
         d = base.rstrip("/") + "/" + top
         find = "[ -d %s ] && find %s -mindepth 1 -maxdepth 1 -type d -mtime +%d" % (
@@ -11990,7 +12038,9 @@ class H(BaseHTTPRequestHandler):
                 self._json(nb_test(nb_load(_nb_bpid(self._body()))))
             elif p == "/api/backup/browse":
                 b = self._body()
-                self._json(nb_browse(nb_load(_nb_bpid(b)), b.get("path", "")))
+                cfg = nb_load(_nb_bpid(b))
+                self._json(nb_browse_dest(cfg, b.get("path", "")) if b.get("dest")
+                           else nb_browse(cfg, b.get("path", "")))
             elif p == "/api/backup/run-bg":
                 b = self._body()
                 self._json(nb_run_bg(_nb_bpid(b), dry=bool(b.get("dry", False))))
