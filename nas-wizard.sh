@@ -3210,8 +3210,12 @@ do_add(){
   mkdir -p "$target"
   uid="$(id -u "${AM_USER:-1000}" 2>/dev/null || echo 1000)"; gid="$(id -g "${AM_USER:-1000}" 2>/dev/null || echo 1000)"
   case "$fs" in
-    vfat|exfat|ntfs) opts="rw,noatime,nofail,uid=$uid,gid=$gid,umask=002" ;;
-    *)               opts="$OPTS_NATIVE" ;;
+    # vfat: without iocharset the kernel falls back to ascii, and any non-ASCII name fails
+    # with EINVAL — a backup to such a stick dies on the first Cyrillic folder (2026-07-12).
+    # exfat/ntfs speak UTF-8 by themselves.
+    vfat)       opts="rw,noatime,nofail,uid=$uid,gid=$gid,umask=002,iocharset=utf8" ;;
+    exfat|ntfs) opts="rw,noatime,nofail,uid=$uid,gid=$gid,umask=002" ;;
+    *)          opts="$OPTS_NATIVE" ;;
   esac
   if mount -o "$opts" "$DEV" "$target" 2>>"$LOG"; then log "смонтирован $DEV ($fs) -> $target"; poke
   else mount "$DEV" "$target" 2>>"$LOG" && { log "смонтирован(деф.) $DEV -> $target"; poke; } || { rmdir "$target" 2>/dev/null; log "ОШИБКА монтирования $DEV"; }

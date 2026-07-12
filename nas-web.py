@@ -4797,6 +4797,7 @@ def _mountpoint_of(p):
 # упирается в это КАЖДЫЙ прогон и выходит с кодом 23 — поэтому такие приёмники
 # обслуживаем иначе (см. nb_build_cmd), а не делаем вид, что это случайный сбой.
 NB_FS_LIMITED = {"exfat", "vfat", "msdos", "fat", "fat32", "ntfs", "ntfs3", "fuseblk", "hfsplus"}
+NB_FS_FAT     = {"vfat", "msdos", "fat", "fat32"}   # hard 4 GiB per-file cap — aborts the run
 # «файл не лезет в эту ФС», а не «сбой»: запрещённое имя (22), симлинк/сокет (1),
 # нет такой возможности у ФС (ENOSYS)
 _NB_FS_ERR_RX = re.compile(r"failed: (Invalid argument \(22\)|Operation not permitted \(1\)|"
@@ -4868,6 +4869,14 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None, allow_delete=Fal
         writer("приёмник в %s: эта файловая система не хранит симлинки, спецфайлы и права — "
                "они будут пропущены; имена с «:» и переносом строки она тоже не принимает"
                % dest_fs)
+    # The FAT family caps a single file at 4 GiB. Unlike the notes above this is not a
+    # "some files are skipped" nuisance: rsync dies with «File too large (27)» and the whole
+    # job stops, so it has to be said loudly and up front (2026-07-12: a backup of game
+    # repacks onto a FAT32 stick died on the first multi-gigabyte archive).
+    if dest_fs in NB_FS_FAT:
+        writer("ВНИМАНИЕ: %s не умеет файлы больше 4 ГиБ — на первом же таком файле прогон "
+               "ОБОРВЁТСЯ с «File too large». Переформатируйте приёмник в ext4 (или exfat, "
+               "если диск нужен и на Windows/Mac)" % dest_fs)
     results = []
     def emit(r):
         results.append(r)
@@ -5217,7 +5226,7 @@ def nb_dest_state(pid=None):
     fs = _fs_type(base) if base.startswith("/") else ""
     return {"base": base, "base_mounted": bool(base) and not _dest_disk_absent(base),
             "base_exists": os.path.isdir(base), "jobs": jobs,
-            "fs": fs, "fs_limited": fs in NB_FS_LIMITED}
+            "fs": fs, "fs_limited": fs in NB_FS_LIMITED, "fs_fat": fs in NB_FS_FAT}
 
 def nb_log_tail(since, pid=None):
     """Хвост лога текущего/последнего прогона (из файла) — для переподключения UI."""
