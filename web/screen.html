@@ -13,7 +13,10 @@
     --accent:#00fbff; --good:#3ecf8e; --warn:#f5b342; --danger:#ff5d68;
     --track:rgba(255,255,255,.13); --line:rgba(255,255,255,.10);
   }
-  *{box-sizing:border-box;margin:0;padding:0;cursor:none;-webkit-tap-highlight-color:transparent;
+  /* курсор не нужен вовсе: единственный указатель — палец. !important, потому что
+     chromium подставляет свои курсоры для полей и кнопок поверх наследования */
+  *,*::before,*::after{cursor:none !important}
+  *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;
     -webkit-user-select:none;user-select:none;touch-action:manipulation}
   html{background:#0a0f1a}
   html,body{width:800px;height:480px;overflow:hidden;color:var(--ink);
@@ -66,14 +69,12 @@
   .dn{color:var(--good)} .upl{color:var(--accent)}
 
   #pages{flex:1;position:relative;min-height:0;margin:0 8px}
-  /* страницы едут, а не моргают */
-  .page{position:absolute;inset:0;display:flex;flex-direction:column;gap:7px;
-        transition:transform .28s ease, opacity .28s ease;pointer-events:none;opacity:0}
-  #p0{transform:translateX(-24px)}
-  #p1{transform:translateX(24px)}
-  /* ID-селекторы выше по специфичности, чем .page.on — активную страницу возвращаем
-     на место таким же ID-правилом, иначе она остаётся сдвинутой и режется по краю */
-  #p0.on,#p1.on{transform:translateX(0);opacity:1;pointer-events:auto}
+  /* Страницы едут, а не моргают. Анимируем ТОЛЬКО transform и только у активной —
+     фейд двух стеклянных страниц с backdrop-filter Pi 4 не тянет (заметно дёргалось). */
+  .page{position:absolute;inset:0;display:none;flex-direction:column;gap:7px;
+        will-change:transform}
+  #p0.on,#p1.on{display:flex;animation:slide .16s ease-out}
+  @keyframes slide{from{transform:translateX(var(--from,18px))}to{transform:translateX(0)}}
 
   /* gauges */
   #gs{flex:none;display:grid;grid-template-columns:repeat(4,1fr);gap:7px;height:100px}
@@ -113,9 +114,10 @@
   .prow .t .ago{color:var(--mut);font-size:11.5px;white-space:nowrap}
   .run{font-size:11.5px;color:var(--accent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .ic{width:16px;height:16px;border-radius:4px;flex:none;object-fit:contain}
-  .sbtn{padding:7px 12px;border-radius:9px;background:rgba(255,255,255,.10);font-size:12.5px;font-weight:600}
+  .sbtn{padding:12px 18px;border-radius:11px;background:rgba(255,255,255,.13);font-size:14px;font-weight:650;
+        min-width:104px;text-align:center}
   .sbtn:active{background:rgba(255,255,255,.22)}
-  .srow2{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.07)}
+  .srow2{display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid rgba(255,255,255,.07)}
   .srow2:last-child{border-bottom:0}
   .srow2 .nm{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:14px}
 
@@ -162,8 +164,8 @@
       border-bottom:1px solid rgba(255,255,255,.07)}
   .kv:last-child{border-bottom:0}
   .kv span{color:var(--dim)} .kv b{font-weight:650;text-align:right}
-  .go{margin-top:10px;padding:12px;border-radius:12px;background:var(--accent);color:#04141a;
-      font-weight:700;text-align:center;font-size:14px;flex:none}
+  .go{margin-top:12px;padding:16px;border-radius:13px;background:var(--accent);color:#04141a;
+      font-weight:700;text-align:center;font-size:15px;flex:none}
   .go:active{filter:brightness(.9)}
   .warnbtn{background:rgba(255,93,104,.9);color:#fff}
 
@@ -329,12 +331,10 @@ function renderCards(d){
   $("#c_ds").innerHTML=`<h2>Диски<span class="r">${dk.length||"—"}</span></h2>
     <div class="body">${dk.length?dk.slice(0,4).map(x=>{
       const p=x.used_pct, sys=x.role==="system"||(x.mounts||[]).includes("/");
-      const free=x.free!=null?gb(x.free)+" своб.":"";
       return `<div class="prow"><div class="t">
         <span class="nm">${esc(x.name)}${sys?" · System":x.tran==="usb"?" · USB":""}</span>
         <span class="ago">${esc(x.size||"")}${p!=null?" · "+Math.round(p)+"%":""}${x.temp?" · "+x.temp+"°":""}</span></div>
-        ${p!=null?bar(p):""}
-        ${free?`<div class="run">${esc(free)}</div>`:""}</div>`;}).join(""):`<div class="empty">дисков нет</div>`}</div>`;
+        ${p!=null?bar(p):""}</div>`;}).join(""):`<div class="empty">дисков нет</div>`}</div>`;
 
   // --- Бэкапы: идёт прогон — показываем прогресс, а не «никогда»
   const bk=d.backups||[], act=bk.find(b=>b.running);
@@ -408,7 +408,7 @@ function renderBar(d){
 /* ---------- вторая страница ---------- */
 /* График с числами: без них линия «красивая, но непонятная» — не видно, какой был пик.
    Рисуем сетку, подписываем max/min по оси и показываем текущее/среднее/пик цифрами. */
-function chart(pts,color,h,fmt,unit){
+function chart(pts,color,h,fmt,unit,full){
   if(!pts||pts.length<2) return `<div class="empty">нет данных</div>`;
   const mx=Math.max.apply(null,pts), mn=Math.min.apply(null,pts);
   const top=mx+(mx-mn)*0.15||mx||1, bot=Math.max(0,mn-(mx-mn)*0.1);
@@ -427,8 +427,8 @@ function chart(pts,color,h,fmt,unit){
       <polyline points="${line}" fill="none" stroke="${color}" stroke-width="1.7" vector-effect="non-scaling-stroke"/>
       <circle cx="${(pk*st).toFixed(1)}" cy="${y(mx)}" r="1.6" fill="${color}" vector-effect="non-scaling-stroke"/>
     </svg>
-    <span class="ymax">${fmt(top)}${unit}</span><span class="ymin">${fmt(bot)}${unit}</span>
-    <span class="pk">пик ${fmt(mx)}${unit} · среднее ${fmt(avg)}${unit}</span>
+    ${full?`<span class="ymax">${fmt(top)}${unit}</span><span class="ymin">${fmt(bot)}${unit}</span>
+      <span class="pk">пик ${fmt(mx)}${unit} · среднее ${fmt(avg)}${unit}</span>`:""}
   </div>`;
 }
 const netnow=d=>{ const [v,u]=rate(((d.net||{}).rx||0)+((d.net||{}).tx||0)); return v+" "+u; };
@@ -598,11 +598,11 @@ const SHEETS={
   graphs:d=>{const g=(d.p2||{}).graphs||{};
     return ["За сутки",
       `<div class="gline"><div class="gh">CPU<b>${r0(((d.tiles.cpu||{}).raw||{}).pct||0)}%</b></div>
-         ${chart(g.cpu,"var(--accent)",92,r0,"%")}</div>
+         ${chart(g.cpu,"var(--accent)",92,r0,"%",1)}</div>
        <div class="gline"><div class="gh">Температура<b>${r0(((d.tiles.cputemp||{}).raw||{}).c||0)}°</b></div>
-         ${chart(g.temp,"var(--warn)",92,r0,"°")}</div>
+         ${chart(g.temp,"var(--warn)",92,r0,"°",1)}</div>
        <div class="gline"><div class="gh">Сеть<b>${netnow(d)}</b></div>
-         ${chart(g.net,"var(--good)",92,gbs,"")}</div>
+         ${chart(g.net,"var(--good)",92,gbs,"",1)}</div>
        <div class="run">точка — 30 минут, всего сутки</div>`, ""];},
   avail:d=>["Доступность",
     KV("За 24 часа",(d.avail&&d.avail.pct!=null)?d.avail.pct+" %":"—")
@@ -687,7 +687,9 @@ function applyLook(L){
 async function poll(){ return _poll(); }
 let PAGE=0;
 function setPage(n){
+  const prev=PAGE;
   PAGE=Math.max(0,Math.min(1,n));
+  document.documentElement.style.setProperty("--from",(PAGE>prev?18:-18)+"px");
   document.querySelectorAll(".page").forEach((p,i)=>p.classList.toggle("on",i===PAGE));
   document.querySelectorAll("#dots .d").forEach((p,i)=>p.classList.toggle("on",i===PAGE));
   poll();
@@ -705,7 +707,9 @@ async function _poll(){
     // тяжёлые данные второй страницы просим, ТОЛЬКО когда она открыта
     const r=await fetch("/api/screen/data"+(PAGE===1?"?p2=1":""),{cache:"no-store"});
     if(!r.ok) throw 0;
+    const prev=D.p2;
     D=await r.json();
+    if(!D.p2 && prev) D.p2=prev;      // ответ без p2 не должен гасить вторую страницу
     window.NAS_LANG=D.lang||"en";
     trStatic();
     applyLook(D.look); renderBar(D); renderFoot(D); renderAlarm(D);

@@ -9242,7 +9242,7 @@ function screenTab(tc){
  api("/api/screen/config").then(r=>{
   const c=(r&&r.config)||{};
   if(r&&r.present===false){ q("#scrNo").style.display=""; }
-  else { q("#scBody").style.display=""; paint(c); }
+  else { q("#scrBody").style.display=""; paint(c); }   // id в разметке — scrBody
  });
  q("#scSleep").onclick=async()=>{
   const r=await api("/api/screen/act",{method:"POST",body:JSON.stringify({a:"sleep"})});

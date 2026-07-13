@@ -268,15 +268,12 @@ const R={
   `<div class="card">${chk("sync","Запустить первый sync сейчас","На больших дисках может занять время",false,"layers")}</div>
    <div class="actions"><button class="btn pri" id="go">Настроить SnapRAID</button></div><div class="console" id="con"></div>`;
   p.querySelector("#go").onclick=()=>run("snapraid",{sync:p.querySelector("[data-k=sync]").checked?"1":"0"});},
- services(p){p.innerHTML=head("Шаг 5","Приложения · Dockge","Ставим Dockge — веб-менеджер docker-стеков. Затем копируем выбранные готовые стеки в его папку /opt/stacks; запускать их будете сами в Dockge по мере надобности.")+
+ services(p){p.innerHTML=head("Шаг 5","Приложения · Dockge","Ставим Dockge — веб-менеджер docker-стеков. Сами приложения ставятся из «Магазина приложений» в панели: он копирует стек, спрашивает нужные поля и поднимает его сам.")+
   `<div class="card"><div class="opt on"><span class="ic">${svg("cube",16)}</span><span class="m"><span class="t">Dockge</span><span class="d">менеджер стеков · порт 5001 · каталог /opt/stacks</span></span></div>
     <div class="actions" style="margin-top:12px"><button class="btn pri" id="godk">Установить Dockge</button><a class="btn" href="http://${location.hostname}:5001" target="_blank">Открыть Dockge ↗</a></div></div>
-   <div class="eyebrow">Скопировать готовые стеки в Dockge</div>
-   <div class="card" id="box">${chk("cronmaster","Cronmaster","планировщик cron-задач хоста (+ окно на десктопе)",true,"cube")}${chk("dozzle","Dozzle","логи контейнеров",false,"cube")}${chk("scrutiny","Scrutiny","SMART-здоровье дисков",false,"cube")}${chk("homepage","Homepage","дашборд",false,"cube")}${chk("syncthing","Syncthing","синхронизация файлов",false,"cube")}${chk("nextexplorer","NextExplorer","файловый менеджер",false,"cube")}${chk("diun","Diun","уведомления об обновлениях образов",false,"cube")}</div>
-   <div class="note">${svg("cube",18)}<span>Стеки только копируются в Dockge. Запускайте их там — там же логи, правка compose и старт/стоп. Ярлыки на рабочем столе появятся сами по меткам <b>web-desktop.*</b> в compose.</span></div>
-   <div class="actions"><button class="btn pri" id="gocp">Скопировать выбранные</button></div><div class="console" id="con"></div>`;
-  p.querySelector("#godk").onclick=()=>run("dockge");
-  p.querySelector("#gocp").onclick=()=>run("copy-stacks",{keys:keys(p.querySelector("#box"))});},
+   <div class="note">${svg("cube",18)}<span>Приложения (Scrutiny, Syncthing, Immich и т.д.) ставьте из <b>Магазина приложений</b> в панели — вкладка в окне Docker. Там же поля вроде паролей и портов. Dockge остаётся для логов, правки compose и старт/стоп.</span></div>
+   <div class="console" id="con"></div>`;
+  p.querySelector("#godk").onclick=()=>run("dockge");},
  shares(p){p.innerHTML=head("Шаг 6","Доступ к файлам","Открыть /mnt/storage по сети и настроить удалённый доступ.")+
   `<div class="card" id="box">${chk("samba","Samba (SMB)","Windows, Mac, телефон",true,"share")}${chk("nfs","NFS","Linux-клиенты",false,"share")}${chk("avahi","Avahi/mDNS","<host>.local",true,"net")}</div>
    <div class="actions"><button class="btn pri" id="go">Применить</button></div><div class="console" id="con"></div>`;

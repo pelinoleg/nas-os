@@ -3534,21 +3534,6 @@ api_dockge() {
     echo "Dockge запущен → http://<pi>:5001 (управляет стеками в $dir)"
 }
 # Скопировать выбранные bundled-стеки (NASW_KEYS) в каталог Dockge. Не запускаем — старт в Dockge.
-api_copy_stacks() {
-    local dir="${NASW_STACKS_DIR:-/opt/stacks}" name src n=0
-    run mkdir -p "$dir"
-    for name in ${NASW_KEYS:-}; do
-        [ "$name" = "dockge" ] && continue
-        src="$(api_compose_file "$name")" || { warn "нет compose для $name — пропуск"; continue; }
-        if [ -e "$dir/$name/compose.yaml" ]; then info "$name уже в Dockge — пропуск"; continue; fi
-        run mkdir -p "$dir/$name"
-        run cp -f "$src" "$dir/$name/compose.yaml"
-        [ -f "$SERVICES_SRC/$name/.env" ] && run cp -f "$SERVICES_SRC/$name/.env" "$dir/$name/.env"
-        info "стек добавлен: $name → $dir/$name/"
-        n=$((n+1))
-    done
-    echo "Готово: добавлено стеков — $n (в $dir). Запускайте их в Dockge (http://<pi>:5001)."
-}
 # запустить набор функций по ключам из NASW_KEYS (через пробел)
 api_keys_run() {               # $1=prefix (pi|sec|...) ; вызывает <prefix>_<key>
     local prefix="$1" k
@@ -3595,7 +3580,6 @@ run_api() {
         docker-restart) api_docker restart ;;
         docker-pull)    api_docker pull ;;
         dockge)         api_dockge ;;
-        copy-stacks)    api_copy_stacks ;;
         system)         stage_system_apply ;;
         format-disk)    api_format_disk ;;
         label-disk)     api_label_disk ;;

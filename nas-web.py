@@ -9595,36 +9595,6 @@ HP_CATALOG = [
     ("Syncthing",    8384, False, "syncthing",  "Синхронизация файлов"),
     ("NextExplorer", 3000, False, "mdi-folder", "Файловый менеджер"),
 ]
-def write_homepage_config(host=None):
-    host = host or (socket.gethostname() + ".local")
-    cfgdir = "/opt/docker/homepage/config"
-    try:
-        os.makedirs(cfgdir, exist_ok=True)
-    except OSError as e:
-        return {"ok": False, "log": str(e)}
-    out = ["---", "- Сервисы NAS:"]
-    for name, port, https, icon, desc in HP_CATALOG:
-        url = f"{'https' if https else 'http'}://{host}:{port}"
-        ic = icon if icon.startswith("mdi-") else icon + ".png"
-        out += [f"    - {name}:", f"        href: {url}", f"        description: {desc}",
-                f"        icon: {ic}", f"        siteMonitor: {url}"]
-    with open(os.path.join(cfgdir, "services.yaml"), "w") as f:
-        f.write("\n".join(out) + "\n")
-    defaults = {
-        "settings.yaml": "---\ntitle: NAS\ntheme: dark\ncolor: slate\nheaderStyle: clean\n",
-        "widgets.yaml": "---\n- resources:\n    cpu: true\n    memory: true\n    disk: /mnt/storage\n- search:\n    provider: duckduckgo\n",
-        "bookmarks.yaml": "---\n",
-    }
-    for fn, txt in defaults.items():
-        pth = os.path.join(cfgdir, fn)
-        if not os.path.isfile(pth):
-            with open(pth, "w") as f:
-                f.write(txt)
-    return {"ok": True, "path": cfgdir, "services": len(HP_CATALOG)}
-
-# --------------------------------------------------------------------------- #
-#  Хранилище доступов
-# --------------------------------------------------------------------------- #
 def load_creds():
     try:
         with open(CREDS_FILE) as f:
@@ -12209,6 +12179,10 @@ class H(BaseHTTPRequestHandler):
             else:
                 self.send_error(404)
             return
+        if p == "/api/screen/config" and self._local():
+            u = _run(["systemctl", "is-enabled", "nas-screen"], timeout=5)
+            self._json({"config": load_screen(), "present": bool(_bl_dir()),
+                        "unit": (u.get("log") or "").strip()}); return
         if p == "/api/screen/data":
             # локальный экран ходит без сессии; из локалки — только по паролю
             if not (self._local() or self._authed()):
@@ -12774,8 +12748,6 @@ class H(BaseHTTPRequestHandler):
                 else:
                     self._json(engine("automount", {"enable": "1" if b.get("enable", True) else "0",
                         "user": user, "base": base}))
-            elif p == "/api/homepage/config":
-                self._json(write_homepage_config(self._body().get("host")))
             elif p == "/api/fs/write":
                 b = self._body(); self._json(fs_write(b.get("path", ""), b.get("content", "")))
             elif p == "/api/fs/mkdir":
