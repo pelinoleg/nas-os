@@ -11176,7 +11176,8 @@ SCREEN_FILE = os.path.join(NAS_CONFIG, "screen.json")
 # tiles reused from Glance: same values, same colours, already translated
 SCREEN_TILES = ("cpu", "load", "cputemp", "ram", "uptime", "pool", "rootfs",
                 "netspeed", "docker", "updates", "disktemp", "snapraid", "inet")
-_SCR = {"touch": time.time(), "last": None, "spd": None, "spd_run": False}
+_SCR = {"touch": time.time(), "last": None, "spd": None, "spd_run": False,
+        "sleep": False}
 
 
 def load_screen():
@@ -11205,10 +11206,16 @@ def load_screen():
 
 def save_screen(d):
     cur = load_screen()
+    was = cur["enabled"]
     if isinstance(d, dict):
         cur.update({k: v for k, v in d.items() if k in cur})
     _json_save(SCREEN_FILE, cur, indent=2)
     _safe(lambda: _screen_apply(force=True))
+    if cur["enabled"] != was:
+        # саму службу киоска включает/выключает движок (визард), а не панель
+        threading.Thread(target=lambda: _safe(
+            lambda: engine("screen", {"enable": "1" if cur["enabled"] else "0"})),
+            daemon=True).start()
     return load_screen()
 
 
@@ -11265,6 +11272,9 @@ def _screen_apply(force=False):
     hp = _safe(health_report, {}) or {}
     if hp.get("overall") == "bad":
         want = cfg["bright"]                       # тревога — жечь экран
+        _SCR["sleep"] = False                      # ... и будить его насильно
+    elif _SCR["sleep"]:
+        want = 0                                   # усыпили кнопкой — спим до касания
     elif now - _SCR["touch"] < 60:
         want = cfg["bright"]                       # минуту после касания светим всегда
     elif _in_night(cfg):
@@ -11280,6 +11290,34 @@ def _screen_apply(force=False):
 
 def _screen_tick():
     _safe(lambda: _screen_apply())
+
+
+_SCR_HEAVY = {"t": 0, "d": {}}
+
+
+def _screen_heavy():
+    """Disks + containers: не гоняем их на каждый опрос (экран спрашивает раз в
+    полторы секунды), держим свой кэш."""
+    now = time.time()
+    if now - _SCR_HEAVY["t"] < 10 and _SCR_HEAVY["d"]:
+        return _SCR_HEAVY["d"]
+    dk = []
+    for d in (_safe(disks, []) or []):
+        sm = d.get("smart") or {}
+        dk.append({"name": d.get("name"), "model": d.get("model") or "",
+                   "size": d.get("size"), "temp": sm.get("temp") or d.get("temp"),
+                   "healthy": sm.get("healthy"), "role": d.get("role") or "",
+                   "tran": d.get("tran") or "", "mounts": d.get("mounts") or [],
+                   "used_pct": (d.get("usage") or {}).get("pct")})
+    ct = []
+    for c in (_safe(_docker_ps, []) or []):
+        ct.append({"name": str(c.get("Names") or "?").split(",")[0],
+                   "state": str(c.get("State") or ""),
+                   "status": str(c.get("Status") or "")})
+    ct.sort(key=lambda c: (c["state"] != "running", c["name"]))
+    _SCR_HEAVY["d"] = {"disks": dk, "containers": ct}
+    _SCR_HEAVY["t"] = now
+    return _SCR_HEAVY["d"]
 
 
 def screen_payload(lang=""):
@@ -11320,18 +11358,22 @@ def screen_payload(lang=""):
                     "last_ts": int(last.get("ts") or 0),
                     "last": last.get("result") or ""})
     av = _safe(lambda: avail_bars(24, 96), {}) or {}   # 2=up 1=local 0=off -1=нет данных
+    hv = _safe(_screen_heavy, {}) or {}
     # обои и их обработка — ТЕ ЖЕ, что на рабочем столе: экран читает desktop.json,
     # поэтому смена обоев/затемнения в браузере доезжает до панели сама (wpVer в URL)
     ds = _safe(load_settings, {}) or {}
-    # материал карточек/менубара экран считает ПО ТОЙ ЖЕ формуле, что панель
-    # (elevation + прозрачность + backdrop-filter), поэтому отдаём сырые ключи
-    look = {"wpVer": ds.get("wpVer") or 0,
-            "theme": "light" if ds.get("theme") == "light" else "dark"}
+    # Экран ВСЕГДА тёмный, даже если панель переключили в светлую тему: он висит на
+    # стене. Поэтому берём стилевые ключи из ТЁМНОГО профиля (SET.themeProfiles.dark),
+    # а не из активного — иначе смена темы в браузере красила бы стену в белое.
+    dark = (ds.get("themeProfiles") or {}).get("dark") or {}
+    look = {"wpVer": ds.get("wpVer") or 0, "theme": "dark"}
     for k in ("fxDim", "fxBlur", "fxNoise", "wdgOp", "wdgBlur", "wdgSat",
               "mbOp", "mbBlur", "mbSat", "elevStep", "elevLight", "elevBaseDark",
-              "elevBaseLight", "tintDark", "tintLight", "wdgDark", "wdgLight",
-              "accentHex", "radius", "perf"):
-        if k in ds:
+              "tintDark", "wdgDark", "accentHex", "radius", "perf",
+              "mbGrad", "mbGradH", "mbGradInt", "mbGradOp"):
+        if k in dark:
+            look[k] = dark[k]
+        elif k in ds:
             look[k] = ds[k]
     cfg = load_screen()
     host = st.get("host") or socket.gethostname()
@@ -11343,6 +11385,10 @@ def screen_payload(lang=""):
             "root": st.get("disk_root"), "overall": hp.get("overall") or "ok",
             "tiles": tiles, "problems": problems, "events": events, "backups": bks,
             "avail": {"bars": av.get("bars") or [], "pct": av.get("pct")}, "look": look,
+            "disks": hv.get("disks") or [], "containers": hv.get("containers") or [],
+            "swap": (st.get("mem") or {}).get("swap_total"),
+            "throttled": st.get("throttled"), "psu_ma": st.get("psu_ma"),
+            "asleep": bool(_SCR["sleep"]),
             "speed": _SCR["spd"], "speed_running": bool(_SCR["spd_run"]),
             "actions": cfg["actions"], "lang": cfg["lang"], "ts": int(time.time())}
 
@@ -11353,6 +11399,11 @@ def screen_action(b):
     a = str(b.get("a") or "")
     if a == "touch":
         _SCR["touch"] = time.time()
+        _SCR["sleep"] = False                      # любое касание будит
+        _safe(lambda: _screen_apply(force=True))
+        return {"ok": True}
+    if a == "sleep":
+        _SCR["sleep"] = True
         _safe(lambda: _screen_apply(force=True))
         return {"ok": True}
     cfg = load_screen()
@@ -12281,8 +12332,9 @@ class H(BaseHTTPRequestHandler):
                 self._json({"error": "unknown endpoint"}, 404)
             return
         if p == "/api/screen/act":
-            # тач на самом боксе = физический доступ; пароль на этом экране не спрашиваем
-            if not self._local():
+            # тач на самом боксе = физический доступ; пароль на этом экране не спрашиваем.
+            # Из панели (сессия) тоже можно — там уже вошли по паролю.
+            if not (self._local() or self._authed()):
                 self._json({"error": "forbidden"}, 403); return
             self._json(screen_action(self._body())); return
         if p == "/api/agent/notify":

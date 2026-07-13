@@ -4,205 +4,206 @@
 <title>NAS</title>
 <script src="/i18n.js"></script>
 <style>
-  /* Kiosk dashboard for the local DSI panel (800x480). Always dark — it hangs on a
-     wall. Wallpaper + glass, same material as the desktop panel; no cursor (the only
-     pointer is a finger). Gauges are rings, not boxes: at 4.3" a number in a ring
-     reads across the room, a square tile does not. */
+  /* Kiosk dashboard, local DSI panel 800x480. ALWAYS dark (it hangs on a wall) —
+     the material comes from the panel's DARK theme profile even when the browser
+     is switched to light. No cursor, no borders on cards (same as our widgets). */
   :root{
     --ink:#eef2f7; --dim:rgba(238,242,247,.62); --mut:rgba(238,242,247,.40);
-    --glass:rgba(255,255,255,.09); --line:rgba(255,255,255,.14);
-    --accent:#2dd4bf; --good:#3ecf8e; --warn:#f5b342; --danger:#ff5d68;
-    --track:rgba(255,255,255,.13);
+    --glass:rgba(0,0,0,.11); --wdg-bf:blur(30px) saturate(.9); --r-lg:11px;
+    --accent:#00fbff; --good:#3ecf8e; --warn:#f5b342; --danger:#ff5d68;
+    --track:rgba(255,255,255,.13); --line:rgba(255,255,255,.10);
   }
   *{box-sizing:border-box;margin:0;padding:0;cursor:none;-webkit-tap-highlight-color:transparent;
     -webkit-user-select:none;user-select:none;touch-action:manipulation}
-  html{background:#0a0f18}
+  html{background:#0a0f1a}
   html,body{width:800px;height:480px;overflow:hidden;color:var(--ink);
     font:15px/1.35 system-ui,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
-  body{background:transparent}   /* иначе фон body закрасил бы обои (#wall лежит ниже) */
-  /* обои — те же, что на рабочем столе панели (/api/wallpaper/img) */
+  body{background:transparent;display:flex;flex-direction:column;gap:7px;padding:0 0 7px}
   #wall{position:fixed;inset:0;background:#0a0f1a center/cover no-repeat;z-index:-3}
   .wfx{position:fixed;inset:0;pointer-events:none;transition:opacity .2s ease}
   #wallDim{z-index:-2;background:#000;opacity:.44}
-  /* зерно — та же текстура и тот же mix-blend-mode, что у рабочего стола */
-  #wallNoise{z-index:-1;opacity:1;mix-blend-mode:overlay;background-size:200px 200px;
+  #wallNoise{z-index:-1;mix-blend-mode:overlay;background-size:200px 200px;
     background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
-  body{display:flex;flex-direction:column;gap:8px;padding:0 0 8px}
 
-  .g{background:var(--glass);border:1px solid var(--line);border-radius:var(--r-lg,16px);
-     backdrop-filter:var(--wdg-bf,none);-webkit-backdrop-filter:var(--wdg-bf,none);
-     box-shadow:0 6px 20px rgba(0,0,0,.22)}
+  /* тёмный градиент-скрим под шапкой — тот же многоступенчатый ease-out, что в панели
+     (линейный давал бы видимый «край» затухания) */
+  #mbGrad{position:fixed;top:0;left:0;right:0;height:0;z-index:1;pointer-events:none;
+    opacity:var(--mb-grad-o,1);
+    background:linear-gradient(to bottom,
+      rgba(0,0,0,calc(var(--mb-grad-a,0) * 1))    0%,
+      rgba(0,0,0,calc(var(--mb-grad-a,0) * .738)) 19%,
+      rgba(0,0,0,calc(var(--mb-grad-a,0) * .541)) 34%,
+      rgba(0,0,0,calc(var(--mb-grad-a,0) * .382)) 47%,
+      rgba(0,0,0,calc(var(--mb-grad-a,0) * .278)) 56.5%,
+      rgba(0,0,0,calc(var(--mb-grad-a,0) * .194)) 65%,
+      rgba(0,0,0,calc(var(--mb-grad-a,0) * .126)) 73%,
+      rgba(0,0,0,calc(var(--mb-grad-a,0) * .075)) 80.2%,
+      rgba(0,0,0,calc(var(--mb-grad-a,0) * .042)) 86.1%,
+      rgba(0,0,0,calc(var(--mb-grad-a,0) * .021)) 91%,
+      rgba(0,0,0,calc(var(--mb-grad-a,0) * .008)) 95.2%,
+      transparent 100%)}
+  #bar{position:relative;z-index:2}
 
-  /* header */
-  /* menubar панели: 40px, во всю ширину, стекло + волосяная линия снизу */
-  #bar{flex:none;display:flex;align-items:center;gap:9px;height:40px;padding:0 14px;
-       border-radius:0;border:0;border-bottom:1px solid var(--line);box-shadow:none;
-       background:var(--mb-bg,transparent);
-       backdrop-filter:var(--mb-bf,none);-webkit-backdrop-filter:var(--mb-bf,none)}
-  #pages{margin:0 10px}
-  #foot{margin:0 10px}
+  /* карточки — как виджеты панели: без бордера, стекло + backdrop-filter */
+  .g{background:var(--glass);border:0;border-radius:var(--r-lg);
+     backdrop-filter:var(--wdg-bf);-webkit-backdrop-filter:var(--wdg-bf)}
+  .g:active{filter:brightness(1.25)}
+
+  /* menubar */
+  #bar{flex:none;display:flex;align-items:center;gap:9px;height:38px;padding:0 12px;border-radius:0;
+       background:var(--mb-bg,transparent);backdrop-filter:var(--mb-bf,none);-webkit-backdrop-filter:var(--mb-bf,none)}
+  #bar:active{filter:none}
   #dot{width:9px;height:9px;border-radius:50%;background:var(--good);color:var(--good);
        box-shadow:0 0 9px currentColor;flex:none}
   #dot.warn{background:var(--warn);color:var(--warn)} #dot.bad{background:var(--danger);color:var(--danger)}
-  #who{font-weight:650} #addr{color:var(--dim);font-size:13px}
-  #up{color:var(--mut);font-size:13px;margin-left:6px}
-  #st{margin-left:auto;font-size:12.5px;color:var(--dim)}
+  #who{font-weight:650} #addr,#up{color:var(--dim);font-size:12.5px}
+  #net{margin-left:auto;display:flex;gap:12px;font-size:13px;font-variant-numeric:tabular-nums}
+  #net b{font-weight:650}
+  .dn{color:var(--good)} .upl{color:var(--accent)}
+  #st{font-size:12.5px;color:var(--dim);max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  #zzz{width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;
+       background:rgba(255,255,255,.10);font-size:15px;flex:none}
+  #zzz:active{background:rgba(255,255,255,.22)}
 
-  /* pages */
-  #pages{flex:1;position:relative;min-height:0}
-  .page{position:absolute;inset:0;display:none;flex-direction:column;gap:8px}
+  #pages{flex:1;position:relative;min-height:0;margin:0 8px}
+  .page{position:absolute;inset:0;display:none;flex-direction:column;gap:7px}
   .page.on{display:flex}
 
-  /* rings */
-  #rings{flex:none;display:grid;grid-template-columns:repeat(4,1fr);align-items:center;padding:10px 6px}
-  .ring{display:flex;flex-direction:column;align-items:center;gap:2px;position:relative}
-  .ring svg{width:104px;height:104px;transform:rotate(-90deg)}
-  .ring .mid{position:absolute;top:0;height:104px;width:104px;display:flex;flex-direction:column;
-             align-items:center;justify-content:center;gap:0}
-  .ring .n{font-size:27px;font-weight:700;line-height:1;font-variant-numeric:tabular-nums}
-  .ring .n small{font-size:13px;font-weight:600;color:var(--dim)}
-  .ring .sub{font-size:11px;color:var(--mut);margin-top:2px}
-  .ring .cap{font-size:11px;letter-spacing:.7px;text-transform:uppercase;color:var(--dim);font-weight:600}
+  /* gauges */
+  #gs{flex:none;display:grid;grid-template-columns:repeat(4,1fr);gap:7px;height:128px}
+  .gauge{padding:6px 4px 7px;display:flex;flex-direction:column;align-items:center;position:relative}
+  .gauge svg{width:124px;height:70px}
+  .gauge .v{position:absolute;top:30px;left:0;right:0;text-align:center;font-size:25px;font-weight:700;
+            font-variant-numeric:tabular-nums;line-height:1}
+  .gauge .v small{font-size:12px;font-weight:600;color:var(--dim)}
+  .gauge .sub{position:absolute;top:57px;left:0;right:0;text-align:center;font-size:11px;color:var(--mut)}
+  .gauge .cap{font-size:10.5px;letter-spacing:.7px;text-transform:uppercase;color:var(--dim);font-weight:650;margin-top:2px}
 
-  /* mid row */
-  #mid{flex:1;display:grid;grid-template-columns:330px 1fr;gap:8px;min-height:0}
-  #right{display:grid;grid-template-rows:1fr auto;gap:8px;min-height:0}
-  #svc{flex:none}
-  .chips{display:flex;gap:14px;flex-wrap:wrap}
-  .chip{display:flex;flex-direction:column;gap:1px;min-width:64px}
-  .chip .cv{font-size:17px;font-weight:700;font-variant-numeric:tabular-nums}
-  .chip .cl{font-size:10.5px;letter-spacing:.5px;text-transform:uppercase;color:var(--mut)}
-  .chip.warn .cv{color:var(--warn)} .chip.danger .cv{color:var(--danger)}
-  .card{padding:9px 13px;display:flex;flex-direction:column;min-height:0;position:relative;overflow:hidden}
-  .card h2{font-size:11px;letter-spacing:.7px;text-transform:uppercase;color:var(--dim);font-weight:650;
-           flex:none;display:flex;align-items:center;gap:7px;margin-bottom:5px}
-  .card h2 .r{margin-left:auto;font-weight:500;letter-spacing:0;text-transform:none;color:var(--mut);font-size:11px}
-
-  .spd{display:flex;gap:14px;align-items:baseline}
-  .spd .v{font-size:25px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.1}
-  .spd .v small{font-size:12px;font-weight:500;color:var(--dim);margin-left:2px}
-  .dn{color:var(--good)} .upl{color:var(--accent)}
-  #netspark{height:44px;margin-top:auto;opacity:.75}
-  .lnk{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--mut);margin-top:4px}
-  .btn-s{margin-left:auto;font-size:12px;padding:5px 11px;border-radius:99px;background:rgba(255,255,255,.10);
-         border:1px solid var(--line);color:var(--ink);font-weight:600}
-  .btn-s:active{background:rgba(255,255,255,.2)}
-
-  .body{flex:1;overflow-y:auto;min-height:0}
-  .r{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.08);font-size:13px}
-  .r:last-child{border-bottom:0}
-  .r .nm{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .r .ago{color:var(--mut);font-size:12px;white-space:nowrap}
-  .r:active{background:rgba(255,255,255,.07)}
-  .st{width:18px;text-align:center;font-weight:700}
-  .st.ok{color:var(--good)} .st.warn{color:var(--warn)} .st.bad{color:var(--danger)} .st.none{color:var(--mut)}
-  .pill{font-size:11px;padding:2px 8px;border-radius:99px;background:rgba(45,212,191,.18);color:var(--accent)}
+  /* row of cards */
+  #row{flex:1;display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;min-height:0}
+  #row2{flex:1;display:grid;grid-template-columns:1.35fr 1fr;gap:7px;min-height:0}
+  .body{overflow:hidden}
+  .card{padding:9px 12px;display:flex;flex-direction:column;min-height:0;overflow:hidden}
+  .card h2{font-size:10.5px;letter-spacing:.7px;text-transform:uppercase;color:var(--dim);font-weight:650;
+           flex:none;display:flex;align-items:center;gap:6px;margin-bottom:5px}
+  .card h2 .r{margin-left:auto;font-weight:600;letter-spacing:0;text-transform:none;color:var(--ink);font-size:12px}
+  .body{flex:1;overflow:hidden;min-height:0}
+  .r2{display:flex;align-items:center;gap:7px;padding:5px 0;font-size:13px;
+      border-bottom:1px solid rgba(255,255,255,.07)}
+  .r2:last-child{border-bottom:0}
+  .r2 .nm{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .r2 .ago{color:var(--mut);font-size:11.5px;white-space:nowrap}
+  .st2{width:14px;text-align:center;font-weight:700}
+  .ok{color:var(--good)} .wn{color:var(--warn)} .bd{color:var(--danger)} .no{color:var(--mut)}
+  .empty{color:var(--mut);font-size:12.5px;padding-top:4px}
 
   /* footer */
-  #foot{flex:none;display:flex;align-items:center;gap:10px;padding:7px 13px}
+  #foot{flex:none;display:flex;align-items:center;gap:10px;padding:6px 12px;margin:0 8px}
   #ev{flex:1;min-width:0;font-size:12.5px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   #ev b{color:var(--ink);font-weight:600}
   #av{display:flex;align-items:center;gap:7px;flex:none}
-  #av .bars{display:flex;gap:1px;align-items:flex-end;height:16px}
+  #av .bars{display:flex;gap:1px;align-items:flex-end;height:15px}
   #av i{width:2px;height:100%;border-radius:1px;background:var(--good)}
-  #av i.local{background:var(--warn)} #av i.off{background:var(--danger)}
-  #av i.nd{background:rgba(255,255,255,.13)}
-  #av .pct{font-size:12px;color:var(--dim);font-variant-numeric:tabular-nums}
-  #dots{display:flex;gap:6px}
-  .d{width:7px;height:7px;border-radius:50%;background:rgba(255,255,255,.25)}
-  .d.on{background:var(--accent)}
+  #av i.local{background:var(--warn)} #av i.off{background:var(--danger)} #av i.nd{background:rgba(255,255,255,.13)}
+  #av .pct{font-size:11.5px;color:var(--dim);font-variant-numeric:tabular-nums}
 
-  /* page 2 */
-  #p1{display:none;grid-template-columns:1fr 1fr;gap:8px}
-  #p1.on{display:grid}
-  .kv{display:flex;justify-content:space-between;font-size:13px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.08)}
-  .kv b{font-weight:600}
-  .acts{display:flex;gap:8px;margin-top:8px}
-  .act{flex:1;padding:11px;border-radius:12px;border:1px solid var(--line);background:rgba(255,255,255,.08);
-       font-weight:650;font-size:14px;text-align:center}
-  .act:active{background:rgba(255,255,255,.18)}
-  .act.bad{background:rgba(255,93,104,.18);border-color:rgba(255,93,104,.4);color:#ffb3b8}
+  /* detail sheet — открывается по тапу на ЛЮБУЮ плашку */
+  #sheet{position:fixed;inset:0;background:rgba(4,8,14,.55);display:none;z-index:8;
+         align-items:flex-end;backdrop-filter:blur(3px)}
+  #sheet.on{display:flex}
+  #sheetIn{width:100%;max-height:410px;background:rgba(14,19,28,.94);border-radius:18px 18px 0 0;
+           padding:14px 18px 16px;display:flex;flex-direction:column;min-height:0}
+  #sheetIn h3{font-size:17px;font-weight:700;flex:none;display:flex;align-items:center;gap:9px;margin-bottom:8px}
+  #sheetIn h3 .x{margin-left:auto;font-size:13px;color:var(--mut);font-weight:500}
+  #sheetB{overflow-y:auto;min-height:0}
+  .kv{display:flex;justify-content:space-between;gap:14px;font-size:14px;padding:7px 0;
+      border-bottom:1px solid rgba(255,255,255,.07)}
+  .kv:last-child{border-bottom:0}
+  .kv span{color:var(--dim)} .kv b{font-weight:650;text-align:right}
+  .go{margin-top:10px;padding:12px;border-radius:12px;background:var(--accent);color:#04141a;
+      font-weight:700;text-align:center;font-size:14px;flex:none}
+  .go:active{filter:brightness(.9)}
+  .warnbtn{background:rgba(255,93,104,.9);color:#fff}
 
-  /* alarm + dialog */
-  #alarm{position:fixed;inset:0;background:rgba(52,10,14,.93);backdrop-filter:blur(6px);display:none;
-         flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:30px;text-align:center;z-index:5}
+  /* alarm */
+  #alarm{position:fixed;inset:0;background:rgba(52,10,14,.94);display:none;flex-direction:column;
+         align-items:center;justify-content:center;gap:8px;padding:30px;text-align:center;z-index:9}
   #alarm.on{display:flex}
   #alarm .big{font-size:29px;font-weight:750;color:#ff9aa0}
   #alarm .li{font-size:16px;color:#ffd9db;line-height:1.6}
   #alarm .hint{font-size:12px;color:#e0a7ab;margin-top:8px}
-  #scrim{position:fixed;inset:0;background:rgba(0,0,0,.62);display:none;align-items:center;justify-content:center;z-index:9}
-  #scrim.on{display:flex}
-  .dlg{background:rgba(22,28,38,.96);border:1px solid var(--line);border-radius:18px;padding:18px 20px;min-width:360px}
-  .dlg h3{font-size:18px;margin-bottom:3px} .dlg p{font-size:13px;color:var(--dim);margin-bottom:14px}
-  .btns{display:flex;gap:9px}
-  .btn{flex:1;padding:13px;border-radius:12px;border:1px solid var(--line);background:rgba(255,255,255,.08);
-       color:var(--ink);font-size:15px;font-weight:650;text-align:center}
-  .btn:active{background:rgba(255,255,255,.18)}
-  .btn.go{background:var(--accent);border-color:transparent;color:#04231f}
-  .btn.bad{background:var(--danger);border-color:transparent;color:#fff}
-  #toast{position:fixed;left:50%;bottom:40px;transform:translateX(-50%);background:rgba(24,30,42,.95);
-         border:1px solid var(--line);border-radius:12px;padding:9px 16px;font-size:14px;display:none;z-index:10}
+  #toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:rgba(18,24,34,.96);
+         border-radius:12px;padding:9px 16px;font-size:14px;display:none;z-index:10}
   #toast.on{display:block}
 </style>
 
 <div id="wall"></div><div class="wfx" id="wallDim"></div><div class="wfx" id="wallNoise"></div>
+<div id="mbGrad"></div>
 
-<div id="bar" class="g">
+<div id="bar">
   <span id="dot"></span><span id="who">—</span><span id="addr"></span><span id="up"></span>
-  <span id="st"></span>
+  <span id="net"></span><span id="st"></span>
+  <span id="zzz" data-act="sleep">☾</span>
 </div>
 
 <div id="pages">
   <div class="page on" id="p0">
-    <div id="rings" class="g"></div>
-    <div id="mid">
-      <div class="card g" id="netc"></div>
-      <div id="right">
-        <div class="card g" id="bkc"></div>
-        <div class="card g" id="svc"></div>
-      </div>
+    <div id="gs"></div>
+    <div id="row">
+      <div class="card g" id="c_dk" data-sheet="docker"></div>
+      <div class="card g" id="c_ds" data-sheet="disks"></div>
+      <div class="card g" id="c_bk" data-sheet="backups"></div>
     </div>
-  </div>
-  <div class="page" id="p1">
-    <div class="card g" id="evc"></div>
-    <div class="card g" id="sysc"></div>
+    <div id="row2">
+      <div class="card g" id="c_ev" data-sheet="events"></div>
+      <div class="card g" id="c_sy" data-sheet="cpu"></div>
+    </div>
   </div>
 </div>
 
-<div id="foot" class="g"><span id="ev"></span><span id="av"></span><span id="dots"><i class="d on"></i><i class="d"></i></span></div>
+<div id="foot" class="g" data-sheet="events"><span id="ev"></span><span id="av"></span></div>
 
+<div id="sheet"><div id="sheetIn"><h3><span id="sheetT"></span><span class="x">тап вне — закрыть</span></h3>
+  <div id="sheetB"></div><div id="sheetA"></div></div></div>
 <div id="alarm"><div class="big"></div><div class="li"></div><div class="hint">Нажмите, чтобы скрыть</div></div>
-<div id="scrim"><div class="dlg"><h3></h3><p></p><div class="btns"></div></div></div>
 <div id="toast"></div>
 
 <script>
-const $=s=>document.querySelector(s), D={};
-let PAGE=0, NETH=[];
+const $=s=>document.querySelector(s);
+let D={}, WPV=null;
 
+/* ---------- helpers ---------- */
 const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-function rate(b){
-  if(!b||b<1024) return ["0","КБ/с"];
+const clampf=(v,a,b)=>Math.max(a,Math.min(b,+v||0));
+const isHex=h=>/^#[0-9a-f]{6}$/i.test(h||"");
+const hexRgb=h=>{const n=parseInt(h.slice(1),16);return [n>>16&255,n>>8&255,n&255].join(",");};
+const litRgb=(rgb,amt)=>rgb.split(",").map(x=>Math.round(+x+(255-+x)*amt)).join(",");
+const gb=b=>(b/1073741824).toFixed(b>107374182400?0:1)+" ГБ";
+function rate(b){ if(!b||b<1024) return ["0","КБ/с"];
   if(b<1048576) return [(b/1024).toFixed(0),"КБ/с"];
-  return [(b/1048576).toFixed(1),"МБ/с"];
-}
+  return [(b/1048576).toFixed(1),"МБ/с"]; }
 function ago(ts){
   if(!ts) return "никогда";
   const s=Math.max(1,Math.floor(Date.now()/1000-ts));
   if(s<60) return "только что";
   if(s<3600) return Math.floor(s/60)+" мин назад";
   if(s<86400) return Math.floor(s/3600)+" ч назад";
-  const d=Math.floor(s/86400);
-  return d===1?"вчера":d+" дн назад";
+  const d=Math.floor(s/86400); return d===1?"вчера":d+" дн назад";
 }
-function upfmt(s){
-  if(!s) return "";
-  const d=Math.floor(s/86400), h=Math.floor(s%86400/3600), m=Math.floor(s%3600/60);
-  return d?`${d} дн ${h} ч`:(h?`${h} ч ${m} мин`:`${m} мин`);
+function upfmt(s){ if(!s) return "";
+  const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);
+  return d?`${d} дн ${h} ч`:(h?`${h} ч ${m} мин`:`${m} мин`); }
+function trStatic(){            // разметка из файла мимо перехвата innerHTML — переводим руками
+  if(trStatic._done||window.NAS_LANG!=="en") return;
+  trStatic._done=1;
+  const w=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);
+  const out=[]; let n;
+  while((n=w.nextNode())) if(/[А-Яа-яЁё]/.test(n.nodeValue)) out.push(n);
+  out.forEach(n=>{ n.nodeValue=window.nasTr(n.nodeValue); });
 }
 function toast(m){ const t=$("#toast"); t.innerHTML=esc(m); t.classList.add("on");
-  clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove("on"),2600); }
+  clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove("on"),2500); }
 
-/* касание будит подсветку — сервер решает, что делать с яркостью */
 let lastWake=0;
 function wake(){ const n=Date.now(); if(n-lastWake<8000) return; lastWake=n;
   fetch("/api/screen/act",{method:"POST",body:JSON.stringify({a:"touch"})}).catch(()=>{}); }
@@ -212,110 +213,101 @@ async function act(b){
   catch(e){ return {ok:false,log:"нет связи с панелью"}; }
 }
 
-/* ---------- ring gauge ---------- */
-const R=44, C=2*Math.PI*R;
-function ring(cap,val,unit,pct,state,sub){
-  const col=state==="danger"?"var(--danger)":state==="warn"?"var(--warn)":"var(--accent)";
-  const off=C*(1-Math.max(0,Math.min(1,pct||0)));
-  return `<div class="ring">
-    <svg viewBox="0 0 104 104">
-      <circle cx="52" cy="52" r="${R}" fill="none" stroke="var(--track)" stroke-width="8"/>
-      <circle cx="52" cy="52" r="${R}" fill="none" stroke="${col}" stroke-width="8" stroke-linecap="round"
-              stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${off.toFixed(1)}"
-              style="transition:stroke-dashoffset .6s ease"/>
+/* ---------- окраска как в системе: низко = зелёное, дальше жёлтое, потом красное --- */
+function lvlOf(v,warn,bad){ return v>=bad?"danger":v>=warn?"warn":"ok"; }
+const COL={ok:"var(--good)",warn:"var(--warn)",danger:"var(--danger)"};
+
+/* ---------- полукруглый спидометр ---------- */
+const AR=Math.PI*52;   // длина дуги радиуса 52
+function gauge(cap,val,unit,pct,lvl,sub,sheet){
+  const off=AR*(1-clampf(pct,0,1));
+  return `<div class="gauge g" data-sheet="${sheet}">
+    <svg viewBox="0 0 132 74">
+      <path d="M14,66 A52,52 0 0 1 118,66" fill="none" stroke="var(--track)" stroke-width="9" stroke-linecap="round"/>
+      <path d="M14,66 A52,52 0 0 1 118,66" fill="none" stroke="${COL[lvl]}" stroke-width="9" stroke-linecap="round"
+            stroke-dasharray="${AR.toFixed(1)}" stroke-dashoffset="${off.toFixed(1)}"
+            style="transition:stroke-dashoffset .5s ease,stroke .3s"/>
     </svg>
-    <div class="mid"><div class="n">${esc(val)}${unit?`<small>${esc(unit)}</small>`:""}</div>
-      ${sub?`<div class="sub">${esc(sub)}</div>`:""}</div>
+    <div class="v">${esc(val)}${unit?`<small>${esc(unit)}</small>`:""}</div>
+    ${sub?`<div class="sub">${esc(sub)}</div>`:""}
     <div class="cap">${esc(cap)}</div>
   </div>`;
 }
-function renderRings(d){
+function renderGauges(d){
   const T=d.tiles||{}, raw=k=>(T[k]&&T[k].raw)||{};
   const cpu=raw("cpu").pct||0, tc=raw("cputemp").c||0, ram=raw("ram").pct||0;
-  const hasPool=!!(T.pool&&T.pool.raw);            // без дисков пул приезжает пустым
-  const disk=hasPool?raw("pool"):raw("rootfs");
-  const dpct=disk.pct!=null?disk.pct:0;
-  const tstate=tc>=75?"danger":tc>=62?"warn":"ok";
-  const ncpu=raw("load").ncpu||4, la=raw("load").load1||0;
-  $("#rings").innerHTML=
-    ring("CPU",Math.round(cpu),"%",cpu/100,T.cpu&&T.cpu.state,"LA "+la.toFixed(1))
-  + ring(T.cputemp?T.cputemp.label:"CPU TEMP",Math.round(tc),"°",tc/85,tstate,
-         raw("cputemp").throttle?"троттлинг":"")
-  + ring(T.ram?T.ram.label:"RAM",Math.round(ram),"%",ram/100,T.ram&&T.ram.state,
-         Math.round((raw("ram").used||0)/1073741824)+" ГБ")
-  + ring((hasPool?T.pool.label:(T.rootfs||{}).label)||"Диск",Math.round(dpct),"%",dpct/100,
-         (hasPool?T.pool:(T.rootfs||{})).state, Math.round((disk.free||0)/1073741824)+" ГБ своб.");
+  const hasPool=!!(T.pool&&T.pool.raw), dk=hasPool?raw("pool"):raw("rootfs");
+  const dp=dk.pct!=null?dk.pct:0, la=raw("load").load1||0, nc=raw("load").ncpu||4;
+  $("#gs").innerHTML=
+    gauge("CPU",Math.round(cpu),"%",cpu/100,lvlOf(cpu,70,90),`LA ${la.toFixed(1)} / ${nc}`,"cpu")
+  + gauge("Температура",Math.round(tc),"°",tc/90,lvlOf(tc,62,75),
+          raw("cputemp").throttle?"троттлинг":"", "temp")
+  + gauge("Память",Math.round(ram),"%",ram/100,lvlOf(ram,75,90),gb(raw("ram").used||0),"ram")
+  + gauge(hasPool?"Пул":"Диск",Math.round(dp),"%",dp/100,lvlOf(dp,75,90),
+          gb(dk.free||0)+" своб.","disk");
 }
 
-/* ---------- cards ---------- */
-function renderNet(d){
-  const [rv,ru]=rate((d.net||{}).rx), [tv,tu]=rate((d.net||{}).tx);
-  NETH.push(((d.net||{}).rx||0)+((d.net||{}).tx||0)); if(NETH.length>60) NETH.shift();
-  const mx=Math.max.apply(null,NETH.concat([1])), w=300, h=44;
-  const pts=NETH.map((v,i)=>`${(i*(w/Math.max(1,NETH.length-1))).toFixed(1)},${(h-(v/mx)*(h-4)-2).toFixed(1)}`).join(" ");
-  const sp=d.speed_running?"меряю…":(d.speed&&d.speed.ok?`${d.speed.down_mbps} / ${d.speed.up_mbps} Мбит/с`:"тап — тест");
-  $("#netc").innerHTML=`<h2>Сеть сейчас<span class="r">${esc(d.iface||"")}</span></h2>
-    <div class="spd">
-      <div class="v dn">↓ ${rv}<small>${ru}</small></div>
-      <div class="v upl">↑ ${tv}<small>${tu}</small></div>
-    </div>
-    <div class="lnk">${esc(d.ip||"")}<button class="btn-s" data-tap="speed">${esc(sp)}</button></div>
-    <svg id="netspark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">
-      <polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="1.7" vector-effect="non-scaling-stroke"/>
-    </svg>`;
-}
-function renderBk(d){
-  const rows=(d.backups||[]).map(b=>{
-    const cls=b.last==="ok"?"ok":b.last==="warn"?"warn":b.last?"bad":"none";
-    const mark=b.last==="ok"?"✓":b.last?"!":"—";
-    return `<div class="r" data-bk="${esc(b.id)}"><span class="st ${cls}">${mark}</span>
-      <span class="nm">${esc(b.name)}</span>
-      ${b.running?'<span class="pill">идёт</span>':b.queued?'<span class="pill">в очереди</span>':""}
-      <span class="ago">${esc(ago(b.last_ts))}</span></div>`;
-  }).join("") || `<div class="r"><span class="nm" style="color:var(--mut)">профилей нет</span></div>`;
-  $("#bkc").innerHTML=`<h2>Бэкапы<span class="r">— тап, чтобы запустить</span></h2><div class="body">${rows}</div>`;
-}
-function renderSvc(d){
+/* ---------- карточки ---------- */
+function renderCards(d){
   const T=d.tiles||{};
-  const chip=t=>t?`<div class="chip ${t.state==="danger"?"danger":t.state==="warn"?"warn":""}">
-      <span class="cv">${esc(t.value)}<span style="font-size:11px;color:var(--mut)"> ${esc(t.unit||"")}</span></span>
-      <span class="cl">${esc(t.label)}</span></div>`:"";
-  const chips=[chip(T.docker),chip(T.updates),chip(T.inet),chip(T.disktemp),chip(T.snapraid)]
-              .filter(Boolean).slice(0,4).join("");
-  $("#svc").innerHTML=`<h2>Службы</h2><div class="chips">${chips||'<span style="color:var(--mut);font-size:13px">нет данных</span>'}</div>`;
+  const ct=d.containers||[], run=ct.filter(c=>c.state==="running").length;
+  $("#c_dk").innerHTML=`<h2>Docker<span class="r">${ct.length?run+"/"+ct.length:"—"}</span></h2>
+    <div class="body">${ct.length?ct.slice(0,4).map(c=>
+      `<div class="r2"><span class="st2 ${c.state==="running"?"ok":"bd"}">●</span>
+       <span class="nm">${esc(c.name)}</span></div>`).join("")
+      :`<div class="empty">не установлен</div>`}</div>`;
+
+  const dk=d.disks||[];
+  $("#c_ds").innerHTML=`<h2>Диски<span class="r">${dk.length||"—"}</span></h2>
+    <div class="body">${dk.length?dk.slice(0,4).map(x=>{
+      const cls=x.healthy===false?"bd":x.healthy===true?"ok":"no";
+      return `<div class="r2"><span class="st2 ${cls}">●</span><span class="nm">${esc(x.name)}</span>
+        <span class="ago">${x.used_pct!=null?Math.round(x.used_pct)+"%":""}${x.temp?" · "+x.temp+"°":""}</span></div>`;
+    }).join(""):`<div class="empty">дисков нет</div>`}</div>`;
+
+  const bk=d.backups||[];
+  $("#c_bk").innerHTML=`<h2>Бэкапы<span class="r">${bk.length||"—"}</span></h2>
+    <div class="body">${bk.length?bk.slice(0,4).map(b=>{
+      const cls=b.last==="ok"?"ok":b.last==="warn"?"wn":b.last?"bd":"no";
+      return `<div class="r2"><span class="st2 ${cls}">${b.last==="ok"?"✓":b.last?"!":"—"}</span>
+        <span class="nm">${esc(b.name)}</span><span class="ago">${esc(ago(b.last_ts))}</span></div>`;
+    }).join(""):`<div class="empty">профилей нет</div>`}</div>`;
 }
-function renderAvail(d){
-  const a=d.avail||{}, bars=a.bars||[];
-  if(!bars.length){ $("#av").innerHTML=""; return; }
-  const cls=v=>v===2?"":v===1?"local":v===0?"off":"nd";
-  $("#av").innerHTML=`<span class="bars">${bars.map(v=>`<i class="${cls(v)}"></i>`).join("")}</span>`
-    +`<span class="pct">${a.pct!=null?a.pct+"% · 24 ч":"24 ч"}</span>`;
+function renderRow2(d){
+  const ev=(d.events||[]).slice(0,5);
+  $("#c_ev").innerHTML=`<h2>События<span class="r">${ev.length||""}</span></h2>
+    <div class="body">${ev.length?ev.map(e=>{
+      const c=e.lvl==="crit"?"bd":e.lvl==="warn"?"wn":e.lvl==="ok"?"ok":"no";
+      return `<div class="r2"><span class="st2 ${c}">●</span><span class="nm">${esc(e.title)}</span>
+        <span class="ago">${esc(ago(e.t))}</span></div>`;}).join(""):`<div class="empty">событий нет</div>`}</div>`;
+  const T=d.tiles||{}, t=(k)=>T[k]?`${T[k].value} ${T[k].unit||""}`:null;
+  const rows=[["Интернет",T.inet?T.inet.value:null],["Обновления",t("updates")],
+              ["SnapRAID",T.snapraid?T.snapraid.value:null],
+              ["Температура дисков",t("disktemp")],
+              ["Питание",d.psu_ma?d.psu_ma+" мА":null],
+              ["Троттлинг",(d.throttled&&d.throttled.throttle)?"да":"нет"],
+              ["Просадка питания",(d.throttled&&d.throttled.undervolt)?"да":null]].filter(r=>r[1]!=null);
+  $("#c_sy").innerHTML=`<h2>Система</h2><div class="body">${rows.slice(0,5).map(r=>
+    `<div class="r2"><span class="nm">${esc(r[0])}</span><span class="ago">${esc(r[1])}</span></div>`).join("")}</div>`;
 }
-function renderEvents(d){
+function renderFoot(d){
   const e=(d.events||[])[0];
   $("#ev").innerHTML=e?`<b>${esc(e.title)}</b> · ${esc(ago(e.t))}`:"";
-  const rows=(d.events||[]).map(x=>{
-    const cls=x.lvl==="crit"?"bad":x.lvl==="warn"?"warn":x.lvl==="ok"?"ok":"none";
-    return `<div class="r"><span class="st ${cls}">●</span><span class="nm">${esc(x.title)}</span>
-      <span class="ago">${esc(ago(x.t))}</span></div>`;
-  }).join("") || `<div class="r"><span class="nm" style="color:var(--mut)">событий нет</span></div>`;
-  $("#evc").innerHTML=`<h2>Последние события</h2><div class="body">${rows}</div>`;
+  const a=d.avail||{}, bars=a.bars||[], cls=v=>v===2?"":v===1?"local":v===0?"off":"nd";
+  $("#av").innerHTML=bars.length
+    ? `<span class="bars">${bars.map(v=>`<i class="${cls(v)}"></i>`).join("")}</span>
+       <span class="pct">${a.pct!=null?a.pct+"% · 24 ч":"24 ч"}</span>` : "";
 }
-function renderSys(d){
-  const T=d.tiles||{}, kv=(k,v)=>v?`<div class="kv"><span>${esc(k)}</span><b>${esc(v)}</b></div>`:"";
-  $("#sysc").innerHTML=`<h2>Система</h2><div class="body">
-    ${kv("Аптайм",upfmt(d.uptime))}
-    ${kv("Адрес",(d.ip||"")+" · "+(d.iface||""))}
-    ${kv(T.docker?T.docker.label:"Docker",T.docker?T.docker.value+" "+(T.docker.unit||""):"")}
-    ${kv(T.updates?T.updates.label:"",T.updates?T.updates.value+" "+(T.updates.unit||""):"")}
-    ${kv(T.disktemp?T.disktemp.label:"",T.disktemp?T.disktemp.value+" "+(T.disktemp.unit||""):"")}
-    ${kv(T.inet?T.inet.label:"",T.inet?T.inet.value:"")}
-    ${kv(T.snapraid?T.snapraid.label:"",T.snapraid?T.snapraid.value:"")}
-    </div>
-    <div class="acts">
-      <button class="act" data-tap="reboot">Перезагрузить</button>
-      <button class="act bad" data-tap="poweroff">Выключить</button>
-    </div>`;
+function renderBar(d){
+  $("#who").textContent=d.mdns||d.host||"NAS";
+  $("#addr").textContent=d.ip?"· "+d.ip:"";
+  $("#up").innerHTML=esc(upfmt(d.uptime));
+  const [rv,ru]=rate((d.net||{}).rx), [tv,tu]=rate((d.net||{}).tx);
+  $("#net").innerHTML=`<span class="dn">↓ <b>${rv}</b> ${ru}</span><span class="upl">↑ <b>${tv}</b> ${tu}</span>`;
+  $("#dot").className=d.overall==="bad"?"bad":d.overall==="warn"?"warn":"";
+  const pr=d.problems||[];
+  $("#st").innerHTML=pr.length?esc(pr.map(p=>p.name+": "+p.value).join(" · ")):"всё в порядке";
+  $("#zzz").textContent=d.asleep?"☀":"☾";
 }
 function renderAlarm(d){
   const bad=(d.problems||[]).filter(p=>p.lvl==="bad"), a=$("#alarm");
@@ -327,35 +319,79 @@ function renderAlarm(d){
 }
 $("#alarm").onclick=()=>{ $("#alarm")._hid=true; $("#alarm").classList.remove("on"); };
 
-let WPV=null;
-/* Материал поверхностей — та же арифметика, что в applySettings() панели:
-   elevation в тёмной теме = белый слой поверх материала, прозрачность отдельно
-   для виджетов (wdgOp) и менубара (mbOp), backdrop-filter из wdgBlur/wdgSat.
-   Раньше тут были захардкоженные rgba(255,255,255,.09) и blur(18px) — экран жил
-   своей жизнью и не менялся вместе с панелью. */
-const clampf=(v,a,b)=>Math.max(a,Math.min(b,+v||0));
-const hexRgb=h=>{const n=parseInt(h.slice(1),16);return [n>>16&255,n>>8&255,n&255].join(",");};
-const isHex=h=>/^#[0-9a-f]{6}$/i.test(h||"");
-const litRgb=(rgb,amt)=>rgb.split(",").map(x=>Math.round(+x+(255-+x)*amt)).join(",");
+/* ---------- детали: открываются по тапу на ЛЮБУЮ плашку ---------- */
+const KV=(k,v)=>v==null||v===""?"":`<div class="kv"><span>${esc(k)}</span><b>${esc(v)}</b></div>`;
+const SHEETS={
+  cpu:d=>{const r=(d.tiles.load||{}).raw||{}, c=(d.tiles.cpu||{}).raw||{};
+    return ["CPU", KV("Загрузка",Math.round(c.pct||0)+" %")
+      +KV("Средняя нагрузка",(d.load||[]).map(x=>x.toFixed(2)).join(" · "))
+      +KV("Ядра",r.ncpu)+KV("Температура",Math.round(((d.tiles.cputemp||{}).raw||{}).c||0)+" °C")
+      +KV("Аптайм",upfmt(d.uptime)), ""];},
+  temp:d=>{const t=((d.tiles.cputemp||{}).raw)||{};
+    return ["Температура", KV("CPU",Math.round(t.c||0)+" °C")+KV("Троттлинг",t.throttle?"да":"нет")
+      +KV("Питание",d.psu_ma?d.psu_ma+" мА":"")
+      +(d.disks||[]).map(x=>KV(x.name,x.temp?x.temp+" °C":"—")).join(""), ""];},
+  ram:d=>{const m=d.mem||{};
+    return ["Память", KV("Занято",gb(m.used||0)+" из "+gb(m.total||0))+KV("Процент",Math.round(m.pct||0)+" %")
+      +KV("Swap",m.swap_total?gb(m.swap_total-(m.swap_free||0))+" из "+gb(m.swap_total):"нет"), ""];},
+  disk:d=>{const T=d.tiles||{}, hp=!!(T.pool&&T.pool.raw), k=hp?T.pool.raw:(T.rootfs||{}).raw||{};
+    return [hp?"Пул":"Системный диск",
+      KV("Занято",Math.round(k.pct||0)+" %")+KV("Свободно",gb(k.free||0))+KV("Использовано",gb(k.used||0))
+      +(d.disks||[]).map(x=>KV(x.name+(x.model?" · "+x.model:""),
+          (x.size||"")+(x.used_pct!=null?" · "+Math.round(x.used_pct)+"%":""))).join(""), ""];},
+  docker:d=>{const ct=d.containers||[];
+    return ["Docker", ct.length?ct.map(c=>KV(c.name,c.status||c.state)).join(""):
+      `<div class="empty">Docker не установлен</div>`, ""];},
+  disks:d=>{const dk=d.disks||[];
+    return ["Диски", dk.length?dk.map(x=>KV(x.name+(x.model?" · "+x.model:""),
+      [x.size,x.temp?x.temp+"°C":null,x.healthy===false?"SMART: сбой":x.healthy===true?"SMART: ок":null,
+       (x.mounts||[]).join(" ")].filter(Boolean).join(" · "))).join(""):`<div class="empty">дисков нет</div>`, ""];},
+  backups:d=>{const bk=d.backups||[];
+    return ["Бэкапы", bk.length?bk.map(b=>KV(b.name,
+      (b.running?"идёт":b.last==="ok"?"✓ "+ago(b.last_ts):b.last?"! "+ago(b.last_ts):"никогда"))).join("")
+      :`<div class="empty">профилей нет</div>`,
+      bk.length?`<div class="go" data-run="${esc(bk[0].id)}">Запустить «${esc(bk[0].name)}»</div>`:""];},
+  events:d=>["Последние события",
+    (d.events||[]).length?(d.events||[]).map(e=>KV(e.title,ago(e.t))).join(""):`<div class="empty">событий нет</div>`,
+    `<div class="go warnbtn" data-act="poweroff">Выключить NAS</div>`],
+};
+function sheet(name){
+  const f=SHEETS[name]; if(!f) return;
+  const [title,body,actions]=f(D);
+  $("#sheetT").innerHTML=esc(title); $("#sheetB").innerHTML=body||""; $("#sheetA").innerHTML=actions||"";
+  $("#sheet").classList.add("on");
+}
+$("#sheet").onclick=e=>{ if(e.target.id==="sheet") $("#sheet").classList.remove("on"); };
+
+document.addEventListener("click",e=>{
+  const a=e.target.closest("[data-act]"), s=e.target.closest("[data-sheet]"), r=e.target.closest("[data-run]");
+  if(a){
+    const k=a.dataset.act;
+    if(k==="sleep"){ act({a:D.asleep?"touch":"sleep"}).then(()=>poll()); return; }
+    if(k==="poweroff"){ $("#sheet").classList.remove("on");
+      act({a:"poweroff"}).then(r=>toast(r.ok?"Выключаюсь…":(r.log||"не вышло"))); return; }
+  }
+  if(r){ $("#sheet").classList.remove("on");
+    act({a:"backup",p:r.dataset.run}).then(x=>{toast(x.ok?"Бэкап запущен":(x.log||"не вышло")); poll();}); return; }
+  if(s) sheet(s.dataset.sheet);
+});
+
+/* ---------- оформление из настроек панели (всегда тёмный профиль) ---------- */
 function applyLook(L){
   if(!L) return;
-  const S=L, dark=L.theme!=="light", root=document.documentElement;
-  if(L.wpVer!==WPV){                       // обои сменили в браузере — подхватываем
-    WPV=L.wpVer;
-    $("#wall").style.backgroundImage=L.wpVer?`url(/api/wallpaper/img?v=${L.wpVer})`:"";
-  }
+  const S=L, root=document.documentElement;
+  if(L.wpVer!==WPV){ WPV=L.wpVer;
+    $("#wall").style.backgroundImage=L.wpVer?`url(/api/wallpaper/img?v=${L.wpVer})`:""; }
   const b=clampf(S.fxBlur,0,100);
-  // масштаб растёт с блюром — иначе размытые края обнажают фон (как в панели)
   $("#wall").style.filter=b?`blur(${b}px)`:"";
   $("#wall").style.transform=b?`scale(${(1+b*0.009).toFixed(3)})`:"";
   $("#wallDim").style.opacity=clampf(S.fxDim,0,80)/100;
   $("#wallNoise").style.opacity=clampf(S.fxNoise,0,100)/100;
-
-  const surf=dark?"22,30,42":"255,255,255";
-  const tint=dark?S.tintDark:S.tintLight, mat=isHex(tint)?hexRgb(tint):surf;
-  const eBase=clampf(dark?(S.elevBaseDark??.5):(S.elevBaseLight??.55),.1,.96);
-  const eStep=clampf(S.elevStep??.13,0,.3), eLight=clampf(S.elevLight??.05,0,.25);
-  const veilBase=dark?.05:0, veilStep=dark?Math.max(eLight,.065):eLight, alphaStep=dark?eStep*.4:eStep;
+  // та же арифметика, что applySettings() в панели, но профиль ВСЕГДА тёмный
+  const mat=isHex(S.tintDark)?hexRgb(S.tintDark):"22,30,42";
+  const eBase=clampf(S.elevBaseDark??.5,.1,.96), eStep=clampf(S.elevStep??.13,0,.3),
+        eLight=clampf(S.elevLight??.05,0,.25);
+  const veilBase=.05, veilStep=Math.max(eLight,.065), alphaStep=eStep*.4;
   const lvlRgb=n=>litRgb(mat,clampf(veilBase+(n-1)*veilStep,0,.85));
   const lvlA=n=>clampf(eBase+(n-1)*alphaStep,.1,1);
   const elA=k=>(S[k]==null||S[k]==="")?lvlA(1):clampf(+S[k]/100,0,1);
@@ -363,86 +399,34 @@ function applyLook(L){
     const px=clampf(S[bk]??0,0,100), sat=clampf(S[sk]??100,0,200), p=[];
     if(px>0)p.push(`blur(${px}px)`); if(sat!==100)p.push(`saturate(${(sat/100).toFixed(2)})`);
     return p.length?p.join(" "):"none"; };
-  const wc=dark?S.wdgDark:S.wdgLight, wOp=(S.wdgOp==null||S.wdgOp==="")?lvlA(1):clampf(+S.wdgOp/100,0,1);
-  root.style.setProperty("--glass", isHex(wc)?`rgba(${hexRgb(wc)},${wOp.toFixed(3)})`
-                                             :`rgba(${lvlRgb(1)},${wOp.toFixed(3)})`);
+  const wOp=(S.wdgOp==null||S.wdgOp==="")?lvlA(1):clampf(+S.wdgOp/100,0,1);
+  root.style.setProperty("--glass", isHex(S.wdgDark)?`rgba(${hexRgb(S.wdgDark)},${wOp.toFixed(3)})`
+                                                    :`rgba(${lvlRgb(1)},${wOp.toFixed(3)})`);
   root.style.setProperty("--wdg-bf", bf("wdgBlur","wdgSat"));
   root.style.setProperty("--mb-bg", `rgba(${lvlRgb(1)},${elA("mbOp").toFixed(3)})`);
   root.style.setProperty("--mb-bf", bf("mbBlur","mbSat"));
   root.style.setProperty("--accent", isHex(S.accentHex)?S.accentHex:"#2dd4bf");
-  const rq=clampf(S.radius??1,.2,2);
-  root.style.setProperty("--r-lg",(16*rq).toFixed(0)+"px");
-  root.style.setProperty("--ink", dark?"#eef2f7":"#16202c");
-  root.style.setProperty("--dim", dark?"rgba(238,242,247,.62)":"rgba(20,30,42,.66)");
-  root.style.setProperty("--mut", dark?"rgba(238,242,247,.40)":"rgba(20,30,42,.47)");
-  root.style.setProperty("--line", dark?"rgba(255,255,255,.14)":"rgba(0,0,0,.10)");
-  root.style.setProperty("--track", dark?"rgba(255,255,255,.13)":"rgba(0,0,0,.12)");
+  root.style.setProperty("--r-lg",(16*clampf(S.radius??1,.2,2)).toFixed(0)+"px");
+  // градиент-скрим сверху: те же ключи, что у менубара панели
+  $("#mbGrad").style.height=S.mbGrad?clampf(S.mbGradH??90,0,400)+"px":"0";
+  root.style.setProperty("--mb-grad-a",clampf((S.mbGradInt??50)/100,0,1).toFixed(3));
+  root.style.setProperty("--mb-grad-o",clampf((S.mbGradOp??100)/100,0,1).toFixed(3));
 }
-function render(d){
-  D.actions=d.actions;
-  applyLook(d.look);
-  $("#who").textContent=d.mdns||d.host||"NAS";
-  $("#addr").textContent=d.ip?"· "+d.ip:"";
-  $("#up").innerHTML=esc(upfmt(d.uptime));   // innerHTML, а не textContent: перевод цепляется только за него
-  $("#dot").className=d.overall==="bad"?"bad":d.overall==="warn"?"warn":"";
-  const pr=(d.problems||[]);
-  $("#st").innerHTML=pr.length?esc(pr.map(p=>p.name+": "+p.value).join(" · ")):"всё в порядке";
-  renderRings(d); renderNet(d); renderBk(d); renderSvc(d); renderAvail(d); renderEvents(d); renderSys(d); renderAlarm(d);
-}
-
-/* ---------- dialogs / actions ---------- */
-function dialog(title,sub,btns){
-  const s=$("#scrim"); s.querySelector("h3").textContent=title; s.querySelector("p").textContent=sub||"";
-  const box=s.querySelector(".btns"); box.innerHTML="";
-  btns.forEach(b=>{ const el=document.createElement("button");
-    el.className="btn"+(b.cls?" "+b.cls:""); el.textContent=b.label;
-    el.onclick=()=>{ s.classList.remove("on"); b.go&&b.go(); }; box.appendChild(el); });
-  s.classList.add("on");
-}
-$("#scrim").onclick=e=>{ if(e.target.id==="scrim") $("#scrim").classList.remove("on"); };
-
-document.addEventListener("click",e=>{
-  const t=e.target.closest("[data-tap]"), b=e.target.closest("[data-bk]");
-  if(!D.actions) return;
-  if(t && t.dataset.tap==="speed"){ act({a:"speed"}).then(r=>toast(r.ok?"Меряю канал…":(r.log||"не вышло"))); poll(); }
-  if(t && (t.dataset.tap==="reboot"||t.dataset.tap==="poweroff")){
-    const off=t.dataset.tap==="poweroff";
-    dialog(off?"Выключить NAS?":"Перезагрузить NAS?","Панель и все службы будут остановлены.",
-      [{label:"Отмена"},{label:off?"Выключить":"Перезагрузить",cls:"bad",
-        go:()=>act({a:t.dataset.tap}).then(()=>toast(off?"Выключаюсь…":"Перезагружаюсь…"))}]);
-  }
-  if(b){
-    dialog("Запустить бэкап?",b.querySelector(".nm").textContent,
-      [{label:"Отмена"},{label:"Запустить",cls:"go",
-        go:()=>act({a:"backup",p:b.dataset.bk}).then(r=>{toast(r.ok?"Бэкап запущен":(r.log||"не вышло")); poll();})}]);
-  }
-});
-
-/* свайп/тап — страницы */
-let sx=0;
-addEventListener("touchstart",e=>{sx=e.touches[0].clientX},{passive:true});
-addEventListener("touchend",e=>{ const dx=e.changedTouches[0].clientX-sx;
-  if(Math.abs(dx)>60) setPage(PAGE+(dx<0?1:-1)); },{passive:true});
-let homeT=0;
-function setPage(n){
-  PAGE=Math.max(0,Math.min(1,n));
-  clearTimeout(homeT);
-  if(PAGE) homeT=setTimeout(()=>setPage(0),60000);   // сам вернётся на главную
-  document.querySelectorAll(".page").forEach((p,i)=>p.classList.toggle("on",i===PAGE));
-  document.querySelectorAll("#dots .d").forEach((p,i)=>p.classList.toggle("on",i===PAGE));
-}
-$("#dots").onclick=()=>setPage(PAGE?0:1);
 
 /* ---------- poll ---------- */
-async function poll(){
+async function poll(){ return _poll(); }
+async function _poll(){
   try{
-    const r=await fetch("/api/screen/data",{cache:"no-store"});   // язык решает сервер (screen.json)
+    const r=await fetch("/api/screen/data",{cache:"no-store"});
     if(!r.ok) throw 0;
-    const d=await r.json();
-    window.NAS_LANG=d.lang||"en";     // i18n.js переводит всё, что уходит в innerHTML
-    render(d);
+    D=await r.json();
+    window.NAS_LANG=D.lang||"en";
+    trStatic();
+    applyLook(D.look); renderBar(D); renderGauges(D); renderCards(D); renderRow2(D); renderFoot(D); renderAlarm(D);
+    if($("#sheet").classList.contains("on")) { /* лист открыт — не дёргаем его перерисовкой */ }
     $("#dot").style.opacity=1;
-  }catch(e){ $("#dot").style.opacity=.25; }   // панель молчит — не рисуем мусор
+  }catch(e){ $("#dot").style.opacity=.25; }
 }
-poll(); setInterval(poll,3000);
+poll().then(()=>{ const m=location.search.match(/sheet=(\w+)/); if(m) sheet(m[1]); });
+setInterval(poll,1500);   // экран живой: полторы секунды
 </script>

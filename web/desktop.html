@@ -8467,6 +8467,7 @@ function winSettings(initTab){openWin("__set","Настройки",body=>{
   {id:"files",name:"Файлы",ic:"folder"},
   {id:"notify",name:"Уведомления",ic:"bell"},
   {id:"glance",name:"Экран",ic:"monitor"},
+  {id:"tscr",name:"Тачскрин",ic:"monitor"},
   {id:"nts",name:"Заметки",ic:"note"},
   {id:"system",name:"Система",ic:"activity"},
   {id:"motd",name:"Приветствие SSH",ic:"term"},
@@ -8478,7 +8479,7 @@ function winSettings(initTab){openWin("__set","Настройки",body=>{
   {id:"pi",name:"Raspberry Pi",ic:"cpu"},
   {id:"timemachine",name:"Time Machine",ic:"timemachine"},
  ];
- const FN={look:lookTab,files:filesTab,notify:notifyTab,glance:glanceTab,nts:notesTab,timemachine:timemachineTab,system:systemTab,motd:motdTab,maint:maintTab,network:networkTab,security:securityTab,usb:usbTab,backup:backupTab,pi:piTab};
+ const FN={look:lookTab,files:filesTab,notify:notifyTab,glance:glanceTab,tscr:screenTab,nts:notesTab,timemachine:timemachineTab,system:systemTab,motd:motdTab,maint:maintTab,network:networkTab,security:securityTab,usb:usbTab,backup:backupTab,pi:piTab};
  let footMo=null;
  const render=()=>{
   if(footMo){footMo.disconnect();footMo=null;}
@@ -9205,6 +9206,50 @@ function usbTab(tc){tc.innerHTML=`<div class="set-load">загрузка…</div
    toast(LIVE?(rr&&rr.ok?(rr.warn||"Сохранено ✓"):"Ошибка: "+((rr&&rr.log)||"?")):"Демо");};
  });}
 /* --- settings: приветствие при входе по SSH --- */
+function screenTab(tc){
+ tc.innerHTML=`<h3 class="set-title">Локальный экран</h3><p class="set-sub">Тач-панель, подключённая к самому боксу: дашборд в киоске (cage + chromium). Экран всегда тёмный и не спрашивает пароль — он доступен только с самого NAS.</p>
+  <div id="scrNo" class="mon-note" style="display:none">${svg("info",13)} Экран не подключён — панель не найдена (нет DSI-дисплея и подсветки).</div>
+  <div id="scrBody" style="display:none">
+  <div class="set-grp">Экран</div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Показывать дашборд</div><div class="srow-d">служба nas-screen: cage + chromium на tty1</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="scEn"><span class="sl"></span></label></div></div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Действия с экрана</div><div class="srow-d">запуск бэкапа, перезагрузка, выключение — прямо пальцем</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="scAct"><span class="sl"></span></label></div></div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Яркость</div><div class="srow-d">днём, 1–255</div></div><div class="srow-c"><input type="range" min="1" max="255" id="scBr" style="width:180px"><b id="scBrV" style="margin-left:8px;min-width:34px;display:inline-block"></b></div></div>
+  <div class="set-grp">Сон</div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Гасить ночью</div><div class="srow-d">по расписанию; авария (диск, бэкап, служба) зажигает экран даже ночью</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="scN"><span class="sl"></span></label></div></div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Засыпать в</div><div class="srow-d">время, когда подсветка гаснет</div></div><div class="srow-c"><input type="time" id="scFrom" class="inp" style="width:120px"></div></div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Просыпаться в</div><div class="srow-d">время, когда подсветка возвращается</div></div><div class="srow-c"><input type="time" id="scTo" class="inp" style="width:120px"></div></div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Яркость ночью</div><div class="srow-d">0 — гасить совсем; касание будит на минуту</div></div><div class="srow-c"><input type="range" min="0" max="255" id="scNb" style="width:180px"><b id="scNbV" style="margin-left:8px;min-width:34px;display:inline-block"></b></div></div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Гасить в простое</div><div class="srow-d">минут без касаний; 0 — не гасить</div></div><div class="srow-c"><input type="number" min="0" max="240" id="scIdle" class="inp" style="width:90px"></div></div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Заснуть сейчас</div><div class="srow-d">погасить до первого касания</div></div><div class="srow-c"><button class="btn sm" id="scSleep">${svg("moon",13)} Заснуть</button></div></div>
+  </div>
+  <div class="set-savebar"><span class="sb-left">Локальный экран</span><button class="btn sm pri" id="scSave">${svg("save",13)} Сохранить</button></div>`;
+ const q=id=>tc.querySelector(id);
+ const paint=c=>{
+  q("#scEn").checked=c.enabled!==false; q("#scAct").checked=c.actions!==false;
+  q("#scBr").value=c.bright||200; q("#scBrV").textContent=c.bright||200;
+  q("#scN").checked=!!c.night; q("#scFrom").value=c.night_from||"23:00"; q("#scTo").value=c.night_to||"07:00";
+  q("#scNb").value=c.night_bright||0; q("#scNbV").textContent=c.night_bright||0;
+  q("#scIdle").value=c.idle_min||0;
+ };
+ q("#scBr").oninput=()=>q("#scBrV").textContent=q("#scBr").value;
+ q("#scNb").oninput=()=>q("#scNbV").textContent=q("#scNb").value;
+ api("/api/screen/config").then(r=>{
+  const c=(r&&r.config)||{};
+  if(r&&r.present===false){ q("#scNo").style.display=""; }
+  else { q("#scBody").style.display=""; paint(c); }
+ });
+ q("#scSleep").onclick=async()=>{
+  const r=await api("/api/screen/act",{method:"POST",body:JSON.stringify({a:"sleep"})});
+  toast(r&&r.ok?"Экран погашен":"Не вышло");
+ };
+ q("#scSave").onclick=async()=>{
+  const cfg={enabled:q("#scEn").checked,actions:q("#scAct").checked,bright:+q("#scBr").value,
+    night:q("#scN").checked,night_from:q("#scFrom").value,night_to:q("#scTo").value,
+    night_bright:+q("#scNb").value,idle_min:+q("#scIdle").value};
+  const r=await api("/api/screen/config",{method:"POST",body:JSON.stringify({config:cfg})});
+  toast(r&&r.ok?"Сохранено ✓":"Ошибка");   // службу киоска поднимает/гасит сервер (движок)
+ };
+}
 function motdTab(tc){
  tc.innerHTML=`<h3 class="set-title">Приветствие в SSH</h3><p class="set-sub">Что видно в терминале при входе. Собирается из нескольких источников: наш блок, строка ядра, баннер Cockpit и «Last login» от sshd.</p>
   <div class="set-grp">Что показывать${tipHTML("Что видно в терминале при входе по SSH. Рисует pam_motd через /etc/update-motd.d/20-nas-os.")}</div>
