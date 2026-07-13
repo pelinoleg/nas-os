@@ -1896,8 +1896,14 @@ EOF
     # CSS cursor:none и XCURSOR_SIZE его не убирают — гасим сам pointer на уровне
     # libinput. Клавиатура и тач продолжают работать.
     write_file /etc/udev/rules.d/99-nas-nopointer.rules <<'EOF'
-# nas-wizard: киоску указатель не нужен — курсор мыши на экране не рисуем.
+# nas-wizard: киоску указатель не нужен — курсор мыши на настенном экране выглядит как баг.
+# Гасим ВСЕ указательные устройства, а не только мышь: на Pi 4 джеки HDMI приезжают как
+# ID_INPUT_POINTINGSTICK, и композитор рисовал курсор даже когда мышь была уже отключена.
+# Тач (ID_INPUT_TOUCHSCREEN) и клавиатуры не трогаем.
 SUBSYSTEM=="input", ENV{ID_INPUT_MOUSE}=="1", ENV{LIBINPUT_IGNORE_DEVICE}="1"
+SUBSYSTEM=="input", ENV{ID_INPUT_POINTINGSTICK}=="1", ENV{LIBINPUT_IGNORE_DEVICE}="1"
+SUBSYSTEM=="input", ENV{ID_INPUT_TOUCHPAD}=="1", ENV{LIBINPUT_IGNORE_DEVICE}="1"
+SUBSYSTEM=="input", ENV{ID_INPUT_TABLET}=="1", ENV{LIBINPUT_IGNORE_DEVICE}="1"
 EOF
     run udevadm control --reload-rules
     run udevadm trigger --subsystem-match=backlight --action=add
