@@ -11200,6 +11200,7 @@ def load_screen():
             "night_to": _hhmm("night_to", "07:00"),
             "night_bright": _i("night_bright", 0, 0, 255),
             "idle_min": _i("idle_min", 0, 0, 240),      # 0 = не гасить по простою
+            "poll": _i("poll", 1500, 500, 30000),       # как часто экран спрашивает данные, мс
             "actions": d.get("actions") is not False,
             "lang": "ru" if d.get("lang") == "ru" else "en"}
 
@@ -11439,7 +11440,8 @@ def screen_payload(lang=""):
             "throttled": st.get("throttled"), "psu_ma": st.get("psu_ma"),
             "asleep": bool(_SCR["sleep"]),
             "speed": _SCR["spd"], "speed_running": bool(_SCR["spd_run"]),
-            "actions": cfg["actions"], "lang": cfg["lang"], "ts": int(time.time())}
+            "actions": cfg["actions"], "lang": cfg["lang"], "poll": cfg["poll"],
+            "ts": int(time.time())}
 
 
 def screen_action(b):

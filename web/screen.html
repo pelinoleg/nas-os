@@ -70,18 +70,20 @@
   .page.on{display:flex}
 
   /* gauges */
-  #gs{flex:none;display:grid;grid-template-columns:repeat(4,1fr);gap:7px;height:128px}
-  .gauge{padding:6px 4px 7px;display:flex;flex-direction:column;align-items:center;position:relative}
-  .gauge svg{width:124px;height:70px}
-  .gauge .v{position:absolute;top:32px;left:0;right:0;text-align:center;font-size:21px;font-weight:700;
+  #gs{flex:none;display:grid;grid-template-columns:repeat(4,1fr);gap:7px;height:100px}
+  .gauge{padding:4px 4px 5px;display:flex;flex-direction:column;align-items:center;position:relative}
+  .gauge svg{width:106px;height:60px}
+  .gauge .v{position:absolute;top:26px;left:0;right:0;text-align:center;font-size:19px;font-weight:700;
             font-variant-numeric:tabular-nums;line-height:1}
   .gauge .v small{font-size:11px;font-weight:600;color:var(--dim)}
-  .gauge .sub{position:absolute;top:55px;left:0;right:0;text-align:center;font-size:11px;color:var(--mut)}
-  .gauge .cap{font-size:10.5px;letter-spacing:.7px;text-transform:uppercase;color:var(--dim);font-weight:650;margin-top:2px}
+  .gauge .sub{position:absolute;top:45px;left:0;right:0;text-align:center;font-size:11px;color:var(--mut)}
+  .gauge .cap{font-size:10px;letter-spacing:.6px;text-transform:uppercase;color:var(--dim);font-weight:650;margin-top:1px}
 
   /* row of cards */
   #row{flex:1.25;display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;min-height:0}
-  #row2{flex:.85;display:grid;grid-template-columns:1.35fr 1fr;gap:7px;min-height:0}
+  #row2{flex:.95;display:grid;grid-template-columns:1.35fr 1fr;gap:7px;min-height:0}
+  #row2 .r2{padding:3px 0;font-size:12.5px}
+  #row2 .prow{padding:3px 0}
   .body{overflow:hidden}
   .card{padding:9px 12px;display:flex;flex-direction:column;min-height:0;overflow:hidden}
   .card h2{font-size:10.5px;letter-spacing:.7px;text-transform:uppercase;color:var(--dim);font-weight:650;
@@ -278,7 +280,7 @@ function renderCards(d){
   // --- Docker: стеки, а не голые контейнеры
   const stk=d.stacks||[], ct=d.containers||[], run=ct.filter(c=>c.state==="running").length;
   $("#c_dk").innerHTML=`<h2>Docker<span class="r">${ct.length?run+"/"+ct.length:(stk.length?stk.length+" стеков":"—")}</span></h2>
-    <div class="body">${stk.length?stk.slice(0,4).map(x=>{
+    <div class="body">${stk.length?stk.slice(0,5).map(x=>{
       const ok=x.running>0, part=x.total&&x.running<x.total;
       return `<div class="r2"><span class="st2 ${ok?(part?"wn":"ok"):"no"}">●</span>
         <span class="nm">${esc(x.name)}</span>
@@ -288,7 +290,7 @@ function renderCards(d){
   // --- Диски: полоска заполнения, как в виджетах
   const dk=d.disks||[];
   $("#c_ds").innerHTML=`<h2>Диски<span class="r">${dk.length||"—"}</span></h2>
-    <div class="body">${dk.length?dk.slice(0,3).map(x=>{
+    <div class="body">${dk.length?dk.slice(0,4).map(x=>{
       const p=x.used_pct, sys=x.role==="system"||(x.mounts||[]).includes("/");
       return `<div class="prow"><div class="t">
         <span class="nm">${esc(x.name)}${sys?" · System":x.tran==="usb"?" · USB":""}</span>
@@ -310,7 +312,7 @@ function renderCards(d){
         </div></div>`;
   } else {
     $("#c_bk").innerHTML=`<h2>Бэкапы<span class="r">${bk.length||"—"}</span></h2>
-      <div class="body">${bk.length?bk.slice(0,3).map(b=>{
+      <div class="body">${bk.length?bk.slice(0,4).map(b=>{
         const cls=b.last==="ok"?"ok":b.last==="warn"?"wn":b.last?"bd":"no";
         return `<div class="r2"><span class="st2 ${cls}">${b.last==="ok"?"✓":b.last?"!":"—"}</span>
           <span class="nm">${esc(b.name)}</span>
@@ -319,7 +321,7 @@ function renderCards(d){
   }
 }
 function renderRow2(d){
-  const ev=(d.events||[]).slice(0,4);
+  const ev=(d.events||[]).slice(0,3);
   $("#c_ev").innerHTML=`<h2>События<span class="r">${ev.length||""}</span></h2>
     <div class="body">${ev.length?ev.map(e=>{
       const c=e.lvl==="crit"?"bd":e.lvl==="warn"?"wn":e.lvl==="ok"?"ok":"no";
@@ -540,5 +542,12 @@ async function _poll(){
     $("#up").textContent="ERR: "+String((e&&e.message)||e).slice(0,80); }
 }
 poll().then(()=>{ const m=location.search.match(/sheet=(\w+)/); if(m) sheet(m[1]); });
-setInterval(poll,1500);   // экран живой: полторы секунды
+// частоту задаёт панель (screen.json:poll) — перевзводим таймер, если её поменяли
+let TICK=0, TICK_MS=0;
+function arm(){
+  const ms=clampf(D.poll||1500,500,30000);
+  if(ms===TICK_MS) return;
+  TICK_MS=ms; clearInterval(TICK); TICK=setInterval(poll,ms);
+}
+arm(); setInterval(arm,5000);
 </script>
