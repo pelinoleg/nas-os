@@ -385,7 +385,7 @@ function renderCards(d){
     <div class="body">${dk.length?dk.slice(0,4).map(x=>{
       const p=x.used_pct, sys=x.role==="system"||(x.mounts||[]).includes("/");
       return `<div class="prow"><div class="t">
-        <span class="nm">${esc(x.name)}${sys?" · System":x.tran==="usb"?" · USB":""}</span>
+        <span class="nm">${sys?"System":esc(x.name)+(x.tran==="usb"?" · USB":"")}</span>
         <span class="ago">${esc(x.size||"")}${p!=null?" · "+Math.round(p)+"%":""}${x.temp?" · "+x.temp+"°":""}</span></div>
         ${p!=null?bar(p):""}</div>`;}).join(""):`<div class="empty">дисков нет</div>`}</div>`;
 
