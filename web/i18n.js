@@ -896,6 +896,7 @@ window.NAS_I18N = { en: {
 "К списку": "Back to the list",
 "КБ": "KB",
 "КБ/с": "KB/s",
+"Кбит/с": "Kbit/s",
 "Кабель (Ethernet)": "Cable (Ethernet)",
 "Кабель гигабитный, но локальная сеть отвечает медленно.": "The cable is gigabit, but the local network answers slowly.",
 "Кадрирование миниатюр": "Thumbnail cropping",

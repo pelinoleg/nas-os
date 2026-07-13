@@ -10565,6 +10565,23 @@ if [ -z "$mp" ]; then
 fi
 cleanup(){ [ "$selfmount" = "1" ] && { umount "$mp" 2>>"$LOG"; rmdir "$mp" 2>/dev/null; }; }
 base="${IMPORT_DEST:-/mnt/storage/imports}"
+# Приёмник под /mnt|/media|/srv подразумевает ОТДЕЛЬНЫЙ носитель. Не подключён —
+# путь проваливается в корень, и rsync молча зальёт системную карту (так 8 ГБ
+# импорта однажды легли в /mnt/storage на SD, потому что пула не было вовсе).
+# Та же проверка, что у бэкапа (_dest_disk_absent в панели): ближайшая вверх
+# точка монтирования обязана быть НЕ «/». Каталог может ещё не существовать —
+# поднимаемся по dirname, пока не упрёмся в смонтированный.
+mnt_of(){ local p; p="$(readlink -f "$1")"
+  while [ "$p" != "/" ] && ! mountpoint -q "$p" 2>/dev/null; do p="$(dirname "$p")"; done
+  printf '%s' "$p"; }
+case "$base" in
+  /mnt/*|/media/*|/srv/*)
+    if [ "$(mnt_of "$base")" = "/" ]; then
+      log "import FAIL $dev: приёмник $base не смонтирован — носитель приёмника не подключён"
+      notify "USB-импорт отменён" "Приёмник $base не смонтирован — импорт залил бы системный диск"
+      cleanup; exit 1
+    fi ;;
+esac
 # защита от импорта самого себя (напр. флешка примонтирована внутри приёмника)
 case "$(readlink -f "$base")/" in "$(readlink -f "$mp")"/*) log "self-import guard: $mp внутри $base"; cleanup; exit 0;; esac
 # раскладка подпапок: шаблон с токенами {label}/{date}/{time}/{year}/{month}/
@@ -11520,6 +11537,8 @@ def screen_payload(lang="", p2=False):
             "usb": _safe(lambda: usb_import_progress()["jobs"], []) or [],
             # история импортов переживает ребут (ops-history.json), в отличие от /run
             "usbhist": _safe(lambda: usb_import_history(8), []) or [],
+            # единицы скорости сети — общая настройка панели (МБ/с vs Мбит/с)
+            "netUnits": ds.get("netUnits") or "",
             "swap": (st.get("mem") or {}).get("swap_total"),
             "throttled": st.get("throttled"), "psu_ma": st.get("psu_ma"),
             "asleep": bool(_SCR["sleep"]),

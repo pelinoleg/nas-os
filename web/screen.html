@@ -262,9 +262,17 @@ function fmtB(b){ b=+b||0; if(b<1024) return b?b+" Б":"";
   const u=["КБ","МБ","ГБ","ТБ"]; let i=0,x=b/1024;
   while(x>=1024&&i<u.length-1){ x/=1024; i++; }
   return (x>=10?Math.round(x):x.toFixed(1))+" "+u[i]; }
-function rate(b){ if(!b||b<1024) return ["0","КБ/с"];
-  if(b<1048576) return [(b/1024).toFixed(0),"КБ/с"];
-  return [(b/1048576).toFixed(1),"МБ/с"]; }
+/* Скорость сети: на стене мерим в БИТАХ — так её считает провайдер и так подписан
+   гигабитный порт (118 МБ/с = 940 Мбит/с). Единицы общие с панелью: если в
+   настройках выбрано «МБ/с» (SET.netUnits=bytes), экран показывает байты. */
+let NETBITS=true;
+function rate(b){ b=+b||0;
+  if(!NETBITS){ if(b<1024) return ["0","КБ/с"];
+    if(b<1048576) return [(b/1024).toFixed(0),"КБ/с"];
+    return [(b/1048576).toFixed(1),"МБ/с"]; }
+  const m=b*8/1e6;
+  if(m<1) return [Math.round(b*8/1e3)+"","Кбит/с"];
+  return [(m>=100?Math.round(m):m.toFixed(1))+"","Мбит/с"]; }
 function ago(ts){
   if(!ts) return "никогда";
   const s=Math.max(1,Math.floor(Date.now()/1000-ts));
@@ -774,6 +782,7 @@ async function _poll(){
     D=await r.json();
     if(!D.p2 && prev) D.p2=prev;      // ответ без p2 не должен гасить вторую страницу
     window.NAS_LANG=D.lang||"en";
+    NETBITS=D.netUnits!=="bytes";     // общая настройка панели; по умолчанию — биты
     trStatic();
     applyLook(D.look); renderBar(D); renderFoot(D); renderAlarm(D);
     if(PAGE===0){ renderGauges(D); renderCards(D); renderRow2(D); } else { renderP1(D); }
