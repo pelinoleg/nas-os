@@ -11342,6 +11342,11 @@ def _screen_heavy():
         return _SCR_HEAVY["d"]
     dk = []
     for d in (_safe(disks, []) or []):
+        # На экране показываем только СМОНТИРОВАННЫЕ тома: пустой кардридер — это
+        # диск без файловой системы, у него нет ни заполнения, ни температуры,
+        # и строка «— · —» на стене только пугает.
+        if not (d.get("mounts") or []):
+            continue
         sm = d.get("smart") or {}
         dk.append({"name": d.get("name"), "model": d.get("model") or "",
                    "size": d.get("size"), "temp": sm.get("temp") or d.get("temp"),
@@ -11350,6 +11355,10 @@ def _screen_heavy():
                    "used_pct": (d.get("usage") or {}).get("pct"),
                    "free": (d.get("usage") or {}).get("free"),
                    "used": (d.get("usage") or {}).get("used")})
+    # системный — всегда первым: на экране умещается 4 строки, и он не должен
+    # уезжать из них из-за алфавита
+    dk.sort(key=lambda x: (0 if (x["role"] == "system" or "/" in x["mounts"]) else 1,
+                           x["name"] or ""))
     ct = []
     for c in (_safe(_docker_ps, []) or []):
         ct.append({"name": str(c.get("Names") or "?").split(",")[0],
