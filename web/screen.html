@@ -97,6 +97,12 @@
   #foot{flex:none;display:flex;align-items:center;gap:10px;padding:7px 13px}
   #ev{flex:1;min-width:0;font-size:12.5px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   #ev b{color:var(--ink);font-weight:600}
+  #av{display:flex;align-items:center;gap:7px;flex:none}
+  #av .bars{display:flex;gap:1px;align-items:flex-end;height:16px}
+  #av i{width:2px;height:100%;border-radius:1px;background:var(--good)}
+  #av i.local{background:var(--warn)} #av i.off{background:var(--danger)}
+  #av i.nd{background:rgba(255,255,255,.13)}
+  #av .pct{font-size:12px;color:var(--dim);font-variant-numeric:tabular-nums}
   #dots{display:flex;gap:6px}
   .d{width:7px;height:7px;border-radius:50%;background:rgba(255,255,255,.25)}
   .d.on{background:var(--accent)}
@@ -158,7 +164,7 @@
   </div>
 </div>
 
-<div id="foot" class="g"><span id="ev"></span><span id="dots"><i class="d on"></i><i class="d"></i></span></div>
+<div id="foot" class="g"><span id="ev"></span><span id="av"></span><span id="dots"><i class="d on"></i><i class="d"></i></span></div>
 
 <div id="alarm"><div class="big"></div><div class="li"></div><div class="hint">Нажмите, чтобы скрыть</div></div>
 <div id="scrim"><div class="dlg"><h3></h3><p></p><div class="btns"></div></div></div>
@@ -273,6 +279,13 @@ function renderSvc(d){
               .filter(Boolean).slice(0,4).join("");
   $("#svc").innerHTML=`<h2>Службы</h2><div class="chips">${chips||'<span style="color:var(--mut);font-size:13px">нет данных</span>'}</div>`;
 }
+function renderAvail(d){
+  const a=d.avail||{}, bars=a.bars||[];
+  if(!bars.length){ $("#av").innerHTML=""; return; }
+  const cls=v=>v===2?"":v===1?"local":v===0?"off":"nd";
+  $("#av").innerHTML=`<span class="bars">${bars.map(v=>`<i class="${cls(v)}"></i>`).join("")}</span>`
+    +`<span class="pct">${a.pct!=null?a.pct+"% · 24 ч":"24 ч"}</span>`;
+}
 function renderEvents(d){
   const e=(d.events||[])[0];
   $("#ev").innerHTML=e?`<b>${esc(e.title)}</b> · ${esc(ago(e.t))}`:"";
@@ -317,7 +330,7 @@ function render(d){
   $("#dot").className=d.overall==="bad"?"bad":d.overall==="warn"?"warn":"";
   const pr=(d.problems||[]);
   $("#st").innerHTML=pr.length?esc(pr.map(p=>p.name+": "+p.value).join(" · ")):"всё в порядке";
-  renderRings(d); renderNet(d); renderBk(d); renderSvc(d); renderEvents(d); renderSys(d); renderAlarm(d);
+  renderRings(d); renderNet(d); renderBk(d); renderSvc(d); renderAvail(d); renderEvents(d); renderSys(d); renderAlarm(d);
 }
 
 /* ---------- dialogs / actions ---------- */
