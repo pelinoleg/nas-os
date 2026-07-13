@@ -60,10 +60,6 @@
   #net{margin-left:auto;display:flex;gap:12px;font-size:13px;font-variant-numeric:tabular-nums}
   #net b{font-weight:650}
   .dn{color:var(--good)} .upl{color:var(--accent)}
-  #st{font-size:12.5px;color:var(--dim);max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  #zzz{width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;
-       background:rgba(255,255,255,.10);font-size:15px;flex:none}
-  #zzz:active{background:rgba(255,255,255,.22)}
 
   #pages{flex:1;position:relative;min-height:0;margin:0 8px}
   .page{position:absolute;inset:0;display:none;flex-direction:column;gap:7px}
@@ -99,13 +95,13 @@
 
   /* footer */
   #foot{flex:none;display:flex;align-items:center;gap:10px;padding:6px 12px;margin:0 8px}
-  #ev{flex:1;min-width:0;font-size:12.5px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  #ev b{color:var(--ink);font-weight:600}
-  #av{display:flex;align-items:center;gap:7px;flex:none}
-  #av .bars{display:flex;gap:1px;align-items:flex-end;height:15px}
-  #av i{width:2px;height:100%;border-radius:1px;background:var(--good)}
-  #av i.local{background:var(--warn)} #av i.off{background:var(--danger)} #av i.nd{background:rgba(255,255,255,.13)}
-  #av .pct{font-size:11.5px;color:var(--dim);font-variant-numeric:tabular-nums}
+  #foot{justify-content:space-between}
+  .avb{display:flex;align-items:center;gap:8px;flex:1;min-width:0}
+  .avb .lbl{font-size:10.5px;letter-spacing:.6px;text-transform:uppercase;color:var(--mut);font-weight:650;flex:none}
+  .avb .bars{display:flex;gap:1px;align-items:flex-end;height:15px;flex:1}
+  .avb i{flex:1;height:100%;border-radius:1px;background:var(--good)}
+  .avb i.local{background:var(--warn)} .avb i.off{background:var(--danger)} .avb i.nd{background:rgba(255,255,255,.13)}
+  .avb .pct{font-size:11.5px;color:var(--dim);font-variant-numeric:tabular-nums;flex:none}
 
   /* detail sheet — открывается по тапу на ЛЮБУЮ плашку */
   #sheet{position:fixed;inset:0;background:rgba(4,8,14,.55);display:none;z-index:8;
@@ -142,8 +138,7 @@
 
 <div id="bar">
   <span id="dot"></span><span id="who">—</span><span id="addr"></span><span id="up"></span>
-  <span id="net"></span><span id="st"></span>
-  <span id="zzz" data-act="sleep">☾</span>
+  <span id="net"></span>
 </div>
 
 <div id="pages">
@@ -161,7 +156,7 @@
   </div>
 </div>
 
-<div id="foot" class="g" data-sheet="events"><span id="ev"></span><span id="av"></span></div>
+<div id="foot" class="g" data-sheet="avail"><span id="av24"></span><span id="av30"></span></div>
 
 <div id="sheet"><div id="sheetIn"><h3><span id="sheetT"></span><span class="x">тап вне — закрыть</span></h3>
   <div id="sheetB"></div><div id="sheetA"></div></div></div>
@@ -291,12 +286,16 @@ function renderRow2(d){
     `<div class="r2"><span class="nm">${esc(r[0])}</span><span class="ago">${esc(r[1])}</span></div>`).join("")}</div>`;
 }
 function renderFoot(d){
-  const e=(d.events||[])[0];
-  $("#ev").innerHTML=e?`<b>${esc(e.title)}</b> · ${esc(ago(e.t))}`:"";
-  const a=d.avail||{}, bars=a.bars||[], cls=v=>v===2?"":v===1?"local":v===0?"off":"nd";
-  $("#av").innerHTML=bars.length
-    ? `<span class="bars">${bars.map(v=>`<i class="${cls(v)}"></i>`).join("")}</span>
-       <span class="pct">${a.pct!=null?a.pct+"% · 24 ч":"24 ч"}</span>` : "";
+  const cls=v=>v===2?"":v===1?"local":v===0?"off":"nd";
+  const strip=(a,lbl)=>{
+    const bars=(a&&a.bars)||[];
+    if(!bars.length) return "";
+    return `<span class="lbl">${lbl}</span><span class="bars">${bars.map(v=>`<i class="${cls(v)}"></i>`).join("")}</span>`
+         + `<span class="pct">${a.pct!=null?a.pct+"%":""}</span>`;
+  };
+  $("#av24").innerHTML=strip(d.avail,"24 ч");
+  $("#av30").innerHTML=strip(d.avail30,"30 дн");
+  $("#av24").className="avb"; $("#av30").className="avb";
 }
 function renderBar(d){
   $("#who").textContent=d.mdns||d.host||"NAS";
@@ -305,9 +304,6 @@ function renderBar(d){
   const [rv,ru]=rate((d.net||{}).rx), [tv,tu]=rate((d.net||{}).tx);
   $("#net").innerHTML=`<span class="dn">↓ <b>${rv}</b> ${ru}</span><span class="upl">↑ <b>${tv}</b> ${tu}</span>`;
   $("#dot").className=d.overall==="bad"?"bad":d.overall==="warn"?"warn":"";
-  const pr=d.problems||[];
-  $("#st").innerHTML=pr.length?esc(pr.map(p=>p.name+": "+p.value).join(" · ")):"всё в порядке";
-  $("#zzz").textContent=d.asleep?"☀":"☾";
 }
 function renderAlarm(d){
   const bad=(d.problems||[]).filter(p=>p.lvl==="bad"), a=$("#alarm");
@@ -351,6 +347,11 @@ const SHEETS={
       (b.running?"идёт":b.last==="ok"?"✓ "+ago(b.last_ts):b.last?"! "+ago(b.last_ts):"никогда"))).join("")
       :`<div class="empty">профилей нет</div>`,
       bk.length?`<div class="go" data-run="${esc(bk[0].id)}">Запустить «${esc(bk[0].name)}»</div>`:""];},
+  avail:d=>["Доступность",
+    KV("За 24 часа",(d.avail&&d.avail.pct!=null)?d.avail.pct+" %":"—")
+    +KV("За 30 дней",(d.avail30&&d.avail30.pct!=null)?d.avail30.pct+" %":"—")
+    +KV("Зелёный","панель отвечала")+KV("Жёлтый","бокс жив, сети не было")+KV("Красный","бокса не было"),
+    `<div class="go" data-act="sleep">Погасить экран</div>`],
   events:d=>["Последние события",
     (d.events||[]).length?(d.events||[]).map(e=>KV(e.title,ago(e.t))).join(""):`<div class="empty">событий нет</div>`,
     `<div class="go warnbtn" data-act="poweroff">Выключить NAS</div>`],
@@ -367,7 +368,8 @@ document.addEventListener("click",e=>{
   const a=e.target.closest("[data-act]"), s=e.target.closest("[data-sheet]"), r=e.target.closest("[data-run]");
   if(a){
     const k=a.dataset.act;
-    if(k==="sleep"){ act({a:D.asleep?"touch":"sleep"}).then(()=>poll()); return; }
+    if(k==="sleep"){ $("#sheet").classList.remove("on");
+      act({a:"sleep"}).then(()=>{toast("Экран погашен — коснитесь, чтобы разбудить"); poll();}); return; }
     if(k==="poweroff"){ $("#sheet").classList.remove("on");
       act({a:"poweroff"}).then(r=>toast(r.ok?"Выключаюсь…":(r.log||"не вышло"))); return; }
   }
