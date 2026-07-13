@@ -29,14 +29,16 @@
     background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
   body{display:flex;flex-direction:column;gap:8px;padding:0 0 8px}
 
-  .g{background:var(--glass);border:1px solid var(--line);border-radius:16px;   /* = --r-lg панели */
-     backdrop-filter:blur(18px) saturate(1.25);-webkit-backdrop-filter:blur(18px) saturate(1.25);
+  .g{background:var(--glass);border:1px solid var(--line);border-radius:var(--r-lg,16px);
+     backdrop-filter:var(--wdg-bf,none);-webkit-backdrop-filter:var(--wdg-bf,none);
      box-shadow:0 6px 20px rgba(0,0,0,.22)}
 
   /* header */
   /* menubar панели: 40px, во всю ширину, стекло + волосяная линия снизу */
   #bar{flex:none;display:flex;align-items:center;gap:9px;height:40px;padding:0 14px;
-       border-radius:0;border:0;border-bottom:1px solid var(--line);box-shadow:none}
+       border-radius:0;border:0;border-bottom:1px solid var(--line);box-shadow:none;
+       background:var(--mb-bg,transparent);
+       backdrop-filter:var(--mb-bf,none);-webkit-backdrop-filter:var(--mb-bf,none)}
   #pages{margin:0 10px}
   #foot{margin:0 10px}
   #dot{width:9px;height:9px;border-radius:50%;background:var(--good);color:var(--good);
@@ -326,18 +328,55 @@ function renderAlarm(d){
 $("#alarm").onclick=()=>{ $("#alarm")._hid=true; $("#alarm").classList.remove("on"); };
 
 let WPV=null;
+/* Материал поверхностей — та же арифметика, что в applySettings() панели:
+   elevation в тёмной теме = белый слой поверх материала, прозрачность отдельно
+   для виджетов (wdgOp) и менубара (mbOp), backdrop-filter из wdgBlur/wdgSat.
+   Раньше тут были захардкоженные rgba(255,255,255,.09) и blur(18px) — экран жил
+   своей жизнью и не менялся вместе с панелью. */
+const clampf=(v,a,b)=>Math.max(a,Math.min(b,+v||0));
+const hexRgb=h=>{const n=parseInt(h.slice(1),16);return [n>>16&255,n>>8&255,n&255].join(",");};
+const isHex=h=>/^#[0-9a-f]{6}$/i.test(h||"");
+const litRgb=(rgb,amt)=>rgb.split(",").map(x=>Math.round(+x+(255-+x)*amt)).join(",");
 function applyLook(L){
   if(!L) return;
-  const w=$("#wall"), b=+L.fxBlur||0;
+  const S=L, dark=L.theme!=="light", root=document.documentElement;
   if(L.wpVer!==WPV){                       // обои сменили в браузере — подхватываем
     WPV=L.wpVer;
-    w.style.backgroundImage=L.wpVer?`url(/api/wallpaper/img?v=${L.wpVer})`:"";
+    $("#wall").style.backgroundImage=L.wpVer?`url(/api/wallpaper/img?v=${L.wpVer})`:"";
   }
+  const b=clampf(S.fxBlur,0,100);
   // масштаб растёт с блюром — иначе размытые края обнажают фон (как в панели)
-  w.style.filter=b?`blur(${b}px)`:"";
-  w.style.transform=b?`scale(${(1+b*0.009).toFixed(3)})`:"";
-  $("#wallDim").style.opacity=(+L.fxDim||0)/100;
-  $("#wallNoise").style.opacity=(+L.fxNoise||0)/100;
+  $("#wall").style.filter=b?`blur(${b}px)`:"";
+  $("#wall").style.transform=b?`scale(${(1+b*0.009).toFixed(3)})`:"";
+  $("#wallDim").style.opacity=clampf(S.fxDim,0,80)/100;
+  $("#wallNoise").style.opacity=clampf(S.fxNoise,0,100)/100;
+
+  const surf=dark?"22,30,42":"255,255,255";
+  const tint=dark?S.tintDark:S.tintLight, mat=isHex(tint)?hexRgb(tint):surf;
+  const eBase=clampf(dark?(S.elevBaseDark??.5):(S.elevBaseLight??.55),.1,.96);
+  const eStep=clampf(S.elevStep??.13,0,.3), eLight=clampf(S.elevLight??.05,0,.25);
+  const veilBase=dark?.05:0, veilStep=dark?Math.max(eLight,.065):eLight, alphaStep=dark?eStep*.4:eStep;
+  const lvlRgb=n=>litRgb(mat,clampf(veilBase+(n-1)*veilStep,0,.85));
+  const lvlA=n=>clampf(eBase+(n-1)*alphaStep,.1,1);
+  const elA=k=>(S[k]==null||S[k]==="")?lvlA(1):clampf(+S[k]/100,0,1);
+  const bf=(bk,sk)=>{ if(S.perf) return "none";
+    const px=clampf(S[bk]??0,0,100), sat=clampf(S[sk]??100,0,200), p=[];
+    if(px>0)p.push(`blur(${px}px)`); if(sat!==100)p.push(`saturate(${(sat/100).toFixed(2)})`);
+    return p.length?p.join(" "):"none"; };
+  const wc=dark?S.wdgDark:S.wdgLight, wOp=(S.wdgOp==null||S.wdgOp==="")?lvlA(1):clampf(+S.wdgOp/100,0,1);
+  root.style.setProperty("--glass", isHex(wc)?`rgba(${hexRgb(wc)},${wOp.toFixed(3)})`
+                                             :`rgba(${lvlRgb(1)},${wOp.toFixed(3)})`);
+  root.style.setProperty("--wdg-bf", bf("wdgBlur","wdgSat"));
+  root.style.setProperty("--mb-bg", `rgba(${lvlRgb(1)},${elA("mbOp").toFixed(3)})`);
+  root.style.setProperty("--mb-bf", bf("mbBlur","mbSat"));
+  root.style.setProperty("--accent", isHex(S.accentHex)?S.accentHex:"#2dd4bf");
+  const rq=clampf(S.radius??1,.2,2);
+  root.style.setProperty("--r-lg",(16*rq).toFixed(0)+"px");
+  root.style.setProperty("--ink", dark?"#eef2f7":"#16202c");
+  root.style.setProperty("--dim", dark?"rgba(238,242,247,.62)":"rgba(20,30,42,.66)");
+  root.style.setProperty("--mut", dark?"rgba(238,242,247,.40)":"rgba(20,30,42,.47)");
+  root.style.setProperty("--line", dark?"rgba(255,255,255,.14)":"rgba(0,0,0,.10)");
+  root.style.setProperty("--track", dark?"rgba(255,255,255,.13)":"rgba(0,0,0,.12)");
 }
 function render(d){
   D.actions=d.actions;

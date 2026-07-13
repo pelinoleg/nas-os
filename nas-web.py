@@ -11323,10 +11323,16 @@ def screen_payload(lang=""):
     # обои и их обработка — ТЕ ЖЕ, что на рабочем столе: экран читает desktop.json,
     # поэтому смена обоев/затемнения в браузере доезжает до панели сама (wpVer в URL)
     ds = _safe(load_settings, {}) or {}
+    # материал карточек/менубара экран считает ПО ТОЙ ЖЕ формуле, что панель
+    # (elevation + прозрачность + backdrop-filter), поэтому отдаём сырые ключи
     look = {"wpVer": ds.get("wpVer") or 0,
-            "fxDim": ds.get("fxDim", 44), "fxBlur": ds.get("fxBlur", 27),
-            "fxNoise": ds.get("fxNoise", 100),
             "theme": "light" if ds.get("theme") == "light" else "dark"}
+    for k in ("fxDim", "fxBlur", "fxNoise", "wdgOp", "wdgBlur", "wdgSat",
+              "mbOp", "mbBlur", "mbSat", "elevStep", "elevLight", "elevBaseDark",
+              "elevBaseLight", "tintDark", "tintLight", "wdgDark", "wdgLight",
+              "accentHex", "radius", "perf"):
+        if k in ds:
+            look[k] = ds[k]
     cfg = load_screen()
     host = st.get("host") or socket.gethostname()
     return {"host": host, "mdns": host + ".local", "ip": st.get("ip") or "",
