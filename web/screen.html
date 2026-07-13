@@ -16,6 +16,9 @@
   /* курсор не нужен вовсе: единственный указатель — палец. !important, потому что
      chromium подставляет свои курсоры для полей и кнопок поверх наследования */
   *,*::before,*::after{cursor:none !important}
+  /* полосы прокрутки не рисуем: пальцем и так листается, а на 4.3" они уродуют вёрстку */
+  *{scrollbar-width:none;-ms-overflow-style:none}
+  *::-webkit-scrollbar{width:0;height:0;display:none}
   *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;
     -webkit-user-select:none;user-select:none;touch-action:manipulation}
   html{background:#0a0f1a}
@@ -46,9 +49,10 @@
       rgba(0,0,0,calc(var(--mb-grad-a,0) * .008)) 95.2%,
       transparent 100%)}
   #bar{position:relative;z-index:2}
-  #zzz{width:56px;height:34px;border-radius:10px;display:flex;align-items:center;justify-content:center;
-       background:rgba(255,255,255,.12);color:var(--ink);flex:none;margin-left:12px}
-  #zzz:active{background:rgba(255,255,255,.30)}
+  #zzz,#pwr{width:56px;height:34px;border-radius:10px;display:flex;align-items:center;justify-content:center;
+       background:rgba(255,255,255,.12);color:var(--ink);flex:none;margin-left:10px}
+  #zzz:active,#pwr:active{background:rgba(255,255,255,.30)}
+  #pwr{color:#ffb3b8}
   #zzz svg{pointer-events:none}     /* клик всегда прилетает на сам #zzz, а не на <path> */
 
   /* карточки — как виджеты панели: без бордера, стекло + backdrop-filter */
@@ -63,18 +67,17 @@
   #dot{width:9px;height:9px;border-radius:50%;background:var(--good);color:var(--good);
        box-shadow:0 0 9px currentColor;flex:none}
   #dot.warn{background:var(--warn);color:var(--warn)} #dot.bad{background:var(--danger);color:var(--danger)}
-  #who{font-weight:650} #addr,#up{color:var(--dim);font-size:12.5px}
+  #who{font-weight:650} #addr{color:var(--dim);font-size:12.5px}
+  #up{color:var(--good);font-size:14px;font-weight:650;margin-left:4px}
   #net{margin-left:auto;display:flex;gap:12px;font-size:13px;font-variant-numeric:tabular-nums}
   #net b{font-weight:650}
   .dn{color:var(--good)} .upl{color:var(--accent)}
 
   #pages{flex:1;position:relative;min-height:0;margin:0 8px}
-  /* Страницы едут, а не моргают. Анимируем ТОЛЬКО transform и только у активной —
-     фейд двух стеклянных страниц с backdrop-filter Pi 4 не тянет (заметно дёргалось). */
-  .page{position:absolute;inset:0;display:none;flex-direction:column;gap:7px;
-        will-change:transform}
-  #p0.on,#p1.on{display:flex;animation:slide .16s ease-out}
-  @keyframes slide{from{transform:translateX(var(--from,18px))}to{transform:translateX(0)}}
+  /* Без анимации: на Pi 4 переезд двух стеклянных страниц с backdrop-filter заметно
+     дёргался и данные приезжали с задержкой. Переключаем мгновенно. */
+  .page{position:absolute;inset:0;display:none;flex-direction:column;gap:7px}
+  #p0.on,#p1.on{display:flex}
 
   /* gauges */
   #gs{flex:none;display:grid;grid-template-columns:repeat(4,1fr);gap:7px;height:100px}
@@ -164,6 +167,12 @@
       border-bottom:1px solid rgba(255,255,255,.07)}
   .kv:last-child{border-bottom:0}
   .kv span{color:var(--dim)} .kv b{font-weight:650;text-align:right}
+  .pwr2{display:grid;grid-template-columns:1fr 1fr;gap:14px;height:100%;min-height:330px}
+  .pbtn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;
+        border-radius:20px;background:rgba(255,255,255,.10);font-size:19px;font-weight:700;color:var(--ink)}
+  .pbtn:active{background:rgba(255,255,255,.22)}
+  .pbtn.off{background:rgba(255,93,104,.18);color:#ffb3b8}
+  .pbtn.off:active{background:rgba(255,93,104,.34)}
   .go{margin-top:12px;padding:16px;border-radius:13px;background:var(--accent);color:#04141a;
       font-weight:700;text-align:center;font-size:15px;flex:none}
   .go:active{filter:brightness(.9)}
@@ -187,6 +196,11 @@
 <div id="bar">
   <span id="dot"></span><span id="who">—</span><span id="addr"></span><span id="up"></span>
   <span id="net"></span>
+  <span id="pwr" data-act="power" title="Питание">
+    <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2"
+         stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 3v9"/><path d="M18.4 6.6a9 9 0 1 1-12.8 0"/>
+    </svg></span>
   <span id="zzz" data-act="sleep" title="Погасить экран">
     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9"
          stroke-linecap="round" stroke-linejoin="round">
@@ -268,7 +282,7 @@ function toast(m){ const t=$("#toast"); t.innerHTML=esc(m); t.classList.add("on"
 let lastWake=0;
 function wake(e){
   // pointerdown по кнопке «погасить» слал бы touch, и он будил бы экран сразу после sleep
-  const t=e&&e.target; if(t&&t.closest&&t.closest("#zzz")) return;
+  const t=e&&e.target; if(t&&t.closest&&(t.closest("#zzz")||t.closest("#pwr"))) return;
   const n=Date.now(); if(n-lastWake<8000) return; lastWake=n;
   fetch("/api/screen/act",{method:"POST",body:JSON.stringify({a:"touch"})}).catch(()=>{}); }
 addEventListener("pointerdown",wake,{passive:true});
@@ -604,6 +618,17 @@ const SHEETS={
        <div class="gline"><div class="gh">Сеть<b>${netnow(d)}</b></div>
          ${chart(g.net,"var(--good)",92,gbs,"",1)}</div>
        <div class="run">точка — 30 минут, всего сутки</div>`, ""];},
+  power:d=>["Питание",
+    `<div class="pwr2">
+       <div class="pbtn" data-act="reboot">
+         <svg viewBox="0 0 24 24" width="54" height="54" fill="none" stroke="currentColor" stroke-width="1.7"
+              stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
+         <span>Перезагрузить</span></div>
+       <div class="pbtn off" data-act="poweroff">
+         <svg viewBox="0 0 24 24" width="54" height="54" fill="none" stroke="currentColor" stroke-width="1.7"
+              stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v9"/><path d="M18.4 6.6a9 9 0 1 1-12.8 0"/></svg>
+         <span>Выключить</span></div>
+     </div>`, ""],
   avail:d=>["Доступность",
     KV("За 24 часа",(d.avail&&d.avail.pct!=null)?d.avail.pct+" %":"—")
     +KV("За 30 дней",(d.avail30&&d.avail30.pct!=null)?d.avail30.pct+" %":"—")
@@ -634,11 +659,14 @@ document.addEventListener("click",e=>{
     return; }
   if(a){
     const k=a.dataset.act;
+    if(k==="power"){ sheet("power"); return; }
     if(k==="sleep"){ closeSheet();
       toast("Гашу экран…");
       act({a:"sleep"}).then(r=>{ if(!r.ok) toast(r.log||"не вышло"); poll(); }); return; }
     if(k==="poweroff"){ closeSheet();
       act({a:"poweroff"}).then(r=>toast(r.ok?"Выключаюсь…":(r.log||"не вышло"))); return; }
+    if(k==="reboot"){ closeSheet();
+      act({a:"reboot"}).then(r=>toast(r.ok?"Перезагружаюсь…":(r.log||"не вышло"))); return; }
   }
   if(r){ closeSheet();
     act({a:"backup",p:r.dataset.run}).then(x=>{toast(x.ok?"Бэкап запущен":(x.log||"не вышло")); poll();}); return; }
@@ -687,9 +715,7 @@ function applyLook(L){
 async function poll(){ return _poll(); }
 let PAGE=0;
 function setPage(n){
-  const prev=PAGE;
   PAGE=Math.max(0,Math.min(1,n));
-  document.documentElement.style.setProperty("--from",(PAGE>prev?18:-18)+"px");
   document.querySelectorAll(".page").forEach((p,i)=>p.classList.toggle("on",i===PAGE));
   document.querySelectorAll("#dots .d").forEach((p,i)=>p.classList.toggle("on",i===PAGE));
   poll();
@@ -704,8 +730,9 @@ addEventListener("touchend",e=>{
 
 async function _poll(){
   try{
-    // тяжёлые данные второй страницы просим, ТОЛЬКО когда она открыта
-    const r=await fetch("/api/screen/data"+(PAGE===1?"?p2=1":""),{cache:"no-store"});
+    // p2 просим всегда: на сервере он кэширован 30 с, зато вторая страница
+    // открывается с готовыми данными, а не пустой
+    const r=await fetch("/api/screen/data?p2=1",{cache:"no-store"});
     if(!r.ok) throw 0;
     const prev=D.p2;
     D=await r.json();

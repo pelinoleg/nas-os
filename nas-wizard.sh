@@ -1891,8 +1891,36 @@ EOF
 # nas-wizard: подсветка панели — группа video может менять яркость без root.
 SUBSYSTEM=="backlight", ACTION=="add", RUN+="/bin/chgrp video /sys/class/backlight/%k/brightness /sys/class/backlight/%k/bl_power", RUN+="/bin/chmod 0664 /sys/class/backlight/%k/brightness /sys/class/backlight/%k/bl_power"
 EOF
+    # Курсор мыши на настенном экране выглядит как баг: композитор рисует указатель,
+    # как только к боксу воткнут USB-донгл (у клавиатур он тоже заявлен как мышь).
+    # CSS cursor:none и XCURSOR_SIZE его не убирают — гасим сам pointer на уровне
+    # libinput. Клавиатура и тач продолжают работать.
+    write_file /etc/udev/rules.d/99-nas-nopointer.rules <<'EOF'
+# nas-wizard: киоску указатель не нужен — курсор мыши на экране не рисуем.
+SUBSYSTEM=="input", ENV{ID_INPUT_MOUSE}=="1", ENV{LIBINPUT_IGNORE_DEVICE}="1"
+EOF
     run udevadm control --reload-rules
     run udevadm trigger --subsystem-match=backlight --action=add
+    run udevadm trigger --subsystem-match=input --action=add
+
+    # Пустой курсор: wlroots рисует указатель по центру, даже когда мыши нет.
+    # Кладём тему с прозрачным Xcursor 1x1 (генерим на месте — не тащить xcursorgen).
+    run mkdir -p /usr/share/icons/nas-blank/cursors
+    python3 - <<'PYCUR'
+import struct, os
+d = "/usr/share/icons/nas-blank/cursors"
+size, w, h = 24, 1, 1
+img = struct.pack("<IIIIIIIII", 36, 0xfffd0002, size, 1, w, h, 0, 0, 0) + struct.pack("<I", 0)
+hdr = struct.pack("<4sIII", b"Xcur", 16, 0x10000, 1)
+toc = struct.pack("<III", 0xfffd0002, size, 28)
+open(os.path.join(d, "left_ptr"), "wb").write(hdr + toc + img)
+for n in ("default", "pointer", "arrow", "text", "hand1", "hand2", "watch"):
+    p = os.path.join(d, n)
+    if not os.path.exists(p):
+        os.symlink("left_ptr", p)
+open("/usr/share/icons/nas-blank/index.theme", "w").write(
+    "[Icon Theme]\nName=nas-blank\nComment=Empty cursor for the NAS kiosk\n")
+PYCUR
 
     run mkdir -p /var/lib/nas-screen
     run chown "$TARGET_USER:$TARGET_USER" /var/lib/nas-screen
@@ -1918,6 +1946,11 @@ StandardInput=tty-fail
 StandardOutput=journal
 StandardError=journal
 Environment=XDG_SESSION_TYPE=wayland
+# курсор мыши: композитор рисует свой указатель, если к боксу воткнута USB-мышь
+# (донгл клавиатуры тоже считается мышью). CSS cursor:none его не убирает — гасим
+# размером курсора, при этом сама мышь продолжает работать.
+Environment=XCURSOR_SIZE=1
+Environment=XCURSOR_THEME=nas-blank
 ExecStart=/usr/bin/cage -d -- /usr/bin/chromium \\
   --kiosk --ozone-platform=wayland --touch-events=enabled \\
   --user-data-dir=/var/lib/nas-screen/chromium \\
