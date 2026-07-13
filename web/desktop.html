@@ -9241,7 +9241,7 @@ function screenTab(tc){
  q("#scNb").oninput=()=>q("#scNbV").textContent=q("#scNb").value;
  api("/api/screen/config").then(r=>{
   const c=(r&&r.config)||{};
-  if(r&&r.present===false){ q("#scNo").style.display=""; }
+  if(r&&r.present===false){ q("#scrNo").style.display=""; }
   else { q("#scBody").style.display=""; paint(c); }
  });
  q("#scSleep").onclick=async()=>{

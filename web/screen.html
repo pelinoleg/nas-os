@@ -73,10 +73,9 @@
   #gs{flex:none;display:grid;grid-template-columns:repeat(4,1fr);gap:7px;height:100px}
   .gauge{padding:4px 4px 5px;display:flex;flex-direction:column;align-items:center;position:relative}
   .gauge svg{width:106px;height:60px}
-  .gauge .v{position:absolute;top:26px;left:0;right:0;text-align:center;font-size:19px;font-weight:700;
+  .gauge .v{position:absolute;top:30px;left:0;right:0;text-align:center;font-size:26px;font-weight:700;
             font-variant-numeric:tabular-nums;line-height:1}
-  .gauge .v small{font-size:11px;font-weight:600;color:var(--dim)}
-  .gauge .sub{position:absolute;top:45px;left:0;right:0;text-align:center;font-size:11px;color:var(--mut)}
+  .gauge .v small{font-size:12px;font-weight:600;color:var(--dim)}
   .gauge .cap{font-size:10px;letter-spacing:.6px;text-transform:uppercase;color:var(--dim);font-weight:650;margin-top:1px}
 
   /* row of cards */
@@ -117,6 +116,16 @@
   /* footer */
   #foot{flex:none;display:flex;align-items:center;gap:10px;padding:6px 12px;margin:0 8px}
   #foot{justify-content:space-between}
+  #dots{display:flex;gap:7px;flex:none;padding-left:6px}
+  .d{width:8px;height:8px;border-radius:50%;background:rgba(255,255,255,.25)}
+  .d.on{background:var(--accent)}
+  #r2a{flex:1.05;display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;min-height:0}
+  #r2b{flex:1;display:grid;grid-template-columns:1.3fr 1fr;gap:7px;min-height:0}
+  .big{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.15}
+  .big small{font-size:11px;color:var(--dim);font-weight:600;margin-left:3px}
+  .gline{display:flex;flex-direction:column;gap:1px;margin-bottom:4px}
+  .gline .gh{display:flex;font-size:11px;color:var(--dim)}
+  .gline .gh b{margin-left:auto;color:var(--ink);font-size:12px}
   .avb{display:flex;align-items:center;gap:8px;flex:1;min-width:0}
   .avb .lbl{font-size:10.5px;letter-spacing:.6px;text-transform:uppercase;color:var(--mut);font-weight:650;flex:none}
   .avb .bars{display:flex;gap:1px;align-items:flex-end;height:15px;flex:1}
@@ -172,18 +181,31 @@
   <div class="page on" id="p0">
     <div id="gs"></div>
     <div id="row">
-      <div class="card g" id="c_dk" data-sheet="docker"></div>
-      <div class="card g" id="c_usb" data-sheet="usb"></div>
       <div class="card g" id="c_bk" data-sheet="backups"></div>
+      <div class="card g" id="c_usb" data-sheet="usb"></div>
+      <div class="card g" id="c_dk" data-sheet="docker"></div>
     </div>
     <div id="row2">
       <div class="card g" id="c_ev" data-sheet="events"></div>
       <div class="card g" id="c_ds" data-sheet="disks"></div>
     </div>
   </div>
+
+  <div class="page" id="p1">
+    <div id="r2a">
+      <div class="card g" id="c_tm" data-sheet="tm"></div>
+      <div class="card g" id="c_tr" data-sheet="traffic"></div>
+      <div class="card g" id="c_up" data-sheet="updates"></div>
+    </div>
+    <div id="r2b">
+      <div class="card g" id="c_gr" data-sheet="graphs"></div>
+      <div class="card g" id="c_nh" data-sheet="nbhist"></div>
+    </div>
+  </div>
 </div>
 
-<div id="foot" class="g" data-sheet="avail"><span id="av24"></span><span id="av30"></span></div>
+<div id="foot" class="g"><span id="av24" data-sheet="avail"></span><span id="av30" data-sheet="avail"></span>
+  <span id="dots"><i class="d on" data-page="0"></i><i class="d" data-page="1"></i></span></div>
 
 <div id="sheet"><div id="sheetIn"><h3><span id="sheetT"></span><span class="x">тап вне — закрыть</span></h3>
   <div id="sheetB"></div><div id="sheetA"></div></div></div>
@@ -244,7 +266,7 @@ const COL={ok:"var(--good)",warn:"var(--warn)",danger:"var(--danger)"};
 
 /* ---------- полукруглый спидометр ---------- */
 const AR=Math.PI*52;   // длина дуги радиуса 52
-function gauge(cap,val,unit,pct,lvl,sub,sheet){
+function gauge(cap,val,unit,pct,lvl,sheet){
   const off=AR*(1-clampf(pct,0,1));
   return `<div class="gauge g" data-sheet="${sheet}">
     <svg viewBox="0 0 132 74">
@@ -254,7 +276,6 @@ function gauge(cap,val,unit,pct,lvl,sub,sheet){
             style="transition:stroke-dashoffset .5s ease,stroke .3s"/>
     </svg>
     <div class="v">${esc(val)}${unit?`<small>${esc(unit)}</small>`:""}</div>
-    ${sub?`<div class="sub">${esc(sub)}</div>`:""}
     <div class="cap">${esc(cap)}</div>
   </div>`;
 }
@@ -264,12 +285,10 @@ function renderGauges(d){
   const hasPool=!!(T.pool&&T.pool.raw), dk=hasPool?raw("pool"):raw("rootfs");
   const dp=dk.pct!=null?dk.pct:0, la=raw("load").load1||0, nc=raw("load").ncpu||4;
   $("#gs").innerHTML=
-    gauge("CPU",Math.round(cpu),"%",cpu/100,lvlOf(cpu,70,90),`LA ${la.toFixed(1)} / ${nc}`,"cpu")
-  + gauge("Температура",Math.round(tc),"°",tc/90,lvlOf(tc,62,75),
-          raw("cputemp").throttle?"троттлинг":"", "temp")
-  + gauge("Память",Math.round(ram),"%",ram/100,lvlOf(ram,75,90),gb(raw("ram").used||0),"ram")
-  + gauge(hasPool?"Пул":"Диск",Math.round(dp),"%",dp/100,lvlOf(dp,75,90),
-          gb(dk.free||0)+" своб.","disk");
+    gauge("CPU",Math.round(cpu),"%",cpu/100,lvlOf(cpu,70,90),"cpu")
+  + gauge("Температура",Math.round(tc),"°",tc/90,lvlOf(tc,62,75),"temp")
+  + gauge("Память",Math.round(ram),"%",ram/100,lvlOf(ram,75,90),"ram")
+  + gauge(hasPool?"Пул":"Диск",Math.round(dp),"%",dp/100,lvlOf(dp,75,90),"disk");
 }
 
 /* ---------- карточки ---------- */
@@ -279,7 +298,10 @@ function bar(pct,cls){ return `<div class="bar"><i class="${cls||lvlCls(pct)}" s
 function renderCards(d){
   // --- Docker: стеки, а не голые контейнеры
   const stk=d.stacks||[], ct=d.containers||[], run=ct.filter(c=>c.state==="running").length;
-  $("#c_dk").innerHTML=`<h2>Docker<span class="r">${ct.length?run+"/"+ct.length:(stk.length?stk.length+" стеков":"—")}</span></h2>
+  const allUp=ct.length && run===ct.length;
+  const head=ct.length?`<span class="r" style="color:${allUp?"var(--good)":"var(--warn)"}">${run}/${ct.length}</span>`
+                      :(stk.length?`<span class="r">${stk.length} стеков</span>`:`<span class="r">—</span>`);
+  $("#c_dk").innerHTML=`<h2>Docker${head}</h2>
     <div class="body">${stk.length?stk.slice(0,5).map(x=>{
       const ok=x.running>0, part=x.total&&x.running<x.total;
       return `<div class="r2"><span class="st2 ${ok?(part?"wn":"ok"):"no"}">●</span>
@@ -292,10 +314,12 @@ function renderCards(d){
   $("#c_ds").innerHTML=`<h2>Диски<span class="r">${dk.length||"—"}</span></h2>
     <div class="body">${dk.length?dk.slice(0,4).map(x=>{
       const p=x.used_pct, sys=x.role==="system"||(x.mounts||[]).includes("/");
+      const free=x.free!=null?gb(x.free)+" своб.":"";
       return `<div class="prow"><div class="t">
         <span class="nm">${esc(x.name)}${sys?" · System":x.tran==="usb"?" · USB":""}</span>
-        <span class="ago">${p!=null?Math.round(p)+"%":""}${x.temp?" · "+x.temp+"°":""}</span></div>
-        ${p!=null?bar(p):""}</div>`;}).join(""):`<div class="empty">дисков нет</div>`}</div>`;
+        <span class="ago">${esc(x.size||"")}${p!=null?" · "+Math.round(p)+"%":""}${x.temp?" · "+x.temp+"°":""}</span></div>
+        ${p!=null?bar(p):""}
+        ${free?`<div class="run">${esc(free)}</div>`:""}</div>`;}).join(""):`<div class="empty">дисков нет</div>`}</div>`;
 
   // --- Бэкапы: идёт прогон — показываем прогресс, а не «никогда»
   const bk=d.backups||[], act=bk.find(b=>b.running);
@@ -366,6 +390,67 @@ function renderBar(d){
   $("#net").innerHTML=`<span class="dn">↓ <b>${rv}</b> ${ru}</span><span class="upl">↑ <b>${tv}</b> ${tu}</span>`;
   $("#dot").className=d.overall==="bad"?"bad":d.overall==="warn"?"warn":"";
 }
+/* ---------- вторая страница ---------- */
+function spark(pts,color,h){
+  if(!pts||pts.length<2) return "";
+  const mx=Math.max.apply(null,pts), mn=Math.min.apply(null,pts), rg=(mx-mn)||1, w=100;
+  const st=w/(pts.length-1);
+  const p=pts.map((v,i)=>(i*st).toFixed(1)+","+(h-((v-mn)/rg)*(h-3)-1).toFixed(1)).join(" ");
+  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" style="width:100%;height:${h}px">
+    <polyline points="${p}" fill="none" stroke="${color}" stroke-width="1.6" vector-effect="non-scaling-stroke"/></svg>`;
+}
+const netnow=d=>{ const [v,u]=rate(((d.net||{}).rx||0)+((d.net||{}).tx||0)); return v+" "+u; };
+function renderP1(d){
+  const P=d.p2; if(!P) return;
+
+  // Time Machine
+  const tm=P.tm||{};
+  $("#c_tm").innerHTML=`<h2>Time Machine<span class="r" style="color:${tm.enabled?"var(--good)":"var(--mut)"}">${tm.enabled?"включён":"выключен"}</span></h2>
+    <div class="body">${tm.installed?`
+      <div class="big">${tm.size!=null?gb(tm.size):"—"}<small>занято</small></div>
+      <div class="run">${esc(tm.path||"")}</div>
+      <div class="r2"><span class="nm">Свободно</span><span class="ago">${tm.free!=null?gb(tm.free):"—"}</span></div>
+      <div class="r2"><span class="nm">Последняя копия</span><span class="ago">${tm.mtime?esc(ago(tm.mtime)):"никогда"}</span></div>`
+      :`<div class="empty">не настроен</div>`}</div>`;
+
+  // Трафик
+  const tr=P.traffic||{};
+  const t=tr.today||{}, mo=tr.month||{};
+  $("#c_tr").innerHTML=`<h2>Трафик</h2>
+    <div class="body">${tr.ok?`
+      <div class="big"><span class="dn">↓ ${gb(t.rx||0)}</span></div>
+      <div class="big"><span class="upl">↑ ${gb(t.tx||0)}</span></div>
+      <div class="r2"><span class="nm">За месяц</span><span class="ago">${gb((mo.rx||0)+(mo.tx||0))}</span></div>`
+      :`<div class="empty">vnstat не установлен</div>`}</div>`;
+
+  // Обновления и задачи
+  const up=P.updates||{}, cr=P.cron||[];
+  $("#c_up").innerHTML=`<h2>Обновления<span class="r" style="color:${(up.apt||up.images)?"var(--warn)":"var(--good)"}">${(up.apt||0)+(up.images||0)}</span></h2>
+    <div class="body">
+      <div class="r2"><span class="nm">Пакеты apt</span><span class="ago">${up.apt||0}${up.security?" · "+up.security+" крит.":""}</span></div>
+      ${up.images!=null?`<div class="r2"><span class="nm">Образы Docker</span><span class="ago">${up.images}</span></div>`:""}
+      ${cr.length?`<div class="r2"><span class="nm">Задач по расписанию</span><span class="ago">${cr.length}</span></div>`:""}
+    </div>`;
+
+  // Графики за сутки
+  const g=P.graphs||{};
+  $("#c_gr").innerHTML=`<h2>За сутки</h2>
+    <div class="body">
+      <div class="gline"><div class="gh">CPU<b>${Math.round(((d.tiles.cpu||{}).raw||{}).pct||0)}%</b></div>${spark(g.cpu,"var(--accent)",26)}</div>
+      <div class="gline"><div class="gh">Температура<b>${Math.round(((d.tiles.cputemp||{}).raw||{}).c||0)}°</b></div>${spark(g.temp,"var(--warn)",26)}</div>
+      <div class="gline"><div class="gh">Сеть<b>${netnow(d)}</b></div>${spark(g.net,"var(--good)",26)}</div>
+    </div>`;
+
+  // История бэкапов
+  const nh=P.nbhist||[];
+  $("#c_nh").innerHTML=`<h2>История бэкапов<span class="r">${nh.length||""}</span></h2>
+    <div class="body">${nh.length?nh.slice(0,4).map(h=>{
+      const c=h.result==="ok"?"ok":h.result==="warn"?"wn":"bd";
+      return `<div class="r2"><span class="st2 ${c}">${h.result==="ok"?"✓":"!"}</span>
+        <span class="nm">${esc(h.name)}</span><span class="ago">${esc(ago(h.ts))}</span></div>`;
+    }).join(""):`<div class="empty">прогонов ещё не было</div>`}</div>`;
+}
+
 function renderAlarm(d){
   const bad=(d.problems||[]).filter(p=>p.lvl==="bad"), a=$("#alarm");
   if(bad.length && !a._hid){
@@ -454,6 +539,37 @@ const SHEETS={
         <span class="ago">${esc(ago(e.t))}</span></div>`;
     }).join(""):`<div class="empty">событий нет</div>`, ""],
 
+  tm:d=>{const t=(d.p2||{}).tm||{};
+    return ["Time Machine", t.installed?
+      KV("Состояние",t.enabled?"включён":"выключен")+KV("Папка",t.path)
+      +KV("Занято",t.size!=null?gb(t.size):"—")+KV("Свободно",t.free!=null?gb(t.free):"—")
+      +KV("Квота",t.quota_gb?t.quota_gb+" ГБ":"без квоты")
+      +KV("Последняя копия",t.mtime?ago(t.mtime):"никогда")
+      +(t.backups||[]).map(b=>KV(b.name||"копия",b.size!=null?gb(b.size):"")).join("")
+      :`<div class="empty">Time Machine не настроен</div>`, ""];},
+  traffic:d=>{const t=(d.p2||{}).traffic||{};
+    return ["Трафик", t.ok?
+      KV("Сегодня ↓",gb((t.today||{}).rx||0))+KV("Сегодня ↑",gb((t.today||{}).tx||0))
+      +KV("За месяц ↓",gb((t.month||{}).rx||0))+KV("За месяц ↑",gb((t.month||{}).tx||0))
+      :`<div class="empty">vnstat не установлен</div>`, ""];},
+  updates:d=>{const u=(d.p2||{}).updates||{}, cr=(d.p2||{}).cron||[];
+    return ["Обновления и задачи",
+      KV("Пакеты apt",u.apt||0)+KV("Из них критических",u.security||0)
+      +(u.packages||[]).map(p=>KV("пакет",p)).join("")
+      +(u.images!=null?KV("Образы Docker",u.images):"")
+      +(u.image_list||[]).map(i=>KV("образ",i)).join("")
+      +cr.map(j=>KV(j.name,j.next?"через "+ago(j.next):"—")).join(""), ""];},
+  graphs:d=>{const g=(d.p2||{}).graphs||{};
+    return ["За сутки",
+      `<div class="gline"><div class="gh">CPU</div>${spark(g.cpu,"var(--accent)",50)}</div>
+       <div class="gline"><div class="gh">Температура</div>${spark(g.temp,"var(--warn)",50)}</div>
+       <div class="gline"><div class="gh">Сеть</div>${spark(g.net,"var(--good)",50)}</div>`, ""];},
+  nbhist:d=>{const nh=(d.p2||{}).nbhist||[];
+    return ["История бэкапов", nh.length?nh.map(h=>KV(
+      h.name+" · "+ago(h.ts),
+      [h.result==="ok"?"✓":"!", h.files!=null?h.files+" файлов":"", h.size!=null?gb(h.size):"",
+       h.dur?Math.round(h.dur/60)+" мин":""].filter(Boolean).join(" · "))).join("")
+      :`<div class="empty">прогонов ещё не было</div>`, ""];},
   avail:d=>["Доступность",
     KV("За 24 часа",(d.avail&&d.avail.pct!=null)?d.avail.pct+" %":"—")
     +KV("За 30 дней",(d.avail30&&d.avail30.pct!=null)?d.avail30.pct+" %":"—")
@@ -469,6 +585,8 @@ function sheet(name){
 $("#sheet").onclick=e=>{ if(e.target.id==="sheet") $("#sheet").classList.remove("on"); };
 
 document.addEventListener("click",e=>{
+  const pg=e.target.closest("[data-page]");
+  if(pg){ setPage(+pg.dataset.page); return; }
   const a=e.target.closest("[data-act]"), s=e.target.closest("[data-sheet]"),
         r=e.target.closest("[data-run]"), k2=e.target.closest("[data-stack]");
   if(k2){ toast("Выполняю…");
@@ -528,20 +646,40 @@ function applyLook(L){
 
 /* ---------- poll ---------- */
 async function poll(){ return _poll(); }
+let PAGE=0;
+function setPage(n){
+  PAGE=Math.max(0,Math.min(1,n));
+  document.querySelectorAll(".page").forEach((p,i)=>p.classList.toggle("on",i===PAGE));
+  document.querySelectorAll("#dots .d").forEach((p,i)=>p.classList.toggle("on",i===PAGE));
+  poll();
+}
+let sx=0;
+addEventListener("touchstart",e=>{sx=e.touches[0].clientX},{passive:true});
+addEventListener("touchend",e=>{
+  if($("#sheet").classList.contains("on")) return;      // лист открыт — свайп не листает
+  const dx=e.changedTouches[0].clientX-sx;
+  if(Math.abs(dx)>60) setPage(PAGE+(dx<0?1:-1));
+},{passive:true});
+
 async function _poll(){
   try{
-    const r=await fetch("/api/screen/data",{cache:"no-store"});
+    // тяжёлые данные второй страницы просим, ТОЛЬКО когда она открыта
+    const r=await fetch("/api/screen/data"+(PAGE===1?"?p2=1":""),{cache:"no-store"});
     if(!r.ok) throw 0;
     D=await r.json();
     window.NAS_LANG=D.lang||"en";
     trStatic();
-    applyLook(D.look); renderBar(D); renderGauges(D); renderCards(D); renderRow2(D); renderFoot(D); renderAlarm(D);
+    applyLook(D.look); renderBar(D); renderFoot(D); renderAlarm(D);
+    if(PAGE===0){ renderGauges(D); renderCards(D); renderRow2(D); } else { renderP1(D); }
     if($("#sheet").classList.contains("on")) { /* лист открыт — не дёргаем его перерисовкой */ }
     $("#dot").style.opacity=1;
   }catch(e){ $("#dot").style.opacity=.25;
     $("#up").textContent="ERR: "+String((e&&e.message)||e).slice(0,80); }
 }
-poll().then(()=>{ const m=location.search.match(/sheet=(\w+)/); if(m) sheet(m[1]); });
+poll().then(()=>{
+  const pg=location.search.match(/page=(\d)/); if(pg) setPage(+pg[1]);   // ?page=1 — сразу вторая
+  const m=location.search.match(/sheet=(\w+)/); if(m) sheet(m[1]);
+});
 // частоту задаёт панель (screen.json:poll) — перевзводим таймер, если её поменяли
 let TICK=0, TICK_MS=0;
 function arm(){

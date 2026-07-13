@@ -11338,7 +11338,9 @@ def _screen_heavy():
                    "size": d.get("size"), "temp": sm.get("temp") or d.get("temp"),
                    "healthy": sm.get("healthy"), "role": d.get("role") or "",
                    "tran": d.get("tran") or "", "mounts": d.get("mounts") or [],
-                   "used_pct": (d.get("usage") or {}).get("pct")})
+                   "used_pct": (d.get("usage") or {}).get("pct"),
+                   "free": (d.get("usage") or {}).get("free"),
+                   "used": (d.get("usage") or {}).get("used")})
     ct = []
     for c in (_safe(_docker_ps, []) or []):
         ct.append({"name": str(c.get("Names") or "?").split(",")[0],
@@ -11356,7 +11358,57 @@ def _screen_heavy():
     return _SCR_HEAVY["d"]
 
 
-def screen_payload(lang=""):
+# Вторая страница экрана. Источники тут дорогие (vnstat, apt, cron, tm) и меняются
+# редко — считаем их раз в 30 с и ТОЛЬКО когда экран действительно на этой странице
+# (клиент просит ?p2=1). Иначе быстрый опрос первой страницы тащил бы их за собой —
+# ровно та ошибка, из-за которой бокс уходил в load 14.
+_SCR_P2 = {"t": 0, "d": {}}
+
+
+def _screen_page2():
+    now = time.time()
+    if now - _SCR_P2["t"] < 30 and _SCR_P2["d"]:
+        return _SCR_P2["d"]
+    tm = _safe(tm_status, {}) or {}
+    vn = _safe(vnstat_state, {}) or {}
+    ap = _safe(apt_updates, {}) or {}
+    wd = _safe(wud_state, {}) or {}
+    cr = _safe(cron_jobs, {}) or {}
+    hist = []
+    for p in (_safe(nb_profiles_public, []) or []):
+        for h in (_safe(lambda pid=p["id"]: nb_history(pid), []) or [])[:3]:
+            hist.append({"name": p["name"], "ts": h.get("ts") or 0,
+                         "result": h.get("result") or "", "files": h.get("files"),
+                         "size": h.get("size"), "dur": h.get("dur")})
+    hist.sort(key=lambda x: -x["ts"])
+    d = {
+        # Time Machine: сервис может быть не настроен — тогда просто пусто
+        "tm": {"enabled": bool(tm.get("enabled")), "installed": bool(tm.get("installed")),
+               "path": tm.get("path") or "", "size": tm.get("size"),
+               "free": (tm.get("space") or {}).get("free") if isinstance(tm.get("space"), dict) else tm.get("free"),
+               "backups": tm.get("backups"), "mtime": tm.get("mtime") or 0,
+               "quota_gb": tm.get("quota_gb")},
+        # vnstat: сервиса нет -> ok:false, плашка просто не рисуется
+        "traffic": {"ok": bool(vn.get("ok")), "today": vn.get("today") or {},
+                    "month": vn.get("month") or {}},
+        "updates": {"apt": ap.get("count") or 0, "security": ap.get("security") or 0,
+                    "packages": [p.get("name") for p in (ap.get("packages") or [])][:6],
+                    "images": (wd.get("count") or 0) if wd.get("ok") else None,
+                    "image_list": [u.get("name") for u in (wd.get("updates") or [])][:5]},
+        "cron": [{"name": j.get("name") or j.get("id") or "?", "next": j.get("next") or 0,
+                  "last": j.get("last") or 0, "ok": j.get("ok")}
+                 for j in (cr.get("jobs") or [])][:6],
+        "nbhist": hist[:8],
+        "graphs": {"cpu": _safe(lambda: _gl_spark("cpu"), []) or [],
+                   "temp": _safe(lambda: _gl_spark("temp"), []) or [],
+                   "net": _safe(lambda: _gl_spark("net"), []) or []},
+    }
+    _SCR_P2["d"] = d
+    _SCR_P2["t"] = now
+    return d
+
+
+def screen_payload(lang="", p2=False):
     # язык экрана задаётся в screen.json, а НЕ браузером киоска: i18n.js по умолчанию
     # ставит NAS_LANG=en, и без этого сервер слал бы английские подписи под русскую
     # разметку страницы — на экране получалась каша из двух языков
@@ -11441,6 +11493,7 @@ def screen_payload(lang=""):
             "asleep": bool(_SCR["sleep"]),
             "speed": _SCR["spd"], "speed_running": bool(_SCR["spd_run"]),
             "actions": cfg["actions"], "lang": cfg["lang"], "poll": cfg["poll"],
+            "p2": (_safe(_screen_page2, {}) or {}) if p2 else None,
             "ts": int(time.time())}
 
 
@@ -12160,7 +12213,8 @@ class H(BaseHTTPRequestHandler):
             # локальный экран ходит без сессии; из локалки — только по паролю
             if not (self._local() or self._authed()):
                 self._json({"error": "auth"}, 401); return
-            self._json(screen_payload((q.get("lang") or [""])[0])); return
+            self._json(screen_payload((q.get("lang") or [""])[0],
+                                      p2=bool((q.get("p2") or [""])[0]))); return
         if p.startswith("/api/") and not self._authed():
             self._json({"error": "auth", "configured": auth_configured()}, 401); return
         try:
