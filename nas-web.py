@@ -1822,13 +1822,20 @@ def _avail_segments():
     return segs
 
 def avail_bars(hours=24, slots=96):
-    """RLE timeline -> per-slot worst state + uptime %. 2=up 1=local 0=off -1=no data."""
+    """RLE timeline -> per-slot worst state + uptime %. 2=up 1=local 0=off -1=no data.
+
+    Beside the worst state we return `frac` — the uptime SHARE of each slot (0..1,
+    None = no data. Worst-state alone is useless once a slot is a whole day: one
+    30-second blip painted the entire day red, so a month of 99.9% uptime looked
+    like a month of outages. The share lets the UI grade the colour instead."""
     segs = _avail_segments()
     now = int(time.time())
     start = now - hours * 3600
     rank = {"off": 0, "local": 1, "up": 2}
     bars = [-1] * slots
     slot_w = hours * 3600.0 / slots
+    up_s = [0.0] * slots      # per-slot uptime / known time
+    kn_s = [0.0] * slots
     up_t = known_t = 0
     events = []              # exact non-up intervals for the widget tooltips
     for i, (t, s) in enumerate(segs):
@@ -1846,8 +1853,18 @@ def avail_bars(hours=24, slots=96):
         v = rank[s]
         for k in range(max(0, s0), min(slots - 1, s1) + 1):
             bars[k] = v if bars[k] < 0 else min(bars[k], v)
+            # доля слота, накрытая этим сегментом: сегмент может лежать в слоте
+            # целиком, начинаться/кончаться внутри или проходить его насквозь
+            ov = min(b, start + (k + 1) * slot_w) - max(a, start + k * slot_w)
+            if ov <= 0:
+                continue
+            kn_s[k] += ov
+            if s == "up":
+                up_s[k] += ov
+    frac = [round(up_s[k] / kn_s[k], 4) if kn_s[k] > 0 else None for k in range(slots)]
     pct = round(100.0 * up_t / known_t, 1) if known_t else None
-    return {"bars": bars, "pct": pct, "hours": hours, "start": start, "now": now,
+    return {"bars": bars, "frac": frac, "pct": pct, "hours": hours,
+            "start": start, "now": now,
             "events": events[-40:]}   # cap: tooltips only need recent detail
 
 _INET_CACHE = {"t": 0, "ok": False}
@@ -11502,8 +11519,10 @@ def screen_payload(lang="", p2=False):
         if b["running"]:
             b["live"] = _safe(lambda pid=p["id"]: _nb_live(pid), {}) or {}
         bks.append(b)
-    av = _safe(lambda: avail_bars(24, 96), {}) or {}   # 2=up 1=local 0=off -1=нет данных
-    av30 = _safe(lambda: avail_bars(720, 96), {}) or {}
+    # 24 полоски = по часу, 30 = по дню (как на статус-пейджах). Цвет считает
+    # клиент по frac (доле аптайма слота), а не по «худшему состоянию».
+    av = _safe(lambda: avail_bars(24, 24), {}) or {}    # 2=up 1=local 0=off -1=нет данных
+    av30 = _safe(lambda: avail_bars(720, 30), {}) or {}
     hv = _safe(_screen_heavy, {}) or {}
     # обои и их обработка — ТЕ ЖЕ, что на рабочем столе: экран читает desktop.json,
     # поэтому смена обоев/затемнения в браузере доезжает до панели сама (wpVer в URL)
@@ -11530,8 +11549,10 @@ def screen_payload(lang="", p2=False):
             "mem": st.get("mem") or {}, "pool": st.get("disk_pool"),
             "root": st.get("disk_root"), "overall": hp.get("overall") or "ok",
             "tiles": tiles, "problems": problems, "events": events, "backups": bks,
-            "avail": {"bars": av.get("bars") or [], "pct": av.get("pct")},
-            "avail30": {"bars": av30.get("bars") or [], "pct": av30.get("pct")}, "look": look,
+            "avail": {"bars": av.get("bars") or [], "frac": av.get("frac") or [],
+                      "pct": av.get("pct")},
+            "avail30": {"bars": av30.get("bars") or [], "frac": av30.get("frac") or [],
+                        "pct": av30.get("pct")}, "look": look,
             "disks": hv.get("disks") or [], "containers": hv.get("containers") or [],
             "stacks": hv.get("stacks") or [],
             "usb": _safe(lambda: usb_import_progress()["jobs"], []) or [],

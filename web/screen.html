@@ -77,7 +77,7 @@
   /* Без анимации: на Pi 4 переезд двух стеклянных страниц с backdrop-filter заметно
      дёргался и данные приезжали с задержкой. Переключаем мгновенно. */
   .page{position:absolute;inset:0;display:none;flex-direction:column;gap:7px}
-  #p0.on,#p1.on{display:flex}
+  .page.on{display:flex}      /* по классу, а не по id: страниц теперь три */
 
   /* gauges */
   #gs{flex:none;display:grid;grid-template-columns:repeat(4,1fr);gap:7px;height:100px}
@@ -88,8 +88,13 @@
   .gauge .v small{font-size:12px;font-weight:600;color:var(--dim)}
   .gauge .cap{font-size:10px;letter-spacing:.6px;text-transform:uppercase;color:var(--dim);font-weight:650;margin-top:1px}
 
-  /* row of cards */
-  #row{flex:1.25;display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;min-height:0}
+  /* row of cards: две плашки вместо трёх — «Бэкапы» и «USB-импорт» несут строки
+     с именем, размером и датой, и в трети экрана они не помещались (докер уехал
+     на свою страницу) */
+  #row{flex:1.25;display:grid;grid-template-columns:1fr 1fr;gap:7px;min-height:0}
+  /* страница Docker: стеки и контейнеры целиком */
+  #r3{flex:1;display:grid;grid-template-columns:1fr 1fr;gap:7px;min-height:0}
+  #r3 .r2{padding:4px 0;font-size:12.5px}
   #row2{flex:.95;display:grid;grid-template-columns:1.35fr 1fr;gap:7px;min-height:0}
   #row2 .r2{padding:3px 0;font-size:12.5px}
   #row2 .prow{padding:3px 0}
@@ -219,7 +224,6 @@
     <div id="row">
       <div class="card g" id="c_bk" data-sheet="backups"></div>
       <div class="card g" id="c_usb" data-sheet="usb"></div>
-      <div class="card g" id="c_dk" data-sheet="docker"></div>
     </div>
     <div id="row2">
       <div class="card g" id="c_ev" data-sheet="events"></div>
@@ -237,10 +241,17 @@
       <div class="card g" id="c_up" data-sheet="updates"></div>
     </div>
   </div>
+
+  <div class="page" id="p2">
+    <div id="r3">
+      <div class="card g" id="c_dk" data-sheet="docker"></div>
+      <div class="card g" id="c_ct" data-sheet="docker"></div>
+    </div>
+  </div>
 </div>
 
 <div id="foot" class="g"><span id="av24" data-sheet="avail"></span><span id="av30" data-sheet="avail"></span>
-  <span id="dots"><i class="d on" data-page="0"></i><i class="d" data-page="1"></i></span></div>
+  <span id="dots"><i class="d on" data-page="0"></i><i class="d" data-page="1"></i><i class="d" data-page="2"></i></span></div>
 
 <div id="sheet"><div id="sheetIn"><h3><span id="sheetT"></span><span class="x" id="sheetX">✕</span></h3>
   <div id="sheetB"></div><div id="sheetA"></div></div></div>
@@ -293,6 +304,31 @@ function when(ts){
   if(same(d,new Date(n.getTime()-86400000))) return "вчера "+hm;
   const yr=d.getFullYear()!==n.getFullYear()?" "+d.getFullYear():"";
   return d.getDate()+" "+MON[d.getMonth()]+yr+" "+hm;
+}
+/* Цвет полоски доступности — по ДОЛЕ аптайма слота, а не по «худшему состоянию».
+   Слот = час (24 ч) или сутки (30 дн); при старом правиле одна секундная просадка
+   красила весь день в красный, и месяц с 99.9 % аптайма выглядел сплошной аварией.
+   Шкала непрерывная: чуть просело — зелёный желтеет, дальше жёлтый → оранжевый,
+   чистый красный только при простое ≥ 50 % слота. Степень 0.4 «растягивает»
+   начало шкалы: короткое падение уже заметно, но ещё не кричит. */
+const _hex=n=>{const v=getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  return /^#[0-9a-f]{6}$/i.test(v)?v:null;};
+const _mix=(a,b,t)=>{const p=h=>[1,3,5].map(i=>parseInt(h.slice(i,i+2),16));
+  const x=p(a),y=p(b),c=i=>Math.round(x[i]+(y[i]-x[i])*t).toString(16).padStart(2,"0");
+  return "#"+c(0)+c(1)+c(2);};
+/* d = доля простоя. Опорные точки шкалы: 0 → зелёный, 1 % → чуть желтее,
+   10 % → жёлтый, 25 % → оранжевый, ≥ 50 % → красный. */
+function avScale(d){
+  if(d<=0) return 0;
+  if(d<0.10) return 0.5*Math.sqrt(d/0.10);           // корень: минута простоя уже видна
+  return Math.min(1, 0.5+0.5*(d-0.10)/0.40);
+}
+function avColor(f){
+  if(f==null) return "var(--track)";                 // нет данных
+  const g=_hex("--good"),w=_hex("--warn"),d=_hex("--danger");
+  if(!g||!w||!d) return f>=1?"var(--good)":f>=0.5?"var(--warn)":"var(--danger)";
+  const u=avScale(1-f);                              // 0 = аптайм 100 %, 1 = простой ≥ 50 %
+  return u<=0.5?_mix(g,w,u*2):_mix(w,d,(u-0.5)*2);
 }
 function upfmt(s){ if(!s) return "";
   const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);
@@ -373,20 +409,30 @@ function bkRow(b,box,tail){
 }
 function usbRow(h,box){ return hrow(h.ok?"ok":"bd",h.name||"USB",sized(h.size,h.ts),box); }
 
-function renderCards(d){
-  // --- Docker: стеки, а не голые контейнеры
+/* Третья страница — целиком Docker: слева стеки, справа контейнеры.
+   На первой странице ему доставалась треть ширины, и в неё не влезало ни имя
+   стека, ни счётчик — а «Бэкапам» и «USB-импорту» ширина нужна под строку
+   «имя · размер · дата». */
+function renderP2(d){
   const stk=d.stacks||[], ct=d.containers||[], run=ct.filter(c=>c.state==="running").length;
   const allUp=ct.length && run===ct.length;
-  const head=ct.length?`<span class="r" style="color:${allUp?"var(--good)":"var(--warn)"}">${run}/${ct.length}</span>`
-                      :(stk.length?`<span class="r">${stk.length} стеков</span>`:`<span class="r">—</span>`);
-  $("#c_dk").innerHTML=`<h2>Docker${head}</h2>
-    <div class="body">${stk.length?stk.slice(0,5).map(x=>{
+  $("#c_dk").innerHTML=`<h2>Стеки<span class="r">${stk.length||"—"}</span></h2>
+    <div class="body">${stk.length?stk.map(x=>{
       const ok=x.running>0, part=x.total&&x.running<x.total;
       return `<div class="r2"><span class="st2 ${ok?(part?"wn":"ok"):"no"}">●</span>
         <span class="nm">${esc(x.name)}</span>
         <span class="ago">${x.total?x.running+"/"+x.total:"стоит"}</span></div>`;}).join("")
       :`<div class="empty">не установлен</div>`}</div>`;
+  $("#c_ct").innerHTML=`<h2>Контейнеры${ct.length?`<span class="r" style="color:${allUp?"var(--good)":"var(--warn)"}">${run}/${ct.length}</span>`:`<span class="r">—</span>`}</h2>
+    <div class="body">${ct.length?ct.map(c=>{
+      const up=c.state==="running";
+      return `<div class="r2"><span class="st2 ${up?"ok":"no"}">●</span>
+        <span class="nm">${esc(c.name)}</span>
+        <span class="ago">${esc(up?(c.status||"работает"):(c.state||"стоит"))}</span></div>`;}).join("")
+      :`<div class="empty">контейнеров нет</div>`}</div>`;
+}
 
+function renderCards(d){
   // --- Диски: полоска заполнения, как в виджетах
   const dk=d.disks||[];
   $("#c_ds").innerHTML=`<h2>Диски<span class="r">${dk.length||"—"}</span></h2>
@@ -442,11 +488,11 @@ function renderRow2(d){
   $("#c_usb").innerHTML=`<h2>USB-импорт<span class="r">${live?"идёт":""}</span></h2><div class="body">${body}</div>`;
 }
 function renderFoot(d){
-  const cls=v=>v===2?"":v===1?"local":v===0?"off":"nd";
   const strip=(a,lbl)=>{
-    const bars=(a&&a.bars)||[];
+    const bars=(a&&a.bars)||[], fr=(a&&a.frac)||[];
     if(!bars.length) return "";
-    return `<span class="lbl">${lbl}</span><span class="bars">${bars.map(v=>`<i class="${cls(v)}"></i>`).join("")}</span>`
+    return `<span class="lbl">${lbl}</span><span class="bars">${bars.map((v,i)=>
+        `<i style="background:${avColor(fr[i])}"></i>`).join("")}</span>`
          + `<span class="pct">${a.pct!=null?a.pct+"%":""}</span>`;
   };
   $("#av24").innerHTML=strip(d.avail,"24 ч");
@@ -758,8 +804,9 @@ function applyLook(L){
 /* ---------- poll ---------- */
 async function poll(){ return _poll(); }
 let PAGE=0;
+const PAGES=3;
 function setPage(n){
-  PAGE=Math.max(0,Math.min(1,n));
+  PAGE=Math.max(0,Math.min(PAGES-1,n));
   document.querySelectorAll(".page").forEach((p,i)=>p.classList.toggle("on",i===PAGE));
   document.querySelectorAll("#dots .d").forEach((p,i)=>p.classList.toggle("on",i===PAGE));
   poll();
@@ -785,7 +832,9 @@ async function _poll(){
     NETBITS=D.netUnits!=="bytes";     // общая настройка панели; по умолчанию — биты
     trStatic();
     applyLook(D.look); renderBar(D); renderFoot(D); renderAlarm(D);
-    if(PAGE===0){ renderGauges(D); renderCards(D); renderRow2(D); } else { renderP1(D); }
+    if(PAGE===0){ renderGauges(D); renderCards(D); renderRow2(D); }
+    else if(PAGE===1){ renderP1(D); }
+    else { renderP2(D); }
     if(CUR_SHEET) sheet(CUR_SHEET,true);   // живые данные внутри открытого листа
     $("#dot").style.opacity=1;
   }catch(e){ $("#dot").style.opacity=.25;

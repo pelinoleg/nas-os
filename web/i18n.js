@@ -2636,6 +2636,7 @@ window.NAS_I18N = { en: {
 "клик по столбику откроет день в Хронике": "click a bar to open that day in the Timeline",
 "код": "code",
 "контейнер": "container",
+"контейнеров нет": "no containers",
 "контейнер упал или стал unhealthy": "a container crashed or became unhealthy",
 "контейнер(ов)": "container(s)",
 "контейнеров запущено": "containers running",

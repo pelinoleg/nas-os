@@ -7366,10 +7366,35 @@ function winFsHistory(){openWin("__fsw","История файлов",(body,win)
  refreshPane();loadAct();
 },{w:860,h:600});}
 
+/* Цвет полоски — по ДОЛЕ аптайма слота (frac), а не по «худшему состоянию»: слот
+   тут час или целые сутки, и одна секундная просадка красила его целиком в красный —
+   месяц с 99.9 % аптайма выглядел сплошной аварией. Шкала непрерывная good→warn→
+   danger, чистый красный только при простое ≥ 50 % слота. Цвета берём из уже
+   подогнанных по контрасту токенов поверхности виджета (--wdg-*), а не хардкодим. */
+const _avHex=n=>{const v=getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+ return /^#[0-9a-f]{6}$/i.test(v)?v:null;};
+const _avMix=(a,b,t)=>{const p=h=>[1,3,5].map(i=>parseInt(h.slice(i,i+2),16));
+ const x=p(a),y=p(b),c=i=>Math.round(x[i]+(y[i]-x[i])*t).toString(16).padStart(2,"0");
+ return "#"+c(0)+c(1)+c(2);};
+/* опорные точки: 0 → зелёный, 1 % простоя → чуть желтее, 10 % → жёлтый,
+   25 % → оранжевый, ≥ 50 % → красный */
+function avScale(d){
+ if(d<=0)return 0;
+ if(d<0.10)return 0.5*Math.sqrt(d/0.10);
+ return Math.min(1,0.5+0.5*(d-0.10)/0.40);
+}
+function avColor(f){
+ if(f==null)return "var(--track)";
+ const g=_avHex("--wdg-good"),w=_avHex("--wdg-warn"),d=_avHex("--wdg-danger");
+ if(!g||!w||!d)return f>=1?"var(--good)":f>=0.5?"var(--warn)":"var(--danger)";
+ const u=avScale(1-f);
+ return u<=0.5?_avMix(g,w,u*2):_avMix(w,d,(u-0.5)*2);
+}
 function avBarsHTML(r,pct,hours){
  if(Array.isArray(r))r={bars:r,pct:pct,hours:hours};   // legacy (bars,pct,hours) call shape
  const bars=r&&r.bars;if(!bars||!bars.length)return "";
- const c=v=>v===2?"var(--good)":v===1?"var(--warn)":v===0?"var(--danger)":"var(--track)";
+ const fr=(r&&r.frac)||[];
+ const c=(v,i)=>fr.length?avColor(fr[i]):(v===2?"var(--good)":v===1?"var(--warn)":v===0?"var(--danger)":"var(--track)");
  const h=r.hours||24;
  const now=(r.now?r.now*1000:Date.now()),t0=(r.start?r.start*1000:now-h*3600e3);
  const slotW=(now-t0)/bars.length,wDate=h>=48;
@@ -7382,14 +7407,17 @@ function avBarsHTML(r,pct,hours){
     list the exact outage intervals (r.events) overlapping the slot */
  const tit=(v,i)=>{
   const a=t0+i*slotW,b=a+slotW;
-  let s=`${hm(a)}–${hm(b)} · ${word(v)}`;
+  const f=fr[i];
+  // слот теперь крупный (час/сутки) — «худшее состояние» без доли аптайма врёт:
+  // 99.9 % и 10 % выглядели бы одинаково
+  let s=`${hm(a)}–${hm(b)} · ${f!=null?(f*100).toFixed(f>=0.999&&f<1?2:1)+"% доступность":word(v)}`;
   if(v===0||v===1)for(const e of ev){
-   const f=e.from*1000,t=e.to*1000;
-   if(f<b&&t>a)s+=`\n${word(e.state==="off"?0:1)}: ${hm(f)}–${hm(t)} (${dur((t-f)/1000)})`;
+   const f2=e.from*1000,t=e.to*1000;
+   if(f2<b&&t>a)s+=`\n${word(e.state==="off"?0:1)}: ${hm(f2)}–${hm(t)} (${dur((t-f2)/1000)})`;
   }
   return s;};
  const span=h>=48?`−${Math.round(h/24)}d`:`−${h}h`;
- return `<div class="gl-avwrap"><div class="gl-bars">${bars.map((v,i)=>`<i style="background:${c(v)}" title="${tit(v,i)}"></i>`).join("")}</div><div class="gl-avcap"><span>${span}</span><span>${r.pct==null?"":r.pct+"% доступность"}</span><span>сейчас</span></div></div>`;}
+ return `<div class="gl-avwrap"><div class="gl-bars">${bars.map((v,i)=>`<i style="background:${c(v,i)}" title="${tit(v,i)}"></i>`).join("")}</div><div class="gl-avcap"><span>${span}</span><span>${r.pct==null?"":r.pct+"% доступность"}</span><span>сейчас</span></div></div>`;}
 async function glanceTab(tc){
  tc.innerHTML=`<div class="set-load">загрузка…</div>`;
  const r=await api("/api/glance/config");
@@ -9368,7 +9396,8 @@ function renderRail(){const rail=document.getElementById("rail");if(!rail)return
 /* Availability bars (timeline collected by nas-netguard, period configurable
    in Настройки → Экран). Hidden until the log has at least some history. */
 async function pollAvail(){
- for(const [id,h,n] of [["wg-avail",24,48],["wg-avail30",720,30]]){
+ // 24 полоски = по часу, 30 = по дню: слот совпадает с подписью виджета
+ for(const [id,h,n] of [["wg-avail",24,24],["wg-avail30",720,30]]){
   const box=document.getElementById(id);if(!box)continue;
   const wdg=box.closest(".wdg");
   let r=null;try{r=await api(`/api/avail?hours=${h}&slots=${n}`);}catch(e){}
