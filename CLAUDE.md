@@ -208,6 +208,18 @@ HTML отдаётся `Cache-Control: no-store` (мобильные при `no-c
 - `printf '%-12s'` меряет БАЙТЫ: кириллица разъезжает по колонкам. Вывод в терминал — латиницей.
 - В `pam_motd`/udev-хуках нельзя `smartctl`/`hdparm` (будят спящие диски) и синхронный `nmcli`
   из NM-dispatcher (дедлок: NM ждёт скрипт, скрипт ждёт NM → `systemctl start --no-block`).
+- **Бокс без дисков = красный `smartmontools.service`.** 2026-07-13, установка на Pi 4 (грузится
+  с SD-карты, NVMe-слота нет вовсе, USB-диски ещё не воткнуты): `smartmontools` лежит в
+  `STACK_PACKAGES`, Debian включает юнит сам, `DEVICESCAN` не находит НИ ОДНОГО устройства →
+  smartd выходит с кодом 17 («No devices to monitor») → `failed`, и панель показывает упавшую
+  службу. Мониторить и правда нечего — это не поломка, а ложная тревога. Лечит
+  `install_smartd_guard()` (вызывается там же, где ставится NAS-стек): `ConditionPathExistsGlob`
+  `|/dev/sd*` + `|/dev/nvme*n*` (дисков нет → юнит не стартует, `inactive`, а не `failed`);
+  `Type=simple` + `SuccessExitStatus=17` для случая «диск есть, но SMART не отдаёт» (флешка) —
+  ОДНОГО `SuccessExitStatus` мало: при штатном `Type=notify` выход ДО `READY=1` даёт
+  `Result=protocol` → `failed` в любом случае; udev `99-nas-smartd.rules` поднимает smartd, когда
+  появился первый настоящий диск (**только `start` и только если не запущен** — слепой `restart`
+  на каждый `add` переопрашивал бы ВСЕ диски и будил спящие).
 
 ## Состояние (актуально на 2026-07-08)
 Готово и в проде: веб-панель (окна/док/менубар/виджеты), мониторинг (50 событий, health, SMART),

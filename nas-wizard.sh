@@ -610,6 +610,7 @@ stage_system() {
     # 0.2 установка софта: NAS-стек + утилиты + Pi-специфичное (идемпотентно, недоступные пропускаются)
     run apt-get update
     install_packages "NAS-стек"   "${STACK_PACKAGES[@]}"
+    install_smartd_guard   # smartmontools ставится тут же — сразу закрыть failed без дисков
     install_packages "утилиты"    "${UTIL_PACKAGES[@]}"
     install_packages "Pi-пакеты"  "${PI_PACKAGES[@]}"
     ensure_docker_repo   # docker-ce + compose-plugin из официального репо Docker
@@ -2327,6 +2328,52 @@ stage_shares() {
 # ---------------------------------------------------------------------------
 # ЭТАП 8: Бэкапы и мониторинг (SMART-алерты, health)
 # ---------------------------------------------------------------------------
+# smartd на боксе без SMART-дисков: DEVICESCAN ничего не находит, smartd выходит
+# с кодом 17 ("No devices to monitor"), systemd красит юнит в failed, а панель
+# показывает его в списке упавших служб. При этом НИЧЕГО не сломано — мониторить
+# просто нечего (Pi загружен с SD-карты, NVMe-слота нет вовсе, диски ещё не воткнуты).
+# smartmontools лежит в STACK_PACKAGES, и Debian включает его юнит при установке,
+# так что это ловит КАЖДЫЙ свежий бокс до первого диска — не только bk_smartd.
+#
+# Два слоя, потому что «нечего мониторить» бывает двух видов:
+#   1. дисков нет вообще -> ConditionPathExistsGlob вообще не даёт стартовать
+#      ('|' = triggering condition: достаточно, чтобы выполнилось одно из двух);
+#   2. диск есть, но SMART не отдаёт (флешка) -> smartd всё равно выходит с 17.
+#      Одного SuccessExitStatus мало: при штатном Type=notify выход ДО READY=1 даёт
+#      Result=protocol -> failed, что бы ни стояло в SuccessExitStatus (проверено).
+#      smartd и так живёт с -n (без форка), и после него никто не выстраивается,
+#      поэтому Type=simple безопасен и делает 17 чистым выходом.
+# udev-правило поднимает smartd, как только появился настоящий диск. Только start и
+# только если не запущен: слепой restart на каждый add переопрашивал бы ВСЕ диски и
+# будил спящие.
+install_smartd_guard() {
+    systemctl list-unit-files smartmontools.service >/dev/null 2>&1 || return 0
+    run mkdir -p /etc/systemd/system/smartmontools.service.d
+    write_file /etc/systemd/system/smartmontools.service.d/nas-nodisk.conf <<'EOF'
+[Unit]
+# nas-wizard: нет ни одного SMART-диска (Pi с одной SD-картой) — не стартуем вовсе.
+ConditionPathExistsGlob=|/dev/sd*
+ConditionPathExistsGlob=|/dev/nvme*n*
+
+[Service]
+# nas-wizard: диск есть, но SMART не отдаёт (флешка) — smartd выходит с кодом 17.
+# Type=notify превращает ранний выход в Result=protocol (failed) независимо от
+# SuccessExitStatus, поэтому переводим в simple: smartd и так живёт с -n (без форка).
+Type=simple
+SuccessExitStatus=17
+EOF
+    write_file /etc/udev/rules.d/99-nas-smartd.rules <<'RULES'
+# nas-wizard: поднять smartd, когда появился первый настоящий диск (до него юнит
+# пропускается по ConditionPathExistsGlob). Только start и только если не запущен:
+# restart на каждый add переопрашивал бы ВСЕ диски и будил спящие.
+ACTION=="add", SUBSYSTEM=="block", ENV{DEVTYPE}=="disk", KERNEL=="sd*|nvme*", RUN+="/bin/sh -c 'systemctl is-active --quiet smartmontools.service || systemctl start --no-block smartmontools.service'"
+RULES
+    run udevadm control --reload-rules
+    run systemctl daemon-reload
+    # clear the red state left by a boot that happened before this guard existed
+    systemctl is-failed smartmontools.service >/dev/null 2>&1 && run systemctl reset-failed smartmontools.service
+    return 0
+}
 bk_smartd() {
     install_packages "smart" smartmontools
     write_file /usr/local/bin/nas-smart-alert.sh <<'ALERT'
@@ -2349,6 +2396,7 @@ ALERT
 DEVICESCAN -a -o on -S on -n standby,q -s (S/../.././02|L/../../6/03) -W 4,45,55 -m root -M exec /usr/local/bin/nas-smart-alert.sh
 EOF
     fi
+    install_smartd_guard   # no disks yet -> skip start instead of failing
     enable_service smartd
     info "smartd включён (алерты -> /var/log/nas-smart.log + ping)"
 }
@@ -3007,6 +3055,7 @@ stage_system_apply() {
     run apt-get update
     run apt-get full-upgrade -y
     install_packages "NAS-стек"  "${STACK_PACKAGES[@]}"
+    install_smartd_guard   # smartmontools ставится тут же — сразу закрыть failed без дисков
     install_packages "утилиты"   "${UTIL_PACKAGES[@]}"
     install_packages "Pi-пакеты" "${PI_PACKAGES[@]}"
     ensure_docker_repo   # docker-ce + compose-plugin из официального репо Docker
