@@ -2605,6 +2605,7 @@ window.NAS_I18N = { en: {
 "имя: буквы/цифры/._-": "name: letters/digits/._-",
 "интернет-канал": "internet link",
 "искл.": "excl.",
+"импортов ещё не было": "no imports yet",
 "исключено": "excluded",
 "исключено из копирования — нажмите, чтобы вернуть": "excluded from copying — click to restore",
 "исполняемый скрипт в": "an executable script in",

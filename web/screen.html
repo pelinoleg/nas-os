@@ -110,6 +110,10 @@
   .bar{height:4px;border-radius:3px;background:var(--track);overflow:hidden;flex:none;margin-top:3px}
   .bar>i{display:block;height:100%;border-radius:3px;background:var(--good)}
   .bar>i.wn{background:var(--warn)} .bar>i.bd{background:var(--danger)}
+  /* progress != fill level: a copy that is 95% done is GOOD news. Fill bars are
+     coloured by threshold (green -> yellow -> red), progress bars must not be —
+     a run finishing in red read as a failure. Accent = "work in flight". */
+  .bar>i.pg{background:var(--accent)}
   .prow{display:flex;flex-direction:column;gap:0;padding:5px 0;border-bottom:1px solid rgba(255,255,255,.07)}
   .prow:last-child{border-bottom:0}
   .prow .t{display:flex;gap:7px;align-items:center;font-size:13px}
@@ -254,6 +258,10 @@ const isHex=h=>/^#[0-9a-f]{6}$/i.test(h||"");
 const hexRgb=h=>{const n=parseInt(h.slice(1),16);return [n>>16&255,n>>8&255,n&255].join(",");};
 const litRgb=(rgb,amt)=>rgb.split(",").map(x=>Math.round(+x+(255-+x)*amt)).join(",");
 const gb=b=>(b/1073741824).toFixed(b>107374182400?0:1)+" ГБ";
+function fmtB(b){ b=+b||0; if(b<1024) return b?b+" Б":"";
+  const u=["КБ","МБ","ГБ","ТБ"]; let i=0,x=b/1024;
+  while(x>=1024&&i<u.length-1){ x/=1024; i++; }
+  return (x>=10?Math.round(x):x.toFixed(1))+" "+u[i]; }
 function rate(b){ if(!b||b<1024) return ["0","КБ/с"];
   if(b<1048576) return [(b/1024).toFixed(0),"КБ/с"];
   return [(b/1048576).toFixed(1),"МБ/с"]; }
@@ -264,6 +272,19 @@ function ago(ts){
   if(s<3600) return Math.floor(s/60)+" мин назад";
   if(s<86400) return Math.floor(s/3600)+" ч назад";
   const d=Math.floor(s/86400); return d===1?"вчера":d+" дн назад";
+}
+/* Дата события, а не «сколько прошло»: на стене висит история («вчера 21:40»),
+   и относительное «2 дн назад» после ребута читается хуже, чем дата. */
+const MON=["янв","фев","мар","апр","мая","июн","июл","авг","сен","окт","ноя","дек"];
+function when(ts){
+  if(!ts) return "никогда";
+  const d=new Date(ts*1000), n=new Date();
+  const hm=("0"+d.getHours()).slice(-2)+":"+("0"+d.getMinutes()).slice(-2);
+  const same=(a,b)=>a.getFullYear()===b.getFullYear()&&a.getMonth()===b.getMonth()&&a.getDate()===b.getDate();
+  if(same(d,n)) return "сегодня "+hm;
+  if(same(d,new Date(n.getTime()-86400000))) return "вчера "+hm;
+  const yr=d.getFullYear()!==n.getFullYear()?" "+d.getFullYear():"";
+  return d.getDate()+" "+MON[d.getMonth()]+yr+" "+hm;
 }
 function upfmt(s){ if(!s) return "";
   const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);
@@ -326,6 +347,24 @@ function renderGauges(d){
 const lvlCls=p=>p>=90?"bd":p>=75?"wn":"";
 function bar(pct,cls){ return `<div class="bar"><i class="${cls||lvlCls(pct)}" style="width:${clampf(pct,0,100)}%"></i></div>`; }
 
+/* Строка истории: точка состояния + имя + ДАТА. Слова «готово» нет намеренно —
+   зелёная точка И ЕСТЬ «всё прошло хорошо», а вопрос, на который отвечает плашка,
+   когда прогон не идёт, — «когда это было в последний раз». */
+function hrow(cls,name,date,box,tail){
+  return `<div class="${box||"r2"}"><span class="st2 ${cls}">●</span>
+    <span class="nm">${esc(name)}</span>
+    <span class="ago">${esc(date)}</span>${tail||""}</div>`;
+}
+/* «сколько» перед «когда»: размер узкий, дата длиннее — так строка не прыгает,
+   а на 4.3" обе влезают (имя при нехватке места ужимается многоточием) */
+const sized=(sz,ts)=>(sz?sz+" · ":"")+when(ts);
+function bkRow(b,box,tail){
+  const cls=b.last==="ok"?"ok":b.last==="warn"?"wn":b.last?"bd":"no";
+  const w=b.queued?"в очереди":sized(b.last_bytes?fmtB(b.last_bytes):"",b.last_ts);
+  return hrow(cls,b.name,w,box,tail);
+}
+function usbRow(h,box){ return hrow(h.ok?"ok":"bd",h.name||"USB",sized(h.size,h.ts),box); }
+
 function renderCards(d){
   // --- Docker: стеки, а не голые контейнеры
   const stk=d.stacks||[], ct=d.containers||[], run=ct.filter(c=>c.state==="running").length;
@@ -350,7 +389,7 @@ function renderCards(d){
         <span class="ago">${esc(x.size||"")}${p!=null?" · "+Math.round(p)+"%":""}${x.temp?" · "+x.temp+"°":""}</span></div>
         ${p!=null?bar(p):""}</div>`;}).join(""):`<div class="empty">дисков нет</div>`}</div>`;
 
-  // --- Бэкапы: идёт прогон — показываем прогресс, а не «никогда»
+  // --- Бэкапы: идёт прогон — прогресс; не идёт — история (профиль + дата + точка)
   const bk=d.backups||[], act=bk.find(b=>b.running);
   if(act){
     const L=act.live||{};
@@ -359,18 +398,14 @@ function renderCards(d){
         <div class="prow" style="border:0">
           <div class="t"><span class="nm">${L.pct!=null?L.pct+"%":"старт…"}</span>
             <span class="ago">${esc(L.speed||"")}</span></div>
-          ${bar(L.pct||0,"")}
+          ${bar(L.pct||0,"pg")}
           <div class="run">${esc(L.cur||"")}</div>
           <div class="run">${L.total?`задача ${(L.done||0)+1} из ${L.total}`:""}${L.eta?" · осталось "+esc(L.eta):""}</div>
         </div></div>`;
   } else {
     $("#c_bk").innerHTML=`<h2>Бэкапы<span class="r">${bk.length||"—"}</span></h2>
-      <div class="body">${bk.length?bk.slice(0,4).map(b=>{
-        const cls=b.last==="ok"?"ok":b.last==="warn"?"wn":b.last?"bd":"no";
-        return `<div class="r2"><span class="st2 ${cls}">${b.last==="ok"?"✓":b.last?"!":"—"}</span>
-          <span class="nm">${esc(b.name)}</span>
-          <span class="ago">${b.queued?"в очереди":esc(ago(b.last_ts))}</span></div>`;
-      }).join(""):`<div class="empty">профилей нет</div>`}</div>`;
+      <div class="body">${bk.length?bk.slice(0,4).map(b=>bkRow(b,"r2")).join("")
+        :`<div class="empty">профилей нет</div>`}</div>`;
   }
 }
 function renderRow2(d){
@@ -381,21 +416,20 @@ function renderRow2(d){
       return `<div class="r2"><span class="st2 ${c}">●</span><span class="nm">${esc(e.title)}</span>
         <span class="ago">${esc(ago(e.t))}</span></div>`;}).join(""):`<div class="empty">событий нет</div>`}</div>`;
 
-  const jobs=d.usb||[], live=jobs.find(j=>j.status==="running"), last=jobs[0];
+  // импорт идёт — прогресс; не идёт — история (флешка + дата), она переживает ребут
+  const jobs=d.usb||[], live=jobs.find(j=>j.status==="running"), hist=d.usbhist||[];
   let body;
   if(live){
     body=`<div class="prow" style="border:0">
       <div class="t"><span class="nm">${esc(live.label||live.dev||"USB")}</span>
         <span class="ago">${live.percent!=null?live.percent+"%":""}</span></div>
-      ${bar(live.percent||0,"")}
+      ${bar(live.percent||0,"pg")}
       <div class="run">${esc(live.speed||"")}${live.eta?" · осталось "+esc(live.eta):""}</div>
       <div class="run">${esc(live.dest||"")}</div></div>`;
-  } else if(last){
-    const c=last.status==="done"?"ok":last.status==="aborted"?"bd":"no";
-    body=`<div class="r2"><span class="st2 ${c}">●</span><span class="nm">${esc(last.label||last.dev||"USB")}</span>
-      <span class="ago">${last.status==="done"?"готово":esc(last.status)}</span></div>`;
+  } else if(hist.length){
+    body=hist.slice(0,3).map(h=>usbRow(h)).join("");
   } else {
-    body=`<div class="empty">носитель не подключён</div>`;
+    body=`<div class="empty">импортов ещё не было</div>`;
   }
   $("#c_usb").innerHTML=`<h2>USB-импорт<span class="r">${live?"идёт":""}</span></h2><div class="body">${body}</div>`;
 }
@@ -560,25 +594,27 @@ const SHEETS={
       if(b.running){ const L=b.live||{};
         return `<div class="prow"><div class="t"><span class="nm">${esc(b.name)}</span>
           <span class="ago">${L.pct!=null?L.pct+"% · ":""}${esc(L.speed||"идёт")}</span></div>
-          ${bar(L.pct||0,"")}
+          ${bar(L.pct||0,"pg")}
           <div class="run">${esc(L.cur||"")}${L.eta?" · осталось "+esc(L.eta):""}</div></div>`;
       }
-      const cls=b.last==="ok"?"ok":b.last==="warn"?"wn":b.last?"bd":"no";
-      return `<div class="srow2"><span class="st2 ${cls}">${b.last==="ok"?"✓":b.last?"!":"—"}</span>
-        <span class="nm">${esc(b.name)}</span>
-        <span class="ago">${b.queued?"в очереди":esc(ago(b.last_ts))}</span>
-        <span class="sbtn" data-run="${esc(b.id)}">Запустить</span></div>`;
+      return bkRow(b,"srow2",`<span class="sbtn" data-run="${esc(b.id)}">Запустить</span>`);
     }).join(""):`<div class="empty">профилей нет</div>`, ""];},
 
-  /* USB-импорт: что подключено и как идёт перекачка */
-  usb:d=>{const jobs=d.usb||[];
-    return ["USB-импорт", jobs.length?jobs.map(j=>{
+  /* USB-импорт: идущая перекачка сверху, ниже — история (переживает ребут) */
+  usb:d=>{const jobs=(d.usb||[]).filter(j=>j.status==="running"), hist=d.usbhist||[];
+    const run=jobs.map(j=>{
       const p=j.percent;
       return `<div class="prow"><div class="t"><span class="nm">${esc(j.label||j.dev||"USB")}</span>
-        <span class="ago">${j.status==="running"?(p!=null?p+"%":"идёт"):esc(j.status)}</span></div>
-        ${j.status==="running"?bar(p||0,""):""}
+        <span class="ago">${p!=null?p+"%":"идёт"}</span></div>
+        ${bar(p||0,"pg")}
         <div class="run">${esc(j.dest||"")}${j.speed?" · "+esc(j.speed):""}${j.eta?" · осталось "+esc(j.eta):""}</div></div>`;
-    }).join(""):`<div class="empty">носитель не подключён</div>`, ""];},
+    }).join("");
+    const old=hist.map(h=>`<div class="prow">
+      <div class="t"><span class="st2 ${h.ok?"ok":"bd"}">●</span>
+        <span class="nm">${esc(h.name||"USB")}</span>
+        <span class="ago">${esc(sized(h.size_full||h.size,h.ts))}</span></div>
+      <div class="run">${esc(h.dest||"")}</div></div>`).join("");
+    return ["USB-импорт", (run+old)||`<div class="empty">импортов ещё не было</div>`, ""];},
 
   /* События: все, новые сверху, с прокруткой */
   events:d=>["Последние события",

@@ -5138,6 +5138,16 @@ def _nb_history_add(pid, entry):
     except OSError:
         pass
 
+def _nb_run_bytes(run):
+    """Transferred bytes of one history entry: the run itself carries no totals,
+    they live in its per-source jobs."""
+    return sum(int(j.get("xfer_bytes") or 0)
+               for j in (run.get("jobs") or []) if isinstance(j, dict))
+
+def _nb_run_files(run):
+    return sum(int(j.get("xfer") or 0)
+               for j in (run.get("jobs") or []) if isinstance(j, dict))
+
 def nb_history(pid=None):
     pid = _nb_pid(pid)
     try:
@@ -10746,6 +10756,7 @@ def usb_import_progress():
             continue
         job = {"dev": meta.get("dev"), "label": meta.get("label"), "dest": meta.get("dest"),
                "status": st, "started": int(meta.get("started") or 0),
+               "finished": fin or None,
                "total": int(meta.get("total") or 0) or None,
                "percent": 100 if st == "done" else None,
                "bytes": None, "speed": None, "eta": None}
@@ -10890,6 +10901,28 @@ def usb_ops_sync():
         if warm and r.get("ok") and not r.get("dup") and j["status"] == "done" \
            and j.get("dest") and os.path.isdir(j["dest"]):
             threading.Thread(target=_thumbs_warm_bg, args=(j["dest"],), daemon=True).start()
+
+def usb_import_history(n=8):
+    """Finished imports, newest first — for the wall screen.
+
+    The progress files live in /run and die with the box, so a reboot would wipe
+    the tile clean. The lasting trace is the one usb_ops_sync() writes to
+    ops-history.json (uid = usb:<dev>:<started>) — read it back from there."""
+    out = []
+    for e in ops_hist_list():
+        if not str(e.get("uid") or "").startswith("usb:"):
+            continue
+        bits = [b.strip() for b in str(e.get("label") or "").split("·")]
+        # «130 МБ из 130 МБ» — в строку плашки лезет только скопированное
+        full = next((b for b in bits[1:] if not b.startswith("/")), "")
+        out.append({"name": (bits[0] if bits and bits[0] else "USB"),
+                    "ts": int(e.get("ts") or 0),
+                    "ok": e.get("state") == "done",
+                    "size": re.split(r"\s+(?:из|of)\s+", full)[0],
+                    "size_full": full,
+                    "dest": next((b for b in bits if b.startswith("/")), "")})
+    out.sort(key=lambda x: -x["ts"])
+    return out[:n]
 
 def _usb_sh_sync():
     """Перезаписать хелпер и udev-правило, если они разошлись с кодом. Раньше и то
@@ -11353,9 +11386,10 @@ def _screen_page2():
     hist = []
     for p in (_safe(nb_profiles_public, []) or []):
         for h in (_safe(lambda pid=p["id"]: nb_history(pid), []) or [])[:3]:
+            # у записи прогона нет полей files/size — они лежат в её задачах (jobs)
             hist.append({"name": p["name"], "ts": h.get("ts") or 0,
-                         "result": h.get("result") or "", "files": h.get("files"),
-                         "size": h.get("size"), "dur": h.get("dur")})
+                         "result": h.get("result") or "", "files": _nb_run_files(h),
+                         "size": _nb_run_bytes(h), "dur": h.get("dur")})
     hist.sort(key=lambda x: -x["ts"])
     d = {
         # Time Machine: сервис может быть не настроен — тогда просто пусто
@@ -11427,7 +11461,8 @@ def screen_payload(lang="", p2=False):
              "running": bool(p.get("running")), "queued": bool(p.get("queued")),
              "configured": bool(p.get("configured")),
              "last_ts": int(last.get("ts") or 0),
-             "last": last.get("result") or ""}
+             "last": last.get("result") or "",
+             "last_bytes": _nb_run_bytes(last), "last_files": _nb_run_files(last)}
         if b["running"]:
             b["live"] = _safe(lambda pid=p["id"]: _nb_live(pid), {}) or {}
         bks.append(b)
@@ -11464,6 +11499,8 @@ def screen_payload(lang="", p2=False):
             "disks": hv.get("disks") or [], "containers": hv.get("containers") or [],
             "stacks": hv.get("stacks") or [],
             "usb": _safe(lambda: usb_import_progress()["jobs"], []) or [],
+            # история импортов переживает ребут (ops-history.json), в отличие от /run
+            "usbhist": _safe(lambda: usb_import_history(8), []) or [],
             "swap": (st.get("mem") or {}).get("swap_total"),
             "throttled": st.get("throttled"), "psu_ma": st.get("psu_ma"),
             "asleep": bool(_SCR["sleep"]),
