@@ -6424,7 +6424,8 @@ def monitor_loop():
         funcs = ((monitor_tick, _automount_tick, usb_ops_sync) if poked else
                  (history_sample, monitor_tick, maintenance_daily, _smart_selftest_tick,
                   _nb_sched_tick, _automount_tick, _summary_tick, _thermal_tick, usb_ops_sync,
-                  _fsw_tick, _replica_tick, _remotes_tick))
+                  _fsw_tick, _replica_tick, _remotes_tick,
+                 _screen_tick))
         for fn in funcs:
             try:
                 fn()
@@ -11161,6 +11162,211 @@ class _Server(ThreadingHTTPServer):
         super().handle_error(request, client_address)
 
 
+# --------------------------------------------------------------------------- #
+#  Local touch screen — kiosk dashboard on the box itself (cage + chromium)
+#
+#  The panel is served at /screen and talks to /api/screen/*. Both are reachable
+#  WITHOUT a session, but ONLY from loopback: the kiosk browser runs on this very
+#  box, so asking for the panel password on a screen you can physically touch buys
+#  nothing (and a token in the URL would not stop a local process either). From the
+#  LAN the same paths still need a normal login, exactly like the rest of /api.
+#  Same loopback-only trick as /api/agent/notify.
+# --------------------------------------------------------------------------- #
+SCREEN_FILE = os.path.join(NAS_CONFIG, "screen.json")
+# tiles reused from Glance: same values, same colours, already translated
+SCREEN_TILES = ("cpu", "load", "cputemp", "ram", "uptime", "pool", "rootfs",
+                "netspeed", "docker", "updates", "disktemp", "snapraid", "inet")
+_SCR = {"touch": time.time(), "last": None, "spd": None, "spd_run": False}
+
+
+def load_screen():
+    d = _json_load_strict(SCREEN_FILE, {})
+
+    def _i(k, dflt, lo, hi):
+        try:
+            return max(lo, min(hi, int(d.get(k, dflt))))
+        except (TypeError, ValueError):
+            return dflt
+
+    def _hhmm(k, dflt):
+        v = str(d.get(k) or dflt)
+        return v if re.match(r"^\d{1,2}:\d{2}$", v) else dflt
+
+    return {"enabled": d.get("enabled") is not False,
+            "bright": _i("bright", 200, 1, 255),
+            "night": bool(d.get("night", True)),
+            "night_from": _hhmm("night_from", "23:00"),
+            "night_to": _hhmm("night_to", "07:00"),
+            "night_bright": _i("night_bright", 0, 0, 255),
+            "idle_min": _i("idle_min", 0, 0, 240),      # 0 = не гасить по простою
+            "actions": d.get("actions") is not False,
+            "lang": "ru" if d.get("lang") == "ru" else "en"}
+
+
+def save_screen(d):
+    cur = load_screen()
+    if isinstance(d, dict):
+        cur.update({k: v for k, v in d.items() if k in cur})
+    _json_save(SCREEN_FILE, cur, indent=2)
+    _safe(lambda: _screen_apply(force=True))
+    return load_screen()
+
+
+def _bl_dir():
+    """First backlight device (the DSI panel), '' if the box has no screen."""
+    try:
+        for n in sorted(os.listdir("/sys/class/backlight")):
+            return "/sys/class/backlight/" + n
+    except OSError:
+        return ""
+    return ""
+
+
+def screen_bright_set(v):
+    d = _bl_dir()
+    if not d:
+        return False
+    try:
+        mx = int((_read(d + "/max_brightness") or "255").strip() or 255)
+    except ValueError:
+        mx = 255
+    try:
+        with open(d + "/brightness", "w") as f:
+            f.write(str(max(0, min(mx, int(v)))))
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def _in_night(cfg, now=None):
+    if not cfg["night"]:
+        return False
+    t = time.localtime(now or time.time())
+    cur = t.tm_hour * 60 + t.tm_min
+
+    def m(x):
+        h, mm = x.split(":")
+        return int(h) * 60 + int(mm)
+    try:
+        a, b = m(cfg["night_from"]), m(cfg["night_to"])
+    except ValueError:
+        return False
+    # окно почти всегда через полночь (23:00 -> 07:00), поэтому не «a <= cur < b»
+    return (a <= cur < b) if a < b else (cur >= a or cur < b)
+
+
+def _screen_apply(force=False):
+    """Brightness = f(night window, idle, alarm). Alarm wins over everything:
+    a dead disk at 03:00 must light the screen up, that is the whole point."""
+    cfg = load_screen()
+    if not cfg["enabled"] or not _bl_dir():
+        return
+    now = time.time()
+    hp = _safe(health_report, {}) or {}
+    if hp.get("overall") == "bad":
+        want = cfg["bright"]                       # тревога — жечь экран
+    elif now - _SCR["touch"] < 60:
+        want = cfg["bright"]                       # минуту после касания светим всегда
+    elif _in_night(cfg):
+        want = cfg["night_bright"]
+    elif cfg["idle_min"] and now - _SCR["touch"] > cfg["idle_min"] * 60:
+        want = 0
+    else:
+        want = cfg["bright"]
+    if force or want != _SCR["last"]:
+        if screen_bright_set(want):
+            _SCR["last"] = want
+
+
+def _screen_tick():
+    _safe(lambda: _screen_apply())
+
+
+def screen_payload(lang=""):
+    # язык экрана задаётся в screen.json, а НЕ браузером киоска: i18n.js по умолчанию
+    # ставит NAS_LANG=en, и без этого сервер слал бы английские подписи под русскую
+    # разметку страницы — на экране получалась каша из двух языков
+    cfg0 = load_screen()
+    lang = lang or cfg0["lang"]
+    en = (lang == "en")
+    st = _safe(stats, {}) or {}
+    # _glance_tile отдаёт value/unit/state/raw, но НЕ label — его glance_payload
+    # подмешивает из каталога; здесь делаем то же самое
+    labels = {t[0]: (t[2] if en else t[1]) for t in glance_catalog()}
+    tiles = {}
+    for tid in SCREEN_TILES:
+        d = _safe(lambda t=tid: _glance_tile(t, en))
+        if not d:
+            continue
+        d = dict(d, label=labels.get(tid, tid))
+        if tid in GLANCE_SPARKS:
+            sp = _safe(lambda t=tid: _gl_spark(GLANCE_SPARKS[t]))
+            if sp:
+                d["spark"] = sp
+        tiles[tid] = d
+    hp = _safe(health_report, {}) or {}
+    problems = [{"name": c.get("name"), "value": c.get("value"),
+                 "lvl": c.get("lvl"), "hint": c.get("hint") or ""}
+                for c in (hp.get("checks") or []) if c.get("lvl") in ("bad", "warn")]
+    ev = _safe(lambda: events_list(0, 8), {}) or {}
+    events = list(reversed(ev.get("events") or []))[:5]
+    bks = []
+    for p in (_safe(nb_profiles_public, []) or []):
+        h = _safe(lambda pid=p["id"]: nb_history(pid), []) or []   # newest first
+        last = h[0] if h else {}
+        bks.append({"id": p["id"], "name": p["name"],
+                    "running": bool(p.get("running")), "queued": bool(p.get("queued")),
+                    "configured": bool(p.get("configured")),
+                    "last_ts": int(last.get("ts") or 0),
+                    "last": last.get("result") or ""})
+    cfg = load_screen()
+    host = st.get("host") or socket.gethostname()
+    return {"host": host, "mdns": host + ".local", "ip": st.get("ip") or "",
+            "iface": st.get("iface") or "", "net": st.get("net") or {"rx": 0, "tx": 0},
+            "uptime": st.get("uptime") or 0, "cpu": st.get("cpu"),
+            "temp": st.get("temp"), "load": st.get("load") or [],
+            "mem": st.get("mem") or {}, "pool": st.get("disk_pool"),
+            "root": st.get("disk_root"), "overall": hp.get("overall") or "ok",
+            "tiles": tiles, "problems": problems, "events": events, "backups": bks,
+            "speed": _SCR["spd"], "speed_running": bool(_SCR["spd_run"]),
+            "actions": cfg["actions"], "lang": cfg["lang"], "ts": int(time.time())}
+
+
+def screen_action(b):
+    """Actions from the local screen. 'touch' is not an action — it is the wake
+    signal, so it works even when the action buttons are switched off."""
+    a = str(b.get("a") or "")
+    if a == "touch":
+        _SCR["touch"] = time.time()
+        _safe(lambda: _screen_apply(force=True))
+        return {"ok": True}
+    cfg = load_screen()
+    if not cfg["actions"]:
+        return {"ok": False, "log": "действия с экрана выключены"}
+    if a == "backup":
+        return nb_run_bg(_nb_bpid(b))
+    if a == "speed":
+        if _SCR["spd_run"]:
+            return {"ok": True, "running": True}
+
+        def go():
+            _SCR["spd_run"] = True
+            try:
+                r = _safe(net_speedtest, {}) or {}
+                r["ts"] = int(time.time())
+                _SCR["spd"] = r
+            finally:
+                _SCR["spd_run"] = False
+        # спидтест блокирует на 10-18 с — экран не должен висеть на fetch
+        threading.Thread(target=go, daemon=True).start()
+        return {"ok": True, "running": True}
+    if a in ("reboot", "poweroff"):
+        log_event("screen_power", "С экрана: " + ("перезагрузка" if a == "reboot" else "выключение"),
+                  "запрошено кнопкой на локальном экране", "warn", "system")
+        return power(a)
+    return {"ok": False, "log": "неизвестное действие"}
+
+
 class H(BaseHTTPRequestHandler):
     server_version = "nas-web"
     # Таймаут сокета: без него зависшее/медленное соединение (slowloris) держит
@@ -11198,6 +11404,10 @@ class H(BaseHTTPRequestHandler):
 
     def _authed(self):
         return session_valid(self._cookie_token())
+
+    def _local(self):
+        """Запрос пришёл с самого бокса (киоск-браузер локального экрана)."""
+        return self.client_address[0] in ("127.0.0.1", "::1", "::ffff:127.0.0.1")
 
     def _origin_ok(self):
         """Защита от CSRF и cross-site WebSocket: Origin (если прислан) должен
@@ -11769,11 +11979,29 @@ class H(BaseHTTPRequestHandler):
             else:
                 self._json(pl)
             return
+        if p in ("/screen", "/screen/"):
+            self._static("/screen.html"); return
+        if p == "/api/wallpaper/img" and self._local():
+            wp = _wallpaper_path()          # киоск рисует те же обои, что рабочий стол
+            if wp:
+                self._sendraw(wp)
+            else:
+                self.send_error(404)
+            return
+        if p == "/api/screen/data":
+            # локальный экран ходит без сессии; из локалки — только по паролю
+            if not (self._local() or self._authed()):
+                self._json({"error": "auth"}, 401); return
+            self._json(screen_payload((q.get("lang") or [""])[0])); return
         if p.startswith("/api/") and not self._authed():
             self._json({"error": "auth", "configured": auth_configured()}, 401); return
         try:
             if p == "/api/stats":
                 self._json(stats())
+            elif p == "/api/screen/config":
+                self._json({"config": load_screen(), "present": bool(_bl_dir()),
+                            "unit": _run(["systemctl", "is-enabled", "nas-screen"],
+                                         timeout=5).strip()})
             elif p == "/api/glance/config":
                 self._json({"config": load_glance(),
                             "catalog": [{"id": t[0], "name": t[1]} for t in glance_catalog()],
@@ -12037,6 +12265,11 @@ class H(BaseHTTPRequestHandler):
             if not self._auth_endpoints(p):
                 self._json({"error": "unknown endpoint"}, 404)
             return
+        if p == "/api/screen/act":
+            # тач на самом боксе = физический доступ; пароль на этом экране не спрашиваем
+            if not self._local():
+                self._json({"error": "forbidden"}, 403); return
+            self._json(screen_action(self._body())); return
         if p == "/api/agent/notify":
             # local shell agents (nas-notify.sh) — pre-auth, loopback only
             if self.client_address[0] not in ("127.0.0.1", "::1", "::ffff:127.0.0.1"):
@@ -12065,6 +12298,8 @@ class H(BaseHTTPRequestHandler):
             elif p == "/api/settings":
                 b = self._body(); save_settings(b.get("settings", {}))
                 self._json({"ok": True})
+            elif p == "/api/screen/config":
+                self._json({"ok": True, "config": save_screen(self._body().get("config") or {})})
             elif p == "/api/glance/config":
                 self._json({"ok": True, "config": save_glance(self._body())})
             elif p == "/api/notes/save":

@@ -611,6 +611,7 @@ stage_system() {
     run apt-get update
     install_packages "NAS-стек"   "${STACK_PACKAGES[@]}"
     install_smartd_guard   # smartmontools ставится тут же — сразу закрыть failed без дисков
+    install_screen         # локальный тач-экран: ставится, только если панель реально подключена
     install_packages "утилиты"    "${UTIL_PACKAGES[@]}"
     install_packages "Pi-пакеты"  "${PI_PACKAGES[@]}"
     ensure_docker_repo   # docker-ce + compose-plugin из официального репо Docker
@@ -1831,6 +1832,118 @@ ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_USB_INTERFAC
 RULES
     run udevadm control --reload-rules
     uas_seed_cmdline
+}
+# ---------------------------------------------------------------------------
+# Local touch screen (DSI panel) — киоск-дашборд на самом боксе
+# ---------------------------------------------------------------------------
+# Драйвер панели ставить НЕ нужно: на актуальной PiOS её поднимает сам ядерный
+# vc4 по display_auto_detect=1 (Waveshare 4.3" DSI 800x480 отдаёт DSI-1 connected,
+# тач приезжает как edt_ft5x06 на i2c). Ставим РЕНДЕРЕР: cage (минимальный
+# Wayland-композитор для киоска, без рабочего стола) + chromium, который смотрит
+# на http://127.0.0.1/screen — nas-web отдаёт эту страницу ДО auth-гейта, но только
+# на loopback, поэтому на экране не спрашивается пароль, а из локалки её не открыть.
+screen_present() {
+    local f
+    for f in /sys/class/drm/card*-DSI-*/status; do
+        [ -e "$f" ] && [ "$(cat "$f" 2>/dev/null)" = "connected" ] && return 0
+    done
+    # часть панелей видна только по подсветке
+    for f in /sys/class/backlight/*/brightness; do [ -e "$f" ] && return 0; done
+    return 1
+}
+install_screen() {
+    if ! screen_present; then
+        info "экран не подключён — киоск не ставлю"
+        return 0
+    fi
+    install_packages "экран" cage chromium seatd
+    # сессия киоска рисует в DRM и читает тач напрямую
+    run usermod -aG video,input,render "$TARGET_USER"
+
+    # Chromium слушается ТОЛЬКО managed-policy: флаги --disable-features=Translate
+    # плашку перевода не убирают (проверено на 150.x). Киоск не должен показывать
+    # НИЧЕГО всплывающего — ни перевода, ни менеджера паролей, ни запросов доступа.
+    run mkdir -p /etc/chromium/policies/managed
+    write_file /etc/chromium/policies/managed/nas-kiosk.json <<'EOF'
+{
+  "TranslateEnabled": false,
+  "PasswordManagerEnabled": false,
+  "AutofillAddressEnabled": false,
+  "AutofillCreditCardEnabled": false,
+  "SpellcheckEnabled": false,
+  "SafeBrowsingEnabled": false,
+  "SyncDisabled": true,
+  "BrowserSignin": 0,
+  "MetricsReportingEnabled": false,
+  "SearchSuggestEnabled": false,
+  "BookmarkBarEnabled": false,
+  "ShowHomeButton": false,
+  "PromptForDownloadLocation": false,
+  "DefaultNotificationsSetting": 2,
+  "DefaultPopupsSetting": 2,
+  "DefaultGeolocationSetting": 2
+}
+EOF
+
+    # Подсветка: sysfs root-only, а ночной режим и слайдер яркости в панели должны
+    # уметь её крутить без root.
+    write_file /etc/udev/rules.d/99-nas-backlight.rules <<'EOF'
+# nas-wizard: подсветка панели — группа video может менять яркость без root.
+SUBSYSTEM=="backlight", ACTION=="add", RUN+="/bin/chgrp video /sys/class/backlight/%k/brightness /sys/class/backlight/%k/bl_power", RUN+="/bin/chmod 0664 /sys/class/backlight/%k/brightness /sys/class/backlight/%k/bl_power"
+EOF
+    run udevadm control --reload-rules
+    run udevadm trigger --subsystem-match=backlight --action=add
+
+    run mkdir -p /var/lib/nas-screen
+    run chown "$TARGET_USER:$TARGET_USER" /var/lib/nas-screen
+    write_file /etc/systemd/system/nas-screen.service <<EOF
+[Unit]
+Description=NAS local screen — cage + chromium kiosk on the DSI panel
+After=nas-web.service systemd-user-sessions.service
+Wants=nas-web.service
+# cage забирает VT — getty на tty1 дрался бы с ним за экран
+Conflicts=getty@tty1.service
+After=getty@tty1.service
+
+[Service]
+Type=simple
+User=$TARGET_USER
+# PAMName=login даёт процессу logind-сессию на seat0 (libseat -> DRM master)
+PAMName=login
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+StandardInput=tty-fail
+StandardOutput=journal
+StandardError=journal
+Environment=XDG_SESSION_TYPE=wayland
+ExecStart=/usr/bin/cage -d -- /usr/bin/chromium \\
+  --kiosk --ozone-platform=wayland --touch-events=enabled \\
+  --user-data-dir=/var/lib/nas-screen/chromium \\
+  --no-first-run --no-default-browser-check --noerrdialogs --disable-infobars \\
+  --disable-session-crashed-bubble --hide-crash-restore-bubble --disable-pinch \\
+  --overscroll-history-navigation=0 --password-store=basic \\
+  --check-for-update-interval=31536000 --disable-component-update \\
+  http://127.0.0.1/screen
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    run systemctl daemon-reload
+    enable_service nas-screen
+    info "экран включён (cage+chromium -> http://127.0.0.1/screen, tty1)"
+}
+api_screen() {
+    if [ "${NASW_ENABLE:-1}" = "0" ]; then
+        run systemctl disable --now nas-screen
+        run systemctl start getty@tty1   # вернуть консоль на панель
+        info "экран выключен"
+        return 0
+    fi
+    install_screen
 }
 # Точное время: chrony вместо systemd-timesyncd
 pi_chrony() {
@@ -3056,6 +3169,7 @@ stage_system_apply() {
     run apt-get full-upgrade -y
     install_packages "NAS-стек"  "${STACK_PACKAGES[@]}"
     install_smartd_guard   # smartmontools ставится тут же — сразу закрыть failed без дисков
+    install_screen         # локальный тач-экран: ставится, только если панель реально подключена
     install_packages "утилиты"   "${UTIL_PACKAGES[@]}"
     install_packages "Pi-пакеты" "${PI_PACKAGES[@]}"
     ensure_docker_repo   # docker-ce + compose-plugin из официального репо Docker
@@ -3503,6 +3617,7 @@ run_api() {
         tailscale)      mod_tailscale ;;
         staticip)       mod_staticip ;;
         cockpit-gui)    mod_cockpit_gui ;;
+        screen)         api_screen ;;
         *)              echo "неизвестное api-действие: $action" >&2; return 2 ;;
     esac
 }
