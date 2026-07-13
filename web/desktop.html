@@ -7298,8 +7298,8 @@ function winFsHistory(){openWin("__fsw","История файлов",(body,win)
     exclude:g("#fwEx").value.split("\n").map(x=>x.trim()).filter(Boolean),
     exclude_re:g("#fwExR").value.split("\n").map(x=>x.trim()).filter(Boolean)})});
    const st=g("#fwStat");
-   if(r&&r.ok){st.style.color="var(--good)";st.textContent="✓ сохранено";refreshPane(true);}
-   else{st.style.color="var(--danger)";st.textContent=(r&&r.log)||"не сохранилось";}};
+   if(r&&r.ok){st.style.color="var(--good)";st.textContent=nasTr("✓ сохранено");refreshPane(true);}
+   else{st.style.color="var(--danger)";st.textContent=nasTr((r&&r.log)||"не сохранилось");}};
  }
  function paneSched(pane){
   pane.classList.remove("fsw-flex");
@@ -7326,8 +7326,8 @@ function winFsHistory(){openWin("__fsw","История файлов",(body,win)
     enabled:g("#fwEn").checked,time:g("#fwTime").value.trim(),
     verify_days:g("#fwVd").value,verify_minutes:g("#fwVm").value,guard_pct:g("#fwGp").value})});
    const st=g("#fwStat2");
-   if(r&&r.ok){st.style.color="var(--good)";st.textContent="✓ сохранено";ST=null;refreshPane(true);}
-   else{st.style.color="var(--danger)";st.textContent=(r&&r.log)||"не сохранилось";}};
+   if(r&&r.ok){st.style.color="var(--good)";st.textContent=nasTr("✓ сохранено");ST=null;refreshPane(true);}
+   else{st.style.color="var(--danger)";st.textContent=nasTr((r&&r.log)||"не сохранилось");}};
   // destructive: first click arms the button, second within 4 s fires
   for(const [id,mode] of [["#fwClrEv","events"],["#fwClrAll","all"]]){
    const b=g(id),orig=b.innerHTML;
@@ -8928,7 +8928,7 @@ function notifyTab(tc){tc.innerHTML=`<div style="color:var(--mut);font-size:12px
   const saveMon=()=>api("/api/monitor",{method:"POST",body:JSON.stringify({monitor:collect()})});
   en.onchange=saveMon;cd.onchange=saveMon;
   items.forEach(m=>{tc.querySelector("#evon_"+m.k).onchange=saveMon;tc.querySelector("#evd_"+m.k).onchange=saveMon;tc.querySelector("#evp_"+m.k).onchange=saveMon;if(m.thr!==undefined)tc.querySelector("#ev_"+m.k).onchange=saveMon;});
-  tc.querySelector("#nfSave").onclick=async()=>{const rr=await api("/api/monitor",{method:"POST",body:JSON.stringify({notify:{user:tc.querySelector("#nfU").value.trim(),token:tc.querySelector("#nfT").value.trim()}})});const st=tc.querySelector("#nfStat");if(rr&&rr.notify){st.textContent=rr.notify.configured?"✓ ключи заданы":"не настроено";st.style.color=rr.notify.configured?"var(--good)":"var(--mut)";}toast(LIVE?"Ключи сохранены":"Демо");flashSaved(tc.querySelector("#nfSave"));};
+  tc.querySelector("#nfSave").onclick=async()=>{const rr=await api("/api/monitor",{method:"POST",body:JSON.stringify({notify:{user:tc.querySelector("#nfU").value.trim(),token:tc.querySelector("#nfT").value.trim()}})});const st=tc.querySelector("#nfStat");if(rr&&rr.notify){st.textContent=nasTr(rr.notify.configured?"✓ ключи заданы":"не настроено");st.style.color=rr.notify.configured?"var(--good)":"var(--mut)";}toast(LIVE?"Ключи сохранены":"Демо");flashSaved(tc.querySelector("#nfSave"));};
   tc.querySelector("#nfTest").onclick=async()=>{const rr=await api("/api/monitor",{method:"POST",body:JSON.stringify({test:true})});toast(LIVE?(rr&&rr.ok?"Тест отправлен в Pushover ✓":"Не отправлено: "+((rr&&rr.log)||"")):"Демо");};
  });}
 
@@ -9015,13 +9015,13 @@ function systemTab(tc){withSysc(tc,()=>{const s=SYSC.system||{};
  // псевдоним пула (симлинк): показать текущий и применить новый
  {const cur=tc.querySelector("#stAliasCur"),inp=tc.querySelector("#stAlias");
   api("/api/maintenance").then(m=>{const a=(m&&m.maintenance&&m.maintenance.pool_alias)||"";
-    if(cur)cur.textContent=a?`сейчас: ${a} → /mnt/storage`:"сейчас: отключён";if(inp)inp.value=a;});
+    if(cur)cur.textContent=nasTr(a?`сейчас: ${a} → /mnt/storage`:"сейчас: отключён");if(inp)inp.value=a;});
   tc.querySelector("#stAliasA").onclick=async()=>{
     const r=await api("/api/maintenance",{method:"POST",body:JSON.stringify({maintenance:{pool_alias:inp.value.trim()}})});
     const md=(r&&r.maintenance)||{};
     if(md.error){toast("Ошибка: "+md.error);return;}
     const a=md.pool_alias||"";
-    if(cur)cur.textContent=a?`сейчас: ${a} → /mnt/storage`:"сейчас: отключён";
+    if(cur)cur.textContent=nasTr(a?`сейчас: ${a} → /mnt/storage`:"сейчас: отключён");
     toast(a?`Псевдоним ${a} создан`:"Псевдоним отключён");};}
  tc.querySelector("#stJA").onclick=async()=>{await sconf("journald_max",J.value.trim());refreshSysc(rerSet);flashSaved(tc.querySelector("#stJA"),"Применено ✓");};
  tc.querySelector("#mChk").onclick=()=>updatesDlg();
@@ -9450,12 +9450,12 @@ async function pollNet(){const box=document.getElementById("wg-netlink");if(!box
   // и тогда потолок копирования — он, а не диски. Признаки — отклик до роутера и proxy-ARP
   +lanHTML(n.lan||{});
  const btn=document.getElementById("wg-nstest"),res=document.getElementById("wg-nsres");
- if(btn&&!btn._wired){btn._wired=1;btn.onclick=async()=>{btn.disabled=true;const o=btn.textContent;btn.textContent="Тест… (~15 c)";if(res)res.textContent="меряю…";
+ if(btn&&!btn._wired){btn._wired=1;btn.onclick=async()=>{btn.disabled=true;const o=btn.textContent;btn.textContent=nasTr("Тест… (~15 c)");if(res)res.textContent=nasTr("меряю…");
    const r=await api("/api/net/speedtest");btn.disabled=false;btn.textContent=o;
    if(r&&r.ok){NS_AT=Date.now();
      NS_HTML=`<b style="color:var(--good)" title="${r.down_MBs!=null?r.down_MBs+" МБ/с":""}">↓ ${r.down_mbps!=null?r.down_mbps:"—"} Мбит/с</b> · <b style="color:var(--accent)" title="${r.up_MBs!=null?r.up_MBs+" МБ/с":""}">↑ ${r.up_mbps!=null?r.up_mbps:"—"} Мбит/с</b>`;
      nsPaint();}
-   else{NS_HTML="";if(res)res.textContent="Ошибка: "+((r&&r.log)||"?");}};}
+   else{NS_HTML="";if(res)res.textContent=nasTr("Ошибка: ")+((r&&r.log)||"?");}};}
  nsPaint();
 }
 /* WUD: карта «контейнер → обновление образа». Наполняется из /api/wud и рисует
