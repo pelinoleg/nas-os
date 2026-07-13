@@ -12221,9 +12221,11 @@ class H(BaseHTTPRequestHandler):
             if p == "/api/stats":
                 self._json(stats())
             elif p == "/api/screen/config":
+                # _run() возвращает СЛОВАРЬ {ok,code,log}: .strip() у него ронял ручку
+                # в 500, и вкладка настроек показывала только заголовок
+                u = _run(["systemctl", "is-enabled", "nas-screen"], timeout=5)
                 self._json({"config": load_screen(), "present": bool(_bl_dir()),
-                            "unit": _run(["systemctl", "is-enabled", "nas-screen"],
-                                         timeout=5).strip()})
+                            "unit": (u.get("log") or "").strip()})
             elif p == "/api/glance/config":
                 self._json({"config": load_glance(),
                             "catalog": [{"id": t[0], "name": t[1]} for t in glance_catalog()],

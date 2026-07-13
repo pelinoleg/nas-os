@@ -66,8 +66,14 @@
   .dn{color:var(--good)} .upl{color:var(--accent)}
 
   #pages{flex:1;position:relative;min-height:0;margin:0 8px}
-  .page{position:absolute;inset:0;display:none;flex-direction:column;gap:7px}
-  .page.on{display:flex}
+  /* страницы едут, а не моргают */
+  .page{position:absolute;inset:0;display:flex;flex-direction:column;gap:7px;
+        transition:transform .28s ease, opacity .28s ease;pointer-events:none;opacity:0}
+  #p0{transform:translateX(-24px)}
+  #p1{transform:translateX(24px)}
+  /* ID-селекторы выше по специфичности, чем .page.on — активную страницу возвращаем
+     на место таким же ID-правилом, иначе она остаётся сдвинутой и режется по краю */
+  #p0.on,#p1.on{transform:translateX(0);opacity:1;pointer-events:auto}
 
   /* gauges */
   #gs{flex:none;display:grid;grid-template-columns:repeat(4,1fr);gap:7px;height:100px}
@@ -119,10 +125,17 @@
   #dots{display:flex;gap:7px;flex:none;padding-left:6px}
   .d{width:8px;height:8px;border-radius:50%;background:rgba(255,255,255,.25)}
   .d.on{background:var(--accent)}
-  #r2a{flex:1.05;display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;min-height:0}
-  #r2b{flex:1;display:grid;grid-template-columns:1.3fr 1fr;gap:7px;min-height:0}
+  #r2a{flex:none;height:120px;display:grid;grid-template-columns:1.75fr 1fr;gap:7px}
+  #r2b{flex:1;display:grid;grid-template-columns:2.2fr 1fr;gap:7px;min-height:0}
   .big{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.15}
   .big small{font-size:11px;color:var(--dim);font-weight:600;margin-left:3px}
+  .chart{position:relative}
+  .chart .grid{stroke:rgba(255,255,255,.08);stroke-width:1;vector-effect:non-scaling-stroke}
+  .chart .ymax,.chart .ymin,.chart .pk{position:absolute;font-size:9.5px;color:var(--mut);
+    font-variant-numeric:tabular-nums;pointer-events:none}
+  .chart .ymax{top:0;left:2px} .chart .ymin{bottom:0;left:2px} .chart .pk{top:0;right:2px}
+  .tmb{display:grid;grid-template-columns:1fr 1.15fr;gap:12px;align-items:start}
+  .tmcol{min-width:0}
   .gline{display:flex;flex-direction:column;gap:1px;margin-bottom:4px}
   .gline .gh{display:flex;font-size:11px;color:var(--dim)}
   .gline .gh b{margin-left:auto;color:var(--ink);font-size:12px}
@@ -134,13 +147,16 @@
   .avb .pct{font-size:11.5px;color:var(--dim);font-variant-numeric:tabular-nums;flex:none}
 
   /* detail sheet — открывается по тапу на ЛЮБУЮ плашку */
-  #sheet{position:fixed;inset:0;background:rgba(4,8,14,.55);display:none;z-index:8;
-         align-items:flex-end;backdrop-filter:blur(3px)}
+  #sheet{position:fixed;inset:0;background:rgba(6,10,16,.86);display:none;z-index:8;
+         backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
   #sheet.on{display:flex}
-  #sheetIn{width:100%;max-height:410px;background:rgba(14,19,28,.94);border-radius:18px 18px 0 0;
-           padding:14px 18px 16px;display:flex;flex-direction:column;min-height:0}
-  #sheetIn h3{font-size:17px;font-weight:700;flex:none;display:flex;align-items:center;gap:9px;margin-bottom:8px}
-  #sheetIn h3 .x{margin-left:auto;font-size:13px;color:var(--mut);font-weight:500}
+  #sheetIn{width:100%;height:100%;padding:12px 16px 14px;display:flex;flex-direction:column;min-height:0}
+  #sheetIn h3{font-size:19px;font-weight:700;flex:none;display:flex;align-items:center;gap:9px;
+              margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid var(--line)}
+  #sheetIn h3 .x{margin-left:auto;width:40px;height:36px;border-radius:10px;display:flex;
+                 align-items:center;justify-content:center;background:rgba(255,255,255,.12);
+                 font-size:19px;font-weight:600;color:var(--ink)}
+  #sheetIn h3 .x:active{background:rgba(255,255,255,.26)}
   #sheetB{overflow-y:auto;min-height:0}
   .kv{display:flex;justify-content:space-between;gap:14px;font-size:14px;padding:7px 0;
       border-bottom:1px solid rgba(255,255,255,.07)}
@@ -195,11 +211,10 @@
     <div id="r2a">
       <div class="card g" id="c_tm" data-sheet="tm"></div>
       <div class="card g" id="c_tr" data-sheet="traffic"></div>
-      <div class="card g" id="c_up" data-sheet="updates"></div>
     </div>
     <div id="r2b">
       <div class="card g" id="c_gr" data-sheet="graphs"></div>
-      <div class="card g" id="c_nh" data-sheet="nbhist"></div>
+      <div class="card g" id="c_up" data-sheet="updates"></div>
     </div>
   </div>
 </div>
@@ -207,7 +222,7 @@
 <div id="foot" class="g"><span id="av24" data-sheet="avail"></span><span id="av30" data-sheet="avail"></span>
   <span id="dots"><i class="d on" data-page="0"></i><i class="d" data-page="1"></i></span></div>
 
-<div id="sheet"><div id="sheetIn"><h3><span id="sheetT"></span><span class="x">тап вне — закрыть</span></h3>
+<div id="sheet"><div id="sheetIn"><h3><span id="sheetT"></span><span class="x" id="sheetX">✕</span></h3>
   <div id="sheetB"></div><div id="sheetA"></div></div></div>
 <div id="alarm"><div class="big"></div><div class="li"></div><div class="hint">Нажмите, чтобы скрыть</div></div>
 <div id="toast"></div>
@@ -391,31 +406,56 @@ function renderBar(d){
   $("#dot").className=d.overall==="bad"?"bad":d.overall==="warn"?"warn":"";
 }
 /* ---------- вторая страница ---------- */
-function spark(pts,color,h){
-  if(!pts||pts.length<2) return "";
-  const mx=Math.max.apply(null,pts), mn=Math.min.apply(null,pts), rg=(mx-mn)||1, w=100;
-  const st=w/(pts.length-1);
-  const p=pts.map((v,i)=>(i*st).toFixed(1)+","+(h-((v-mn)/rg)*(h-3)-1).toFixed(1)).join(" ");
-  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" style="width:100%;height:${h}px">
-    <polyline points="${p}" fill="none" stroke="${color}" stroke-width="1.6" vector-effect="non-scaling-stroke"/></svg>`;
+/* График с числами: без них линия «красивая, но непонятная» — не видно, какой был пик.
+   Рисуем сетку, подписываем max/min по оси и показываем текущее/среднее/пик цифрами. */
+function chart(pts,color,h,fmt,unit){
+  if(!pts||pts.length<2) return `<div class="empty">нет данных</div>`;
+  const mx=Math.max.apply(null,pts), mn=Math.min.apply(null,pts);
+  const top=mx+(mx-mn)*0.15||mx||1, bot=Math.max(0,mn-(mx-mn)*0.1);
+  const rg=(top-bot)||1, w=100, st=w/(pts.length-1);
+  const y=v=>(h-((v-bot)/rg)*h).toFixed(1);
+  const line=pts.map((v,i)=>(i*st).toFixed(1)+","+y(v)).join(" ");
+  const area=`0,${h} `+line+` ${w},${h}`;
+  const avg=pts.reduce((a,b)=>a+b,0)/pts.length;
+  const pk=pts.indexOf(mx);
+  return `<div class="chart">
+    <svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" style="width:100%;height:${h}px">
+      <line x1="0" y1="${(h*.25).toFixed(1)}" x2="100" y2="${(h*.25).toFixed(1)}" class="grid"/>
+      <line x1="0" y1="${(h*.5).toFixed(1)}"  x2="100" y2="${(h*.5).toFixed(1)}"  class="grid"/>
+      <line x1="0" y1="${(h*.75).toFixed(1)}" x2="100" y2="${(h*.75).toFixed(1)}" class="grid"/>
+      <polygon points="${area}" fill="${color}" opacity=".12"/>
+      <polyline points="${line}" fill="none" stroke="${color}" stroke-width="1.7" vector-effect="non-scaling-stroke"/>
+      <circle cx="${(pk*st).toFixed(1)}" cy="${y(mx)}" r="1.6" fill="${color}" vector-effect="non-scaling-stroke"/>
+    </svg>
+    <span class="ymax">${fmt(top)}${unit}</span><span class="ymin">${fmt(bot)}${unit}</span>
+    <span class="pk">пик ${fmt(mx)}${unit} · среднее ${fmt(avg)}${unit}</span>
+  </div>`;
 }
 const netnow=d=>{ const [v,u]=rate(((d.net||{}).rx||0)+((d.net||{}).tx||0)); return v+" "+u; };
+const r0=v=>Math.round(v);
+const gbs=v=>{ const [a,b]=rate(v); return a+" "+b; };
+
 function renderP1(d){
   const P=d.p2; if(!P) return;
 
-  // Time Machine
+  // Time Machine — шире и подробнее
   const tm=P.tm||{};
   $("#c_tm").innerHTML=`<h2>Time Machine<span class="r" style="color:${tm.enabled?"var(--good)":"var(--mut)"}">${tm.enabled?"включён":"выключен"}</span></h2>
-    <div class="body">${tm.installed?`
-      <div class="big">${tm.size!=null?gb(tm.size):"—"}<small>занято</small></div>
-      <div class="run">${esc(tm.path||"")}</div>
-      <div class="r2"><span class="nm">Свободно</span><span class="ago">${tm.free!=null?gb(tm.free):"—"}</span></div>
-      <div class="r2"><span class="nm">Последняя копия</span><span class="ago">${tm.mtime?esc(ago(tm.mtime)):"никогда"}</span></div>`
+    <div class="body tmb">${tm.installed?`
+      <div class="tmcol">
+        <div class="big">${tm.size!=null?gb(tm.size):"—"}<small>занято</small></div>
+        <div class="run">${esc(tm.path||"")}</div>
+      </div>
+      <div class="tmcol">
+        <div class="r2"><span class="nm">Свободно</span><span class="ago">${tm.free!=null?gb(tm.free):"—"}</span></div>
+        <div class="r2"><span class="nm">Квота</span><span class="ago">${tm.quota_gb?tm.quota_gb+" ГБ":"без квоты"}</span></div>
+        <div class="r2"><span class="nm">Последняя копия</span><span class="ago">${tm.mtime?esc(ago(tm.mtime)):"никогда"}</span></div>
+        <div class="r2"><span class="nm">Копий</span><span class="ago">${(tm.backups||[]).length}</span></div>
+      </div>`
       :`<div class="empty">не настроен</div>`}</div>`;
 
   // Трафик
-  const tr=P.traffic||{};
-  const t=tr.today||{}, mo=tr.month||{};
+  const tr=P.traffic||{}, t=tr.today||{}, mo=tr.month||{};
   $("#c_tr").innerHTML=`<h2>Трафик</h2>
     <div class="body">${tr.ok?`
       <div class="big"><span class="dn">↓ ${gb(t.rx||0)}</span></div>
@@ -423,32 +463,28 @@ function renderP1(d){
       <div class="r2"><span class="nm">За месяц</span><span class="ago">${gb((mo.rx||0)+(mo.tx||0))}</span></div>`
       :`<div class="empty">vnstat не установлен</div>`}</div>`;
 
-  // Обновления и задачи
-  const up=P.updates||{}, cr=P.cron||[];
-  $("#c_up").innerHTML=`<h2>Обновления<span class="r" style="color:${(up.apt||up.images)?"var(--warn)":"var(--good)"}">${(up.apt||0)+(up.images||0)}</span></h2>
-    <div class="body">
-      <div class="r2"><span class="nm">Пакеты apt</span><span class="ago">${up.apt||0}${up.security?" · "+up.security+" крит.":""}</span></div>
-      ${up.images!=null?`<div class="r2"><span class="nm">Образы Docker</span><span class="ago">${up.images}</span></div>`:""}
-      ${cr.length?`<div class="r2"><span class="nm">Задач по расписанию</span><span class="ago">${cr.length}</span></div>`:""}
-    </div>`;
-
-  // Графики за сутки
+  // Графики за сутки — с числами
   const g=P.graphs||{};
-  $("#c_gr").innerHTML=`<h2>За сутки</h2>
+  $("#c_gr").innerHTML=`<h2>За сутки<span class="r">тап — подробнее</span></h2>
     <div class="body">
-      <div class="gline"><div class="gh">CPU<b>${Math.round(((d.tiles.cpu||{}).raw||{}).pct||0)}%</b></div>${spark(g.cpu,"var(--accent)",26)}</div>
-      <div class="gline"><div class="gh">Температура<b>${Math.round(((d.tiles.cputemp||{}).raw||{}).c||0)}°</b></div>${spark(g.temp,"var(--warn)",26)}</div>
-      <div class="gline"><div class="gh">Сеть<b>${netnow(d)}</b></div>${spark(g.net,"var(--good)",26)}</div>
+      <div class="gline"><div class="gh">CPU<b>${r0(((d.tiles.cpu||{}).raw||{}).pct||0)}%</b></div>
+        ${chart(g.cpu,"var(--accent)",34,r0,"%")}</div>
+      <div class="gline"><div class="gh">Температура<b>${r0(((d.tiles.cputemp||{}).raw||{}).c||0)}°</b></div>
+        ${chart(g.temp,"var(--warn)",34,r0,"°")}</div>
+      <div class="gline"><div class="gh">Сеть<b>${netnow(d)}</b></div>
+        ${chart(g.net,"var(--good)",34,gbs,"")}</div>
     </div>`;
 
-  // История бэкапов
-  const nh=P.nbhist||[];
-  $("#c_nh").innerHTML=`<h2>История бэкапов<span class="r">${nh.length||""}</span></h2>
-    <div class="body">${nh.length?nh.slice(0,4).map(h=>{
-      const c=h.result==="ok"?"ok":h.result==="warn"?"wn":"bd";
-      return `<div class="r2"><span class="st2 ${c}">${h.result==="ok"?"✓":"!"}</span>
-        <span class="nm">${esc(h.name)}</span><span class="ago">${esc(ago(h.ts))}</span></div>`;
-    }).join(""):`<div class="empty">прогонов ещё не было</div>`}</div>`;
+  // Обновления — узкой плашкой
+  const up=P.updates||{}, cr=P.cron||[];
+  const n=(up.apt||0)+(up.images||0);
+  $("#c_up").innerHTML=`<h2>Обновления<span class="r" style="color:${n?"var(--warn)":"var(--good)"}">${n}</span></h2>
+    <div class="body">
+      <div class="r2"><span class="nm">apt</span><span class="ago">${up.apt||0}${up.security?" · "+up.security+" крит.":""}</span></div>
+      ${up.images!=null?`<div class="r2"><span class="nm">Образы</span><span class="ago">${up.images}</span></div>`:""}
+      ${cr.length?`<div class="r2"><span class="nm">Задачи</span><span class="ago">${cr.length}</span></div>`:""}
+      ${!n?`<div class="run" style="margin-top:6px">всё свежее</div>`:""}
+    </div>`;
 }
 
 function renderAlarm(d){
@@ -561,28 +597,31 @@ const SHEETS={
       +cr.map(j=>KV(j.name,j.next?"через "+ago(j.next):"—")).join(""), ""];},
   graphs:d=>{const g=(d.p2||{}).graphs||{};
     return ["За сутки",
-      `<div class="gline"><div class="gh">CPU</div>${spark(g.cpu,"var(--accent)",50)}</div>
-       <div class="gline"><div class="gh">Температура</div>${spark(g.temp,"var(--warn)",50)}</div>
-       <div class="gline"><div class="gh">Сеть</div>${spark(g.net,"var(--good)",50)}</div>`, ""];},
-  nbhist:d=>{const nh=(d.p2||{}).nbhist||[];
-    return ["История бэкапов", nh.length?nh.map(h=>KV(
-      h.name+" · "+ago(h.ts),
-      [h.result==="ok"?"✓":"!", h.files!=null?h.files+" файлов":"", h.size!=null?gb(h.size):"",
-       h.dur?Math.round(h.dur/60)+" мин":""].filter(Boolean).join(" · "))).join("")
-      :`<div class="empty">прогонов ещё не было</div>`, ""];},
+      `<div class="gline"><div class="gh">CPU<b>${r0(((d.tiles.cpu||{}).raw||{}).pct||0)}%</b></div>
+         ${chart(g.cpu,"var(--accent)",92,r0,"%")}</div>
+       <div class="gline"><div class="gh">Температура<b>${r0(((d.tiles.cputemp||{}).raw||{}).c||0)}°</b></div>
+         ${chart(g.temp,"var(--warn)",92,r0,"°")}</div>
+       <div class="gline"><div class="gh">Сеть<b>${netnow(d)}</b></div>
+         ${chart(g.net,"var(--good)",92,gbs,"")}</div>
+       <div class="run">точка — 30 минут, всего сутки</div>`, ""];},
   avail:d=>["Доступность",
     KV("За 24 часа",(d.avail&&d.avail.pct!=null)?d.avail.pct+" %":"—")
     +KV("За 30 дней",(d.avail30&&d.avail30.pct!=null)?d.avail30.pct+" %":"—")
     +KV("Зелёный","панель отвечала")+KV("Жёлтый","бокс жив, сети не было")+KV("Красный","бокса не было"),
     `<div class="go warnbtn" data-act="poweroff">Выключить NAS</div>`],
 };
-function sheet(name){
+let CUR_SHEET=null;
+function sheet(name,keepScroll){
   const f=SHEETS[name]; if(!f) return;
+  CUR_SHEET=name;
+  const box=$("#sheetB"), top=keepScroll?box.scrollTop:0;
   const [title,body,actions]=f(D);
-  $("#sheetT").innerHTML=esc(title); $("#sheetB").innerHTML=body||""; $("#sheetA").innerHTML=actions||"";
+  $("#sheetT").innerHTML=esc(title); box.innerHTML=body||""; $("#sheetA").innerHTML=actions||"";
+  box.scrollTop=top;
   $("#sheet").classList.add("on");
 }
-$("#sheet").onclick=e=>{ if(e.target.id==="sheet") $("#sheet").classList.remove("on"); };
+function closeSheet(){ CUR_SHEET=null; $("#sheet").classList.remove("on"); }
+$("#sheet").onclick=e=>{ if(e.target.id==="sheet"||e.target.id==="sheetX") closeSheet(); };
 
 document.addEventListener("click",e=>{
   const pg=e.target.closest("[data-page]");
@@ -595,13 +634,13 @@ document.addEventListener("click",e=>{
     return; }
   if(a){
     const k=a.dataset.act;
-    if(k==="sleep"){ $("#sheet").classList.remove("on");
+    if(k==="sleep"){ closeSheet();
       toast("Гашу экран…");
       act({a:"sleep"}).then(r=>{ if(!r.ok) toast(r.log||"не вышло"); poll(); }); return; }
-    if(k==="poweroff"){ $("#sheet").classList.remove("on");
+    if(k==="poweroff"){ closeSheet();
       act({a:"poweroff"}).then(r=>toast(r.ok?"Выключаюсь…":(r.log||"не вышло"))); return; }
   }
-  if(r){ $("#sheet").classList.remove("on");
+  if(r){ closeSheet();
     act({a:"backup",p:r.dataset.run}).then(x=>{toast(x.ok?"Бэкап запущен":(x.log||"не вышло")); poll();}); return; }
   if(s) sheet(s.dataset.sheet);
 });
@@ -671,7 +710,7 @@ async function _poll(){
     trStatic();
     applyLook(D.look); renderBar(D); renderFoot(D); renderAlarm(D);
     if(PAGE===0){ renderGauges(D); renderCards(D); renderRow2(D); } else { renderP1(D); }
-    if($("#sheet").classList.contains("on")) { /* лист открыт — не дёргаем его перерисовкой */ }
+    if(CUR_SHEET) sheet(CUR_SHEET,true);   // живые данные внутри открытого листа
     $("#dot").style.opacity=1;
   }catch(e){ $("#dot").style.opacity=.25;
     $("#up").textContent="ERR: "+String((e&&e.message)||e).slice(0,80); }
