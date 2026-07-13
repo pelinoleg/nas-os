@@ -10301,6 +10301,11 @@ def _wallpaper_path():
     g = sorted(glob.glob(os.path.join(NAS_CONFIG, "wallpaper.*")))
     return g[0] if g else ""
 
+def _wallpaper_screen_refresh():
+    """Обои сменились — пересобрать копию под экран, не дожидаясь первого запроса."""
+    threading.Thread(target=lambda: _safe(_wallpaper_screen), daemon=True).start()
+
+
 def _wallpaper_save(data):
     ext = _img_ext(data)
     if not ext:
@@ -10318,6 +10323,7 @@ def _wallpaper_save(data):
             f.write(data)
     except OSError as e:
         return {"ok": False, "log": str(e)}
+    _wallpaper_screen_refresh()      # сразу готовим копию под маленький экран
     return {"ok": True, "ext": ext}
 
 def wallpaper_fetch(url):
@@ -12406,7 +12412,10 @@ class H(BaseHTTPRequestHandler):
             elif p == "/api/scrutiny/device":
                 self._json(scrutiny_device((q.get("serial") or [""])[0]))
             elif p == "/api/wallpaper/img":
-                wp = _wallpaper_path()
+                # screen=1 -> копия под маленький экран (та же логика, что и для киоска;
+                # раньше параметр работал только с loopback, и из локалки отдавался оригинал)
+                wp = (_safe(_wallpaper_screen) if (q.get("screen") or [""])[0]
+                      else None) or _wallpaper_path()
                 if wp:
                     self._sendraw(wp)
                 else:
