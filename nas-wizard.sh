@@ -2923,7 +2923,16 @@ avail_track(){
   boot="$(( now - $(cut -d. -f1 /proc/uptime) ))"
   if [ -n "$beat" ] && [ $(( beat + 30 )) -lt "$now" ] \
      && { [ $(( now - beat )) -gt 90 ] || [ "$beat" -lt "$boot" ]; }; then
-    printf '%s off\n' "$(( beat + 30 ))" >> "$AVLOG"
+    # Строка пишется ЗАДНИМ числом, а журнал читается как «интервал до следующей
+    # строки» — значит она не имеет права сесть РАНЬШЕ последней записи. Со стухшим
+    # beat (восстановленный /var/lib, клонированная карта) так и вышло: «off» с
+    # временем из прошлого проглотил три часа, про которые журнал говорил «up», и
+    # виджет показал два перекрывающихся простоя. Прижимаем к концу журнала.
+    off_at=$(( beat + 30 ))
+    last_ts="$(tail -n1 "$AVLOG" 2>/dev/null | awk '{print $1}')"
+    case "$last_ts" in ''|*[!0-9]*) last_ts=0 ;; esac
+    [ "$off_at" -gt "$last_ts" ] || off_at=$(( last_ts + 1 ))
+    [ "$off_at" -lt "$now" ] && printf '%s off\n' "$off_at" >> "$AVLOG"
   fi
   last="$(tail -n1 "$AVLOG" 2>/dev/null | awk '{print $2}')"
   [ "$last" = "$state" ] || printf '%s %s\n' "$now" "$state" >> "$AVLOG"

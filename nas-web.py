@@ -29,7 +29,8 @@ NAS_CONFIG  = os.path.join(HOME, "nas-config")
 CREDS_FILE  = os.path.join(NAS_CONFIG, "credentials.json")
 TRASH       = os.path.join(HOME, ".nas-trash")
 PORT        = int(os.environ.get("NAS_WEB_PORT", "8080"))
-STORAGE     = "/mnt/storage"
+STORAGE     = "/mnt/storage"      # mergerfs pool (may not exist at all)
+STORAGE_CONF = os.path.join(NAS_CONFIG, "storage.json")
 BODY_MAX    = 32 * 1024 * 1024   # потолок JSON-тела запроса (обои/base64 влезают; больше — через _upload_raw)
 COMPOSE_NAMES = ("docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml")
 CRON_URL    = os.environ.get("CRONMASTER_URL", "http://127.0.0.1:8123")  # опубликованный порт cronmaster
@@ -79,6 +80,110 @@ def _json_load_strict(path, default):
             _BAD_CONFIGS.append(name)
         sys.stderr.write("nas-web: %s повреждён, сохранён как %s.bad\n" % (name, name))
         return default
+
+# --------------------------------------------------------------------------- #
+#  Основное хранилище
+#
+#  Одно понятие вместо пяти разных дефолтов. Раньше каждая подсистема (импорт,
+#  бэкап, заметки, Time Machine, миниатюры) сама подставляла «/mnt/storage/…» —
+#  и на боксе БЕЗ пула этот путь оказывался обычной папкой на системной карте:
+#  импорт молча залил на неё 8 ГБ. Теперь источник правды один:
+#    пул смонтирован  → хранилище = пул (появились NVMe — ничего перенастраивать);
+#    иначе            → выбранный съёмный том (внешний SSD);
+#    ничего нет       → None, и подсистемы обязаны это честно показать, а не писать
+#                       «куда-нибудь».
+#  storage_conf() помнит ВЫБОР (даже когда диск вынут) — иначе после отключения SSD
+#  дефолты уехали бы обратно на карту.
+# --------------------------------------------------------------------------- #
+def storage_conf():
+    d = _json_load_strict(STORAGE_CONF, {})
+    return d if isinstance(d, dict) else {}
+
+def storage_root():
+    """Смонтированный корень хранилища или None."""
+    if os.path.ismount(STORAGE):
+        return STORAGE
+    r = str(storage_conf().get("root") or "").rstrip("/")
+    if r and os.path.ismount(r):
+        return r
+    return None
+
+def storage_base():
+    """Куда СЧИТАТЬ дефолты, даже если носитель сейчас не подключён: путь есть,
+    просто он не смонтирован — подсистемы отобьются проверкой монтирования и
+    скажут «диск не подключён», а не подсунут системную карту."""
+    if os.path.ismount(STORAGE):
+        return STORAGE
+    r = str(storage_conf().get("root") or "").rstrip("/")
+    if r:
+        return r
+    return STORAGE if os.path.isdir(STORAGE) else None
+
+def storage_state():
+    """Для панели: что выбрано, смонтировано ли, и куда смотрят дефолты."""
+    cfg = storage_conf()
+    root = storage_root()
+    pool = os.path.ismount(STORAGE)
+    base = storage_base()
+    st = {"root": root, "base": base, "pool": pool,
+          "chosen": str(cfg.get("root") or ""), "label": cfg.get("label") or "",
+          "mounted": bool(root), "candidates": storage_candidates()}
+    if root:
+        try:
+            u = shutil.disk_usage(root)
+            st["size"], st["free"] = u.total, u.free
+        except OSError:
+            pass
+    return st
+
+def storage_candidates():
+    """Тома, годные в хранилище: пул и всё смонтированное под /mnt|/media|/srv,
+    кроме системного корня. Системный диск сюда не пускаем намеренно: «хранилище»
+    на той же карте, с которой грузится ОС, — это не хранилище."""
+    out = []
+    seen = set()
+    for line in _read("/proc/mounts").splitlines():
+        p = line.split()
+        if len(p) < 3:
+            continue
+        dev, mp, fs = p[0], p[1].replace("\\040", " "), p[2]
+        if mp in seen or fs in ("proc", "sysfs", "devtmpfs", "tmpfs", "devpts", "cgroup2"):
+            continue
+        if not (mp == STORAGE or mp.startswith("/mnt/") or mp.startswith("/media/")
+                or mp.startswith("/srv/")):
+            continue
+        seen.add(mp)
+        item = {"path": mp, "fs": fs, "dev": dev, "pool": mp == STORAGE,
+                "removable": mp.startswith("/media/")}
+        try:
+            u = shutil.disk_usage(mp)
+            item["size"], item["free"] = u.total, u.free
+        except OSError:
+            pass
+        out.append(item)
+    out.sort(key=lambda x: (not x["pool"], x["path"]))
+    return out
+
+def storage_save(body):
+    root = str((body or {}).get("root") or "").rstrip("/")
+    if root:
+        if not root.startswith(("/mnt/", "/media/", "/srv/")) or ".." in root:
+            return {"ok": False, "log": "недопустимый путь хранилища"}
+        if not os.path.ismount(root):
+            return {"ok": False, "log": "том %s не смонтирован" % root}
+    cfg = storage_conf()
+    cfg["root"] = root
+    cfg["label"] = os.path.basename(root) if root else ""
+    try:
+        _json_save(STORAGE_CONF, cfg)
+    except OSError as e:
+        return {"ok": False, "log": str(e)}
+    return {"ok": True, "log": "сохранено", "state": storage_state()}
+
+def storage_sub(name):
+    """Путь подпапки хранилища для дефолтов. None — хранилища нет вовсе."""
+    b = storage_base()
+    return os.path.join(b, name) if b else None
 
 def cpu_percent(sample=0.20):
     def snap():
@@ -1810,15 +1915,41 @@ def save_glance(d):
     return cur
 
 def _avail_segments():
-    segs = []
+    """Журнал в RLE: «состояние сменилось на X в момент T». Строки читаются как
+    интервалы «до следующей строки», поэтому порядок ВАЖЕН.
+
+    А порядок не гарантирован: строку «был выключен» сторож дописывает ЗАДНИМ
+    числом (beat+30) уже после загрузки, и при стухшем beat она садится РАНЬШЕ
+    последней записи. Наивное чтение давало тогда отрицательный интервал (терялся)
+    и один «off» на три часа, накрывавший период, про который журнал говорит «up»:
+    в подсказке виджета появлялись два перекрывающихся простоя, а час, о котором
+    известны 2 минуты, красился в полный красный.
+
+    Лечим на чтении: время монотонно (запись из прошлого прижимается к предыдущей),
+    подряд идущие одинаковые состояния схлопываются."""
+    raw = []
     try:
         with open(AVAIL_LOG) as f:
             for ln in f:
                 p = ln.split()
                 if len(p) == 2 and p[0].isdigit() and p[1] in ("up", "local", "off"):
-                    segs.append((int(p[0]), p[1]))
+                    raw.append((int(p[0]), p[1]))
     except OSError:
-        pass
+        return []
+    fixed = []
+    prev_t = 0
+    for t, s in raw:
+        t = max(t, prev_t)          # запись «из прошлого» не двигает время назад
+        prev_t = t
+        fixed.append((t, s))
+    segs = []
+    for i, (t, s) in enumerate(fixed):
+        nxt = fixed[i + 1][0] if i + 1 < len(fixed) else None
+        if nxt is not None and nxt <= t:
+            continue                # нулевая длина — артефакт выравнивания, не период
+        if segs and segs[-1][1] == s:
+            continue                # то же состояние — новый сегмент не начинается
+        segs.append((t, s))
     return segs
 
 def avail_bars(hours=24, slots=96):
@@ -1862,8 +1993,13 @@ def avail_bars(hours=24, slots=96):
             if s == "up":
                 up_s[k] += ov
     frac = [round(up_s[k] / kn_s[k], 4) if kn_s[k] > 0 else None for k in range(slots)]
+    # cov — какая ДОЛЯ слота вообще известна. Час, про который журнал знает две
+    # минуты, нельзя красить как полностью красный: 4 % аптайма от двух известных
+    # минут — это не «час простоя», это «мы почти ничего не знаем про этот час».
+    # Клиент приглушает цвет к «нет данных» пропорционально cov.
+    cov = [round(min(1.0, kn_s[k] / slot_w), 4) if slot_w else 0 for k in range(slots)]
     pct = round(100.0 * up_t / known_t, 1) if known_t else None
-    return {"bars": bars, "frac": frac, "pct": pct, "hours": hours,
+    return {"bars": bars, "frac": frac, "cov": cov, "pct": pct, "hours": hours,
             "start": start, "now": now,
             "events": events[-40:]}   # cap: tooltips only need recent detail
 
@@ -2229,7 +2365,9 @@ def load_notes_conf():
 def notes_root(create=True):
     root = (load_notes_conf().get("root") or "").strip()
     if not root:
-        root = os.path.join(STORAGE, "notes") if os.path.ismount(STORAGE) \
+        # заметки — не бэкап: терять их из-за вынутого диска нельзя, поэтому при
+        # НЕсмонтированном хранилище честно уходим в домашнюю папку, а не в его точку
+        root = os.path.join(storage_root(), "notes") if storage_root() \
             else os.path.join(HOME, "nas-notes")
     if create and not os.path.isdir(root):
         os.makedirs(root, exist_ok=True)
@@ -3974,7 +4112,7 @@ def tm_status():
     """Состояние приёмника Time Machine: установка, активность, папка, лимит,
     место и список бэкапов Mac (sparsebundle)."""
     conf = _tm_read_conf()
-    path = conf.get("path") or (STORAGE + "/TimeMachine")
+    path = conf.get("path") or storage_sub("TimeMachine") or (STORAGE + "/TimeMachine")
     user = conf.get("user") or "timemachine"      # dedicated TM-only account (not the system user)
     try:
         quota = int(conf.get("quota") or 0)
@@ -5862,7 +6000,9 @@ def settings_backup_path():
     custom = (load_maintenance().get("settings_backup_dir") or "").strip().rstrip("/")
     if custom and custom.startswith("/") and ".." not in custom:
         return custom
-    return os.path.join(STORAGE, "nas-settings-backup") if os.path.ismount(STORAGE) \
+    # бэкап настроек обязан существовать ВСЕГДА (им поднимают систему после
+    # переустановки), поэтому без смонтированного хранилища — на системный диск
+    return os.path.join(storage_root(), "nas-settings-backup") if storage_root() \
         else "/var/backups/nas-os"
 
 def settings_backup_dir():
@@ -6799,7 +6939,9 @@ def _store_subst(val):
         val = val.replace("{tz}", _read("/etc/timezone") or "UTC")
     if "{rand}" in val:
         val = val.replace("{rand}", secrets.token_urlsafe(12))
-    return val.replace("{storage}", STORAGE).replace("{host}", lan_ip())
+    # {storage} в compose стеков — тоже основное хранилище (на боксе без пула это
+    # внешний том, а не несуществующая /mnt/storage)
+    return val.replace("{storage}", storage_base() or STORAGE).replace("{host}", lan_ip())
 
 def _replica_dir(sid):
     return os.path.join(NAS_CONFIG, "replica", sid)
@@ -8734,8 +8876,10 @@ def fsw_load():
                 d[k] = u[k]
     except (OSError, ValueError):
         pass
-    if not d["roots"] and os.path.isdir("/mnt/storage"):
-        d["roots"] = ["/mnt/storage"]
+    # ismount, а НЕ isdir: пустая папка /mnt/storage (пула нет) — это системная
+    # карта, и индексатор миниатюр честно ходил бы по ней
+    if not d["roots"] and storage_root():
+        d["roots"] = [storage_root()]
     return d
 
 def fsw_save(patch):
@@ -11471,6 +11615,13 @@ def _screen_page2():
     return d
 
 
+def _screen_usb_cfg():
+    c = usb_import_load()
+    dest = c.get("dest") or ""
+    return {"enabled": bool(c.get("enabled")), "dest": dest,
+            "dest_off": bool(dest and _dest_disk_absent(dest))}
+
+
 def screen_payload(lang="", p2=False):
     # язык экрана задаётся в screen.json, а НЕ браузером киоска: i18n.js по умолчанию
     # ставит NAS_LANG=en, и без этого сервер слал бы английские подписи под русскую
@@ -11510,12 +11661,20 @@ def screen_payload(lang="", p2=False):
     for p in (_safe(nb_profiles_public, []) or []):
         h = _safe(lambda pid=p["id"]: nb_history(pid), []) or []   # newest first
         last = h[0] if h else {}
+        # приёмник может быть на вынутом диске — на стене это надо ВИДЕТЬ, а не
+        # узнавать из провалившегося прогона
+        pc = _safe(lambda pid=p["id"]: nb_load(pid), {}) or {}
+        pbase = pc.get("dest_base") or ""
         b = {"id": p["id"], "name": p["name"],
              "running": bool(p.get("running")), "queued": bool(p.get("queued")),
              "configured": bool(p.get("configured")),
              "last_ts": int(last.get("ts") or 0),
              "last": last.get("result") or "",
-             "last_bytes": _nb_run_bytes(last), "last_files": _nb_run_files(last)}
+             "last_bytes": _nb_run_bytes(last), "last_files": _nb_run_files(last),
+             "dest": pbase,
+             "dest_off": bool(pc.get("direction") == "push"
+                              and pc.get("transport") == "local"
+                              and pbase and _dest_disk_absent(pbase))}
         if b["running"]:
             b["live"] = _safe(lambda pid=p["id"]: _nb_live(pid), {}) or {}
         bks.append(b)
@@ -11560,6 +11719,10 @@ def screen_payload(lang="", p2=False):
             "usbhist": _safe(lambda: usb_import_history(8), []) or [],
             # единицы скорости сети — общая настройка панели (МБ/с vs Мбит/с)
             "netUnits": ds.get("netUnits") or "",
+            # приёмник импорта: включён ли автоимпорт и на месте ли носитель.
+            # Отказ импорта виден в «Событиях», но это ПРОШЛОЕ — на плашке нужно
+            # текущее состояние: «диск вынут, импортировать некуда».
+            "usbcfg": _safe(_screen_usb_cfg, {}) or {},
             "swap": (st.get("mem") or {}).get("swap_total"),
             "throttled": st.get("throttled"), "psu_ma": st.get("psu_ma"),
             "asleep": bool(_SCR["sleep"]),

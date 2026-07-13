@@ -2127,7 +2127,12 @@
   }
   .gl-avwrap{margin-top:12px}
   .gl-bars{display:flex;gap:1px;height:14px}
-  .gl-bars i{flex:1;border-radius:2px;min-width:1px}
+  /* подложка полоски = «нет данных»; цвет кладём слоем сверху с непрозрачностью,
+     равной ДОЛЕ известного времени слота: час, о котором журнал знает две минуты,
+     остаётся почти серым, а не красным во всю высоту */
+  .gl-bars i{flex:1;border-radius:2px;min-width:1px;position:relative;overflow:hidden;
+             background:var(--wdg-track,var(--track))}
+  .gl-bars i>b{display:block;width:100%;height:100%}
   .gl-avcap{display:flex;justify-content:space-between;font-size:11px;color:var(--dim);margin-top:3px}
   /* Time Machine tab */
   .tm-actions{display:flex;gap:9px;margin-top:12px;flex-wrap:wrap}
@@ -7393,8 +7398,9 @@ function avColor(f){
 function avBarsHTML(r,pct,hours){
  if(Array.isArray(r))r={bars:r,pct:pct,hours:hours};   // legacy (bars,pct,hours) call shape
  const bars=r&&r.bars;if(!bars||!bars.length)return "";
- const fr=(r&&r.frac)||[];
+ const fr=(r&&r.frac)||[], cv=(r&&r.cov)||[];
  const c=(v,i)=>fr.length?avColor(fr[i]):(v===2?"var(--good)":v===1?"var(--warn)":v===0?"var(--danger)":"var(--track)");
+ const op=i=>cv.length?Math.max(0,Math.min(1,cv[i])):1;   // доля известного времени слота
  const h=r.hours||24;
  const now=(r.now?r.now*1000:Date.now()),t0=(r.start?r.start*1000:now-h*3600e3);
  const slotW=(now-t0)/bars.length,wDate=h>=48;
@@ -7411,13 +7417,16 @@ function avBarsHTML(r,pct,hours){
   // слот теперь крупный (час/сутки) — «худшее состояние» без доли аптайма врёт:
   // 99.9 % и 10 % выглядели бы одинаково
   let s=`${hm(a)}–${hm(b)} · ${f!=null?(f*100).toFixed(f>=0.999&&f<1?2:1)+"% доступность":word(v)}`;
+  // честно говорим, что про слот известно не всё — иначе «4.2 %» выглядит как
+  // час простоя, хотя журнал знает про этот час всего пару минут
+  if(f!=null&&op(i)<0.98)s+=` · известно ${Math.round(op(i)*100)}% времени`;
   if(v===0||v===1)for(const e of ev){
    const f2=e.from*1000,t=e.to*1000;
    if(f2<b&&t>a)s+=`\n${word(e.state==="off"?0:1)}: ${hm(f2)}–${hm(t)} (${dur((t-f2)/1000)})`;
   }
   return s;};
  const span=h>=48?`−${Math.round(h/24)}d`:`−${h}h`;
- return `<div class="gl-avwrap"><div class="gl-bars">${bars.map((v,i)=>`<i style="background:${c(v,i)}" title="${tit(v,i)}"></i>`).join("")}</div><div class="gl-avcap"><span>${span}</span><span>${r.pct==null?"":r.pct+"% доступность"}</span><span>сейчас</span></div></div>`;}
+ return `<div class="gl-avwrap"><div class="gl-bars">${bars.map((v,i)=>`<i title="${tit(v,i)}"><b style="background:${c(v,i)};opacity:${op(i).toFixed(2)}"></b></i>`).join("")}</div><div class="gl-avcap"><span>${span}</span><span>${r.pct==null?"":r.pct+"% доступность"}</span><span>сейчас</span></div></div>`;}
 async function glanceTab(tc){
  tc.innerHTML=`<div class="set-load">загрузка…</div>`;
  const r=await api("/api/glance/config");

@@ -112,6 +112,11 @@
   .st2{width:14px;text-align:center;font-weight:700}
   .ok{color:var(--good)} .wn{color:var(--warn)} .bd{color:var(--danger)} .no{color:var(--mut)}
   .empty{color:var(--mut);font-size:12.5px;padding-top:4px}
+  /* предупреждение состояния (а не события): «приёмника нет — писать некуда» */
+  .wrn{font-size:12px;color:var(--warn);background:rgba(245,179,66,.13);
+       border-radius:7px;padding:4px 7px;margin-bottom:4px;
+       white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .card h2 .r.wn{color:var(--warn)}
   .bar{height:4px;border-radius:3px;background:var(--track);overflow:hidden;flex:none;margin-top:3px}
   .bar>i{display:block;height:100%;border-radius:3px;background:var(--good)}
   .bar>i.wn{background:var(--warn)} .bar>i.bd{background:var(--danger)}
@@ -156,8 +161,11 @@
   .avb{display:flex;align-items:center;gap:8px;flex:1;min-width:0}
   .avb .lbl{font-size:10.5px;letter-spacing:.6px;text-transform:uppercase;color:var(--mut);font-weight:650;flex:none}
   .avb .bars{display:flex;gap:1px;align-items:flex-end;height:15px;flex:1}
-  .avb i{flex:1;height:100%;border-radius:1px;background:var(--good)}
-  .avb i.local{background:var(--warn)} .avb i.off{background:var(--danger)} .avb i.nd{background:rgba(255,255,255,.13)}
+  /* подложка = «нет данных», цвет слоем сверху с непрозрачностью = доля известного
+     времени слота (час, про который знаем 2 минуты, остаётся почти серым) */
+  .avb i{flex:1;height:100%;border-radius:1px;position:relative;overflow:hidden;
+         background:rgba(255,255,255,.13)}
+  .avb i>b{display:block;width:100%;height:100%}
   .avb .pct{font-size:11.5px;color:var(--dim);font-variant-numeric:tabular-nums;flex:none}
 
   /* detail sheet — открывается по тапу на ЛЮБУЮ плашку */
@@ -457,8 +465,13 @@ function renderCards(d){
           <div class="run">${L.total?`задача ${(L.done||0)+1} из ${L.total}`:""}${L.eta?" · осталось "+esc(L.eta):""}</div>
         </div></div>`;
   } else {
-    $("#c_bk").innerHTML=`<h2>Бэкапы<span class="r">${bk.length||"—"}</span></h2>
-      <div class="body">${bk.length?bk.slice(0,4).map(b=>bkRow(b,"r2")).join("")
+    // приёмник вынут — прогон не состоится; на стене это должно быть видно СРАЗУ,
+    // а не выясняться из провалившейся задачи
+    const off=bk.filter(b=>b.dest_off);
+    const bwarn=off.length?`<div class="wrn">${off.length===bk.length?"Приёмник не подключён"
+      :"Приёмник не подключён: "+esc(off.map(b=>b.name).join(", "))}</div>`:"";
+    $("#c_bk").innerHTML=`<h2>Бэкапы<span class="r ${off.length?"wn":""}">${off.length?"нет приёмника":(bk.length||"—")}</span></h2>
+      <div class="body">${bwarn}${bk.length?bk.slice(0,bwarn?3:4).map(b=>bkRow(b,"r2")).join("")
         :`<div class="empty">профилей нет</div>`}</div>`;
   }
 }
@@ -472,6 +485,10 @@ function renderRow2(d){
 
   // импорт идёт — прогресс; не идёт — история (флешка + дата), она переживает ребут
   const jobs=d.usb||[], live=jobs.find(j=>j.status==="running"), hist=d.usbhist||[];
+  const uc=d.usbcfg||{};
+  // диск-приёмник вынут: импорт вставленной карты НЕ состоится — это надо видеть
+  // ДО того, как вставишь карту, а не читать потом в событиях
+  const warn=uc.dest_off?`<div class="wrn">${uc.enabled?"Приёмник не подключён — импорта не будет":"Приёмник не подключён"}</div>`:"";
   let body;
   if(live){
     body=`<div class="prow" style="border:0">
@@ -481,18 +498,20 @@ function renderRow2(d){
       <div class="run">${esc(live.speed||"")}${live.eta?" · осталось "+esc(live.eta):""}</div>
       <div class="run">${esc(live.dest||"")}</div></div>`;
   } else if(hist.length){
-    body=hist.slice(0,3).map(h=>usbRow(h)).join("");
+    body=hist.slice(0,warn?2:3).map(h=>usbRow(h)).join("");
   } else {
     body=`<div class="empty">импортов ещё не было</div>`;
   }
-  $("#c_usb").innerHTML=`<h2>USB-импорт<span class="r">${live?"идёт":""}</span></h2><div class="body">${body}</div>`;
+  $("#c_usb").innerHTML=`<h2>USB-импорт<span class="r ${uc.dest_off?"wn":""}">${live?"идёт":uc.dest_off?"нет приёмника":""}</span></h2>
+    <div class="body">${warn}${body}</div>`;
 }
 function renderFoot(d){
   const strip=(a,lbl)=>{
-    const bars=(a&&a.bars)||[], fr=(a&&a.frac)||[];
+    const bars=(a&&a.bars)||[], fr=(a&&a.frac)||[], cv=(a&&a.cov)||[];
     if(!bars.length) return "";
+    const op=i=>cv.length?clampf(cv[i],0,1):1;
     return `<span class="lbl">${lbl}</span><span class="bars">${bars.map((v,i)=>
-        `<i style="background:${avColor(fr[i])}"></i>`).join("")}</span>`
+        `<i><b style="background:${avColor(fr[i])};opacity:${op(i).toFixed(2)}"></b></i>`).join("")}</span>`
          + `<span class="pct">${a.pct!=null?a.pct+"%":""}</span>`;
   };
   $("#av24").innerHTML=strip(d.avail,"24 ч");
