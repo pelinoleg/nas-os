@@ -21,9 +21,12 @@
     font:15px/1.35 system-ui,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
   body{background:transparent}   /* иначе фон body закрасил бы обои (#wall лежит ниже) */
   /* обои — те же, что на рабочем столе панели (/api/wallpaper/img) */
-  #wall{position:fixed;inset:0;background:#0a0f18 center/cover no-repeat;z-index:-2}
-  #veil{position:fixed;inset:0;z-index:-1;
-        background:linear-gradient(180deg,rgba(6,10,18,.42),rgba(6,10,18,.66))}
+  #wall{position:fixed;inset:0;background:#0a0f1a center/cover no-repeat;z-index:-3}
+  .wfx{position:fixed;inset:0;pointer-events:none;transition:opacity .2s ease}
+  #wallDim{z-index:-2;background:#000;opacity:.44}
+  /* зерно — та же текстура и тот же mix-blend-mode, что у рабочего стола */
+  #wallNoise{z-index:-1;opacity:1;mix-blend-mode:overlay;background-size:200px 200px;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
   body{display:flex;flex-direction:column;gap:8px;padding:0 0 8px}
 
   .g{background:var(--glass);border:1px solid var(--line);border-radius:16px;   /* = --r-lg панели */
@@ -140,7 +143,7 @@
   #toast.on{display:block}
 </style>
 
-<div id="wall"></div><div id="veil"></div>
+<div id="wall"></div><div class="wfx" id="wallDim"></div><div class="wfx" id="wallNoise"></div>
 
 <div id="bar" class="g">
   <span id="dot"></span><span id="who">—</span><span id="addr"></span><span id="up"></span>
@@ -322,8 +325,23 @@ function renderAlarm(d){
 }
 $("#alarm").onclick=()=>{ $("#alarm")._hid=true; $("#alarm").classList.remove("on"); };
 
+let WPV=null;
+function applyLook(L){
+  if(!L) return;
+  const w=$("#wall"), b=+L.fxBlur||0;
+  if(L.wpVer!==WPV){                       // обои сменили в браузере — подхватываем
+    WPV=L.wpVer;
+    w.style.backgroundImage=L.wpVer?`url(/api/wallpaper/img?v=${L.wpVer})`:"";
+  }
+  // масштаб растёт с блюром — иначе размытые края обнажают фон (как в панели)
+  w.style.filter=b?`blur(${b}px)`:"";
+  w.style.transform=b?`scale(${(1+b*0.009).toFixed(3)})`:"";
+  $("#wallDim").style.opacity=(+L.fxDim||0)/100;
+  $("#wallNoise").style.opacity=(+L.fxNoise||0)/100;
+}
 function render(d){
   D.actions=d.actions;
+  applyLook(d.look);
   $("#who").textContent=d.mdns||d.host||"NAS";
   $("#addr").textContent=d.ip?"· "+d.ip:"";
   $("#up").innerHTML=esc(upfmt(d.uptime));   // innerHTML, а не textContent: перевод цепляется только за него
@@ -387,6 +405,5 @@ async function poll(){
     $("#dot").style.opacity=1;
   }catch(e){ $("#dot").style.opacity=.25; }   // панель молчит — не рисуем мусор
 }
-$("#wall").style.backgroundImage="url(/api/wallpaper/img)";
 poll(); setInterval(poll,3000);
 </script>

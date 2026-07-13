@@ -11320,6 +11320,13 @@ def screen_payload(lang=""):
                     "last_ts": int(last.get("ts") or 0),
                     "last": last.get("result") or ""})
     av = _safe(lambda: avail_bars(24, 96), {}) or {}   # 2=up 1=local 0=off -1=нет данных
+    # обои и их обработка — ТЕ ЖЕ, что на рабочем столе: экран читает desktop.json,
+    # поэтому смена обоев/затемнения в браузере доезжает до панели сама (wpVer в URL)
+    ds = _safe(load_settings, {}) or {}
+    look = {"wpVer": ds.get("wpVer") or 0,
+            "fxDim": ds.get("fxDim", 44), "fxBlur": ds.get("fxBlur", 27),
+            "fxNoise": ds.get("fxNoise", 100),
+            "theme": "light" if ds.get("theme") == "light" else "dark"}
     cfg = load_screen()
     host = st.get("host") or socket.gethostname()
     return {"host": host, "mdns": host + ".local", "ip": st.get("ip") or "",
@@ -11329,7 +11336,7 @@ def screen_payload(lang=""):
             "mem": st.get("mem") or {}, "pool": st.get("disk_pool"),
             "root": st.get("disk_root"), "overall": hp.get("overall") or "ok",
             "tiles": tiles, "problems": problems, "events": events, "backups": bks,
-            "avail": {"bars": av.get("bars") or [], "pct": av.get("pct")},
+            "avail": {"bars": av.get("bars") or [], "pct": av.get("pct")}, "look": look,
             "speed": _SCR["spd"], "speed_running": bool(_SCR["spd_run"]),
             "actions": cfg["actions"], "lang": cfg["lang"], "ts": int(time.time())}
 
