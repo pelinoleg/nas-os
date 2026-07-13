@@ -8007,13 +8007,22 @@ def fs_list(path):
 _FS_PROTECTED = (HERE, "/etc", "/usr", "/bin", "/sbin", "/lib", "/lib64",
                  "/boot", "/proc", "/sys", "/dev", "/run", "/var")
 
-def _fs_guard(path):
-    """Нормализовать пользовательский путь для МУТИРУЮЩЕЙ операции.
-    Возвращает (realpath, None) если можно, иначе (None, сообщение об ошибке)."""
+def _fs_guard(path, into=False):
+    """Normalise a user path for a MUTATING operation.
+    → (realpath, None) if allowed, else (None, error message).
+
+    Two different questions, and mixing them up cost us a false alarm:
+      into=False — the path itself is destroyed/overwritten (delete, rename,
+        move, write). Depth < 2 (/home, /mnt) is forbidden: a slip there takes
+        out a whole top-level tree.
+      into=True  — we only CREATE something inside the path (mkdir, upload,
+        restore from trash). The container is not touched, so depth-1 is fine:
+        making /home/backups is as harmless as making /home/oleg/backups.
+        Blocked here: the root itself and the protected system trees."""
     if not path or not str(path).strip():
         return None, "пустой путь"
     rp = os.path.realpath(path)
-    if rp == "/" or rp.count("/") < 2:
+    if rp == "/" or (not into and rp.count("/") < 2):
         return None, "слишком опасный путь: " + rp
     for prot in _FS_PROTECTED:
         if rp == prot or rp.startswith(prot.rstrip("/") + os.sep):
@@ -8069,7 +8078,7 @@ def fs_fetch_start(path, url, name=""):
     url = (url or "").strip()
     if not re.match(r"^https?://", url):
         return {"ok": False, "log": "нужен http(s) URL"}
-    d, err = _fs_guard(path)          # не качать в системные деревья/движок
+    d, err = _fs_guard(path, into=True)   # не качать в системные деревья/движок
     if err:
         return {"ok": False, "log": err}
     if not os.path.isdir(d):
@@ -8148,7 +8157,8 @@ def fs_fetch_cancel(jid):
     return {"ok": True}
 
 def fs_mkdir(path, name):
-    parent, err = _fs_guard(path)     # не даём создавать каталоги в системных деревьях/движке
+    # создаём ВНУТРИ каталога — сам он не страдает, поэтому /home и /mnt разрешены
+    parent, err = _fs_guard(path, into=True)
     if err:
         return {"ok": False, "log": err}
     d = _child(parent, name)
@@ -9506,7 +9516,7 @@ def fs_trash_restore(tid, dest_dir=""):
             _trash_save([i for i in items if i.get("id") != tid])
         return {"ok": False, "log": "файл отсутствует в хранилище"}
     if dest_dir:
-        d, err = _fs_guard(dest_dir)
+        d, err = _fs_guard(dest_dir, into=True)   # кладём в каталог, а не сносим его
         if err:
             return {"ok": False, "log": err}
         if not os.path.isdir(d):
@@ -12007,7 +12017,7 @@ class H(BaseHTTPRequestHandler):
         """Потоковая бинарная загрузка (без base64 — не роняет вкладку на больших файлах).
         rel — путь подпапок внутри назначения (загрузка папки целиком)."""
         q = parse_qs(urlparse(self.path).query)
-        d, err = _fs_guard((q.get("path") or [""])[0])   # не загружать в системные деревья/движок
+        d, err = _fs_guard((q.get("path") or [""])[0], into=True)   # не загружать в системные деревья/движок
         if err:
             return {"ok": False, "log": err}
         name = os.path.basename(((q.get("name") or [""])[0]).strip())
