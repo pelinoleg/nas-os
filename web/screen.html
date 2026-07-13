@@ -43,6 +43,10 @@
       rgba(0,0,0,calc(var(--mb-grad-a,0) * .008)) 95.2%,
       transparent 100%)}
   #bar{position:relative;z-index:2}
+  #zzz{width:56px;height:34px;border-radius:10px;display:flex;align-items:center;justify-content:center;
+       background:rgba(255,255,255,.12);color:var(--ink);flex:none;margin-left:12px}
+  #zzz:active{background:rgba(255,255,255,.30)}
+  #zzz svg{pointer-events:none}     /* клик всегда прилетает на сам #zzz, а не на <path> */
 
   /* карточки — как виджеты панели: без бордера, стекло + backdrop-filter */
   .g{background:var(--glass);border:0;border-radius:var(--r-lg);
@@ -69,15 +73,15 @@
   #gs{flex:none;display:grid;grid-template-columns:repeat(4,1fr);gap:7px;height:128px}
   .gauge{padding:6px 4px 7px;display:flex;flex-direction:column;align-items:center;position:relative}
   .gauge svg{width:124px;height:70px}
-  .gauge .v{position:absolute;top:30px;left:0;right:0;text-align:center;font-size:25px;font-weight:700;
+  .gauge .v{position:absolute;top:32px;left:0;right:0;text-align:center;font-size:21px;font-weight:700;
             font-variant-numeric:tabular-nums;line-height:1}
-  .gauge .v small{font-size:12px;font-weight:600;color:var(--dim)}
-  .gauge .sub{position:absolute;top:57px;left:0;right:0;text-align:center;font-size:11px;color:var(--mut)}
+  .gauge .v small{font-size:11px;font-weight:600;color:var(--dim)}
+  .gauge .sub{position:absolute;top:55px;left:0;right:0;text-align:center;font-size:11px;color:var(--mut)}
   .gauge .cap{font-size:10.5px;letter-spacing:.7px;text-transform:uppercase;color:var(--dim);font-weight:650;margin-top:2px}
 
   /* row of cards */
-  #row{flex:1;display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;min-height:0}
-  #row2{flex:1;display:grid;grid-template-columns:1.35fr 1fr;gap:7px;min-height:0}
+  #row{flex:1.25;display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px;min-height:0}
+  #row2{flex:.85;display:grid;grid-template-columns:1.35fr 1fr;gap:7px;min-height:0}
   .body{overflow:hidden}
   .card{padding:9px 12px;display:flex;flex-direction:column;min-height:0;overflow:hidden}
   .card h2{font-size:10.5px;letter-spacing:.7px;text-transform:uppercase;color:var(--dim);font-weight:650;
@@ -92,6 +96,21 @@
   .st2{width:14px;text-align:center;font-weight:700}
   .ok{color:var(--good)} .wn{color:var(--warn)} .bd{color:var(--danger)} .no{color:var(--mut)}
   .empty{color:var(--mut);font-size:12.5px;padding-top:4px}
+  .bar{height:4px;border-radius:3px;background:var(--track);overflow:hidden;flex:none;margin-top:3px}
+  .bar>i{display:block;height:100%;border-radius:3px;background:var(--good)}
+  .bar>i.wn{background:var(--warn)} .bar>i.bd{background:var(--danger)}
+  .prow{display:flex;flex-direction:column;gap:0;padding:5px 0;border-bottom:1px solid rgba(255,255,255,.07)}
+  .prow:last-child{border-bottom:0}
+  .prow .t{display:flex;gap:7px;align-items:center;font-size:13px}
+  .prow .t .nm{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .prow .t .ago{color:var(--mut);font-size:11.5px;white-space:nowrap}
+  .run{font-size:11.5px;color:var(--accent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ic{width:16px;height:16px;border-radius:4px;flex:none;object-fit:contain}
+  .sbtn{padding:7px 12px;border-radius:9px;background:rgba(255,255,255,.10);font-size:12.5px;font-weight:600}
+  .sbtn:active{background:rgba(255,255,255,.22)}
+  .srow2{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.07)}
+  .srow2:last-child{border-bottom:0}
+  .srow2 .nm{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:14px}
 
   /* footer */
   #foot{flex:none;display:flex;align-items:center;gap:10px;padding:6px 12px;margin:0 8px}
@@ -139,6 +158,12 @@
 <div id="bar">
   <span id="dot"></span><span id="who">—</span><span id="addr"></span><span id="up"></span>
   <span id="net"></span>
+  <span id="zzz" data-act="sleep" title="Погасить экран">
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9"
+         stroke-linecap="round" stroke-linejoin="round">
+      <rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/>
+      <path d="M15.5 7.5a3.5 3.5 0 1 1-4-4 3 3 0 0 0 4 4z" fill="currentColor" stroke="none"/>
+    </svg></span>
 </div>
 
 <div id="pages">
@@ -146,12 +171,12 @@
     <div id="gs"></div>
     <div id="row">
       <div class="card g" id="c_dk" data-sheet="docker"></div>
-      <div class="card g" id="c_ds" data-sheet="disks"></div>
+      <div class="card g" id="c_usb" data-sheet="usb"></div>
       <div class="card g" id="c_bk" data-sheet="backups"></div>
     </div>
     <div id="row2">
       <div class="card g" id="c_ev" data-sheet="events"></div>
-      <div class="card g" id="c_sy" data-sheet="cpu"></div>
+      <div class="card g" id="c_ds" data-sheet="disks"></div>
     </div>
   </div>
 </div>
@@ -200,7 +225,10 @@ function toast(m){ const t=$("#toast"); t.innerHTML=esc(m); t.classList.add("on"
   clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove("on"),2500); }
 
 let lastWake=0;
-function wake(){ const n=Date.now(); if(n-lastWake<8000) return; lastWake=n;
+function wake(e){
+  // pointerdown по кнопке «погасить» слал бы touch, и он будил бы экран сразу после sleep
+  const t=e&&e.target; if(t&&t.closest&&t.closest("#zzz")) return;
+  const n=Date.now(); if(n-lastWake<8000) return; lastWake=n;
   fetch("/api/screen/act",{method:"POST",body:JSON.stringify({a:"touch"})}).catch(()=>{}); }
 addEventListener("pointerdown",wake,{passive:true});
 async function act(b){
@@ -243,47 +271,78 @@ function renderGauges(d){
 }
 
 /* ---------- карточки ---------- */
+const lvlCls=p=>p>=90?"bd":p>=75?"wn":"";
+function bar(pct,cls){ return `<div class="bar"><i class="${cls||lvlCls(pct)}" style="width:${clampf(pct,0,100)}%"></i></div>`; }
+
 function renderCards(d){
-  const T=d.tiles||{};
-  const ct=d.containers||[], run=ct.filter(c=>c.state==="running").length;
-  $("#c_dk").innerHTML=`<h2>Docker<span class="r">${ct.length?run+"/"+ct.length:"—"}</span></h2>
-    <div class="body">${ct.length?ct.slice(0,4).map(c=>
-      `<div class="r2"><span class="st2 ${c.state==="running"?"ok":"bd"}">●</span>
-       <span class="nm">${esc(c.name)}</span></div>`).join("")
+  // --- Docker: стеки, а не голые контейнеры
+  const stk=d.stacks||[], ct=d.containers||[], run=ct.filter(c=>c.state==="running").length;
+  $("#c_dk").innerHTML=`<h2>Docker<span class="r">${ct.length?run+"/"+ct.length:(stk.length?stk.length+" стеков":"—")}</span></h2>
+    <div class="body">${stk.length?stk.slice(0,4).map(x=>{
+      const ok=x.running>0, part=x.total&&x.running<x.total;
+      return `<div class="r2"><span class="st2 ${ok?(part?"wn":"ok"):"no"}">●</span>
+        <span class="nm">${esc(x.name)}</span>
+        <span class="ago">${x.total?x.running+"/"+x.total:"стоит"}</span></div>`;}).join("")
       :`<div class="empty">не установлен</div>`}</div>`;
 
+  // --- Диски: полоска заполнения, как в виджетах
   const dk=d.disks||[];
   $("#c_ds").innerHTML=`<h2>Диски<span class="r">${dk.length||"—"}</span></h2>
-    <div class="body">${dk.length?dk.slice(0,4).map(x=>{
-      const cls=x.healthy===false?"bd":x.healthy===true?"ok":"no";
-      return `<div class="r2"><span class="st2 ${cls}">●</span><span class="nm">${esc(x.name)}</span>
-        <span class="ago">${x.used_pct!=null?Math.round(x.used_pct)+"%":""}${x.temp?" · "+x.temp+"°":""}</span></div>`;
-    }).join(""):`<div class="empty">дисков нет</div>`}</div>`;
+    <div class="body">${dk.length?dk.slice(0,3).map(x=>{
+      const p=x.used_pct, sys=x.role==="system"||(x.mounts||[]).includes("/");
+      return `<div class="prow"><div class="t">
+        <span class="nm">${esc(x.name)}${sys?" · System":x.tran==="usb"?" · USB":""}</span>
+        <span class="ago">${p!=null?Math.round(p)+"%":""}${x.temp?" · "+x.temp+"°":""}</span></div>
+        ${p!=null?bar(p):""}</div>`;}).join(""):`<div class="empty">дисков нет</div>`}</div>`;
 
-  const bk=d.backups||[];
-  $("#c_bk").innerHTML=`<h2>Бэкапы<span class="r">${bk.length||"—"}</span></h2>
-    <div class="body">${bk.length?bk.slice(0,4).map(b=>{
-      const cls=b.last==="ok"?"ok":b.last==="warn"?"wn":b.last?"bd":"no";
-      return `<div class="r2"><span class="st2 ${cls}">${b.last==="ok"?"✓":b.last?"!":"—"}</span>
-        <span class="nm">${esc(b.name)}</span><span class="ago">${esc(ago(b.last_ts))}</span></div>`;
-    }).join(""):`<div class="empty">профилей нет</div>`}</div>`;
+  // --- Бэкапы: идёт прогон — показываем прогресс, а не «никогда»
+  const bk=d.backups||[], act=bk.find(b=>b.running);
+  if(act){
+    const L=act.live||{};
+    $("#c_bk").innerHTML=`<h2>Бэкап идёт<span class="r">${esc(act.name)}</span></h2>
+      <div class="body">
+        <div class="prow" style="border:0">
+          <div class="t"><span class="nm">${L.pct!=null?L.pct+"%":"старт…"}</span>
+            <span class="ago">${esc(L.speed||"")}</span></div>
+          ${bar(L.pct||0,"")}
+          <div class="run">${esc(L.cur||"")}</div>
+          <div class="run">${L.total?`задача ${(L.done||0)+1} из ${L.total}`:""}${L.eta?" · осталось "+esc(L.eta):""}</div>
+        </div></div>`;
+  } else {
+    $("#c_bk").innerHTML=`<h2>Бэкапы<span class="r">${bk.length||"—"}</span></h2>
+      <div class="body">${bk.length?bk.slice(0,3).map(b=>{
+        const cls=b.last==="ok"?"ok":b.last==="warn"?"wn":b.last?"bd":"no";
+        return `<div class="r2"><span class="st2 ${cls}">${b.last==="ok"?"✓":b.last?"!":"—"}</span>
+          <span class="nm">${esc(b.name)}</span>
+          <span class="ago">${b.queued?"в очереди":esc(ago(b.last_ts))}</span></div>`;
+      }).join(""):`<div class="empty">профилей нет</div>`}</div>`;
+  }
 }
 function renderRow2(d){
-  const ev=(d.events||[]).slice(0,5);
+  const ev=(d.events||[]).slice(0,4);
   $("#c_ev").innerHTML=`<h2>События<span class="r">${ev.length||""}</span></h2>
     <div class="body">${ev.length?ev.map(e=>{
       const c=e.lvl==="crit"?"bd":e.lvl==="warn"?"wn":e.lvl==="ok"?"ok":"no";
       return `<div class="r2"><span class="st2 ${c}">●</span><span class="nm">${esc(e.title)}</span>
         <span class="ago">${esc(ago(e.t))}</span></div>`;}).join(""):`<div class="empty">событий нет</div>`}</div>`;
-  const T=d.tiles||{}, t=(k)=>T[k]?`${T[k].value} ${T[k].unit||""}`:null;
-  const rows=[["Интернет",T.inet?T.inet.value:null],["Обновления",t("updates")],
-              ["SnapRAID",T.snapraid?T.snapraid.value:null],
-              ["Температура дисков",t("disktemp")],
-              ["Питание",d.psu_ma?d.psu_ma+" мА":null],
-              ["Троттлинг",(d.throttled&&d.throttled.throttle)?"да":"нет"],
-              ["Просадка питания",(d.throttled&&d.throttled.undervolt)?"да":null]].filter(r=>r[1]!=null);
-  $("#c_sy").innerHTML=`<h2>Система</h2><div class="body">${rows.slice(0,5).map(r=>
-    `<div class="r2"><span class="nm">${esc(r[0])}</span><span class="ago">${esc(r[1])}</span></div>`).join("")}</div>`;
+
+  const jobs=d.usb||[], live=jobs.find(j=>j.status==="running"), last=jobs[0];
+  let body;
+  if(live){
+    body=`<div class="prow" style="border:0">
+      <div class="t"><span class="nm">${esc(live.label||live.dev||"USB")}</span>
+        <span class="ago">${live.percent!=null?live.percent+"%":""}</span></div>
+      ${bar(live.percent||0,"")}
+      <div class="run">${esc(live.speed||"")}${live.eta?" · осталось "+esc(live.eta):""}</div>
+      <div class="run">${esc(live.dest||"")}</div></div>`;
+  } else if(last){
+    const c=last.status==="done"?"ok":last.status==="aborted"?"bd":"no";
+    body=`<div class="r2"><span class="st2 ${c}">●</span><span class="nm">${esc(last.label||last.dev||"USB")}</span>
+      <span class="ago">${last.status==="done"?"готово":esc(last.status)}</span></div>`;
+  } else {
+    body=`<div class="empty">носитель не подключён</div>`;
+  }
+  $("#c_usb").innerHTML=`<h2>USB-импорт<span class="r">${live?"идёт":""}</span></h2><div class="body">${body}</div>`;
 }
 function renderFoot(d){
   const cls=v=>v===2?"":v===1?"local":v===0?"off":"nd";
@@ -325,35 +384,78 @@ const SHEETS={
       +KV("Аптайм",upfmt(d.uptime)), ""];},
   temp:d=>{const t=((d.tiles.cputemp||{}).raw)||{};
     return ["Температура", KV("CPU",Math.round(t.c||0)+" °C")+KV("Троттлинг",t.throttle?"да":"нет")
-      +KV("Питание",d.psu_ma?d.psu_ma+" мА":"")
+      +KV("Просадка питания",(d.throttled&&d.throttled.undervolt)?"да":"нет")
       +(d.disks||[]).map(x=>KV(x.name,x.temp?x.temp+" °C":"—")).join(""), ""];},
   ram:d=>{const m=d.mem||{};
     return ["Память", KV("Занято",gb(m.used||0)+" из "+gb(m.total||0))+KV("Процент",Math.round(m.pct||0)+" %")
       +KV("Swap",m.swap_total?gb(m.swap_total-(m.swap_free||0))+" из "+gb(m.swap_total):"нет"), ""];},
-  disk:d=>{const T=d.tiles||{}, hp=!!(T.pool&&T.pool.raw), k=hp?T.pool.raw:(T.rootfs||{}).raw||{};
-    return [hp?"Пул":"Системный диск",
-      KV("Занято",Math.round(k.pct||0)+" %")+KV("Свободно",gb(k.free||0))+KV("Использовано",gb(k.used||0))
-      +(d.disks||[]).map(x=>KV(x.name+(x.model?" · "+x.model:""),
-          (x.size||"")+(x.used_pct!=null?" · "+Math.round(x.used_pct)+"%":""))).join(""), ""];},
-  docker:d=>{const ct=d.containers||[];
-    return ["Docker", ct.length?ct.map(c=>KV(c.name,c.status||c.state)).join(""):
-      `<div class="empty">Docker не установлен</div>`, ""];},
+  disk:d=>SHEETS.disks(d),
+
+  /* Диски: ВСЕ, что видит система, включая внешние; у каждого — полоска заполнения */
   disks:d=>{const dk=d.disks||[];
-    return ["Диски", dk.length?dk.map(x=>KV(x.name+(x.model?" · "+x.model:""),
-      [x.size,x.temp?x.temp+"°C":null,x.healthy===false?"SMART: сбой":x.healthy===true?"SMART: ок":null,
-       (x.mounts||[]).join(" ")].filter(Boolean).join(" · "))).join(""):`<div class="empty">дисков нет</div>`, ""];},
+    return ["Диски", dk.length?dk.map(x=>{
+      const p=x.used_pct, sys=x.role==="system"||(x.mounts||[]).includes("/");
+      const tags=[sys?"System":"", x.size, x.tran?x.tran.toUpperCase():"",
+        x.temp?x.temp+" °C":"", x.healthy===false?"SMART: сбой":x.healthy===true?"SMART: ок":""]
+        .filter(Boolean).join(" · ");
+      return `<div class="prow"><div class="t"><span class="nm">${esc(x.name)}${x.model?" · "+esc(x.model):""}</span>
+        <span class="ago">${p!=null?Math.round(p)+"%":""}</span></div>
+        ${p!=null?bar(p):""}
+        <div class="run">${esc(tags)}${(x.mounts||[]).length?" · "+esc(x.mounts.join(" ")):""}</div></div>`;
+    }).join(""):`<div class="empty">дисков нет</div>`, ""];},
+
+  /* Docker: стеки с иконками и кнопками */
+  docker:d=>{const stk=d.stacks||[];
+    return ["Docker", stk.length?stk.map(x=>{
+      const on=x.running>0;
+      return `<div class="srow2">
+        ${x.icon?`<img class="ic" src="/api/icon?u=${encodeURIComponent(x.icon)}">`
+                :`<span class="st2 ${on?"ok":"no"}">●</span>`}
+        <span class="nm">${esc(x.name)}</span>
+        <span class="ago">${x.total?x.running+"/"+x.total:"стоит"}</span>
+        <span class="sbtn" data-stack="${esc(x.name)}" data-op="${on?"restart":"up"}">${on?"Перезапустить":"Запустить"}</span>
+        ${on?`<span class="sbtn" data-stack="${esc(x.name)}" data-op="stop">Остановить</span>`:""}
+      </div>`;}).join(""):`<div class="empty">Docker не установлен</div>`, ""];},
+
+  /* Бэкапы: все профили, прогресс идущего, запуск любого */
   backups:d=>{const bk=d.backups||[];
-    return ["Бэкапы", bk.length?bk.map(b=>KV(b.name,
-      (b.running?"идёт":b.last==="ok"?"✓ "+ago(b.last_ts):b.last?"! "+ago(b.last_ts):"никогда"))).join("")
-      :`<div class="empty">профилей нет</div>`,
-      bk.length?`<div class="go" data-run="${esc(bk[0].id)}">Запустить «${esc(bk[0].name)}»</div>`:""];},
+    return ["Бэкапы", bk.length?bk.map(b=>{
+      if(b.running){ const L=b.live||{};
+        return `<div class="prow"><div class="t"><span class="nm">${esc(b.name)}</span>
+          <span class="ago">${L.pct!=null?L.pct+"% · ":""}${esc(L.speed||"идёт")}</span></div>
+          ${bar(L.pct||0,"")}
+          <div class="run">${esc(L.cur||"")}${L.eta?" · осталось "+esc(L.eta):""}</div></div>`;
+      }
+      const cls=b.last==="ok"?"ok":b.last==="warn"?"wn":b.last?"bd":"no";
+      return `<div class="srow2"><span class="st2 ${cls}">${b.last==="ok"?"✓":b.last?"!":"—"}</span>
+        <span class="nm">${esc(b.name)}</span>
+        <span class="ago">${b.queued?"в очереди":esc(ago(b.last_ts))}</span>
+        <span class="sbtn" data-run="${esc(b.id)}">Запустить</span></div>`;
+    }).join(""):`<div class="empty">профилей нет</div>`, ""];},
+
+  /* USB-импорт: что подключено и как идёт перекачка */
+  usb:d=>{const jobs=d.usb||[];
+    return ["USB-импорт", jobs.length?jobs.map(j=>{
+      const p=j.percent;
+      return `<div class="prow"><div class="t"><span class="nm">${esc(j.label||j.dev||"USB")}</span>
+        <span class="ago">${j.status==="running"?(p!=null?p+"%":"идёт"):esc(j.status)}</span></div>
+        ${j.status==="running"?bar(p||0,""):""}
+        <div class="run">${esc(j.dest||"")}${j.speed?" · "+esc(j.speed):""}${j.eta?" · осталось "+esc(j.eta):""}</div></div>`;
+    }).join(""):`<div class="empty">носитель не подключён</div>`, ""];},
+
+  /* События: все, новые сверху, с прокруткой */
+  events:d=>["Последние события",
+    (d.events||[]).length?(d.events||[]).map(e=>{
+      const c=e.lvl==="crit"?"bd":e.lvl==="warn"?"wn":e.lvl==="ok"?"ok":"no";
+      return `<div class="srow2"><span class="st2 ${c}">●</span>
+        <span class="nm">${esc(e.title)}</span>
+        <span class="ago">${esc(ago(e.t))}</span></div>`;
+    }).join(""):`<div class="empty">событий нет</div>`, ""],
+
   avail:d=>["Доступность",
     KV("За 24 часа",(d.avail&&d.avail.pct!=null)?d.avail.pct+" %":"—")
     +KV("За 30 дней",(d.avail30&&d.avail30.pct!=null)?d.avail30.pct+" %":"—")
     +KV("Зелёный","панель отвечала")+KV("Жёлтый","бокс жив, сети не было")+KV("Красный","бокса не было"),
-    `<div class="go" data-act="sleep">Погасить экран</div>`],
-  events:d=>["Последние события",
-    (d.events||[]).length?(d.events||[]).map(e=>KV(e.title,ago(e.t))).join(""):`<div class="empty">событий нет</div>`,
     `<div class="go warnbtn" data-act="poweroff">Выключить NAS</div>`],
 };
 function sheet(name){
@@ -365,11 +467,17 @@ function sheet(name){
 $("#sheet").onclick=e=>{ if(e.target.id==="sheet") $("#sheet").classList.remove("on"); };
 
 document.addEventListener("click",e=>{
-  const a=e.target.closest("[data-act]"), s=e.target.closest("[data-sheet]"), r=e.target.closest("[data-run]");
+  const a=e.target.closest("[data-act]"), s=e.target.closest("[data-sheet]"),
+        r=e.target.closest("[data-run]"), k2=e.target.closest("[data-stack]");
+  if(k2){ toast("Выполняю…");
+    act({a:"stack",name:k2.dataset.stack,op:k2.dataset.op})
+      .then(x=>{toast(x.ok?"Готово":(x.log||"не вышло")); poll();});
+    return; }
   if(a){
     const k=a.dataset.act;
     if(k==="sleep"){ $("#sheet").classList.remove("on");
-      act({a:"sleep"}).then(()=>{toast("Экран погашен — коснитесь, чтобы разбудить"); poll();}); return; }
+      toast("Гашу экран…");
+      act({a:"sleep"}).then(r=>{ if(!r.ok) toast(r.log||"не вышло"); poll(); }); return; }
     if(k==="poweroff"){ $("#sheet").classList.remove("on");
       act({a:"poweroff"}).then(r=>toast(r.ok?"Выключаюсь…":(r.log||"не вышло"))); return; }
   }
@@ -383,7 +491,8 @@ function applyLook(L){
   if(!L) return;
   const S=L, root=document.documentElement;
   if(L.wpVer!==WPV){ WPV=L.wpVer;
-    $("#wall").style.backgroundImage=L.wpVer?`url(/api/wallpaper/img?v=${L.wpVer})`:""; }
+    // screen=1 -> сервер отдаёт копию под 800x480, а не исходник на 2560 px
+    $("#wall").style.backgroundImage=L.wpVer?`url(/api/wallpaper/img?screen=1&v=${L.wpVer})`:""; }
   const b=clampf(S.fxBlur,0,100);
   $("#wall").style.filter=b?`blur(${b}px)`:"";
   $("#wall").style.transform=b?`scale(${(1+b*0.009).toFixed(3)})`:"";
@@ -427,7 +536,8 @@ async function _poll(){
     applyLook(D.look); renderBar(D); renderGauges(D); renderCards(D); renderRow2(D); renderFoot(D); renderAlarm(D);
     if($("#sheet").classList.contains("on")) { /* лист открыт — не дёргаем его перерисовкой */ }
     $("#dot").style.opacity=1;
-  }catch(e){ $("#dot").style.opacity=.25; }
+  }catch(e){ $("#dot").style.opacity=.25;
+    $("#up").textContent="ERR: "+String((e&&e.message)||e).slice(0,80); }
 }
 poll().then(()=>{ const m=location.search.match(/sheet=(\w+)/); if(m) sheet(m[1]); });
 setInterval(poll,1500);   // экран живой: полторы секунды

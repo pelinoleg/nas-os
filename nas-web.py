@@ -11292,6 +11292,35 @@ def _screen_tick():
     _safe(lambda: _screen_apply())
 
 
+def _nb_live(pid):
+    """Живой прогресс прогона: состояние + хвост лога. Весь лог читать нельзя —
+    экран опрашивается раз в полторы секунды."""
+    rs = _nb_run_state_read(pid)
+    out = {"cur": rs.get("cur") or "", "done": len(rs.get("jobs") or []),
+           "total": rs.get("total") or 0, "started": rs.get("started") or 0,
+           "dry": bool(rs.get("dry")), "stopping": bool(rs.get("stopping"))}
+    try:
+        with open(nb_run_log(pid), "rb") as f:
+            f.seek(0, 2)
+            f.seek(max(0, f.tell() - 8192))
+            tail = f.read().decode("utf-8", "replace").split("\n")
+    except OSError:
+        tail = []
+    for line in reversed(tail[-14:]):
+        m = _RSYNC_PROG.match(line.strip())
+        if m:
+            out["pct"] = int(m.group(2))
+            out["speed"] = m.group(3)
+            out["eta"] = m.group(4)
+            break
+    return out
+
+
+# Сколько секунд плитка живёт в кэше. "updates" запускает apt-get -s upgrade, а
+# "disktemp"/"snapraid" ходят к дискам — их нельзя считать на каждый опрос экрана.
+SCREEN_TILE_TTL = {"updates": 300, "disktemp": 120, "snapraid": 120, "inet": 60,
+                   "docker": 15, "pool": 10, "rootfs": 10}
+_SCR_TILES = {}
 _SCR_HEAVY = {"t": 0, "d": {}}
 
 
@@ -11315,7 +11344,13 @@ def _screen_heavy():
                    "state": str(c.get("State") or ""),
                    "status": str(c.get("Status") or "")})
     ct.sort(key=lambda c: (c["state"] != "running", c["name"]))
-    _SCR_HEAVY["d"] = {"disks": dk, "containers": ct}
+    stacks = []
+    for st_ in ((_safe(docker_stacks, {}) or {}).get("stacks") or []):
+        stacks.append({"name": st_.get("name"), "running": st_.get("running") or 0,
+                       "total": st_.get("total") or 0, "icon": st_.get("icon") or "",
+                       "url": st_.get("url") or ""})
+    stacks.sort(key=lambda x: x["name"] or "")
+    _SCR_HEAVY["d"] = {"disks": dk, "containers": ct, "stacks": stacks}
     _SCR_HEAVY["t"] = now
     return _SCR_HEAVY["d"]
 
@@ -11332,31 +11367,41 @@ def screen_payload(lang=""):
     # подмешивает из каталога; здесь делаем то же самое
     labels = {t[0]: (t[2] if en else t[1]) for t in glance_catalog()}
     tiles = {}
+    now = time.time()
     for tid in SCREEN_TILES:
-        d = _safe(lambda t=tid: _glance_tile(t, en))
-        if not d:
+        ttl = SCREEN_TILE_TTL.get(tid, 2)
+        c = _SCR_TILES.get(tid)
+        if c and c["lang"] == lang and now - c["t"] < ttl:
+            if c["d"]:
+                tiles[tid] = c["d"]
             continue
-        d = dict(d, label=labels.get(tid, tid))
-        if tid in GLANCE_SPARKS:
-            sp = _safe(lambda t=tid: _gl_spark(GLANCE_SPARKS[t]))
-            if sp:
-                d["spark"] = sp
-        tiles[tid] = d
+        d = _safe(lambda t=tid: _glance_tile(t, en))
+        if d:
+            d = dict(d, label=labels.get(tid, tid))
+            if tid in GLANCE_SPARKS:
+                sp = _safe(lambda t=tid: _gl_spark(GLANCE_SPARKS[t]))
+                if sp:
+                    d["spark"] = sp
+            tiles[tid] = d
+        _SCR_TILES[tid] = {"t": now, "lang": lang, "d": d}
     hp = _safe(health_report, {}) or {}
     problems = [{"name": c.get("name"), "value": c.get("value"),
                  "lvl": c.get("lvl"), "hint": c.get("hint") or ""}
                 for c in (hp.get("checks") or []) if c.get("lvl") in ("bad", "warn")]
-    ev = _safe(lambda: events_list(0, 8), {}) or {}
-    events = list(reversed(ev.get("events") or []))[:5]
+    ev = _safe(lambda: events_list(0, 40), {}) or {}
+    events = list(reversed(ev.get("events") or []))[:30]   # новые сверху
     bks = []
     for p in (_safe(nb_profiles_public, []) or []):
         h = _safe(lambda pid=p["id"]: nb_history(pid), []) or []   # newest first
         last = h[0] if h else {}
-        bks.append({"id": p["id"], "name": p["name"],
-                    "running": bool(p.get("running")), "queued": bool(p.get("queued")),
-                    "configured": bool(p.get("configured")),
-                    "last_ts": int(last.get("ts") or 0),
-                    "last": last.get("result") or ""})
+        b = {"id": p["id"], "name": p["name"],
+             "running": bool(p.get("running")), "queued": bool(p.get("queued")),
+             "configured": bool(p.get("configured")),
+             "last_ts": int(last.get("ts") or 0),
+             "last": last.get("result") or ""}
+        if b["running"]:
+            b["live"] = _safe(lambda pid=p["id"]: _nb_live(pid), {}) or {}
+        bks.append(b)
     av = _safe(lambda: avail_bars(24, 96), {}) or {}   # 2=up 1=local 0=off -1=нет данных
     av30 = _safe(lambda: avail_bars(720, 96), {}) or {}
     hv = _safe(_screen_heavy, {}) or {}
@@ -11388,6 +11433,8 @@ def screen_payload(lang=""):
             "avail": {"bars": av.get("bars") or [], "pct": av.get("pct")},
             "avail30": {"bars": av30.get("bars") or [], "pct": av30.get("pct")}, "look": look,
             "disks": hv.get("disks") or [], "containers": hv.get("containers") or [],
+            "stacks": hv.get("stacks") or [],
+            "usb": _safe(lambda: usb_import_progress()["jobs"], []) or [],
             "swap": (st.get("mem") or {}).get("swap_total"),
             "throttled": st.get("throttled"), "psu_ma": st.get("psu_ma"),
             "asleep": bool(_SCR["sleep"]),
@@ -11400,12 +11447,17 @@ def screen_action(b):
     signal, so it works even when the action buttons are switched off."""
     a = str(b.get("a") or "")
     if a == "touch":
+        # клик по кнопке «погасить» приходит вместе с pointerdown -> touch, и тот
+        # мог прийти ПОСЛЕ sleep и разбудить экран сразу же. Полсекунды грейса.
+        if _SCR["sleep"] and time.time() - _SCR.get("slept_at", 0) < 1.0:
+            return {"ok": True, "ignored": True}
         _SCR["touch"] = time.time()
         _SCR["sleep"] = False                      # любое касание будит
         _safe(lambda: _screen_apply(force=True))
         return {"ok": True}
     if a == "sleep":
         _SCR["sleep"] = True
+        _SCR["slept_at"] = time.time()
         _safe(lambda: _screen_apply(force=True))
         return {"ok": True}
     cfg = load_screen()
@@ -11428,11 +11480,53 @@ def screen_action(b):
         # спидтест блокирует на 10-18 с — экран не должен висеть на fetch
         threading.Thread(target=go, daemon=True).start()
         return {"ok": True, "running": True}
+    if a == "stack":
+        op = str(b.get("op") or "")
+        if op not in ("up", "down", "restart", "stop", "start"):
+            return {"ok": False, "log": "неизвестная операция"}
+        return stack_action(str(b.get("name") or ""), op)
     if a in ("reboot", "poweroff"):
         log_event("screen_power", "С экрана: " + ("перезагрузка" if a == "reboot" else "выключение"),
                   "запрошено кнопкой на локальном экране", "warn", "system")
         return power(a)
     return {"ok": False, "log": "неизвестное действие"}
+
+
+# Обои под локальный экран: исходник — под рабочий стол (2-4 МБ, 2560+ px), а панели
+# нужно 800x480. Хром на Pi 4 тащил полный кадр в память И мылил его blur(27px) —
+# это заметная работа на слабой GPU. Держим ужатую копию рядом с оригиналом и отдаём её
+# киоску; пересобираем, когда оригинал изменился (обои крутятся по таймеру).
+_WALL_SCR_LOCK = threading.Lock()
+
+
+def _wallpaper_screen(w=800, h=480):
+    src = _wallpaper_path()
+    if not src:
+        return ""
+    dst = os.path.join(NAS_CONFIG, "wallpaper-screen.webp")
+    try:
+        if os.path.isfile(dst) and os.path.getmtime(dst) >= os.path.getmtime(src):
+            return dst
+    except OSError:
+        pass
+    with _WALL_SCR_LOCK:
+        try:                                   # пока ждали лок, кто-то мог собрать
+            if os.path.isfile(dst) and os.path.getmtime(dst) >= os.path.getmtime(src):
+                return dst
+        except OSError:
+            pass
+        tmp = dst + ".tmp.webp"
+        vf = ("scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d" % (w, h, w, h))
+        try:
+            p = subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", src,
+                                "-vf", vf, "-quality", "82", tmp],
+                               capture_output=True, text=True, timeout=60)
+            if p.returncode != 0 or not os.path.isfile(tmp):
+                return src                     # не вышло — отдаём оригинал, не падаем
+            os.replace(tmp, dst)
+        except (OSError, subprocess.SubprocessError):
+            return src
+    return dst
 
 
 class H(BaseHTTPRequestHandler):
@@ -12049,8 +12143,12 @@ class H(BaseHTTPRequestHandler):
             return
         if p in ("/screen", "/screen/"):
             self._static("/screen.html"); return
+        if p == "/api/icon" and self._local():
+            self._send_icon((q.get("u") or [""])[0]); return   # иконки стеков для экрана
         if p == "/api/wallpaper/img" and self._local():
-            wp = _wallpaper_path()          # киоск рисует те же обои, что рабочий стол
+            # киоск рисует те же обои, но в размер своей панели (см. _wallpaper_screen)
+            wp = (_safe(_wallpaper_screen) if (q.get("screen") or [""])[0]
+                  else None) or _wallpaper_path()
             if wp:
                 self._sendraw(wp)
             else:
