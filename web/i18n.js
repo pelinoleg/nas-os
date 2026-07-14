@@ -2758,6 +2758,8 @@ window.NAS_I18N = { en: {
 "Наблюдение за хостами": "Host watch",
 "Плата": "Board",
 "Цвета статусов": "Status colors",
+"заголовок скрыт — имени не видно": "the title is hidden — the name will not show",
+"Показать": "Show",
 "Заголовок был скрыт — включил": "The title was hidden — turned it on",
 "Подсветка": "Backlight",
 "Яркость экранов": "Screen brightness",

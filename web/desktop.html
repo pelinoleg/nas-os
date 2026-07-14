@@ -8551,7 +8551,8 @@ function winGlance(){openWin("__glance","Экран NAS",async body=>{
   const det=(id,title,body)=>`<details class="gi" data-sec="${id}"${OP.has(id)?" open":""}><summary>${title}</summary>${body}</details>`;
   insp.innerHTML=`
    <div class="glc-cap" style="margin-bottom:2px">${esc(names[t.id]||t.id)}</div>
-   <div class="gi"><span>Название</span><label><input id="giName" maxlength="40" placeholder="${att(namesDev[t.id]||names[t.id]||"")}" value="${att(t.label||"")}" style="width:130px"><button class="btn sm" id="giNameX" ${t.label?"":"disabled"} title="Вернуть каталожное имя">✕</button></label></div>
+   <div class="gi"><span>Название</span><label><input id="giName" maxlength="40" placeholder="${att(namesDev[t.id]||names[t.id]||"")}" value="${att(t.label||"")}" style="width:130px"><button class="btn sm" id="giNameX" ${t.label?"":"disabled"} title="Вернуть каталожное имя">✕</button></label>
+    ${stv(t,"lp")==="hide"?`<div style="display:flex;align-items:center;gap:6px;color:var(--warn)">заголовок скрыт — имени не видно<button class="btn sm" id="giShow">Показать</button></div>`:""}</div>
    <div class="gi"><span>Вид</span><div class="seg" id="giKind">${[["","авто"],["value","число"],["gauge","шкала"],["bars","полоски"],["spark","график"]].map(([v,l])=>`<button data-v="${v}" class="${kind===v?"on":""}">${l}</button>`).join("")}</div>
     <label><input type="checkbox" id="giDot" ${!(t.st&&t.st.nd)?"checked":""}> точка статуса</label></div>
    ${det("n","Подпись (note)",g9("n",[["hide","скрыть"]])+`<div class="glc-cap" style="text-transform:none">служебный текст плитки: имя хоста, модель диска, самый горячий диск…</div>`)}
@@ -8572,6 +8573,8 @@ function winGlance(){openWin("__glance","Экран NAS",async body=>{
    }else delete t.label;
    commit();paintInsp();};
   insp.querySelector("#giNameX").onclick=()=>{delete t.label;commit();paintInsp();};
+  const shw=insp.querySelector("#giShow");
+  if(shw)shw.onclick=()=>{(t.st||(t.st={})).lp="tl";commit();paintInsp();};
   insp.querySelector("#giKind").querySelectorAll("button").forEach(b=>b.onclick=()=>{
    if(b.dataset.v)st().k=b.dataset.v;else delete st().k;commit();paintInsp();});
   insp.querySelector("#giDot").onchange=e=>{
