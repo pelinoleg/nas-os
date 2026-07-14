@@ -919,6 +919,11 @@
   .nb-dest .seg{margin-left:auto}
   /* компактный сегмент в шапке карточки (класса .seg.sm в системе не было) */
   .nb-dest .seg.sm button{padding:4px 10px;font-size:11.5px}
+  .nb-grid2{display:grid;grid-template-columns:1fr 1fr;gap:9px 12px}
+  .nb-grid2 label{display:flex;flex-direction:column;gap:4px;font-size:11.5px;color:var(--dim)}
+  .nb-grid2 input{width:100%}
+  /* стрелка между карточками сторон: откуда → куда, без лишних слов */
+  .nb-arrow-row{display:flex;justify-content:center;color:var(--mut);margin:-6px 0 6px;transform:rotate(180deg)}
   .nb-dest .nb-field-row{display:flex;gap:8px;align-items:center}
   .nb-dest input{flex:1;min-width:0}
   .nb-dwarn{font-size:12px;line-height:1.45;border-radius:var(--r-sm);padding:8px 10px;margin-bottom:8px;color:var(--text);
@@ -6319,59 +6324,90 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
    else rr.innerHTML=`<div class="nb-err">✗ ${esc((t&&t.log)||"нет связи")}</div>`;};
  }
  /* ── Подключение ── */
- function tabConn(tc){if(isPush())return tabConnPush(tc);
-  const c=CFG,ssh=c.transport==="ssh";
-  const MHELP={rsync:{t:"rsync-демон",d:"На главном NAS работает служба rsync (rsync daemon), которая отдаёт шары как «модули». Быстро, без шифрования — подходит для домашней сети. Нужны включённая служба rsync, имя пользователя и пароль. Если не знаешь, есть ли она — жми «Проверить связь»: покажет список модулей."},
-   ssh:{t:"SSH + rsync",d:"Копирование поверх SSH — работает почти на любом NAS/Linux с SSH. Можно по паролю (введите его ниже) или по ключу (оставьте пароль пустым и добавьте ключ: ssh-copy-id пользователь@адрес). Медленнее (шифрование), но безопаснее и универсальнее."}};
-  const mh=MHELP[ssh?"ssh":"rsync"];
-  tc.innerHTML=`<h3 class="set-title">Подключение</h3><p class="set-sub">Откуда забирать данные для бэкапа.</p>
-   <div class="srow"><div class="srow-l"><div class="srow-t">Способ подключения</div></div><div class="srow-c"><div class="seg" id="cTr"><button data-v="rsync" class="${!ssh?"on":""}">rsync-демон</button><button data-v="ssh" class="${ssh?"on":""}">SSH</button></div></div></div>
-   <div class="nb-help" id="cHelp"><b>${esc(mh.t)}</b><span>${esc(mh.d)}</span></div>
-   <div class="srow"><div class="srow-l"><div class="srow-t">Адрес NAS</div></div><div class="srow-c"><input class="mono" id="cHost" value="${att(c.host||"")}" placeholder="192.168.1.95"></div></div>
-   <div class="srow"><div class="srow-l"><div class="srow-t">Пользователь</div></div><div class="srow-c"><input class="mono" id="cUser" value="${att(c.user||"")}" placeholder="oleg"></div></div>
-   <div class="srow" id="cPwRow"><div class="srow-l"><div class="srow-t">Пароль${tipHTML("rsync-демон — пароль модуля. SSH — пароль учётной записи (идёт через sshpass). Для SSH можно оставить пустым и настроить вход по ключу. Хранится на этом NAS.")}</div>${ssh?'<div class="srow-d">для SSH: пусто = вход по ключу</div>':""}</div><div class="srow-c"><input type="password" class="mono" id="cPw" placeholder="${c.has_password?"•••••• (задан)":"пароль"}"></div></div>
-   <div class="srow" id="cPortRow" style="${ssh?"":"display:none"}"><div class="srow-l"><div class="srow-t">SSH-порт</div></div><div class="srow-c"><input class="mono" id="cPort" style="max-width:90px" value="${c.ssh_port||22}"></div></div>
-   <div class="srow" id="cSudoRow" style="${ssh?"":"display:none"}"><div class="srow-l"><div class="srow-t">Читать через sudo на источнике${tipHTML("Если часть файлов на главном NAS недоступна пользователю (ошибки «Permission denied») — rsync на источнике запускается через sudo и читает всё. Требуется беспарольный sudo для rsync на источнике: в /etc/sudoers.d добавить строку вида «"+(c.user||"oleg")+" ALL=(root) NOPASSWD: /usr/bin/rsync».")}</div><div class="srow-d">лечит «Permission denied» на части файлов</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="cSudo"${c.remote_sudo?" checked":""}><span class="sl"></span></label></div></div>
-   <div class="srow"><div class="srow-l"><div class="srow-t">Ограничение скорости${tipHTML("Лимит скорости передачи в КБ/с (rsync --bwlimit), чтобы бэкап не забивал сеть и диск. 0 — без ограничения.")}</div><div class="srow-d">чтобы не забивать сеть/диск</div></div><div class="srow-c"><input class="mono" id="cBw" style="max-width:90px" value="${c.bwlimit||0}"><span style="color:var(--mut);font-size:12px">КБ/с</span></div></div>
+ /* ── Подключения: ДВЕ независимые стороны. Источник — этот NAS, SSH-сервер или
+    rsync-демон; приёмник — этот NAS или SSH-сервер (в т.ч. rsync.net). Обе удалённые
+    (SSH→SSH) rsync не умеет напрямую, поэтому источник монтируется по sshfs, и копия
+    идёт через этот NAS — об этом пишем прямо в карточке. ── */
+ const KINDS_SRC=[["local","Этот NAS"],["ssh","SSH-сервер"],["rsyncd","rsync-демон"]];
+ const KINDS_DST=[["local","Этот NAS"],["ssh","SSH-сервер"]];
+ function sideCard(w){
+  const c=CFG,S=(w==="src"?c.src:c.dst)||{kind:"local"},rem=S.kind!=="local";
+  const kinds=w==="src"?KINDS_SRC:KINDS_DST,ttl=w==="src"?"Источник":"Приёмник";
+  const key=S.auth==="key",rnet=S.provider==="rsyncnet",kinfo=c.key||{};
+  return `<div class="nb-dest" data-side="${w}">
+   <div class="nb-dest-h"><span class="nb-dest-t">${svg(rem?"net":"folder",15)} ${ttl}</span>
+    <span class="nb-dest-w mono">${rem?esc((S.user||"?")+"@"+(S.host||"не задан")):(w==="src"?"папки этого NAS":"папка этого NAS")}</span>
+    <div class="seg sm" id="k_${w}">${kinds.map(([v,l])=>`<button data-v="${v}" class="${S.kind===v?"on":""}">${l}</button>`).join("")}</div></div>
+   ${rem?`<div class="nb-grid2">
+    <label>Адрес<input class="mono" id="h_${w}" value="${att(S.host||"")}" placeholder="${w==="dst"&&rnet?"usw-s001.rsync.net":"192.168.1.50"}"></label>
+    <label>Пользователь<input class="mono" id="u_${w}" value="${att(S.user||"")}" placeholder="${w==="dst"&&rnet?"de1234":"oleg"}"></label>
+    ${S.kind==="ssh"?`<label>Порт<input class="mono" id="p_${w}" value="${S.port||22}"></label>`:""}
+    <label>Пароль<input type="password" class="mono" id="w_${w}" placeholder="${S.has_password?"•••••• (задан)":"пароль"}"></label>
+   </div>
+   ${S.kind==="ssh"?`<div class="srow" style="padding:8px 0 0"><div class="srow-l"><div class="srow-t">Как входить</div><div class="srow-d">${key?"ключ панели (пароль нужен один раз — поставить ключ)":"пароль хранится в конфиге"}</div></div><div class="srow-c"><div class="seg sm" id="a_${w}"><button data-v="password" class="${key?"":"on"}">Пароль</button><button data-v="key" class="${key?"on":""}">Ключ</button></div></div></div>`:""}
+   ${w==="dst"&&S.kind==="ssh"?`<div class="srow" style="padding:6px 0 0"><div class="srow-l"><div class="srow-t">Тип сервера</div><div class="srow-d">${rnet?"путь от домашней папки, без ведущего «/»; чистить архив не надо — там ZFS-снимки":"обычный сервер с SSH и rsync"}</div></div><div class="srow-c"><div class="seg sm" id="v_${w}"><button data-v="" class="${rnet?"":"on"}">Обычный</button><button data-v="rsyncnet" class="${rnet?"on":""}">rsync.net</button></div></div></div>`:""}
+   ${key?`<div class="nb-field" style="margin-top:8px"><label>Ключ этого NAS</label>
+    <textarea class="mono" id="pub_${w}" readonly rows="2" style="width:100%;font-size:11px;resize:vertical">${esc(kinfo.pubkey||"ключ ещё не создан")}</textarea>
+    <div class="nb-field-row" style="margin-top:6px"><button class="btn sm" id="kg_${w}">${svg("key",13)} ${kinfo.exists?"Пересоздать":"Создать ключ"}</button>
+     <button class="btn sm" id="kc_${w}" ${kinfo.exists?"":"disabled"}>${svg("copy",13)} Копировать</button>
+     <button class="btn sm pri" id="kp_${w}" ${kinfo.exists?"":"disabled"}>${svg("upload",13)} Установить на сервер</button></div></div>`:""}
+   ${S.kind==="ssh"&&w==="src"?`<label class="nb-chk" style="margin-top:8px"><input type="checkbox" id="su_src" ${c.remote_sudo?"checked":""}> Читать через sudo на источнике${tipHTML("Если файлы источника принадлежат другому пользователю. На источнике нужен NOPASSWD sudo для rsync.")}</label>`:""}`
+   :`<div class="srow-d">${w==="src"?"Копируем папки самого NAS (выберете их во вкладке «Что копировать»).":"Копия ложится в папку на этом NAS — обычно на внешнем USB-диске. Диск не подключён → прогон безопасно пропускается."}</div>`}
+  </div>`;}
+
+ function tabConn(tc){const c=CFG;
+  const both=c.both_remote;
+  tc.innerHTML=`<h3 class="set-title">Подключения</h3><p class="set-sub">Откуда берём и куда кладём. Стороны независимы: любая может быть этим NAS или удалённым сервером.</p>
+   ${sideCard("src")}
+   <div class="nb-arrow-row">${svg("arrowup",16)}</div>
+   ${sideCard("dst")}
+   ${both?`<div class="nb-dwarn">Обе стороны удалённые. rsync так не умеет напрямую, поэтому источник монтируется на этот NAS (sshfs), и данные идут ЧЕРЕЗ него: скорость ограничена его каналом, трафик считается дважды.</div>`:""}
    ${verifyRow(c)}
-   <div class="set-savebar"><span class="sb-left nb-saved" id="cSaved"></span><button class="btn sm" id="cTest">${svg("refresh",13)} Проверить связь</button><button class="btn sm pri" id="cSave">${svg("save",13)} Сохранить</button></div>
+   <div class="srow"><div class="srow-l"><div class="srow-t">Ограничение скорости${tipHTML("Лимит скорости передачи в КБ/с (rsync --bwlimit). 0 — без ограничения.")}</div></div><div class="srow-c"><input class="mono" id="cBw" style="max-width:90px" value="${c.bwlimit||0}"><span style="color:var(--mut);font-size:12px">КБ/с</span></div></div>
+   <div class="set-savebar"><span class="sb-left nb-saved" id="cSaved"></span><button class="btn sm" id="cTest">${svg("refresh",13)} Проверить</button></div>
    <div class="nb-testr" id="cTestR"></div>`;
-  const g=s=>tc.querySelector(s);
-  wireSeg(tc,"#cTr",v=>{g("#cPortRow").style.display=v==="ssh"?"":"none";const hh=MHELP[v];g("#cHelp").innerHTML=`<b>${esc(hh.t)}</b><span>${esc(hh.d)}</span>`;saveCfg({transport:v}).then(()=>tabConn(tc));});
-  // явное сохранение всех полей + подтверждение (поля также сохраняются по blur)
-  const saveConn=async()=>{const patch={host:g("#cHost").value.trim(),user:g("#cUser").value.trim(),ssh_port:+g("#cPort").value||22};
-    if(g("#cPw").value)patch.password=g("#cPw").value;await saveCfg(patch);
-    const sv=g("#cSaved");sv.textContent=nasTr("✓ сохранено");sv.classList.add("show");setTimeout(()=>sv.classList.remove("show"),2000);};
-  g("#cSave").onclick=saveConn;
-  g("#cHost").onchange=()=>saveCfg({host:g("#cHost").value.trim()});
-  g("#cUser").onchange=()=>saveCfg({user:g("#cUser").value.trim()});
-  g("#cPw").onchange=()=>{if(g("#cPw").value)saveCfg({password:g("#cPw").value});};
-  g("#cPort").onchange=()=>saveCfg({ssh_port:+g("#cPort").value||22});
-  {const su=g("#cSudo");if(su)su.onchange=()=>saveCfg({remote_sudo:su.checked});}
+  const g=q=>tc.querySelector(q);
+  ["src","dst"].forEach(w=>{
+   const S=(w==="src"?CFG.src:CFG.dst)||{};
+   wireSeg(tc,"#k_"+w,v=>saveCfg({[w]:{kind:v}}).then(()=>tabConn(tc)));
+   wireSeg(tc,"#a_"+w,v=>saveCfg({[w]:{auth:v}}).then(()=>tabConn(tc)));
+   wireSeg(tc,"#v_"+w,v=>saveCfg({[w]:{provider:v}}).then(()=>tabConn(tc)));
+   const h=g("#h_"+w);if(h)h.onchange=()=>saveCfg({[w]:{host:h.value.trim()}});
+   const u=g("#u_"+w);if(u)u.onchange=()=>saveCfg({[w]:{user:u.value.trim()}});
+   const pt=g("#p_"+w);if(pt)pt.onchange=()=>saveCfg({[w]:{port:+pt.value||22}});
+   const pw=g("#w_"+w);if(pw)pw.onchange=()=>{if(pw.value)saveCfg({[w]:{password:pw.value}});};
+   const kg=g("#kg_"+w);if(kg)kg.onclick=async()=>{
+    if((CFG.key||{}).exists&&!confirm("Пересоздать ключ? Старый перестанет подходить к серверам, куда уже установлен."))return;
+    const r=await nbP("/api/backup/key",{action:"gen",force:true});
+    if(r&&r.ok){CFG.key=r;toast("Ключ создан");tabConn(tc);}else toast((r&&r.log)||"не вышло");};
+   const kc=g("#kc_"+w);if(kc)kc.onclick=()=>{const t=g("#pub_"+w);if(navigator.clipboard)navigator.clipboard.writeText(t.value);toast("Скопировано");};
+   const kp=g("#kp_"+w);if(kp)kp.onclick=async()=>{toast("Ставлю ключ на сервер…");
+    const r=await nbP("/api/backup/key",{action:"install",side:w});
+    toast(r&&r.ok?"Ключ установлен ✓":((r&&r.log)||"не вышло"));};
+  });
+  {const su=g("#su_src");if(su)su.onchange=()=>saveCfg({remote_sudo:su.checked});}
   {const bw=g("#cBw");if(bw)bw.onchange=()=>saveCfg({bwlimit:+bw.value||0});}
   wireVerify(tc);
   g("#cTest").onclick=async()=>{const rr=g("#cTestR");rr.innerHTML=`<span class="nb-ok" style="color:var(--mut)">проверяю…</span>`;
    const t=await nbP("/api/backup/test");
-   if(t&&t.ok)rr.innerHTML=`<span class="nb-ok">✓ ${esc(t.log||"работает")}${t.modules&&t.modules.length?" · модули: "+esc(t.modules.join(", ")):""}</span>`;
+   if(t&&t.ok)rr.innerHTML=`<span class="nb-ok">✓ ${esc(t.log||"работает")}</span>`;
    else rr.innerHTML=`<div class="nb-err">✗ ${esc((t&&t.log)||"нет связи")}</div>`;};
  }
+
  /* ── Приёмник: отдельный заметный блок вверху «Что копировать». У push — табы
     «Локально | SSH-сервер» (тот же transport, что на вкладке «Приёмник»), у pull
     приёмник может быть только локальным, поэтому вместо табов пояснение. ── */
- const destCard=()=>{const c=CFG,push=isPush(),ssh=c.transport==="ssh",rnet=c.provider==="rsyncnet";
-  const who=push?(ssh?`${esc(c.user||"?")}@${esc(c.host||"не задан")}${rnet?" · rsync.net":""}`:"диск этого NAS")
-                :"папка на этом NAS";
-  const ph=push?(ssh?(rnet?host()+"-backup":"/mnt/backup/"+host()):"/media/usb-disk/backup")
-               :"/mnt/storage/nas-backup";
+ const destCard=()=>{const c=CFG,D=c.dst||{kind:"local"},ssh=D.kind==="ssh",rnet=D.provider==="rsyncnet";
+  const who=ssh?`${esc(D.user||"?")}@${esc(D.host||"не задан")}${rnet?" · rsync.net":""}`:"папка этого NAS";
+  const ph=ssh?(rnet?host()+"-backup":"/mnt/backup/"+host()):"/media/usb-disk/backup";
   return `<div class="nb-dest">
    <div class="nb-dest-h"><span class="nb-dest-t">${svg(ssh&&push?"net":"folder",15)} Приёмник</span>
     <span class="nb-dest-w mono">${who}</span>
-    ${push?`<div class="seg sm" id="dTr"><button data-v="local" class="${ssh?"":"on"}">Локально</button><button data-v="ssh" class="${ssh?"on":""}">SSH-сервер</button></div>`:""}</div>
+    <div class="seg sm" id="dTr"><button data-v="local" class="${ssh?"":"on"}">Этот NAS</button><button data-v="ssh" class="${ssh?"on":""}">SSH-сервер</button></div></div>
    <div class="nb-field-row"><input class="mono" id="sBase" value="${att(c.dest_base||"")}" placeholder="${esc(ph)}"><button class="btn sm" id="sBaseB">${svg("folder",13)} Выбрать</button>
-    ${push&&ssh?`<button class="btn sm" id="dConn">${svg("key",13)} Подключение</button>`:""}</div>
+    ${ssh?`<button class="btn sm" id="dConn">${svg("key",13)} Подключение</button>`:""}</div>
    ${!c.dest_base?`<div class="nb-dwarn" style="margin-top:8px">Приёмник не выбран — без него прогон не запустится.</div>`:""}
-   ${push&&ssh&&rnet?`<div class="srow-d" style="margin-top:7px">rsync.net: путь от домашней папки, без ведущего «/» (например ${esc(host())}-backup).</div>`:""}
-   ${!push?`<div class="srow-d" style="margin-top:7px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">Профиль ЗАБИРАЕТ данные сюда, поэтому приёмник — папка на самом NAS. Чтобы ОТПРАВЛЯТЬ наружу (SSH-сервер, rsync.net, USB-диск), нужен профиль «Отправить с этого NAS».<button class="btn sm" id="sMkPush">${svg("upload",13)} Создать такой профиль</button></div>`:""}
+   ${ssh&&rnet?`<div class="srow-d" style="margin-top:7px">rsync.net: путь от домашней папки, без ведущего «/» (например ${esc(host())}-backup).</div>`:""}
   </div>`;};
 
  /* ── Что копировать ── */
@@ -6396,12 +6432,11 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
     box.appendChild(row);});};
   drawJobs();
   wireSeg(tc,"#sDm",v=>saveCfg({dest_mode:v}).then(()=>tabSources(tc)));
-  wireSeg(tc,"#dTr",v=>saveCfg({transport:v}).then(()=>tabSources(tc)));
+  wireSeg(tc,"#dTr",v=>saveCfg({dst:{kind:v}}).then(()=>tabSources(tc)));
   {const dc=g("#dConn");if(dc)dc.onclick=()=>{tab="conn";render();};}
   // redraw after saving: the server re-derives every job's dest from the new base, so the
   // list must be repainted — otherwise it keeps showing the destinations of the old folder
-  const mkp=g("#sMkPush");if(mkp)mkp.onclick=()=>addDlg("push");
-  const remoteDest=()=>isPush()&&CFG.transport==="ssh";
+  const remoteDest=()=>((CFG.dst||{}).kind==="ssh");
   const saveDest=async v=>{
    if(v&&!remoteDest()&&!/^\/(mnt|media|srv|home)\//.test(v)){
     toast("Папка-приёмник должна быть в /mnt, /media, /srv или /home");return;}
@@ -6816,32 +6851,21 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
  const curProf=()=>PROFS.find(x=>x.id===NB_PID)||PROFS[0]||{};
  const switchTo=id=>{if(id===NB_PID)return;NB_PID=id;tab="overview";nbCursor=0;nbStarted=null;render();};
 
- const addDlg=(dir0="pull")=>{const s=document.getElementById("scrim"),src=curProf();
-  const DHELP={pull:"Забрать данные с другого NAS/сервера на этот (классический бэкап сюда).",
-   push:"Отправить папки ЭТОГО NAS наружу: на внешний USB-диск или на другой сервер по SSH. Приёмник выберете после создания."};
+ const addDlg=()=>{const s=document.getElementById("scrim"),src=curProf();
   s.innerHTML=`<div class="dialog"><h3>Новый бэкап</h3>
     <div class="mon-note" style="margin:0 0 10px">Отдельный профиль: своё подключение, свои папки, своё расписание и своя история. Ничего общего с остальными.</div>
-    <div class="field"><label>Направление</label><div class="seg" id="npDir"><button data-v="pull" class="${dir0==="push"?"":"on"}">Забрать с другого NAS</button><button data-v="push" class="${dir0==="push"?"on":""}">Отправить с этого NAS</button></div></div>
-    <div class="mon-note" id="npDirHelp" style="margin:0 0 10px">${esc(DHELP[dir0])}</div>
+    <div class="mon-note" style="margin:0 0 10px">Откуда и куда копировать — настроите потом во вкладке «Подключения»: любая сторона может быть этим NAS или удалённым сервером.</div>
     <div class="field"><label>Название</label><input id="npName" placeholder="Например: Резервный NAS"></div>
     <label class="nb-chk"><input type="checkbox" id="npClone"> Скопировать подключение и исключения из «${esc(src.name||"")}»</label>
     <div class="mon-note" style="margin:10px 0 0">Источники и расписание не копируются: пути на другом NAS свои, а два включённых расписания сразу — неприятный сюрприз.</div>
     <div class="r"><button class="btn" id="npX">Отмена</button><button class="btn pri" id="npOk">Создать</button></div></div>`;
   s.classList.add("show");const nm=s.querySelector("#npName");nm.focus();
-  let dir=dir0;
-  const dirSeg=s.querySelector("#npDir"),clone=s.querySelector("#npClone");
-  dirSeg.querySelectorAll("button").forEach(b=>b.onclick=()=>{if(clone.checked)return;
-    dirSeg.querySelectorAll("button").forEach(x=>x.classList.toggle("on",x===b));
-    dir=b.dataset.v;s.querySelector("#npDirHelp").textContent=nasTr(DHELP[dir]);});
-  clone.onchange=()=>{dirSeg.style.opacity=clone.checked?".45":"";   // a clone inherits the source profile's direction
-    if(clone.checked){dir=src.direction||"pull";
-      dirSeg.querySelectorAll("button").forEach(x=>x.classList.toggle("on",x.dataset.v===dir));
-      s.querySelector("#npDirHelp").textContent=nasTr(DHELP[dir]);}};
+  const clone=s.querySelector("#npClone");
   s.querySelector("#npX").onclick=()=>s.classList.remove("show");
   s.querySelector("#npOk").onclick=async()=>{
+    // направление больше не спрашиваем: стороны настраиваются во вкладке «Подключения»
     const r=await api("/api/backup/profile",{method:"POST",body:JSON.stringify(
-      {action:"add",name:nm.value.trim(),clone_from:clone.checked?src.id:"",
-       direction:clone.checked?"":dir})});
+      {action:"add",name:nm.value.trim(),clone_from:clone.checked?src.id:""})});
     if(!(r&&r.ok)){toast("Ошибка: "+((r&&r.log)||"?"));return;}
     s.classList.remove("show");NB_PID=r.id;tab="conn";render();toast("Профиль создан");};};
 
