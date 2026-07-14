@@ -158,6 +158,14 @@
   .gline{display:flex;flex-direction:column;gap:1px;margin-bottom:4px}
   .gline .gh{display:flex;font-size:11px;color:var(--dim)}
   .gline .gh b{margin-left:auto;color:var(--ink);font-size:12px}
+  /* charts card: three fixed-height charts left a dead band at the card bottom —
+     stretch each row over the full body height instead (viewBox scales freely,
+     strokes are non-scaling). Scoped to #c_gr: the full-screen sheet keeps its own h. */
+  #c_gr .body{display:flex;flex-direction:column}
+  #c_gr .gline{flex:1;min-height:0;margin-bottom:0}
+  #c_gr .gline+.gline{margin-top:5px}
+  #c_gr .chart{flex:1;min-height:0;display:flex}
+  #c_gr .chart svg{height:100% !important;flex:1}
   .avb{display:flex;align-items:center;gap:8px;flex:1;min-width:0}
   .avb .lbl{font-size:10.5px;letter-spacing:.6px;text-transform:uppercase;color:var(--mut);font-weight:650;flex:none}
   .avb .bars{display:flex;gap:1px;align-items:flex-end;height:15px;flex:1}
