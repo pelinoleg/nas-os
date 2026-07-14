@@ -910,6 +910,17 @@
   .nb-sum.bad b{color:var(--danger)}
   .nb-sum-i{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--dim);padding:2px 0 0 2px}
   .nb-sum-h{font-size:11.5px;color:var(--mut);padding-top:4px}
+  /* приёмник — отдельный заметный блок: стекло + рамка, табы транспорта в шапке */
+  .nb-dest{background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);padding:13px 14px;margin:4px 0 16px}
+  .nb-dest-h{display:flex;align-items:center;gap:10px;margin-bottom:9px;flex-wrap:wrap}
+  .nb-dest-t{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:650;color:var(--text)}
+  .nb-dest-t svg{color:var(--accent)}
+  .nb-dest-w{font-size:11.5px;color:var(--mut);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .nb-dest .seg{margin-left:auto}
+  /* компактный сегмент в шапке карточки (класса .seg.sm в системе не было) */
+  .nb-dest .seg.sm button{padding:4px 10px;font-size:11.5px}
+  .nb-dest .nb-field-row{display:flex;gap:8px;align-items:center}
+  .nb-dest input{flex:1;min-width:0}
   .nb-dwarn{font-size:12px;line-height:1.45;border-radius:var(--r-sm);padding:8px 10px;margin-bottom:8px;color:var(--text);
     background:color-mix(in srgb,var(--danger) 12%,transparent);border:1px solid color-mix(in srgb,var(--danger) 35%,transparent)}
   .nb-dwarn.wrn{background:color-mix(in srgb,var(--warn) 12%,transparent);border-color:color-mix(in srgb,var(--warn) 35%,transparent)}
@@ -6344,15 +6355,33 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
    if(t&&t.ok)rr.innerHTML=`<span class="nb-ok">✓ ${esc(t.log||"работает")}${t.modules&&t.modules.length?" · модули: "+esc(t.modules.join(", ")):""}</span>`;
    else rr.innerHTML=`<div class="nb-err">✗ ${esc((t&&t.log)||"нет связи")}</div>`;};
  }
- /* ── Источники ── */
+ /* ── Приёмник: отдельный заметный блок вверху «Что копировать». У push — табы
+    «Локально | SSH-сервер» (тот же transport, что на вкладке «Приёмник»), у pull
+    приёмник может быть только локальным, поэтому вместо табов пояснение. ── */
+ const destCard=()=>{const c=CFG,push=isPush(),ssh=c.transport==="ssh",rnet=c.provider==="rsyncnet";
+  const who=push?(ssh?`${esc(c.user||"?")}@${esc(c.host||"не задан")}${rnet?" · rsync.net":""}`:"диск этого NAS")
+                :"папка на этом NAS";
+  const ph=push?(ssh?(rnet?host()+"-backup":"/mnt/backup/"+host()):"/media/usb-disk/backup")
+               :"/mnt/storage/nas-backup";
+  return `<div class="nb-dest">
+   <div class="nb-dest-h"><span class="nb-dest-t">${svg(ssh&&push?"net":"folder",15)} Приёмник</span>
+    <span class="nb-dest-w mono">${who}</span>
+    ${push?`<div class="seg sm" id="dTr"><button data-v="local" class="${ssh?"":"on"}">Локально</button><button data-v="ssh" class="${ssh?"on":""}">SSH-сервер</button></div>`:""}</div>
+   <div class="nb-field-row"><input class="mono" id="sBase" value="${att(c.dest_base||"")}" placeholder="${esc(ph)}"><button class="btn sm" id="sBaseB">${svg("folder",13)} Выбрать</button>
+    ${push&&ssh?`<button class="btn sm" id="dConn">${svg("key",13)} Подключение</button>`:""}</div>
+   ${!c.dest_base?`<div class="nb-dwarn" style="margin-top:8px">Приёмник не выбран — без него прогон не запустится.</div>`:""}
+   ${push&&ssh&&rnet?`<div class="srow-d" style="margin-top:7px">rsync.net: путь от домашней папки, без ведущего «/» (например ${esc(host())}-backup).</div>`:""}
+   ${!push?`<div class="srow-d" style="margin-top:7px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">Профиль ЗАБИРАЕТ данные сюда, поэтому приёмник — папка на самом NAS. Чтобы ОТПРАВЛЯТЬ наружу (SSH-сервер, rsync.net, USB-диск), нужен профиль «Отправить с этого NAS».<button class="btn sm" id="sMkPush">${svg("upload",13)} Создать такой профиль</button></div>`:""}
+  </div>`;};
+
+ /* ── Что копировать ── */
  function tabSources(tc){const c=CFG,push=isPush(),per=!isPushSsh()&&c.dest_mode==="per";
   tc.innerHTML=`<h3 class="set-title">Источники</h3><p class="set-sub">${push?"Какие папки этого NAS отправлять в приёмник.":"Какие папки главного NAS копировать и куда."}</p>
+   ${destCard()}
    ${isPushSsh()?"":`<div class="srow"><div class="srow-l"><div class="srow-t">Режим приёмника${tipHTML("Единая папка — всё в одну папку по подпапкам. Отдельно для каждой — у каждого источника своя папка-приёмник.")}</div><div class="srow-d">${per?"у каждого источника своя папка":"всё в одну папку по подпапкам"}</div></div><div class="srow-c"><div class="seg" id="sDm"><button data-v="single" class="${!per?"on":""}">Единая папка</button><button data-v="per" class="${per?"on":""}">Отдельно</button></div></div></div>`}
    <div style="display:flex;justify-content:space-between;align-items:center;margin:16px 0 6px"><span class="set-h" style="margin:0;padding:0;border:none">Что копировать</span><button class="btn sm pri" id="sAdd">${svg("plus",13)} ${push?"Выбрать папки":"Выбрать с NAS"}</button></div>
    <div id="sJobs"></div>
-   ${!per&&!push?`<div class="nb-field" style="margin-top:14px"><label>Общая папка-приёмник${tipHTML("Локальная папка на этом NAS, куда попадёт всё выбранное (каждый источник — своей подпапкой).")}</label><div class="nb-field-row"><input class="mono" id="sBase" value="${att(c.dest_base||"/mnt/storage/nas-backup")}"><button class="btn sm" id="sBaseB">${svg("folder",13)} Выбрать</button></div>
-    <div class="srow-d" style="margin-top:7px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">Профиль ЗАБИРАЕТ данные сюда — поэтому приёмник это папка на самом NAS. Чтобы ОТПРАВЛЯТЬ наружу (SSH-сервер, rsync.net, USB-диск), нужен профиль «Отправить с этого NAS».<button class="btn sm" id="sMkPush">${svg("upload",13)} Создать такой профиль</button></div></div>`:""}
-   ${push&&!c.dest_base?`<div class="nb-dwarn" style="margin-top:12px">Приёмник ещё не выбран — задайте его на вкладке «Приёмник», иначе бэкап не запустится.</div>`:""}
+
    <details class="nb-det"><summary class="nb-sum">Исключения${tipHTML("Шаблоны rsync (по одному в строке): что не копировать — мусор, кэши, служебное.")}</summary>
      <textarea id="sExcl" class="nb-excl" spellcheck="false">${esc((c.excludes||[]).join("\n"))}</textarea>
      <div style="display:flex;gap:8px;margin-top:6px"><button class="btn sm" id="sExDev">${svg("code",13)} Добавить шаблоны разработки</button><button class="btn sm" id="sExReset">Сбросить по умолчанию</button></div>
@@ -6367,11 +6396,25 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
     box.appendChild(row);});};
   drawJobs();
   wireSeg(tc,"#sDm",v=>saveCfg({dest_mode:v}).then(()=>tabSources(tc)));
+  wireSeg(tc,"#dTr",v=>saveCfg({transport:v}).then(()=>tabSources(tc)));
+  {const dc=g("#dConn");if(dc)dc.onclick=()=>{tab="conn";render();};}
   // redraw after saving: the server re-derives every job's dest from the new base, so the
   // list must be repainted — otherwise it keeps showing the destinations of the old folder
   const mkp=g("#sMkPush");if(mkp)mkp.onclick=()=>addDlg("push");
-  const bb=g("#sBase");if(bb)bb.onchange=()=>saveCfg({dest_base:bb.value.trim()}).then(drawJobs);
-  const bbB=g("#sBaseB");if(bbB)bbB.onclick=()=>nbPickLocal(bb.value||"/mnt",p=>{bb.value=p;saveCfg({dest_base:p}).then(drawJobs);});
+  const remoteDest=()=>isPush()&&CFG.transport==="ssh";
+  const saveDest=async v=>{
+   if(v&&!remoteDest()&&!/^\/(mnt|media|srv|home)\//.test(v)){
+    toast("Папка-приёмник должна быть в /mnt, /media, /srv или /home");return;}
+   await saveCfg({dest_base:v});
+   // единая папка: приёмник каждой задачи выводится из базы — пересобираем
+   if(v&&CFG.dest_mode!=="per"&&JOBS.length){JOBS.forEach(j=>{j.dest=destFor(j.src);});await saveCfg({jobs:JOBS});}
+   drawJobs();};
+  const bb=g("#sBase");if(bb)bb.onchange=()=>saveDest(bb.value.trim());
+  const bbB=g("#sBaseB");if(bbB)bbB.onclick=()=>{
+   if(remoteDest()){
+    if(!CFG.host||!CFG.user){toast("Сначала заполните подключение (адрес и пользователя)");return;}
+    nbPickDest(bb.value.trim(),p=>{bb.value=p;saveDest(p);});
+   }else nbPickLocal(bb.value||"/mnt",p=>{bb.value=p;saveDest(p);});};
   g("#sAdd").onclick=()=>{
     if(push&&!CFG.dest_base){toast("Сначала выберите приёмник (вкладка «Приёмник»)");return;}
     // существующие per-job исключения → абсолютные пути для преселекта дерева
