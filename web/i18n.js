@@ -2758,6 +2758,7 @@ window.NAS_I18N = { en: {
 "Наблюдение за хостами": "Host watch",
 "Плата": "Board",
 "Цвета статусов": "Status colors",
+"Заголовок был скрыт — включил": "The title was hidden — turned it on",
 "Подсветка": "Backlight",
 "Яркость экранов": "Screen brightness",
 "для ESP32-плат; применяется на следующем опросе (плитка «Яркость» на экране показывает уровень)": "for ESP32 boards; applied on the next poll (the on-screen Brightness tile shows the level)",
