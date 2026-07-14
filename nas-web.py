@@ -13445,7 +13445,10 @@ arduino-cli compile --fqbn %(fqbn)s --build-path %(build)s %(sketch)s
 echo '== заливка приложения =='
 arduino-cli upload -p %(port)s --fqbn %(fqbn)s --input-dir %(build)s %(sketch)s
 echo '== запись конфигурации (Wi-Fi, адрес NAS, токен) =='
-esptool --chip esp32s3 --port %(port)s --after hard_reset write_flash %(addr)s %(cfg)s
+# esptool из ядра esp32: дебиановский пакет битый для S3 (нет stub_flasher json)
+ESPT=$(ls -d /opt/arduino-cli/data/packages/esp32/tools/esptool_py/*/esptool 2>/dev/null | head -1)
+[ -x "$ESPT" ] || ESPT=esptool
+"$ESPT" --chip esp32s3 --port %(port)s --after hard_reset write_flash %(addr)s %(cfg)s
 echo '== готово: экран перезагружается с новой прошивкой =='""" % {
                     "wiz": shlex.quote(os.path.join(HERE, "nas-wizard.sh")),
                     "fqbn": shlex.quote(ESP32_FQBN), "build": shlex.quote(build),

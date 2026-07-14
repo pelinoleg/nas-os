@@ -17,6 +17,12 @@
 #include <ArduinoJson.h>
 #include <TFT_eSPI.h>
 
+// Types must precede the FIRST function definition: the Arduino sketch
+// preprocessor inserts auto-generated prototypes there, and any prototype
+// returning a later-defined struct fails ('Anchor' does not name a type).
+struct Anchor { int datum, x, y; };
+struct Style { const char *lp, *vp, *up; int ls, vs, us; };
+
 static const char* WIFI_SSID = "your-wifi";
 static const char* WIFI_PASS = "your-pass";
 static const char* NAS_HOST  = "192.168.1.48";   // NAS IP or hostname
@@ -179,7 +185,6 @@ int pickFont(int px, const String &s) {
 }
 
 // 9-grid position ("tl".."br") -> TFT datum + anchor point inside the tile
-struct Anchor { int datum, x, y; };
 Anchor posAnchor(const char* p, int x, int y, int w, int h) {
   int col = 1, row = 1;                                // default centre
   if (p && strlen(p) >= 1) {
@@ -197,7 +202,6 @@ Anchor posAnchor(const char* p, int x, int y, int w, int h) {
 }
 
 // per-size defaults, overridden by the tile's "st" style from the server
-struct Style { const char *lp, *vp, *up; int ls, vs, us; };
 Style defStyle(const char* size) {
   if (!strcmp(size, "s")) return {"cl", "cr", "val", 10, 12, 9};
   if (!strcmp(size, "l")) return {"tl", "c",  "val", 11, 26, 11};
