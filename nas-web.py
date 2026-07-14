@@ -12770,8 +12770,10 @@ class H(BaseHTTPRequestHandler):
                                       checked=int(last.get("ts") or 0), pct24=av.get("pct")))
                 self._json({"hosts": hosts})
             elif p == "/api/esp32/state":
+                # saved.pass отдаётся как есть: это домашний NAS, диалог за auth,
+                # а NM-подсказка может быть лишь производным WPA-ключом (64 hex,
+                # netplan-профиль) — реальный пароль знает только сам пользователь
                 saved = _json_load_strict(ESP32_FILE, {})
-                saved.pop("pass", None)          # пароль Wi-Fi наружу не отдаём
                 self._json({"ports": esp32_ports(), "ready": esp32_ready(),
                             "wifi": _safe(esp32_wifi_hint, {}) or {},
                             "host": (_safe(stats, {}) or {}).get("ip") or "",
@@ -13426,22 +13428,26 @@ class H(BaseHTTPRequestHandler):
                 blob = esp32_cfg_blob(b)
                 if not blob or not b.get("ssid") or not b.get("token"):
                     self._json({"ok": False, "log": "нужны Wi-Fi сеть и токен"}); return
+                # плата: classic (TFT_eSPI) или Long (AXS15231B через Arduino_GFX);
+                # у каждой свой кэш сборки — флаг компиляции меняет весь рендер
+                long_ = str(b.get("board") or "") == "s3long"
                 cfg_bin = os.path.join(NAS_CONFIG, "esp32-cfg.bin")
                 with open(cfg_bin, "wb") as f:
                     f.write(blob)
                 os.chmod(cfg_bin, 0o600)
-                saved = {k: str(b.get(k) or "") for k in ("ssid", "pass", "host", "screen")}
+                saved = {k: str(b.get(k) or "") for k in ("ssid", "pass", "host", "screen", "board")}
                 saved["ts"] = int(time.time())
                 _json_save(ESP32_FILE, saved, indent=2)   # маркер: переустановка вернёт тулчейн
                 env = dict(_C_ENV, **_ESP32_ENV)
-                build = "/opt/arduino-cli/build-esp32-glance"
+                build = "/opt/arduino-cli/build-esp32-glance" + ("-long" if long_ else "")
+                flags = "--build-property compiler.cpp.extra_flags=-DNAS_DISPLAY_LONG=1" if long_ else ""
                 script = """set -e
 if ! command -v arduino-cli >/dev/null || [ ! -d /opt/arduino-cli/data/packages/esp32 ]; then
   echo '== первый запуск: ставлю тулчейн (~1.5 ГБ, 10-30 минут) =='
   bash %(wiz)s api esp32tools
 fi
 echo '== сборка прошивки =='
-arduino-cli compile --fqbn %(fqbn)s --build-path %(build)s %(sketch)s
+arduino-cli compile --fqbn %(fqbn)s --build-path %(build)s %(flags)s %(sketch)s
 echo '== заливка приложения =='
 arduino-cli upload -p %(port)s --fqbn %(fqbn)s --input-dir %(build)s %(sketch)s
 echo '== запись конфигурации (Wi-Fi, адрес NAS, токен) =='
@@ -13453,7 +13459,8 @@ echo '== готово: экран перезагружается с новой �
                     "wiz": shlex.quote(os.path.join(HERE, "nas-wizard.sh")),
                     "fqbn": shlex.quote(ESP32_FQBN), "build": shlex.quote(build),
                     "sketch": shlex.quote(ESP32_SKETCH), "port": shlex.quote(port),
-                    "addr": ESP32_CFG_ADDR, "cfg": shlex.quote(cfg_bin)}
+                    "addr": ESP32_CFG_ADDR, "cfg": shlex.quote(cfg_bin),
+                    "flags": flags}
                 log_event("action", "Прошивка ESP32-экрана", "порт " + port, "ok",
                           kind="action", desk=True)
                 self._stream_cmd(["bash", "-c", script], env=env, timeout=3600)

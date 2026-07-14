@@ -15,7 +15,18 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
+
+// Board flavours: the classic T-Display-S3 (170x320 ST7789) renders through
+// TFT_eSPI; the T-Display-S3 Long (640x180 AXS15231B, QSPI) is not supported
+// by TFT_eSPI at all — it goes through the shim in disp_long.h (Arduino_GFX).
+// The NAS panel's flasher sets -DNAS_DISPLAY_LONG=1 for the Long.
+#if NAS_DISPLAY_LONG
+#include "disp_long.h"
+#define dispFlush() tft.flush()
+#else
 #include <TFT_eSPI.h>
+#define dispFlush()
+#endif
 
 // Types must precede the FIRST function definition: the Arduino sketch
 // preprocessor inserts auto-generated prototypes there, and any prototype
@@ -31,7 +42,11 @@ static const char* SCREEN_ID = "";               // empty = first screen; ids ar
 
 static uint32_t POLL_MS = 5000;
 static uint32_t PAGE_ROTATE_MS = 15000;          // 0 = manual (button) only
+#if NAS_DISPLAY_LONG
+static const int BTN1 = 0, BTN2 = -1;            // Long: GPIO14/21 belong to QSPI
+#else
 static const int BTN1 = 0, BTN2 = 14;            // T-Display-S3 buttons
+#endif
 
 // ---- config from flash --------------------------------------------------
 // The NAS panel (Настройки → Экран → «Прошить экран») writes a 4 KB block at
@@ -67,6 +82,28 @@ void loadCfg() {
 
 #if USE_TOUCH
 #include <Wire.h>
+#if NAS_DISPLAY_LONG
+// AXS15231B has the touch controller built in: I2C 0x3B on SDA=15 SCL=10,
+// read with a magic command, coords come in the panel's portrait 180x640
+static const int TP_SDA = 15, TP_SCL = 10;
+static const uint8_t TP_ADDR = 0x3B;
+void touchInit() { Wire.begin(TP_SDA, TP_SCL); }
+bool touchRead(int &x, int &y) {
+  static const uint8_t cmd[11] = {0xB5, 0xAB, 0xA5, 0x5A, 0, 0, 0, 8, 0, 0, 0};
+  Wire.beginTransmission(TP_ADDR);
+  Wire.write(cmd, sizeof cmd);
+  if (Wire.endTransmission() != 0) return false;
+  if (Wire.requestFrom((int)TP_ADDR, 8) < 8) return false;
+  uint8_t b[8];
+  for (int i = 0; i < 8; i++) b[i] = Wire.read();
+  if (!(b[1] & 0x0F)) return false;
+  // raw portrait coords, like the CST816 path: the swipe code in loop()
+  // already picks the long axis (raw Y) for landscape rotations
+  x = ((b[2] & 0x0F) << 8) | b[3];
+  y = ((b[4] & 0x0F) << 8) | b[5];
+  return true;
+}
+#else
 static const int TP_SDA = 18, TP_SCL = 17, TP_RST = 21;
 static const uint8_t TP_ADDR = 0x15;
 void touchInit() {
@@ -89,8 +126,13 @@ bool touchRead(int &x, int &y) {
   return true;
 }
 #endif
+#endif
 
+#if NAS_DISPLAY_LONG
+TFTCompat tft;
+#else
 TFT_eSPI tft;
+#endif
 JsonDocument DOC;              // last payload (kept for page redraws)
 bool haveDoc = false;
 long lastSeq = -1;
@@ -118,6 +160,7 @@ void drawStaleBadge() {
   tft.setTextColor(TFT_WHITE, TFT_RED);
   tft.drawString(s, x + (tw + 12) / 2, y + 9, 2);
   tft.setTextDatum(ML_DATUM);
+  dispFlush();
 }
 
 void drawOffline(const char* why) {
@@ -128,6 +171,7 @@ void drawOffline(const char* why) {
   tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
   tft.drawString(why, tft.width() / 2, tft.height() / 2 + 20, 2);
   tft.setTextDatum(ML_DATUM);
+  dispFlush();
 }
 
 void drawSpark(JsonArray sp, int x, int y, int w, int h) {
@@ -346,8 +390,8 @@ void drawPage() {
     }
   }
   JsonObject avail = DOC["avail"];
-  if (!(scrInfo["avail"] | true)) return;      // strip disabled for this screen
-  if (!avail.isNull()) drawAvail(avail, tft.height() - 12);
+  if ((scrInfo["avail"] | true) && !avail.isNull()) drawAvail(avail, tft.height() - 12);
+  dispFlush();
 }
 
 void poll() {
@@ -393,16 +437,24 @@ void flipPage(int dir) {
 }
 
 void setup() {
+#if !NAS_DISPLAY_LONG
+  // T-Display-S3: GPIO15 is PWR_EN of the LCD rail — without driving it HIGH
+  // the panel stays BLACK while the firmware runs fine (wifi, polls, serial).
+  // On the Long GPIO15 is the touch SDA — must be left alone.
+  pinMode(15, OUTPUT);
+  digitalWrite(15, HIGH);
+#endif
   Serial.begin(115200);
   loadCfg();                                // flash-config beats compiled defaults
   pinMode(BTN1, INPUT_PULLUP);
-  pinMode(BTN2, INPUT_PULLUP);
+  if (BTN2 >= 0) pinMode(BTN2, INPUT_PULLUP);
   tft.init();
   tft.setRotation(1);                       // landscape; use 0 for portrait
   tft.fillScreen(TFT_BLACK);
   tft.setTextDatum(ML_DATUM);
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.drawString("connecting...", 10, tft.height() / 2, 2);
+  dispFlush();
   WiFi.mode(WIFI_STA);
   WiFi.begin(C_ssid.c_str(), C_pass.c_str());
 #if USE_TOUCH
@@ -412,7 +464,7 @@ void setup() {
 
 void loop() {
   static int b1 = HIGH, b2 = HIGH;
-  int n1 = digitalRead(BTN1), n2 = digitalRead(BTN2);
+  int n1 = digitalRead(BTN1), n2 = BTN2 >= 0 ? digitalRead(BTN2) : HIGH;
   if (b1 == HIGH && n1 == LOW) flipPage(+1);
   if (b2 == HIGH && n2 == LOW) flipPage(-1);
   b1 = n1; b2 = n2;

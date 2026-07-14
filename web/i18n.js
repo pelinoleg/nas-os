@@ -2756,6 +2756,8 @@ window.NAS_I18N = { en: {
 "запись конфигурации (Wi-Fi, адрес NAS, токен)": "writing the configuration (Wi-Fi, NAS address, token)",
 "готово: экран перезагружается с новой прошивкой": "done: the display reboots with the new firmware",
 "Наблюдение за хостами": "Host watch",
+"Плата": "Board",
+"у Long другой контроллер дисплея — прошивки не взаимозаменяемы": "the Long has a different display controller — the firmwares are not interchangeable",
 "Пинг или TCP-проверка доменов и локальных серверов. Каждый хост становится плиткой конструктора («Хост · имя») с задержкой, статусом и историей доступности за 24 часа — видно на ESP32-экране сразу, когда что-то отвалилось.": "Ping or TCP checks for domains and local servers. Each host becomes a builder tile (\"Host · name\") with latency, status and a 24-hour availability history — the ESP32 display shows at a glance when something is down.",
 "пока не наблюдаем ни за чем": "not watching anything yet",
 "Добавить хост": "Add a host",

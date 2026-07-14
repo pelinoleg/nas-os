@@ -7447,8 +7447,9 @@ async function glanceTab(tc){
   <div class="set-h">Прошивка экрана (LilyGO T-Display-S3)</div>
   <div class="set-sub">Подключите плату по USB к NAS — панель соберёт и зальёт прошивку сама, вместе с настройками Wi-Fi и токеном. После этого экран работает автономно: USB нужен только для питания. Первая прошивка ставит тулчейн (~1.5 ГБ, 10–30 минут), дальше — пара минут.</div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Порт</div><div class="srow-d" id="e32PortD">ищу подключённые платы…</div></div><div class="srow-c"><select class="inp" id="e32Port" style="width:200px"></select><button class="btn sm" id="e32Ref">${svg("refresh",13)}</button></div></div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Плата</div><div class="srow-d">у Long другой контроллер дисплея — прошивки не взаимозаменяемы</div></div><div class="srow-c"><select class="inp" id="e32Board" style="width:200px"><option value="s3">T-Display-S3 (170×320)</option><option value="s3long">T-Display-S3 Long (640×180)</option></select></div></div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Wi-Fi сеть</div><div class="srow-d">к ней экран будет подключаться сам</div></div><div class="srow-c"><input class="inp" id="e32Ssid" style="width:200px" placeholder="SSID"></div></div>
-  <div class="srow"><div class="srow-l"><div class="srow-t">Пароль Wi-Fi</div></div><div class="srow-c"><input class="inp" type="password" id="e32Pass" style="width:200px"></div></div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Пароль Wi-Fi</div></div><div class="srow-c"><input class="inp" id="e32Pass" style="width:200px"></div></div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Адрес NAS</div><div class="srow-d">IP надёжнее имени: mDNS на ESP32 не всегда работает</div></div><div class="srow-c"><input class="inp mono" id="e32Host" style="width:200px"></div></div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Экран из конструктора</div><div class="srow-d">какой набор страниц показывать этому устройству</div></div><div class="srow-c"><select class="inp" id="e32Scr" style="width:200px"></select></div></div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Прошить</div><div class="srow-d">плата перезагрузится с новой прошивкой и сама подключится</div></div><div class="srow-c"><button class="btn pri" id="e32Go" disabled>${svg("zap",13)} Прошить</button></div></div>
@@ -7456,14 +7457,21 @@ async function glanceTab(tc){
   <div class="set-h">Наблюдение за хостами</div>
   <div class="set-sub">Пинг или TCP-проверка доменов и локальных серверов. Каждый хост становится плиткой конструктора («Хост · имя») с задержкой, статусом и историей доступности за 24 часа — видно на ESP32-экране сразу, когда что-то отвалилось.</div>
   <div id="hwList"><div class="set-sub">загрузка…</div></div>
-  <div class="srow"><div class="srow-l"><div class="srow-t">Добавить хост</div><div class="srow-d">домен или IP; для TCP — порт (22 = SSH, 443 = HTTPS)</div></div>
-   <div class="srow-c" style="flex-wrap:wrap;gap:6px;justify-content:flex-end">
-    <input class="inp" id="hwName" style="width:110px" placeholder="имя">
-    <input class="inp mono" id="hwTgt" style="width:150px" placeholder="host.example.com">
+  <div class="srow" style="display:block">
+   <div class="srow-t" style="margin-bottom:2px">Добавить хост</div>
+   <div class="srow-d" style="margin-bottom:8px">домен или IP; для TCP — порт (22 = SSH, 443 = HTTPS)</div>
+   <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px">
+    <input class="inp" id="hwName" style="flex:1;min-width:120px" placeholder="имя">
+    <input class="inp mono" id="hwTgt" style="flex:1.6;min-width:170px" placeholder="host.example.com">
+   </div>
+   <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">
     <div class="seg" id="hwType"><button data-v="ping" class="on">ping</button><button data-v="tcp">tcp</button></div>
-    <input class="inp mono" id="hwPort" type="number" style="width:70px;display:none" value="22" title="порт">
-    <input class="inp" id="hwIv" type="number" min="10" max="3600" style="width:70px" value="60" title="интервал, с">
-    <button class="btn sm pri" id="hwAdd">Добавить</button></div></div>
+    <span id="hwPortW" style="display:none;align-items:center;gap:5px"><span class="srow-d">порт</span>
+     <input class="inp mono" id="hwPort" type="number" style="width:72px" value="22"></span>
+    <span style="display:flex;align-items:center;gap:5px"><span class="srow-d">интервал, с</span>
+     <input class="inp" id="hwIv" type="number" min="10" max="3600" style="width:72px" value="60"></span>
+    <button class="btn sm pri" id="hwAdd" style="margin-left:auto">Добавить</button>
+   </div></div>
   <div class="set-h">Доступность</div>
   <div class="set-sub">Журнал доступности ведёт сторож сети: пингует шлюз и пишет состояние (онлайн / без сети / выключен). Полоски — в виджетах «Доступность · 24h / 30d» и в плитках avail.</div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Интервал проверки</div><div class="srow-d">чаще — точнее полоски, реже — меньше фоновой работы</div></div><div class="srow-c"><div class="seg" id="glPing">${[15,30,60,120].map(v=>`<button data-v="${v}" class="${(cfg.ping_interval||30)===v?"on":""}">${v}с</button>`).join("")}</div></div></div>`;
@@ -7486,15 +7494,16 @@ async function glanceTab(tc){
   q("#e32PortD").textContent=nasTr(ps.length?(ps.length+" устройств(о) найдено"+(st.ready?"":" · тулчейн поставится при первой прошивке")):"плата не найдена — подключите её по USB");
   q("#e32Go").disabled=!ps.length;
   if(!q("#e32Ssid").value) q("#e32Ssid").value=(st.saved&&st.saved.ssid)||(st.wifi&&st.wifi.ssid)||"";
-  if(!q("#e32Pass").value) q("#e32Pass").value=(st.wifi&&st.wifi.psk)||"";
+  if(!q("#e32Pass").value) q("#e32Pass").value=(st.saved&&st.saved.pass)||(st.wifi&&st.wifi.psk)||"";
   if(!q("#e32Host").value) q("#e32Host").value=(st.saved&&st.saved.host)||st.host||"";
+  if(st.saved&&st.saved.board) q("#e32Board").value=st.saved.board;
  }
  e32State();
  q("#e32Ref").onclick=e32State;
  q("#e32Go").onclick=()=>{
   if(!tok){toast("Сначала создайте токен");return;}
   const body={port:q("#e32Port").value,ssid:q("#e32Ssid").value.trim(),pass:q("#e32Pass").value,
-              host:q("#e32Host").value.trim(),token:tok,screen:scrSel.value};
+              host:q("#e32Host").value.trim(),token:tok,screen:scrSel.value,board:q("#e32Board").value};
   if(!body.ssid){toast("Укажите Wi-Fi сеть");return;}
   const con=q("#e32Con"); con.style.display="block"; q("#e32Go").disabled=true;
   streamPost("/api/esp32/flash",con,code=>{
@@ -7521,7 +7530,7 @@ async function glanceTab(tc){
  hwPaint();
  tc.querySelectorAll("#hwType button").forEach(b=>b.onclick=()=>{
   tc.querySelectorAll("#hwType button").forEach(x=>x.classList.toggle("on",x===b));
-  q("#hwPort").style.display=b.dataset.v==="tcp"?"":"none";});
+  q("#hwPortW").style.display=b.dataset.v==="tcp"?"flex":"none";});
  q("#hwAdd").onclick=async()=>{
   const target=q("#hwTgt").value.trim();
   if(!target){toast("Укажите адрес");return;}
