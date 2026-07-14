@@ -83,14 +83,14 @@ void loadCfg() {
 #if USE_TOUCH
 #include <Wire.h>
 #if NAS_DISPLAY_LONG
-// AXS15231B has the touch controller built in: I2C 0x3B on SDA=15 SCL=10,
-// reset on GPIO16, read with a magic command, coords in portrait 180x640
-static const int TP_SDA = 15, TP_SCL = 10, TP_RST = 16;
+// AXS15231B has the touch controller BUILT INTO the display chip: I2C 0x3B on
+// SDA=15 SCL=10. Its reset (GPIO16) is the same wire as the DISPLAY reset —
+// pulsing it here, after tft.init(), wiped the panel init and the screen went
+// black ("connecting..." flashed and vanished). The display driver owns the
+// reset; touch only opens the bus.
+static const int TP_SDA = 15, TP_SCL = 10;
 static const uint8_t TP_ADDR = 0x3B;
 void touchInit() {
-  pinMode(TP_RST, OUTPUT);                 // left floating, the controller can
-  digitalWrite(TP_RST, LOW); delay(10);    // wedge the bus and hang the loop
-  digitalWrite(TP_RST, HIGH); delay(120);
   Wire.begin(TP_SDA, TP_SCL);
   Wire.setTimeOut(50);
 }

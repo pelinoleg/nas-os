@@ -26,10 +26,12 @@ public:
     pinMode(1, OUTPUT);                     // TFT_BL of the Long
     digitalWrite(1, HIGH);
     bus = new Arduino_ESP32QSPI(12 /*CS*/, 17 /*SCK*/, 13, 18, 21, 14 /*D0-D3*/);
-    // RST is 47 (per the library's own LILYGO_T_Display_S3_LONG dev profile);
-    // GPIO16 from LilyGO's pins_config is the TOUCH reset — pulsing it here
-    // left the touch controller dead
-    panel = new Arduino_AXS15231B(bus, 47 /*RST*/, 0, false, 180, 640);
+    // RST is 16 — and it resets the WHOLE AXS15231B, display and touch alike
+    // (LilyGO lists it as both TFT_QSPI_RST and TOUCH_RES). Verified on the
+    // board: text rendered with 16; with 47 (the library's dev profile) plus a
+    // touch-side reset pulse AFTER init the panel went black — the "touch
+    // reset" was wiping the display init. Only the display driver may own it.
+    panel = new Arduino_AXS15231B(bus, 16 /*RST*/, 0, false, 180, 640);
     // ctor takes the PANEL-NATIVE dims (that exact bitmap goes out on flush);
     // rotation=1 remaps DRAWING coords, so width()/height() report 640x180.
     // Passing rotated dims here pushes a 640-wide frame into a 180-wide panel
