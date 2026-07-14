@@ -1665,6 +1665,11 @@ def glance_catalog():
         cat.append((s["id"], s["name"], s["name"]))
     for h in _safe(hostwatch_load, []) or []:
         cat.append(("hw:" + h["id"], "Хост · " + h["name"], "Host · " + h["name"]))
+    # смонтированные тома: свободное место плиткой (вид «шкала» = заполнение)
+    for d in (_safe(_screen_heavy, {}) or {}).get("disks") or []:
+        mts = d.get("mounts") or []
+        nm = "System" if "/" in mts else (os.path.basename(mts[0]) if mts else d.get("name") or "?")
+        cat.append(("dk:" + (d.get("name") or "?"), "Диск · " + nm, "Disk · " + nm))
     return cat
 
 # User check scripts: any executable in ~/nas-config/scripts/glance/ becomes a
@@ -1890,6 +1895,10 @@ def _gl_norm_style(st):
             out[k] = v
     if st.get("k") in ("value", "gauge", "bars", "spark"):
         out["k"] = st["k"]                            # представление; нет = авто
+    if st.get("nd"):
+        out["nd"] = 1                                 # спрятать точку статуса
+    if st.get("np") in _GL_POS:
+        out["np"] = st["np"]                          # позиция подписи (note)
     bg = st.get("bg")                                 # absent=default card
     if bg == "none" or (isinstance(bg, str) and _GL_COLOR.match(bg)):
         out["bg"] = bg
@@ -2233,6 +2242,17 @@ def _glance_tile(tid, en):
         fall = {"ok": "OK", "warn": "WARN", "danger": "FAIL"}[s["state"]]
         return {"value": s["text"] or fall, "unit": "", "state": s["state"],
                 "raw": {"state": s["state"], "text": s["text"]}}
+    if tid.startswith("dk:"):
+        d0 = next((x for x in (_safe(_screen_heavy, {}) or {}).get("disks") or []
+                   if x.get("name") == tid[3:]), None)
+        if not d0 or d0.get("used_pct") is None:
+            return None
+        pct = round(d0["used_pct"])
+        st = "danger" if pct >= 95 else ("warn" if pct >= 90 else "ok")
+        return {"value": _fmt_b(d0.get("free") or 0), "unit": "free" if en else "своб.",
+                "state": st, "note": (d0.get("model") or d0.get("name") or ""),
+                "raw": {"pct": pct, "free": d0.get("free"), "used": d0.get("used"),
+                        "size": d0.get("size"), "temp": d0.get("temp")}}
     if tid.startswith("hw:"):
         h = next((x for x in (_safe(hostwatch_load, []) or []) if x["id"] == tid[3:]), None)
         if not h:
@@ -2434,15 +2454,22 @@ _TRANSLIT = {"а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "
              "ъ": "", "ы": "y", "ь": "", "э": "e", "ю": "yu", "я": "ya"}
 
 
+_TR_SYM = {"↑": "^", "↓": "v", "→": ">", "←": "<", "—": "-", "–": "-", "…": "..."}
+
+
 def _translit(s):
-    """Cyrillic -> Latin for displays whose fonts are ASCII-only."""
+    """Cyrillic -> Latin for displays whose fonts are Latin-1-only. Arrows and
+    dashes map to ASCII lookalikes; Latin-1 itself (°, ·, ±) passes through —
+    the device fonts have those glyphs."""
     out = []
     for ch in str(s):
         lo = ch.lower()
         if lo in _TRANSLIT:
             t = _TRANSLIT[lo]
             out.append(t.capitalize() if ch.isupper() else t)
-        elif ord(ch) < 128:
+        elif ch in _TR_SYM:
+            out.append(_TR_SYM[ch])
+        elif ord(ch) < 0x100:
             out.append(ch)
         else:
             out.append("?")

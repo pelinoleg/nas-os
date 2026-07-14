@@ -3104,6 +3104,16 @@ const INTERNAL=[
 ];
 function renderApps(){
  const box=document.getElementById("apps");box.innerHTML="";
+ // встроенный ярлык: конструктор внешних экранов (ESP32) сразу с рабочего стола
+ if(!(SET.deskHidden||[]).includes("__glance")){
+  const g=el(`<button class="app" title="Конструктор внешних экранов"><div class="tile applbl" style="background:linear-gradient(135deg,#0e7d7d,#5b4bd4);display:flex;align-items:center;justify-content:center">${svg("monitor",30)}</div><div class="lbl">Экран NAS</div></button>`);
+  g.onclick=()=>winGlance();
+  g.oncontextmenu=e=>{e.preventDefault();showMenu(e.clientX,e.clientY,[
+   {label:"Скрыть с рабочего стола",ic:svg("eye",16),act:()=>{
+    SET.deskHidden=[...(SET.deskHidden||[]),"__glance"];saveSettings();renderApps();
+    toast("Вернуть можно через Launchpad — кнопка в верхнем баре");}}]);};
+  box.appendChild(g);
+ }
  /* Ярлыки контейнеров с меткой web-desktop.* (запущенные и остановленные; скрытые enable=false отфильтрованы бэкендом). */
  APPS.forEach(app=>{if(!app.url)return;
   const key=app.container||app.name;
@@ -8404,7 +8414,7 @@ function winGlance(){openWin("__glance","Экран NAS",async body=>{
   if(vp!=="hide"&&vp!=="val")inner+=`<span class="e v" style="${POS[vp]};font-size:${fs(stv(t,"vs"))}${col("vc")}${up==="valb"?";text-align:center":""}">${esc(live.value)}${uIn}</span>`;
   if(up!=="val"&&up!=="valb"&&up!=="hide")inner+=`<span class="e u2" style="${POS[up]};${uSt}">${esc(live.unit||"")}</span>`;
   }
-  inner+=`<i class="d" style="background:${stColor(live.state)}"></i>`;
+  if(!(t.st&&t.st.nd))inner+=`<i class="d" style="background:${stColor(live.state)}"></i>`;
   if(MODE()==="free"&&i===sel)inner+=`<span class="rzh"></span>`;
   if(i===sel)inner+=`<span class="glc-x" data-i="${i}" title="Убрать с экрана">✕</span>`;
   return `<div class="glc-tile${i===sel?" sel":""}" ${MODE()==="flow"?'draggable="true"':""} data-i="${i}" style="left:${px(b.x)}px;top:${px(b.y)}px;width:${px(b.w)}px;height:${px(b.h)}px;background:${bg==="none"?"transparent":(bg||"#151821")};border:${bw?Math.max(1,px(bw))+"px solid "+bc:"none"};z-index:${10+i}">${inner}</div>`;};
@@ -8416,7 +8426,7 @@ function winGlance(){openWin("__glance","Экран NAS",async body=>{
   const {boxes,over}=MODE()==="free"?freeBoxes():flowBoxes();PLACES=boxes;
   const px=v=>Math.round(v*f)+"px";
   const avHTML=scr().avail===false?"":`<div class="glc-av" style="height:${px(11)}" title="Доступность за 24ч — устройство рисует её внизу сам">${(AVB||[]).map(v=>`<i style="background:${v===2?"#2e7d54":v===1?"#8a6d1f":v===0?"#7d2e2e":"#23262e"}"></i>`).join("")}</div>`;
-  cv.innerHTML=`<div class="glc-hdr" style="height:${px(28)}"><i></i><span>${esc(location.hostname)}</span><span class="pgdots">${scr().pages.map((p,k)=>`<b data-k="${k}" title="${esc(p.name)}" class="${k===pi?"on":""}"></b>`).join("")}</span></div>`
+  cv.innerHTML=`<div class="glc-hdr" style="height:${px(28)}"><i></i><span>${esc(location.hostname.replace(/\.local$/,""))}</span><span class="pgdots">${scr().pages.map((p,k)=>`<b data-k="${k}" title="${esc(p.name)}" class="${k===pi?"on":""}"></b>`).join("")}</span></div>`
    +boxes.map(b=>tileHTML(pg().tiles[b.i],b.i,b,f)).join("")
    +avHTML;
   cv.querySelectorAll(".pgdots b").forEach(b=>b.onclick=e=>{e.stopPropagation();pi=+b.dataset.k;sel=-1;paint();paintInsp();});
@@ -8500,18 +8510,25 @@ function winGlance(){openWin("__glance","Экран NAS",async body=>{
    return `<label>цвет <input type="color" data-cc="${k}" value="${(v||defc).slice(0,7)}"><input type="number" data-ca="${k}" min="5" max="100" value="${aOf(v)}" style="width:50px" title="прозрачность, %"><button class="btn sm" data-cd="${k}" ${v?"":"disabled"}>авто</button></label>`;};
   const bgMode=!t.st||t.st.bg===undefined?"def":(t.st.bg==="none"?"none":"color");
   const kind=(t.st&&t.st.k)||"";
+  // стили — в сворачиваемых секциях: раскрытый список не влезал в колонку
+  // и требовал долгого скролла; открытые секции переживают перерисовку
+  winGlance._open=winGlance._open||new Set();
+  const OP=winGlance._open;
+  const det=(id,title,body)=>`<details class="gi" data-sec="${id}"${OP.has(id)?" open":""}><summary>${title}</summary>${body}</details>`;
   insp.innerHTML=`
    <div class="glc-cap" style="margin-bottom:2px">${esc(names[t.id]||t.id)}</div>
-   <div class="gi"><span>Название</span><label><input id="giName" maxlength="40" placeholder="${att(names[t.id]||"")}" value="${att(t.label||"")}" style="width:150px"><button class="btn sm" id="giNameX" ${t.label?"":"disabled"}>каталожное</button></label></div>
-   <div class="gi"><span>Вид</span><div class="seg" id="giKind">${[["","авто"],["value","значение"],["gauge","спидометр"],["bars","полоски"],["spark","график"]].map(([v,l])=>`<button data-v="${v}" class="${kind===v?"on":""}">${l}</button>`).join("")}</div>
-    <div class="glc-cap" style="text-transform:none;margin-top:3px">полоски — история доступности (avail, хосты); график — только у плиток со spark</div></div>
-   <div class="gi"><span>Заголовок</span>${g9("l",[["hide","скрыть"]])}<label>размер ${num("ls",6,60)}</label>${cw("lc","#8a90a0")}</div>
-   <div class="gi"><span>Значение</span>${g9("v",[["hide","скрыть"]])}<label>размер ${num("vs",6,120)}</label>${cw("vc","#e8eaf0")}</div>
-   <div class="gi"><span>Единица</span>${g9("u",[["val","у значения"],["valb","под значением"],["hide","скрыть"]])}<label>размер ${num("us",6,60)}</label>${cw("uc","#8a90a0")}</div>
-   <div class="gi"><span>Фон</span><div class="seg" id="giBg">${[["def","карточка"],["none","нет"],["color","цвет"]].map(([v,l])=>`<button data-b="${v}" class="${bgMode===v?"on":""}">${l}</button>`).join("")}</div><label style="${bgMode==="color"?"":"display:none"}" id="giBgRow">цвет <input type="color" id="giBgC" value="${t.st&&t.st.bg&&t.st.bg!=="none"?t.st.bg.slice(0,7):"#151821"}"><input type="number" id="giBgA" min="5" max="100" value="${aOf(t.st&&t.st.bg!=="none"?t.st.bg:"")}" style="width:50px" title="прозрачность, %"></label></div>
-   <div class="gi"><span>Рамка</span><label>толщина ${num("bw",0,6)}</label>${cw("bc","#262b36")}</div>
-   ${MODE()==="free"?`<div class="gi"><span>Положение и размер</span><label>x ${num("x",0,4096)}</label><label>y ${num("y",0,4096)}</label><label>w ${num("w",8,4096)}</label><label>h ${num("h",8,4096)}</label></div>`:""}
+   <div class="gi"><span>Название</span><label><input id="giName" maxlength="40" placeholder="${att(names[t.id]||"")}" value="${att(t.label||"")}" style="width:130px"><button class="btn sm" id="giNameX" ${t.label?"":"disabled"} title="Вернуть каталожное имя">✕</button></label></div>
+   <div class="gi"><span>Вид</span><div class="seg" id="giKind">${[["","авто"],["value","число"],["gauge","шкала"],["bars","полоски"],["spark","график"]].map(([v,l])=>`<button data-v="${v}" class="${kind===v?"on":""}">${l}</button>`).join("")}</div>
+    <label><input type="checkbox" id="giDot" ${!(t.st&&t.st.nd)?"checked":""}> точка статуса</label></div>
+   ${det("n","Подпись (note)",g9("n",[["hide","скрыть"]])+`<div class="glc-cap" style="text-transform:none">служебный текст плитки: имя хоста, модель диска, самый горячий диск…</div>`)}
+   ${det("l","Заголовок",g9("l",[["hide","скрыть"]])+`<label>размер ${num("ls",6,60)}</label>${cw("lc","#8a90a0")}`)}
+   ${det("v","Значение",g9("v",[["hide","скрыть"]])+`<label>размер ${num("vs",6,120)}</label>${cw("vc","#e8eaf0")}`)}
+   ${det("u","Единица",g9("u",[["val","у значения"],["valb","под значением"],["hide","скрыть"]])+`<label>размер ${num("us",6,60)}</label>${cw("uc","#8a90a0")}`)}
+   ${det("b","Фон и рамка",`<div class="seg" id="giBg">${[["def","карточка"],["none","нет"],["color","цвет"]].map(([v,l])=>`<button data-b="${v}" class="${bgMode===v?"on":""}">${l}</button>`).join("")}</div><label style="${bgMode==="color"?"":"display:none"}" id="giBgRow">цвет <input type="color" id="giBgC" value="${t.st&&t.st.bg&&t.st.bg!=="none"?t.st.bg.slice(0,7):"#151821"}"><input type="number" id="giBgA" min="5" max="100" value="${aOf(t.st&&t.st.bg!=="none"?t.st.bg:"")}" style="width:50px" title="прозрачность, %"></label><label>рамка ${num("bw",0,6)}</label>${cw("bc","#262b36")}`)}
+   ${MODE()==="free"?det("g","Положение и размер",`<label>x ${num("x",0,4096)}</label><label>y ${num("y",0,4096)}</label><label>w ${num("w",8,4096)}</label><label>h ${num("h",8,4096)}</label>`):""}
    <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn sm" id="giDef" title="Новые плитки этого экрана будут получать этот стиль">Сделать по умолчанию</button><button class="btn sm" id="giReset">Сбросить стиль</button></div>`;
+  insp.querySelectorAll("details[data-sec]").forEach(dd=>dd.addEventListener("toggle",()=>{
+   dd.open?OP.add(dd.dataset.sec):OP.delete(dd.dataset.sec);}));
   const st=()=>t.st||(t.st={});
   const hexA=(c,a)=>a>=100?c:c+Math.round(a*2.55).toString(16).padStart(2,"0");
   insp.querySelector("#giName").onchange=e=>{const v=e.target.value.trim();
@@ -8519,6 +8536,8 @@ function winGlance(){openWin("__glance","Экран NAS",async body=>{
   insp.querySelector("#giNameX").onclick=()=>{delete t.label;commit();paintInsp();};
   insp.querySelector("#giKind").querySelectorAll("button").forEach(b=>b.onclick=()=>{
    if(b.dataset.v)st().k=b.dataset.v;else delete st().k;commit();paintInsp();});
+  insp.querySelector("#giDot").onchange=e=>{
+   if(e.target.checked)delete st().nd;else st().nd=1;commit();};
   insp.querySelectorAll(".glc-9 button,.glc-9x button").forEach(b=>b.onclick=()=>{st()[b.closest("[data-k]").dataset.k]=b.dataset.p;commit();paintInsp();});
   insp.querySelectorAll("input[data-n]").forEach(inp=>inp.onchange=()=>{const k=inp.dataset.n,v=+inp.value;
    if(["x","y","w","h"].includes(k))t[k]=v;else st()[k]=v;commit();});

@@ -40,13 +40,22 @@ static const char* NAS_HOST  = "192.168.1.48";   // NAS IP or hostname
 static const char* TOKEN     = "paste-glance-token-here";
 static const char* SCREEN_ID = "";               // empty = first screen; ids are shown in the constructor
 
-static uint32_t POLL_MS = 5000;
+static uint32_t POLL_MS = 3000;
 static uint32_t PAGE_ROTATE_MS = 15000;          // 0 = manual (button) only
 #if NAS_DISPLAY_LONG
 static const int BTN1 = 0, BTN2 = -1;            // Long: GPIO14/21 belong to QSPI
+static const int BL_PIN = 1;                     // backlight, PWM-able
 #else
 static const int BTN1 = 0, BTN2 = 14;            // T-Display-S3 buttons
+static const int BL_PIN = 38;
 #endif
+
+// Brightness: a touch starting at the left/right edge turns into a vertical
+// slider (drag up = brighter); the level persists in NVS across reboots.
+#include <Preferences.h>
+Preferences PREFS;
+uint8_t BRIGHT = 255;
+void briApply() { ledcWrite(BL_PIN, BRIGHT); }
 
 // ---- config from flash --------------------------------------------------
 // The NAS panel (Настройки → Экран → «Прошить экран») writes a 4 KB block at
@@ -172,6 +181,15 @@ void drawStaleBadge() {
   dispFlush();
 }
 
+void drawBriOverlay(bool right) {
+  int w = 34, x = right ? tft.width() - w - 6 : 6, y = 6, h = tft.height() - 12;
+  tft.fillRoundRect(x, y, w, h, 8, 0x18E3);
+  tft.drawRoundRect(x, y, w, h, 8, 0x4A69);
+  int fill = (h - 8) * BRIGHT / 255;
+  tft.fillRoundRect(x + 4, y + 4 + (h - 8 - fill), w - 8, fill, 5, TFT_YELLOW);
+  dispFlush();
+}
+
 void drawOffline(const char* why) {
   tft.fillScreen(TFT_BLACK);
   tft.setTextDatum(MC_DATUM);
@@ -267,6 +285,24 @@ Style defStyle(const char* size) {
   return {"tl", "c", "val", 10, 17, 10};
 }
 
+void tileDot(JsonObject st, int x, int y, int w, const char* state) {
+  if (st["nd"] | 0) return;                  // toggled off in the inspector
+  tft.fillCircle(x + w - 9, y + 8, 3, stColor(state));
+}
+// extra caption: the tile's "note" (host name, profile, hottest disk...) at a
+// 9-grid position of its own; hidden unless the inspector places it
+void tileNote(JsonObject t, int x, int y, int w, int h, uint16_t c, uint16_t tbg) {
+  JsonObject st = t["st"];
+  const char* np = st["np"] | "hide";
+  const char* note = t["note"] | "";
+  if (!strcmp(np, "hide") || !note[0]) return;
+  Anchor a = posAnchor(np, x, y, w, h);
+  tft.setTextDatum(a.datum);
+  tft.setTextColor(c, tbg);
+  tft.drawString(note, a.x, a.y, pickFont(st["ls"] | 10, ""));
+  tft.setTextDatum(ML_DATUM);
+}
+
 // Tile representation ("k" style key, set in the constructor's inspector):
 // value = classic text, gauge = semicircle meter, bars = uptime-kuma history
 // strip, spark = big chart. Auto: bars when the tile carries raw.bars
@@ -334,7 +370,8 @@ void drawTile(JsonObject t, int x, int y, int w, int h) {
       }
     }
     tft.setTextDatum(ML_DATUM);
-    tft.fillCircle(x + w - 9, y + 8, 3, stColor(state));
+    tileNote(t, x, y, w, h, uniC, tbg);
+    tileDot(st, x, y, w, state);
     return;
   }
 
@@ -363,7 +400,8 @@ void drawTile(JsonObject t, int x, int y, int w, int h) {
       tft.drawString(unit, x + w - 16, y + 4, pickFont(us, unit));
     }
     tft.setTextDatum(ML_DATUM);
-    tft.fillCircle(x + w - 9, y + 8, 3, stColor(state));
+    tileNote(t, x, y, w, h, uniC, tbg);
+    tileDot(st, x, y, w, state);
     return;
   }
 
@@ -377,7 +415,8 @@ void drawTile(JsonObject t, int x, int y, int w, int h) {
     drawSparkC(t["spark"], x + 7, y + 22, w - 14, h - 29,
                strcmp(state, "ok") ? stColor(state) : TFT_GREEN);
     tft.setTextDatum(ML_DATUM);
-    tft.fillCircle(x + w - 9, y + 8, 3, stColor(state));
+    tileNote(t, x, y, w, h, uniC, tbg);
+    tileDot(st, x, y, w, state);
     return;
   }
   // label
@@ -430,7 +469,8 @@ void drawTile(JsonObject t, int x, int y, int w, int h) {
     tft.drawString(unit, a.x, a.y, pickFont(us, unit));
   }
   tft.setTextDatum(ML_DATUM);
-  tft.fillCircle(x + w - 9, y + 8, 3, stColor(t["state"] | "ok"));
+  tileNote(t, x, y, w, h, uniC, tbg);
+  tileDot(st, x, y, w, state);
   JsonArray sp = t["spark"];
   if (sp.size() >= 2 && h >= 52) drawSpark(sp, x + 8, y + h - 16, w - 16, 11);
 }
@@ -564,6 +604,10 @@ void setup() {
   pinMode(BTN1, INPUT_PULLUP);
   if (BTN2 >= 0) pinMode(BTN2, INPUT_PULLUP);
   tft.init();
+  PREFS.begin("glance", false);
+  BRIGHT = PREFS.getUChar("br", 255);
+  ledcAttach(BL_PIN, 5000, 8);               // takes over the BL pin as PWM
+  briApply();
   tft.setRotation(1);                       // landscape; use 0 for portrait
   tft.fillScreen(TFT_BLACK);
   tft.setTextDatum(ML_DATUM);
@@ -591,18 +635,35 @@ void loop() {
   b1 = n1; b2 = n2;
 
 #if USE_TOUCH
-  // swipe detection: remember where the finger landed, compare on release
-  static bool touching = false;
+  // touch: an edge-started drag is the brightness slider, otherwise a swipe
+  static bool touching = false, briMode = false;
   static int tx0 = 0, ty0 = 0, tx = 0, ty = 0;
   int px, py;
   if (touchRead(px, py)) {
-    if (!touching) { touching = true; tx0 = px; ty0 = py; }
+    // portrait raw -> landscape (rotation 1): long axis = raw Y
+    int lx = (tft.getRotation() % 2) ? py : px;
+    int ly = (tft.getRotation() % 2) ? px : py;
+    if (!touching) {
+      touching = true; tx0 = px; ty0 = py;
+      briMode = (lx < 46 || lx > tft.width() - 46);
+    }
     tx = px; ty = py;
+    if (briMode) {
+      int lvl = 255 - ly * 255 / (tft.height() - 1);
+      BRIGHT = lvl < 8 ? 8 : (lvl > 255 ? 255 : lvl);
+      briApply();
+      drawBriOverlay(lx > tft.width() / 2);
+    }
   } else if (touching) {
     touching = false;
-    // panel reports portrait coords; with rotation 1 the long axis is Y
-    int dl = (tft.getRotation() % 2) ? (ty - ty0) : (tx - tx0);
-    if (abs(dl) > 50) flipPage(dl < 0 ? +1 : -1);
+    if (briMode) {                       // persist + wipe the overlay
+      briMode = false;
+      PREFS.putUChar("br", BRIGHT);
+      lastSeq = -1; if (haveDoc) drawPage(); lastPoll = 0;
+    } else {
+      int dl = (tft.getRotation() % 2) ? (ty - ty0) : (tx - tx0);
+      if (abs(dl) > 50) flipPage(dl < 0 ? +1 : -1);
+    }
   }
 #endif
 

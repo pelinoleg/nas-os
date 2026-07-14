@@ -42,6 +42,9 @@ public:
     // — the screen shows one strip of colored noise (been there).
     gfx = new Arduino_Canvas(180, 640, panel, 0, 0, 1);
     gfx->begin(32000000);                   // >32 MHz corrupts this panel
+    // labels arrive as UTF-8 ("60 °C", "Host · x"): without the decoder each
+    // multi-byte char printed as two garbage glyphs; _tf fonts carry Latin-1
+    gfx->setUTF8Print(true);
     gfx->fillScreen(TFT_BLACK);
     gfx->flush();
   }
