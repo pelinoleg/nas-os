@@ -2536,7 +2536,7 @@ const hexRgb=h=>{const n=parseInt(h.slice(1),16);return `${n>>16&255},${n>>8&255
    АКТИВНОЙ темы: правишь настройки — правишь текущую тему. При переключении
    значения складываются в SET.themeProfiles[тема] и подгружаются из профиля
    новой. Размеры иконок/текста, обои, расположение и списки — общие. */
-const THEMED_KEYS=["accent","accentHex","radius","shadow","winShadow","dockShadow","tileShadow",
+const THEMED_KEYS=["accent","accentHex","goodHex","warnHex","dangerHex","radius","shadow","winShadow","dockShadow","tileShadow",
  "textContrast","elevStep","elevLight","mbOp","dockOp","wdgOp","mbBlur","dockBlur","wdgBlur","winBlur",
  "mbSat","dockSat","wdgSat","winSat","mbIconOp","popOp","popBlur","popSat","winNoise","deskLc","deskShadow","autoContrast",
  "dockTiles","dockLabels","fxDim","fxBlur","fxNoise","deskGlass","deskTileOp","deskTileBlur",
@@ -2707,10 +2707,11 @@ function applySettings(){
   root.style.setProperty("--"+prefix+"-mut",`rgba(${b},${clampf((lite?.64:.56)*tcf,.34,1).toFixed(2)})`);
   // дорожки баров/колец: видимы на любом фоне, но приглушены
   root.style.setProperty("--"+prefix+"-track",`rgba(${b},${lite?.20:.13})`);
-  // статусные цвета (good/warn/danger) — тон сохраняем, светлоту тянем до контраста с фоном
-  root.style.setProperty("--"+prefix+"-good",accentAdj("#1FA971",effL));
-  root.style.setProperty("--"+prefix+"-warn",accentAdj("#CF881B",effL));
-  root.style.setProperty("--"+prefix+"-danger",accentAdj("#DE4E48",effL));
+  // статусные цвета (good/warn/danger) — тон берём из настроек (Оформление →
+  // «Цвета статусов»), светлоту тянем до контраста с фоном поверхности
+  root.style.setProperty("--"+prefix+"-good",accentAdj(SET.goodHex||"#1FA971",effL));
+  root.style.setProperty("--"+prefix+"-warn",accentAdj(SET.warnHex||"#CF881B",effL));
+  root.style.setProperty("--"+prefix+"-danger",accentAdj(SET.dangerHex||"#DE4E48",effL));
   // фон активной «фишки» (табы/сегменты/сайдбар): лёгкая подложка от фактического фона,
   // не глухой белый — акцентный текст поверх остаётся читаемым
   root.style.setProperty("--"+prefix+"-sel",`rgba(${b},${lite?.20:.11})`);
@@ -8311,6 +8312,9 @@ function winGlance(){openWin("__glance","Экран NAS",async body=>{
  if(!r||!r.config){body.innerHTML=`<div class="set-load" style="padding:20px">нет данных</div>`;return;}
  const screens=r.config.screens,cat=r.catalog||[],presets=r.presets||[];
  const names={};cat.forEach(c=>names[c.id]=c.name);
+ // имя, которое НАРИСУЕТ устройство (оно всегда ходит с lang=en): холст обязан
+ // показывать его, иначе «Аптайм» в конструкторе и «Uptime» на панели
+ const namesDev={};cat.forEach(c=>namesDev[c.id]=c.nameEn||c.name);
  let si=0,pi=0,sel=-1,LIVE={};
  body.innerHTML=`
   <div class="glc-bar">
@@ -8403,7 +8407,7 @@ function winGlance(){openWin("__glance","Экран NAS",async body=>{
   const fs=v=>Math.max(6,px(v))+"px";
   const lp=stv(t,"lp"),vp=stv(t,"vp"),up=stv(t,"up");
   const col=k=>t.st&&t.st[k]?`;color:${t.st[k]}`:"";
-  const dispName=t.label||names[t.id]||t.id;
+  const dispName=t.label||namesDev[t.id]||names[t.id]||t.id;
   const kind=(t.st&&t.st.k)||((live.raw&&live.raw.bars)?"bars":"");
   const uSt0=`font-size:${fs(stv(t,"us"))}${col("uc")}`;
   let inner="";
@@ -8543,7 +8547,7 @@ function winGlance(){openWin("__glance","Экран NAS",async body=>{
   const det=(id,title,body)=>`<details class="gi" data-sec="${id}"${OP.has(id)?" open":""}><summary>${title}</summary>${body}</details>`;
   insp.innerHTML=`
    <div class="glc-cap" style="margin-bottom:2px">${esc(names[t.id]||t.id)}</div>
-   <div class="gi"><span>Название</span><label><input id="giName" maxlength="40" placeholder="${att(names[t.id]||"")}" value="${att(t.label||"")}" style="width:130px"><button class="btn sm" id="giNameX" ${t.label?"":"disabled"} title="Вернуть каталожное имя">✕</button></label></div>
+   <div class="gi"><span>Название</span><label><input id="giName" maxlength="40" placeholder="${att(namesDev[t.id]||names[t.id]||"")}" value="${att(t.label||"")}" style="width:130px"><button class="btn sm" id="giNameX" ${t.label?"":"disabled"} title="Вернуть каталожное имя">✕</button></label></div>
    <div class="gi"><span>Вид</span><div class="seg" id="giKind">${[["","авто"],["value","число"],["gauge","шкала"],["bars","полоски"],["spark","график"]].map(([v,l])=>`<button data-v="${v}" class="${kind===v?"on":""}">${l}</button>`).join("")}</div>
     <label><input type="checkbox" id="giDot" ${!(t.st&&t.st.nd)?"checked":""}> точка статуса</label></div>
    ${det("n","Подпись (note)",g9("n",[["hide","скрыть"]])+`<div class="glc-cap" style="text-transform:none">служебный текст плитки: имя хоста, модель диска, самый горячий диск…</div>`)}
@@ -8856,6 +8860,12 @@ function lsTheme(lb){lb.innerHTML=`
     <button data-t="light" class="${SET.theme==="light"?"on":""}">Светлая</button>
     <button data-t="dark" class="${SET.theme==="dark"?"on":""}">Тёмная</button></div></div>
    <div class="field"><label>Акцент</label><div class="dots" id="ac"></div></div>
+   <div class="field"><label>Цвета статусов</label><div style="display:flex;gap:10px;align-items:center">
+    <label style="display:flex;align-items:center;gap:5px">норма <input type="color" class="stc" data-k="goodHex" value="${SET.goodHex||"#1FA971"}"></label>
+    <label style="display:flex;align-items:center;gap:5px">тревога <input type="color" class="stc" data-k="warnHex" value="${SET.warnHex||"#CF881B"}"></label>
+    <label style="display:flex;align-items:center;gap:5px">авария <input type="color" class="stc" data-k="dangerHex" value="${SET.dangerHex||"#DE4E48"}"></label>
+    <button class="btn sm" id="stcRst">Сбросить</button></div>
+    <div class="set-sub" style="margin-top:4px">оттенок для всех виджетов, окон и внешних экранов; светлота подстраивается под фон сама</div></div>
   </div>
   <div class="set-card">${pSlider("Контраст вторичного текста","textContrast",.6,1.4,.05,"pct","Яркость подписей и значений (белые на тёмной теме, чёрные на светлой, с прозрачностью). Больше — чётче на пёстрых обоях. Влияет на виджеты и верхнюю панель.")}</div>`;
  lb.querySelectorAll("#lang button").forEach(b=>b.onclick=()=>{SET.lang=b.dataset.l;saveSettings();
@@ -8867,6 +8877,11 @@ function lsTheme(lb){lb.innerHTML=`
  cw.querySelector("input").oninput=e=>{SET.accentHex=e.target.value;applySettings();};
  cw.querySelector("input").onchange=e=>{SET.accentHex=e.target.value;saveSettings();lsTheme(lb);};
  lb.querySelector("#ac").appendChild(cw);
+ lb.querySelectorAll(".stc").forEach(inp=>{
+  inp.oninput=e=>{SET[inp.dataset.k]=e.target.value;applySettings();};
+  inp.onchange=e=>{SET[inp.dataset.k]=e.target.value;saveSettings();};});
+ lb.querySelector("#stcRst").onclick=()=>{
+  SET.goodHex="";SET.warnHex="";SET.dangerHex="";applySettings();saveSettings();lsTheme(lb);};
  wireLook(lb);}
 function lsWall(lb){lb.innerHTML=`
   <div class="set-card">

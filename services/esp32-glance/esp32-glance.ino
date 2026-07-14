@@ -98,40 +98,72 @@ void loadCfg() {
 // Touch variant (T-Display-S3 Touch / Long): swipe left/right flips pages.
 // Set to 0 for boards without a touch panel. CST816 on SDA=18 SCL=17 RST=21.
 #define USE_TOUCH 1
+#define TOUCH_DEBUG 1        // heartbeat of raw I2C frames to Serial
 
 #if USE_TOUCH
 #include <Wire.h>
 #if NAS_DISPLAY_LONG
-// AXS15231B has the touch controller BUILT INTO the display chip: I2C 0x3B on
-// SDA=15 SCL=10. Its reset (GPIO16) is the same wire as the DISPLAY reset —
-// pulsing it here, after tft.init(), wiped the panel init and the screen went
-// black ("connecting..." flashed and vanished). The display driver owns the
-// reset; touch only opens the bus.
-static const int TP_SDA = 15, TP_SCL = 10;
+// AXS15231B: the touch controller is BUILT INTO the display chip (I2C 0x3B,
+// SDA=15 SCL=10, INT=11) and shares GPIO16 as reset with the display.
+// This block follows LilyGO's Arduino_GFX example byte for byte — every
+// deviation cost a debugging round:
+//   * reset: HIGH 2ms, LOW **100ms**, HIGH 2ms, and it must run BEFORE the
+//     panel init (so the display driver gets RST=GFX_NOT_DEFINED);
+//   * read: write the 11-byte command, read back 8 bytes;
+//   * a frame is valid ONLY when INT fired — free-running polls return a
+//     constant 0x03 filler, which is exactly what "touch does not work"
+//     looked like from the outside;
+//   * layout: b[1] = fingers, b[2]>>4 = event (0x08 = down),
+//     long axis = b[2..3], short axis = b[4..5].
+static const int TP_SDA = 15, TP_SCL = 10, TP_RST = 16, TP_INT = 11;
 static const uint8_t TP_ADDR = 0x3B;
-void touchInit() {
+volatile bool TP_IRQ = false;
+void IRAM_ATTR tpISR() { TP_IRQ = true; }
+void tpReset() {
+  pinMode(TP_INT, INPUT_PULLUP);
+  attachInterrupt(TP_INT, tpISR, FALLING);
+  pinMode(TP_RST, OUTPUT);
+  digitalWrite(TP_RST, HIGH); delay(2);
+  digitalWrite(TP_RST, LOW);  delay(100);
+  digitalWrite(TP_RST, HIGH); delay(2);
   Wire.begin(TP_SDA, TP_SCL);
   Wire.setTimeOut(50);
 }
+void touchInit() {
+  Wire.setTimeOut(50);
+  if (TOUCH_DEBUG) {                       // who is actually on this bus?
+    String found = "";
+    for (uint8_t a = 1; a < 127; a++) {
+      Wire.beginTransmission(a);
+      if (Wire.endTransmission() == 0) found += " 0x" + String(a, HEX);
+    }
+    Serial.println("i2c scan:" + (found.length() ? found : String(" nothing")));
+  }
+}
 bool touchRead(int &x, int &y) {
-  static uint8_t dead = 0;                 // fuse: a wedged bus must not stall
-  if (dead >= 20) return false;            // every loop forever
-  // exact protocol from LilyGO's touch example: write the 8-byte read command,
-  // then read a TWO-POINT frame (14 bytes). Writing 11 / reading 8 (my first
-  // guess) returned garbage coords like 771,771 — outside a 180x640 panel.
-  static const uint8_t cmd[8] = {0xB5, 0xAB, 0xA5, 0x5A, 0, 0, 0, 8};
+  // read only when the chip says there is something to read
+  bool irq = TP_IRQ, low = digitalRead(TP_INT) == LOW;
+  if (!irq && !low) return false;
+  TP_IRQ = false;
+  static const uint8_t cmd[11] = {0xB5, 0xAB, 0xA5, 0x5A, 0, 0, 0, 0x08, 0, 0, 0};
   Wire.beginTransmission(TP_ADDR);
   Wire.write(cmd, sizeof cmd);
-  if (Wire.endTransmission() != 0) { dead++; return false; }
-  if (Wire.requestFrom((int)TP_ADDR, 14) < 14) { dead++; return false; }
-  uint8_t b[14];
-  for (int i = 0; i < 14; i++) b[i] = Wire.read();
-  dead = 0;
-  uint8_t num = b[1], gesture = b[0];
-  if (!num || gesture) return false;       // no finger, or a gesture frame
-  // raw portrait coords (x: 0..179 short axis, y: 0..639 long axis)
-  x = ((b[2] & 0x0F) << 8) | b[3];
-  y = ((b[4] & 0x0F) << 8) | b[5];
+  if (Wire.endTransmission() != 0) return false;
+  if (Wire.requestFrom((int)TP_ADDR, 8) < 8) return false;
+  uint8_t b[8] = {0};
+  for (int i = 0; i < 8; i++) b[i] = Wire.read();
+  if (TOUCH_DEBUG) {
+    static uint32_t logAt = 0;
+    if (millis() - logAt > 400) {
+      logAt = millis();
+      Serial.printf("touch frame %02x %02x %02x %02x %02x %02x\n",
+                    b[0], b[1], b[2], b[3], b[4], b[5]);
+    }
+  }
+  uint8_t fingers = b[1], event = b[2] >> 4;
+  if (fingers != 1 || event != 0x08) return false;
+  y = ((b[2] & 0x0F) << 8) | b[3];         // long axis, 0..639
+  x = ((b[4] & 0x0F) << 8) | b[5];         // short axis, 0..179
   return true;
 }
 #else
@@ -172,11 +204,20 @@ uint32_t lastPoll = 0, lastFlip = 0, lastOkMs = 0;
 uint8_t failures = 0;
 bool stale = false;            // polls are failing: keep last data + red badge
 
+// status hues come from the panel (Оформление -> «Цвета статусов»), so the
+// external screens match the desktop and the wall panel instead of shouting
+// in stock RGB green/yellow/red
+uint16_t C_OK = TFT_GREEN, C_WARN = TFT_YELLOW, C_BAD = TFT_RED;
+uint16_t hex565s(const char* h, uint16_t fb) {
+  if (!h || h[0] != '#' || strlen(h) < 7) return fb;
+  long v = strtol(h + 1, nullptr, 16);
+  return (uint16_t)((((v >> 16) & 0xF8) << 8) | (((v >> 8) & 0xFC) << 3) | ((v & 0xFF) >> 3));
+}
 uint16_t stColor(const char* s) {
   if (!s) return TFT_DARKGREY;
-  if (!strcmp(s, "ok"))   return TFT_GREEN;
-  if (!strcmp(s, "warn")) return TFT_YELLOW;
-  return TFT_RED;
+  if (!strcmp(s, "ok"))   return C_OK;
+  if (!strcmp(s, "warn")) return C_WARN;
+  return C_BAD;
 }
 
 // red "offline Nm" badge in the top-right corner: the NAS stopped answering,
@@ -405,20 +446,33 @@ void drawTile(JsonObject t, int x, int y, int w, int h) {
     }
     if (strcmp(vp, "hide")) {
       String rx = String(raw["rxh"] | ""), txs = String(raw["txh"] | "");
-      // fit BOTH rows into the tile: a wide "12.3 MB/s" overflowed at the
-      // styled size and spilled outside the card
       int f = pickFont(vs, rx);
-      for (int guard = 0; guard < 8 && f > 10; guard++) {
-        int wid = max(tft.textWidth(rx, f), tft.textWidth(txs, f));
-        if (wid <= w - 12 && tft.fontHeight(f) * 2 + 6 <= h - (strcmp(lp, "hide") ? 18 : 4)) break;
-        f = pickFont(f - 3, rx);
-      }
       int cy = y + h / 2 + (strcmp(lp, "hide") ? 0 : 8);
-      tft.setTextDatum(MC_DATUM);
-      tft.setTextColor(TFT_GREEN, tbg);
-      tft.drawString(rx, x + w / 2, cy - tft.fontHeight(f) / 2 - 1, f);
-      tft.setTextColor(TFT_RED, tbg);
-      tft.drawString(txs, x + w / 2, cy + tft.fontHeight(f) / 2 + 1, f);
+      int gapw = 10;
+      // ONE line while it fits (that is what a wide tile is for); only a tile
+      // too narrow for both values falls back to two rows
+      bool one = tft.textWidth(rx, f) + gapw + tft.textWidth(txs, f) <= w - 12
+                 && tft.fontHeight(f) <= h - (strcmp(lp, "hide") ? 20 : 4);
+      if (one) {
+        int wr = tft.textWidth(rx, f), wt = tft.textWidth(txs, f);
+        int lx = x + (w - (wr + gapw + wt)) / 2;
+        tft.setTextDatum(ML_DATUM);
+        tft.setTextColor(C_OK, tbg);
+        tft.drawString(rx, lx, cy, f);
+        tft.setTextColor(C_BAD, tbg);
+        tft.drawString(txs, lx + wr + gapw, cy, f);
+      } else {
+        for (int guard = 0; guard < 8 && f > 10; guard++) {   // shrink to fit
+          int wid = max(tft.textWidth(rx, f), tft.textWidth(txs, f));
+          if (wid <= w - 12 && tft.fontHeight(f) * 2 + 4 <= h - (strcmp(lp, "hide") ? 20 : 4)) break;
+          f = pickFont(f - 3, rx);
+        }
+        tft.setTextDatum(MC_DATUM);
+        tft.setTextColor(C_OK, tbg);
+        tft.drawString(rx, x + w / 2, cy - tft.fontHeight(f) / 2 - 1, f);
+        tft.setTextColor(C_BAD, tbg);
+        tft.drawString(txs, x + w / 2, cy + tft.fontHeight(f) / 2 + 1, f);
+      }
     }
     tft.setTextDatum(ML_DATUM);
     tileNote(t, x, y, w, h, uniC, tbg);
@@ -446,7 +500,7 @@ void drawTile(JsonObject t, int x, int y, int w, int h) {
       for (int b = 0; b < n; b++) {
         int xa = x + 7 + b * (w - 14) / n, xb = x + 7 + (b + 1) * (w - 14) / n;
         int v2 = bars[b].as<int>();
-        uint16_t c = v2 == 2 ? TFT_GREEN : (v2 == 1 ? TFT_YELLOW : (v2 == 0 ? TFT_RED : 0x39E7));
+        uint16_t c = v2 == 2 ? C_OK : (v2 == 1 ? C_WARN : (v2 == 0 ? C_BAD : 0x39E7));
         int w2 = xb - xa - 2; if (w2 < 1) w2 = 1;
         tft.fillRoundRect(xa, by, w2, bh2, w2 > 4 ? 2 : 0, c);
       }
@@ -508,8 +562,7 @@ void drawTile(JsonObject t, int x, int y, int w, int h) {
       tft.setTextDatum(TR_DATUM); tft.setTextColor(valC, tbg);
       tft.drawString(v, x + w - 16, y + 4, pickFont(ls, v));
     }
-    drawSparkC(t["spark"], x + 7, y + 22, w - 14, h - 29,
-               strcmp(state, "ok") ? stColor(state) : TFT_GREEN);
+    drawSparkC(t["spark"], x + 7, y + 22, w - 14, h - 29, stColor(state));
     tft.setTextDatum(ML_DATUM);
     tileNote(t, x, y, w, h, uniC, tbg);
     tileDot(st, x, y, w, state);
@@ -580,7 +633,7 @@ void drawAvail(JsonObject avail, int y) {
   for (int b = 0; b < n; b++) {
     int xa = b * tft.width() / n, xb = (b + 1) * tft.width() / n;
     int v = bars[b].as<int>();
-    uint16_t c = v == 2 ? TFT_GREEN : (v == 1 ? TFT_YELLOW : (v == 0 ? TFT_RED : TFT_DARKGREY));
+    uint16_t c = v == 2 ? C_OK : (v == 1 ? C_WARN : (v == 0 ? C_BAD : TFT_DARKGREY));
     tft.fillRect(xa, y, xb - xa - 1, 10, c);
   }
 }
@@ -673,6 +726,12 @@ void poll() {
   http.end();
   if (err) return;
   long seq = DOC["seq"] | 0;
+  JsonObject col = DOC["colors"];
+  if (!col.isNull()) {
+    C_OK   = hex565s(col["ok"]     | "", TFT_GREEN);
+    C_WARN = hex565s(col["warn"]   | "", TFT_YELLOW);
+    C_BAD  = hex565s(col["danger"] | "", TFT_RED);
+  }
   bool n = DOC["night"] | false;
   if (n != NIGHT) { NIGHT = n; applyBright(); }
   haveDoc = true;
@@ -700,6 +759,9 @@ void setup() {
 #endif
   Serial.begin(115200);
   loadCfg();                                // flash-config beats compiled defaults
+#if NAS_DISPLAY_LONG && USE_TOUCH
+  tpReset();                                // reset + I2C BEFORE the panel init
+#endif
   pinMode(BTN1, INPUT_PULLUP);
   if (BTN2 >= 0) pinMode(BTN2, INPUT_PULLUP);
   tft.init();

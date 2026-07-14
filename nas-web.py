@@ -185,15 +185,38 @@ def storage_sub(name):
     b = storage_base()
     return os.path.join(b, name) if b else None
 
+_CPU = {"t": 0.0, "tot": 0, "idle": 0, "v": 0.0}
+_CPU_LOCK = threading.Lock()
+
+
 def cpu_percent(sample=0.20):
+    """CPU load since the PREVIOUS call, cached ~1 s and shared by everyone.
+
+    Every caller used to take its own 200 ms snapshot at its own moment, so the
+    wall screen, the panel and the glance tile each showed a different number
+    for the same instant (and each burned 200 ms of a request). One rolling
+    delta = one truth, and no sleeping in the request path."""
     def snap():
         parts = _read("/proc/stat").splitlines()[0].split()[1:]
         vals = list(map(int, parts))
         idle = vals[3] + vals[4]
         return sum(vals), idle
-    t1, i1 = snap(); time.sleep(sample); t2, i2 = snap()
-    dt, di = t2 - t1, i2 - i1
-    return round(100 * (dt - di) / dt, 1) if dt else 0.0
+    with _CPU_LOCK:
+        now = time.time()
+        if _CPU["t"] and now - _CPU["t"] < 1.0:
+            return _CPU["v"]
+        tot, idle = snap()
+        if not _CPU["t"]:                       # cold start: classic sample
+            time.sleep(sample)
+            tot2, idle2 = snap()
+            dt, di = tot2 - tot, idle2 - idle
+            _CPU.update(t=time.time(), tot=tot2, idle=idle2,
+                        v=round(100 * (dt - di) / dt, 1) if dt else 0.0)
+            return _CPU["v"]
+        dt, di = tot - _CPU["tot"], idle - _CPU["idle"]
+        _CPU.update(t=now, tot=tot, idle=idle,
+                    v=round(100 * (dt - di) / dt, 1) if dt > 0 else _CPU["v"])
+        return _CPU["v"]
 
 def temp_c():
     raw = _read("/sys/class/thermal/thermal_zone0/temp", "")
@@ -2558,7 +2581,15 @@ def glance_payload(lang="ru", screen=""):
         status = "warn"
     av = avail_bars(24, 96)
     night = bool(cfg.get("night") and _in_night(cfg))
+    ds0 = _safe(load_settings, {}) or {}
+    dk0 = (ds0.get("themeProfiles") or {}).get("dark") or {}
+    def _hue(k, dflt):
+        v = dk0.get(k) or ds0.get(k) or dflt
+        return v if isinstance(v, str) and re.match(r"^#[0-9a-fA-F]{6}$", v) else dflt
+    colors = {"ok": _hue("goodHex", "#1FA971"), "warn": _hue("warnHex", "#CF881B"),
+              "danger": _hue("dangerHex", "#DE4E48"), "accent": _hue("accentHex", "#12B0A6")}
     payload = {"v": 2, "host": socket.gethostname(), "status": status, "night": night,
+               "colors": colors,
                "screen": {"id": scr["id"], "name": scr["name"], "preset": scr["preset"],
                           "mode": scr["mode"], "gap": scr["gap"], "avail": scr["avail"]},
                "problems": problems[:4], "pages": pages,
@@ -2566,7 +2597,8 @@ def glance_payload(lang="ru", screen=""):
                "tiles": pages[0]["tiles"] if pages else [],
                "avail": {"bars": av["bars"], "pct24": av["pct"]},
                "ts": int(time.time())}
-    sig = json.dumps([pages, problems, status, av["bars"], night], sort_keys=True, ensure_ascii=False)
+    sig = json.dumps([pages, problems, status, av["bars"], night, colors],
+                     sort_keys=True, ensure_ascii=False)
     with _GL_LOCK:
         c = _GL_CACHE["langs"].setdefault(key, {"t": 0, "sig": "", "seq": 0, "payload": None})
         if sig != c["sig"]:
@@ -11992,7 +12024,8 @@ def screen_payload(lang="", p2=False):
     look = {"wpVer": ds.get("wpVer") or 0, "theme": "dark"}
     for k in ("fxDim", "fxBlur", "fxNoise", "wdgOp", "wdgBlur", "wdgSat",
               "mbOp", "mbBlur", "mbSat", "elevStep", "elevLight", "elevBaseDark",
-              "tintDark", "wdgDark", "accentHex", "radius", "perf",
+              "tintDark", "wdgDark", "accentHex", "goodHex", "warnHex", "dangerHex",
+              "radius", "perf",
               "mbGrad", "mbGradH", "mbGradInt", "mbGradOp"):
         if k in dark:
             look[k] = dark[k]
@@ -12823,10 +12856,17 @@ class H(BaseHTTPRequestHandler):
                 self._json(pl)
             return
         if p in ("/screen", "/screen/"):
+            # из локалки страницу можно смотреть, но ей нужны /api/screen/* —
+            # без сессии они отдают 401, и получался «тёмный экран с иконками»
+            if not (self._local() or self._authed()):
+                self.send_response(302)
+                self.send_header("Location", "/?next=/screen")
+                self.end_headers()
+                return
             self._static("/screen.html"); return
-        if p == "/api/icon" and self._local():
+        if p == "/api/icon" and (self._local() or self._authed()):
             self._send_icon((q.get("u") or [""])[0]); return   # иконки стеков для экрана
-        if p == "/api/wallpaper/img" and self._local():
+        if p == "/api/wallpaper/img" and (self._local() or self._authed()):
             # киоск рисует те же обои, но в размер своей панели (см. _wallpaper_screen)
             wp = (_safe(_wallpaper_screen) if (q.get("screen") or [""])[0]
                   else None) or _wallpaper_path()
@@ -12857,8 +12897,11 @@ class H(BaseHTTPRequestHandler):
                 self._json({"config": load_screen(), "present": bool(_bl_dir()),
                             "unit": (u.get("log") or "").strip()})
             elif p == "/api/glance/config":
+                # nameEn — то, что реально нарисует устройство (оно ходит с lang=en):
+                # холст конструктора обязан показывать ЕГО, иначе имена расходятся
                 self._json({"config": load_glance(),
-                            "catalog": [{"id": t[0], "name": t[1]} for t in glance_catalog()],
+                            "catalog": [{"id": t[0], "name": t[1], "nameEn": _translit(t[2])}
+                                        for t in glance_catalog()],
                             "presets": [{"id": pi, "name": pn} for pi, pn in GLANCE_PRESETS]})
             elif p == "/api/hostwatch":
                 hosts = []

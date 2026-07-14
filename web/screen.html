@@ -953,6 +953,10 @@ $("#shield").addEventListener("click",e=>{ e.stopPropagation();
 function applyLook(L){
   if(!L) return;
   const S=L, root=document.documentElement;
+  // цвета статусов — общие с панелью (Оформление → «Цвета статусов»)
+  if(L.goodHex)   root.style.setProperty("--good",L.goodHex);
+  if(L.warnHex)   root.style.setProperty("--warn",L.warnHex);
+  if(L.dangerHex) root.style.setProperty("--danger",L.dangerHex);
   if(L.wpVer!==WPV){ WPV=L.wpVer;
     // screen=1 -> сервер отдаёт копию под 800x480, а не исходник на 2560 px
     $("#wall").style.backgroundImage=L.wpVer?`url(/api/wallpaper/img?screen=1&v=${L.wpVer})`:""; }
