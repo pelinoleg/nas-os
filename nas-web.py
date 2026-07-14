@@ -1663,6 +1663,8 @@ def glance_catalog():
                 cat.append(("nb:" + pr["id"], "Бэкап · " + nm, "Backup · " + nm))
     for s in _glance_scripts():
         cat.append((s["id"], s["name"], s["name"]))
+    for h in _safe(hostwatch_load, []) or []:
+        cat.append(("hw:" + h["id"], "Хост · " + h["name"], "Host · " + h["name"]))
     return cat
 
 # User check scripts: any executable in ~/nas-config/scripts/glance/ becomes a
@@ -1709,6 +1711,113 @@ def _glance_scripts():
         _SC_CACHE["busy"] = True
         threading.Thread(target=_sc_refresh, daemon=True).start()
     return _SC_CACHE["data"]
+
+# ---------------------------------------------------------------------------
+# Наблюдение за хостами: пинг/TCP-проверки доменов и локальных серверов с
+# историей доступности (те же RLE-журналы и полоски, что у собственного avail).
+# Каждый хост = glance-плитка "hw:<id>" → видна на ESP32-экранах и в конструкторе.
+HOSTWATCH_FILE = os.path.join(NAS_CONFIG, "hostwatch.json")
+HOSTWATCH_DIR = "/var/lib/nas-wizard/hostwatch"
+_HW = {"last": {}, "busy": False}       # id -> {"up","ms","ts"}
+_HW_ID_RE = re.compile(r"^[\w-]{1,40}$")
+
+
+def hostwatch_load():
+    d = _json_load_strict(HOSTWATCH_FILE, {})
+    out = []
+    for h in (d.get("hosts") or []):
+        hid = str(h.get("id") or "")
+        tgt = str(h.get("target") or "").strip()
+        if not _HW_ID_RE.match(hid) or not tgt or len(tgt) > 200:
+            continue
+        try:
+            port = max(1, min(65535, int(h.get("port") or 0)))
+        except (TypeError, ValueError):
+            port = 0
+        try:
+            iv = max(10, min(3600, int(h.get("interval") or 60)))
+        except (TypeError, ValueError):
+            iv = 60
+        out.append({"id": hid, "name": str(h.get("name") or tgt)[:60], "target": tgt,
+                    "type": "tcp" if h.get("type") == "tcp" else "ping",
+                    "port": port, "interval": iv})
+    return out
+
+
+def hostwatch_save(hosts):
+    cur, used = [], set()
+    for h in (hosts if isinstance(hosts, list) else [])[:24]:
+        if not isinstance(h, dict):
+            continue
+        hid = str(h.get("id") or "")
+        if not _HW_ID_RE.match(hid):
+            hid = re.sub(r"[^\w-]+", "-", str(h.get("target") or "h")).strip("-")[:24] or "h"
+        while hid in used:
+            hid += "x"
+        used.add(hid)
+        cur.append(dict(h, id=hid))
+    _json_save(HOSTWATCH_FILE, {"hosts": cur}, indent=2)
+    # удалённый хост не должен оставлять хвост: плитка исчезла — журнал тоже
+    keep = {h["id"] for h in hostwatch_load()}
+    for f in glob.glob(os.path.join(HOSTWATCH_DIR, "*.log")):
+        if os.path.splitext(os.path.basename(f))[0] not in keep:
+            _safe(lambda p=f: os.unlink(p))
+    return hostwatch_load()
+
+
+def _hw_check(h):
+    """One probe. Returns (up, ms). DNS failures count as down — a dead domain
+    IS the thing the user wants to see."""
+    t0 = time.time()
+    try:
+        if h["type"] == "tcp":
+            with socket.create_connection((h["target"], h["port"] or 22), timeout=3):
+                pass
+            return True, int((time.time() - t0) * 1000)
+        r = subprocess.run(["ping", "-c1", "-W2", h["target"]],
+                           capture_output=True, text=True, timeout=6)
+        if r.returncode != 0:
+            return False, None
+        m = re.search(r"time=([\d.]+)", r.stdout or "")
+        return True, (int(float(m.group(1))) if m else None)
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return False, None
+
+
+def _hw_log(hid, up):
+    """RLE journal, same format as avail.log — parsed by the same avail_bars()."""
+    os.makedirs(HOSTWATCH_DIR, exist_ok=True)
+    p = os.path.join(HOSTWATCH_DIR, hid + ".log")
+    try:
+        with open(p) as f:
+            last = f.readlines()[-1].split()[1] if os.path.getsize(p) else ""
+    except (OSError, IndexError):
+        last = ""
+    state = "up" if up else "off"
+    if last != state:
+        with open(p, "a") as f:
+            f.write("%d %s\n" % (int(time.time()), state))
+
+
+def _hostwatch_tick():
+    if _HW["busy"]:
+        return
+    now = time.time()
+    due = [h for h in hostwatch_load()
+           if now - (_HW["last"].get(h["id"], {}).get("ts") or 0) >= h["interval"]]
+    if not due:
+        return
+    _HW["busy"] = True
+
+    def go():
+        try:
+            for h in due:
+                up, ms = _hw_check(h)
+                _HW["last"][h["id"]] = {"up": up, "ms": ms, "ts": time.time()}
+                _safe(lambda: _hw_log(h["id"], up))
+        finally:
+            _HW["busy"] = False
+    threading.Thread(target=go, daemon=True).start()
 
 def _nb_next_run(cfg):
     """Next scheduled run (epoch) for a backup profile, None if not scheduled."""
@@ -1914,7 +2023,7 @@ def save_glance(d):
         _GL_CACHE["langs"].clear()
     return cur
 
-def _avail_segments():
+def _avail_segments(path=None):
     """Журнал в RLE: «состояние сменилось на X в момент T». Строки читаются как
     интервалы «до следующей строки», поэтому порядок ВАЖЕН.
 
@@ -1929,7 +2038,7 @@ def _avail_segments():
     подряд идущие одинаковые состояния схлопываются."""
     raw = []
     try:
-        with open(AVAIL_LOG) as f:
+        with open(path or AVAIL_LOG) as f:
             for ln in f:
                 p = ln.split()
                 if len(p) == 2 and p[0].isdigit() and p[1] in ("up", "local", "off"):
@@ -1952,14 +2061,16 @@ def _avail_segments():
         segs.append((t, s))
     return segs
 
-def avail_bars(hours=24, slots=96):
+def avail_bars(hours=24, slots=96, path=None):
     """RLE timeline -> per-slot worst state + uptime %. 2=up 1=local 0=off -1=no data.
 
     Beside the worst state we return `frac` — the uptime SHARE of each slot (0..1,
     None = no data. Worst-state alone is useless once a slot is a whole day: one
     30-second blip painted the entire day red, so a month of 99.9% uptime looked
-    like a month of outages. The share lets the UI grade the colour instead."""
-    segs = _avail_segments()
+    like a month of outages. The share lets the UI grade the colour instead.
+
+    `path` reuses the same parser for other RLE journals (host watch)."""
+    segs = _avail_segments(path)
     now = int(time.time())
     start = now - hours * 3600
     rank = {"off": 0, "local": 1, "up": 2}
@@ -2118,6 +2229,27 @@ def _glance_tile(tid, en):
         fall = {"ok": "OK", "warn": "WARN", "danger": "FAIL"}[s["state"]]
         return {"value": s["text"] or fall, "unit": "", "state": s["state"],
                 "raw": {"state": s["state"], "text": s["text"]}}
+    if tid.startswith("hw:"):
+        h = next((x for x in (_safe(hostwatch_load, []) or []) if x["id"] == tid[3:]), None)
+        if not h:
+            return None
+        last = _HW["last"].get(h["id"]) or {}
+        av = _safe(lambda: avail_bars(24, 48,
+                   path=os.path.join(HOSTWATCH_DIR, h["id"] + ".log")), {}) or {}
+        up = last.get("up")
+        if up is None:
+            return None                     # ещё ни одной проверки — плитки нет
+        if up:
+            val = ("%d" % last["ms"]) if last.get("ms") is not None else "OK"
+            unit = "ms" if last.get("ms") is not None else ""
+        else:
+            val, unit = "DOWN", ""
+        pct = av.get("pct")
+        st = "danger" if not up else ("warn" if (pct is not None and pct < 99) else "ok")
+        return {"value": val, "unit": unit, "state": st, "note": h["name"],
+                "raw": {"up": bool(up), "ms": last.get("ms"), "pct24": pct,
+                        "bars": av.get("bars") or [], "frac": av.get("frac") or [],
+                        "target": h["target"], "type": h["type"]}}
     if tid in ("avail", "avail30"):
         hours = 24 if tid == "avail" else 720
         av = avail_bars(hours, 96)
@@ -12628,6 +12760,15 @@ class H(BaseHTTPRequestHandler):
                 self._json({"config": load_glance(),
                             "catalog": [{"id": t[0], "name": t[1]} for t in glance_catalog()],
                             "presets": [{"id": pi, "name": pn} for pi, pn in GLANCE_PRESETS]})
+            elif p == "/api/hostwatch":
+                hosts = []
+                for h in hostwatch_load():
+                    last = _HW["last"].get(h["id"]) or {}
+                    av = _safe(lambda hh=h: avail_bars(24, 48,
+                               path=os.path.join(HOSTWATCH_DIR, hh["id"] + ".log")), {}) or {}
+                    hosts.append(dict(h, up=last.get("up"), ms=last.get("ms"),
+                                      checked=int(last.get("ts") or 0), pct24=av.get("pct")))
+                self._json({"hosts": hosts})
             elif p == "/api/esp32/state":
                 saved = _json_load_strict(ESP32_FILE, {})
                 saved.pop("pass", None)          # пароль Wi-Fi наружу не отдаём
@@ -13266,6 +13407,14 @@ class H(BaseHTTPRequestHandler):
                           "", "ok", kind="svc", desk=False)
                 self._stream_cmd(["bash", "-c", script],
                                  env=dict(_C_ENV, **env), timeout=86400)
+            elif p == "/api/hostwatch":
+                b = self._body()
+                out = hostwatch_save(b.get("hosts"))
+                _HW["last"] = {k: v for k, v in _HW["last"].items()
+                               if k in {h["id"] for h in out}}
+                with _GL_LOCK:
+                    _GL_CACHE["langs"].clear()   # каталог плиток изменился
+                self._json({"ok": True, "hosts": out})
             elif p == "/api/esp32/flash":
                 # прошивка ESP32-экрана стримом: (тулчейн, если надо) → сборка →
                 # заливка приложения → конфиг-blob в хвост flash. Пароль Wi-Fi
@@ -13463,6 +13612,14 @@ def main():
     except Exception:
         pass
     threading.Thread(target=monitor_loop, daemon=True).start()
+
+    # host watch runs its own cadence: per-host intervals go down to 10 s,
+    # while monitor_loop wakes only once a minute
+    def _hostwatch_loop():
+        while True:
+            _safe(_hostwatch_tick)
+            time.sleep(5)
+    threading.Thread(target=_hostwatch_loop, daemon=True).start()
     srv = _Server(("0.0.0.0", PORT), H)
     ip = lan_ip()
     print(f"nas-web запущен:  http://{ip}:{PORT}   (http://{socket.gethostname()}.local:{PORT})")

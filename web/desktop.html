@@ -7453,6 +7453,17 @@ async function glanceTab(tc){
   <div class="srow"><div class="srow-l"><div class="srow-t">Экран из конструктора</div><div class="srow-d">какой набор страниц показывать этому устройству</div></div><div class="srow-c"><select class="inp" id="e32Scr" style="width:200px"></select></div></div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Прошить</div><div class="srow-d">плата перезагрузится с новой прошивкой и сама подключится</div></div><div class="srow-c"><button class="btn pri" id="e32Go" disabled>${svg("zap",13)} Прошить</button></div></div>
   <div class="mcon" id="e32Con" style="display:none"></div>
+  <div class="set-h">Наблюдение за хостами</div>
+  <div class="set-sub">Пинг или TCP-проверка доменов и локальных серверов. Каждый хост становится плиткой конструктора («Хост · имя») с задержкой, статусом и историей доступности за 24 часа — видно на ESP32-экране сразу, когда что-то отвалилось.</div>
+  <div id="hwList"><div class="set-sub">загрузка…</div></div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Добавить хост</div><div class="srow-d">домен или IP; для TCP — порт (22 = SSH, 443 = HTTPS)</div></div>
+   <div class="srow-c" style="flex-wrap:wrap;gap:6px;justify-content:flex-end">
+    <input class="inp" id="hwName" style="width:110px" placeholder="имя">
+    <input class="inp mono" id="hwTgt" style="width:150px" placeholder="host.example.com">
+    <div class="seg" id="hwType"><button data-v="ping" class="on">ping</button><button data-v="tcp">tcp</button></div>
+    <input class="inp mono" id="hwPort" type="number" style="width:70px;display:none" value="22" title="порт">
+    <input class="inp" id="hwIv" type="number" min="10" max="3600" style="width:70px" value="60" title="интервал, с">
+    <button class="btn sm pri" id="hwAdd">Добавить</button></div></div>
   <div class="set-h">Доступность</div>
   <div class="set-sub">Журнал доступности ведёт сторож сети: пингует шлюз и пишет состояние (онлайн / без сети / выключен). Полоски — в виджетах «Доступность · 24h / 30d» и в плитках avail.</div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Интервал проверки</div><div class="srow-d">чаще — точнее полоски, реже — меньше фоновой работы</div></div><div class="srow-c"><div class="seg" id="glPing">${[15,30,60,120].map(v=>`<button data-v="${v}" class="${(cfg.ping_interval||30)===v?"on":""}">${v}с</button>`).join("")}</div></div></div>`;
@@ -7490,6 +7501,37 @@ async function glanceTab(tc){
     q("#e32Go").disabled=false;
     toast(code===0?"Экран прошит ✓":"Прошивка не удалась — см. лог");
   },body);
+ };
+ // --- наблюдение за хостами ---
+ let HW=[];
+ async function hwPaint(){
+  const r=await api("/api/hostwatch"); if(!r||!document.body.contains(tc)) return;
+  HW=(r.hosts||[]).map(h=>({id:h.id,name:h.name,target:h.target,type:h.type,port:h.port,interval:h.interval,
+                            up:h.up,ms:h.ms,pct24:h.pct24}));
+  q("#hwList").innerHTML=HW.length?HW.map((h,i)=>`<div class="srow">
+    <div class="srow-l"><div class="srow-t"><span style="color:${h.up===false?"var(--danger)":h.up?"var(--good)":"var(--mut)"}">●</span> ${esc(h.name)}</div>
+    <div class="srow-d mono">${esc(h.target)}${h.type==="tcp"?":"+h.port:""} · ${esc(h.type)} · ${h.interval}с${h.pct24!=null?" · "+h.pct24+"% / 24ч":""}${h.ms!=null?" · "+h.ms+" ms":""}${h.up===false?" · сейчас недоступен":""}</div></div>
+    <div class="srow-c"><button class="btn sm warn" data-hwdel="${i}">Убрать</button></div></div>`).join("")
+   :`<div class="set-sub">пока не наблюдаем ни за чем</div>`;
+  q("#hwList").querySelectorAll("[data-hwdel]").forEach(b=>b.onclick=async()=>{
+   HW.splice(+b.dataset.hwdel,1);
+   await api("/api/hostwatch",{method:"POST",body:JSON.stringify({hosts:HW})});
+   hwPaint();});
+ }
+ hwPaint();
+ tc.querySelectorAll("#hwType button").forEach(b=>b.onclick=()=>{
+  tc.querySelectorAll("#hwType button").forEach(x=>x.classList.toggle("on",x===b));
+  q("#hwPort").style.display=b.dataset.v==="tcp"?"":"none";});
+ q("#hwAdd").onclick=async()=>{
+  const target=q("#hwTgt").value.trim();
+  if(!target){toast("Укажите адрес");return;}
+  HW.push({name:q("#hwName").value.trim()||target,target:target,
+           type:tc.querySelector("#hwType .on").dataset.v,
+           port:+q("#hwPort").value||22,interval:+q("#hwIv").value||60});
+  await api("/api/hostwatch",{method:"POST",body:JSON.stringify({hosts:HW})});
+  q("#hwName").value=q("#hwTgt").value="";
+  toast("Хост добавлен — плитка появится в конструкторе");
+  hwPaint();
  };
 }
 /* Settings tab «Заметки»: storage location + editor prefs */
