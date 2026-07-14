@@ -1860,6 +1860,13 @@ install_screen() {
     # сессия киоска рисует в DRM и читает тач напрямую
     run usermod -aG video,input,render "$TARGET_USER"
 
+    # true backlight-off pokes the panel's ATTINY over /dev/i2c-* (PC_LED_EN bit:
+    # PWM=0 alone leaves a glow) — the i2c-dev char device must exist after boot
+    write_file /etc/modules-load.d/nas-screen.conf <<'EOF'
+i2c-dev
+EOF
+    run modprobe i2c-dev || true
+
     # Chromium слушается ТОЛЬКО managed-policy: флаги --disable-features=Translate
     # плашку перевода не убирают (проверено на 150.x). Киоск не должен показывать
     # НИЧЕГО всплывающего — ни перевода, ни менеджера паролей, ни запросов доступа.

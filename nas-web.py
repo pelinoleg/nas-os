@@ -11428,6 +11428,46 @@ def _bl_dir():
     return ""
 
 
+_I2C_SLAVE_FORCE = 0x0706
+
+
+def _attiny_led(on):
+    """True backlight off for the RPi/Waveshare DSI panel. PWM=0 (and bl_power=4,
+    which the driver maps to the same PWM write) leaves the ATTINY's LED driver
+    ENABLED — the panel keeps a visible glow in a dark room. The real switch is
+    PC_LED_EN (bit0 of PORTC, reg 0x83). The firmware's registers are write-only
+    (reads return junk), so we blind-write the driver's steady-state values:
+    0x0f = run, 0x0e = LED off with bridge/LCD/touch resets untouched — touch
+    stays alive to wake the screen. The i2c bus is shared with the touch
+    controller: a raced poll costs it one EIO+retry, so write ONCE per
+    transition (callers only act on brightness changes), never per tick."""
+    d = _bl_dir()
+    m = re.match(r"^(\d+)-00([0-9a-f]+)$", os.path.basename(d or ""))
+    if not m:
+        return False
+    try:  # only this exact panel driver — never poke unknown i2c hardware
+        drv = os.path.basename(os.readlink(d + "/device/driver"))
+    except OSError:
+        return False
+    if drv != "rpi_touchscreen_attiny":
+        return False
+    dev = "/dev/i2c-" + m.group(1)
+    if not os.path.exists(dev):
+        _run(["modprobe", "i2c-dev"], timeout=10)
+    try:
+        fd = os.open(dev, os.O_RDWR)
+    except OSError:
+        return False
+    try:
+        fcntl.ioctl(fd, _I2C_SLAVE_FORCE, int(m.group(2), 16))
+        os.write(fd, bytes([0x83, 0x0F if on else 0x0E]))
+        return True
+    except OSError:
+        return False
+    finally:
+        os.close(fd)
+
+
 def screen_bright_set(v):
     d = _bl_dir()
     if not d:
@@ -11438,9 +11478,8 @@ def screen_bright_set(v):
         mx = 255
     try:
         v = max(0, min(mx, int(v)))
-        # brightness=0 does NOT cut this panel's backlight (minimum PWM still
-        # glows — "погашенный" экран был виден в тёмной комнате). Real off is
-        # bl_power=4 (FB_BLANK_POWERDOWN); coming back needs bl_power=0 first.
+        if v > 0:
+            _safe(lambda: _attiny_led(True))   # LED first, then PWM
         try:
             with open(d + "/bl_power", "w") as f:
                 f.write("4" if v == 0 else "0")
@@ -11448,6 +11487,8 @@ def screen_bright_set(v):
             pass                      # нет bl_power у драйвера — хотя бы PWM в ноль
         with open(d + "/brightness", "w") as f:
             f.write(str(v))
+        if v == 0:
+            _safe(lambda: _attiny_led(False))  # PWM to zero, then LED truly off
         return True
     except (OSError, ValueError):
         return False

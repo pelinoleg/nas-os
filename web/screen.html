@@ -542,7 +542,10 @@ let LAST_ACT=Date.now();
 addEventListener("pointerdown",()=>{ LAST_ACT=Date.now(); },{passive:true});
 function clkTick(){
   const c=$("#clock"), min=+D.clock||0;
-  if(!(min>0) || Date.now()-LAST_ACT<min*60000 || $("#alarm").classList.contains("on")){
+  // идёт работа (бэкап/импорт) или горит тревога — часы уступают место дашборду
+  const busy=(D.backups||[]).some(b=>b.running||b.queued)
+           ||(D.usb||[]).some(j=>j.status==="running");
+  if(!(min>0) || busy || Date.now()-LAST_ACT<min*60000 || $("#alarm").classList.contains("on")){
     c.classList.remove("on"); return;
   }
   const t=new Date();
