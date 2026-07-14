@@ -8566,7 +8566,11 @@ function winGlance(){openWin("__glance","Экран NAS",async body=>{
   const st=()=>t.st||(t.st={});
   const hexA=(c,a)=>a>=100?c:c+Math.round(a*2.55).toString(16).padStart(2,"0");
   insp.querySelector("#giName").onchange=e=>{const v=e.target.value.trim();
-   if(v)t.label=v;else delete t.label;commit();paintInsp();};
+   if(v){t.label=v;
+    // имя вводят, чтобы его ВИДЕТЬ: если заголовок был спрятан, возвращаем его
+    if(stv(t,"lp")==="hide"){(t.st||(t.st={})).lp="tl";toast("Заголовок был скрыт — включил");}
+   }else delete t.label;
+   commit();paintInsp();};
   insp.querySelector("#giNameX").onclick=()=>{delete t.label;commit();paintInsp();};
   insp.querySelector("#giKind").querySelectorAll("button").forEach(b=>b.onclick=()=>{
    if(b.dataset.v)st().k=b.dataset.v;else delete st().k;commit();paintInsp();});
