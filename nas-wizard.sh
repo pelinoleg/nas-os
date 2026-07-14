@@ -2739,6 +2739,9 @@ disable_comitup() {
     for u in $units; do
         run systemctl disable --now "$u" || true
         run systemctl mask "$u" || true
+        # comitup dies by SIGKILL on stop -> unit lingers as "failed" and the
+        # panel screams about a broken service that is masked and gone forever
+        run systemctl reset-failed "$u" || true
         found=1
     done
     # без демона хотспот-профили всё равно мертвы, но пусть не мозолят глаза в списке сетей
