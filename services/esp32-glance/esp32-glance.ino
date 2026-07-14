@@ -123,9 +123,12 @@ void tpReset() {
   pinMode(TP_INT, INPUT_PULLUP);
   attachInterrupt(TP_INT, tpISR, FALLING);
   pinMode(TP_RST, OUTPUT);
-  digitalWrite(TP_RST, HIGH); delay(2);
-  digitalWrite(TP_RST, LOW);  delay(100);
-  digitalWrite(TP_RST, HIGH); delay(2);
+  // LilyGO's own timings (axs15231_init): 130 / 130 / 300 ms. Short pulses
+  // (2/100/2) bring the DISPLAY up fine but leave the touch block asleep —
+  // it then ACKs on I2C and answers a constant 0x03 filler forever.
+  digitalWrite(TP_RST, HIGH); delay(130);
+  digitalWrite(TP_RST, LOW);  delay(130);
+  digitalWrite(TP_RST, HIGH); delay(300);
   Wire.begin(TP_SDA, TP_SCL);
   Wire.setTimeOut(50);
 }
@@ -141,26 +144,42 @@ void touchInit() {
   }
 }
 bool touchRead(int &x, int &y) {
-  // read only when the chip says there is something to read
-  bool irq = TP_IRQ, low = digitalRead(TP_INT) == LOW;
-  if (!irq && !low) return false;
+  // Poll on a 20 ms tick and ALSO honour INT. Gating strictly on INT assumed
+  // GPIO11 is wired on every revision — if it is not, touch is dead silent
+  // (that is what "тач не работает" looked like). A frame is trusted only when
+  // it parses (fingers==1, event==down), so free-running polls cost nothing.
+  static uint32_t nextAt = 0;
+  bool irq = TP_IRQ;
+  if (!irq && millis() < nextAt) return false;
   TP_IRQ = false;
+  nextAt = millis() + 20;
   static const uint8_t cmd[11] = {0xB5, 0xAB, 0xA5, 0x5A, 0, 0, 0, 0x08, 0, 0, 0};
-  Wire.beginTransmission(TP_ADDR);
-  Wire.write(cmd, sizeof cmd);
-  if (Wire.endTransmission() != 0) return false;
-  if (Wire.requestFrom((int)TP_ADDR, 8) < 8) return false;
+  // Two dialects in the wild: STOP between command and read, or a repeated
+  // START. Wrong one -> the chip ACKs and answers a constant 0x03 filler
+  // (which is exactly what we saw). Probe both until one parses, then stick.
+  static int8_t rs = -1;                   // -1 unknown, 0 = STOP, 1 = restart
   uint8_t b[8] = {0};
-  for (int i = 0; i < 8; i++) b[i] = Wire.read();
-  if (TOUCH_DEBUG) {
-    static uint32_t logAt = 0;
-    if (millis() - logAt > 400) {
-      logAt = millis();
-      Serial.printf("touch frame %02x %02x %02x %02x %02x %02x\n",
-                    b[0], b[1], b[2], b[3], b[4], b[5]);
-    }
+  for (int attempt = 0; attempt < 2; attempt++) {
+    bool restart = rs < 0 ? (attempt == 0) : (rs == 1);
+    Wire.beginTransmission(TP_ADDR);
+    Wire.write(cmd, sizeof cmd);
+    if (Wire.endTransmission(!restart) != 0) { if (rs >= 0) return false; continue; }
+    if (Wire.requestFrom((int)TP_ADDR, 8) < 8) { if (rs >= 0) return false; continue; }
+    for (int i = 0; i < 8; i++) b[i] = Wire.read();
+    bool sane = !(b[0] == b[1] && b[1] == b[2] && b[2] == b[3]);   // not filler
+    if (sane || rs >= 0) { if (rs < 0 && sane) { rs = restart ? 1 : 0;
+        Serial.println("touch dialect: " + String(restart ? "repeated-start" : "stop")); }
+      break; }
   }
   uint8_t fingers = b[1], event = b[2] >> 4;
+  if (TOUCH_DEBUG && fingers) {            // log only real contact, not idle noise
+    static uint32_t logAt = 0;
+    if (millis() - logAt > 300) {
+      logAt = millis();
+      Serial.printf("touch frame %02x %02x %02x %02x %02x %02x (int=%d)\n",
+                    b[0], b[1], b[2], b[3], b[4], b[5], digitalRead(TP_INT));
+    }
+  }
   if (fingers != 1 || event != 0x08) return false;
   y = ((b[2] & 0x0F) << 8) | b[3];         // long axis, 0..639
   x = ((b[4] & 0x0F) << 8) | b[5];         // short axis, 0..179
@@ -734,6 +753,15 @@ void poll() {
   }
   bool n = DOC["night"] | false;
   if (n != NIGHT) { NIGHT = n; applyBright(); }
+  // brightness can also be set from the panel (Настройки -> Экран): the device
+  // is not always touchable, and a wall display still needs a dimmer
+  if (DOC["bright"].is<int>()) {
+    int b = DOC["bright"].as<int>();
+    if (b >= 8 && b <= 255 && b != BRIGHT) {
+      BRIGHT = b; applyBright(); PREFS.putUChar("br", BRIGHT);
+      if (BR_X >= 0) drawBrightBody();
+    }
+  }
   haveDoc = true;
   if (seq == lastSeq) return;
   lastSeq = seq;
@@ -765,6 +793,8 @@ void setup() {
   pinMode(BTN1, INPUT_PULLUP);
   if (BTN2 >= 0) pinMode(BTN2, INPUT_PULLUP);
   tft.init();
+  delay(120);                                // AXS15231B: touch block needs a
+                                             // moment after the panel init
   PREFS.begin("glance", false);
   BRIGHT = PREFS.getUChar("br", 255);
   ledcAttach(BL_PIN, 5000, 8);               // takes over the BL pin as PWM

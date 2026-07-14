@@ -7493,7 +7493,8 @@ async function glanceTab(tc){
   <div class="set-h">Доступность</div>
   <div class="set-sub">Журнал доступности ведёт сторож сети: пингует шлюз и пишет состояние (онлайн / без сети / выключен). Полоски — в виджетах «Доступность · 24h / 30d» и в плитках avail.</div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Интервал проверки</div><div class="srow-d">чаще — точнее полоски, реже — меньше фоновой работы</div></div><div class="srow-c"><div class="seg" id="glPing">${[15,30,60,120].map(v=>`<button data-v="${v}" class="${(cfg.ping_interval||30)===v?"on":""}">${v}с</button>`).join("")}</div></div></div>
-  <div class="set-h">Ночь</div>
+  <div class="set-h">Подсветка</div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Яркость экранов</div><div class="srow-d">для ESP32-плат; применяется на следующем опросе (плитка «Яркость» на экране показывает уровень)</div></div><div class="srow-c"><input type="range" min="8" max="255" id="glBr" value="${cfg.bright||255}" style="width:170px"><b id="glBrV" style="margin-left:8px">${Math.round((cfg.bright||255)/2.55)}%</b></div></div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Гасить экраны ночью</div><div class="srow-d">ESP32-экраны выключают подсветку по расписанию; касание будит на минуту</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="glN"${cfg.night?" checked":""}><span class="sl"></span></label></div></div>
   <div class="srow"><div class="srow-l"><div class="srow-t">С</div></div><div class="srow-c"><input type="time" id="glNF" class="inp" style="width:110px" value="${att(cfg.night_from||"23:00")}"></div></div>
   <div class="srow"><div class="srow-l"><div class="srow-t">До</div></div><div class="srow-c"><input type="time" id="glNT" class="inp" style="width:110px" value="${att(cfg.night_to||"07:00")}"></div></div>`;
@@ -7505,6 +7506,9 @@ async function glanceTab(tc){
  tc.querySelector("#glCopy").onclick=()=>{if(navigator.clipboard)navigator.clipboard.writeText(url);toast("Скопировано");};
  tc.querySelector("#glFw").onclick=()=>winFiles("/opt/nas-os/services/esp32-glance");
  tc.querySelectorAll("#glPing button").forEach(b=>b.onclick=()=>{tc.querySelectorAll("#glPing button").forEach(x=>x.classList.toggle("on",x===b));post({ping_interval:+b.dataset.v});toast("Интервал обновлён");});
+ const glBr=tc.querySelector("#glBr");
+ glBr.oninput=()=>tc.querySelector("#glBrV").textContent=Math.round(glBr.value/2.55)+"%";
+ glBr.onchange=()=>post({bright:+glBr.value});
  tc.querySelector("#glN").onchange=e=>post({night:e.target.checked});
  tc.querySelector("#glNF").onchange=e=>post({night_from:e.target.value});
  tc.querySelector("#glNT").onchange=e=>post({night_to:e.target.value});

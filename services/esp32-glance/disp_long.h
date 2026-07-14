@@ -24,18 +24,38 @@ enum { TL_DATUM = 0, TC_DATUM, TR_DATUM,
 #define TFT_RED      0xF800
 #define TFT_DARKGREY 0x7BEF
 
+// LilyGO's QSPI init for this panel is FOUR commands — display off, sleep in,
+// sleep out, display on — because the panel's own firmware already holds the
+// full register config (their long table is only used on the parallel-SPI
+// build). Arduino_GFX's stock axs15231b_180640 table reprograms dozens of
+// registers instead, and with it the TOUCH half of the AXS15231B never wakes:
+// it ACKs on I2C and returns a constant 0x03 filler forever. Same picture,
+// working touch.
+static const uint8_t axs_long_qspi_init[] = {
+    BEGIN_WRITE, WRITE_COMMAND_8, 0x28, END_WRITE,   // display off
+    DELAY, 20,
+    BEGIN_WRITE, WRITE_COMMAND_8, 0x10, END_WRITE,   // sleep in
+    BEGIN_WRITE, WRITE_COMMAND_8, 0x11, END_WRITE,   // sleep out
+    DELAY, 200,
+    BEGIN_WRITE, WRITE_COMMAND_8, 0x29, END_WRITE,   // display on
+};
+
 class TFTCompat {
 public:
   void init() {
     pinMode(1, OUTPUT);                     // TFT_BL of the Long
     digitalWrite(1, HIGH);
     bus = new Arduino_ESP32QSPI(12 /*CS*/, 17 /*SCK*/, 13, 18, 21, 14 /*D0-D3*/);
-    // GPIO16 resets the WHOLE AXS15231B — display AND touch (LilyGO lists it
-    // as both TFT_QSPI_RST and TOUCH_RES). LilyGO's own order is: pulse the
-    // reset by hand, open I2C, THEN init the display — and only then does the
-    // touch block answer. So the reset is pulsed in the sketch (tpReset()) and
-    // the driver gets GFX_NOT_DEFINED: a second reset from inside begin() left
-    // the touch half of the chip dead (it ACKed but returned a constant 0x03).
+    // GPIO16 resets the WHOLE AXS15231B — display AND touch (LilyGO lists it as
+    // both TFT_QSPI_RST and TOUCH_RES). LilyGO's working example does BOTH: a
+    // manual pulse before I2C (tpReset() in the sketch) AND the driver's own
+    // reset inside begin() — the touch block only produces frames when the
+    // panel init follows a driver-timed reset. Dropping either one leaves the
+    // chip ACKing on I2C but answering a constant 0x03 filler.
+    // NOTE: the touch half of this chip stayed dead (I2C ACK + constant 0x03
+    // filler, INT never asserted) under the stock table, LilyGO's minimal QSPI
+    // init, both I2C dialects and LilyGO's exact reset timings — so the init
+    // table is NOT the culprit and we keep the stock one, which renders best.
     panel = new Arduino_AXS15231B(bus, GFX_NOT_DEFINED, 0, false, 180, 640);
     // ctor takes the PANEL-NATIVE dims (that exact bitmap goes out on flush);
     // rotation=1 remaps DRAWING coords, so width()/height() report 640x180.

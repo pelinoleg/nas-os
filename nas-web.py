@@ -2003,9 +2003,15 @@ def load_glance():
     def _hhmm(k, dflt):
         v = str(d.get(k) or dflt)
         return v if re.match(r"^\d{1,2}:\d{2}$", v) else dflt
+    def _bri():
+        try:
+            return max(8, min(255, int(d.get("bright", 255))))
+        except (TypeError, ValueError):
+            return 255
     return {"enabled": bool(d.get("enabled")),
             "token": d.get("token") or "",
             "ping_interval": int(d.get("ping_interval") or 30),
+            "bright": _bri(),          # яркость ESP32-экранов из панели
             # ночь для ESP32-экранов: payload несёт night=true, устройство гасит
             # подсветку само (часов у него нет — время знает сервер)
             "night": bool(d.get("night")),
@@ -2019,6 +2025,11 @@ def save_glance(d):
         cur["enabled"] = bool(d["enabled"])
     if "night" in d:
         cur["night"] = bool(d["night"])
+    if "bright" in d:
+        try:
+            cur["bright"] = max(8, min(255, int(d["bright"])))
+        except (TypeError, ValueError):
+            pass
     for k in ("night_from", "night_to"):
         if re.match(r"^\d{1,2}:\d{2}$", str(d.get(k) or "")):
             cur[k] = str(d[k])
@@ -2243,6 +2254,30 @@ def _gl_backup_tile(best, en):
     st = "danger" if age > 7 * 86400 else ("warn" if age > 2 * 86400 else "ok")
     return {"value": _gl_ago(age, en), "unit": "назад" if not en else "ago", "state": st,
             "raw": {"ts": int(best), "age_s": int(age)}}
+
+# Цена КАЖДОГО поля ответа умножается на частоту опроса (грабля из CLAUDE.md).
+# glance опрашивают конструктор (?all=1, живые значения) и ESP32-экраны раз в
+# 3 с — а плитка «updates» честно запускала apt-get -s upgrade НА КАЖДЫЙ опрос:
+# поймано пять параллельных apt при load 14. У каждого источника свой TTL.
+GLANCE_TILE_TTL = {"updates": 300, "disktemp": 120, "snapraid": 120, "inet": 60,
+                   "docker": 15, "pool": 10, "rootfs": 10, "uptime": 5}
+_GL_TILES = {}
+_GL_TILES_LOCK = threading.Lock()
+
+
+def _glance_tile_cached(tid, en):
+    key = (tid, en)
+    ttl = GLANCE_TILE_TTL.get(tid.split(":")[0] if ":" in tid else tid, 2)
+    now = time.time()
+    with _GL_TILES_LOCK:
+        c = _GL_TILES.get(key)
+        if c and now - c[0] < ttl:
+            return c[1]
+    d = _safe(lambda: _glance_tile(tid, en))
+    with _GL_TILES_LOCK:
+        _GL_TILES[key] = (now, d)
+    return d
+
 
 def _glance_tile(tid, en):
     """Build one tile -> {value, unit, state, raw[, note]} or None to hide it.
@@ -2489,7 +2524,7 @@ def glance_palette(lang="ru"):
         return c["data"]
     out = []
     for tid, ru, en_l in glance_catalog():
-        d = _safe(lambda: _glance_tile(tid, en))
+        d = _glance_tile_cached(tid, en)
         if d:
             out.append(dict(d, id=tid, label=(en_l if en else ru)))
     _GL_PAL_CACHE[lang] = {"t": time.time(), "data": out}
@@ -2540,7 +2575,7 @@ def glance_payload(lang="ru", screen=""):
     def build(tid):
         if tid in built:
             return built[tid]
-        d = _safe(lambda: _glance_tile(tid, en)) if tid in labels else None
+        d = _glance_tile_cached(tid, en) if tid in labels else None
         if d:
             d = dict(d, id=tid, label=labels[tid])
             if en:
@@ -2589,7 +2624,7 @@ def glance_payload(lang="ru", screen=""):
     colors = {"ok": _hue("goodHex", "#1FA971"), "warn": _hue("warnHex", "#CF881B"),
               "danger": _hue("dangerHex", "#DE4E48"), "accent": _hue("accentHex", "#12B0A6")}
     payload = {"v": 2, "host": socket.gethostname(), "status": status, "night": night,
-               "colors": colors,
+               "colors": colors, "bright": cfg.get("bright", 255),
                "screen": {"id": scr["id"], "name": scr["name"], "preset": scr["preset"],
                           "mode": scr["mode"], "gap": scr["gap"], "avail": scr["avail"]},
                "problems": problems[:4], "pages": pages,
@@ -2597,8 +2632,8 @@ def glance_payload(lang="ru", screen=""):
                "tiles": pages[0]["tiles"] if pages else [],
                "avail": {"bars": av["bars"], "pct24": av["pct"]},
                "ts": int(time.time())}
-    sig = json.dumps([pages, problems, status, av["bars"], night, colors],
-                     sort_keys=True, ensure_ascii=False)
+    sig = json.dumps([pages, problems, status, av["bars"], night, colors,
+                      cfg.get("bright", 255)], sort_keys=True, ensure_ascii=False)
     with _GL_LOCK:
         c = _GL_CACHE["langs"].setdefault(key, {"t": 0, "sig": "", "seq": 0, "payload": None})
         if sig != c["sig"]:
@@ -3821,8 +3856,23 @@ def _apt_upgradable():
     r = _run(["apt-get", "-s", "-o", "Debug::NoLocking=true", "upgrade"], timeout=40)
     return sum(1 for l in (r.get("log") or "").splitlines() if l.startswith("Inst "))
 
+_APT_CACHE = {"t": 0.0, "d": None}
+_APT_LOCK = threading.Lock()
+
+
 def apt_updates(refresh=False):
-    """Список пакетов, доступных к обновлению: [{name, cur, new, security}]."""
+    """Список пакетов, доступных к обновлению: [{name, cur, new, security}].
+
+    Кэш 5 минут + одиночный вход: apt-get -s upgrade стоит ~секунду и держит
+    ~130 МБ, а звали его отовсюду (плитки glance, экран, панель)."""
+    with _APT_LOCK:
+        if not refresh and _APT_CACHE["d"] is not None \
+                and time.time() - _APT_CACHE["t"] < 300:
+            return _APT_CACHE["d"]
+        return _apt_updates_run(refresh)
+
+
+def _apt_updates_run(refresh=False):
     if refresh:
         _run(["apt-get", "update"], timeout=180)
     r = _run(["apt-get", "-s", "-o", "Debug::NoLocking=true", "upgrade"], timeout=60)
@@ -3835,7 +3885,10 @@ def apt_updates(refresh=False):
             pkgs.append({"name": m.group(1), "cur": m.group(2), "new": m.group(3),
                          "security": "security" in src.lower()})
     pkgs.sort(key=lambda p: (not p["security"], p["name"]))
-    return {"ok": True, "count": len(pkgs), "packages": pkgs}
+    res = {"ok": True, "count": len(pkgs), "packages": pkgs}
+    _APT_CACHE["t"] = time.time()
+    _APT_CACHE["d"] = res
+    return res
 
 def _sec_updates_recent():
     log = _read("/var/log/unattended-upgrades/unattended-upgrades.log")
