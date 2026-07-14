@@ -2420,6 +2420,28 @@ def glance_palette(lang="ru"):
     _GL_PAL_CACHE[lang] = {"t": time.time(), "data": out}
     return out
 
+_TRANSLIT = {"а": "a", "б": "b", "в": "v", "г": "g", "д": "d", "е": "e", "ё": "e",
+             "ж": "zh", "з": "z", "и": "i", "й": "y", "к": "k", "л": "l", "м": "m",
+             "н": "n", "о": "o", "п": "p", "р": "r", "с": "s", "т": "t", "у": "u",
+             "ф": "f", "х": "h", "ц": "ts", "ч": "ch", "ш": "sh", "щ": "sch",
+             "ъ": "", "ы": "y", "ь": "", "э": "e", "ю": "yu", "я": "ya"}
+
+
+def _translit(s):
+    """Cyrillic -> Latin for displays whose fonts are ASCII-only."""
+    out = []
+    for ch in str(s):
+        lo = ch.lower()
+        if lo in _TRANSLIT:
+            t = _TRANSLIT[lo]
+            out.append(t.capitalize() if ch.isupper() else t)
+        elif ord(ch) < 128:
+            out.append(ch)
+        else:
+            out.append("?")
+    return "".join(out)
+
+
 def glance_payload(lang="ru", screen=""):
     """Glance document for one screen profile; cached a few seconds,
     seq bumps only on change. Cache/seq stream is per (lang, screen)."""
@@ -2439,6 +2461,15 @@ def glance_payload(lang="ru", screen=""):
         d = _safe(lambda: _glance_tile(tid, en)) if tid in labels else None
         if d:
             d = dict(d, id=tid, label=labels[tid])
+            if en:
+                # user-supplied names (backup profiles, hosts, scripts) can be
+                # Cyrillic — TFT fonts on the devices are Latin-only and render
+                # them as garbage; transliterate for the en stream
+                d["label"] = _translit(d["label"])
+                if d.get("note"):
+                    d["note"] = _translit(d["note"])
+                if d.get("value") and not str(d["value"]).isascii():
+                    d["value"] = _translit(str(d["value"]))
             if tid in GLANCE_SPARKS:
                 sp = _safe(lambda: _gl_spark(GLANCE_SPARKS[tid]))
                 if sp:

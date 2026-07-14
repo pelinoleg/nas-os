@@ -1784,6 +1784,9 @@
   .glc-av{position:absolute;left:6px;right:6px;bottom:2px;border-radius:3px;overflow:hidden;display:flex;gap:1px;background:#181b22}
   .glc-av i{flex:1;min-width:1px}
   .glc-tile{position:absolute;box-sizing:border-box;border-radius:7px;color:#e8eaf0;cursor:grab;overflow:hidden;touch-action:none}
+  .glc-x{position:absolute;top:2px;right:2px;width:17px;height:17px;border-radius:50%;background:#c2374a;color:#fff;
+   font-size:11px;line-height:17px;text-align:center;cursor:pointer;z-index:5}
+  .glc-x:hover{background:#e04358}
   .glc-tile.sel{box-shadow:0 0 0 2px var(--accent)}
   .glc-tile .e{position:absolute;white-space:nowrap;line-height:1.05;max-width:96%;overflow:hidden;text-overflow:ellipsis}
   .glc-tile .l,.glc-tile .u,.glc-tile .u2{color:#8a90a0}
@@ -8388,6 +8391,7 @@ function winGlance(){openWin("__glance","Экран NAS",async body=>{
   if(up!=="val"&&up!=="valb"&&up!=="hide")inner+=`<span class="e u2" style="${POS[up]};${uSt}">${esc(live.unit||"")}</span>`;
   inner+=`<i class="d" style="background:${stColor(live.state)}"></i>`;
   if(MODE()==="free"&&i===sel)inner+=`<span class="rzh"></span>`;
+  if(i===sel)inner+=`<span class="glc-x" data-i="${i}" title="Убрать с экрана">✕</span>`;
   return `<div class="glc-tile${i===sel?" sel":""}" ${MODE()==="flow"?'draggable="true"':""} data-i="${i}" style="left:${px(b.x)}px;top:${px(b.y)}px;width:${px(b.w)}px;height:${px(b.h)}px;background:${bg==="none"?"transparent":(bg||"#151821")};border:${bw?Math.max(1,px(bw))+"px solid "+bc:"none"};z-index:${10+i}">${inner}</div>`;};
  const paintCv=()=>{const cv=q("#gcCv");if(!cv)return;
   const [W,H]=WH();
@@ -8406,6 +8410,10 @@ function winGlance(){openWin("__glance","Экран NAS",async body=>{
    tl.onclick=e=>{e.stopPropagation();if(sel!==i){sel=i;paintCtl();paintInsp();paintCv();}};
    if(MODE()==="flow"){tl.ondragstart=e=>e.dataTransfer.setData("text/plain","mv:"+i);}
    else tl.onpointerdown=e=>freeDrag(e,tl,i);});
+  // крестик на выбранной плитке: кнопка в баре есть, но её никто не находит
+  cv.querySelectorAll(".glc-x").forEach(x=>{
+   x.onpointerdown=e=>e.stopPropagation();
+   x.onclick=e=>{e.stopPropagation();pg().tiles.splice(+x.dataset.i,1);sel=-1;commit();paintInsp();};});
   const ov=q("#gcOver");
   ov.innerHTML=over.length?`<span class="glc-cap">Не влезло на экран:</span> `+over.map(i=>`<button class="btn sm" data-i="${i}">${esc(names[pg().tiles[i].id]||"?")} ✕</button>`).join(" "):"";
   ov.querySelectorAll("button").forEach(b=>b.onclick=()=>{pg().tiles.splice(+b.dataset.i,1);sel=-1;commit();});};

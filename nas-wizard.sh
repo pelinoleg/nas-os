@@ -2019,8 +2019,10 @@ install_esp32_tools() {
     fi
     arduino-cli lib list 2>/dev/null | grep -q '^TFT_eSPI'    || run arduino-cli lib install TFT_eSPI
     arduino-cli lib list 2>/dev/null | grep -q '^ArduinoJson' || run arduino-cli lib install ArduinoJson
-    # T-Display-S3 Long (AXS15231B): TFT_eSPI не умеет — рендер через Arduino_GFX
+    # T-Display-S3 Long (AXS15231B): TFT_eSPI не умеет — рендер через Arduino_GFX;
+    # U8g2 включает в нём шрифтовый движок (и даёт гладкие шрифты fub/helvR)
     arduino-cli lib list 2>/dev/null | grep -q '^GFX Library' || run arduino-cli lib install "GFX Library for Arduino"
+    arduino-cli lib list 2>/dev/null | grep -q '^U8g2'        || run arduino-cli lib install U8g2
     # TFT_eSPI надо нацелить на панель T-Display-S3: раскомментировать Setup206
     # и погасить дефолтный User_Setup (штатный способ настройки этой библиотеки)
     local sel="$ESP32_ARDUINO_DATA/user/libraries/TFT_eSPI/User_Setup_Select.h"

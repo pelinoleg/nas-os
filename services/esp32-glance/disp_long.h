@@ -6,6 +6,10 @@
 // Selected with -DNAS_DISPLAY_LONG=1 (the panel's flasher sets it for the
 // "T-Display-S3 Long" board choice); the classic build keeps real TFT_eSPI.
 #pragma once
+// U8g2 must be installed: Arduino_GFX enables its u8g2-font engine (and the
+// smooth Latin fonts we use below come straight from the U8g2 library) only
+// when <U8g2lib.h> is present. The linker keeps just the referenced fonts.
+#include <U8g2lib.h>
 #include <Arduino_GFX_Library.h>
 
 // TFT_eSPI text-datum codes (posAnchor's 3x3 grid relies on this numbering)
@@ -60,19 +64,32 @@ public:
     return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3); }
   void setTextDatum(uint8_t d) { datum = d; }
   void setTextColor(uint16_t fg, uint16_t bg) { tfg = fg; tbg = bg; }
-  // TFT_eSPI font number -> classic 6x8 font scale: 1=8px 2=16 4=24 6/7=48 8=72
-  int fscale(int f) { return f >= 8 ? 9 : f >= 6 ? 6 : f >= 4 ? 3 : f >= 2 ? 2 : 1; }
-  int16_t fontHeight(int f) { return 8 * fscale(f); }
-  int16_t textWidth(const String &s, int f) { return 6 * fscale(f) * s.length(); }
+  // TFT_eSPI font number -> a real vector-quality u8g2 bitmap font (the classic
+  // 6x8 GFX font scaled 3-9x read as Minecraft on a 640 px panel). fubNN's cap
+  // height is NN px; ascent/total are fixed per font so rows don't jitter
+  // between strings with and without descenders.
+  const uint8_t *ufont(int f) {
+    return f >= 8 ? u8g2_font_fub42_tf : f >= 6 ? u8g2_font_fub30_tf
+         : f >= 4 ? u8g2_font_fub17_tf : u8g2_font_helvR10_tf;
+  }
+  int asc(int f) { return f >= 8 ? 42 : f >= 6 ? 30 : f >= 4 ? 17 : 10; }
+  int16_t fontHeight(int f) { return f >= 8 ? 55 : f >= 6 ? 39 : f >= 4 ? 22 : 14; }
+  int16_t textWidth(const String &s, int f) {
+    gfx->setFont(ufont(f));
+    gfx->setTextSize(1);
+    int16_t bx, by; uint16_t bw, bh;
+    gfx->getTextBounds(s, 0, 0, &bx, &by, &bw, &bh);
+    return bw + (bx > 0 ? bx : 0);
+  }
   void drawString(const String &s, int32_t x, int32_t y, int f) {
-    int sc = fscale(f), w = textWidth(s, f), h = 8 * sc;
+    int w = textWidth(s, f), h = fontHeight(f);
     int px = datum % 3 == 1 ? x - w / 2 : (datum % 3 == 2 ? x - w : x);
     int py = datum / 3 == 1 ? y - h / 2 : (datum / 3 == 2 ? y - h : y);
     if (tbg != tfg) gfx->fillRect(px, py, w, h, tbg);   // TFT_eSPI paints text bg
-    gfx->setTextSize(sc);
     gfx->setTextColor(tfg);
-    gfx->setCursor(px, py);
+    gfx->setCursor(px, py + asc(f));                    // u8g2 draws from baseline
     gfx->print(s);
+    gfx->setFont((const GFXfont *)nullptr);             // back to default for safety
     dirty = true;
   }
   void flush() { if (dirty) { gfx->flush(); dirty = false; } }

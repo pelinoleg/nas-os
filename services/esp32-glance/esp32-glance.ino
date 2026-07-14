@@ -340,11 +340,13 @@ void drawAvail(JsonObject avail, int y) {
   JsonArray bars = avail["bars"];
   int n = bars.size();
   if (!n) return;
-  int bw = tft.width() / n;
+  // spread the remainder across slots — width/n floored left a bald stripe
+  // on the right (640/48 loses 16 px, 640/96 loses a whole 64)
   for (int b = 0; b < n; b++) {
+    int xa = b * tft.width() / n, xb = (b + 1) * tft.width() / n;
     int v = bars[b].as<int>();
     uint16_t c = v == 2 ? TFT_GREEN : (v == 1 ? TFT_YELLOW : (v == 0 ? TFT_RED : TFT_DARKGREY));
-    tft.fillRect(b * bw, y, bw - 1, 10, c);
+    tft.fillRect(xa, y, xb - xa - 1, 10, c);
   }
 }
 
