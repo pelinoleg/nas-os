@@ -6340,7 +6340,8 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
    ${isPushSsh()?"":`<div class="srow"><div class="srow-l"><div class="srow-t">Режим приёмника${tipHTML("Единая папка — всё в одну папку по подпапкам. Отдельно для каждой — у каждого источника своя папка-приёмник.")}</div><div class="srow-d">${per?"у каждого источника своя папка":"всё в одну папку по подпапкам"}</div></div><div class="srow-c"><div class="seg" id="sDm"><button data-v="single" class="${!per?"on":""}">Единая папка</button><button data-v="per" class="${per?"on":""}">Отдельно</button></div></div></div>`}
    <div style="display:flex;justify-content:space-between;align-items:center;margin:16px 0 6px"><span class="set-h" style="margin:0;padding:0;border:none">Что копировать</span><button class="btn sm pri" id="sAdd">${svg("plus",13)} ${push?"Выбрать папки":"Выбрать с NAS"}</button></div>
    <div id="sJobs"></div>
-   ${!per&&!push?`<div class="nb-field" style="margin-top:14px"><label>Общая папка-приёмник${tipHTML("Локальная папка на этом NAS, куда попадёт всё выбранное (каждый источник — своей подпапкой).")}</label><div class="nb-field-row"><input class="mono" id="sBase" value="${att(c.dest_base||"/mnt/storage/nas-backup")}"><button class="btn sm" id="sBaseB">${svg("folder",13)} Выбрать</button></div></div>`:""}
+   ${!per&&!push?`<div class="nb-field" style="margin-top:14px"><label>Общая папка-приёмник${tipHTML("Локальная папка на этом NAS, куда попадёт всё выбранное (каждый источник — своей подпапкой).")}</label><div class="nb-field-row"><input class="mono" id="sBase" value="${att(c.dest_base||"/mnt/storage/nas-backup")}"><button class="btn sm" id="sBaseB">${svg("folder",13)} Выбрать</button></div>
+    <div class="srow-d" style="margin-top:7px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">Профиль ЗАБИРАЕТ данные сюда — поэтому приёмник это папка на самом NAS. Чтобы ОТПРАВЛЯТЬ наружу (SSH-сервер, rsync.net, USB-диск), нужен профиль «Отправить с этого NAS».<button class="btn sm" id="sMkPush">${svg("upload",13)} Создать такой профиль</button></div></div>`:""}
    ${push&&!c.dest_base?`<div class="nb-dwarn" style="margin-top:12px">Приёмник ещё не выбран — задайте его на вкладке «Приёмник», иначе бэкап не запустится.</div>`:""}
    <details class="nb-det"><summary class="nb-sum">Исключения${tipHTML("Шаблоны rsync (по одному в строке): что не копировать — мусор, кэши, служебное.")}</summary>
      <textarea id="sExcl" class="nb-excl" spellcheck="false">${esc((c.excludes||[]).join("\n"))}</textarea>
@@ -6358,6 +6359,7 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
   wireSeg(tc,"#sDm",v=>saveCfg({dest_mode:v}).then(()=>tabSources(tc)));
   // redraw after saving: the server re-derives every job's dest from the new base, so the
   // list must be repainted — otherwise it keeps showing the destinations of the old folder
+  const mkp=g("#sMkPush");if(mkp)mkp.onclick=()=>addDlg("push");
   const bb=g("#sBase");if(bb)bb.onchange=()=>saveCfg({dest_base:bb.value.trim()}).then(drawJobs);
   const bbB=g("#sBaseB");if(bbB)bbB.onclick=()=>nbPickLocal(bb.value||"/mnt",p=>{bb.value=p;saveCfg({dest_base:p}).then(drawJobs);});
   g("#sAdd").onclick=()=>{
@@ -6761,19 +6763,19 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
  const curProf=()=>PROFS.find(x=>x.id===NB_PID)||PROFS[0]||{};
  const switchTo=id=>{if(id===NB_PID)return;NB_PID=id;tab="overview";nbCursor=0;nbStarted=null;render();};
 
- const addDlg=()=>{const s=document.getElementById("scrim"),src=curProf();
+ const addDlg=(dir0="pull")=>{const s=document.getElementById("scrim"),src=curProf();
   const DHELP={pull:"Забрать данные с другого NAS/сервера на этот (классический бэкап сюда).",
    push:"Отправить папки ЭТОГО NAS наружу: на внешний USB-диск или на другой сервер по SSH. Приёмник выберете после создания."};
   s.innerHTML=`<div class="dialog"><h3>Новый бэкап</h3>
     <div class="mon-note" style="margin:0 0 10px">Отдельный профиль: своё подключение, свои папки, своё расписание и своя история. Ничего общего с остальными.</div>
-    <div class="field"><label>Направление</label><div class="seg" id="npDir"><button data-v="pull" class="on">Забрать с другого NAS</button><button data-v="push">Отправить с этого NAS</button></div></div>
-    <div class="mon-note" id="npDirHelp" style="margin:0 0 10px">${esc(DHELP.pull)}</div>
+    <div class="field"><label>Направление</label><div class="seg" id="npDir"><button data-v="pull" class="${dir0==="push"?"":"on"}">Забрать с другого NAS</button><button data-v="push" class="${dir0==="push"?"on":""}">Отправить с этого NAS</button></div></div>
+    <div class="mon-note" id="npDirHelp" style="margin:0 0 10px">${esc(DHELP[dir0])}</div>
     <div class="field"><label>Название</label><input id="npName" placeholder="Например: Резервный NAS"></div>
     <label class="nb-chk"><input type="checkbox" id="npClone"> Скопировать подключение и исключения из «${esc(src.name||"")}»</label>
     <div class="mon-note" style="margin:10px 0 0">Источники и расписание не копируются: пути на другом NAS свои, а два включённых расписания сразу — неприятный сюрприз.</div>
     <div class="r"><button class="btn" id="npX">Отмена</button><button class="btn pri" id="npOk">Создать</button></div></div>`;
   s.classList.add("show");const nm=s.querySelector("#npName");nm.focus();
-  let dir="pull";
+  let dir=dir0;
   const dirSeg=s.querySelector("#npDir"),clone=s.querySelector("#npClone");
   dirSeg.querySelectorAll("button").forEach(b=>b.onclick=()=>{if(clone.checked)return;
     dirSeg.querySelectorAll("button").forEach(x=>x.classList.toggle("on",x===b));
