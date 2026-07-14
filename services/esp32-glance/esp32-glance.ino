@@ -55,7 +55,16 @@ static const int BL_PIN = 38;
 #include <Preferences.h>
 Preferences PREFS;
 uint8_t BRIGHT = 255;
-void briApply() { ledcWrite(BL_PIN, BRIGHT); }
+bool NIGHT = false;              // server says "night window" -> backlight off
+uint32_t wokeAt = 0;             // a touch wakes the panel for a minute
+void applyBright() {
+  bool asleep = NIGHT && (millis() - wokeAt > 60000UL);
+  ledcWrite(BL_PIN, asleep ? 0 : BRIGHT);
+}
+// geometry of the on-screen "Brightness" tile (placed via the constructor);
+// BR_X < 0 = tile is not on the current page
+int BR_X = -1, BR_Y = 0, BR_W = 0, BR_H = 0;
+uint16_t BR_bg = 0, BR_lab = 0;
 
 // ---- config from flash --------------------------------------------------
 // The NAS panel (Настройки → Экран → «Прошить экран») writes a 4 KB block at
@@ -181,12 +190,18 @@ void drawStaleBadge() {
   dispFlush();
 }
 
-void drawBriOverlay(bool right) {
-  int w = 34, x = right ? tft.width() - w - 6 : 6, y = 6, h = tft.height() - 12;
-  tft.fillRoundRect(x, y, w, h, 8, 0x18E3);
-  tft.drawRoundRect(x, y, w, h, 8, 0x4A69);
-  int fill = (h - 8) * BRIGHT / 255;
-  tft.fillRoundRect(x + 4, y + 4 + (h - 8 - fill), w - 8, fill, 5, TFT_YELLOW);
+void drawBrightBody() {
+  if (BR_X < 0) return;
+  int tx = BR_X + BR_W / 2 - 11, ty = BR_Y + 22, th = BR_H - 29;
+  if (th < 20) { ty = BR_Y + 6; th = BR_H - 12; }
+  tft.fillRoundRect(tx, ty, 22, th, 6, 0x18E3);
+  int fill = (th - 6) * BRIGHT / 255;
+  tft.fillRoundRect(tx + 3, ty + 3 + (th - 6 - fill), 16, fill, 4, TFT_YELLOW);
+  String pc = String((BRIGHT * 100 + 127) / 255) + "%";
+  tft.setTextDatum(TR_DATUM);
+  tft.setTextColor(BR_lab, BR_bg);
+  tft.drawString(pc + "  ", BR_X + BR_W - 8, BR_Y + 12, 2);
+  tft.setTextDatum(ML_DATUM);
   dispFlush();
 }
 
@@ -348,14 +363,51 @@ void drawTile(JsonObject t, int x, int y, int w, int h) {
     valC = stColor(state);
   const char* kind = tileKind(t);
 
+  if (!strcmp(t["id"] | "", "bright")) {
+    // the slider tile: server sends an empty shell, the device owns the value
+    BR_X = x; BR_Y = y; BR_W = w; BR_H = h; BR_bg = tbg; BR_lab = labC;
+    tft.setTextDatum(TL_DATUM);
+    tft.setTextColor(labC, tbg);
+    tft.drawString(t["label"] | "", x + 7, y + 4, pickFont(ls, ""));
+    drawBrightBody();
+    tft.setTextDatum(ML_DATUM);
+    return;
+  }
+
+  JsonObject raw = t["raw"];
+  if (raw["rxh"].is<const char*>() && raw["txh"].is<const char*>()) {
+    // network up/down: two rows, download green / upload red, no arrow glyphs
+    if (strcmp(lp, "hide")) {
+      tft.setTextDatum(TL_DATUM); tft.setTextColor(labC, tbg);
+      tft.drawString(t["label"] | "", x + 7, y + 4, pickFont(ls, ""));
+    }
+    if (strcmp(vp, "hide")) {
+      int f = pickFont(vs, "");
+      int cy = y + h / 2 + (strcmp(lp, "hide") ? 6 : 0);
+      tft.setTextDatum(MC_DATUM);
+      tft.setTextColor(TFT_GREEN, tbg);
+      tft.drawString(String(raw["rxh"] | ""), x + w / 2, cy - tft.fontHeight(f) / 2 - 2, f);
+      tft.setTextColor(TFT_RED, tbg);
+      tft.drawString(String(raw["txh"] | ""), x + w / 2, cy + tft.fontHeight(f) / 2 + 2, f);
+    }
+    tft.setTextDatum(ML_DATUM);
+    tileNote(t, x, y, w, h, uniC, tbg);
+    tileDot(st, x, y, w, state);
+    return;
+  }
+
   if (!strcmp(kind, "bars")) {
     // uptime-kuma style: label left, value right, history bars fill the body
-    tft.setTextDatum(TL_DATUM); tft.setTextColor(labC, tbg);
-    tft.drawString(t["label"] | "", x + 7, y + 4, pickFont(ls, ""));
-    String v = String(t["value"] | "");
-    if ((t["unit"] | (const char*)"")[0]) v += " " + String(t["unit"] | "");
-    tft.setTextDatum(TR_DATUM); tft.setTextColor(valC, tbg);
-    tft.drawString(v, x + w - 16, y + 4, pickFont(ls, v));
+    if (strcmp(lp, "hide")) {
+      tft.setTextDatum(TL_DATUM); tft.setTextColor(labC, tbg);
+      tft.drawString(t["label"] | "", x + 7, y + 4, pickFont(ls, ""));
+    }
+    if (strcmp(vp, "hide")) {
+      String v = String(t["value"] | "");
+      if ((t["unit"] | (const char*)"")[0]) v += " " + String(t["unit"] | "");
+      tft.setTextDatum(TR_DATUM); tft.setTextColor(valC, tbg);
+      tft.drawString(v, x + w - 16, y + 4, pickFont(ls, v));
+    }
     JsonArray bars = t["raw"]["bars"];
     int n = bars.size();
     if (n) {
@@ -389,15 +441,25 @@ void drawTile(JsonObject t, int x, int y, int w, int h) {
       bool lit = a <= pct * 1.8f;
       tft.fillCircle(px, py, thick / 2, lit ? stColor(state) : 0x2965);
     }
-    tft.setTextDatum(BC_DATUM); tft.setTextColor(valC, tbg);
     String val = String(t["value"] | "");
-    tft.drawString(val, cx, cy + 1, pickFont(vs, val));
-    tft.setTextDatum(TL_DATUM); tft.setTextColor(labC, tbg);
-    tft.drawString(t["label"] | "", x + 7, y + 4, pickFont(ls, ""));
     String unit = String(t["unit"] | "");
-    if (unit.length()) {
-      tft.setTextDatum(TR_DATUM); tft.setTextColor(uniC, tbg);
-      tft.drawString(unit, x + w - 16, y + 4, pickFont(us, unit));
+    if (strcmp(vp, "hide")) {
+      tft.setTextDatum(BC_DATUM); tft.setTextColor(valC, tbg);
+      // value + unit glued right after it, small and dim — no corner clutter
+      if (unit.length() && strcmp(up, "hide")) {
+        int vf = pickFont(vs, val), uf = pickFont(us, unit);
+        int tot = tft.textWidth(val, vf) + 4 + tft.textWidth(unit, uf);
+        tft.setTextDatum(BL_DATUM);
+        tft.drawString(val, cx - tot / 2, cy + 1, vf);
+        tft.setTextColor(uniC, tbg);
+        tft.drawString(unit, cx - tot / 2 + tft.textWidth(val, vf) + 4, cy + 1, uf);
+      } else {
+        tft.drawString(val, cx, cy + 1, pickFont(vs, val));
+      }
+    }
+    if (strcmp(lp, "hide")) {
+      tft.setTextDatum(TL_DATUM); tft.setTextColor(labC, tbg);
+      tft.drawString(t["label"] | "", x + 7, y + 4, pickFont(ls, ""));
     }
     tft.setTextDatum(ML_DATUM);
     tileNote(t, x, y, w, h, uniC, tbg);
@@ -407,11 +469,15 @@ void drawTile(JsonObject t, int x, int y, int w, int h) {
 
   if (!strcmp(kind, "spark") && t["spark"].size() >= 2) {
     // big chart: header row + the whole body is the graph
-    tft.setTextDatum(TL_DATUM); tft.setTextColor(labC, tbg);
-    tft.drawString(t["label"] | "", x + 7, y + 4, pickFont(ls, ""));
-    String v = String(t["value"] | "") + " " + String(t["unit"] | "");
-    tft.setTextDatum(TR_DATUM); tft.setTextColor(valC, tbg);
-    tft.drawString(v, x + w - 16, y + 4, pickFont(ls, v));
+    if (strcmp(lp, "hide")) {
+      tft.setTextDatum(TL_DATUM); tft.setTextColor(labC, tbg);
+      tft.drawString(t["label"] | "", x + 7, y + 4, pickFont(ls, ""));
+    }
+    if (strcmp(vp, "hide")) {
+      String v = String(t["value"] | "") + " " + String(t["unit"] | "");
+      tft.setTextDatum(TR_DATUM); tft.setTextColor(valC, tbg);
+      tft.drawString(v, x + w - 16, y + 4, pickFont(ls, v));
+    }
     drawSparkC(t["spark"], x + 7, y + 22, w - 14, h - 29,
                strcmp(state, "ok") ? stColor(state) : TFT_GREEN);
     tft.setTextDatum(ML_DATUM);
@@ -497,6 +563,7 @@ void drawPage() {
   JsonObject pg = pages[page];
 
   tft.fillScreen(TFT_BLACK);
+  BR_X = -1;                       // re-registered by the tile if it is drawn
   // header: status dot, host, page name + dots
   // wide panels (Long 640px): a bold f4 host name read as a billboard —
   // slimmer f2 leaves the space to the tiles
@@ -576,6 +643,8 @@ void poll() {
   http.end();
   if (err) return;
   long seq = DOC["seq"] | 0;
+  bool n = DOC["night"] | false;
+  if (n != NIGHT) { NIGHT = n; applyBright(); }
   haveDoc = true;
   if (seq == lastSeq) return;
   lastSeq = seq;
@@ -607,7 +676,7 @@ void setup() {
   PREFS.begin("glance", false);
   BRIGHT = PREFS.getUChar("br", 255);
   ledcAttach(BL_PIN, 5000, 8);               // takes over the BL pin as PWM
-  briApply();
+  applyBright();
   tft.setRotation(1);                       // landscape; use 0 for portrait
   tft.fillScreen(TFT_BLACK);
   tft.setTextDatum(ML_DATUM);
@@ -635,36 +704,40 @@ void loop() {
   b1 = n1; b2 = n2;
 
 #if USE_TOUCH
-  // touch: an edge-started drag is the brightness slider, otherwise a swipe
+  // touch: inside the "Brightness" tile = slider, otherwise swipe flips pages
   static bool touching = false, briMode = false;
   static int tx0 = 0, ty0 = 0, tx = 0, ty = 0;
   int px, py;
   if (touchRead(px, py)) {
-    // portrait raw -> landscape (rotation 1): long axis = raw Y
-    int lx = (tft.getRotation() % 2) ? py : px;
-    int ly = (tft.getRotation() % 2) ? px : py;
+    // portrait raw -> landscape: MIRRORED on both axes (verified live: the
+    // old un-mirrored mapping put a right-edge touch on the LEFT of the screen)
+    int lx = tft.width() - 1 - py;
+    int ly = tft.height() - 1 - px;
     if (!touching) {
       touching = true; tx0 = px; ty0 = py;
-      briMode = (lx < 46 || lx > tft.width() - 46);
+      briMode = (BR_X >= 0 && lx >= BR_X && lx <= BR_X + BR_W
+                           && ly >= BR_Y && ly <= BR_Y + BR_H);
     }
     tx = px; ty = py;
+    wokeAt = millis(); applyBright();    // ночью касание будит подсветку
     if (briMode) {
-      int lvl = 255 - ly * 255 / (tft.height() - 1);
+      int lvl = (BR_Y + BR_H - ly) * 255 / (BR_H > 0 ? BR_H : 1);
       BRIGHT = lvl < 8 ? 8 : (lvl > 255 ? 255 : lvl);
-      briApply();
-      drawBriOverlay(lx > tft.width() / 2);
+      applyBright();
+      drawBrightBody();                  // partial redraw: no page repaint
     }
   } else if (touching) {
     touching = false;
-    if (briMode) {                       // persist + wipe the overlay
+    if (briMode) {
       briMode = false;
       PREFS.putUChar("br", BRIGHT);
-      lastSeq = -1; if (haveDoc) drawPage(); lastPoll = 0;
     } else {
-      int dl = (tft.getRotation() % 2) ? (ty - ty0) : (tx - tx0);
+      int dl = ty - ty0;                 // raw long axis, direction as before
       if (abs(dl) > 50) flipPage(dl < 0 ? +1 : -1);
     }
   }
+  if (touching) { delay(30); return; }   // finger down: no polls, no rotation —
+                                         // a mid-drag repaint yanked the slider
 #endif
 
   if (WiFi.status() != WL_CONNECTED) {

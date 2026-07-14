@@ -1798,7 +1798,8 @@
   .glc-guide.v{width:1px;top:0;bottom:0}
   .glc-guide.h{height:1px;left:0;right:0}
   .glc-over{align-self:stretch;display:flex;align-items:center;gap:6px;flex-wrap:wrap;color:var(--warn);font-size:12px}
-  .glc-insp{width:216px;flex:none;overflow:auto;display:flex;flex-direction:column;gap:10px;font-size:12px;padding-right:4px}
+  .glc-insp{width:286px;flex:none;overflow:auto;display:flex;flex-direction:column;gap:8px;font-size:12px;padding-right:4px}
+  .glc-insp details.gi>summary{cursor:pointer;font-size:10.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--dim);list-style:revert}
   .glc-insp .gi{display:flex;flex-direction:column;gap:5px;padding:9px 11px;border-radius:10px;background:var(--card);border:1px solid var(--line)}
   .glc-insp .gi>span{font-size:10.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--dim)}
   .glc-insp .gi label{display:flex;align-items:center;gap:5px;color:var(--dim)}
@@ -7487,7 +7488,11 @@ async function glanceTab(tc){
    </div></div>
   <div class="set-h">Доступность</div>
   <div class="set-sub">Журнал доступности ведёт сторож сети: пингует шлюз и пишет состояние (онлайн / без сети / выключен). Полоски — в виджетах «Доступность · 24h / 30d» и в плитках avail.</div>
-  <div class="srow"><div class="srow-l"><div class="srow-t">Интервал проверки</div><div class="srow-d">чаще — точнее полоски, реже — меньше фоновой работы</div></div><div class="srow-c"><div class="seg" id="glPing">${[15,30,60,120].map(v=>`<button data-v="${v}" class="${(cfg.ping_interval||30)===v?"on":""}">${v}с</button>`).join("")}</div></div></div>`;
+  <div class="srow"><div class="srow-l"><div class="srow-t">Интервал проверки</div><div class="srow-d">чаще — точнее полоски, реже — меньше фоновой работы</div></div><div class="srow-c"><div class="seg" id="glPing">${[15,30,60,120].map(v=>`<button data-v="${v}" class="${(cfg.ping_interval||30)===v?"on":""}">${v}с</button>`).join("")}</div></div></div>
+  <div class="set-h">Ночь</div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Гасить экраны ночью</div><div class="srow-d">ESP32-экраны выключают подсветку по расписанию; касание будит на минуту</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="glN"${cfg.night?" checked":""}><span class="sl"></span></label></div></div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">С</div></div><div class="srow-c"><input type="time" id="glNF" class="inp" style="width:110px" value="${att(cfg.night_from||"23:00")}"></div></div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">До</div></div><div class="srow-c"><input type="time" id="glNT" class="inp" style="width:110px" value="${att(cfg.night_to||"07:00")}"></div></div>`;
  const post=async d=>api("/api/glance/config",{method:"POST",body:JSON.stringify(d)});
  tc.querySelector("#glOpen").onclick=()=>winGlance();
  tc.querySelector("#glEn").onchange=e=>post({enabled:e.target.checked});
@@ -7496,6 +7501,9 @@ async function glanceTab(tc){
  tc.querySelector("#glCopy").onclick=()=>{if(navigator.clipboard)navigator.clipboard.writeText(url);toast("Скопировано");};
  tc.querySelector("#glFw").onclick=()=>winFiles("/opt/nas-os/services/esp32-glance");
  tc.querySelectorAll("#glPing button").forEach(b=>b.onclick=()=>{tc.querySelectorAll("#glPing button").forEach(x=>x.classList.toggle("on",x===b));post({ping_interval:+b.dataset.v});toast("Интервал обновлён");});
+ tc.querySelector("#glN").onchange=e=>post({night:e.target.checked});
+ tc.querySelector("#glNF").onchange=e=>post({night_from:e.target.value});
+ tc.querySelector("#glNT").onchange=e=>post({night_to:e.target.value});
  // --- прошивка ESP32-экрана ---
  const q=id=>tc.querySelector(id);
  const scrSel=q("#e32Scr");
@@ -8395,7 +8403,10 @@ function winGlance(){openWin("__glance","Экран NAS",async body=>{
   const dispName=t.label||names[t.id]||t.id;
   const kind=(t.st&&t.st.k)||((live.raw&&live.raw.bars)?"bars":"");
   let inner="";
-  if(kind==="bars"||kind==="gauge"||kind==="spark"){
+  if(t.id==="bright"){
+   inner+=`<span class="e l" style="left:4%;top:4%;font-size:${fs(stv(t,"ls"))}${col("lc")}">${esc(dispName)}</span>
+    <span style="position:absolute;left:50%;top:32%;bottom:10%;width:${px(20)}px;transform:translateX(-50%);border-radius:${px(6)}px;background:#20242e;overflow:hidden"><i style="position:absolute;left:${px(3)}px;right:${px(3)}px;bottom:${px(3)}px;height:62%;border-radius:${px(4)}px;background:#f5b342"></i></span>`;
+  }else if(kind==="bars"||kind==="gauge"||kind==="spark"){
    // rough preview of the device rendering: header row + body graphic
    inner+=`<span class="e l" style="left:4%;top:4%;font-size:${fs(stv(t,"ls"))}${col("lc")}">${esc(dispName)}</span>`;
    inner+=`<span class="e v" style="right:8%;top:4%;font-size:${fs(stv(t,"ls"))}${col("vc")}">${esc(live.value)} ${esc(live.unit||"")}</span>`;

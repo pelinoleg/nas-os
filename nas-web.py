@@ -1665,6 +1665,7 @@ def glance_catalog():
         cat.append((s["id"], s["name"], s["name"]))
     for h in _safe(hostwatch_load, []) or []:
         cat.append(("hw:" + h["id"], "Хост · " + h["name"], "Host · " + h["name"]))
+    cat.append(("bright", "Яркость", "Brightness"))   # рисует и крутит устройство
     # смонтированные тома: свободное место плиткой (вид «шкала» = заполнение)
     for d in (_safe(_screen_heavy, {}) or {}).get("disks") or []:
         mts = d.get("mounts") or []
@@ -1976,15 +1977,28 @@ def load_glance():
                     "avail": s.get("avail") is not False,   # bottom 24h strip
                     "defst": _gl_norm_style(s.get("defst")),  # style for new tiles
                     "pages": _gl_norm_pages(s.get("pages"))})
+    def _hhmm(k, dflt):
+        v = str(d.get(k) or dflt)
+        return v if re.match(r"^\d{1,2}:\d{2}$", v) else dflt
     return {"enabled": bool(d.get("enabled")),
             "token": d.get("token") or "",
             "ping_interval": int(d.get("ping_interval") or 30),
+            # ночь для ESP32-экранов: payload несёт night=true, устройство гасит
+            # подсветку само (часов у него нет — время знает сервер)
+            "night": bool(d.get("night")),
+            "night_from": _hhmm("night_from", "23:00"),
+            "night_to": _hhmm("night_to", "07:00"),
             "screens": out}
 
 def save_glance(d):
     cur = load_glance()
     if "enabled" in d:
         cur["enabled"] = bool(d["enabled"])
+    if "night" in d:
+        cur["night"] = bool(d["night"])
+    for k in ("night_from", "night_to"):
+        if re.match(r"^\d{1,2}:\d{2}$", str(d.get(k) or "")):
+            cur[k] = str(d[k])
     if isinstance(d.get("screens"), list):
         ok_ids = {t[0] for t in glance_catalog()}
         screens, seen = [], set()
@@ -2242,6 +2256,9 @@ def _glance_tile(tid, en):
         fall = {"ok": "OK", "warn": "WARN", "danger": "FAIL"}[s["state"]]
         return {"value": s["text"] or fall, "unit": "", "state": s["state"],
                 "raw": {"state": s["state"], "text": s["text"]}}
+    if tid == "bright":
+        # слайдер подсветки: значение живёт НА устройстве, сервер лишь даёт плитку
+        return {"value": "", "unit": "", "state": "ok", "raw": {"local": True}}
     if tid.startswith("dk:"):
         d0 = next((x for x in (_safe(_screen_heavy, {}) or {}).get("disks") or []
                    if x.get("name") == tid[3:]), None)
@@ -2307,14 +2324,22 @@ def _glance_tile(tid, en):
     if tid == "netspeed":
         r = net_rate(default_iface()) or {}
         raw = {"rx": r.get("rx", 0), "tx": r.get("tx", 0)}
+        # rxh/txh — готовые строки для двухстрочного рендера на устройстве
+        # (download зелёным, upload красным, без стрелок-иконок)
         if load_settings().get("netUnits") == "bits":  # panel-wide unit choice
             def _mb(x):
                 x = (x or 0) * 8 / 1e6
                 return "%d" % x if x >= 100 else "%.1f" % x
+            u = "Мбит/с" if not en else "Mbit/s"
+            raw["rxh"] = _mb(raw["rx"]) + " " + u
+            raw["txh"] = _mb(raw["tx"]) + " " + u
             return {"value": "↓%s ↑%s" % (_mb(raw["rx"]), _mb(raw["tx"])),
-                    "unit": "Мбит/с" if not en else "Mbit/s", "state": "ok", "raw": raw}
+                    "unit": u, "state": "ok", "raw": raw}
+        us = "/с" if not en else "/s"
+        raw["rxh"] = _gl_bytes(raw["rx"], en) + us
+        raw["txh"] = _gl_bytes(raw["tx"], en) + us
         return {"value": "↓%s ↑%s" % (_gl_bytes(raw["rx"], en), _gl_bytes(raw["tx"], en)),
-                "unit": "/с" if not en else "/s", "state": "ok", "raw": raw}
+                "unit": us, "state": "ok", "raw": raw}
     if tid == "cputemp":
         t = temp_c()
         if t is None:
@@ -2532,7 +2557,8 @@ def glance_payload(lang="ru", screen=""):
     elif any(t["state"] == "warn" for t in shown):
         status = "warn"
     av = avail_bars(24, 96)
-    payload = {"v": 2, "host": socket.gethostname(), "status": status,
+    night = bool(cfg.get("night") and _in_night(cfg))
+    payload = {"v": 2, "host": socket.gethostname(), "status": status, "night": night,
                "screen": {"id": scr["id"], "name": scr["name"], "preset": scr["preset"],
                           "mode": scr["mode"], "gap": scr["gap"], "avail": scr["avail"]},
                "problems": problems[:4], "pages": pages,
@@ -2540,7 +2566,7 @@ def glance_payload(lang="ru", screen=""):
                "tiles": pages[0]["tiles"] if pages else [],
                "avail": {"bars": av["bars"], "pct24": av["pct"]},
                "ts": int(time.time())}
-    sig = json.dumps([pages, problems, status, av["bars"]], sort_keys=True, ensure_ascii=False)
+    sig = json.dumps([pages, problems, status, av["bars"], night], sort_keys=True, ensure_ascii=False)
     with _GL_LOCK:
         c = _GL_CACHE["langs"].setdefault(key, {"t": 0, "sig": "", "seq": 0, "payload": None})
         if sig != c["sig"]:
