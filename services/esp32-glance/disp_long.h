@@ -26,10 +26,15 @@ public:
     pinMode(1, OUTPUT);                     // TFT_BL of the Long
     digitalWrite(1, HIGH);
     bus = new Arduino_ESP32QSPI(12 /*CS*/, 17 /*SCK*/, 13, 18, 21, 14 /*D0-D3*/);
-    panel = new Arduino_AXS15231B(bus, 16 /*RST*/, 0, false, 180, 640);
-    // the panel is physically portrait 180x640; the canvas presents it as
-    // landscape 640x180 and rotates on flush
-    gfx = new Arduino_Canvas(640, 180, panel, 0, 0, 1);
+    // RST is 47 (per the library's own LILYGO_T_Display_S3_LONG dev profile);
+    // GPIO16 from LilyGO's pins_config is the TOUCH reset — pulsing it here
+    // left the touch controller dead
+    panel = new Arduino_AXS15231B(bus, 47 /*RST*/, 0, false, 180, 640);
+    // ctor takes the PANEL-NATIVE dims (that exact bitmap goes out on flush);
+    // rotation=1 remaps DRAWING coords, so width()/height() report 640x180.
+    // Passing rotated dims here pushes a 640-wide frame into a 180-wide panel
+    // — the screen shows one strip of colored noise (been there).
+    gfx = new Arduino_Canvas(180, 640, panel, 0, 0, 1);
     gfx->begin(32000000);                   // >32 MHz corrupts this panel
     gfx->fillScreen(TFT_BLACK);
     gfx->flush();

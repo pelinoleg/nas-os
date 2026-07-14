@@ -84,16 +84,25 @@ void loadCfg() {
 #include <Wire.h>
 #if NAS_DISPLAY_LONG
 // AXS15231B has the touch controller built in: I2C 0x3B on SDA=15 SCL=10,
-// read with a magic command, coords come in the panel's portrait 180x640
-static const int TP_SDA = 15, TP_SCL = 10;
+// reset on GPIO16, read with a magic command, coords in portrait 180x640
+static const int TP_SDA = 15, TP_SCL = 10, TP_RST = 16;
 static const uint8_t TP_ADDR = 0x3B;
-void touchInit() { Wire.begin(TP_SDA, TP_SCL); }
+void touchInit() {
+  pinMode(TP_RST, OUTPUT);                 // left floating, the controller can
+  digitalWrite(TP_RST, LOW); delay(10);    // wedge the bus and hang the loop
+  digitalWrite(TP_RST, HIGH); delay(120);
+  Wire.begin(TP_SDA, TP_SCL);
+  Wire.setTimeOut(50);
+}
 bool touchRead(int &x, int &y) {
+  static uint8_t dead = 0;                 // fuse: a wedged bus must not stall
+  if (dead >= 20) return false;            // every loop forever
   static const uint8_t cmd[11] = {0xB5, 0xAB, 0xA5, 0x5A, 0, 0, 0, 8, 0, 0, 0};
   Wire.beginTransmission(TP_ADDR);
   Wire.write(cmd, sizeof cmd);
-  if (Wire.endTransmission() != 0) return false;
-  if (Wire.requestFrom((int)TP_ADDR, 8) < 8) return false;
+  if (Wire.endTransmission() != 0) { dead++; return false; }
+  if (Wire.requestFrom((int)TP_ADDR, 8) < 8) { dead++; return false; }
+  dead = 0;
   uint8_t b[8];
   for (int i = 0; i < 8; i++) b[i] = Wire.read();
   if (!(b[1] & 0x0F)) return false;
@@ -402,6 +411,8 @@ void poll() {
   http.setTimeout(4000);
   http.begin(url);
   int code = http.GET();
+  static int lastCode = -1;                 // log only transitions, not every poll
+  if (code != lastCode) { lastCode = code; Serial.println("poll HTTP " + String(code)); }
   if (code == 304) {
     http.end(); failures = 0; lastOkMs = millis();
     if (stale) { stale = false; drawPage(); }        // link is back — clear badge
@@ -455,11 +466,17 @@ void setup() {
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.drawString("connecting...", 10, tft.height() / 2, 2);
   dispFlush();
+  Serial.println("display up " + String(tft.width()) + "x" + String(tft.height())
+                 + ", wifi ssid=" + C_ssid);
+  Serial.println("wifi mode...");
   WiFi.mode(WIFI_STA);
+  Serial.println("wifi begin...");
   WiFi.begin(C_ssid.c_str(), C_pass.c_str());
+  Serial.println("touch init...");
 #if USE_TOUCH
   touchInit();
 #endif
+  Serial.println("setup done");
 }
 
 void loop() {
@@ -487,11 +504,15 @@ void loop() {
 
   if (WiFi.status() != WL_CONNECTED) {
     static uint32_t lostAt = 0;
+    static uint32_t logAt = 0;
     if (!lostAt) lostAt = millis();
+    if (millis() - logAt > 3000) { logAt = millis(); Serial.println("wifi status " + String(WiFi.status())); }
     if (millis() - lostAt > 15000) { drawOffline("wifi lost"); lostAt = millis(); WiFi.reconnect(); }
     delay(100);
     return;
   }
+  static bool up = false;
+  if (!up) { up = true; Serial.println("wifi up, ip " + WiFi.localIP().toString()); }
   if (PAGE_ROTATE_MS && haveDoc && millis() - lastFlip >= PAGE_ROTATE_MS) flipPage(+1);
   if (millis() - lastPoll >= POLL_MS || !lastPoll) { lastPoll = millis(); poll(); }
   delay(30);
