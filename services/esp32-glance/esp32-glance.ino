@@ -707,6 +707,7 @@ void loop() {
   // touch: inside the "Brightness" tile = slider, otherwise swipe flips pages
   static bool touching = false, briMode = false;
   static int tx0 = 0, ty0 = 0, tx = 0, ty = 0;
+  static uint32_t touchT0 = 0;
   int px, py;
   if (touchRead(px, py)) {
     // portrait raw -> landscape: MIRRORED on both axes (verified live: the
@@ -714,9 +715,12 @@ void loop() {
     int lx = tft.width() - 1 - py;
     int ly = tft.height() - 1 - px;
     if (!touching) {
-      touching = true; tx0 = px; ty0 = py;
+      touching = true; tx0 = px; ty0 = py; touchT0 = millis();
       briMode = (BR_X >= 0 && lx >= BR_X && lx <= BR_X + BR_W
                            && ly >= BR_Y && ly <= BR_Y + BR_H);
+    }
+    if (millis() - touchT0 > 20000) {    // ghost touch: controller reports a
+      touching = false; briMode = false; // finger forever -> release the fuse
     }
     tx = px; ty = py;
     wokeAt = millis(); applyBright();    // ночью касание будит подсветку
@@ -736,8 +740,10 @@ void loop() {
       if (abs(dl) > 50) flipPage(dl < 0 ? +1 : -1);
     }
   }
-  if (touching) { delay(30); return; }   // finger down: no polls, no rotation —
-                                         // a mid-drag repaint yanked the slider
+  // only an ACTIVE slider drag pauses polling (a repaint mid-drag yanked the
+  // slider); a plain touch or a ghost point must not starve the data loop
+  if (touching && briMode) { delay(30); return; }
+  if (touching && PAGE_ROTATE_MS) lastFlip = millis();   // no auto-flip mid-touch
 #endif
 
   if (WiFi.status() != WL_CONNECTED) {
