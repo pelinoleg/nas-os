@@ -11397,6 +11397,7 @@ def load_screen():
             "night_to": _hhmm("night_to", "07:00"),
             "night_bright": _i("night_bright", 0, 0, 255),
             "idle_min": _i("idle_min", 0, 0, 240),      # 0 = не гасить по простою
+            "clock_min": _i("clock_min", 3, 0, 240),    # часы при простое; 0 = выкл
             "poll": _i("poll", 1500, 500, 30000),       # как часто экран спрашивает данные, мс
             "actions": d.get("actions") is not False,
             "lang": "ru" if d.get("lang") == "ru" else "en"}
@@ -11436,8 +11437,17 @@ def screen_bright_set(v):
     except ValueError:
         mx = 255
     try:
+        v = max(0, min(mx, int(v)))
+        # brightness=0 does NOT cut this panel's backlight (minimum PWM still
+        # glows — "погашенный" экран был виден в тёмной комнате). Real off is
+        # bl_power=4 (FB_BLANK_POWERDOWN); coming back needs bl_power=0 first.
+        try:
+            with open(d + "/bl_power", "w") as f:
+                f.write("4" if v == 0 else "0")
+        except OSError:
+            pass                      # нет bl_power у драйвера — хотя бы PWM в ноль
         with open(d + "/brightness", "w") as f:
-            f.write(str(max(0, min(mx, int(v)))))
+            f.write(str(v))
         return True
     except (OSError, ValueError):
         return False
@@ -11542,7 +11552,10 @@ def _screen_heavy():
                    "tran": d.get("tran") or "", "mounts": d.get("mounts") or [],
                    "used_pct": (d.get("usage") or {}).get("pct"),
                    "free": (d.get("usage") or {}).get("free"),
-                   "used": (d.get("usage") or {}).get("used")})
+                   "used": (d.get("usage") or {}).get("used"),
+                   "dev": d.get("path") or "",
+                   "removable": bool(d.get("removable")) or d.get("tran") == "usb",
+                   "hours": sm.get("power_on_hours")})
     # системный — всегда первым: на экране умещается 4 строки, и он не должен
     # уезжать из них из-за алфавита
     dk.sort(key=lambda x: (0 if (x["role"] == "system" or "/" in x["mounts"]) else 1,
@@ -11581,12 +11594,18 @@ def _screen_page2():
     wd = _safe(wud_state, {}) or {}
     cr = _safe(cron_jobs, {}) or {}
     hist = []
+    sched = []
     for p in (_safe(nb_profiles_public, []) or []):
         for h in (_safe(lambda pid=p["id"]: nb_history(pid), []) or [])[:3]:
             # у записи прогона нет полей files/size — они лежат в её задачах (jobs)
             hist.append({"name": p["name"], "ts": h.get("ts") or 0,
                          "result": h.get("result") or "", "files": _nb_run_files(h),
                          "size": _nb_run_bytes(h), "dur": h.get("dur")})
+        # запланированный прогон профиля — для плашки «Следующие запуски»
+        pc = _safe(lambda pid=p["id"]: nb_load(pid), {}) or {}
+        t = _safe(lambda: _nb_next_run(pc))
+        if t:
+            sched.append({"name": p["name"], "next": int(t), "kind": "backup"})
     hist.sort(key=lambda x: -x["ts"])
     d = {
         # Time Machine: сервис может быть не настроен — тогда просто пусто
@@ -11605,6 +11624,7 @@ def _screen_page2():
         "cron": [{"name": j.get("name") or j.get("id") or "?", "next": j.get("next") or 0,
                   "last": j.get("last") or 0, "ok": j.get("ok")}
                  for j in (cr.get("jobs") or [])][:6],
+        "sched": sorted(sched, key=lambda x: x["next"])[:8],
         "nbhist": hist[:8],
         "graphs": {"cpu": _safe(lambda: _gl_spark("cpu"), []) or [],
                    "temp": _safe(lambda: _gl_spark("temp"), []) or [],
@@ -11726,8 +11746,12 @@ def screen_payload(lang="", p2=False):
             "swap": (st.get("mem") or {}).get("swap_total"),
             "throttled": st.get("throttled"), "psu_ma": st.get("psu_ma"),
             "asleep": bool(_SCR["sleep"]),
+            # подсветка сейчас погашена (сон/ночь/простой): первый тап должен
+            # только будить, а не нажимать плашку под пальцем — клиент ставит щит
+            "dark": _SCR["last"] == 0,
             "speed": _SCR["spd"], "speed_running": bool(_SCR["spd_run"]),
             "actions": cfg["actions"], "lang": cfg["lang"], "poll": cfg["poll"],
+            "clock": cfg["clock_min"],
             "p2": (_safe(_screen_page2, {}) or {}) if p2 else None,
             "ts": int(time.time())}
 
@@ -11755,6 +11779,16 @@ def screen_action(b):
         return {"ok": False, "log": "действия с экрана выключены"}
     if a == "backup":
         return nb_run_bg(_nb_bpid(b))
+    if a == "eject":
+        # disk_eject sam refuses system/pool disks; the screen only offers the
+        # button for mounted USB drives, but the server must not trust that
+        dev = str(b.get("dev") or "")
+        if not dev.startswith("/dev/"):
+            dev = "/dev/" + dev
+        r = disk_eject(dev)
+        if r.get("ok"):
+            _SCR_HEAVY["t"] = 0            # диск исчез — лист должен увидеть сразу
+        return r
     if a == "speed":
         if _SCR["spd_run"]:
             return {"ok": True, "running": True}

@@ -9257,6 +9257,7 @@ function screenTab(tc){
   <div class="srow"><div class="srow-l"><div class="srow-t">Просыпаться в</div><div class="srow-d">время, когда подсветка возвращается</div></div><div class="srow-c"><input type="time" id="scTo" class="inp" style="width:120px"></div></div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Яркость ночью</div><div class="srow-d">0 — гасить совсем; касание будит на минуту</div></div><div class="srow-c"><input type="range" min="0" max="255" id="scNb" style="width:180px"><b id="scNbV" style="margin-left:8px;min-width:34px;display:inline-block"></b></div></div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Гасить в простое</div><div class="srow-d">минут без касаний; 0 — не гасить</div></div><div class="srow-c"><input type="number" min="0" max="240" id="scIdle" class="inp" style="width:90px"></div></div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Часы в простое</div><div class="srow-d">минут без касаний до больших часов с основными показателями; 0 — не показывать</div></div><div class="srow-c"><input type="number" min="0" max="240" id="scClk" class="inp" style="width:90px"></div></div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Заснуть сейчас</div><div class="srow-d">погасить до первого касания</div></div><div class="srow-c"><button class="btn sm" id="scSleep">${svg("moon",13)} Заснуть</button></div></div>
   <div class="set-grp">Данные</div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Как часто обновлять</div><div class="srow-d">секунды между опросами. Тяжёлые источники (обновления apt, температура дисков) кэшируются отдельно и от этого не страдают</div></div><div class="srow-c"><input type="number" min="0.5" max="30" step="0.5" id="scPoll" class="inp" style="width:90px"></div></div>
@@ -9270,6 +9271,7 @@ function screenTab(tc){
   q("#scN").checked=!!c.night; q("#scFrom").value=c.night_from||"23:00"; q("#scTo").value=c.night_to||"07:00";
   q("#scNb").value=c.night_bright||0; q("#scNbV").textContent=c.night_bright||0;
   q("#scIdle").value=c.idle_min||0;
+  q("#scClk").value=c.clock_min!=null?c.clock_min:3;
   q("#scPoll").value=((c.poll||1500)/1000).toFixed(1);
   const u=location.origin+"/screen";
   q("#scUrl").href=u; q("#scUrl").textContent=u.replace(/^https?:\/\//,"");
@@ -9289,6 +9291,7 @@ function screenTab(tc){
   const cfg={enabled:q("#scEn").checked,actions:q("#scAct").checked,bright:+q("#scBr").value,
     night:q("#scN").checked,night_from:q("#scFrom").value,night_to:q("#scTo").value,
     night_bright:+q("#scNb").value,idle_min:+q("#scIdle").value,
+    clock_min:+q("#scClk").value,
     poll:Math.round((+q("#scPoll").value||1.5)*1000)};
   const r=await api("/api/screen/config",{method:"POST",body:JSON.stringify({config:cfg})});
   toast(r&&r.ok?"Сохранено ✓":"Ошибка");   // службу киоска поднимает/гасит сервер (движок)

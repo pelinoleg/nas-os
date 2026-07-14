@@ -1,6 +1,6 @@
 <!doctype html>
 <meta charset="utf-8">
-<meta name="viewport" content="width=800,height=480,initial-scale=1,user-scalable=no">
+<meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
 <title>NAS</title>
 <script src="/i18n.js"></script>
 <style>
@@ -16,13 +16,20 @@
   /* курсор не нужен вовсе: единственный указатель — палец. !important, потому что
      chromium подставляет свои курсоры для полей и кнопок поверх наследования */
   *,*::before,*::after{cursor:none !important}
+  /* the same page opened from LAN (phone/desktop, .remote set by JS) has a real
+     pointer — hiding it there just loses the mouse */
+  :root.remote *,:root.remote *::before,:root.remote *::after{cursor:auto !important}
   /* полосы прокрутки не рисуем: пальцем и так листается, а на 4.3" они уродуют вёрстку */
   *{scrollbar-width:none;-ms-overflow-style:none}
   *::-webkit-scrollbar{width:0;height:0;display:none}
   *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;
     -webkit-user-select:none;user-select:none;touch-action:manipulation}
-  html{background:#0a0f1a}
-  html,body{width:800px;height:480px;overflow:hidden;color:var(--ink);
+  /* The layout is authored in logical 800x480. fit() scales the body as one
+     stage to ANY viewport (phone, tablet, replaced panel): tiles keep their
+     arrangement, pixels grow/shrink, and the logical height follows the device
+     aspect so the flex rows absorb the proportion difference. */
+  html{background:#0a0f1a;width:100%;height:100%;overflow:hidden}
+  body{width:800px;height:480px;overflow:hidden;color:var(--ink);transform-origin:0 0;
     font:15px/1.35 system-ui,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
   body{background:transparent;display:flex;flex-direction:column;gap:7px;padding:0 0 7px}
   #wall{position:fixed;inset:0;background:#0a0f1a center/cover no-repeat;z-index:-3}
@@ -94,6 +101,19 @@
   #row{flex:1.25;display:grid;grid-template-columns:1fr 1fr;gap:7px;min-height:0}
   /* страница Docker: стеки и контейнеры целиком */
   #r3{flex:1;display:grid;grid-template-columns:1fr 1fr;gap:7px;min-height:0}
+  #r4{flex:1;display:grid;grid-template-columns:1.15fr 1fr;gap:7px;min-height:0}
+  /* idle clock overlay */
+  #clock{position:fixed;inset:0;z-index:8;display:none;align-items:center;justify-content:center;
+    background:rgba(5,9,16,.72);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px)}
+  #clock.on{display:flex}
+  #clockIn{display:flex;flex-direction:column;align-items:center;transition:transform 1.2s ease}
+  #ctime{font-size:132px;font-weight:200;line-height:1;letter-spacing:3px;font-variant-numeric:tabular-nums}
+  #cdate{font-size:18px;color:var(--dim);margin-top:12px}
+  #cstats{display:flex;gap:24px;margin-top:30px;font-size:14px;color:var(--dim);align-items:center;flex-wrap:wrap;justify-content:center}
+  #cstats b{color:var(--ink);font-weight:650}
+  #cstats .ok{color:var(--good)} #cstats .wn{color:var(--warn)}
+  #shield{position:fixed;inset:0;z-index:20;display:none;background:transparent}
+  #shield.on{display:block}
   #r3 .r2{padding:4px 0;font-size:12.5px}
   #row2{flex:.95;display:grid;grid-template-columns:1.35fr 1fr;gap:7px;min-height:0}
   #row2 .r2{padding:3px 0;font-size:12.5px}
@@ -264,19 +284,47 @@
       <div class="card g" id="c_ct" data-sheet="docker"></div>
     </div>
   </div>
+
+  <div class="page" id="p3">
+    <div id="r4">
+      <div class="card g" id="c_sc" data-sheet="sched"></div>
+      <div class="card g" id="c_sm" data-sheet="smart"></div>
+    </div>
+  </div>
 </div>
 
 <div id="foot" class="g"><span id="av24" data-sheet="avail"></span><span id="av30" data-sheet="avail"></span>
-  <span id="dots"><i class="d on" data-page="0"></i><i class="d" data-page="1"></i><i class="d" data-page="2"></i></span></div>
+  <span id="dots"><i class="d on" data-page="0"></i><i class="d" data-page="1"></i><i class="d" data-page="2"></i><i class="d" data-page="3"></i></span></div>
 
 <div id="sheet"><div id="sheetIn"><h3><span id="sheetT"></span><span class="x" id="sheetX">✕</span></h3>
   <div id="sheetB"></div><div id="sheetA"></div></div></div>
 <div id="alarm"><div class="big"></div><div class="li"></div><div class="hint">Нажмите, чтобы скрыть</div></div>
 <div id="toast"></div>
+<!-- idle clock: big time + core stats; a tap dismisses it and nothing else.
+     Sits after #sheet in the DOM so an equal z-index puts it OVER an open sheet,
+     while #alarm (z:9) and #toast (z:10) stay above. -->
+<div id="clock"><div id="clockIn"><div id="ctime"></div><div id="cdate"></div><div id="cstats"></div></div></div>
+<!-- invisible shield while the backlight is off: the waking tap must not press
+     whatever card happens to be under the finger -->
+<div id="shield"></div>
 
 <script>
 const $=s=>document.querySelector(s);
 let D={}, WPV=null;
+
+/* ---------- one stage, any screen ----------
+   Logical canvas is 800x480. Scale = fit the smaller side; the other logical
+   dimension grows with the device aspect, flex rows soak up the difference.
+   Kiosk (loopback) stays exactly 1:1. */
+const KIOSK=["127.0.0.1","localhost","[::1]"].includes(location.hostname);
+if(!KIOSK) document.documentElement.classList.add("remote");
+function fit(){
+  const s=Math.min(innerWidth/800,innerHeight/480)||1, b=document.body;
+  b.style.transform=Math.abs(s-1)<.002?"":`scale(${s})`;
+  b.style.width=Math.round(innerWidth/s)+"px";
+  b.style.height=Math.round(innerHeight/s)+"px";
+}
+addEventListener("resize",fit); fit();
 
 /* ---------- helpers ---------- */
 const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
@@ -446,6 +494,71 @@ function renderP2(d){
         <span class="nm">${esc(c.name)}</span>
         <span class="ago">${esc(up?(c.status||"работает"):(c.state||"стоит"))}</span></div>`;}).join("")
       :`<div class="empty">контейнеров нет</div>`}</div>`;
+}
+
+/* ---------- четвёртая страница: расписание + здоровье дисков ---------- */
+function schedList(d){
+  const P=d.p2||{};
+  const a=(P.sched||[]).map(x=>({name:x.name,next:x.next,kind:"бэкап"}));
+  const b=(P.cron||[]).filter(j=>j.next).map(j=>({name:j.name,next:j.next,kind:"задача"}));
+  return a.concat(b).sort((x,y)=>x.next-y.next);
+}
+function fmtIn(ts){
+  const s=ts-Math.floor(Date.now()/1000);
+  if(s<=30) return "сейчас";
+  if(s<3600) return "через "+Math.max(1,Math.round(s/60))+" мин";
+  if(s<86400) return "через "+Math.round(s/3600)+" ч";
+  return "через "+Math.round(s/86400)+" дн";
+}
+function tat(ts){
+  const t=new Date(ts*1000), n=new Date();
+  const hm=("0"+t.getHours()).slice(-2)+":"+("0"+t.getMinutes()).slice(-2);
+  if(t.toDateString()===n.toDateString()) return hm;
+  return t.toLocaleDateString(window.NAS_LANG==="ru"?"ru-RU":"en-GB",{weekday:"short"})+" "+hm;
+}
+const hrsFmt=h=>h>=17520?(h/8760).toFixed(1)+" лет":h>=72?Math.round(h/24)+" дн":h+" ч";
+function renderP3(d){
+  const L=schedList(d);
+  $("#c_sc").innerHTML=`<h2>Следующие запуски<span class="r">${L.length||"—"}</span></h2>
+    <div class="body">${L.length?L.slice(0,8).map(x=>`
+      <div class="r2"><span class="nm">${esc(x.name)}</span>
+        <span class="ago">${fmtIn(x.next)} · ${tat(x.next)}</span></div>`).join("")
+      :`<div class="empty">ничего не запланировано</div>`}</div>`;
+  const dk=d.disks||[];
+  $("#c_sm").innerHTML=`<h2>Здоровье дисков${dk.some(x=>x.healthy===false)
+      ?`<span class="r" style="color:var(--danger)">сбой</span>`
+      :`<span class="r">${dk.length||"—"}</span>`}</h2>
+    <div class="body">${dk.length?dk.map(x=>{
+      const st=x.healthy===false?"bd":x.healthy===true?"ok":"no";
+      const bits=[x.temp?x.temp+" °C":"",x.hours!=null?hrsFmt(x.hours):""].filter(Boolean).join(" · ");
+      return `<div class="r2"><span class="st2 ${st}">●</span>
+        <span class="nm">${esc(x.name)}${x.model?" · "+esc(x.model):""}</span>
+        <span class="ago">${esc(bits)}</span></div>`;}).join("")
+      :`<div class="empty">дисков нет</div>`}</div>`;
+}
+
+/* ---------- часы при простое ---------- */
+let LAST_ACT=Date.now();
+addEventListener("pointerdown",()=>{ LAST_ACT=Date.now(); },{passive:true});
+function clkTick(){
+  const c=$("#clock"), min=+D.clock||0;
+  if(!(min>0) || Date.now()-LAST_ACT<min*60000 || $("#alarm").classList.contains("on")){
+    c.classList.remove("on"); return;
+  }
+  const t=new Date();
+  $("#ctime").textContent=("0"+t.getHours()).slice(-2)+":"+("0"+t.getMinutes()).slice(-2);
+  $("#cdate").textContent=t.toLocaleDateString(D.lang==="ru"?"ru-RU":"en-GB",
+    {weekday:"long",day:"numeric",month:"long"});
+  const cc=Math.round((((D.tiles||{}).cpu||{}).raw||{}).pct||D.cpu||0),
+        tp=Math.round(D.temp||0), mm=Math.round((D.mem||{}).pct||0);
+  const [rv,ru]=rate((D.net||{}).rx||0),[tv,tu]=rate((D.net||{}).tx||0);
+  $("#cstats").innerHTML=`<span class="${D.overall==="warn"?"wn":"ok"}">●</span>
+    <span>CPU <b>${cc}%</b></span><span><b>${tp}°</b></span><span>RAM <b>${mm}%</b></span>
+    <span>↓ <b>${rv}</b> ${ru}</span><span>↑ <b>${tv}</b> ${tu}</span>`;
+  // anti burn-in: OLED-friendly drift, a new spot every minute
+  const m=t.getHours()*60+t.getMinutes(), dx=(m%7)-3, dy=(Math.floor(m/3)%7)-3;
+  $("#clockIn").style.transform=`translate(${dx*7}px,${dy*6}px)`;
+  c.classList.add("on");
 }
 
 function renderCards(d){
@@ -643,17 +756,44 @@ const SHEETS={
       +KV("Swap",m.swap_total?gb(m.swap_total-(m.swap_free||0))+" из "+gb(m.swap_total):"нет"), ""];},
   disk:d=>SHEETS.disks(d),
 
-  /* Диски: ВСЕ, что видит система, включая внешние; у каждого — полоска заполнения */
+  /* Диски: ВСЕ, что видит система, включая внешние; у каждого — полоска заполнения.
+     Съёмный смонтированный диск получает «Извлечь» — двойное касание, чтобы случайный
+     тап не отмонтировал приёмник бэкапа (лист перерисовывается каждый опрос, поэтому
+     взведённость живёт в EJ, а не в DOM). */
   disks:d=>{const dk=d.disks||[];
     return ["Диски", dk.length?dk.map(x=>{
       const p=x.used_pct, sys=x.role==="system"||(x.mounts||[]).includes("/");
       const tags=[sys?"System":"", x.size, x.tran?x.tran.toUpperCase():"",
         x.temp?x.temp+" °C":"", x.healthy===false?"SMART: сбой":x.healthy===true?"SMART: ок":""]
         .filter(Boolean).join(" · ");
+      const ej=(x.removable&&!sys&&(x.mounts||[]).length&&d.actions!==false&&x.dev)
+        ?`<div style="margin-top:7px"><span class="sbtn" data-eject="${esc(x.dev)}">${
+            EJ.dev===x.dev&&Date.now()-EJ.t<5000?"Точно извлечь?":"Извлечь"}</span></div>`:"";
       return `<div class="prow"><div class="t"><span class="nm">${esc(x.name)}${x.model?" · "+esc(x.model):""}</span>
         <span class="ago">${p!=null?Math.round(p)+"%":""}</span></div>
         ${p!=null?bar(p):""}
-        <div class="run">${esc(tags)}${(x.mounts||[]).length?" · "+esc(x.mounts.join(" ")):""}</div></div>`;
+        <div class="run">${esc(tags)}${(x.mounts||[]).length?" · "+esc(x.mounts.join(" ")):""}</div>${ej}</div>`;
+    }).join(""):`<div class="empty">дисков нет</div>`, ""];},
+
+  /* Следующие запуски: бэкапы по расписанию + cron-задачи, ближайшие сверху */
+  sched:d=>{const L=schedList(d);
+    return ["Следующие запуски", L.length?L.map(x=>`<div class="srow2">
+      <span class="st2 no">●</span><span class="nm">${esc(x.name)}</span>
+      <span class="ago">${esc(x.kind)} · ${fmtIn(x.next)} · ${tat(x.next)}</span></div>`).join("")
+      :`<div class="empty">ничего не запланировано</div>`, ""];},
+
+  /* Здоровье дисков: вердикт SMART, температура, наработка */
+  smart:d=>{const dk=d.disks||[];
+    return ["Здоровье дисков", dk.length?dk.map(x=>{
+      const st=x.healthy===false?"bd":x.healthy===true?"ok":"no";
+      const tags=[x.size, x.tran?x.tran.toUpperCase():"", x.temp?x.temp+" °C":"",
+        x.hours!=null?"наработка "+hrsFmt(x.hours):"",
+        x.healthy===false?"SMART: сбой":x.healthy===true?"SMART: ок":"SMART: нет данных"]
+        .filter(Boolean).join(" · ");
+      return `<div class="prow"><div class="t"><span class="st2 ${st}">●</span>
+        <span class="nm">${esc(x.name)}${x.model?" · "+esc(x.model):""}</span>
+        <span class="ago">${x.used_pct!=null?Math.round(x.used_pct)+"%":""}</span></div>
+        <div class="run">${esc(tags)}</div></div>`;
     }).join(""):`<div class="empty">дисков нет</div>`, ""];},
 
   /* Docker: стеки с иконками и кнопками */
@@ -752,7 +892,7 @@ const SHEETS={
     +KV("Зелёный","панель отвечала")+KV("Жёлтый","бокс жив, сети не было")+KV("Красный","бокса не было"),
     `<div class="go warnbtn" data-act="poweroff">Выключить NAS</div>`],
 };
-let CUR_SHEET=null;
+let CUR_SHEET=null, EJ={dev:"",t:0};
 function sheet(name,keepScroll){
   const f=SHEETS[name]; if(!f) return;
   CUR_SHEET=name;
@@ -787,8 +927,24 @@ document.addEventListener("click",e=>{
   }
   if(r){ closeSheet();
     act({a:"backup",p:r.dataset.run}).then(x=>{toast(x.ok?"Бэкап запущен":(x.log||"не вышло")); poll();}); return; }
+  const ej=e.target.closest("[data-eject]");
+  if(ej){ const dev=ej.dataset.eject;
+    if(EJ.dev!==dev||Date.now()-EJ.t>=5000){                  // первый тап — взводим
+      EJ={dev:dev,t:Date.now()}; if(CUR_SHEET) sheet(CUR_SHEET,true); return; }
+    EJ={dev:"",t:0}; toast("Извлекаю…");
+    act({a:"eject",dev:dev}).then(x=>{ toast(x.ok?(x.log||"Можно отключать"):(x.log||"не вышло")); poll(); });
+    return; }
   if(s) sheet(s.dataset.sheet);
 });
+// часы: тап только убирает их (оверлей глотает клик, вниз ничего не проходит)
+$("#clock").addEventListener("click",e=>{ e.stopPropagation(); $("#clock").classList.remove("on"); });
+// щит спящего экрана: касание будит и глотается целиком. Прячем по click,
+// а не по pointerdown — иначе click долетел бы до плашки под пальцем.
+let SHIELD_OK=0;   // после пробуждения ответ опроса может быть стухшим — не возвращаем щит 4 с
+$("#shield").addEventListener("pointerdown",e=>{ e.stopPropagation();
+  lastWake=Date.now(); act({a:"touch"}); },{passive:true});
+$("#shield").addEventListener("click",e=>{ e.stopPropagation();
+  SHIELD_OK=Date.now()+4000; $("#shield").classList.remove("on"); });
 
 /* ---------- оформление из настроек панели (всегда тёмный профиль) ---------- */
 function applyLook(L){
@@ -831,7 +987,7 @@ function applyLook(L){
 /* ---------- poll ---------- */
 async function poll(){ return _poll(); }
 let PAGE=0;
-const PAGES=3;
+const PAGES=4;
 function setPage(n){
   PAGE=Math.max(0,Math.min(PAGES-1,n));
   document.querySelectorAll(".page").forEach((p,i)=>p.classList.toggle("on",i===PAGE));
@@ -861,7 +1017,11 @@ async function _poll(){
     applyLook(D.look); renderBar(D); renderFoot(D); renderAlarm(D);
     if(PAGE===0){ renderGauges(D); renderCards(D); renderRow2(D); }
     else if(PAGE===1){ renderP1(D); }
-    else { renderP2(D); }
+    else if(PAGE===2){ renderP2(D); }
+    else { renderP3(D); }
+    clkTick();
+    // подсветка погашена → щит: первое касание будит, но не нажимает
+    if(KIOSK) $("#shield").classList.toggle("on", !!D.dark && Date.now()>SHIELD_OK);
     if(CUR_SHEET) sheet(CUR_SHEET,true);   // живые данные внутри открытого листа
     $("#dot").style.opacity=1;
   }catch(e){ $("#dot").style.opacity=.25;
