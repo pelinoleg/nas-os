@@ -23,9 +23,37 @@ static const char* NAS_HOST  = "192.168.1.48";   // NAS IP or hostname
 static const char* TOKEN     = "paste-glance-token-here";
 static const char* SCREEN_ID = "";               // empty = first screen; ids are shown in the constructor
 
-static const uint32_t POLL_MS = 5000;
-static const uint32_t PAGE_ROTATE_MS = 15000;    // 0 = manual (button) only
+static uint32_t POLL_MS = 5000;
+static uint32_t PAGE_ROTATE_MS = 15000;          // 0 = manual (button) only
 static const int BTN1 = 0, BTN2 = 14;            // T-Display-S3 buttons
+
+// ---- config from flash --------------------------------------------------
+// The NAS panel (Настройки → Экран → «Прошить экран») writes a 4 KB block at
+// the LAST 4 KB of the 16 MB flash: magic "NASG" + uint16 json length + JSON
+// {"ssid","pass","host","token","screen","poll","rotate"}. It overrides the
+// compiled constants above, so one prebuilt firmware serves any Wi-Fi/NAS —
+// re-flashing the config takes seconds and does not touch the app.
+#include <esp_flash.h>
+static const uint32_t CFG_ADDR = 0x00FFF000;
+String C_ssid = WIFI_SSID, C_pass = WIFI_PASS, C_host = NAS_HOST,
+       C_token = TOKEN, C_screen = SCREEN_ID;
+void loadCfg() {
+  static uint8_t buf[4096];
+  if (esp_flash_read(NULL, buf, CFG_ADDR, sizeof buf) != ESP_OK) return;
+  if (memcmp(buf, "NASG", 4) != 0) return;
+  uint16_t len = buf[4] | (buf[5] << 8);
+  if (!len || len > sizeof buf - 6) return;
+  JsonDocument j;
+  if (deserializeJson(j, (const char*)buf + 6, len)) return;
+  if (j["ssid"].is<const char*>())   C_ssid   = j["ssid"].as<const char*>();
+  if (j["pass"].is<const char*>())   C_pass   = j["pass"].as<const char*>();
+  if (j["host"].is<const char*>())   C_host   = j["host"].as<const char*>();
+  if (j["token"].is<const char*>())  C_token  = j["token"].as<const char*>();
+  if (j["screen"].is<const char*>()) C_screen = j["screen"].as<const char*>();
+  if (j["poll"].is<uint32_t>())      POLL_MS  = max((uint32_t)1000, j["poll"].as<uint32_t>());
+  if (j["rotate"].is<uint32_t>())    PAGE_ROTATE_MS = j["rotate"].as<uint32_t>();
+  Serial.println("config loaded from flash");
+}
 
 // Touch variant (T-Display-S3 Touch / Long): swipe left/right flips pages.
 // Set to 0 for boards without a touch panel. CST816 on SDA=18 SCL=17 RST=21.
@@ -320,9 +348,9 @@ void drawPage() {
 
 void poll() {
   HTTPClient http;
-  String url = String("http://") + NAS_HOST + "/api/glance?token=" + TOKEN +
+  String url = String("http://") + C_host + "/api/glance?token=" + C_token +
                "&lang=en&seq=" + String(lastSeq);
-  if (SCREEN_ID[0]) url += String("&screen=") + SCREEN_ID;
+  if (C_screen.length()) url += String("&screen=") + C_screen;
   http.setTimeout(4000);
   http.begin(url);
   int code = http.GET();
@@ -362,6 +390,7 @@ void flipPage(int dir) {
 
 void setup() {
   Serial.begin(115200);
+  loadCfg();                                // flash-config beats compiled defaults
   pinMode(BTN1, INPUT_PULLUP);
   pinMode(BTN2, INPUT_PULLUP);
   tft.init();
@@ -371,7 +400,7 @@ void setup() {
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
   tft.drawString("connecting...", 10, tft.height() / 2, 2);
   WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  WiFi.begin(C_ssid.c_str(), C_pass.c_str());
 #if USE_TOUCH
   touchInit();
 #endif

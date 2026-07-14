@@ -5957,8 +5957,10 @@ _BK_SECTIONS = (
     ("disks",     "Диски и пул",               False, ("nas-config/fstab.",)),
     ("webauth",   "Пароль панели",             True,  ("etc/nas-os/webauth.json",)),
     ("nasbackup", "Бэкап главного NAS",        True,  ("etc/nas-os/nas-backup.json", "nas-config/nas-backup-",
-                                                       # store.json / remotes.json содержат SSH-пароли
-                                                       "nas-config/store.json", "nas-config/remotes.json")),
+                                                       # store.json / remotes.json содержат SSH-пароли,
+                                                       # esp32.json — пароль Wi-Fi для автономных экранов
+                                                       "nas-config/store.json", "nas-config/remotes.json",
+                                                       "nas-config/esp32.json")),
     ("other",     "Прочее",                    False, ()),      # всё, что не подошло выше
 )
 
@@ -11460,7 +11462,18 @@ def _attiny_led(on):
         return False
     try:
         fcntl.ioctl(fd, _I2C_SLAVE_FORCE, int(m.group(2), 16))
-        os.write(fd, bytes([0x83, 0x0F if on else 0x0E]))
+        # The Waveshare clone answers the official ATTINY protocol (PORTC bit0 =
+        # LED_EN) *and* its own native one (0xAA backlight enable, 0xAD panel
+        # power — the exact regs panel-waveshare-dsi.c toggles for DPMS, so the
+        # panel comes back from 0xAD=0 without re-init; touch at 0x38 verified
+        # alive through both). Firmware revisions differ in which switch they
+        # honour — write them all, extras are ignored.
+        if on:
+            seq = ((0xAD, 0x01), (0xAA, 0x01), (0x83, 0x0F))
+        else:
+            seq = ((0x83, 0x0E), (0xAA, 0x00), (0xAD, 0x00))
+        for reg, val in seq:
+            os.write(fd, bytes([reg, val]))
         return True
     except OSError:
         return False
@@ -11855,6 +11868,77 @@ def screen_action(b):
                   "запрошено кнопкой на локальном экране", "warn", "system")
         return power(a)
     return {"ok": False, "log": "неизвестное действие"}
+
+
+# ---------------------------------------------------------------------------
+# ESP32-экраны (glance): прошивка LilyGO-платы прямо из панели. Тулчейн
+# (arduino-cli + ядро esp32) ставит визард (api esp32tools) в /opt/arduino-cli;
+# конфиг (Wi-Fi, адрес NAS, токен) НЕ компилируется в прошивку, а дописывается
+# отдельным blob'ом в последние 4 КБ flash — скетч читает его на старте.
+ESP32_FILE = os.path.join(NAS_CONFIG, "esp32.json")
+ESP32_SKETCH = os.path.join(HERE, "services", "esp32-glance")
+ESP32_FQBN = "esp32:esp32:lilygo_t_display_s3"
+ESP32_CFG_ADDR = "0xFFF000"           # must match CFG_ADDR in the sketch
+_ESP32_ENV = {"ARDUINO_DIRECTORIES_DATA": "/opt/arduino-cli/data",
+              "ARDUINO_DIRECTORIES_DOWNLOADS": "/opt/arduino-cli/downloads",
+              "ARDUINO_DIRECTORIES_USER": "/opt/arduino-cli/user"}
+
+
+def esp32_ports():
+    out = []
+    for dev in sorted(glob.glob("/dev/ttyACM*") + glob.glob("/dev/ttyUSB*")):
+        p = {"dev": dev, "name": "", "vidpid": ""}
+        r = _run(["udevadm", "info", "-q", "property", "-n", dev], timeout=5)
+        if r["ok"]:
+            props = dict(ln.split("=", 1) for ln in r["log"].splitlines() if "=" in ln)
+            p["name"] = (props.get("ID_MODEL") or "").replace("_", " ")
+            p["vidpid"] = (props.get("ID_VENDOR_ID") or "") + ":" + (props.get("ID_MODEL_ID") or "")
+        out.append(p)
+    return out
+
+
+def esp32_ready():
+    return bool(shutil.which("arduino-cli")) \
+        and os.path.isdir("/opt/arduino-cli/data/packages/esp32")
+
+
+def esp32_wifi_hint():
+    """Prefill for the flash dialog: the box already knows the home Wi-Fi the
+    display should join (NM profile kept by netguard). Authed admins only."""
+    r = _run(["nmcli", "-t", "-f", "NAME,TYPE", "connection", "show"], timeout=10)
+    for line in (r.get("log") or "").splitlines():
+        name, _, typ = line.partition(":")
+        if typ.strip() != "802-11-wireless":
+            continue
+        g = _run(["nmcli", "-s", "-t", "-f",
+                  "802-11-wireless.ssid,802-11-wireless-security.psk",
+                  "connection", "show", name], timeout=10)
+        ssid = psk = ""
+        for ln in (g.get("log") or "").splitlines():
+            k, _, v = ln.partition(":")
+            if k.endswith(".ssid"):
+                ssid = v.strip()
+            elif k.endswith(".psk"):
+                psk = v.strip()
+        if ssid:
+            return {"ssid": ssid, "psk": psk}
+    return {}
+
+
+def esp32_cfg_blob(b):
+    """4 KB config block for the sketch: magic + uint16 len + JSON, zero-padded."""
+    cfg = {"ssid": str(b.get("ssid") or ""), "pass": str(b.get("pass") or ""),
+           "host": str(b.get("host") or ""), "token": str(b.get("token") or ""),
+           "screen": str(b.get("screen") or "")}
+    try:
+        if int(b.get("poll") or 0) >= 1000:
+            cfg["poll"] = int(b["poll"])
+    except (TypeError, ValueError):
+        pass
+    js = json.dumps(cfg, ensure_ascii=False).encode()
+    if len(js) > 4090:
+        return None
+    return b"NASG" + len(js).to_bytes(2, "little") + js + b"\0" * (4096 - 6 - len(js))
 
 
 # Обои под локальный экран: исходник — под рабочий стол (2-4 МБ, 2560+ px), а панели
@@ -12544,6 +12628,13 @@ class H(BaseHTTPRequestHandler):
                 self._json({"config": load_glance(),
                             "catalog": [{"id": t[0], "name": t[1]} for t in glance_catalog()],
                             "presets": [{"id": pi, "name": pn} for pi, pn in GLANCE_PRESETS]})
+            elif p == "/api/esp32/state":
+                saved = _json_load_strict(ESP32_FILE, {})
+                saved.pop("pass", None)          # пароль Wi-Fi наружу не отдаём
+                self._json({"ports": esp32_ports(), "ready": esp32_ready(),
+                            "wifi": _safe(esp32_wifi_hint, {}) or {},
+                            "host": (_safe(stats, {}) or {}).get("ip") or "",
+                            "saved": saved})
             elif p == "/api/avail":
                 self._json(avail_bars(int((q.get("hours") or ["24"])[0]),
                                       int((q.get("slots") or ["96"])[0])))
@@ -13175,6 +13266,45 @@ class H(BaseHTTPRequestHandler):
                           "", "ok", kind="svc", desk=False)
                 self._stream_cmd(["bash", "-c", script],
                                  env=dict(_C_ENV, **env), timeout=86400)
+            elif p == "/api/esp32/flash":
+                # прошивка ESP32-экрана стримом: (тулчейн, если надо) → сборка →
+                # заливка приложения → конфиг-blob в хвост flash. Пароль Wi-Fi
+                # не светится в argv: blob уже лежит файлом в nas-config (root-only)
+                b = self._body()
+                port = str(b.get("port") or "")
+                if not re.match(r"^/dev/tty(ACM|USB)\d+$", port) or not os.path.exists(port):
+                    self._json({"ok": False, "log": "порт не найден"}); return
+                blob = esp32_cfg_blob(b)
+                if not blob or not b.get("ssid") or not b.get("token"):
+                    self._json({"ok": False, "log": "нужны Wi-Fi сеть и токен"}); return
+                cfg_bin = os.path.join(NAS_CONFIG, "esp32-cfg.bin")
+                with open(cfg_bin, "wb") as f:
+                    f.write(blob)
+                os.chmod(cfg_bin, 0o600)
+                saved = {k: str(b.get(k) or "") for k in ("ssid", "pass", "host", "screen")}
+                saved["ts"] = int(time.time())
+                _json_save(ESP32_FILE, saved, indent=2)   # маркер: переустановка вернёт тулчейн
+                env = dict(_C_ENV, **_ESP32_ENV)
+                build = "/opt/arduino-cli/build-esp32-glance"
+                script = """set -e
+if ! command -v arduino-cli >/dev/null || [ ! -d /opt/arduino-cli/data/packages/esp32 ]; then
+  echo '== первый запуск: ставлю тулчейн (~1.5 ГБ, 10-30 минут) =='
+  bash %(wiz)s api esp32tools
+fi
+echo '== сборка прошивки =='
+arduino-cli compile --fqbn %(fqbn)s --build-path %(build)s %(sketch)s
+echo '== заливка приложения =='
+arduino-cli upload -p %(port)s --fqbn %(fqbn)s --input-dir %(build)s %(sketch)s
+echo '== запись конфигурации (Wi-Fi, адрес NAS, токен) =='
+esptool --chip esp32s3 --port %(port)s --after hard_reset write_flash %(addr)s %(cfg)s
+echo '== готово: экран перезагружается с новой прошивкой =='""" % {
+                    "wiz": shlex.quote(os.path.join(HERE, "nas-wizard.sh")),
+                    "fqbn": shlex.quote(ESP32_FQBN), "build": shlex.quote(build),
+                    "sketch": shlex.quote(ESP32_SKETCH), "port": shlex.quote(port),
+                    "addr": ESP32_CFG_ADDR, "cfg": shlex.quote(cfg_bin)}
+                log_event("action", "Прошивка ESP32-экрана", "порт " + port, "ok",
+                          kind="action", desk=True)
+                self._stream_cmd(["bash", "-c", script], env=env, timeout=3600)
             elif p == "/api/stack/stream":
                 # долгие compose-действия (up при установке, pull) — стримом
                 b = self._body()
