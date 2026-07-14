@@ -183,7 +183,7 @@ void drawOffline(const char* why) {
   dispFlush();
 }
 
-void drawSpark(JsonArray sp, int x, int y, int w, int h) {
+void drawSparkC(JsonArray sp, int x, int y, int w, int h, uint16_t col) {
   int m = sp.size();
   if (m < 2) return;
   float mn = 1e30, mx = -1e30;
@@ -193,9 +193,15 @@ void drawSpark(JsonArray sp, int x, int y, int w, int h) {
   for (int k = 0; k < m; k++) {
     int gx = x + k * (w - 1) / (m - 1);
     int gy = y + h - 1 - (int)((sp[k].as<float>() - mn) / span * (h - 1));
-    if (px >= 0) tft.drawLine(px, py, gx, gy, TFT_DARKGREY);
+    if (px >= 0) {
+      tft.drawLine(px, py, gx, gy, col);
+      tft.drawLine(px, py + 1, gx, gy + 1, col);   // 2px line reads better
+    }
     px = gx; py = gy;
   }
+}
+void drawSpark(JsonArray sp, int x, int y, int w, int h) {
+  drawSparkC(sp, x, y, w, h, TFT_DARKGREY);
 }
 
 // "#RRGGBB[AA]" -> RGB565; alpha is blended against bg (r,g,b) because the
@@ -261,6 +267,24 @@ Style defStyle(const char* size) {
   return {"tl", "c", "val", 10, 17, 10};
 }
 
+// Tile representation ("k" style key, set in the constructor's inspector):
+// value = classic text, gauge = semicircle meter, bars = uptime-kuma history
+// strip, spark = big chart. Auto: bars when the tile carries raw.bars
+// (availability, watched hosts), else value.
+const char* tileKind(JsonObject t) {
+  const char* k = t["st"]["k"] | "";
+  if (k[0]) return k;
+  if (t["raw"]["bars"].is<JsonArray>()) return "bars";
+  return "value";
+}
+
+float tilePct(JsonObject t) {                         // 0..100 for gauges
+  JsonObject raw = t["raw"];
+  if (raw["pct"].is<float>()) return raw["pct"].as<float>();
+  if (raw["c"].is<float>())   return raw["c"].as<float>();   // temperature ≈ %
+  return String(t["value"] | "").toFloat();
+}
+
 void drawTile(JsonObject t, int x, int y, int w, int h) {
   JsonObject st = t["st"];
   Style d = defStyle(t["size"] | "m");
@@ -281,6 +305,81 @@ void drawTile(JsonObject t, int x, int y, int w, int h) {
   uint16_t labC = hexBlend(st["lc"] | "", TFT_DARKGREY, br, bgc, bb);
   uint16_t valC = hexBlend(st["vc"] | "", TFT_WHITE, br, bgc, bb);
   uint16_t uniC = hexBlend(st["uc"] | "", TFT_DARKGREY, br, bgc, bb);
+  const char* state = t["state"] | "ok";
+  // a colour screen should USE colour: the value inherits the state colour
+  // when the tile is unwell, unless the user pinned an explicit colour
+  if (!st["vc"].is<const char*>() && strcmp(state, "ok"))
+    valC = stColor(state);
+  const char* kind = tileKind(t);
+
+  if (!strcmp(kind, "bars")) {
+    // uptime-kuma style: label left, value right, history bars fill the body
+    tft.setTextDatum(TL_DATUM); tft.setTextColor(labC, tbg);
+    tft.drawString(t["label"] | "", x + 7, y + 4, pickFont(ls, ""));
+    String v = String(t["value"] | "");
+    if ((t["unit"] | (const char*)"")[0]) v += " " + String(t["unit"] | "");
+    tft.setTextDatum(TR_DATUM); tft.setTextColor(valC, tbg);
+    tft.drawString(v, x + w - 16, y + 4, pickFont(ls, v));
+    JsonArray bars = t["raw"]["bars"];
+    int n = bars.size();
+    if (n) {
+      int by = y + 22, bh2 = h - 29;
+      if (bh2 < 8) { by = y + h - 13; bh2 = 9; }
+      for (int b = 0; b < n; b++) {
+        int xa = x + 7 + b * (w - 14) / n, xb = x + 7 + (b + 1) * (w - 14) / n;
+        int v2 = bars[b].as<int>();
+        uint16_t c = v2 == 2 ? TFT_GREEN : (v2 == 1 ? TFT_YELLOW : (v2 == 0 ? TFT_RED : 0x39E7));
+        int w2 = xb - xa - 2; if (w2 < 1) w2 = 1;
+        tft.fillRoundRect(xa, by, w2, bh2, w2 > 4 ? 2 : 0, c);
+      }
+    }
+    tft.setTextDatum(ML_DATUM);
+    tft.fillCircle(x + w - 9, y + 8, 3, stColor(state));
+    return;
+  }
+
+  if (!strcmp(kind, "gauge")) {
+    // semicircle meter like the wall screen's speedometers
+    float pct = tilePct(t);
+    if (pct < 0) pct = 0; if (pct > 100) pct = 100;
+    int cx = x + w / 2, cy = y + h - 12;
+    int R = (w - 24) / 2; if (R > h - 26) R = h - 26; if (R < 14) R = 14;
+    int thick = R / 4 + 2;
+    for (int a = 0; a <= 180; a += 2) {
+      float rad = a * 3.14159f / 180.0f;
+      int px = cx - (int)(cosf(rad) * (R - thick / 2));
+      int py = cy - (int)(sinf(rad) * (R - thick / 2));
+      bool lit = a <= pct * 1.8f;
+      tft.fillCircle(px, py, thick / 2, lit ? stColor(state) : 0x2965);
+    }
+    tft.setTextDatum(BC_DATUM); tft.setTextColor(valC, tbg);
+    String val = String(t["value"] | "");
+    tft.drawString(val, cx, cy + 1, pickFont(vs, val));
+    tft.setTextDatum(TL_DATUM); tft.setTextColor(labC, tbg);
+    tft.drawString(t["label"] | "", x + 7, y + 4, pickFont(ls, ""));
+    String unit = String(t["unit"] | "");
+    if (unit.length()) {
+      tft.setTextDatum(TR_DATUM); tft.setTextColor(uniC, tbg);
+      tft.drawString(unit, x + w - 16, y + 4, pickFont(us, unit));
+    }
+    tft.setTextDatum(ML_DATUM);
+    tft.fillCircle(x + w - 9, y + 8, 3, stColor(state));
+    return;
+  }
+
+  if (!strcmp(kind, "spark") && t["spark"].size() >= 2) {
+    // big chart: header row + the whole body is the graph
+    tft.setTextDatum(TL_DATUM); tft.setTextColor(labC, tbg);
+    tft.drawString(t["label"] | "", x + 7, y + 4, pickFont(ls, ""));
+    String v = String(t["value"] | "") + " " + String(t["unit"] | "");
+    tft.setTextDatum(TR_DATUM); tft.setTextColor(valC, tbg);
+    tft.drawString(v, x + w - 16, y + 4, pickFont(ls, v));
+    drawSparkC(t["spark"], x + 7, y + 22, w - 14, h - 29,
+               strcmp(state, "ok") ? stColor(state) : TFT_GREEN);
+    tft.setTextDatum(ML_DATUM);
+    tft.fillCircle(x + w - 9, y + 8, 3, stColor(state));
+    return;
+  }
   // label
   if (strcmp(lp, "hide")) {
     Anchor a = posAnchor(lp, x, y, w, h);
@@ -359,9 +458,12 @@ void drawPage() {
 
   tft.fillScreen(TFT_BLACK);
   // header: status dot, host, page name + dots
-  tft.fillCircle(12, 13, 7, stColor(DOC["status"] | "warn"));
+  // wide panels (Long 640px): a bold f4 host name read as a billboard —
+  // slimmer f2 leaves the space to the tiles
+  int hf = tft.width() >= 600 ? 2 : 4;
+  tft.fillCircle(12, 13, tft.width() >= 600 ? 5 : 7, stColor(DOC["status"] | "warn"));
   tft.setTextColor(TFT_WHITE, TFT_BLACK);
-  tft.drawString(DOC["host"] | "NAS", 26, 13, 4);
+  tft.drawString(DOC["host"] | "NAS", 26, 13, hf);
   tft.setTextColor(TFT_DARKGREY, TFT_BLACK);
   String pname = pg["name"] | "";
   if (pages.size() > 1) {

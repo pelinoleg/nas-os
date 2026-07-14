@@ -1888,6 +1888,8 @@ def _gl_norm_style(st):
         v = st.get(k)
         if isinstance(v, str) and _GL_COLOR.match(v):
             out[k] = v
+    if st.get("k") in ("value", "gauge", "bars", "spark"):
+        out["k"] = st["k"]                            # представление; нет = авто
     bg = st.get("bg")                                 # absent=default card
     if bg == "none" or (isinstance(bg, str) and _GL_COLOR.match(bg)):
         out["bg"] = bg
@@ -1911,6 +1913,8 @@ def _gl_norm_tiles(lst):
             continue
         d = {"id": str(t["id"]),
              "size": t.get("size") if t.get("size") in ("s", "m", "l") else "m"}
+        if t.get("label"):
+            d["label"] = str(t["label"])[:40]         # своё имя плитки; нет = каталог
         for k in ("x", "y", "w", "h"):
             try:
                 d[k] = max(0, min(4096, int(t[k])))
@@ -2252,14 +2256,17 @@ def _glance_tile(tid, en):
                         "target": h["target"], "type": h["type"]}}
     if tid in ("avail", "avail30"):
         hours = 24 if tid == "avail" else 720
-        av = avail_bars(hours, 96)
+        av = avail_bars(hours, 48 if tid == "avail" else 30)
         if av["pct"] is None:
             return None
         st = "ok" if av["pct"] >= 99 else ("warn" if av["pct"] >= 95 else "danger")
         unit = ("% / 24ч" if not en else "% / 24h") if tid == "avail" else \
                ("% / 30д" if not en else "% / 30d")
+        # bars в raw: плитку доступности можно класть/растягивать как обычную,
+        # и устройство рисует ей uptime-kuma-полоски (вид bars)
         return {"value": "%.1f" % av["pct"], "unit": unit, "state": st,
-                "raw": {"pct": av["pct"], "hours": hours}}
+                "raw": {"pct": av["pct"], "hours": hours,
+                        "bars": av.get("bars") or [], "frac": av.get("frac") or []}}
     if tid == "disktemp":
         temps = _hwmon_disk_temps()
         if not temps:
@@ -2484,6 +2491,8 @@ def glance_payload(lang="ru", screen=""):
             if not d:
                 continue
             extra = {k: t[k] for k in ("x", "y", "w", "h", "st") if k in t}
+            if t.get("label"):                        # своё имя вместо каталожного
+                extra["label"] = _translit(t["label"]) if en else t["label"]
             tl.append(dict(d, size=t["size"], **extra))
             if d["state"] != "ok" and d["id"] not in seen_prob:
                 seen_prob.add(d["id"])

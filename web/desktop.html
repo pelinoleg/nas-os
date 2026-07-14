@@ -8382,13 +8382,28 @@ function winGlance(){openWin("__glance","Экран NAS",async body=>{
   const fs=v=>Math.max(6,px(v))+"px";
   const lp=stv(t,"lp"),vp=stv(t,"vp"),up=stv(t,"up");
   const col=k=>t.st&&t.st[k]?`;color:${t.st[k]}`:"";
+  const dispName=t.label||names[t.id]||t.id;
+  const kind=(t.st&&t.st.k)||((live.raw&&live.raw.bars)?"bars":"");
   let inner="";
-  if(lp!=="hide"&&lp!=="val")inner+=`<span class="e l" style="${POS[lp]};font-size:${fs(stv(t,"ls"))}${col("lc")}">${esc(names[t.id]||t.id)}</span>`;
+  if(kind==="bars"||kind==="gauge"||kind==="spark"){
+   // rough preview of the device rendering: header row + body graphic
+   inner+=`<span class="e l" style="left:4%;top:4%;font-size:${fs(stv(t,"ls"))}${col("lc")}">${esc(dispName)}</span>`;
+   inner+=`<span class="e v" style="right:8%;top:4%;font-size:${fs(stv(t,"ls"))}${col("vc")}">${esc(live.value)} ${esc(live.unit||"")}</span>`;
+   if(kind==="bars"){const bars=(live.raw&&live.raw.bars)||[];
+    inner+=`<span style="position:absolute;left:4%;right:4%;top:38%;bottom:10%;display:flex;gap:1px;align-items:stretch">${
+     (bars.length?bars:Array(24).fill(2)).map(v=>`<i style="flex:1;border-radius:2px;background:${v===2?"#2e7d54":v===1?"#8a6d1f":v===0?"#7d2e2e":"#2a2e38"}"></i>`).join("")}</span>`;}
+   else if(kind==="gauge"){const p=Math.max(0,Math.min(100,((live.raw&&(live.raw.pct??live.raw.c))??(parseFloat(live.value)||0))));
+    inner+=`<span style="position:absolute;left:50%;bottom:6%;width:${px(Math.min(b.w-24,(b.h-26)*2))}px;aspect-ratio:2/1;transform:translateX(-50%);border-radius:1000px 1000px 0 0;background:conic-gradient(from -90deg at 50% 100%, ${stColor(live.state)} ${p*1.8}deg, #2a2e38 ${p*1.8}deg 180deg, transparent 180deg);-webkit-mask:radial-gradient(circle at 50% 100%, transparent 55%, #000 56%)"></span>
+    <span class="e v" style="left:50%;bottom:8%;transform:translateX(-50%);font-size:${fs(stv(t,"vs"))}${col("vc")}">${esc(live.value)}</span>`;}
+   else inner+=`<span style="position:absolute;left:4%;right:4%;top:40%;bottom:12%;background:linear-gradient(100deg,transparent 10%,${stColor(live.state)}22 40%,transparent 70%);border-bottom:2px solid ${stColor(live.state)}"></span>`;
+  }else{
+  if(lp!=="hide"&&lp!=="val")inner+=`<span class="e l" style="${POS[lp]};font-size:${fs(stv(t,"ls"))}${col("lc")}">${esc(dispName)}</span>`;
   const uSt=`font-size:${fs(stv(t,"us"))}${col("uc")}`;
   const uIn=up==="val"?` <span class="u" style="${uSt}">${esc(live.unit||"")}</span>`
            :up==="valb"?`<span class="u" style="display:block;text-align:center;${uSt}">${esc(live.unit||"")}</span>`:"";
   if(vp!=="hide"&&vp!=="val")inner+=`<span class="e v" style="${POS[vp]};font-size:${fs(stv(t,"vs"))}${col("vc")}${up==="valb"?";text-align:center":""}">${esc(live.value)}${uIn}</span>`;
   if(up!=="val"&&up!=="valb"&&up!=="hide")inner+=`<span class="e u2" style="${POS[up]};${uSt}">${esc(live.unit||"")}</span>`;
+  }
   inner+=`<i class="d" style="background:${stColor(live.state)}"></i>`;
   if(MODE()==="free"&&i===sel)inner+=`<span class="rzh"></span>`;
   if(i===sel)inner+=`<span class="glc-x" data-i="${i}" title="Убрать с экрана">✕</span>`;
@@ -8484,8 +8499,12 @@ function winGlance(){openWin("__glance","Экран NAS",async body=>{
   const cw=(k,defc)=>{const v=(t.st&&t.st[k])||"";
    return `<label>цвет <input type="color" data-cc="${k}" value="${(v||defc).slice(0,7)}"><input type="number" data-ca="${k}" min="5" max="100" value="${aOf(v)}" style="width:50px" title="прозрачность, %"><button class="btn sm" data-cd="${k}" ${v?"":"disabled"}>авто</button></label>`;};
   const bgMode=!t.st||t.st.bg===undefined?"def":(t.st.bg==="none"?"none":"color");
+  const kind=(t.st&&t.st.k)||"";
   insp.innerHTML=`
    <div class="glc-cap" style="margin-bottom:2px">${esc(names[t.id]||t.id)}</div>
+   <div class="gi"><span>Название</span><label><input id="giName" maxlength="40" placeholder="${att(names[t.id]||"")}" value="${att(t.label||"")}" style="width:150px"><button class="btn sm" id="giNameX" ${t.label?"":"disabled"}>каталожное</button></label></div>
+   <div class="gi"><span>Вид</span><div class="seg" id="giKind">${[["","авто"],["value","значение"],["gauge","спидометр"],["bars","полоски"],["spark","график"]].map(([v,l])=>`<button data-v="${v}" class="${kind===v?"on":""}">${l}</button>`).join("")}</div>
+    <div class="glc-cap" style="text-transform:none;margin-top:3px">полоски — история доступности (avail, хосты); график — только у плиток со spark</div></div>
    <div class="gi"><span>Заголовок</span>${g9("l",[["hide","скрыть"]])}<label>размер ${num("ls",6,60)}</label>${cw("lc","#8a90a0")}</div>
    <div class="gi"><span>Значение</span>${g9("v",[["hide","скрыть"]])}<label>размер ${num("vs",6,120)}</label>${cw("vc","#e8eaf0")}</div>
    <div class="gi"><span>Единица</span>${g9("u",[["val","у значения"],["valb","под значением"],["hide","скрыть"]])}<label>размер ${num("us",6,60)}</label>${cw("uc","#8a90a0")}</div>
@@ -8495,6 +8514,11 @@ function winGlance(){openWin("__glance","Экран NAS",async body=>{
    <div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn sm" id="giDef" title="Новые плитки этого экрана будут получать этот стиль">Сделать по умолчанию</button><button class="btn sm" id="giReset">Сбросить стиль</button></div>`;
   const st=()=>t.st||(t.st={});
   const hexA=(c,a)=>a>=100?c:c+Math.round(a*2.55).toString(16).padStart(2,"0");
+  insp.querySelector("#giName").onchange=e=>{const v=e.target.value.trim();
+   if(v)t.label=v;else delete t.label;commit();paintInsp();};
+  insp.querySelector("#giNameX").onclick=()=>{delete t.label;commit();paintInsp();};
+  insp.querySelector("#giKind").querySelectorAll("button").forEach(b=>b.onclick=()=>{
+   if(b.dataset.v)st().k=b.dataset.v;else delete st().k;commit();paintInsp();});
   insp.querySelectorAll(".glc-9 button,.glc-9x button").forEach(b=>b.onclick=()=>{st()[b.closest("[data-k]").dataset.k]=b.dataset.p;commit();paintInsp();});
   insp.querySelectorAll("input[data-n]").forEach(inp=>inp.onchange=()=>{const k=inp.dataset.n,v=+inp.value;
    if(["x","y","w","h"].includes(k))t[k]=v;else st()[k]=v;commit();});
