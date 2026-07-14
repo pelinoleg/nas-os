@@ -2917,6 +2917,15 @@ avail_track(){
   mkdir -p "$(dirname "$AVLOG")" 2>/dev/null || true
   beat="$(cat "$BEAT" 2>/dev/null || true)"
   case "$beat" in *[!0-9]*|'') beat="" ;; esac
+  # RTC-less Pi: right after boot the clock is STALE (restored from disk, hours
+  # in the past) until NTP syncs. A run in that window must not touch the journal:
+  # it would rewind beat into the past, erasing the real "last alive" mark, and
+  # the first synced run would then backdate the outage by hours (real case
+  # 2026-07-14: overnight shutdown start moved from ~22:00 back to 13:34 and
+  # swallowed the whole previous day). Clock behind beat = clock is wrong, skip.
+  if [ -n "$beat" ] && [ "$now" -lt $(( beat - 60 )) ]; then
+    return 0
+  fi
   # A beat older than the current boot means the box went down, even when the
   # whole reboot fits inside the gap threshold (real case 2026-07-11: hard
   # reset + ~2.5 min of downtime < 180 s threshold -> outage never recorded).
