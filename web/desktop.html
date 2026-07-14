@@ -1805,6 +1805,9 @@
   .glc-insp .gi label{display:flex;align-items:center;gap:5px;color:var(--dim)}
   .glc-insp input[type=number]{height:24px;border-radius:6px;border:1px solid var(--line);background:var(--glass);color:var(--ink);padding:0 5px;font-size:12px}
   .glc-insp input[type=color]{width:36px;height:24px;border:1px solid var(--line);border-radius:6px;background:none;padding:1px}
+  /* чекбокс в инспекторе: без этого он тянулся общим правилом input и утаскивал подпись */
+  .glc-insp input[type=checkbox]{width:14px;height:14px;flex:none;margin:0;accent-color:var(--accent)}
+  .glc-insp .gi label{white-space:nowrap}
   .glc-9{display:grid;grid-template-columns:repeat(3,18px);gap:3px;width:max-content}
   .glc-9 button{width:18px;height:14px;border-radius:4px;border:1px solid var(--line);background:var(--glass);cursor:pointer;padding:0}
   .glc-9 button.on{background:var(--accent);border-color:var(--accent)}
@@ -8402,20 +8405,32 @@ function winGlance(){openWin("__glance","Экран NAS",async body=>{
   const col=k=>t.st&&t.st[k]?`;color:${t.st[k]}`:"";
   const dispName=t.label||names[t.id]||t.id;
   const kind=(t.st&&t.st.k)||((live.raw&&live.raw.bars)?"bars":"");
+  const uSt0=`font-size:${fs(stv(t,"us"))}${col("uc")}`;
   let inner="";
   if(t.id==="bright"){
-   inner+=`<span class="e l" style="left:4%;top:4%;font-size:${fs(stv(t,"ls"))}${col("lc")}">${esc(dispName)}</span>
-    <span style="position:absolute;left:50%;top:32%;bottom:10%;width:${px(20)}px;transform:translateX(-50%);border-radius:${px(6)}px;background:#20242e;overflow:hidden"><i style="position:absolute;left:${px(3)}px;right:${px(3)}px;bottom:${px(3)}px;height:62%;border-radius:${px(4)}px;background:#f5b342"></i></span>`;
+   // слайдер = вся плитка (как на устройстве): заголовок/«%» — только если их
+   // явно включили в инспекторе
+   const bl=t.st&&t.st.lp&&t.st.lp!=="hide";
+   if(bl)inner+=`<span class="e l" style="left:3%;top:2%;font-size:${fs(stv(t,"ls"))}${col("lc")}">${esc(dispName)}</span>`;
+   inner+=`<span style="position:absolute;left:0;right:0;bottom:0;top:${bl?px(20)+"px":"0"};border-radius:${px(8)}px;background:#20242e;overflow:hidden"><i style="position:absolute;left:0;right:0;bottom:0;height:62%;border-radius:${px(8)}px;background:#f5b342"></i></span>`;
+  }else if(live.raw&&live.raw.rxh&&live.raw.txh){
+   // сеть: два ряда, приём зелёным / отдача красным — как на устройстве
+   if(lp!=="hide")inner+=`<span class="e l" style="${POS.tl};font-size:${fs(stv(t,"ls"))}${col("lc")}">${esc(dispName)}</span>`;
+   if(vp!=="hide")inner+=`<span class="e" style="left:50%;top:50%;transform:translate(-50%,-50%);text-align:center;font-size:${fs(stv(t,"vs"))};line-height:1.25">
+     <span style="display:block;color:#3ecf8e">${esc(live.raw.rxh)}</span>
+     <span style="display:block;color:#ff5d68">${esc(live.raw.txh)}</span></span>`;
   }else if(kind==="bars"||kind==="gauge"||kind==="spark"){
-   // rough preview of the device rendering: header row + body graphic
-   inner+=`<span class="e l" style="left:4%;top:4%;font-size:${fs(stv(t,"ls"))}${col("lc")}">${esc(dispName)}</span>`;
-   inner+=`<span class="e v" style="right:8%;top:4%;font-size:${fs(stv(t,"ls"))}${col("vc")}">${esc(live.value)} ${esc(live.unit||"")}</span>`;
+   // превью повторяет раскладку устройства: та же шапка (те же отступы, что в POS)
+   if(lp!=="hide")inner+=`<span class="e l" style="${POS.tl};font-size:${fs(stv(t,"ls"))}${col("lc")}">${esc(dispName)}</span>`;
+   if(vp!=="hide"&&kind!=="gauge")inner+=`<span class="e v" style="${POS.tr};font-size:${fs(stv(t,"ls"))}${col("vc")}">${esc(live.value)} ${esc(live.unit||"")}</span>`;
    if(kind==="bars"){const bars=(live.raw&&live.raw.bars)||[];
     inner+=`<span style="position:absolute;left:4%;right:4%;top:38%;bottom:10%;display:flex;gap:1px;align-items:stretch">${
      (bars.length?bars:Array(24).fill(2)).map(v=>`<i style="flex:1;border-radius:2px;background:${v===2?"#2e7d54":v===1?"#8a6d1f":v===0?"#7d2e2e":"#2a2e38"}"></i>`).join("")}</span>`;}
    else if(kind==="gauge"){const p=Math.max(0,Math.min(100,((live.raw&&(live.raw.pct??live.raw.c))??(parseFloat(live.value)||0))));
-    inner+=`<span style="position:absolute;left:50%;bottom:6%;width:${px(Math.min(b.w-24,(b.h-26)*2))}px;aspect-ratio:2/1;transform:translateX(-50%);border-radius:1000px 1000px 0 0;background:conic-gradient(from -90deg at 50% 100%, ${stColor(live.state)} ${p*1.8}deg, #2a2e38 ${p*1.8}deg 180deg, transparent 180deg);-webkit-mask:radial-gradient(circle at 50% 100%, transparent 55%, #000 56%)"></span>
-    <span class="e v" style="left:50%;bottom:8%;transform:translateX(-50%);font-size:${fs(stv(t,"vs"))}${col("vc")}">${esc(live.value)}</span>`;}
+    // геометрия дуги — как в прошивке: R = min((w-24)/2, h-26), центр внизу
+    const R=Math.max(14,Math.min((b.w-24)/2,b.h-26));
+    inner+=`<span style="position:absolute;left:50%;bottom:${px(12)-px(R)/1+px(R)}px;width:${px(R*2)}px;aspect-ratio:2/1;transform:translate(-50%,50%);border-radius:1000px 1000px 0 0;background:conic-gradient(from -90deg at 50% 100%, ${stColor(live.state)} ${p*1.8}deg, #2a2e38 ${p*1.8}deg 180deg, transparent 180deg);-webkit-mask:radial-gradient(circle at 50% 100%, transparent 52%, #000 53%)"></span>
+    ${vp==="hide"?"":`<span class="e v" style="left:50%;bottom:${px(11)}px;transform:translateX(-50%);font-size:${fs(stv(t,"vs"))}${col("vc")}">${esc(live.value)}${up==="hide"||!live.unit?"":` <span class="u" style="${uSt0}">${esc(live.unit)}</span>`}</span>`}`;}
    else inner+=`<span style="position:absolute;left:4%;right:4%;top:40%;bottom:12%;background:linear-gradient(100deg,transparent 10%,${stColor(live.state)}22 40%,transparent 70%);border-bottom:2px solid ${stColor(live.state)}"></span>`;
   }else{
   if(lp!=="hide"&&lp!=="val")inner+=`<span class="e l" style="${POS[lp]};font-size:${fs(stv(t,"ls"))}${col("lc")}">${esc(dispName)}</span>`;

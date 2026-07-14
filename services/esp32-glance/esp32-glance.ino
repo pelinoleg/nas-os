@@ -65,6 +65,7 @@ void applyBright() {
 // BR_X < 0 = tile is not on the current page
 int BR_X = -1, BR_Y = 0, BR_W = 0, BR_H = 0;
 uint16_t BR_bg = 0, BR_lab = 0;
+bool BR_pct = false, BR_lp = false;
 
 // ---- config from flash --------------------------------------------------
 // The NAS panel (Настройки → Экран → «Прошить экран») writes a 4 KB block at
@@ -115,17 +116,20 @@ void touchInit() {
 bool touchRead(int &x, int &y) {
   static uint8_t dead = 0;                 // fuse: a wedged bus must not stall
   if (dead >= 20) return false;            // every loop forever
-  static const uint8_t cmd[11] = {0xB5, 0xAB, 0xA5, 0x5A, 0, 0, 0, 8, 0, 0, 0};
+  // exact protocol from LilyGO's touch example: write the 8-byte read command,
+  // then read a TWO-POINT frame (14 bytes). Writing 11 / reading 8 (my first
+  // guess) returned garbage coords like 771,771 — outside a 180x640 panel.
+  static const uint8_t cmd[8] = {0xB5, 0xAB, 0xA5, 0x5A, 0, 0, 0, 8};
   Wire.beginTransmission(TP_ADDR);
   Wire.write(cmd, sizeof cmd);
   if (Wire.endTransmission() != 0) { dead++; return false; }
-  if (Wire.requestFrom((int)TP_ADDR, 8) < 8) { dead++; return false; }
+  if (Wire.requestFrom((int)TP_ADDR, 14) < 14) { dead++; return false; }
+  uint8_t b[14];
+  for (int i = 0; i < 14; i++) b[i] = Wire.read();
   dead = 0;
-  uint8_t b[8];
-  for (int i = 0; i < 8; i++) b[i] = Wire.read();
-  if (!(b[1] & 0x0F)) return false;
-  // raw portrait coords, like the CST816 path: the swipe code in loop()
-  // already picks the long axis (raw Y) for landscape rotations
+  uint8_t num = b[1], gesture = b[0];
+  if (!num || gesture) return false;       // no finger, or a gesture frame
+  // raw portrait coords (x: 0..179 short axis, y: 0..639 long axis)
   x = ((b[2] & 0x0F) << 8) | b[3];
   y = ((b[4] & 0x0F) << 8) | b[5];
   return true;
@@ -190,18 +194,25 @@ void drawStaleBadge() {
   dispFlush();
 }
 
+// The slider IS the tile: the bar fills the whole area (no label, no padding
+// — a title and margins only stole the thing you actually grab). Label / "%"
+// appear only when the inspector explicitly asks for them.
 void drawBrightBody() {
   if (BR_X < 0) return;
-  int tx = BR_X + BR_W / 2 - 11, ty = BR_Y + 22, th = BR_H - 29;
-  if (th < 20) { ty = BR_Y + 6; th = BR_H - 12; }
-  tft.fillRoundRect(tx, ty, 22, th, 6, 0x18E3);
-  int fill = (th - 6) * BRIGHT / 255;
-  tft.fillRoundRect(tx + 3, ty + 3 + (th - 6 - fill), 16, fill, 4, TFT_YELLOW);
-  String pc = String((BRIGHT * 100 + 127) / 255) + "%";
-  tft.setTextDatum(TR_DATUM);
-  tft.setTextColor(BR_lab, BR_bg);
-  tft.drawString(pc + "  ", BR_X + BR_W - 8, BR_Y + 12, 2);
-  tft.setTextDatum(ML_DATUM);
+  int tx = BR_X, ty = BR_Y + (BR_lp ? 20 : 0), tw = BR_W, th = BR_H - (BR_lp ? 20 : 0);
+  if (th < 8) { ty = BR_Y; th = BR_H; }
+  int r = tw < th ? tw / 4 : th / 4; if (r > 10) r = 10;
+  tft.fillRoundRect(tx, ty, tw, th, r, 0x18E3);
+  int fill = th * BRIGHT / 255;
+  if (fill < 4) fill = 4;
+  tft.fillRoundRect(tx, ty + th - fill, tw, fill, r, TFT_YELLOW);
+  if (BR_pct) {
+    String pc = String((BRIGHT * 100 + 127) / 255) + "%";
+    tft.setTextDatum(MC_DATUM);
+    tft.setTextColor(TFT_BLACK, TFT_YELLOW);
+    tft.drawString(pc, tx + tw / 2, ty + th - fill / 2, 12);
+    tft.setTextDatum(ML_DATUM);
+  }
   dispFlush();
 }
 
@@ -266,14 +277,20 @@ void tileBgRGB(const char* bgs, uint8_t &r, uint8_t &g, uint8_t &b) {
   }
 }
 
-// requested font-size (device px) -> nearest TFT_eSPI font
+// requested font-size (device px) -> font handle. The Long passes pixels
+// straight through (its shim has ten font sizes — matches the constructor);
+// the classic quantizes to TFT_eSPI's built-in fonts.
 int pickFont(int px, const String &s) {
+#if NAS_DISPLAY_LONG
+  return px < 10 ? 10 : (px > 64 ? 64 : px);
+#else
   if (px > 33) {  // font 6 is digits-only
     bool dig = true;
     for (unsigned i = 0; i < s.length() && dig; i++) dig = strchr("0123456789.-", s[i]);
     return dig ? 6 : 4;
   }
   return px > 17 ? 4 : 2;
+#endif
 }
 
 // 9-grid position ("tl".."br") -> TFT datum + anchor point inside the tile
@@ -366,9 +383,14 @@ void drawTile(JsonObject t, int x, int y, int w, int h) {
   if (!strcmp(t["id"] | "", "bright")) {
     // the slider tile: server sends an empty shell, the device owns the value
     BR_X = x; BR_Y = y; BR_W = w; BR_H = h; BR_bg = tbg; BR_lab = labC;
-    tft.setTextDatum(TL_DATUM);
-    tft.setTextColor(labC, tbg);
-    tft.drawString(t["label"] | "", x + 7, y + 4, pickFont(ls, ""));
+    // chrome is OPT-IN: only an explicit inspector choice brings it back
+    BR_lp = st["lp"].is<const char*>() && strcmp(st["lp"] | "hide", "hide");
+    BR_pct = st["vp"].is<const char*>() && strcmp(st["vp"] | "hide", "hide");
+    if (BR_lp) {
+      tft.setTextDatum(TL_DATUM);
+      tft.setTextColor(labC, tbg);
+      tft.drawString(t["label"] | "", x + 4, y + 2, pickFont(ls, ""));
+    }
     drawBrightBody();
     tft.setTextDatum(ML_DATUM);
     return;
@@ -382,13 +404,21 @@ void drawTile(JsonObject t, int x, int y, int w, int h) {
       tft.drawString(t["label"] | "", x + 7, y + 4, pickFont(ls, ""));
     }
     if (strcmp(vp, "hide")) {
-      int f = pickFont(vs, "");
-      int cy = y + h / 2 + (strcmp(lp, "hide") ? 6 : 0);
+      String rx = String(raw["rxh"] | ""), txs = String(raw["txh"] | "");
+      // fit BOTH rows into the tile: a wide "12.3 MB/s" overflowed at the
+      // styled size and spilled outside the card
+      int f = pickFont(vs, rx);
+      for (int guard = 0; guard < 8 && f > 10; guard++) {
+        int wid = max(tft.textWidth(rx, f), tft.textWidth(txs, f));
+        if (wid <= w - 12 && tft.fontHeight(f) * 2 + 6 <= h - (strcmp(lp, "hide") ? 18 : 4)) break;
+        f = pickFont(f - 3, rx);
+      }
+      int cy = y + h / 2 + (strcmp(lp, "hide") ? 0 : 8);
       tft.setTextDatum(MC_DATUM);
       tft.setTextColor(TFT_GREEN, tbg);
-      tft.drawString(String(raw["rxh"] | ""), x + w / 2, cy - tft.fontHeight(f) / 2 - 2, f);
+      tft.drawString(rx, x + w / 2, cy - tft.fontHeight(f) / 2 - 1, f);
       tft.setTextColor(TFT_RED, tbg);
-      tft.drawString(String(raw["txh"] | ""), x + w / 2, cy + tft.fontHeight(f) / 2 + 2, f);
+      tft.drawString(txs, x + w / 2, cy + tft.fontHeight(f) / 2 + 1, f);
     }
     tft.setTextDatum(ML_DATUM);
     tileNote(t, x, y, w, h, uniC, tbg);
@@ -710,14 +740,26 @@ void loop() {
   static uint32_t touchT0 = 0;
   int px, py;
   if (touchRead(px, py)) {
-    // portrait raw -> landscape: MIRRORED on both axes (verified live: the
-    // old un-mirrored mapping put a right-edge touch on the LEFT of the screen)
-    int lx = tft.width() - 1 - py;
-    int ly = tft.height() - 1 - px;
+    // Raw touch is panel-portrait; which way it maps onto our landscape frame
+    // is a per-revision coin toss (guessing it cost two failed builds). So we
+    // do not guess: on finger-down we test all four flips and keep the one
+    // that lands inside the Brightness tile, then reuse it for the drag.
+    static uint8_t map_ = 0;             // bit0: mirror long, bit1: mirror short
+    auto mapX = [&](uint8_t m) { return (m & 1) ? tft.width() - 1 - py : py; };
+    auto mapY = [&](uint8_t m) { return (m & 2) ? tft.height() - 1 - px : px; };
     if (!touching) {
       touching = true; tx0 = px; ty0 = py; touchT0 = millis();
-      briMode = (BR_X >= 0 && lx >= BR_X && lx <= BR_X + BR_W
-                           && ly >= BR_Y && ly <= BR_Y + BR_H);
+      briMode = false;
+      if (BR_X >= 0) {
+        for (uint8_t m = 0; m < 4; m++) {
+          int lx = mapX(m), ly = mapY(m);
+          if (lx >= BR_X && lx <= BR_X + BR_W && ly >= BR_Y && ly <= BR_Y + BR_H) {
+            map_ = m; briMode = true; break;
+          }
+        }
+      }
+      Serial.println("touch raw " + String(px) + "," + String(py)
+                     + (briMode ? " -> slider map " + String(map_) : ""));
     }
     if (millis() - touchT0 > 20000) {    // ghost touch: controller reports a
       touching = false; briMode = false; // finger forever -> release the fuse
@@ -725,6 +767,7 @@ void loop() {
     tx = px; ty = py;
     wokeAt = millis(); applyBright();    // ночью касание будит подсветку
     if (briMode) {
+      int ly = mapY(map_);
       int lvl = (BR_Y + BR_H - ly) * 255 / (BR_H > 0 ? BR_H : 1);
       BRIGHT = lvl < 8 ? 8 : (lvl > 255 ? 255 : lvl);
       applyBright();

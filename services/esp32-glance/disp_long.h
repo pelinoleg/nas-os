@@ -67,16 +67,42 @@ public:
     return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3); }
   void setTextDatum(uint8_t d) { datum = d; }
   void setTextColor(uint16_t fg, uint16_t bg) { tfg = fg; tbg = bg; }
-  // TFT_eSPI font number -> a real vector-quality u8g2 bitmap font (the classic
-  // 6x8 GFX font scaled 3-9x read as Minecraft on a 640 px panel). fubNN's cap
-  // height is NN px; ascent/total are fixed per font so rows don't jitter
-  // between strings with and without descenders.
-  const uint8_t *ufont(int f) {
-    return f >= 8 ? u8g2_font_fub42_tf : f >= 6 ? u8g2_font_fub30_tf
-         : f >= 4 ? u8g2_font_fub17_tf : u8g2_font_helvR10_tf;
+  // Fonts. The style sizes come from the constructor, where they are CSS
+  // font-size px — and CSS cap height is ~0.72 of that, while u8g2's fubNN cap
+  // height IS NN. Mapping px->fubPX made the panel render visibly bigger than
+  // the preview; we pick the font whose CAP height matches the CSS one, so the
+  // canvas and the device finally agree. Legacy TFT_eSPI font numbers (1..8,
+  // used by fixed calls) map onto the same ladder.
+  static const int NF = 9;
+  const uint8_t *fontAt(int i) {
+    switch (i) {
+      case 0: return u8g2_font_helvR10_tf;   // cap 8
+      case 1: return u8g2_font_fub11_tf;
+      case 2: return u8g2_font_fub14_tf;
+      case 3: return u8g2_font_fub17_tf;
+      case 4: return u8g2_font_fub20_tf;
+      case 5: return u8g2_font_fub25_tf;
+      case 6: return u8g2_font_fub30_tf;
+      case 7: return u8g2_font_fub35_tf;
+      default: return u8g2_font_fub42_tf;
+    }
   }
-  int asc(int f) { return f >= 8 ? 42 : f >= 6 ? 30 : f >= 4 ? 17 : 10; }
-  int16_t fontHeight(int f) { return f >= 8 ? 55 : f >= 6 ? 39 : f >= 4 ? 22 : 14; }
+  int capAt(int i)  { static const int C[NF] = {8, 11, 14, 17, 20, 25, 30, 35, 42}; return C[i]; }
+  int totAt(int i)  { static const int T[NF] = {11, 14, 18, 22, 26, 32, 39, 45, 54}; return T[i]; }
+  int fidx(int f) {
+    int px = f;
+    if (f <= 9) px = f >= 8 ? 48 : f >= 6 ? 34 : f >= 4 ? 22 : 14;  // legacy numbers
+    int want = (px * 72 + 50) / 100;                                // CSS cap height
+    int best = 0, bd = 9999;
+    for (int i = 0; i < NF; i++) {
+      int d = abs(capAt(i) - want);
+      if (d < bd) { bd = d; best = i; }
+    }
+    return best;
+  }
+  const uint8_t *ufont(int f) { return fontAt(fidx(f)); }
+  int asc(int f) { return capAt(fidx(f)); }
+  int16_t fontHeight(int f) { return totAt(fidx(f)); }
   int16_t textWidth(const String &s, int f) {
     gfx->setFont(ufont(f));
     gfx->setTextSize(1);
