@@ -2758,6 +2758,8 @@ window.NAS_I18N = { en: {
 "Наблюдение за хостами": "Host watch",
 "Плата": "Board",
 "Цвета статусов": "Status colors",
+"Профиль ЗАБИРАЕТ данные сюда — поэтому приёмник это папка на самом NAS. Чтобы ОТПРАВЛЯТЬ наружу (SSH-сервер, rsync.net, USB-диск), нужен профиль «Отправить с этого NAS».": "This profile PULLS data here, so its destination is a folder on the NAS itself. To SEND data out (an SSH server, rsync.net, a USB disk) you need a 'Send from this NAS' profile.",
+"Создать такой профиль": "Create such a profile",
 "Тип сервера": "Server type",
 "Обычный": "Standard",
 "обычный сервер с SSH и rsync (другой NAS, VPS, машина у родственников)": "a standard server with SSH and rsync (another NAS, a VPS, a relative's machine)",
