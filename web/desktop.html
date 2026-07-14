@@ -1736,6 +1736,13 @@
   .set-nav button:hover:not(.on){background:var(--sel);color:var(--text)}
   .set-nav button.on{background:var(--sel);color:var(--text);font-weight:650}
   .set-nav button.on svg{opacity:1;color:var(--accent)}
+  /* второй уровень: настройки/просмотр — тише главных пунктов, но так же кликабельны */
+  .set-nav .nav-sep{height:1px;background:var(--line);margin:9px 6px 8px;flex:none}
+  .set-nav button.sec{font-size:12px;font-weight:500;color:var(--mut);padding:6px 10px}
+  .set-nav button.sec svg{opacity:.6;color:var(--mut);transform:scale(.9)}
+  .set-nav button.sec:hover:not(.on){color:var(--dim)}
+  .set-nav button.sec.on{color:var(--text);font-weight:600}
+  .set-nav button.sec.on svg{opacity:1;color:var(--accent)}
   .set-pane{flex:1;min-width:0;overflow-y:auto;padding:22px 26px}
   .set-load{color:var(--mut);font-size:12px;padding:20px 0}
   /* glance (внешний экран): предпросмотр плиток + полоски доступности */
@@ -6207,13 +6214,16 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
  // profile direction: pull = grab from another NAS here, push = send from this NAS
  const isPush=()=>CFG.direction==="push",isPushSsh=()=>isPush()&&CFG.transport==="ssh";
  let nbCursor=0,nbStarted=null;   // курсор лога: общий для окна, сбрасывается при смене профиля
+ // Главные вкладки — то, без чего бэкап не настроить (куда ходим, что копируем).
+ // Второстепенные (sec) — тонкая настройка и просмотр: в сайдбаре они за разделителем
+ // и написаны спокойнее, чтобы глаз сразу цеплялся за главное.
  const CATS=[
   {id:"overview",name:"Обзор",ic:"gauge"},
   {id:"conn",name:"Подключение",ic:"net"},
-  {id:"sources",name:"Источники",ic:"folder"},
-  {id:"deleted",name:"Удалённые файлы",ic:"trash"},
-  {id:"sched",name:"Расписание",ic:"clock"},
-  {id:"history",name:"История",ic:"activity"},
+  {id:"sources",name:"Что копировать",ic:"folder"},
+  {id:"deleted",name:"Удалённые файлы",ic:"trash",sec:1},
+  {id:"sched",name:"Расписание",ic:"clock",sec:1},
+  {id:"history",name:"История",ic:"activity",sec:1},
  ];
  if(SET.nbTab&&CATS.some(c=>c.id===SET.nbTab))tab=SET.nbTab;   // запоминаем последний открытый таб
  const saveCfg=async patch=>{const r=await nbP("/api/backup/config",{config:patch});CFG=(r&&r.config)||CFG;JOBS=(CFG.jobs||[]).slice();return CFG;};
@@ -6850,7 +6860,7 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
   const multi=PROFS.length>1;
   if(nbFootMo){nbFootMo.disconnect();nbFootMo=null;}
   body.innerHTML=`<div class="nbtabs" id="nbTabs"></div>
-   <div class="nbmain"><div class="set-nav">${CATS.map(c=>`<button data-t="${c.id}" class="${tab===c.id?"on":""}">${svg(c.ic,17)}<span>${c.id==="conn"&&isPush()?"Приёмник":c.name}</span></button>`).join("")}
+   <div class="nbmain"><div class="set-nav">${CATS.map((c,i)=>`${c.sec&&!CATS[i-1].sec?`<div class="nav-sep"></div>`:""}<button data-t="${c.id}" class="${tab===c.id?"on":""}${c.sec?" sec":""}">${svg(c.ic,17)}<span>${c.id==="conn"&&isPush()?"Приёмник":c.name}</span></button>`).join("")}
     ${multi?`<button data-t="__del" class="nbdelbtn">${svg("trash",17)}<span>Удалить профиль</span></button>`:""}</div>
    <div class="set-main"><div class="set-pane" id="tc"></div><div class="set-foot" id="tf"></div></div></div>`;
   renderTabs();
