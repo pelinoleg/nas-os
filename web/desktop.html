@@ -6230,17 +6230,26 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
  const wireVerify=tc=>{const v=tc.querySelector("#cVer");if(v)v.onchange=()=>saveCfg({verify:v.checked});};
  /* ── Приёмник (push: куда отправлять с этого NAS) ── */
  function tabConnPush(tc){const c=CFG,ssh=c.transport==="ssh";
+  const rnet=c.provider==="rsyncnet",key=c.auth==="key",kinfo=c.key||{};
   const MHELP={local:{t:"Диск на этом NAS",d:"Приёмник — папка на этом NAS, обычно на внешнем USB-диске. Если диск не подключён, прогон безопасно пропускается: панель следит, чтобы копия не полилась в системный раздел."},
    ssh:{t:"Другой сервер (SSH + rsync)",d:"Отправка на любой сервер с SSH и rsync: другой NAS, VPS, сервер у родственников. По паролю (через sshpass) или по ключу (оставьте пароль пустым и добавьте ключ: ssh-copy-id пользователь@адрес). Папки на приёмнике создаются сами."}};
   const mh=MHELP[ssh?"ssh":"local"];
   tc.innerHTML=`<h3 class="set-title">Приёмник</h3><p class="set-sub">Куда отправлять копии с этого NAS.</p>
    <div class="srow"><div class="srow-l"><div class="srow-t">Куда копировать</div></div><div class="srow-c"><div class="seg" id="cTr"><button data-v="local" class="${!ssh?"on":""}">Диск на этом NAS</button><button data-v="ssh" class="${ssh?"on":""}">SSH-сервер</button></div></div></div>
    <div class="nb-help" id="cHelp"><b>${esc(mh.t)}</b><span>${esc(mh.d)}</span></div>
-   ${ssh?`<div class="srow"><div class="srow-l"><div class="srow-t">Адрес сервера</div></div><div class="srow-c"><input class="mono" id="cHost" value="${att(c.host||"")}" placeholder="192.168.1.50"></div></div>
-   <div class="srow"><div class="srow-l"><div class="srow-t">Пользователь</div></div><div class="srow-c"><input class="mono" id="cUser" value="${att(c.user||"")}" placeholder="oleg"></div></div>
-   <div class="srow"><div class="srow-l"><div class="srow-t">Пароль</div><div class="srow-d">пусто = вход по ключу</div></div><div class="srow-c"><input type="password" class="mono" id="cPw" placeholder="${c.has_password?"•••••• (задан)":"пароль"}"></div></div>
+   ${ssh?`<div class="srow"><div class="srow-l"><div class="srow-t">Тип сервера</div><div class="srow-d">${rnet?"rsync.net: путь пишется ОТ домашней папки (без ведущего /), архив удалённых чистить не нужно — аккаунт сам держит ZFS-снимки":"обычный сервер с SSH и rsync (другой NAS, VPS, машина у родственников)"}</div></div><div class="srow-c"><div class="seg" id="cProv"><button data-v="" class="${rnet?"":"on"}">Обычный</button><button data-v="rsyncnet" class="${rnet?"on":""}">rsync.net</button></div></div></div>
+   <div class="srow"><div class="srow-l"><div class="srow-t">Адрес сервера</div></div><div class="srow-c"><input class="mono" id="cHost" value="${att(c.host||"")}" placeholder="${rnet?"usw-s001.rsync.net":"192.168.1.50"}"></div></div>
+   <div class="srow"><div class="srow-l"><div class="srow-t">Пользователь</div></div><div class="srow-c"><input class="mono" id="cUser" value="${att(c.user||"")}" placeholder="${rnet?"de1234":"oleg"}"></div></div>
+   <div class="srow"><div class="srow-l"><div class="srow-t">Как входить</div><div class="srow-d">${key?"ключ панели — надёжнее для автоматики, пароль не хранится":"пароль хранится в конфиге (в секретной секции бэкапа настроек)"}</div></div><div class="srow-c"><div class="seg" id="cAuth"><button data-v="password" class="${key?"":"on"}">Пароль</button><button data-v="key" class="${key?"on":""}">Ключ</button></div></div></div>
+   <div class="srow"><div class="srow-l"><div class="srow-t">Пароль</div><div class="srow-d">${key?"нужен один раз — чтобы поставить ключ на сервер":"пусто = вход по уже имеющемуся ключу"}</div></div><div class="srow-c"><input type="password" class="mono" id="cPw" placeholder="${c.has_password?"•••••• (задан)":"пароль"}"></div></div>
+   ${key?`<div class="nb-field" style="margin-top:6px"><label>Ключ этого NAS${tipHTML("ed25519-ключ, созданный панелью (/root/.ssh/nas-backup). Публичную часть надо положить на приёмник: кнопка «Установить на сервер» делает это по паролю, либо скопируйте строку и добавьте её в authorized_keys / в личном кабинете rsync.net.")}</label>
+    <textarea class="mono" id="cPub" readonly rows="2" style="width:100%;resize:vertical;font-size:11px">${esc(kinfo.pubkey||"ключ ещё не создан")}</textarea>
+    <div class="nb-field-row" style="margin-top:6px">
+     <button class="btn sm" id="cKeyGen">${svg("key",13)} ${kinfo.exists?"Пересоздать":"Создать ключ"}</button>
+     <button class="btn sm" id="cKeyCopy" ${kinfo.exists?"":"disabled"}>${svg("copy",13)} Копировать</button>
+     <button class="btn sm pri" id="cKeyPut" ${kinfo.exists?"":"disabled"}>${svg("upload",13)} Установить на сервер</button></div></div>`:""}
    <div class="srow"><div class="srow-l"><div class="srow-t">SSH-порт</div></div><div class="srow-c"><input class="mono" id="cPort" style="max-width:90px" value="${c.ssh_port||22}"></div></div>
-   <div class="nb-field" style="margin-top:10px"><label>Папка на сервере${tipHTML("Куда складывать копии (каждый источник — своей подпапкой), папки создаются сами. Проще всего — кнопка «Выбрать»: покажет папки сервера как есть. Если писать руками: обычный Linux-сервер — абсолютный путь (/mnt/backup/nas), а NAS вроде UGREEN/Synology заворачивают rsync в «модули», и путь пишется ОТ модуля без ведущего /: например HDD6TB/Downloads/backup.")}</label><div class="nb-field-row"><input class="mono" id="cBase" value="${att(c.dest_base||"")}" placeholder="/mnt/backup/${esc(host())}"><button class="btn sm" id="cBaseR">${svg("folder",13)} Выбрать</button></div></div>`
+   <div class="nb-field" style="margin-top:10px"><label>Папка на сервере${tipHTML("Куда складывать копии (каждый источник — своей подпапкой), папки создаются сами. Проще всего — кнопка «Выбрать»: покажет папки сервера как есть. Если писать руками: обычный Linux-сервер — абсолютный путь (/mnt/backup/nas), а NAS вроде UGREEN/Synology заворачивают rsync в «модули», и путь пишется ОТ модуля без ведущего /: например HDD6TB/Downloads/backup.")}</label><div class="nb-field-row"><input class="mono" id="cBase" value="${att(c.dest_base||"")}" placeholder="${rnet?esc(host())+"-backup":"/mnt/backup/"+esc(host())}"><button class="btn sm" id="cBaseR">${svg("folder",13)} Выбрать</button></div></div>`
    :`<div class="nb-field" style="margin-top:10px"><label>Папка-приёмник${tipHTML("Папка на этом NAS, куда складывать копии — обычно на внешнем USB-диске. Если диск не подключён, прогон пропустится и ничего не зальёт системный раздел.")}</label><div class="nb-field-row"><input class="mono" id="cBase" value="${att(c.dest_base||"")}" placeholder="/media/usb-disk/backup"><button class="btn sm" id="cBaseB">${svg("folder",13)} Выбрать</button></div></div>`}
    <div class="srow"><div class="srow-l"><div class="srow-t">Ограничение скорости${tipHTML("Лимит скорости передачи в КБ/с (rsync --bwlimit), чтобы бэкап не забивал сеть и диск. 0 — без ограничения.")}</div><div class="srow-d">чтобы не забивать сеть/диск</div></div><div class="srow-c"><input class="mono" id="cBw" style="max-width:90px" value="${c.bwlimit||0}"><span style="color:var(--mut);font-size:12px">КБ/с</span></div></div>
    ${verifyRow(c)}
@@ -6248,6 +6257,23 @@ function winBackup(){openWin("__nasbak","Бэкап",(body,win)=>{
    <div class="nb-testr" id="cTestR"></div>`;
   const g=s=>tc.querySelector(s);
   wireSeg(tc,"#cTr",v=>saveCfg({transport:v}).then(()=>tabConnPush(tc)));
+  if(ssh){
+   wireSeg(tc,"#cProv",v=>saveCfg({provider:v}).then(()=>tabConnPush(tc)));
+   wireSeg(tc,"#cAuth",v=>saveCfg({auth:v}).then(()=>tabConnPush(tc)));
+   const kg=g0=>tc.querySelector(g0);
+   const gen=kg("#cKeyGen");
+   if(gen)gen.onclick=async()=>{
+    if(kinfo.exists&&!confirm("Пересоздать ключ? Старый перестанет подходить к серверам, куда он уже установлен."))return;
+    const r=await nbP("/api/backup/key",{action:"gen",force:true});
+    if(r&&r.ok){CFG.key=r;toast("Ключ создан");tabConnPush(tc);}else toast((r&&r.log)||"не вышло");};
+   const cp=kg("#cKeyCopy");
+   if(cp)cp.onclick=()=>{const t=kg("#cPub");if(navigator.clipboard)navigator.clipboard.writeText(t.value);toast("Скопировано");};
+   const put=kg("#cKeyPut");
+   if(put)put.onclick=async()=>{
+    toast("Ставлю ключ на сервер…");
+    const r=await nbP("/api/backup/key",{action:"install"});
+    toast(r&&r.ok?"Ключ установлен ✓":((r&&r.log)||"не вышло"));};
+  }
   // base changed → in single-folder mode remap every job's dest under the new base.
   // An empty base is saved as-is but jobs are NOT remapped (dest would become server root)
   const saveBase=async v=>{
