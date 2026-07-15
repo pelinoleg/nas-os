@@ -1,7 +1,7 @@
 {
   "name": "NAS OS",
   "short_name": "NAS",
-  "description": "Панель управления и мастер настройки NAS",
+  "description": "NAS control panel and setup wizard",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

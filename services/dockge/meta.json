@@ -1,6 +1,6 @@
 {
   "name": "Dockge",
-  "desc": "Менеджер docker-compose стеков: редактор YAML, запуск, логи",
+  "desc": "Docker-compose stack manager: YAML editor, start, logs",
   "category": "tools",
   "icon": "https://cdn.jsdelivr.net/gh/selfhst/icons@main/svg/dockge.svg",
   "port": 5001

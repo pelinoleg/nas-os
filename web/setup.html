@@ -1,6 +1,6 @@
 <!doctype html><html lang="ru"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<title>NAS · мастер настройки</title>
+<title>NAS · Setup Wizard</title>
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
 <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
@@ -119,12 +119,12 @@
   @media(max-width:760px){.wrap{grid-template-columns:1fr}.rail{display:flex;overflow-x:auto;border-right:none;border-bottom:1px solid var(--line)}.step{white-space:nowrap}.step .nm{display:none}}
 </style></head><body>
 <div class="top">
-  <div class="brand"><img class="brand-ico" src="/icon-flat.svg" alt="Raspberry Pi" draggable="false">Мастер настройки</div>
+  <div class="brand"><img class="brand-ico" src="/icon-flat.svg" alt="Raspberry Pi" draggable="false">Setup Wizard</div>
   <span class="sub" id="hostlbl"></span>
   <span class="spacer"></span>
-  <button class="back" id="langBtn" style="cursor:pointer;border:none;background:transparent;font:inherit;color:inherit" title="Switch language / Переключить язык">EN / RU</button>
-  <label class="dry">Предпросмотр<button class="sw" id="dry" role="switch" aria-checked="false"></button></label>
-  <a class="back" href="/">← Рабочий стол</a>
+  <button class="back" id="langBtn" style="cursor:pointer;border:none;background:transparent;font:inherit;color:inherit" title="Switch language">EN / RU</button>
+  <label class="dry">Preview<button class="sw" id="dry" role="switch" aria-checked="false"></button></label>
+  <a class="back" href="/">← Desktop</a>
 </div>
 <div class="wrap">
   <nav class="rail" id="rail"></nav>
@@ -133,8 +133,8 @@
 <div class="scrim" id="scrim"></div>
 <script src="/i18n.js"></script>
 <script>
-// переключатель языка мастера: localStorage-зеркало + перезагрузка
-// статичная шапка мастера не проходит через innerHTML — переводим текстовые узлы на старте
+// wizard language toggle: localStorage mirror + reload
+// the static wizard header doesn't go through innerHTML — translate its text nodes on startup
 addEventListener("DOMContentLoaded",()=>{document.querySelectorAll(".brand,.dry,.back,.sub").forEach(n=>{
  n.childNodes.forEach(c=>{if(c.nodeType===3)c.textContent=nasTr(c.textContent);});
  if(n.title)n.title=nasTr(n.title);});});
@@ -164,7 +164,7 @@ const el=h=>{const t=document.createElement("template");t.innerHTML=h.trim();ret
 let DRY=false,LIVE=false,STATE={};
 async function api(path,opts){try{const r=await fetch(path,Object.assign({headers:{"Content-Type":"application/json"}},opts));if(r.status===401){authGate();throw 0;}if(!r.ok)throw 0;LIVE=true;return await r.json();}catch(e){return null;}}
 
-/* вход: бэкенд отдаёт 401 без сессии; при первом запуске пароль ещё не задан */
+/* sign-in: the backend returns 401 without a session; on first run the password isn't set yet */
 let AUTHUI=false;
 async function authGate(){
  if(AUTHUI)return;AUTHUI=true;
@@ -172,13 +172,13 @@ async function authGate(){
  try{st=await (await fetch("/api/auth/state")).json();}catch(e){}
  const setup=!st.configured;
  const ov=el(`<div class="scrim show" style="z-index:90"><div class="modal">
-  <h3>${setup?"Пароль администратора":"Вход в NAS"}</h3>
-  <p>${setup?"Первый запуск: придумайте пароль для входа в панель управления.":"Введите пароль администратора панели."}</p>
+  <h3>${setup?"Administrator password":"Sign in to NAS"}</h3>
+  <p>${setup?"First run: create a password to sign in to the control panel.":"Enter the panel administrator password."}</p>
   <form id="authF" style="display:flex;flex-direction:column;gap:10px">
-   <input type="password" id="authPw" placeholder="Пароль" autocomplete="${setup?"new-password":"current-password"}" required>
-   ${setup?'<input type="password" id="authPw2" placeholder="Пароль ещё раз" autocomplete="new-password" required>':""}
+   <input type="password" id="authPw" placeholder="Password" autocomplete="${setup?"new-password":"current-password"}" required>
+   ${setup?'<input type="password" id="authPw2" placeholder="Password again" autocomplete="new-password" required>':""}
    <div id="authErr" style="color:var(--danger);font-size:12.5px;min-height:16px"></div>
-   <div class="r"><button class="btn pri" type="submit">${setup?"Сохранить и войти":"Войти"}</button></div>
+   <div class="r"><button class="btn pri" type="submit">${setup?"Save and sign in":"Sign in"}</button></div>
   </form></div></div>`);
  document.body.appendChild(ov);
  setTimeout(()=>ov.querySelector("#authPw").focus(),80);
@@ -186,26 +186,26 @@ async function authGate(){
   e.preventDefault();
   const err=ov.querySelector("#authErr");err.textContent="";
   const pw=ov.querySelector("#authPw").value;
-  if(setup&&pw!==ov.querySelector("#authPw2").value){err.textContent="Пароли не совпадают";return;}
+  if(setup&&pw!==ov.querySelector("#authPw2").value){err.textContent="Passwords do not match";return;}
   let r=null;
   try{r=await(await fetch(setup?"/api/auth/setup":"/api/auth/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({password:pw})})).json();}catch(ex){}
   if(r&&r.ok)location.reload();
-  else err.textContent=(r&&r.log)||"Не удалось войти";
+  else err.textContent=(r&&r.log)||"Could not sign in";
  };
 }
 
 const STEPS=[
- {id:"system",nm:"Система",ic:"cpu"},
- {id:"disks",nm:"Диски",ic:"disks"},
- {id:"mergerfs",nm:"Пул",ic:"layers"},
- {id:"snapraid",nm:"Чётность",ic:"layers"},
- {id:"services",nm:"Сервисы",ic:"cube"},
- {id:"shares",nm:"Доступ",ic:"share"},
- {id:"security",nm:"Безопасность",ic:"shield"},
- {id:"tuning",nm:"Тюнинг Pi",ic:"sliders"},
- {id:"notify",nm:"Уведомления",ic:"bell"},
- {id:"backup",nm:"Бэкапы",ic:"save"},
- {id:"modules",nm:"Модули",ic:"plug"},
+ {id:"system",nm:"System",ic:"cpu"},
+ {id:"disks",nm:"Disks",ic:"disks"},
+ {id:"mergerfs",nm:"Pool",ic:"layers"},
+ {id:"snapraid",nm:"Parity",ic:"layers"},
+ {id:"services",nm:"Services",ic:"cube"},
+ {id:"shares",nm:"Access",ic:"share"},
+ {id:"security",nm:"Security",ic:"shield"},
+ {id:"tuning",nm:"Pi Tuning",ic:"sliders"},
+ {id:"notify",nm:"Notifications",ic:"bell"},
+ {id:"backup",nm:"Backups",ic:"save"},
+ {id:"modules",nm:"Modules",ic:"plug"},
 ];
 let cur="system";const DONE={};
 function renderRail(){const r=document.getElementById("rail");r.innerHTML="";STEPS.forEach(s=>{
@@ -215,12 +215,12 @@ function renderRail(){const r=document.getElementById("rail");r.innerHTML="";STE
 function head(eb,t,l){return `<div class="eyebrow">${eb}</div><h1>${t}</h1><p class="lead">${l}</p>`;}
 async function run(action,params,after){
  const con=document.getElementById("con");con.classList.add("show");
- con.innerHTML=`<div class="dim">${DRY?"# предпросмотр плана":"$ выполняю "+action} …</div>`;
+ con.innerHTML=`<div class="dim">${DRY?"# plan preview":"$ running "+action} …</div>`;
  let resp;
  try{resp=await fetch("/api/setup/"+action,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({dry:DRY,params:params||{}})});}
- catch(e){con.innerHTML=`<div class="er">Нет связи с бэкендом. Установите службу: sudo ./nas-web-install.sh</div>`;return;}
- if(resp.status===401){authGate();con.innerHTML=`<div class="er">Нужен вход: введите пароль администратора</div>`;return;}
- if(!resp.ok||!resp.body){con.innerHTML=`<div class="er">Ошибка ${resp.status}</div>`;return;}
+ catch(e){con.innerHTML=`<div class="er">No connection to the backend. Install the service: sudo ./nas-web-install.sh</div>`;return;}
+ if(resp.status===401){authGate();con.innerHTML=`<div class="er">Sign-in required: enter the administrator password</div>`;return;}
+ if(!resp.ok||!resp.body){con.innerHTML=`<div class="er">Error ${resp.status}</div>`;return;}
  con.innerHTML="";
  const reader=resp.body.getReader(),dec=new TextDecoder();let buf="",code=null;
  const push=line=>{if(line.startsWith("__EXIT__")){code=parseInt(line.slice(8),10);return;}
@@ -229,90 +229,90 @@ async function run(action,params,after){
  for(;;){const {done,value}=await reader.read();if(done)break;buf+=dec.decode(value,{stream:true});
    const parts=buf.split("\n");buf=parts.pop();parts.forEach(push);}
  if(buf)push(buf);
- const ok=code===0;con.appendChild(el(`<div class="${ok?"ok":"er"}">${DRY?"— конец плана —":ok?"✓ готово":"⚠ код "+code}</div>`));
+ const ok=code===0;con.appendChild(el(`<div class="${ok?"ok":"er"}">${DRY?"— end of plan —":ok?"✓ done":"⚠ code "+code}</div>`));
  if(ok&&!DRY){DONE[cur]=true;renderRail();after&&after();}
 }
 function chk(id,t,d,on,ic){return `<label class="opt ${on?"on":""}"><span class="ic">${svg(ic||"cube",16)}</span><span class="m"><span class="t">${t}</span><span class="d">${d}</span></span><input type="checkbox" data-k="${id}" ${on?"checked":""} style="width:20px;height:20px;accent-color:var(--accent)"></label>`;}
 function keys(box){return [...box.querySelectorAll("[data-k]:checked")].map(x=>x.dataset.k).join(" ");}
 
 const R={
- system(p){p.innerHTML=head("Шаг 1","Подготовка системы","Обновление, установка Cockpit, Docker, mergerfs, SnapRAID и утилит. Уже установленное пропускается.")+
-  `<div class="card"><div class="opt on"><span class="ic">${svg("cpu",16)}</span><span class="m"><span class="t">NAS-стек + утилиты + Pi-пакеты</span><span class="d">cockpit · docker · mergerfs · snapraid · smartmontools · nvme-cli · htop · git · …</span></span></div></div>
-   <div class="actions"><button class="btn pri" id="go">Установить</button></div><div class="console" id="con"></div>`;
+ system(p){p.innerHTML=head("Step 1","System preparation","Updates and installation of Cockpit, Docker, mergerfs, SnapRAID and utilities. Anything already installed is skipped.")+
+  `<div class="card"><div class="opt on"><span class="ic">${svg("cpu",16)}</span><span class="m"><span class="t">NAS stack + utilities + Pi packages</span><span class="d">cockpit · docker · mergerfs · snapraid · smartmontools · nvme-cli · htop · git · …</span></span></div></div>
+   <div class="actions"><button class="btn pri" id="go">Install</button></div><div class="console" id="con"></div>`;
   p.querySelector("#go").onclick=()=>run("system");},
- disks(p){p.innerHTML=head("Шаг 2","Диски","Выберите свободный диск, роль и файловую систему. Форматирование требует ввода пути вручную. Системный диск исключён.")+`<div id="dl"></div><div class="console" id="con"></div>`;
+ disks(p){p.innerHTML=head("Step 2","Disks","Choose a free disk, its role and filesystem. Formatting requires typing the device path manually. The system disk is excluded.")+`<div id="dl"></div><div class="console" id="con"></div>`;
   api("/api/disks").then(d=>{const dl=p.querySelector("#dl");const all=(d&&d.disks)||[];
    const free=all.filter(x=>x.role==="free"&&x.size&&x.size!=="0B");
-   // смонтированные внешние — тоже кандидаты в пул, но сначала их нужно отмонтировать
+   // mounted external disks are also pool candidates, but must be unmounted first
    const busy=all.filter(x=>x.role==="removable"&&!x.no_media);
    if(!free.length&&!busy.length){
-     dl.innerHTML=`<div class="note">${all.length?"Все диски уже заняты системой или пулом — подключите новый диск.":"Нет связи с бэкендом или диски не обнаружены."}</div>`;return;}
+     dl.innerHTML=`<div class="note">${all.length?"All disks are already used by the system or the pool — connect a new disk.":"No connection to the backend or no disks detected."}</div>`;return;}
    dl.innerHTML="";
-   busy.forEach(x=>{const row=el(`<div class="disk"><span class="ic">${svg("disks",26)}</span><div class="info"><div class="p">${x.path}</div><div class="mo">${(x.model||"").slice(0,34)} · ${x.size} · смонтирован как внешний: ${(x.mounts||[]).join(", ")}</div></div></div>`);
-     const ub=el(`<button class="btn sm">Отмонтировать</button>`);
-     ub.title="Отключит диск от /media — после этого его можно отформатировать в пул";
-     ub.onclick=async()=>{ub.disabled=true;ub.textContent="отмонтирую…";
+   busy.forEach(x=>{const row=el(`<div class="disk"><span class="ic">${svg("disks",26)}</span><div class="info"><div class="p">${x.path}</div><div class="mo">${(x.model||"").slice(0,34)} · ${x.size} · mounted as external: ${(x.mounts||[]).join(", ")}</div></div></div>`);
+     const ub=el(`<button class="btn sm">Unmount</button>`);
+     ub.title="Detaches the disk from /media — after that it can be formatted into the pool";
+     ub.onclick=async()=>{ub.disabled=true;ub.textContent="unmounting…";
        for(const mp of (x.mounts||[]))await api("/api/disk/mount",{method:"POST",body:JSON.stringify({target:mp,unmount:true})});
        R.disks(p);};
      row.appendChild(ub);dl.appendChild(row);});
-   if(!free.length){dl.appendChild(el(`<div class="note">Свободных дисков нет — отмонтируйте внешний диск выше, чтобы использовать его в пуле (форматирование сотрёт его данные).</div>`));return;}
+   if(!free.length){dl.appendChild(el(`<div class="note">No free disks — unmount an external disk above to use it in the pool (formatting will erase its data).</div>`));return;}
    free.forEach(x=>{const row=el(`<div class="disk"><span class="ic">${svg("disks",26)}</span><div class="info"><div class="p">${x.path}</div><div class="mo">${(x.model||"").slice(0,34)} · ${x.size} · ${x.tran||""}</div></div></div>`);
     const ctl=el(`<div style="display:flex;flex-direction:column;gap:8px;align-items:flex-end"></div>`);
     let role="data",fs="ext4";
-    const seg=el(`<div class="seg"><button class="on" data-r="data">Данные</button><button data-r="parity">Parity</button></div>`);
+    const seg=el(`<div class="seg"><button class="on" data-r="data">Data</button><button data-r="parity">Parity</button></div>`);
     seg.querySelectorAll("button").forEach(b=>b.onclick=()=>{role=b.dataset.r;seg.querySelectorAll("button").forEach(z=>z.classList.toggle("on",z===b));});
-    const fmt=el(`<button class="btn dng sm">Форматировать</button>`);fmt.onclick=()=>fmtModal(x.path,()=>run("format-disk",{dev:x.path,role,fs}));
+    const fmt=el(`<button class="btn dng sm">Format</button>`);fmt.onclick=()=>fmtModal(x.path,()=>run("format-disk",{dev:x.path,role,fs}));
     ctl.appendChild(seg);ctl.appendChild(fmt);row.appendChild(ctl);dl.appendChild(row);});});},
- mergerfs(p){p.innerHTML=head("Шаг 3","Пул mergerfs","Объединяет диски данных в /mnt/storage. Нужно ≥2 дисков — иначе шаг пропускается автоматически.")+`<div class="actions"><button class="btn pri" id="go">Собрать пул</button></div><div class="console" id="con"></div>`;p.querySelector("#go").onclick=()=>run("mergerfs");},
- snapraid(p){p.innerHTML=head("Шаг 4","Чётность · SnapRAID","Генерирует snapraid.conf, ставит защиту от массового удаления и таймеры (sync 03:00, scrub вс 05:00).")+
-  `<div class="card">${chk("sync","Запустить первый sync сейчас","На больших дисках может занять время",false,"layers")}</div>
-   <div class="actions"><button class="btn pri" id="go">Настроить SnapRAID</button></div><div class="console" id="con"></div>`;
+ mergerfs(p){p.innerHTML=head("Step 3","mergerfs pool","Combines data disks into /mnt/storage. Requires ≥2 disks — otherwise this step is skipped automatically.")+`<div class="actions"><button class="btn pri" id="go">Build pool</button></div><div class="console" id="con"></div>`;p.querySelector("#go").onclick=()=>run("mergerfs");},
+ snapraid(p){p.innerHTML=head("Step 4","Parity · SnapRAID","Generates snapraid.conf, sets up mass-deletion protection and timers (sync 03:00, scrub Sun 05:00).")+
+  `<div class="card">${chk("sync","Run the first sync now","May take a while on large disks",false,"layers")}</div>
+   <div class="actions"><button class="btn pri" id="go">Configure SnapRAID</button></div><div class="console" id="con"></div>`;
   p.querySelector("#go").onclick=()=>run("snapraid",{sync:p.querySelector("[data-k=sync]").checked?"1":"0"});},
- services(p){p.innerHTML=head("Шаг 5","Приложения · Dockge","Ставим Dockge — веб-менеджер docker-стеков. Сами приложения ставятся из «Магазина приложений» в панели: он копирует стек, спрашивает нужные поля и поднимает его сам.")+
-  `<div class="card"><div class="opt on"><span class="ic">${svg("cube",16)}</span><span class="m"><span class="t">Dockge</span><span class="d">менеджер стеков · порт 5001 · каталог /opt/stacks</span></span></div>
-    <div class="actions" style="margin-top:12px"><button class="btn pri" id="godk">Установить Dockge</button><a class="btn" href="http://${location.hostname}:5001" target="_blank">Открыть Dockge ↗</a></div></div>
-   <div class="note">${svg("cube",18)}<span>Приложения (Scrutiny, Syncthing, Immich и т.д.) ставьте из <b>Магазина приложений</b> в панели — вкладка в окне Docker. Там же поля вроде паролей и портов. Dockge остаётся для логов, правки compose и старт/стоп.</span></div>
+ services(p){p.innerHTML=head("Step 5","Apps · Dockge","Installs Dockge — a web manager for docker stacks. Apps themselves are installed from the “App Store” in the panel: it copies the stack, asks for the required fields and brings it up itself.")+
+  `<div class="card"><div class="opt on"><span class="ic">${svg("cube",16)}</span><span class="m"><span class="t">Dockge</span><span class="d">stack manager · port 5001 · directory /opt/stacks</span></span></div>
+    <div class="actions" style="margin-top:12px"><button class="btn pri" id="godk">Install Dockge</button><a class="btn" href="http://${location.hostname}:5001" target="_blank">Open Dockge ↗</a></div></div>
+   <div class="note">${svg("cube",18)}<span>Install apps (Scrutiny, Syncthing, Immich, etc.) from the <b>App Store</b> in the panel — a tab in the Docker window. It also has fields like passwords and ports. Dockge stays around for logs, editing compose files, and start/stop.</span></div>
    <div class="console" id="con"></div>`;
   p.querySelector("#godk").onclick=()=>run("dockge");},
- shares(p){p.innerHTML=head("Шаг 6","Доступ к файлам","Открыть /mnt/storage по сети и настроить удалённый доступ.")+
-  `<div class="card" id="box">${chk("samba","Samba (SMB)","Windows, Mac, телефон",true,"share")}${chk("nfs","NFS","Linux-клиенты",false,"share")}${chk("avahi","Avahi/mDNS","<host>.local",true,"net")}</div>
-   <div class="actions"><button class="btn pri" id="go">Применить</button></div><div class="console" id="con"></div>`;
+ shares(p){p.innerHTML=head("Step 6","File access","Share /mnt/storage over the network and set up remote access.")+
+  `<div class="card" id="box">${chk("samba","Samba (SMB)","Windows, Mac, phone",true,"share")}${chk("nfs","NFS","Linux clients",false,"share")}${chk("avahi","Avahi/mDNS","<host>.local",true,"net")}</div>
+   <div class="actions"><button class="btn pri" id="go">Apply</button></div><div class="console" id="con"></div>`;
   p.querySelector("#go").onclick=()=>run("shares",{keys:keys(p.querySelector("#box"))});},
- security(p){p.innerHTML=head("Шаг 7","Безопасность","Разумные настройки. Firewall открывает SSH и Cockpit до включения; вход по ключу — только если ключи есть.")+
-  `<div class="card" id="box">${chk("unattended","Авто security-обновления","unattended-upgrades",true,"shield")}${chk("ufw","Firewall ufw","SSH, Cockpit, шары",false,"shield")}${chk("fail2ban","fail2ban","защита SSH",false,"shield")}${chk("journald","Лимит журналов 200М","меньше износ SD",true,"save")}${chk("log2ram","log2ram","логи в ОЗУ",false,"save")}</div>
-   <div class="actions"><button class="btn pri" id="go">Применить</button></div><div class="console" id="con"></div>`;
+ security(p){p.innerHTML=head("Step 7","Security","Sensible defaults. The firewall opens SSH and Cockpit before enabling; key-only login only if keys exist.")+
+  `<div class="card" id="box">${chk("unattended","Automatic security updates","unattended-upgrades",true,"shield")}${chk("ufw","Firewall ufw","SSH, Cockpit, shares",false,"shield")}${chk("fail2ban","fail2ban","SSH protection",false,"shield")}${chk("journald","200M journal limit","less SD wear",true,"save")}${chk("log2ram","log2ram","logs in RAM",false,"save")}</div>
+   <div class="actions"><button class="btn pri" id="go">Apply</button></div><div class="console" id="con"></div>`;
   p.querySelector("#go").onclick=()=>run("security",{keys:keys(p.querySelector("#box"))});},
- tuning(p){p.innerHTML=head("Шаг 8","Тюнинг Raspberry Pi","Аппаратные твики. Правки config.txt применяются после перезагрузки.")+
-  `<div class="card" id="box">${chk("usbpower","Питание USB","критично для USB-SSD на Pi5",true,"plug")}${chk("trim","fstrim (TRIM)","скорость SSD/NVMe",true,"disks")}${chk("pcie3","PCIe Gen3 для NVMe","быстрее, вне спеки",false,"cpu")}${chk("cgroup","Memory cgroup","лимиты памяти контейнеров",false,"cpu")}${chk("sysctl","Sysctl-тюнинг","swappiness, сеть",false,"sliders")}${chk("zram","zram-swap","сжатый swap в ОЗУ",false,"cpu")}${chk("chrony","chrony вместо timesyncd","точная синхронизация времени",false,"cpu")}${chk("governor","Адаптивный CPU governor","снижает частоту при перегреве",false,"sliders")}${chk("watchdog","Watchdog","авто-ребут при зависании",false,"cpu")}</div>
-   <div class="actions"><button class="btn pri" id="go">Применить</button></div><div class="console" id="con"></div>`;
+ tuning(p){p.innerHTML=head("Step 8","Raspberry Pi tuning","Hardware tweaks. config.txt changes take effect after a reboot.")+
+  `<div class="card" id="box">${chk("usbpower","USB power","critical for USB SSDs on the Pi 5",true,"plug")}${chk("trim","fstrim (TRIM)","SSD/NVMe speed",true,"disks")}${chk("pcie3","PCIe Gen3 for NVMe","faster, out of spec",false,"cpu")}${chk("cgroup","Memory cgroup","container memory limits",false,"cpu")}${chk("sysctl","Sysctl tuning","swappiness, network",false,"sliders")}${chk("zram","zram swap","compressed swap in RAM",false,"cpu")}${chk("chrony","chrony instead of timesyncd","accurate time synchronization",false,"cpu")}${chk("governor","Adaptive CPU governor","lowers frequency when overheating",false,"sliders")}${chk("watchdog","Watchdog","auto-reboot on hang",false,"cpu")}</div>
+   <div class="actions"><button class="btn pri" id="go">Apply</button></div><div class="console" id="con"></div>`;
   p.querySelector("#go").onclick=()=>run("pi",{keys:keys(p.querySelector("#box"))});},
- notify(p){p.innerHTML=head("Шаг 9","Уведомления · Pushover","Статус SnapRAID, проблемы SMART и перегрев — в приложение Pushover на телефоне.")+
+ notify(p){p.innerHTML=head("Step 9","Notifications · Pushover","SnapRAID status, SMART problems and overheating — delivered to the Pushover app on your phone.")+
   `<div class="card"><div class="field"><label>User Key</label><input class="mono" id="pu" placeholder="u xxxxxxxxxxxxxxxx"></div>
    <div class="field"><label>Application Token</label><input class="mono" id="pt" placeholder="a xxxxxxxxxxxxxxxx"></div></div>
-   <div class="actions"><button class="btn pri" id="go">Сохранить</button><button class="btn" id="test">Тест</button></div><div class="console" id="con"></div>`;
+   <div class="actions"><button class="btn pri" id="go">Save</button><button class="btn" id="test">Test</button></div><div class="console" id="con"></div>`;
   p.querySelector("#go").onclick=()=>run("notify",{puser:p.querySelector("#pu").value,ptoken:p.querySelector("#pt").value});
   p.querySelector("#test").onclick=()=>run("notify",{puser:p.querySelector("#pu").value,ptoken:p.querySelector("#pt").value});},
- backup(p){p.innerHTML=head("Шаг 10","Бэкапы и мониторинг","Контроль здоровья дисков и порогов места/температуры (алерты через Pushover).")+
-  `<div class="card" id="box">${chk("smartd","SMART-мониторинг","постоянный контроль + алерт",true,"save")}${chk("spacetemp","Место и температура","ежечасная проверка",true,"sliders")}</div>
-   <div class="actions"><button class="btn pri" id="go">Применить</button></div><div class="console" id="con"></div>`;
+ backup(p){p.innerHTML=head("Step 10","Backups and monitoring","Monitors disk health and space/temperature thresholds (alerts via Pushover).")+
+  `<div class="card" id="box">${chk("smartd","SMART monitoring","continuous monitoring + alerts",true,"save")}${chk("spacetemp","Space and temperature","hourly check",true,"sliders")}</div>
+   <div class="actions"><button class="btn pri" id="go">Apply</button></div><div class="console" id="con"></div>`;
   p.querySelector("#go").onclick=()=>run("backup",{keys:keys(p.querySelector("#box"))});},
- modules(p){p.innerHTML=head("Шаг 11","Дополнительные модули","Сеть и удалённый доступ. Ставятся по отдельности.")+
+ modules(p){p.innerHTML=head("Step 11","Additional modules","Networking and remote access. Installed individually.")+
   `<div class="card">
-   <div class="opt"><span class="ic">${svg("net",16)}</span><span class="m"><span class="t">comitup</span><span class="d">Wi-Fi точка доступа для ввода сети на свежей системе</span></span><button class="btn sm" data-a="comitup">Установить</button></div>
-   <div class="opt"><span class="ic">${svg("shield",16)}</span><span class="m"><span class="t">Tailscale</span><span class="d">безопасный удалённый доступ без проброса портов</span></span><button class="btn sm" data-a="tailscale">Установить</button></div>
-   <div class="opt"><span class="ic">${svg("cube",16)}</span><span class="m"><span class="t">Cockpit GUI-модули</span><span class="d">управление шарами и файлами мышкой</span></span><button class="btn sm" data-a="cockpit-gui">Установить</button></div>
+   <div class="opt"><span class="ic">${svg("net",16)}</span><span class="m"><span class="t">comitup</span><span class="d">Wi-Fi access point for entering network details on a fresh system</span></span><button class="btn sm" data-a="comitup">Install</button></div>
+   <div class="opt"><span class="ic">${svg("shield",16)}</span><span class="m"><span class="t">Tailscale</span><span class="d">secure remote access without port forwarding</span></span><button class="btn sm" data-a="tailscale">Install</button></div>
+   <div class="opt"><span class="ic">${svg("cube",16)}</span><span class="m"><span class="t">Cockpit GUI modules</span><span class="d">manage shares and files with the mouse</span></span><button class="btn sm" data-a="cockpit-gui">Install</button></div>
    </div><div class="console" id="con"></div>`;
   p.querySelectorAll("[data-a]").forEach(b=>b.onclick=()=>run(b.dataset.a));},
 };
 function renderPanel(){const p=document.getElementById("panel");p.innerHTML="";(R[cur]||R.system)(p);
- // если шаг уже настроен — сверху зелёная плашка «уже установлено», чтобы не гадать
+ // if the step is already configured — show a green "already installed" banner up top, so there's no guessing
  if(DONE[cur]){const b=document.createElement("div");b.className="okban";
-  b.innerHTML=`${svg("shield",15)} Этот шаг уже настроен на системе. Повторный запуск обновит/дополнит — существующее не ломается.`;
+  b.innerHTML=`${svg("shield",15)} This step is already configured on the system. Running it again updates/extends it — nothing existing breaks.`;
   p.insertBefore(b,p.firstChild.nextSibling||null);}}
 
 function fmtModal(dev,ok){const s=document.getElementById("scrim");
- s.innerHTML=`<div class="modal"><h3>Отформатировать ${dev}?</h3><p>Все данные на диске будут удалены безвозвратно. Введите путь устройства для подтверждения.</p>
-  <input class="mono" id="cf" placeholder="${dev}" autocomplete="off"><div class="r"><button class="btn" id="cx">Отмена</button><button class="btn dng" id="ok" disabled>Форматировать</button></div></div>`;
+ s.innerHTML=`<div class="modal"><h3>Format ${dev}?</h3><p>All data on the disk will be permanently erased. Type the device path to confirm.</p>
+  <input class="mono" id="cf" placeholder="${dev}" autocomplete="off"><div class="r"><button class="btn" id="cx">Cancel</button><button class="btn dng" id="ok" disabled>Format</button></div></div>`;
  s.classList.add("show");const inp=s.querySelector("#cf"),b=s.querySelector("#ok");
  inp.oninput=()=>b.disabled=inp.value.trim()!==dev;inp.focus();
  s.querySelector("#cx").onclick=()=>s.classList.remove("show");
@@ -323,7 +323,7 @@ document.getElementById("dry").onclick=function(){DRY=!DRY;this.setAttribute("ar
 const ACCENTS={teal:["#14B8AC","#4C8DF6"],blue:["#4C8DF6","#8A7DFF"],violet:["#8A7DFF","#E05AB4"],
  green:["#1FA971","#14B8AC"],amber:["#E0913C","#F0876A"],coral:["#F0665E","#E05AB4"]};
 const hexA=(h,a)=>{const n=parseInt(h.slice(1),16);return `rgba(${n>>16&255},${n>>8&255},${n&255},${a})`;};
-// контрастный текст на сплошной акцентной заливке (белый/тёмный по WCAG)
+// contrasting text on a solid accent fill (white/dark per WCAG)
 function inkOn(hex){const n=parseInt(hex.slice(1),16),f=c=>{c/=255;return c<=.03928?c/12.92:Math.pow((c+.055)/1.055,2.4);};
  const L=.2126*f(n>>16&255)+.7152*f(n>>8&255)+.0722*f(n&255);return 1.05/(L+.05)>=(L+.05)/.05?"#FFFFFF":"#04181A";}
 function applyDeskTheme(S){const root=document.documentElement,t=(S&&S.theme)||"light";
@@ -339,7 +339,7 @@ try{applyDeskTheme(JSON.parse(localStorage.getItem("nasdesk")||"{}"));}catch(e){
  const raw=await api("/api/setup/state");let st=null;
  try{st=raw&&typeof raw.log==="string"?JSON.parse(raw.log):raw;}catch(e){st=null;}
  if(st&&st.host){STATE=st;document.getElementById("hostlbl").textContent=st.host+" · "+(st.iface||"");
-   // уже установленное/настроенное показываем как готовое (галочки в списке шагов)
+   // show what's already installed/configured as done (checkmarks in the step list)
    DONE.system=!!(STATE.docker&&STATE.cockpit);
    DONE.disks=(STATE.data_disks||0)>0;
    DONE.mergerfs=!!STATE.pool;
@@ -347,5 +347,5 @@ try{applyDeskTheme(JSON.parse(localStorage.getItem("nasdesk")||"{}"));}catch(e){
    DONE.services=!!STATE.docker;
    DONE.shares=!!(STATE.samba||STATE.nfs);
    DONE.security=!!(STATE.ufw||STATE.fail2ban);}
- else document.getElementById("hostlbl").textContent="демо (нет бэкенда)";renderRail();renderPanel();})();
+ else document.getElementById("hostlbl").textContent="demo (no backend)";renderRail();renderPanel();})();
 </script></body></html>

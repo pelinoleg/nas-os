@@ -1,7 +1,7 @@
-# Scrutiny — мониторинг SMART-состояния дисков (omnibus: web+InfluxDB). http://<pi>:8084
-# ВАЖНО: перечислите свои диски в devices. Для NVMe нужен cap SYS_ADMIN.
-# Панель находит Scrutiny сама по имени контейнера и фактическому порту — так что
-# порт web можно менять здесь свободно, ничего в панели править не нужно.
+# Scrutiny — SMART disk health monitoring (omnibus: web+InfluxDB). http://<pi>:8084
+# IMPORTANT: list your disks under devices. NVMe needs the SYS_ADMIN cap.
+# The panel finds Scrutiny by container name and actual port — so
+# the web port can be changed here freely, no need to touch the panel.
 services:
   scrutiny:
     image: ghcr.io/analogj/scrutiny:v0.9.2-omnibus
@@ -13,23 +13,23 @@ services:
       - "web-desktop.icon=https://cdn.jsdelivr.net/gh/selfhst/icons@main/svg/scrutiny.svg"
     cap_add:
       - SYS_RAWIO
-      - SYS_ADMIN            # нужно для NVMe-дисков
+      - SYS_ADMIN            # needed for NVMe disks
     ports:
-      - "8084:8080"          # web (8080 занят Dozzle -> вынесен на 8084)
-      # InfluxDB (8086) наружу не публикуем: в omnibus она нужна только внутри
-      # контейнера, а на 0.0.0.0 это была бы открытая база в локальной сети.
+      - "8084:8080"          # web (8080 is taken by Dozzle -> moved to 8084)
+      # InfluxDB (8086) is not published: in omnibus it's only needed inside
+      # the container, and on 0.0.0.0 it would be an open database on the LAN.
     volumes:
       - /run/udev:/run/udev:ro
       - /opt/docker/scrutiny/config:/opt/scrutiny/config
       - /opt/docker/scrutiny/influxdb:/opt/scrutiny/influxdb
-    # Пробрасываем char-КОНТРОЛЛЕРЫ (/dev/nvmeN), а не namespace (/dev/nvmeNn1):
-    # smartctl --scan находит именно контроллеры, и тогда Scrutiny видит диски сам,
-    # без ручного collector.yaml. Список — под ваши диски (Docker требует, чтобы
-    # устройство существовало на старте; лишние строки уберите).
+    # We pass through char CONTROLLERS (/dev/nvmeN), not the namespace (/dev/nvmeNn1):
+    # smartctl --scan finds exactly the controllers, so Scrutiny discovers disks
+    # itself, without a manual collector.yaml. List — match your disks (Docker
+    # requires the device to exist at startup; remove extra lines).
     devices:
-      - "/dev/nvme0"         # Crucial CT500P3P (пул disk2)
-      - "/dev/nvme1"         # Samsung 970 EVO Plus 1TB (пул disk1)
-      - "/dev/nvme2"         # Kioxia 256G (системный)
-      # USB/SATA-диски (char-девайс = сам диск): раскомментируйте по мере надобности
+      - "/dev/nvme0"         # Crucial CT500P3P (pool disk2)
+      - "/dev/nvme1"         # Samsung 970 EVO Plus 1TB (pool disk1)
+      - "/dev/nvme2"         # Kioxia 256G (system disk)
+      # USB/SATA disks (char device = the disk itself): uncomment as needed
       # - "/dev/sda"
       # - "/dev/sdb"

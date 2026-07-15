@@ -1,4 +1,4 @@
-# Syncthing — синхронизация файлов между устройствами. http://<pi>:8384
+# Syncthing — file sync between devices. http://<pi>:8384
 services:
   syncthing:
     image: lscr.io/linuxserver/syncthing:2.1.1
@@ -15,17 +15,17 @@ services:
       - TZ=Europe/Madrid
     volumes:
       - /opt/docker/syncthing/config:/config
-      - /mnt/storage:/data                 # пул mergerfs
+      - /mnt/storage:/data                 # mergerfs pool
     ports:
       - "8384:8384"          # web UI
-      - "22000:22000/tcp"    # синхронизация
+      - "22000:22000/tcp"    # sync
       - "22000:22000/udp"
-      - "21027:21027/udp"    # обнаружение
+      - "21027:21027/udp"    # discovery
 
-  # Светлая тема Vellum для веб-UI Syncthing: одноразово копирует файлы темы в
-  # конфиг (/config/gui/vellum-light). Появится в Actions → Settings → GUI →
-  # Theme = vellum-light (выбрать один раз). Не влияет на работу Syncthing:
-  # без hard-depends — если клон не удался, Syncthing всё равно поднимется.
+  # Light Vellum theme for the Syncthing web UI: one-time copy of the theme files
+  # into the config (/config/gui/vellum-light). Shows up in Actions → Settings → GUI →
+  # Theme = vellum-light (pick it once). Doesn't affect Syncthing's operation:
+  # no hard-depends — if the clone fails, Syncthing still comes up.
   syncthing-vellum:
     image: alpine/git:latest
     container_name: syncthing-vellum

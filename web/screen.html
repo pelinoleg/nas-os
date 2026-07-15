@@ -13,13 +13,13 @@
     --accent:#00fbff; --good:#3ecf8e; --warn:#f5b342; --danger:#ff5d68;
     --track:rgba(255,255,255,.13); --line:rgba(255,255,255,.10);
   }
-  /* курсор не нужен вовсе: единственный указатель — палец. !important, потому что
-     chromium подставляет свои курсоры для полей и кнопок поверх наследования */
+  /* no cursor needed at all: the only pointer is the finger. !important because
+     chromium substitutes its own cursors for fields and buttons over inheritance */
   *,*::before,*::after{cursor:none !important}
   /* the same page opened from LAN (phone/desktop, .remote set by JS) has a real
      pointer — hiding it there just loses the mouse */
   :root.remote *,:root.remote *::before,:root.remote *::after{cursor:auto !important}
-  /* полосы прокрутки не рисуем: пальцем и так листается, а на 4.3" они уродуют вёрстку */
+  /* no scrollbars drawn: finger scrolling works fine, and on 4.3" they'd disfigure the layout */
   *{scrollbar-width:none;-ms-overflow-style:none}
   *::-webkit-scrollbar{width:0;height:0;display:none}
   *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;
@@ -38,8 +38,8 @@
   #wallNoise{z-index:-1;mix-blend-mode:overlay;background-size:200px 200px;
     background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
 
-  /* тёмный градиент-скрим под шапкой — тот же многоступенчатый ease-out, что в панели
-     (линейный давал бы видимый «край» затухания) */
+  /* dark gradient scrim under the header — same multi-step ease-out as in the panel
+     (linear would give a visible fade "edge") */
   #mbGrad{position:fixed;top:0;left:0;right:0;height:0;z-index:1;pointer-events:none;
     opacity:var(--mb-grad-o,1);
     background:linear-gradient(to bottom,
@@ -60,9 +60,9 @@
        background:rgba(255,255,255,.12);color:var(--ink);flex:none;margin-left:10px}
   #zzz:active,#pwr:active{background:rgba(255,255,255,.30)}
   #pwr{color:#ffb3b8}
-  #zzz svg{pointer-events:none}     /* клик всегда прилетает на сам #zzz, а не на <path> */
+  #zzz svg{pointer-events:none}     /* click always lands on #zzz itself, not on <path> */
 
-  /* карточки — как виджеты панели: без бордера, стекло + backdrop-filter */
+  /* cards — like the panel's widgets: no border, glass + backdrop-filter */
   .g{background:var(--glass);border:0;border-radius:var(--r-lg);
      backdrop-filter:var(--wdg-bf);-webkit-backdrop-filter:var(--wdg-bf)}
   .g:active{filter:brightness(1.25)}
@@ -81,10 +81,10 @@
   .dn{color:var(--good)} .upl{color:var(--accent)}
 
   #pages{flex:1;position:relative;min-height:0;margin:0 8px}
-  /* Без анимации: на Pi 4 переезд двух стеклянных страниц с backdrop-filter заметно
-     дёргался и данные приезжали с задержкой. Переключаем мгновенно. */
+  /* No animation: on the Pi 4, sliding two glass pages with backdrop-filter visibly
+     stuttered and data arrived with a delay. Switch instantly instead. */
   .page{position:absolute;inset:0;display:none;flex-direction:column;gap:7px}
-  .page.on{display:flex}      /* по классу, а не по id: страниц теперь три */
+  .page.on{display:flex}      /* by class, not id: there are three pages now */
 
   /* gauges */
   #gs{flex:none;display:grid;grid-template-columns:repeat(4,1fr);gap:7px;height:100px}
@@ -95,11 +95,11 @@
   .gauge .v small{font-size:12px;font-weight:600;color:var(--dim)}
   .gauge .cap{font-size:10px;letter-spacing:.6px;text-transform:uppercase;color:var(--dim);font-weight:650;margin-top:1px}
 
-  /* row of cards: две плашки вместо трёх — «Бэкапы» и «USB-импорт» несут строки
-     с именем, размером и датой, и в трети экрана они не помещались (докер уехал
-     на свою страницу) */
+  /* row of cards: two tiles instead of three — "Backups" and "USB import" carry rows
+     with name, size and date, and they didn't fit in a third of the screen (Docker
+     moved to its own page) */
   #row{flex:1.25;display:grid;grid-template-columns:1fr 1fr;gap:7px;min-height:0}
-  /* страница Docker: стеки и контейнеры целиком */
+  /* Docker page: stacks and containers in full */
   #r3{flex:1;display:grid;grid-template-columns:1fr 1fr;gap:7px;min-height:0}
   #r4{flex:1;display:grid;grid-template-columns:1.15fr 1fr;gap:7px;min-height:0}
   /* idle clock overlay */
@@ -132,7 +132,7 @@
   .st2{width:14px;text-align:center;font-weight:700}
   .ok{color:var(--good)} .wn{color:var(--warn)} .bd{color:var(--danger)} .no{color:var(--mut)}
   .empty{color:var(--mut);font-size:12.5px;padding-top:4px}
-  /* предупреждение состояния (а не события): «приёмника нет — писать некуда» */
+  /* state warning (not an event): "no destination — nowhere to write" */
   .wrn{font-size:12px;color:var(--warn);background:rgba(245,179,66,.13);
        border-radius:7px;padding:4px 7px;margin-bottom:4px;
        white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -189,14 +189,14 @@
   .avb{display:flex;align-items:center;gap:8px;flex:1;min-width:0}
   .avb .lbl{font-size:10.5px;letter-spacing:.6px;text-transform:uppercase;color:var(--mut);font-weight:650;flex:none}
   .avb .bars{display:flex;gap:1px;align-items:flex-end;height:15px;flex:1}
-  /* подложка = «нет данных», цвет слоем сверху с непрозрачностью = доля известного
-     времени слота (час, про который знаем 2 минуты, остаётся почти серым) */
+  /* backing = "no data", the color layered on top with opacity = the known share
+     of the slot's time (an hour we only know 2 minutes of stays nearly grey) */
   .avb i{flex:1;height:100%;border-radius:1px;position:relative;overflow:hidden;
          background:rgba(255,255,255,.13)}
   .avb i>b{display:block;width:100%;height:100%}
   .avb .pct{font-size:11.5px;color:var(--dim);font-variant-numeric:tabular-nums;flex:none}
 
-  /* detail sheet — открывается по тапу на ЛЮБУЮ плашку */
+  /* detail sheet — opens on a tap on ANY tile */
   #sheet{position:fixed;inset:0;background:rgba(6,10,16,.86);display:none;z-index:8;
          backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px)}
   #sheet.on{display:flex}
@@ -241,12 +241,12 @@
 <div id="bar">
   <span id="dot"></span><span id="who">—</span><span id="addr"></span><span id="up"></span>
   <span id="net"></span>
-  <span id="pwr" data-act="power" title="Питание">
+  <span id="pwr" data-act="power" title="Power">
     <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2"
          stroke-linecap="round" stroke-linejoin="round">
       <path d="M12 3v9"/><path d="M18.4 6.6a9 9 0 1 1-12.8 0"/>
     </svg></span>
-  <span id="zzz" data-act="sleep" title="Погасить экран">
+  <span id="zzz" data-act="sleep" title="Turn the screen off">
     <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.9"
          stroke-linecap="round" stroke-linejoin="round">
       <rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8"/><path d="M12 17v4"/>
@@ -298,7 +298,7 @@
 
 <div id="sheet"><div id="sheetIn"><h3><span id="sheetT"></span><span class="x" id="sheetX">✕</span></h3>
   <div id="sheetB"></div><div id="sheetA"></div></div></div>
-<div id="alarm"><div class="big"></div><div class="li"></div><div class="hint">Нажмите, чтобы скрыть</div></div>
+<div id="alarm"><div class="big"></div><div class="li"></div><div class="hint">Tap to dismiss</div></div>
 <div id="toast"></div>
 <!-- idle clock: big time + core stats; a tap dismisses it and nothing else.
      Sits after #sheet in the DOM so an equal z-index puts it OVER an open sheet,
@@ -332,72 +332,73 @@ const clampf=(v,a,b)=>Math.max(a,Math.min(b,+v||0));
 const isHex=h=>/^#[0-9a-f]{6}$/i.test(h||"");
 const hexRgb=h=>{const n=parseInt(h.slice(1),16);return [n>>16&255,n>>8&255,n&255].join(",");};
 const litRgb=(rgb,amt)=>rgb.split(",").map(x=>Math.round(+x+(255-+x)*amt)).join(",");
-const gb=b=>(b/1073741824).toFixed(b>107374182400?0:1)+" ГБ";
-function fmtB(b){ b=+b||0; if(b<1024) return b?b+" Б":"";
-  const u=["КБ","МБ","ГБ","ТБ"]; let i=0,x=b/1024;
+const gb=b=>(b/1073741824).toFixed(b>107374182400?0:1)+" GB";
+function fmtB(b){ b=+b||0; if(b<1024) return b?b+" B":"";
+  const u=["KB","MB","GB","TB"]; let i=0,x=b/1024;
   while(x>=1024&&i<u.length-1){ x/=1024; i++; }
   return (x>=10?Math.round(x):x.toFixed(1))+" "+u[i]; }
-/* Скорость сети: на стене мерим в БИТАХ — так её считает провайдер и так подписан
-   гигабитный порт (118 МБ/с = 940 Мбит/с). Единицы общие с панелью: если в
-   настройках выбрано «МБ/с» (SET.netUnits=bytes), экран показывает байты. */
+/* Network speed: on the wall we measure in BITS — that's how ISPs count it and how
+   the gigabit port is labeled (118 MB/s = 940 Mbit/s). Units are shared with the panel:
+   if settings pick "MB/s" (SET.netUnits=bytes), the screen shows bytes. */
 let NETBITS=true;
 function rate(b){ b=+b||0;
-  if(!NETBITS){ if(b<1024) return ["0","КБ/с"];
-    if(b<1048576) return [(b/1024).toFixed(0),"КБ/с"];
-    return [(b/1048576).toFixed(1),"МБ/с"]; }
+  if(!NETBITS){ if(b<1024) return ["0","KB/s"];
+    if(b<1048576) return [(b/1024).toFixed(0),"KB/s"];
+    return [(b/1048576).toFixed(1),"MB/s"]; }
   const m=b*8/1e6;
-  if(m<1) return [Math.round(b*8/1e3)+"","Кбит/с"];
-  return [(m>=100?Math.round(m):m.toFixed(1))+"","Мбит/с"]; }
+  if(m<1) return [Math.round(b*8/1e3)+"","Kbit/s"];
+  return [(m>=100?Math.round(m):m.toFixed(1))+"","Mbit/s"]; }
 function ago(ts){
-  if(!ts) return "никогда";
+  if(!ts) return "never";
   const s=Math.max(1,Math.floor(Date.now()/1000-ts));
-  if(s<60) return "только что";
-  if(s<3600) return Math.floor(s/60)+" мин назад";
-  if(s<86400) return Math.floor(s/3600)+" ч назад";
-  const d=Math.floor(s/86400); return d===1?"вчера":d+" дн назад";
+  if(s<60) return "just now";
+  if(s<3600) return Math.floor(s/60)+" min ago";
+  if(s<86400) return Math.floor(s/3600)+" h ago";
+  const d=Math.floor(s/86400); return d===1?"yesterday":d+" d ago";
 }
-/* Дата события, а не «сколько прошло»: на стене висит история («вчера 21:40»),
-   и относительное «2 дн назад» после ребута читается хуже, чем дата. */
-const MON=["янв","фев","мар","апр","мая","июн","июл","авг","сен","окт","ноя","дек"];
+/* Event date, not "how long ago": the wall shows history ("yesterday 21:40"),
+   and a relative "2 days ago" after a reboot reads worse than a date. */
+const MON=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 function when(ts){
-  if(!ts) return "никогда";
+  if(!ts) return "never";
   const d=new Date(ts*1000), n=new Date();
   const hm=("0"+d.getHours()).slice(-2)+":"+("0"+d.getMinutes()).slice(-2);
   const same=(a,b)=>a.getFullYear()===b.getFullYear()&&a.getMonth()===b.getMonth()&&a.getDate()===b.getDate();
-  if(same(d,n)) return "сегодня "+hm;
-  if(same(d,new Date(n.getTime()-86400000))) return "вчера "+hm;
+  if(same(d,n)) return "today "+hm;
+  if(same(d,new Date(n.getTime()-86400000))) return "yesterday "+hm;
   const yr=d.getFullYear()!==n.getFullYear()?" "+d.getFullYear():"";
   return d.getDate()+" "+MON[d.getMonth()]+yr+" "+hm;
 }
-/* Цвет полоски доступности — по ДОЛЕ аптайма слота, а не по «худшему состоянию».
-   Слот = час (24 ч) или сутки (30 дн); при старом правиле одна секундная просадка
-   красила весь день в красный, и месяц с 99.9 % аптайма выглядел сплошной аварией.
-   Шкала непрерывная: чуть просело — зелёный желтеет, дальше жёлтый → оранжевый,
-   чистый красный только при простое ≥ 50 % слота. Степень 0.4 «растягивает»
-   начало шкалы: короткое падение уже заметно, но ещё не кричит. */
+/* Availability strip color — by the uptime SHARE of the slot, not by "worst state".
+   A slot is an hour (24 h) or a day (30 d); under the old rule a one-second dip
+   painted the whole day red, and a month with 99.9% uptime looked like one solid
+   outage. The scale is continuous: a small dip yellows the green, further on it
+   goes yellow -> orange, pure red only at downtime >= 50% of the slot. The 0.4
+   exponent "stretches" the start of the scale: a brief drop is already visible
+   but doesn't yet scream. */
 const _hex=n=>{const v=getComputedStyle(document.documentElement).getPropertyValue(n).trim();
   return /^#[0-9a-f]{6}$/i.test(v)?v:null;};
 const _mix=(a,b,t)=>{const p=h=>[1,3,5].map(i=>parseInt(h.slice(i,i+2),16));
   const x=p(a),y=p(b),c=i=>Math.round(x[i]+(y[i]-x[i])*t).toString(16).padStart(2,"0");
   return "#"+c(0)+c(1)+c(2);};
-/* d = доля простоя. Опорные точки шкалы: 0 → зелёный, 1 % → чуть желтее,
-   10 % → жёлтый, 25 % → оранжевый, ≥ 50 % → красный. */
+/* d = downtime share. Scale reference points: 0 -> green, 1% -> slightly more yellow,
+   10% -> yellow, 25% -> orange, >= 50% -> red. */
 function avScale(d){
   if(d<=0) return 0;
-  if(d<0.10) return 0.5*Math.sqrt(d/0.10);           // корень: минута простоя уже видна
+  if(d<0.10) return 0.5*Math.sqrt(d/0.10);           // sqrt: a minute of downtime is already visible
   return Math.min(1, 0.5+0.5*(d-0.10)/0.40);
 }
 function avColor(f){
-  if(f==null) return "var(--track)";                 // нет данных
+  if(f==null) return "var(--track)";                 // no data
   const g=_hex("--good"),w=_hex("--warn"),d=_hex("--danger");
   if(!g||!w||!d) return f>=1?"var(--good)":f>=0.5?"var(--warn)":"var(--danger)";
-  const u=avScale(1-f);                              // 0 = аптайм 100 %, 1 = простой ≥ 50 %
+  const u=avScale(1-f);                              // 0 = 100% uptime, 1 = downtime >= 50%
   return u<=0.5?_mix(g,w,u*2):_mix(w,d,(u-0.5)*2);
 }
 function upfmt(s){ if(!s) return "";
   const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);
-  return d?`${d} дн ${h} ч`:(h?`${h} ч ${m} мин`:`${m} мин`); }
-function trStatic(){            // разметка из файла мимо перехвата innerHTML — переводим руками
+  return d?`${d} d ${h} h`:(h?`${h} h ${m} min`:`${m} min`); }
+function trStatic(){            // markup from the file bypasses the innerHTML hook — translate by hand
   if(trStatic._done||window.NAS_LANG!=="en") return;
   trStatic._done=1;
   const w=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);
@@ -410,22 +411,22 @@ function toast(m){ const t=$("#toast"); t.innerHTML=esc(m); t.classList.add("on"
 
 let lastWake=0;
 function wake(e){
-  // pointerdown по кнопке «погасить» слал бы touch, и он будил бы экран сразу после sleep
+  // a pointerdown on the "turn off" button would send touch too, and wake the screen right after sleep
   const t=e&&e.target; if(t&&t.closest&&(t.closest("#zzz")||t.closest("#pwr"))) return;
   const n=Date.now(); if(n-lastWake<8000) return; lastWake=n;
   fetch("/api/screen/act",{method:"POST",body:JSON.stringify({a:"touch"})}).catch(()=>{}); }
 addEventListener("pointerdown",wake,{passive:true});
 async function act(b){
   try{ const r=await fetch("/api/screen/act",{method:"POST",body:JSON.stringify(b)}); return await r.json(); }
-  catch(e){ return {ok:false,log:"нет связи с панелью"}; }
+  catch(e){ return {ok:false,log:"no connection to the panel"}; }
 }
 
-/* ---------- окраска как в системе: низко = зелёное, дальше жёлтое, потом красное --- */
+/* ---------- coloring like the rest of the system: low = green, further = yellow, then red --- */
 function lvlOf(v,warn,bad){ return v>=bad?"danger":v>=warn?"warn":"ok"; }
 const COL={ok:"var(--good)",warn:"var(--warn)",danger:"var(--danger)"};
 
-/* ---------- полукруглый спидометр ---------- */
-const AR=Math.PI*52;   // длина дуги радиуса 52
+/* ---------- semicircular gauge ---------- */
+const AR=Math.PI*52;   // arc length, radius 52
 function gauge(cap,val,unit,pct,lvl,sheet){
   const off=AR*(1-clampf(pct,0,1));
   return `<div class="gauge g" data-sheet="${sheet}">
@@ -446,69 +447,69 @@ function renderGauges(d){
   const dp=dk.pct!=null?dk.pct:0, la=raw("load").load1||0, nc=raw("load").ncpu||4;
   $("#gs").innerHTML=
     gauge("CPU",Math.round(cpu),"%",cpu/100,lvlOf(cpu,70,90),"cpu")
-  + gauge("Температура",Math.round(tc),"°",tc/90,lvlOf(tc,62,75),"temp")
-  + gauge("Память",Math.round(ram),"%",ram/100,lvlOf(ram,75,90),"ram")
-  + gauge(hasPool?"Пул":"Диск",Math.round(dp),"%",dp/100,lvlOf(dp,75,90),"disk");
+  + gauge("Temperature",Math.round(tc),"°",tc/90,lvlOf(tc,62,75),"temp")
+  + gauge("Memory",Math.round(ram),"%",ram/100,lvlOf(ram,75,90),"ram")
+  + gauge(hasPool?"Pool":"Disk",Math.round(dp),"%",dp/100,lvlOf(dp,75,90),"disk");
 }
 
-/* ---------- карточки ---------- */
+/* ---------- cards ---------- */
 const lvlCls=p=>p>=90?"bd":p>=75?"wn":"";
 function bar(pct,cls){ return `<div class="bar"><i class="${cls||lvlCls(pct)}" style="width:${clampf(pct,0,100)}%"></i></div>`; }
 
-/* Строка истории: точка состояния + имя + ДАТА. Слова «готово» нет намеренно —
-   зелёная точка И ЕСТЬ «всё прошло хорошо», а вопрос, на который отвечает плашка,
-   когда прогон не идёт, — «когда это было в последний раз». */
+/* History row: status dot + name + DATE. There is no "done" wording on purpose —
+   the green dot IS "everything went fine", and the question the tile answers
+   when no run is in progress is "when was the last time". */
 function hrow(cls,name,date,box,tail){
   return `<div class="${box||"r2"}"><span class="st2 ${cls}">●</span>
     <span class="nm">${esc(name)}</span>
     <span class="ago">${esc(date)}</span>${tail||""}</div>`;
 }
-/* «сколько» перед «когда»: размер узкий, дата длиннее — так строка не прыгает,
-   а на 4.3" обе влезают (имя при нехватке места ужимается многоточием) */
+/* "how much" before "when": size is narrow, date is longer — that way the row doesn't
+   jump, and both fit on a 4.3" screen (the name ellipsizes if it runs out of room) */
 const sized=(sz,ts)=>(sz?sz+" · ":"")+when(ts);
 function bkRow(b,box,tail){
   const cls=b.last==="ok"?"ok":b.last==="warn"?"wn":b.last?"bd":"no";
-  const w=b.queued?"в очереди":sized(b.last_bytes?fmtB(b.last_bytes):"",b.last_ts);
+  const w=b.queued?"queued":sized(b.last_bytes?fmtB(b.last_bytes):"",b.last_ts);
   return hrow(cls,b.name,w,box,tail);
 }
 function usbRow(h,box){ return hrow(h.ok?"ok":"bd",h.name||"USB",sized(h.size,h.ts),box); }
 
-/* Третья страница — целиком Docker: слева стеки, справа контейнеры.
-   На первой странице ему доставалась треть ширины, и в неё не влезало ни имя
-   стека, ни счётчик — а «Бэкапам» и «USB-импорту» ширина нужна под строку
-   «имя · размер · дата». */
+/* The third page is Docker in full: stacks on the left, containers on the right.
+   On the first page it only got a third of the width, and neither the stack name
+   nor the counter fit — while "Backups" and "USB import" need the width for the
+   "name · size · date" row. */
 function renderP2(d){
   const stk=d.stacks||[], ct=d.containers||[], run=ct.filter(c=>c.state==="running").length;
   const allUp=ct.length && run===ct.length;
-  $("#c_dk").innerHTML=`<h2>Стеки<span class="r">${stk.length||"—"}</span></h2>
+  $("#c_dk").innerHTML=`<h2>Stacks<span class="r">${stk.length||"—"}</span></h2>
     <div class="body">${stk.length?stk.map(x=>{
       const ok=x.running>0, part=x.total&&x.running<x.total;
       return `<div class="r2"><span class="st2 ${ok?(part?"wn":"ok"):"no"}">●</span>
         <span class="nm">${esc(x.name)}</span>
-        <span class="ago">${x.total?x.running+"/"+x.total:"стоит"}</span></div>`;}).join("")
-      :`<div class="empty">не установлен</div>`}</div>`;
-  $("#c_ct").innerHTML=`<h2>Контейнеры${ct.length?`<span class="r" style="color:${allUp?"var(--good)":"var(--warn)"}">${run}/${ct.length}</span>`:`<span class="r">—</span>`}</h2>
+        <span class="ago">${x.total?x.running+"/"+x.total:"stopped"}</span></div>`;}).join("")
+      :`<div class="empty">not installed</div>`}</div>`;
+  $("#c_ct").innerHTML=`<h2>Containers${ct.length?`<span class="r" style="color:${allUp?"var(--good)":"var(--warn)"}">${run}/${ct.length}</span>`:`<span class="r">—</span>`}</h2>
     <div class="body">${ct.length?ct.map(c=>{
       const up=c.state==="running";
       return `<div class="r2"><span class="st2 ${up?"ok":"no"}">●</span>
         <span class="nm">${esc(c.name)}</span>
-        <span class="ago">${esc(up?(c.status||"работает"):(c.state||"стоит"))}</span></div>`;}).join("")
-      :`<div class="empty">контейнеров нет</div>`}</div>`;
+        <span class="ago">${esc(up?(c.status||"running"):(c.state||"stopped"))}</span></div>`;}).join("")
+      :`<div class="empty">no containers</div>`}</div>`;
 }
 
-/* ---------- четвёртая страница: расписание + здоровье дисков ---------- */
+/* ---------- fourth page: schedule + disk health ---------- */
 function schedList(d){
   const P=d.p2||{};
-  const a=(P.sched||[]).map(x=>({name:x.name,next:x.next,kind:"бэкап"}));
-  const b=(P.cron||[]).filter(j=>j.next).map(j=>({name:j.name,next:j.next,kind:"задача"}));
+  const a=(P.sched||[]).map(x=>({name:x.name,next:x.next,kind:"backup"}));
+  const b=(P.cron||[]).filter(j=>j.next).map(j=>({name:j.name,next:j.next,kind:"task"}));
   return a.concat(b).sort((x,y)=>x.next-y.next);
 }
 function fmtIn(ts){
   const s=ts-Math.floor(Date.now()/1000);
-  if(s<=30) return "сейчас";
-  if(s<3600) return "через "+Math.max(1,Math.round(s/60))+" мин";
-  if(s<86400) return "через "+Math.round(s/3600)+" ч";
-  return "через "+Math.round(s/86400)+" дн";
+  if(s<=30) return "now";
+  if(s<3600) return "in "+Math.max(1,Math.round(s/60))+" min";
+  if(s<86400) return "in "+Math.round(s/3600)+" h";
+  return "in "+Math.round(s/86400)+" d";
 }
 function tat(ts){
   const t=new Date(ts*1000), n=new Date();
@@ -516,17 +517,17 @@ function tat(ts){
   if(t.toDateString()===n.toDateString()) return hm;
   return t.toLocaleDateString(window.NAS_LANG==="ru"?"ru-RU":"en-GB",{weekday:"short"})+" "+hm;
 }
-const hrsFmt=h=>h>=17520?(h/8760).toFixed(1)+" лет":h>=72?Math.round(h/24)+" дн":h+" ч";
+const hrsFmt=h=>h>=17520?(h/8760).toFixed(1)+" yr":h>=72?Math.round(h/24)+" d":h+" h";
 function renderP3(d){
   const L=schedList(d);
-  $("#c_sc").innerHTML=`<h2>Следующие запуски<span class="r">${L.length||"—"}</span></h2>
+  $("#c_sc").innerHTML=`<h2>Next runs<span class="r">${L.length||"—"}</span></h2>
     <div class="body">${L.length?L.slice(0,8).map(x=>`
       <div class="r2"><span class="nm">${esc(x.name)}</span>
         <span class="ago">${fmtIn(x.next)} · ${tat(x.next)}</span></div>`).join("")
-      :`<div class="empty">ничего не запланировано</div>`}</div>`;
+      :`<div class="empty">nothing scheduled</div>`}</div>`;
   const dk=d.disks||[];
-  $("#c_sm").innerHTML=`<h2>Здоровье дисков${dk.some(x=>x.healthy===false)
-      ?`<span class="r" style="color:var(--danger)">сбой</span>`
+  $("#c_sm").innerHTML=`<h2>Disk health${dk.some(x=>x.healthy===false)
+      ?`<span class="r" style="color:var(--danger)">failure</span>`
       :`<span class="r">${dk.length||"—"}</span>`}</h2>
     <div class="body">${dk.length?dk.map(x=>{
       const st=x.healthy===false?"bd":x.healthy===true?"ok":"no";
@@ -534,15 +535,15 @@ function renderP3(d){
       return `<div class="r2"><span class="st2 ${st}">●</span>
         <span class="nm">${esc(x.name)}${x.model?" · "+esc(x.model):""}</span>
         <span class="ago">${esc(bits)}</span></div>`;}).join("")
-      :`<div class="empty">дисков нет</div>`}</div>`;
+      :`<div class="empty">no disks</div>`}</div>`;
 }
 
-/* ---------- часы при простое ---------- */
+/* ---------- idle clock ---------- */
 let LAST_ACT=Date.now();
 addEventListener("pointerdown",()=>{ LAST_ACT=Date.now(); },{passive:true});
 function clkTick(){
   const c=$("#clock"), min=+D.clock||0;
-  // идёт работа (бэкап/импорт) или горит тревога — часы уступают место дашборду
+  // a job is running (backup/import) or an alarm is up — the clock yields to the dashboard
   const busy=(D.backups||[]).some(b=>b.running||b.queued)
            ||(D.usb||[]).some(j=>j.status==="running");
   if(!(min>0) || busy || Date.now()-LAST_ACT<min*60000 || $("#alarm").classList.contains("on")){
@@ -565,68 +566,68 @@ function clkTick(){
 }
 
 function renderCards(d){
-  // --- Диски: полоска заполнения, как в виджетах
+  // --- Disks: fill bar, like in the widgets
   const dk=d.disks||[];
-  $("#c_ds").innerHTML=`<h2>Диски<span class="r">${dk.length||"—"}</span></h2>
+  $("#c_ds").innerHTML=`<h2>Disks<span class="r">${dk.length||"—"}</span></h2>
     <div class="body">${dk.length?dk.slice(0,4).map(x=>{
       const p=x.used_pct, sys=x.role==="system"||(x.mounts||[]).includes("/");
       return `<div class="prow"><div class="t">
         <span class="nm">${sys?"System":esc(x.name)+(x.tran==="usb"?" · USB":"")}</span>
         <span class="ago">${esc(x.size||"")}${p!=null?" · "+Math.round(p)+"%":""}${x.temp?" · "+x.temp+"°":""}</span></div>
-        ${p!=null?bar(p):""}</div>`;}).join(""):`<div class="empty">дисков нет</div>`}</div>`;
+        ${p!=null?bar(p):""}</div>`;}).join(""):`<div class="empty">no disks</div>`}</div>`;
 
-  // --- Бэкапы: идёт прогон — прогресс; не идёт — история (профиль + дата + точка)
+  // --- Backups: a run in progress -> progress; idle -> history (profile + date + dot)
   const bk=d.backups||[], act=bk.find(b=>b.running);
   if(act){
     const L=act.live||{};
-    $("#c_bk").innerHTML=`<h2>Бэкап идёт<span class="r">${esc(act.name)}</span></h2>
+    $("#c_bk").innerHTML=`<h2>Backup running<span class="r">${esc(act.name)}</span></h2>
       <div class="body">
         <div class="prow" style="border:0">
-          <div class="t"><span class="nm">${L.pct!=null?L.pct+"%":"старт…"}</span>
+          <div class="t"><span class="nm">${L.pct!=null?L.pct+"%":"starting…"}</span>
             <span class="ago">${esc(L.speed||"")}</span></div>
           ${bar(L.pct||0,"pg")}
           <div class="run">${esc(L.cur||"")}</div>
-          <div class="run">${L.total?`задача ${(L.done||0)+1} из ${L.total}`:""}${L.eta?" · осталось "+esc(L.eta):""}</div>
+          <div class="run">${L.total?`job ${(L.done||0)+1} of ${L.total}`:""}${L.eta?" · "+esc(L.eta)+" left":""}</div>
         </div></div>`;
   } else {
-    // приёмник вынут — прогон не состоится; на стене это должно быть видно СРАЗУ,
-    // а не выясняться из провалившейся задачи
+    // destination unplugged — the run won't happen; the wall must show this AT ONCE,
+    // not have it discovered from a failed job later
     const off=bk.filter(b=>b.dest_off);
-    const bwarn=off.length?`<div class="wrn">${off.length===bk.length?"Приёмник не подключён"
-      :"Приёмник не подключён: "+esc(off.map(b=>b.name).join(", "))}</div>`:"";
-    $("#c_bk").innerHTML=`<h2>Бэкапы<span class="r ${off.length?"wn":""}">${off.length?"нет приёмника":(bk.length||"—")}</span></h2>
+    const bwarn=off.length?`<div class="wrn">${off.length===bk.length?"Destination disk unplugged"
+      :"Destination disk unplugged: "+esc(off.map(b=>b.name).join(", "))}</div>`:"";
+    $("#c_bk").innerHTML=`<h2>Backups<span class="r ${off.length?"wn":""}">${off.length?"no destination":(bk.length||"—")}</span></h2>
       <div class="body">${bwarn}${bk.length?bk.slice(0,bwarn?3:4).map(b=>bkRow(b,"r2")).join("")
-        :`<div class="empty">профилей нет</div>`}</div>`;
+        :`<div class="empty">no profiles</div>`}</div>`;
   }
 }
 function renderRow2(d){
   const ev=(d.events||[]).slice(0,3);
-  $("#c_ev").innerHTML=`<h2>События<span class="r">${ev.length||""}</span></h2>
+  $("#c_ev").innerHTML=`<h2>Events<span class="r">${ev.length||""}</span></h2>
     <div class="body">${ev.length?ev.map(e=>{
       const c=e.lvl==="crit"?"bd":e.lvl==="warn"?"wn":e.lvl==="ok"?"ok":"no";
       return `<div class="r2"><span class="st2 ${c}">●</span><span class="nm">${esc(e.title)}</span>
-        <span class="ago">${esc(ago(e.t))}</span></div>`;}).join(""):`<div class="empty">событий нет</div>`}</div>`;
+        <span class="ago">${esc(ago(e.t))}</span></div>`;}).join(""):`<div class="empty">no events</div>`}</div>`;
 
-  // импорт идёт — прогресс; не идёт — история (флешка + дата), она переживает ребут
+  // import running -> progress; idle -> history (drive + date), which survives a reboot
   const jobs=d.usb||[], live=jobs.find(j=>j.status==="running"), hist=d.usbhist||[];
   const uc=d.usbcfg||{};
-  // диск-приёмник вынут: импорт вставленной карты НЕ состоится — это надо видеть
-  // ДО того, как вставишь карту, а не читать потом в событиях
-  const warn=uc.dest_off?`<div class="wrn">${uc.enabled?"Приёмник не подключён — импорта не будет":"Приёмник не подключён"}</div>`:"";
+  // destination disk unplugged: an inserted card's import will NOT happen — this must be
+  // visible BEFORE you insert the card, not read afterwards in the events
+  const warn=uc.dest_off?`<div class="wrn">${uc.enabled?"Destination disk unplugged — no import will run":"Destination disk unplugged"}</div>`:"";
   let body;
   if(live){
     body=`<div class="prow" style="border:0">
       <div class="t"><span class="nm">${esc(live.label||live.dev||"USB")}</span>
         <span class="ago">${live.percent!=null?live.percent+"%":""}</span></div>
       ${bar(live.percent||0,"pg")}
-      <div class="run">${esc(live.speed||"")}${live.eta?" · осталось "+esc(live.eta):""}</div>
+      <div class="run">${esc(live.speed||"")}${live.eta?" · "+esc(live.eta)+" left":""}</div>
       <div class="run">${esc(live.dest||"")}</div></div>`;
   } else if(hist.length){
     body=hist.slice(0,warn?2:3).map(h=>usbRow(h)).join("");
   } else {
-    body=`<div class="empty">импортов ещё не было</div>`;
+    body=`<div class="empty">no imports yet</div>`;
   }
-  $("#c_usb").innerHTML=`<h2>USB-импорт<span class="r ${uc.dest_off?"wn":""}">${live?"идёт":uc.dest_off?"нет приёмника":""}</span></h2>
+  $("#c_usb").innerHTML=`<h2>USB import<span class="r ${uc.dest_off?"wn":""}">${live?"running":uc.dest_off?"no destination":""}</span></h2>
     <div class="body">${warn}${body}</div>`;
 }
 function renderFoot(d){
@@ -638,8 +639,8 @@ function renderFoot(d){
         `<i><b style="background:${avColor(fr[i])};opacity:${op(i).toFixed(2)}"></b></i>`).join("")}</span>`
          + `<span class="pct">${a.pct!=null?a.pct+"%":""}</span>`;
   };
-  $("#av24").innerHTML=strip(d.avail,"24 ч");
-  $("#av30").innerHTML=strip(d.avail30,"30 дн");
+  $("#av24").innerHTML=strip(d.avail,"24 h");
+  $("#av30").innerHTML=strip(d.avail30,"30 d");
   $("#av24").className="avb"; $("#av30").className="avb";
 }
 function renderBar(d){
@@ -650,11 +651,12 @@ function renderBar(d){
   $("#net").innerHTML=`<span class="dn">↓ <b>${rv}</b> ${ru}</span><span class="upl">↑ <b>${tv}</b> ${tu}</span>`;
   $("#dot").className=d.overall==="bad"?"bad":d.overall==="warn"?"warn":"";
 }
-/* ---------- вторая страница ---------- */
-/* График с числами: без них линия «красивая, но непонятная» — не видно, какой был пик.
-   Рисуем сетку, подписываем max/min по оси и показываем текущее/среднее/пик цифрами. */
+/* ---------- second page ---------- */
+/* Chart with numbers: without them the line is "pretty but meaningless" — you can't
+   tell what the peak was. Draw a grid, label max/min on the axis, and show the
+   current/average/peak as figures. */
 function chart(pts,color,h,fmt,unit,full){
-  if(!pts||pts.length<2) return `<div class="empty">нет данных</div>`;
+  if(!pts||pts.length<2) return `<div class="empty">no data</div>`;
   const mx=Math.max.apply(null,pts), mn=Math.min.apply(null,pts);
   const top=mx+(mx-mn)*0.15||mx||1, bot=Math.max(0,mn-(mx-mn)*0.1);
   const rg=(top-bot)||1, w=100, st=w/(pts.length-1);
@@ -673,7 +675,7 @@ function chart(pts,color,h,fmt,unit,full){
       <circle cx="${(pk*st).toFixed(1)}" cy="${y(mx)}" r="1.6" fill="${color}" vector-effect="non-scaling-stroke"/>
     </svg>
     ${full?`<span class="ymax">${fmt(top)}${unit}</span><span class="ymin">${fmt(bot)}${unit}</span>
-      <span class="pk">пик ${fmt(mx)}${unit} · среднее ${fmt(avg)}${unit}</span>`:""}
+      <span class="pk">peak ${fmt(mx)}${unit} · avg ${fmt(avg)}${unit}</span>`:""}
   </div>`;
 }
 const netnow=d=>{ const [v,u]=rate(((d.net||{}).rx||0)+((d.net||{}).tx||0)); return v+" "+u; };
@@ -683,123 +685,123 @@ const gbs=v=>{ const [a,b]=rate(v); return a+" "+b; };
 function renderP1(d){
   const P=d.p2; if(!P) return;
 
-  // Time Machine — шире и подробнее
+  // Time Machine — wider and more detailed
   const tm=P.tm||{};
-  $("#c_tm").innerHTML=`<h2>Time Machine<span class="r" style="color:${tm.enabled?"var(--good)":"var(--mut)"}">${tm.enabled?"включён":"выключен"}</span></h2>
+  $("#c_tm").innerHTML=`<h2>Time Machine<span class="r" style="color:${tm.enabled?"var(--good)":"var(--mut)"}">${tm.enabled?"enabled":"disabled"}</span></h2>
     <div class="body tmb">${tm.installed?`
       <div class="tmcol">
-        <div class="big">${tm.size!=null?gb(tm.size):"—"}<small>занято</small></div>
+        <div class="big">${tm.size!=null?gb(tm.size):"—"}<small>used</small></div>
         <div class="run">${esc(tm.path||"")}</div>
       </div>
       <div class="tmcol">
-        <div class="r2"><span class="nm">Свободно</span><span class="ago">${tm.free!=null?gb(tm.free):"—"}</span></div>
-        <div class="r2"><span class="nm">Квота</span><span class="ago">${tm.quota_gb?tm.quota_gb+" ГБ":"без квоты"}</span></div>
-        <div class="r2"><span class="nm">Последняя копия</span><span class="ago">${tm.mtime?esc(ago(tm.mtime)):"никогда"}</span></div>
-        <div class="r2"><span class="nm">Копий</span><span class="ago">${(tm.backups||[]).length}</span></div>
+        <div class="r2"><span class="nm">Free</span><span class="ago">${tm.free!=null?gb(tm.free):"—"}</span></div>
+        <div class="r2"><span class="nm">Quota</span><span class="ago">${tm.quota_gb?tm.quota_gb+" GB":"no quota"}</span></div>
+        <div class="r2"><span class="nm">Last backup</span><span class="ago">${tm.mtime?esc(ago(tm.mtime)):"never"}</span></div>
+        <div class="r2"><span class="nm">Backups</span><span class="ago">${(tm.backups||[]).length}</span></div>
       </div>`
-      :`<div class="empty">не настроен</div>`}</div>`;
+      :`<div class="empty">not configured</div>`}</div>`;
 
-  // Трафик
+  // Traffic
   const tr=P.traffic||{}, t=tr.today||{}, mo=tr.month||{};
-  $("#c_tr").innerHTML=`<h2>Трафик</h2>
+  $("#c_tr").innerHTML=`<h2>Traffic</h2>
     <div class="body">${tr.ok?`
       <div class="big"><span class="dn">↓ ${gb(t.rx||0)}</span></div>
       <div class="big"><span class="upl">↑ ${gb(t.tx||0)}</span></div>
-      <div class="r2"><span class="nm">За месяц</span><span class="ago">${gb((mo.rx||0)+(mo.tx||0))}</span></div>`
-      :`<div class="empty">vnstat не установлен</div>`}</div>`;
+      <div class="r2"><span class="nm">This month</span><span class="ago">${gb((mo.rx||0)+(mo.tx||0))}</span></div>`
+      :`<div class="empty">vnstat is not installed</div>`}</div>`;
 
-  // Графики за сутки — с числами
+  // Last-24h charts — with numbers
   const g=P.graphs||{};
-  $("#c_gr").innerHTML=`<h2>За сутки<span class="r">тап — подробнее</span></h2>
+  $("#c_gr").innerHTML=`<h2>Last 24 h<span class="r">tap for details</span></h2>
     <div class="body">
       <div class="gline"><div class="gh">CPU<b>${r0(((d.tiles.cpu||{}).raw||{}).pct||0)}%</b></div>
         ${chart(g.cpu,"var(--accent)",34,r0,"%")}</div>
-      <div class="gline"><div class="gh">Температура<b>${r0(((d.tiles.cputemp||{}).raw||{}).c||0)}°</b></div>
+      <div class="gline"><div class="gh">Temperature<b>${r0(((d.tiles.cputemp||{}).raw||{}).c||0)}°</b></div>
         ${chart(g.temp,"var(--warn)",34,r0,"°")}</div>
-      <div class="gline"><div class="gh">Сеть<b>${netnow(d)}</b></div>
+      <div class="gline"><div class="gh">Network<b>${netnow(d)}</b></div>
         ${chart(g.net,"var(--good)",34,gbs,"")}</div>
     </div>`;
 
-  // Обновления — узкой плашкой
+  // Updates — narrow tile
   const up=P.updates||{}, cr=P.cron||[];
   const n=(up.apt||0)+(up.images||0);
-  $("#c_up").innerHTML=`<h2>Обновления<span class="r" style="color:${n?"var(--warn)":"var(--good)"}">${n}</span></h2>
+  $("#c_up").innerHTML=`<h2>Updates<span class="r" style="color:${n?"var(--warn)":"var(--good)"}">${n}</span></h2>
     <div class="body">
-      <div class="r2"><span class="nm">apt</span><span class="ago">${up.apt||0}${up.security?" · "+up.security+" крит.":""}</span></div>
-      ${up.images!=null?`<div class="r2"><span class="nm">Образы</span><span class="ago">${up.images}</span></div>`:""}
-      ${cr.length?`<div class="r2"><span class="nm">Задачи</span><span class="ago">${cr.length}</span></div>`:""}
-      ${!n?`<div class="run" style="margin-top:6px">всё свежее</div>`:""}
+      <div class="r2"><span class="nm">apt</span><span class="ago">${up.apt||0}${up.security?" · "+up.security+" sec.":""}</span></div>
+      ${up.images!=null?`<div class="r2"><span class="nm">Images</span><span class="ago">${up.images}</span></div>`:""}
+      ${cr.length?`<div class="r2"><span class="nm">Tasks</span><span class="ago">${cr.length}</span></div>`:""}
+      ${!n?`<div class="run" style="margin-top:6px">all up to date</div>`:""}
     </div>`;
 }
 
 function renderAlarm(d){
   const bad=(d.problems||[]).filter(p=>p.lvl==="bad"), a=$("#alarm");
   if(bad.length && !a._hid){
-    a.querySelector(".big").textContent="Что-то сломалось";
+    a.querySelector(".big").textContent="Something is broken";
     a.querySelector(".li").innerHTML=bad.map(p=>`${esc(p.name)}: <b>${esc(p.value)}</b>`).join("<br>");
     a.classList.add("on");
   }else if(!bad.length){ a._hid=false; a.classList.remove("on"); }
 }
 $("#alarm").onclick=()=>{ $("#alarm")._hid=true; $("#alarm").classList.remove("on"); };
 
-/* ---------- детали: открываются по тапу на ЛЮБУЮ плашку ---------- */
+/* ---------- details: open on a tap on ANY tile ---------- */
 const KV=(k,v)=>v==null||v===""?"":`<div class="kv"><span>${esc(k)}</span><b>${esc(v)}</b></div>`;
 const SHEETS={
   cpu:d=>{const r=(d.tiles.load||{}).raw||{}, c=(d.tiles.cpu||{}).raw||{};
-    return ["CPU", KV("Загрузка",Math.round(c.pct||0)+" %")
-      +KV("Средняя нагрузка",(d.load||[]).map(x=>x.toFixed(2)).join(" · "))
-      +KV("Ядра",r.ncpu)+KV("Температура",Math.round(((d.tiles.cputemp||{}).raw||{}).c||0)+" °C")
-      +KV("Аптайм",upfmt(d.uptime)), ""];},
+    return ["CPU", KV("Usage",Math.round(c.pct||0)+" %")
+      +KV("Load average",(d.load||[]).map(x=>x.toFixed(2)).join(" · "))
+      +KV("Cores",r.ncpu)+KV("Temperature",Math.round(((d.tiles.cputemp||{}).raw||{}).c||0)+" °C")
+      +KV("Uptime",upfmt(d.uptime)), ""];},
   temp:d=>{const t=((d.tiles.cputemp||{}).raw)||{};
-    return ["Температура", KV("CPU",Math.round(t.c||0)+" °C")+KV("Троттлинг",t.throttle?"да":"нет")
-      +KV("Просадка питания",(d.throttled&&d.throttled.undervolt)?"да":"нет")
+    return ["Temperature", KV("CPU",Math.round(t.c||0)+" °C")+KV("Throttling",t.throttle?"yes":"no")
+      +KV("Undervoltage",(d.throttled&&d.throttled.undervolt)?"yes":"no")
       +(d.disks||[]).map(x=>KV(x.name,x.temp?x.temp+" °C":"—")).join(""), ""];},
   ram:d=>{const m=d.mem||{};
-    return ["Память", KV("Занято",gb(m.used||0)+" из "+gb(m.total||0))+KV("Процент",Math.round(m.pct||0)+" %")
-      +KV("Swap",m.swap_total?gb(m.swap_total-(m.swap_free||0))+" из "+gb(m.swap_total):"нет"), ""];},
+    return ["Memory", KV("Used",gb(m.used||0)+" of "+gb(m.total||0))+KV("Percent",Math.round(m.pct||0)+" %")
+      +KV("Swap",m.swap_total?gb(m.swap_total-(m.swap_free||0))+" of "+gb(m.swap_total):"none"), ""];},
   disk:d=>SHEETS.disks(d),
 
-  /* Диски: ВСЕ, что видит система, включая внешние; у каждого — полоска заполнения.
-     Съёмный смонтированный диск получает «Извлечь» — двойное касание, чтобы случайный
-     тап не отмонтировал приёмник бэкапа (лист перерисовывается каждый опрос, поэтому
-     взведённость живёт в EJ, а не в DOM). */
+  /* Disks: EVERYTHING the system sees, including external ones; each gets a fill bar.
+     A mounted removable disk gets "Eject" — a double tap, so a stray tap doesn't
+     unmount the backup destination (the sheet redraws on every poll, so the armed
+     state lives in EJ, not in the DOM). */
   disks:d=>{const dk=d.disks||[];
-    return ["Диски", dk.length?dk.map(x=>{
+    return ["Disks", dk.length?dk.map(x=>{
       const p=x.used_pct, sys=x.role==="system"||(x.mounts||[]).includes("/");
       const tags=[sys?"System":"", x.size, x.tran?x.tran.toUpperCase():"",
-        x.temp?x.temp+" °C":"", x.healthy===false?"SMART: сбой":x.healthy===true?"SMART: ок":""]
+        x.temp?x.temp+" °C":"", x.healthy===false?"SMART: failed":x.healthy===true?"SMART: ok":""]
         .filter(Boolean).join(" · ");
       const ej=(x.removable&&!sys&&(x.mounts||[]).length&&d.actions!==false&&x.dev)
         ?`<div style="margin-top:7px"><span class="sbtn" data-eject="${esc(x.dev)}">${
-            EJ.dev===x.dev&&Date.now()-EJ.t<5000?"Точно извлечь?":"Извлечь"}</span></div>`:"";
+            EJ.dev===x.dev&&Date.now()-EJ.t<5000?"Really eject?":"Eject"}</span></div>`:"";
       return `<div class="prow"><div class="t"><span class="nm">${esc(x.name)}${x.model?" · "+esc(x.model):""}</span>
         <span class="ago">${p!=null?Math.round(p)+"%":""}</span></div>
         ${p!=null?bar(p):""}
         <div class="run">${esc(tags)}${(x.mounts||[]).length?" · "+esc(x.mounts.join(" ")):""}</div>${ej}</div>`;
-    }).join(""):`<div class="empty">дисков нет</div>`, ""];},
+    }).join(""):`<div class="empty">no disks</div>`, ""];},
 
-  /* Следующие запуски: бэкапы по расписанию + cron-задачи, ближайшие сверху */
+  /* Next runs: scheduled backups + cron tasks, soonest first */
   sched:d=>{const L=schedList(d);
-    return ["Следующие запуски", L.length?L.map(x=>`<div class="srow2">
+    return ["Next runs", L.length?L.map(x=>`<div class="srow2">
       <span class="st2 no">●</span><span class="nm">${esc(x.name)}</span>
       <span class="ago">${esc(x.kind)} · ${fmtIn(x.next)} · ${tat(x.next)}</span></div>`).join("")
-      :`<div class="empty">ничего не запланировано</div>`, ""];},
+      :`<div class="empty">nothing scheduled</div>`, ""];},
 
-  /* Здоровье дисков: вердикт SMART, температура, наработка */
+  /* Disk health: SMART verdict, temperature, power-on time */
   smart:d=>{const dk=d.disks||[];
-    return ["Здоровье дисков", dk.length?dk.map(x=>{
+    return ["Disk health", dk.length?dk.map(x=>{
       const st=x.healthy===false?"bd":x.healthy===true?"ok":"no";
       const tags=[x.size, x.tran?x.tran.toUpperCase():"", x.temp?x.temp+" °C":"",
-        x.hours!=null?"наработка "+hrsFmt(x.hours):"",
-        x.healthy===false?"SMART: сбой":x.healthy===true?"SMART: ок":"SMART: нет данных"]
+        x.hours!=null?"power-on "+hrsFmt(x.hours):"",
+        x.healthy===false?"SMART: failed":x.healthy===true?"SMART: ok":"SMART: no data"]
         .filter(Boolean).join(" · ");
       return `<div class="prow"><div class="t"><span class="st2 ${st}">●</span>
         <span class="nm">${esc(x.name)}${x.model?" · "+esc(x.model):""}</span>
         <span class="ago">${x.used_pct!=null?Math.round(x.used_pct)+"%":""}</span></div>
         <div class="run">${esc(tags)}</div></div>`;
-    }).join(""):`<div class="empty">дисков нет</div>`, ""];},
+    }).join(""):`<div class="empty">no disks</div>`, ""];},
 
-  /* Docker: стеки с иконками и кнопками */
+  /* Docker: stacks with icons and buttons */
   docker:d=>{const stk=d.stacks||[];
     return ["Docker", stk.length?stk.map(x=>{
       const on=x.running>0;
@@ -807,93 +809,93 @@ const SHEETS={
         ${x.icon?`<img class="ic" src="/api/icon?u=${encodeURIComponent(x.icon)}">`
                 :`<span class="st2 ${on?"ok":"no"}">●</span>`}
         <span class="nm">${esc(x.name)}</span>
-        <span class="ago">${x.total?x.running+"/"+x.total:"стоит"}</span>
-        <span class="sbtn" data-stack="${esc(x.name)}" data-op="${on?"restart":"up"}">${on?"Перезапустить":"Запустить"}</span>
-        ${on?`<span class="sbtn" data-stack="${esc(x.name)}" data-op="stop">Остановить</span>`:""}
-      </div>`;}).join(""):`<div class="empty">Docker не установлен</div>`, ""];},
+        <span class="ago">${x.total?x.running+"/"+x.total:"stopped"}</span>
+        <span class="sbtn" data-stack="${esc(x.name)}" data-op="${on?"restart":"up"}">${on?"Restart":"Start"}</span>
+        ${on?`<span class="sbtn" data-stack="${esc(x.name)}" data-op="stop">Stop</span>`:""}
+      </div>`;}).join(""):`<div class="empty">Docker is not installed</div>`, ""];},
 
-  /* Бэкапы: все профили, прогресс идущего, запуск любого */
+  /* Backups: all profiles, progress of the running one, launch any of them */
   backups:d=>{const bk=d.backups||[];
-    return ["Бэкапы", bk.length?bk.map(b=>{
+    return ["Backups", bk.length?bk.map(b=>{
       if(b.running){ const L=b.live||{};
         return `<div class="prow"><div class="t"><span class="nm">${esc(b.name)}</span>
-          <span class="ago">${L.pct!=null?L.pct+"% · ":""}${esc(L.speed||"идёт")}</span></div>
+          <span class="ago">${L.pct!=null?L.pct+"% · ":""}${esc(L.speed||"running")}</span></div>
           ${bar(L.pct||0,"pg")}
-          <div class="run">${esc(L.cur||"")}${L.eta?" · осталось "+esc(L.eta):""}</div></div>`;
+          <div class="run">${esc(L.cur||"")}${L.eta?" · "+esc(L.eta)+" left":""}</div></div>`;
       }
-      return bkRow(b,"srow2",`<span class="sbtn" data-run="${esc(b.id)}">Запустить</span>`);
-    }).join(""):`<div class="empty">профилей нет</div>`, ""];},
+      return bkRow(b,"srow2",`<span class="sbtn" data-run="${esc(b.id)}">Start</span>`);
+    }).join(""):`<div class="empty">no profiles</div>`, ""];},
 
-  /* USB-импорт: идущая перекачка сверху, ниже — история (переживает ребут) */
+  /* USB import: an in-progress copy on top, history below (survives a reboot) */
   usb:d=>{const jobs=(d.usb||[]).filter(j=>j.status==="running"), hist=d.usbhist||[];
     const run=jobs.map(j=>{
       const p=j.percent;
       return `<div class="prow"><div class="t"><span class="nm">${esc(j.label||j.dev||"USB")}</span>
-        <span class="ago">${p!=null?p+"%":"идёт"}</span></div>
+        <span class="ago">${p!=null?p+"%":"running"}</span></div>
         ${bar(p||0,"pg")}
-        <div class="run">${esc(j.dest||"")}${j.speed?" · "+esc(j.speed):""}${j.eta?" · осталось "+esc(j.eta):""}</div></div>`;
+        <div class="run">${esc(j.dest||"")}${j.speed?" · "+esc(j.speed):""}${j.eta?" · "+esc(j.eta)+" left":""}</div></div>`;
     }).join("");
     const old=hist.map(h=>`<div class="prow">
       <div class="t"><span class="st2 ${h.ok?"ok":"bd"}">●</span>
         <span class="nm">${esc(h.name||"USB")}</span>
         <span class="ago">${esc(sized(h.size_full||h.size,h.ts))}</span></div>
       <div class="run">${esc(h.dest||"")}</div></div>`).join("");
-    return ["USB-импорт", (run+old)||`<div class="empty">импортов ещё не было</div>`, ""];},
+    return ["USB import", (run+old)||`<div class="empty">no imports yet</div>`, ""];},
 
-  /* События: все, новые сверху, с прокруткой */
-  events:d=>["Последние события",
+  /* Events: all of them, newest first, scrollable */
+  events:d=>["Recent events",
     (d.events||[]).length?(d.events||[]).map(e=>{
       const c=e.lvl==="crit"?"bd":e.lvl==="warn"?"wn":e.lvl==="ok"?"ok":"no";
       return `<div class="srow2"><span class="st2 ${c}">●</span>
         <span class="nm">${esc(e.title)}</span>
         <span class="ago">${esc(ago(e.t))}</span></div>`;
-    }).join(""):`<div class="empty">событий нет</div>`, ""],
+    }).join(""):`<div class="empty">no events</div>`, ""],
 
   tm:d=>{const t=(d.p2||{}).tm||{};
     return ["Time Machine", t.installed?
-      KV("Состояние",t.enabled?"включён":"выключен")+KV("Папка",t.path)
-      +KV("Занято",t.size!=null?gb(t.size):"—")+KV("Свободно",t.free!=null?gb(t.free):"—")
-      +KV("Квота",t.quota_gb?t.quota_gb+" ГБ":"без квоты")
-      +KV("Последняя копия",t.mtime?ago(t.mtime):"никогда")
-      +(t.backups||[]).map(b=>KV(b.name||"копия",b.size!=null?gb(b.size):"")).join("")
-      :`<div class="empty">Time Machine не настроен</div>`, ""];},
+      KV("Status",t.enabled?"enabled":"disabled")+KV("Folder",t.path)
+      +KV("Used",t.size!=null?gb(t.size):"—")+KV("Free",t.free!=null?gb(t.free):"—")
+      +KV("Quota",t.quota_gb?t.quota_gb+" GB":"no quota")
+      +KV("Last backup",t.mtime?ago(t.mtime):"never")
+      +(t.backups||[]).map(b=>KV(b.name||"backup",b.size!=null?gb(b.size):"")).join("")
+      :`<div class="empty">Time Machine is not configured</div>`, ""];},
   traffic:d=>{const t=(d.p2||{}).traffic||{};
-    return ["Трафик", t.ok?
-      KV("Сегодня ↓",gb((t.today||{}).rx||0))+KV("Сегодня ↑",gb((t.today||{}).tx||0))
-      +KV("За месяц ↓",gb((t.month||{}).rx||0))+KV("За месяц ↑",gb((t.month||{}).tx||0))
-      :`<div class="empty">vnstat не установлен</div>`, ""];},
+    return ["Traffic", t.ok?
+      KV("Today ↓",gb((t.today||{}).rx||0))+KV("Today ↑",gb((t.today||{}).tx||0))
+      +KV("This month ↓",gb((t.month||{}).rx||0))+KV("This month ↑",gb((t.month||{}).tx||0))
+      :`<div class="empty">vnstat is not installed</div>`, ""];},
   updates:d=>{const u=(d.p2||{}).updates||{}, cr=(d.p2||{}).cron||[];
-    return ["Обновления и задачи",
-      KV("Пакеты apt",u.apt||0)+KV("Из них критических",u.security||0)
-      +(u.packages||[]).map(p=>KV("пакет",p)).join("")
-      +(u.images!=null?KV("Образы Docker",u.images):"")
-      +(u.image_list||[]).map(i=>KV("образ",i)).join("")
-      +cr.map(j=>KV(j.name,j.next?"через "+ago(j.next):"—")).join(""), ""];},
+    return ["Updates and tasks",
+      KV("apt packages",u.apt||0)+KV("Of them security",u.security||0)
+      +(u.packages||[]).map(p=>KV("package",p)).join("")
+      +(u.images!=null?KV("Docker images",u.images):"")
+      +(u.image_list||[]).map(i=>KV("image",i)).join("")
+      +cr.map(j=>KV(j.name,j.next?"in "+ago(j.next):"—")).join(""), ""];},
   graphs:d=>{const g=(d.p2||{}).graphs||{};
-    return ["За сутки",
+    return ["Last 24 h",
       `<div class="gline"><div class="gh">CPU<b>${r0(((d.tiles.cpu||{}).raw||{}).pct||0)}%</b></div>
          ${chart(g.cpu,"var(--accent)",92,r0,"%",1)}</div>
-       <div class="gline"><div class="gh">Температура<b>${r0(((d.tiles.cputemp||{}).raw||{}).c||0)}°</b></div>
+       <div class="gline"><div class="gh">Temperature<b>${r0(((d.tiles.cputemp||{}).raw||{}).c||0)}°</b></div>
          ${chart(g.temp,"var(--warn)",92,r0,"°",1)}</div>
-       <div class="gline"><div class="gh">Сеть<b>${netnow(d)}</b></div>
+       <div class="gline"><div class="gh">Network<b>${netnow(d)}</b></div>
          ${chart(g.net,"var(--good)",92,gbs,"",1)}</div>
-       <div class="run">точка — 30 минут, всего сутки</div>`, ""];},
-  power:d=>["Питание",
+       <div class="run">one point = 30 min, 24 h total</div>`, ""];},
+  power:d=>["Power",
     `<div class="pwr2">
        <div class="pbtn" data-act="reboot">
          <svg viewBox="0 0 24 24" width="54" height="54" fill="none" stroke="currentColor" stroke-width="1.7"
               stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4"/><path d="M21 3v6h-6"/></svg>
-         <span>Перезагрузить</span></div>
+         <span>Reboot</span></div>
        <div class="pbtn off" data-act="poweroff">
          <svg viewBox="0 0 24 24" width="54" height="54" fill="none" stroke="currentColor" stroke-width="1.7"
               stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v9"/><path d="M18.4 6.6a9 9 0 1 1-12.8 0"/></svg>
-         <span>Выключить</span></div>
+         <span>Power off</span></div>
      </div>`, ""],
-  avail:d=>["Доступность",
-    KV("За 24 часа",(d.avail&&d.avail.pct!=null)?d.avail.pct+" %":"—")
-    +KV("За 30 дней",(d.avail30&&d.avail30.pct!=null)?d.avail30.pct+" %":"—")
-    +KV("Зелёный","панель отвечала")+KV("Жёлтый","бокс жив, сети не было")+KV("Красный","бокса не было"),
-    `<div class="go warnbtn" data-act="poweroff">Выключить NAS</div>`],
+  avail:d=>["Availability",
+    KV("Last 24 hours",(d.avail&&d.avail.pct!=null)?d.avail.pct+" %":"—")
+    +KV("Last 30 days",(d.avail30&&d.avail30.pct!=null)?d.avail30.pct+" %":"—")
+    +KV("Green","panel was answering")+KV("Amber","box alive, no network")+KV("Red","box was down"),
+    `<div class="go warnbtn" data-act="poweroff">Power off NAS</div>`],
 };
 let CUR_SHEET=null, EJ={dev:"",t:0};
 function sheet(name,keepScroll){
@@ -913,59 +915,59 @@ document.addEventListener("click",e=>{
   if(pg){ setPage(+pg.dataset.page); return; }
   const a=e.target.closest("[data-act]"), s=e.target.closest("[data-sheet]"),
         r=e.target.closest("[data-run]"), k2=e.target.closest("[data-stack]");
-  if(k2){ toast("Выполняю…");
+  if(k2){ toast("Working…");
     act({a:"stack",name:k2.dataset.stack,op:k2.dataset.op})
-      .then(x=>{toast(x.ok?"Готово":(x.log||"не вышло")); poll();});
+      .then(x=>{toast(x.ok?"Done":(x.log||"failed")); poll();});
     return; }
   if(a){
     const k=a.dataset.act;
     if(k==="power"){ sheet("power"); return; }
     if(k==="sleep"){ closeSheet();
-      toast("Гашу экран…");
-      act({a:"sleep"}).then(r=>{ if(!r.ok) toast(r.log||"не вышло"); poll(); }); return; }
+      toast("Turning the screen off…");
+      act({a:"sleep"}).then(r=>{ if(!r.ok) toast(r.log||"failed"); poll(); }); return; }
     if(k==="poweroff"){ closeSheet();
-      act({a:"poweroff"}).then(r=>toast(r.ok?"Выключаюсь…":(r.log||"не вышло"))); return; }
+      act({a:"poweroff"}).then(r=>toast(r.ok?"Shutting down…":(r.log||"failed"))); return; }
     if(k==="reboot"){ closeSheet();
-      act({a:"reboot"}).then(r=>toast(r.ok?"Перезагружаюсь…":(r.log||"не вышло"))); return; }
+      act({a:"reboot"}).then(r=>toast(r.ok?"Rebooting…":(r.log||"failed"))); return; }
   }
   if(r){ closeSheet();
-    act({a:"backup",p:r.dataset.run}).then(x=>{toast(x.ok?"Бэкап запущен":(x.log||"не вышло")); poll();}); return; }
+    act({a:"backup",p:r.dataset.run}).then(x=>{toast(x.ok?"Backup started":(x.log||"failed")); poll();}); return; }
   const ej=e.target.closest("[data-eject]");
   if(ej){ const dev=ej.dataset.eject;
-    if(EJ.dev!==dev||Date.now()-EJ.t>=5000){                  // первый тап — взводим
+    if(EJ.dev!==dev||Date.now()-EJ.t>=5000){                  // first tap — arm it
       EJ={dev:dev,t:Date.now()}; if(CUR_SHEET) sheet(CUR_SHEET,true); return; }
-    EJ={dev:"",t:0}; toast("Извлекаю…");
-    act({a:"eject",dev:dev}).then(x=>{ toast(x.ok?(x.log||"Можно отключать"):(x.log||"не вышло")); poll(); });
+    EJ={dev:"",t:0}; toast("Ejecting…");
+    act({a:"eject",dev:dev}).then(x=>{ toast(x.ok?(x.log||"Safe to unplug"):(x.log||"failed")); poll(); });
     return; }
   if(s) sheet(s.dataset.sheet);
 });
-// часы: тап только убирает их (оверлей глотает клик, вниз ничего не проходит)
+// clock: a tap only dismisses it (the overlay swallows the click, nothing passes through)
 $("#clock").addEventListener("click",e=>{ e.stopPropagation(); $("#clock").classList.remove("on"); });
-// щит спящего экрана: касание будит и глотается целиком. Прячем по click,
-// а не по pointerdown — иначе click долетел бы до плашки под пальцем.
-let SHIELD_OK=0;   // после пробуждения ответ опроса может быть стухшим — не возвращаем щит 4 с
+// sleeping-screen shield: a touch wakes it and is swallowed whole. Hide on click,
+// not pointerdown — otherwise the click would land on the tile under the finger.
+let SHIELD_OK=0;   // right after waking the poll response can be stale — don't bring the shield back for 4s
 $("#shield").addEventListener("pointerdown",e=>{ e.stopPropagation();
   lastWake=Date.now(); act({a:"touch"}); },{passive:true});
 $("#shield").addEventListener("click",e=>{ e.stopPropagation();
   SHIELD_OK=Date.now()+4000; $("#shield").classList.remove("on"); });
 
-/* ---------- оформление из настроек панели (всегда тёмный профиль) ---------- */
+/* ---------- look from the panel's settings (always the dark profile) ---------- */
 function applyLook(L){
   if(!L) return;
   const S=L, root=document.documentElement;
-  // цвета статусов — общие с панелью (Оформление → «Цвета статусов»)
+  // status colors — shared with the panel (Appearance -> "Status colors")
   if(L.goodHex)   root.style.setProperty("--good",L.goodHex);
   if(L.warnHex)   root.style.setProperty("--warn",L.warnHex);
   if(L.dangerHex) root.style.setProperty("--danger",L.dangerHex);
   if(L.wpVer!==WPV){ WPV=L.wpVer;
-    // screen=1 -> сервер отдаёт копию под 800x480, а не исходник на 2560 px
+    // screen=1 -> the server returns a copy sized for 800x480, not the 2560 px original
     $("#wall").style.backgroundImage=L.wpVer?`url(/api/wallpaper/img?screen=1&v=${L.wpVer})`:""; }
   const b=clampf(S.fxBlur,0,100);
   $("#wall").style.filter=b?`blur(${b}px)`:"";
   $("#wall").style.transform=b?`scale(${(1+b*0.009).toFixed(3)})`:"";
   $("#wallDim").style.opacity=clampf(S.fxDim,0,80)/100;
   $("#wallNoise").style.opacity=clampf(S.fxNoise,0,100)/100;
-  // та же арифметика, что applySettings() в панели, но профиль ВСЕГДА тёмный
+  // same arithmetic as applySettings() in the panel, but the profile is ALWAYS dark
   const mat=isHex(S.tintDark)?hexRgb(S.tintDark):"22,30,42";
   const eBase=clampf(S.elevBaseDark??.5,.1,.96), eStep=clampf(S.elevStep??.13,0,.3),
         eLight=clampf(S.elevLight??.05,0,.25);
@@ -985,7 +987,7 @@ function applyLook(L){
   root.style.setProperty("--mb-bf", bf("mbBlur","mbSat"));
   root.style.setProperty("--accent", isHex(S.accentHex)?S.accentHex:"#2dd4bf");
   root.style.setProperty("--r-lg",(16*clampf(S.radius??1,.2,2)).toFixed(0)+"px");
-  // градиент-скрим сверху: те же ключи, что у менубара панели
+  // top gradient scrim: the same keys as the panel's menubar
   $("#mbGrad").style.height=S.mbGrad?clampf(S.mbGradH??90,0,400)+"px":"0";
   root.style.setProperty("--mb-grad-a",clampf((S.mbGradInt??50)/100,0,1).toFixed(3));
   root.style.setProperty("--mb-grad-o",clampf((S.mbGradOp??100)/100,0,1).toFixed(3));
@@ -1004,22 +1006,22 @@ function setPage(n){
 let sx=0;
 addEventListener("touchstart",e=>{sx=e.touches[0].clientX},{passive:true});
 addEventListener("touchend",e=>{
-  if($("#sheet").classList.contains("on")) return;      // лист открыт — свайп не листает
+  if($("#sheet").classList.contains("on")) return;      // sheet open — swipe doesn't page
   const dx=e.changedTouches[0].clientX-sx;
   if(Math.abs(dx)>60) setPage(PAGE+(dx<0?1:-1));
 },{passive:true});
 
 async function _poll(){
   try{
-    // p2 просим всегда: на сервере он кэширован 30 с, зато вторая страница
-    // открывается с готовыми данными, а не пустой
+    // always request p2: the server caches it for 30s, so the second page
+    // opens with data already there instead of empty
     const r=await fetch("/api/screen/data?p2=1",{cache:"no-store"});
     if(!r.ok) throw 0;
     const prev=D.p2;
     D=await r.json();
-    if(!D.p2 && prev) D.p2=prev;      // ответ без p2 не должен гасить вторую страницу
+    if(!D.p2 && prev) D.p2=prev;      // a response without p2 must not blank out the second page
     window.NAS_LANG=D.lang||"en";
-    NETBITS=D.netUnits!=="bytes";     // общая настройка панели; по умолчанию — биты
+    NETBITS=D.netUnits!=="bytes";     // shared panel setting; bits by default
     trStatic();
     applyLook(D.look); renderBar(D); renderFoot(D); renderAlarm(D);
     if(PAGE===0){ renderGauges(D); renderCards(D); renderRow2(D); }
@@ -1027,18 +1029,18 @@ async function _poll(){
     else if(PAGE===2){ renderP2(D); }
     else { renderP3(D); }
     clkTick();
-    // подсветка погашена → щит: первое касание будит, но не нажимает
+    // backlight off -> shield: the first touch wakes it up but doesn't press anything
     if(KIOSK) $("#shield").classList.toggle("on", !!D.dark && Date.now()>SHIELD_OK);
-    if(CUR_SHEET) sheet(CUR_SHEET,true);   // живые данные внутри открытого листа
+    if(CUR_SHEET) sheet(CUR_SHEET,true);   // live data inside an open sheet
     $("#dot").style.opacity=1;
   }catch(e){ $("#dot").style.opacity=.25;
     $("#up").textContent="ERR: "+String((e&&e.message)||e).slice(0,80); }
 }
 poll().then(()=>{
-  const pg=location.search.match(/page=(\d)/); if(pg) setPage(+pg[1]);   // ?page=1 — сразу вторая
+  const pg=location.search.match(/page=(\d)/); if(pg) setPage(+pg[1]);   // ?page=1 — go straight to page 2
   const m=location.search.match(/sheet=(\w+)/); if(m) sheet(m[1]);
 });
-// частоту задаёт панель (screen.json:poll) — перевзводим таймер, если её поменяли
+// the panel sets the rate (screen.json:poll) — rearm the timer if it changed
 let TICK=0, TICK_MS=0;
 function arm(){
   const ms=clampf(D.poll||1500,500,30000);

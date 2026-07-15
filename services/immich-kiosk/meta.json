@@ -1,19 +1,19 @@
 {
   "name": "Immich Kiosk",
-  "desc": "Цифровая фоторамка поверх Immich: слайдшоу альбомов на ТВ/планшете",
+  "desc": "A digital photo frame on top of Immich: album slideshows on a TV/tablet",
   "category": "media",
   "icon": "https://cdn.jsdelivr.net/gh/selfhst/icons@main/png/immich-kiosk.png",
   "port": 3001,
   "fields": [
-    {"key": "KIOSK_IMMICH_URL", "label": "Адрес Immich", "default": "http://{host}:2283",
-     "hint": "URL вашего сервера Immich"},
-    {"key": "KIOSK_IMMICH_API_KEY", "label": "API-ключ Immich", "default": "", "secret": true,
+    {"key": "KIOSK_IMMICH_URL", "label": "Immich address", "default": "http://{host}:2283",
+     "hint": "URL of your Immich server"},
+    {"key": "KIOSK_IMMICH_API_KEY", "label": "Immich API key", "default": "", "secret": true,
      "hint": "Immich → Account Settings → API Keys"},
-    {"key": "KIOSK_IMMICH_EXTERNAL_URL", "label": "Внешний адрес (для QR)", "default": "", "adv": true},
-    {"key": "KIOSK_ALBUMS", "label": "Альбомы (id через запятую)", "default": "", "adv": true,
-     "hint": "пусто = все альбомы"},
-    {"key": "KIOSK_PEOPLE", "label": "Люди (id через запятую)", "default": "", "adv": true},
-    {"key": "KIOSK_DURATION", "label": "Секунд на кадр", "default": "15", "adv": true},
-    {"key": "TZ", "label": "Часовой пояс", "default": "{tz}", "adv": true}
+    {"key": "KIOSK_IMMICH_EXTERNAL_URL", "label": "External address (for QR)", "default": "", "adv": true},
+    {"key": "KIOSK_ALBUMS", "label": "Albums (comma-separated ids)", "default": "", "adv": true,
+     "hint": "empty = all albums"},
+    {"key": "KIOSK_PEOPLE", "label": "People (comma-separated ids)", "default": "", "adv": true},
+    {"key": "KIOSK_DURATION", "label": "Seconds per frame", "default": "15", "adv": true},
+    {"key": "TZ", "label": "Time zone", "default": "{tz}", "adv": true}
   ]
 }

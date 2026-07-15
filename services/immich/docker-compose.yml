@@ -1,9 +1,9 @@
-# Immich — фото/видео библиотека (аналог Google Photos). http://<pi>:2283
-# ВЫРОВНЕНО с релизным compose и с боевым инстансом на главном NAS: маунт
-# /usr/src/app/upload и та же строка образа Postgres — это ВАЖНО для реплики
-# (пути внутри контейнера и версия/расширения БД должны совпадать с источником).
-# Медиа (UPLOAD_LOCATION) — в пул /mnt/storage; БД (DB_DATA_LOCATION) — на SSD
-# (Postgres нельзя держать на mergerfs). Настройки — в .env.
+# Immich — photo/video library (a Google Photos analog). http://<pi>:2283
+# ALIGNED with the release compose and the production instance on the main NAS:
+# the /usr/src/app/upload mount and the same Postgres image line are IMPORTANT
+# for the replica (in-container paths and DB version/extensions must match the source).
+# Media (UPLOAD_LOCATION) — goes to the pool /mnt/storage; DB (DB_DATA_LOCATION) — on the SSD
+# (Postgres must not be kept on mergerfs). Settings — in .env.
 name: immich
 
 services:

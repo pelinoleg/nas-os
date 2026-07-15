@@ -1,6 +1,6 @@
 {
   "name": "Cronmaster",
-  "desc": "Веб-редактор cron-задач",
+  "desc": "Web editor for cron jobs",
   "category": "tools",
   "icon": "https://cdn.jsdelivr.net/gh/selfhst/icons@main/png/cronmaster.png",
   "port": 8123

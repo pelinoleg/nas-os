@@ -1,39 +1,39 @@
-# services/ — docker-стеки NAS (лежат рядом с nas-wizard.sh)
+# services/ — NAS docker stacks (live next to nas-wizard.sh)
 
-Каждый сервис — отдельная подпапка с файлом `docker-compose.yml`
-(или `docker-compose.yaml` / `compose.yml` / `compose.yaml`).
+Each service is a separate subfolder with a `docker-compose.yml` file
+(or `docker-compose.yaml` / `compose.yml` / `compose.yaml`).
 
-`nas-wizard.sh --stage docker` сканирует эту папку, показывает чеклист
-«какие поднять», и делает `docker compose up -d` по выбранным (idempotent).
-`~/nas-config/scripts/deploy.sh` поднимает всё разом.
+`nas-wizard.sh --stage docker` scans this folder, shows a checklist of
+"which ones to bring up", and runs `docker compose up -d` for the selected ones (idempotent).
+`~/nas-config/scripts/deploy.sh` brings everything up at once.
 
-## Соглашения (по ТЗ)
+## Conventions (by spec)
 
-- **Фиксированные теги образов**, НЕ `latest` — чтобы не ловить внезапные обновления.
-- `restart: unless-stopped` у каждого сервиса.
-- Конфиги контейнера → `/opt/docker/<service>/...`
-- Большие данные (медиа, документы) → `/mnt/storage/<service>/...` (пул mergerfs).
-- Секреты — в файле `.env` рядом с compose (в git НЕ коммитить; добавьте в .gitignore).
+- **Pinned image tags**, NOT `latest` — to avoid catching surprise updates.
+- `restart: unless-stopped` for every service.
+- Container configs → `/opt/docker/<service>/...`
+- Large data (media, documents) → `/mnt/storage/<service>/...` (mergerfs pool).
+- Secrets — in an `.env` file next to the compose file (do NOT commit to git; add to .gitignore).
 
-## Добавить свой сервис
+## Add your own service
 
 ```bash
 mkdir -p services/immich
 $EDITOR services/immich/docker-compose.yml
-sudo ./nas-wizard.sh --stage docker      # найдёт и предложит поднять
+sudo ./nas-wizard.sh --stage docker      # will find it and offer to bring it up
 ```
 
-## Что здесь есть (готовые шаблоны, фикс. теги)
+## What's here (ready-made templates, pinned tags)
 
-| Сервис | Порт | Назначение |
+| Service | Port | Purpose |
 |--------|------|-----------|
-| `dockge/` | 5001 | Менеджер docker-compose стеков (веб UI) |
-| `dozzle/` | 8083 | Логи контейнеров в реальном времени |
-| `scrutiny/` | 8084 | Мониторинг SMART дисков (укажите диски в `devices:`) |
-| `syncthing/` | 8384 | Синхронизация файлов |
-| `nextexplorer/` | 3000 | Веб-файловый менеджер (задайте `SESSION_SECRET`!) |
-| `example-service/…example` | — | Шаблон-заготовка (переименуйте в `docker-compose.yml`) |
+| `dockge/` | 5001 | Docker-compose stack manager (web UI) |
+| `dozzle/` | 8083 | Real-time container logs |
+| `scrutiny/` | 8084 | Disk SMART monitoring (specify disks in `devices:`) |
+| `syncthing/` | 8384 | File synchronization |
+| `nextexplorer/` | 3000 | Web file manager (set `SESSION_SECRET`!) |
+| `example-service/…example` | — | Blank template (rename to `docker-compose.yml`) |
 
-Перед первым подъёмом проверьте в шаблонах: `SESSION_SECRET` (NextExplorer),
-список дисков (Scrutiny), `PUBLIC_URL`/адрес Pi. Порты Dozzle и Scrutiny разведены
-(оба по умолчанию 8080 → 8083 и 8084).
+Before the first launch, check in the templates: `SESSION_SECRET` (NextExplorer),
+the disk list (Scrutiny), `PUBLIC_URL`/Pi address. Dozzle and Scrutiny ports are kept apart
+(both default to 8080 → 8083 and 8084).

@@ -1,6 +1,6 @@
 {
   "name": "Syncthing",
-  "desc": "Синхронизация папок между устройствами без облака",
+  "desc": "Folder sync between devices without a cloud",
   "category": "files",
   "icon": "https://cdn.jsdelivr.net/gh/selfhst/icons@main/svg/syncthing.svg",
   "port": 8384

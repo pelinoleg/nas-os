@@ -1,39 +1,39 @@
-# DESIGN.md — дизайн-контракт для Notes
+# DESIGN.md — design contract for Notes
 
-> Это единственный источник правды по визуалу. Любой UI собирается **только** из
-> токенов ниже. Хардкодить hex, px-отступы, радиусы, тени — запрещено.
-> Правило для Claude Code: если нужного токена нет — не выдумывай значение,
-> предложи добавить новый токен.
-
----
-
-## 1. Принципы (constraints)
-
-Держись рамок — они и делают дизайн «красивым»:
-
-- **Одна поверхность.** Chrome (сайдбар, тулбар) и контент редактора живут в одной
-  теме. Никакого чисто-белого `#fff` холста внутри тёмного приложения.
-- **Один акцент.** Ровно один accent-цвет на экране. Всё остальное — нейтрали.
-- **Воздух.** Отступы щедрые и по шкале. Тесно = дёшево.
-- **Иерархия типографикой, не цветом.** Разница между заголовком и текстом —
-  размер/вес, а не радужные цвета.
-- **Иконки, не текст.** В тулбаре иконки-only (`quote`, `code`), без лейблов `66`/`CB`.
-- **Внятный empty state.** Пусто = один placeholder, а не 10 пустых чекбоксов.
-- **Максимум:** 1 акцент · 2 радиуса · 2 веса шрифта · 2 уровня теней.
+> This is the single source of truth for the visuals. Any UI is assembled **only** from
+> the tokens below. Hardcoding hex, px paddings, radii, shadows — forbidden.
+> Rule for Claude Code: if the needed token doesn't exist — don't make up a value,
+> propose adding a new token.
 
 ---
 
-## 2. Цветовые токены
+## 1. Principles (constraints)
 
-**Notes владеет двумя палитрами** — светлая = тёплая «бумага», тёмная =
-**Everforest** (тёпло-серо-зелёные стены). **Акцент — зелёный в обеих темах**
-(изумруд в light, шалфей в dark): это характер приложения, он НЕ наследует
-системный акцент ОС. От системы наследуются только форма (слайдер радиуса
-`--r-sm/--r-lg`) и шкала теней. Компоненты используют **только**
-семантические имена (`--surface`, `--text`, `--accent`).
+Stick to the boundaries — they're what makes the design "beautiful":
+
+- **One surface.** Chrome (sidebar, toolbar) and editor content live in one
+  theme. No pure-white `#fff` canvas inside a dark app.
+- **One accent.** Exactly one accent color on screen. Everything else — neutrals.
+- **Air.** Padding is generous and follows the scale. Cramped = cheap.
+- **Hierarchy through typography, not color.** The difference between a heading
+  and body text is size/weight, not rainbow colors.
+- **Icons, not text.** Toolbar is icon-only (`quote`, `code`), no `66`/`CB` labels.
+- **A clear empty state.** Empty = one placeholder, not 10 empty checkboxes.
+- **Maximum:** 1 accent · 2 radii · 2 font weights · 2 shadow levels.
+
+---
+
+## 2. Color tokens
+
+**Notes owns two palettes** — light = warm "paper", dark =
+**Everforest** (warm gray-green walls). **Accent is green in both themes**
+(emerald in light, sage in dark): this is the app's character, it does NOT inherit
+the OS system accent. Only the shape (radius slider
+`--r-sm/--r-lg`) and shadow scale are inherited from the system. Components use
+**only** semantic names (`--surface`, `--text`, `--accent`).
 
 ```css
-/* LIGHT (default, на .nt-root) — тёплая бумага */
+/* LIGHT (default, on .nt-root) — warm paper */
 --bg: #F7F6F3;  --surface: #FFFFFF;  --surface-2: #F0EFEA;  --surface-inset: #ECEBE6;
 --text: #1C1B1A;  --text-muted: #6B6A66;  --text-faint: #A3A29E;
 --border: #E4E2DD;  --border-strong: #D2CFC8;
@@ -41,41 +41,41 @@
 --success: #1F9E6E;  --warning: #C98A1B;  --danger: #C0473B;
 --callout-bg: #FBF3D9;  --callout-border: #F0E2AE;
 
-/* DARK (.nt-root[data-theme="dark"]) — Everforest: тёпло-серо-зелёные стены */
---side-bg: #232a2e (сайдбар, глубже всех);  --bg/--surface: #2d353b (основное поле);
---card-bg/--surface-2: #343f44 (карточки, код);  --surface-3: #3d484d (поповеры);
+/* DARK (.nt-root[data-theme="dark"]) — Everforest: warm gray-green walls */
+--side-bg: #232a2e (sidebar, deepest);  --bg/--surface: #2d353b (main field);
+--card-bg/--surface-2: #343f44 (cards, code);  --surface-3: #3d484d (popovers);
 --text: #d3c6aa;  --text-muted: #9da9a0;  --text-faint: #859289;
 --border: #414b50;  --border-strong: #4f585e;
 --accent: #a7c080;  --accent-hover: #bacc8f;  --accent-soft: #425047;  --on-accent: #232a2e;
 --success: #a7c080;  --warning/--star: #dbbc7f;  --danger: #e67e80;
-/* семантика контента (есть и в light): */
---heading: #e4dbc4;  --link: #7fbbb3;  --code-fg: #e69875 (ТОЛЬКО инлайн-код);
---selection: #543a48;  --quote-border: #a7c080;  --veil: полупрозрачный hover;
+/* content semantics (also present in light): */
+--heading: #e4dbc4;  --link: #7fbbb3;  --code-fg: #e69875 (inline code ONLY);
+--selection: #543a48;  --quote-border: #a7c080;  --veil: semi-transparent hover;
 
-/* форма и spacing (общие) */
---radius-sm: var(--r-sm);  --radius-lg: var(--r-lg);   /* системный слайдер */
+/* shape and spacing (shared) */
+--radius-sm: var(--r-sm);  --radius-lg: var(--r-lg);   /* system slider */
 --sp-1..--sp-7: 4 8 12 16 24 32 48px;
 ```
 
-Режимы («Тема заметок»: как панель / светлая / тёмная): auto следует теме
-панели, light/dark — принудительно. Верхняя полоса окна (`.win.nt-win .wbar`)
-красится из той же палитры — хром окна следует теме заметок. Родная нижняя
-плашка Markdown/WYSIWYG удалена: переключатель — две иконки в тулбаре.
+Modes ("Notes theme": follow panel / light / dark): auto follows the
+panel theme, light/dark are forced. The window's top bar (`.win.nt-win .wbar`)
+is colored from the same palette — window chrome follows the Notes theme. The native
+bottom Markdown/WYSIWYG bar is removed: the switch is two icons in the toolbar.
 
-Бордеры — только там, где без них нельзя (плавающие поповеры, таблицы,
-рамка пустого чекбокса). Колонки (сайдбар/список/редактор) разделяются
-ТОНОМ (`--side-bg` vs `--bg`), не линиями. Карточки, кнопки, инпуты, бумага,
-счётчики, теги — без рамок: разница поверхностей и тень. Активная карточка — фон
-`--accent-soft` + левая полоса 2px `--accent` (inset box-shadow).
+Borders — only where unavoidable (floating popovers, tables,
+empty checkbox outline). Columns (sidebar/list/editor) are separated by
+TONE (`--side-bg` vs `--bg`), not lines. Cards, buttons, inputs, paper,
+counters, tags — no borders: surface difference and shadow instead. Active card — background
+`--accent-soft` + 2px left stripe `--accent` (inset box-shadow).
 
-## 3. Типографика
+## 3. Typography
 
 ```css
 :root {
   --font-ui:   ui-sans-serif, -apple-system, "Inter", system-ui, sans-serif;
   --font-mono: ui-monospace, "IBM Plex Mono", "JetBrains Mono", monospace;
 
-  /* размеры — минимальная шкала */
+  /* sizes — minimal scale */
   --fs-h1:   28px;  --lh-h1:   1.25;  --fw-h1:   700;
   --fs-h2:   22px;  --lh-h2:   1.3;   --fw-h2:   600;
   --fs-h3:   18px;  --lh-h3:   1.4;   --fw-h3:   600;
@@ -84,79 +84,79 @@
 }
 ```
 
-Правила:
-- Только 2 веса: `400` (текст) и `600/700` (заголовки/акценты). Никакого `300`/`500` россыпью.
-- `meta` (время, «сохранено 14:31», теги) — всегда `--text-muted`, размер `--fs-meta`.
-- Ширина контента редактора НЕ ограничивается (решение владельца, 2026-07-11);
-  паддинги контента по шкале обязательны.
+Rules:
+- Only 2 weights: `400` (text) and `600/700` (headings/accents). No stray `300`/`500`.
+- `meta` (time, "saved 14:31", tags) — always `--text-muted`, size `--fs-meta`.
+- Editor content width is NOT constrained (owner's decision, 2026-07-11);
+  content padding on the scale is mandatory.
 
 ---
 
-## 4. Правила компонентов
+## 4. Component rules
 
-**Поверхность редактора**
-- Фон = `--surface`, текст = `--text`. В dark это тёмный, НЕ белый.
-- Внутренний паддинг контента: `--sp-6` по горизонтали, `--sp-5` сверху.
+**Editor surface**
+- Background = `--surface`, text = `--text`. In dark this is dark, NOT white.
+- Content inner padding: `--sp-6` horizontal, `--sp-5` top.
 
-**Тулбар**
-- Иконки-only, размер 20px, цвет `--text-muted`; hover → `--text` + фон `--surface-2`.
-- Активная кнопка → иконка `--accent`, фон `--accent-soft`, радиус `--radius-sm`.
-- Разделители групп — `1px` линия `--border`, а не пустоты наугад.
+**Toolbar**
+- Icon-only, size 20px, color `--text-muted`; hover → `--text` + background `--surface-2`.
+- Active button → icon `--accent`, background `--accent-soft`, radius `--radius-sm`.
+- Group separators — `1px` line `--border`, not arbitrary gaps.
 
-**Todo / чекбокс**
-- Строка = чекбокс + текст, gap `--sp-2`, высота строки как `--lh-body`.
-- Пустой чекбокс: `border 1.5px --border-strong`, фон `--surface`, радиус 6px.
-- Отмеченный: фон `--accent`, галочка `--on-accent`; текст → `--text-muted` +
+**Todo / checkbox**
+- Row = checkbox + text, gap `--sp-2`, row height matches `--lh-body`.
+- Empty checkbox: `border 1.5px --border-strong`, background `--surface`, radius 6px.
+- Checked: background `--accent`, checkmark `--on-accent`; text → `--text-muted` +
   `line-through`.
-- **Никогда** не рендерить пустые чекбоксы без текста как «заполнитель». Пусто →
-  один плейсхолдер строкой `--text-faint`: «Добавьте пункт…».
+- **Never** render empty checkboxes with no text as a "placeholder". Empty →
+  one placeholder line in `--text-faint`: "Add an item…".
 
 **Code block**
-- Фон `--surface-inset`, `--font-mono`, `--fs-meta`..`--fs-body`, радиус `--radius-lg`.
-- Номера строк — `--text-faint`. Кнопка copy в углу, иконка-only.
+- Background `--surface-inset`, `--font-mono`, `--fs-meta`..`--fs-body`, radius `--radius-lg`.
+- Line numbers — `--text-faint`. Copy button in the corner, icon-only.
 
 **Callout**
-- Фон `--callout-bg`, левая граница или рамка `--callout-border`, радиус `--radius-lg`,
-  паддинг `--sp-4`.
+- Background `--callout-bg`, left border or outline `--callout-border`, radius `--radius-lg`,
+  padding `--sp-4`.
 
-**Карточка заметки в списке**
-- Фон `--surface`, hover → `--surface-2`, активная → `--accent-soft` + текст сохраняет
-  контраст. Тень только `--shadow-1`. Радиус `--radius-lg`. Паддинг `--sp-4`.
-
----
-
-## 5. Контракт для Claude Code
-
-При работе над UI Notes:
-
-1. Бери значения **только** из токенов выше. Ни одного сырого hex/px в компонентах.
-2. Тему переключай через `[data-theme]`, компоненты одинаковы для light/dark.
-3. Меняем **один слой за итерацию**: `layout → color → typography → components`.
-   Не трогай остальные слои без запроса.
-4. Empty states, hover, focus, active, disabled — обязательны для каждого
-   интерактивного элемента.
-5. Если для задачи не хватает токена — не выдумывай значение. Предложи новый токен
-   с обоснованием, добавь его в этот файл.
-6. Держись ограничений: 1 акцент, 2 радиуса, 2 веса шрифта, 2 тени, spacing по шкале.
+**Note card in the list**
+- Background `--surface`, hover → `--surface-2`, active → `--accent-soft` + text keeps
+  contrast. Shadow only `--shadow-1`. Radius `--radius-lg`. Padding `--sp-4`.
 
 ---
 
-## 6. Реализация в NAS-OS (implementation notes)
+## 5. Contract for Claude Code
 
-- Токены объявлены в `web/desktop.html` в скоупе `.nt-root` (корневой элемент окна
-  Заметок) — контракт распространяется на всё внутри окна и на /notes (solo).
-- Из системы наследуются только `--r-sm/--r-lg` (слайдер радиуса) — остальные
-  значения палитр локальные (см. §2).
-- Тема: `ntApplyTheme()` всегда ставит `data-theme` (light|dark) на `.nt-root`
-  И зеркалит его на `.win` (класс `nt-win`) — так красится полоса заголовка.
-- Правила для тост-редактора обязаны иметь префикс `.nt-root .nt-ed …`:
-  vendor-CSS (`tui-editor-dark.css`) грузится ПОСЛЕ инлайн-стилей и селекторы
-  `.toastui-editor-dark …` (0,2,0) перебивают правила без префикса.
-- Редактор Toast UI получает `theme:"dark"` при тёмной теме (нужен светлый спрайт
-  иконок), всё остальное красится токенами.
-- Плавающие поповеры внутри Notes (список языков код-блока) — на `--surface-3`
-  с рамкой `--border` и тенью `--shadow-2`; hover-состояния — через `--veil`.
-- Пользовательские данные (заголовки, теги, пути, превью) рендерятся ТОЛЬКО через
-  `textContent` / `.value` / percent-encoded data-атрибуты: i18n-хук переводит весь
-  innerHTML, включая атрибуты, и словарные фразы («Новая заметка») искажаются.
-- Размер текста заметки: настройка `SET.ntFont` (дефолт = `--fs-body` 16px).
+When working on the Notes UI:
+
+1. Take values **only** from the tokens above. Not a single raw hex/px in components.
+2. Switch theme via `[data-theme]`, components are identical for light/dark.
+3. Change **one layer per iteration**: `layout → color → typography → components`.
+   Don't touch other layers without being asked.
+4. Empty states, hover, focus, active, disabled — mandatory for every
+   interactive element.
+5. If a task needs a token that doesn't exist — don't make up a value. Propose a new token
+   with justification, add it to this file.
+6. Stick to the constraints: 1 accent, 2 radii, 2 font weights, 2 shadows, spacing on the scale.
+
+---
+
+## 6. Implementation in NAS-OS (implementation notes)
+
+- Tokens are declared in `web/desktop.html` scoped to `.nt-root` (root element of the
+  Notes window) — the contract applies to everything inside the window and to /notes (solo).
+- Only `--r-sm/--r-lg` (radius slider) are inherited from the system — the rest of the
+  palette values are local (see §2).
+- Theme: `ntApplyTheme()` always sets `data-theme` (light|dark) on `.nt-root`
+  AND mirrors it onto `.win` (class `nt-win`) — that's how the title bar gets colored.
+- Rules for the Toast UI editor must be prefixed with `.nt-root .nt-ed …`:
+  vendor CSS (`tui-editor-dark.css`) loads AFTER inline styles, and `.toastui-editor-dark …`
+  selectors (0,2,0) override unprefixed rules.
+- The Toast UI editor gets `theme:"dark"` in dark mode (needs the light icon
+  sprite), everything else is colored via tokens.
+- Floating popovers inside Notes (code block language list) — on `--surface-3`
+  with a `--border` outline and `--shadow-2` shadow; hover states — via `--veil`.
+- User data (titles, tags, paths, previews) is rendered ONLY via
+  `textContent` / `.value` / percent-encoded data attributes: the i18n hook translates the
+  whole innerHTML, including attributes, and dictionary phrases ("New note") would get mangled.
+- Note text size: setting `SET.ntFont` (default = `--fs-body` 16px).

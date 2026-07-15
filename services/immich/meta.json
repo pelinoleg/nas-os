@@ -1,22 +1,22 @@
 {
   "name": "Immich",
-  "desc": "Фото и видео как Google Photos: загрузка с телефона, лица, поиск",
+  "desc": "Photos and videos like Google Photos: phone upload, faces, search",
   "category": "media",
   "icon": "https://cdn.jsdelivr.net/gh/selfhst/icons@main/svg/immich.svg",
   "port": 2283,
   "fields": [
-    {"key": "UPLOAD_LOCATION", "label": "Папка медиатеки", "default": "{storage}/immich", "type": "path",
-     "hint": "оригиналы фото/видео — в пул"},
-    {"key": "DB_DATA_LOCATION", "label": "Папка базы данных", "default": "/opt/docker/immich/postgres", "type": "path",
-     "hint": "Postgres на SSD, НЕ в пул mergerfs"},
-    {"key": "DB_PASSWORD", "label": "Пароль БД", "default": "{rand}", "secret": true},
-    {"key": "DB_USERNAME", "label": "Пользователь БД", "default": "postgres", "adv": true},
-    {"key": "DB_DATABASE_NAME", "label": "Имя БД", "default": "immich", "adv": true},
-    {"key": "IMMICH_VERSION", "label": "Версия Immich", "default": "v3.0.1", "adv": true},
-    {"key": "TZ", "label": "Часовой пояс", "default": "{tz}", "adv": true}
+    {"key": "UPLOAD_LOCATION", "label": "Media library folder", "default": "{storage}/immich", "type": "path",
+     "hint": "photo/video originals — to the pool"},
+    {"key": "DB_DATA_LOCATION", "label": "Database folder", "default": "/opt/docker/immich/postgres", "type": "path",
+     "hint": "Postgres on the SSD, NOT in the mergerfs pool"},
+    {"key": "DB_PASSWORD", "label": "DB password", "default": "{rand}", "secret": true},
+    {"key": "DB_USERNAME", "label": "DB user", "default": "postgres", "adv": true},
+    {"key": "DB_DATABASE_NAME", "label": "DB name", "default": "immich", "adv": true},
+    {"key": "IMMICH_VERSION", "label": "Immich version", "default": "v3.0.1", "adv": true},
+    {"key": "TZ", "label": "Time zone", "default": "{tz}", "adv": true}
   ],
   "replica": {
-    "desc": "Холодная реплика Immich с другого NAS: дамп Postgres по SSH + rsync медиатеки; реплика поднимается той же версией, что источник",
+    "desc": "A cold Immich replica from another NAS: Postgres dump over SSH + rsync of the media library; the replica runs the same version as the source",
     "version_cmd": "docker inspect --format {{.Config.Image}} immich_server",
     "dump_cmd": "docker exec immich_postgres sh -c 'pg_dumpall --clean --if-exists --username=$POSTGRES_USER' | gzip",
     "db_container": "immich_postgres",

@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-nas-web.py — веб-бэкенд мастера настройки NAS и рабочего стола (Raspberry Pi 5).
+nas-web.py — web backend of the NAS setup wizard and desktop (Raspberry Pi 5).
 
-Только стандартная библиотека Python 3 (без pip). Отдаёт статику из web/ и JSON API:
-  GET  /api/stats                 — живые метрики Pi (CPU, temp, RAM, диск, сеть, uptime)
-  GET  /api/desktop               — ярлыки рабочего стола из docker-лейблов web-desktop.*
-  GET/POST /api/creds             — хранилище доступов (~/nas-config/credentials.json, 0600)
-  GET  /api/setup/state           — состояние системы для мастера
-  POST /api/setup/<action>        — выполнить шаг мастера (делегирует nas-wizard.sh api)
+Python 3 standard library only (no pip). Serves static files from web/ and a JSON API:
+  GET  /api/stats                 — live Pi metrics (CPU, temp, RAM, disk, network, uptime)
+  GET  /api/desktop               — desktop shortcuts from docker labels web-desktop.*
+  GET/POST /api/creds             — credential store (~/nas-config/credentials.json, 0600)
+  GET  /api/setup/state           — system state for the wizard
+  POST /api/setup/<action>        — run a wizard step (delegates to nas-wizard.sh api)
 
-Системные изменения выполняет проверенный движок nas-wizard.sh (api-режим), поэтому
-сервер нужно запускать от root (launcher nas-setup.sh это делает).
+System changes are made by the vetted nas-wizard.sh engine (api mode), so the
+server must run as root (the nas-setup.sh launcher does that).
 """
 import json, os, re, subprocess, time, shutil, socket, threading, pwd, mimetypes, glob, errno, heapq, sys, sqlite3, fnmatch
 import html as _htmllib
@@ -31,12 +31,12 @@ TRASH       = os.path.join(HOME, ".nas-trash")
 PORT        = int(os.environ.get("NAS_WEB_PORT", "8080"))
 STORAGE     = "/mnt/storage"      # mergerfs pool (may not exist at all)
 STORAGE_CONF = os.path.join(NAS_CONFIG, "storage.json")
-BODY_MAX    = 32 * 1024 * 1024   # потолок JSON-тела запроса (обои/base64 влезают; больше — через _upload_raw)
+BODY_MAX    = 32 * 1024 * 1024   # JSON request body cap (wallpaper/base64 fits; larger — via _upload_raw)
 COMPOSE_NAMES = ("docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml")
-CRON_URL    = os.environ.get("CRONMASTER_URL", "http://127.0.0.1:8123")  # опубликованный порт cronmaster
+CRON_URL    = os.environ.get("CRONMASTER_URL", "http://127.0.0.1:8123")  # published cronmaster port
 
 # --------------------------------------------------------------------------- #
-#  Сбор метрик (read-only, root не нужен)
+#  Metrics collection (read-only, no root needed)
 # --------------------------------------------------------------------------- #
 def _read(path, default=""):
     try:
@@ -78,29 +78,29 @@ def _json_load_strict(path, default):
         name = os.path.basename(path)
         if name not in _BAD_CONFIGS:
             _BAD_CONFIGS.append(name)
-        sys.stderr.write("nas-web: %s повреждён, сохранён как %s.bad\n" % (name, name))
+        sys.stderr.write("nas-web: %s is corrupt, saved as %s.bad\n" % (name, name))
         return default
 
 # --------------------------------------------------------------------------- #
-#  Основное хранилище
+#  Primary storage
 #
-#  Одно понятие вместо пяти разных дефолтов. Раньше каждая подсистема (импорт,
-#  бэкап, заметки, Time Machine, миниатюры) сама подставляла «/mnt/storage/…» —
-#  и на боксе БЕЗ пула этот путь оказывался обычной папкой на системной карте:
-#  импорт молча залил на неё 8 ГБ. Теперь источник правды один:
-#    пул смонтирован  → хранилище = пул (появились NVMe — ничего перенастраивать);
-#    иначе            → выбранный съёмный том (внешний SSD);
-#    ничего нет       → None, и подсистемы обязаны это честно показать, а не писать
-#                       «куда-нибудь».
-#  storage_conf() помнит ВЫБОР (даже когда диск вынут) — иначе после отключения SSD
-#  дефолты уехали бы обратно на карту.
+#  One concept instead of five different defaults. Previously every subsystem
+#  (import, backup, notes, Time Machine, thumbnails) substituted "/mnt/storage/…"
+#  itself — on a box WITHOUT a pool that path was an ordinary folder on the system
+#  card: import silently dumped 8 GB onto it. Now there is a single source of truth:
+#    pool mounted     → storage = pool (NVMe appeared — nothing to reconfigure);
+#    otherwise        → the chosen removable volume (external SSD);
+#    nothing          → None, and subsystems must honestly show that instead of
+#                       writing "somewhere".
+#  storage_conf() remembers the CHOICE (even when the disk is unplugged) — otherwise
+#  after the SSD is removed the defaults would slide back onto the card.
 # --------------------------------------------------------------------------- #
 def storage_conf():
     d = _json_load_strict(STORAGE_CONF, {})
     return d if isinstance(d, dict) else {}
 
 def storage_root():
-    """Смонтированный корень хранилища или None."""
+    """Mounted storage root or None."""
     if os.path.ismount(STORAGE):
         return STORAGE
     r = str(storage_conf().get("root") or "").rstrip("/")
@@ -109,9 +109,9 @@ def storage_root():
     return None
 
 def storage_base():
-    """Куда СЧИТАТЬ дефолты, даже если носитель сейчас не подключён: путь есть,
-    просто он не смонтирован — подсистемы отобьются проверкой монтирования и
-    скажут «диск не подключён», а не подсунут системную карту."""
+    """Where to READ defaults from, even if the medium is not attached right now:
+    the path exists, it is just not mounted — subsystems will fail their mount
+    check and say "disk not attached" instead of slipping in the system card."""
     if os.path.ismount(STORAGE):
         return STORAGE
     r = str(storage_conf().get("root") or "").rstrip("/")
@@ -120,7 +120,7 @@ def storage_base():
     return STORAGE if os.path.isdir(STORAGE) else None
 
 def storage_state():
-    """Для панели: что выбрано, смонтировано ли, и куда смотрят дефолты."""
+    """For the panel: what is chosen, whether it is mounted, and where defaults point."""
     cfg = storage_conf()
     root = storage_root()
     pool = os.path.ismount(STORAGE)
@@ -137,9 +137,9 @@ def storage_state():
     return st
 
 def storage_candidates():
-    """Тома, годные в хранилище: пул и всё смонтированное под /mnt|/media|/srv,
-    кроме системного корня. Системный диск сюда не пускаем намеренно: «хранилище»
-    на той же карте, с которой грузится ОС, — это не хранилище."""
+    """Volumes fit to be storage: the pool and everything mounted under
+    /mnt|/media|/srv, except the system root. The system disk is deliberately kept
+    out: "storage" on the same card the OS boots from is not storage."""
     out = []
     seen = set()
     for line in _read("/proc/mounts").splitlines():
@@ -168,9 +168,9 @@ def storage_save(body):
     root = str((body or {}).get("root") or "").rstrip("/")
     if root:
         if not root.startswith(("/mnt/", "/media/", "/srv/")) or ".." in root:
-            return {"ok": False, "log": "недопустимый путь хранилища"}
+            return {"ok": False, "log": "invalid storage path"}
         if not os.path.ismount(root):
-            return {"ok": False, "log": "том %s не смонтирован" % root}
+            return {"ok": False, "log": "volume %s is not mounted" % root}
     cfg = storage_conf()
     cfg["root"] = root
     cfg["label"] = os.path.basename(root) if root else ""
@@ -178,10 +178,10 @@ def storage_save(body):
         _json_save(STORAGE_CONF, cfg)
     except OSError as e:
         return {"ok": False, "log": str(e)}
-    return {"ok": True, "log": "сохранено", "state": storage_state()}
+    return {"ok": True, "log": "saved", "state": storage_state()}
 
 def storage_sub(name):
-    """Путь подпапки хранилища для дефолтов. None — хранилища нет вовсе."""
+    """Storage subfolder path for defaults. None — no storage at all."""
     b = storage_base()
     return os.path.join(b, name) if b else None
 
@@ -243,9 +243,9 @@ def disk_info(path):
     except OSError:
         return None
     total = s.f_blocks * s.f_frsize
-    free  = s.f_bavail * s.f_frsize                  # доступно (как df Avail; БЕЗ ext4-резерва)
-    used  = (s.f_blocks - s.f_bfree) * s.f_frsize    # реально занято данными (резерв ≠ «занято»)
-    denom = used + free                              # база для % как в df (без учёта резерва)
+    free  = s.f_bavail * s.f_frsize                  # available (like df Avail; WITHOUT ext4 reserve)
+    used  = (s.f_blocks - s.f_bfree) * s.f_frsize    # actually used by data (reserve ≠ "used")
+    denom = used + free                              # base for % as in df (ignoring the reserve)
     return {"path": path, "total": total, "used": used, "free": free,
             "pct": round(100 * used / denom, 1) if denom else 0}
 
@@ -317,7 +317,7 @@ def _arp_relay(gw, iface):
     return shared
 
 def lan_quality(is_wifi, ttl=120):
-    """Отклик до роутера + признак «мы за мостом/репитером». Кэш: пинг раз в 2 минуты."""
+    """RTT to the router + a sign of "we sit behind a bridge/repeater". Cache: ping once per 2 minutes."""
     now = time.time()
     if _LAN_CACHE["d"] is not None and now - _LAN_CACHE["t"] < ttl:
         return _LAN_CACHE["d"]
@@ -340,8 +340,8 @@ def lan_quality(is_wifi, ttl=120):
     return d
 
 def net_info():
-    """Тип активного подключения (Wi-Fi/кабель), скорость линка (Мбит/с),
-    для Wi-Fi — SSID/диапазон/сигнал. Чтобы наглядно видеть эффект кабеля."""
+    """Type of the active connection (Wi-Fi/cable), link speed (Mbit/s),
+    for Wi-Fi — SSID/band/signal. So the effect of the cable is plainly visible."""
     iface = default_iface()
     info = {"iface": iface or "", "ip": lan_ip(), "type": "", "ssid": "",
             "band": "", "signal": None, "signal_pct": None, "link_mbit": None}
@@ -358,7 +358,7 @@ def net_info():
                 info["ssid"] = m.group(1).strip()
             m = re.search(r"freq:\s*(\d+)", out)
             if m:
-                fr = int(m.group(1)); info["band"] = "5 ГГц" if fr >= 5000 else "2.4 ГГц"
+                fr = int(m.group(1)); info["band"] = "5 GHz" if fr >= 5000 else "2.4 GHz"
             m = re.search(r"signal:\s*(-?\d+)", out)
             if m:
                 sig = int(m.group(1)); info["signal"] = sig
@@ -380,13 +380,13 @@ def net_info():
     return info
 
 def net_speedtest():
-    """Мини-спидтест download+upload через Cloudflare. Крутится ~8-10 c ради точности."""
+    """Mini download+upload speedtest via Cloudflare. Runs ~8-10 s for accuracy."""
     out = {"ok": False}
-    # --- DOWNLOAD: тянем до ~10 c; считаем по факту скачанного (даже если поток
-    #     оборвался — Cloudflare может закрыть соединение после части объёма) ---
+    # --- DOWNLOAD: pull for up to ~10 s; count by what was actually downloaded (even if
+    #     the stream broke — Cloudflare may close the connection after part of the volume) ---
     n = 0.0; t0 = time.time()
     try:
-        # OVH (Европа) — Cloudflare в Испании часто заблокирован (LaLiga)
+        # OVH (Europe) — Cloudflare in Spain is often blocked (LaLiga)
         req = urllib.request.Request("https://proof.ovh.net/files/1Gb.dat",
                                      headers={"User-Agent": "nas-os"})
         with urllib.request.urlopen(req, timeout=40) as r:
@@ -397,15 +397,15 @@ def net_speedtest():
                 n += len(chunk)
     except Exception as e:
         if n < 1000000:
-            out["log"] = ("нет интернета?" if "URLError" in str(type(e)) else str(e)[:100])
+            out["log"] = ("no internet?" if "URLError" in str(type(e)) else str(e)[:100])
     dt = max(0.1, time.time() - t0)
     if n >= 1000000:
         out["ok"] = True
         out["down_MBs"] = round(n / dt / 1048576, 1)
         out["down_mbps"] = round(n * 8 / dt / 1e6, 1)
-    # --- UPLOAD: шлём фиксированный объём, замеряем время ---
+    # --- UPLOAD: send a fixed volume, measure the time ---
     try:
-        total = 60 * 1024 * 1024   # 60 МБ
+        total = 60 * 1024 * 1024   # 60 MB
         data = b"\0" * total
         req = urllib.request.Request("http://speedtest.tele2.net/upload.php", data=data,
                                      headers={"User-Agent": "nas-os", "Content-Type": "application/octet-stream"})
@@ -476,21 +476,21 @@ AUTOMOUNT_CONF = "/etc/nas-wizard/automount.conf"
 COMITUP_CONF = "/etc/comitup.conf"
 
 def comitup_state():
-    """comitup — Wi-Fi точка доступа + captive-портал для первичной настройки без
-    монитора. Статус берём из лога (D-Bus у comitup подвисает), настройки из conf.
-    Не установлен → {installed:false}."""
+    """comitup — Wi-Fi access point + captive portal for headless first-time setup.
+    Status is read from the log (comitup's D-Bus hangs), settings from the conf.
+    Not installed → {installed:false}."""
     out = {"installed": bool(shutil.which("comitup")), "mode": None, "ssid": None,
            "ap_name": "comitup-<nnn>", "ap_password": ""}
     if not out["installed"]:
         return out
-    # настройки: раскомментированные ap_name/ap_password
+    # settings: uncommented ap_name/ap_password
     for l in _read(COMITUP_CONF).splitlines():
         l = l.strip()
         if l.startswith("ap_name:"):
             out["ap_name"] = l.split(":", 1)[1].strip()
         elif l.startswith("ap_password:"):
             out["ap_password"] = l.split(":", 1)[1].strip()
-    # режим/SSID из последних строк журнала comitup
+    # mode/SSID from the last lines of the comitup log
     log = _read("/var/log/comitup.log")
     for l in reversed(log.splitlines()[-80:]):
         if "Setting state to" in l and out["mode"] is None:
@@ -502,19 +502,19 @@ def comitup_state():
     return out
 
 def comitup_save(ap_name, ap_password):
-    """Записать имя/пароль точки доступа comitup. Пустое поле → строка убирается
-    (возврат к дефолту). Пароль 8–63 символа (требование WPA) или пусто (открытая)."""
+    """Write the comitup access point name/password. Empty field → the line is
+    removed (back to default). Password 8–63 chars (WPA requirement) or empty (open)."""
     if not shutil.which("comitup"):
-        return {"ok": False, "log": "comitup не установлен"}
+        return {"ok": False, "log": "comitup is not installed"}
     ap_name = (ap_name or "").strip()
     ap_password = (ap_password or "").strip()
     if ap_password and not (8 <= len(ap_password) <= 63):
-        return {"ok": False, "log": "пароль точки доступа: 8–63 символа (или пусто)"}
+        return {"ok": False, "log": "access point password: 8–63 chars (or empty)"}
     try:
         lines = _read(COMITUP_CONF).splitlines()
     except Exception:
         lines = []
-    # выкидываем прежние (в т.ч. закомментированные-активные) строки настроек
+    # drop the previous (including commented-active) settings lines
     keep = [l for l in lines if not re.match(r"^\s*(ap_name|ap_password)\s*:", l)]
     if ap_name:
         keep.append("ap_name: " + ap_name)
@@ -525,10 +525,10 @@ def comitup_save(ap_name, ap_password):
             f.write("\n".join(keep).rstrip("\n") + "\n")
     except OSError as e:
         return {"ok": False, "log": str(e)}
-    return {"ok": True, "log": "сохранено — применится после перезапуска comitup или ребута"}
+    return {"ok": True, "log": "saved — applies after a comitup restart or reboot"}
 
 def automount_state():
-    """Состояние автомонтирования: включено ли, база, пользователь."""
+    """Automount state: whether enabled, base, user."""
     conf = _read(AUTOMOUNT_CONF)
     st = {"enabled": False, "base": "/media/nas", "user": TARGET_USER,
           "installed": os.path.isfile("/etc/udev/rules.d/99-nas-automount.rules")}
@@ -553,11 +553,11 @@ def _smart_has_data(j):
                 or (j.get("temperature") or {}).get("current") is not None)
 
 def _smartctl_json(extra, dev, timeout=12):
-    """smartctl -j с фолбэком типа устройства: голый → -d sat → -d scsi
-    (USB-мосты без -d sat отдают только баннер версии)."""
-    if not re.match(r"^/dev/[\w-]+$", dev or ""):   # как у соседей: не даём dev вида "-x…" стать флагом
+    """smartctl -j with a device-type fallback: bare → -d sat → -d scsi
+    (USB bridges without -d sat return only the version banner)."""
+    if not re.match(r"^/dev/[\w-]+$", dev or ""):   # like the neighbors: don't let a dev like "-x…" become a flag
         return {}
-    # для типа устройства подбираем варианты; NVMe работает напрямую
+    # for the device type we try variants; NVMe works directly
     variants = [[]] if dev.startswith("/dev/nvme") else [[], ["-d", "sat"], ["-d", "scsi"]]
     last = {}
     for dt in variants:
@@ -573,24 +573,24 @@ def _smartctl_json(extra, dev, timeout=12):
     return last
 
 def smart_info(dev):
-    # -n standby: НЕ будить спящий диск ради фонового опроса (список/виджет/health).
-    # Если диск в standby, smartctl вернёт пусто → диск покажет здоровье/темп как «—».
+    # -n standby: do NOT wake a sleeping disk for a background poll (list/widget/health).
+    # If the disk is in standby, smartctl returns empty → the disk shows health/temp as "—".
     j = _smartctl_json(["-n", "standby", "-H", "-A"], dev, timeout=8)
     if not _smart_has_data(j):
         return None
     t = (j.get("temperature") or {}).get("current")
-    return {"temp": t if t else None,      # USB-мосты отдают 0 — это «не знаю», а не ноль градусов
+    return {"temp": t if t else None,      # USB bridges return 0 — that's "don't know", not zero degrees
             "healthy": (j.get("smart_status") or {}).get("passed"),
             "hours": (j.get("power_on_time") or {}).get("hours")}
 
 def fs_tools():
-    """Файловые системы, для которых есть mkfs (что реально можно создать)."""
+    """Filesystems that have mkfs available (what can actually be created)."""
     return [fs for fs in ("ext4", "xfs", "btrfs", "exfat", "ntfs", "vfat")
             if shutil.which("mkfs." + fs)]
 
 _SZ_MUL = {"B": 1, "K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4, "P": 1024**5}
 def _size_bytes(s):
-    """lsblk отдаёт размер строкой («238.8G»). Для выбора главного раздела нужен порядок."""
+    """lsblk returns the size as a string ("238.8G"). Picking the main partition needs an ordering."""
     m = re.match(r"^\s*([\d.,]+)\s*([BKMGTP])?", str(s or ""))
     if not m:
         return 0
@@ -604,7 +604,7 @@ def disks():
     am_base = automount_state().get("base", "/media/nas")
     spin = _load_spindown()
     spd = _speedtest_load()
-    scr = scrutiny_state().get("devices", {})   # {} если Scrutiny не установлен
+    scr = scrutiny_state().get("devices", {})   # {} if Scrutiny is not installed
     for d in _lsblk():
         if d.get("type") != "disk":
             continue
@@ -633,8 +633,8 @@ def disks():
                     role = "pool"; break
                 if mp == am_base or mp.startswith(am_base + "/") or mp.startswith("/media/"):
                     role = "removable"; break
-        # для системного диска показываем корень «/», а не /boot/firmware (иначе «свободно»
-        # берётся с крошечного boot-раздела); для остальных — точку в /mnt, затем /media
+        # for the system disk show the root "/", not /boot/firmware (otherwise "free"
+        # is taken from the tiny boot partition); for the rest — the point in /mnt, then /media
         parts = []
         for ch in d.get("children", []) or []:
             cmp = ch.get("mountpoint")
@@ -644,16 +644,16 @@ def disks():
                 "mount": cmp, "mounted": bool(cmp),
                 "parttypename": ch.get("parttypename"),
             })
-        # Главный раздел — САМЫЙ БОЛЬШОЙ смонтированный, а не первый в списке.
-        # У флешки с остатками загрузочного образа первым идёт EFI на 200 МБ, и
-        # карточка показывала «197 МБ свободно» вместо честных 239 ГБ.
+        # The main partition is the LARGEST mounted one, not the first in the list.
+        # On a flash drive with leftovers of a boot image, a 200 MB EFI comes first, and
+        # the card showed "197 MB free" instead of the honest 239 GB.
         mparts = [x for x in parts if x["mount"]]
         main = max(mparts, key=lambda x: _size_bytes(x["size"])) if mparts else None
         primary = (("/" if "/" in mounts else None)
                    or (main["mount"] if main else None)
                    or (mounts[0] if mounts else None))
-        # ФС и метка — того же раздела, что и статистика (иначе заголовок от одного,
-        # цифры от другого)
+        # FS and label from the same partition as the stats (otherwise the title is from one,
+        # the numbers from another)
         fstype = (main.get("fstype") if main else None) or d.get("fstype")
         label = (main.get("label") if main else None) or d.get("label")
         if label is None and parts:
@@ -661,7 +661,7 @@ def disks():
         fstab = _read("/etc/fstab")
         in_fstab = bool(primary and primary in fstab)
         size = d.get("size")
-        # пустой слот картридера / нет вставленного носителя → lsblk отдаёт размер 0B
+        # empty card-reader slot / no inserted media → lsblk returns size 0B
         no_media = (str(size).strip() in ("", "0", "0B", "None")) and not parts and not fstype
         res.append({
             "name": name, "path": d.get("path"), "size": size,
@@ -675,19 +675,19 @@ def disks():
             "smart": smart_info(d.get("path")),
             "spindown": spin.get(d.get("path")),
             "speedtest": spd.get((d.get("serial") or "").strip() or "\0") or spd.get(d.get("path")),
-            "scrutiny": scr.get((d.get("serial") or "").strip()),   # None, если Scrutiny нет/нет данных
+            "scrutiny": scr.get((d.get("serial") or "").strip()),   # None if no Scrutiny/no data
         })
     return res
 
 def external_volumes():
-    """Тома вне пула (USB-диски/флешки, свободные диски с ФС) — для ярлыков
-    на рабочем столе и секции «Диски» в сайдбаре файлового менеджера."""
+    """Volumes outside the pool (USB disks/flash drives, free disks with a FS) — for
+    desktop shortcuts and the "Disks" section in the file manager sidebar."""
     vols = []
     for d in disks():
         if d.get("no_media") or d["role"] not in ("free", "removable"):
             continue
         parts = d["partitions"] or []
-        if not parts and d.get("fstype"):      # ФС прямо на диске, без таблицы разделов
+        if not parts and d.get("fstype"):      # FS directly on the disk, without a partition table
             parts = [{"name": d["name"], "path": d["path"], "size": d["size"],
                       "fstype": d["fstype"], "label": d["label"],
                       "mount": d["mount"], "mounted": d["mounted"]}]
@@ -711,7 +711,7 @@ def external_volumes():
 def smart_detail(dev):
     j = _smartctl_json(["-a"], dev, timeout=12)
     if not _smart_has_data(j):
-        return {"ok": False, "log": "SMART недоступен: диск/USB-мост не отдаёт данные (или нужен root)"}
+        return {"ok": False, "log": "SMART unavailable: disk/USB bridge returns no data (or root is needed)"}
     attrs = []
     ata = (j.get("ata_smart_attributes") or {}).get("table")
     if ata:
@@ -740,7 +740,7 @@ def smart_detail(dev):
         "attrs": attrs,
     }
 
-_C_ENV = dict(os.environ, LC_ALL="C", LANG="C")   # стабильный (английский) вывод утилит для парсинга
+_C_ENV = dict(os.environ, LC_ALL="C", LANG="C")   # stable (English) utility output for parsing
 
 def _run(cmd, timeout=40, env=None):
     try:
@@ -751,14 +751,14 @@ def _run(cmd, timeout=40, env=None):
 
 def disk_mount(target, unmount=False):
     if not re.match(r"^/[\w/.+-]+$", target or ""):
-        return {"ok": False, "log": "недопустимый путь"}
+        return {"ok": False, "log": "invalid path"}
     r = _run(["umount" if unmount else "mount", target])
     if r["ok"] and not r["log"]:
-        r["log"] = "размонтировано" if unmount else "смонтировано"
+        r["log"] = "unmounted" if unmount else "mounted"
     return r
 
 def _smart_dtype(dev):
-    """Определить рабочий -d тип для устройства (для команд, не читающих JSON)."""
+    """Determine the working -d type for the device (for commands that don't read JSON)."""
     if dev.startswith("/dev/nvme"):
         return []
     for dt in ([], ["-d", "sat"], ["-d", "scsi"]):
@@ -773,7 +773,7 @@ def _smart_dtype(dev):
 
 def smart_test(dev, kind):
     if not re.match(r"^/dev/[\w-]+$", dev or ""):
-        return {"ok": False, "log": "недопустимое устройство"}
+        return {"ok": False, "log": "invalid device"}
     kind = kind if kind in ("short", "long") else "short"
     return _run(["smartctl", "-t", kind] + _smart_dtype(dev) + [dev], timeout=20)
 
@@ -801,7 +801,7 @@ def _speedtest_load():
         return {}
 
 def _speedtest_key(dev):
-    """Ключ сохранённого замера: серийник (не меняется при переименовании sdX) или сам dev."""
+    """Key of the saved measurement: serial (unchanged when sdX is renamed) or the dev itself."""
     r = _run(["lsblk", "-dno", "SERIAL", dev], timeout=8)
     ser = (r.get("log") or "").strip()
     return ser if r.get("ok") and ser else dev
@@ -814,28 +814,28 @@ def _dd_mbps(log):
     return val * {"B": 1e-6, "kB": 1e-3, "MB": 1, "GB": 1e3}.get(unit, 1)
 
 def disk_speedtest(dev):
-    """Тест скорости: последовательное чтение с устройства (мимо кэша) +
-    последовательная запись временного файла на смонтированный раздел этого диска
-    (файл удаляется). Результат сохраняется и показывается в карточке диска."""
+    """Speed test: sequential read from the device (bypassing the cache) +
+    sequential write of a temp file to a mounted partition of this disk
+    (the file is deleted). The result is saved and shown on the disk card."""
     if not re.match(r"^/dev/[\w-]+$", dev or ""):
-        return {"ok": False, "log": "недопустимое устройство"}
+        return {"ok": False, "log": "invalid device"}
     if not os.path.exists(dev):
-        return {"ok": False, "log": "нет такого устройства"}
+        return {"ok": False, "log": "no such device"}
     r = _run(["dd", "if=" + dev, "of=/dev/null", "bs=4M", "count=256", "iflag=direct"], timeout=120)
     read_mbps = _dd_mbps(r.get("log", ""))
     if read_mbps is None:
-        return {"ok": False, "log": "не удалось измерить: " + (r.get("log", "")[-120:])}
-    # запись: на смонтированную rw-точку с запасом места; для системного диска
-    # (нет «своих» точек кроме / и /boot) пишем во временный каталог /var/tmp
+        return {"ok": False, "log": "measurement failed: " + (r.get("log", "")[-120:])}
+    # write: to a mounted rw point with spare space; for the system disk
+    # (no "own" points besides / and /boot) write to the temp dir /var/tmp
     write_mbps = None
-    wnote = "запись: нет смонтированного раздела для теста"
+    wnote = "write: no mounted partition to test"
     mps = _disk_mountpoints(dev)
     cands = [mp for mp in mps if mp not in _SYS_MPS] or (["/var/tmp"] if "/" in mps else [])
     for mp in cands:
         try:
             st = os.statvfs(mp)
             if st.f_bavail * st.f_frsize < (1 << 30):
-                wnote = "запись: мало свободного места для теста"
+                wnote = "write: not enough free space to test"
                 continue
         except OSError:
             continue
@@ -843,11 +843,11 @@ def disk_speedtest(dev):
         try:
             w = _run(["dd", "if=/dev/zero", "of=" + tmp, "bs=4M", "count=64",
                       "oflag=direct", "conv=fsync"], timeout=90)
-            if not w["ok"]:      # ФС без O_DIRECT (exFAT/NTFS) — повторить через fsync
+            if not w["ok"]:      # FS without O_DIRECT (exFAT/NTFS) — retry via fsync
                 w = _run(["dd", "if=/dev/zero", "of=" + tmp, "bs=4M", "count=64",
                           "conv=fsync"], timeout=90)
             write_mbps = _dd_mbps(w.get("log", ""))
-            wnote = "" if write_mbps is not None else "запись: не удалось измерить"
+            wnote = "" if write_mbps is not None else "write: measurement failed"
         finally:
             try:
                 os.remove(tmp)
@@ -859,7 +859,7 @@ def disk_speedtest(dev):
            "t": int(time.time())}
     try:
         os.makedirs(NAS_CONFIG, exist_ok=True)
-        with _speed_lock:                 # два одновременных теста не должны терять записи
+        with _speed_lock:                 # two simultaneous tests must not lose entries
             saved = _speedtest_load()
             saved[_speedtest_key(dev)] = res
             tmp = SPEEDTEST_FILE + ".tmp"
@@ -868,31 +868,31 @@ def disk_speedtest(dev):
             os.replace(tmp, SPEEDTEST_FILE)
     except OSError:
         pass
-    log = "чтение: %.0f МБ/с" % read_mbps
-    log += (" · запись: %.0f МБ/с" % write_mbps) if write_mbps is not None else (" · " + wnote)
+    log = "read: %.0f MB/s" % read_mbps
+    log += (" · write: %.0f MB/s" % write_mbps) if write_mbps is not None else (" · " + wnote)
     return {"ok": True, "read_mbps": res["read"], "write_mbps": res["write"],
             "t": res["t"], "log": log}
 
 def disk_eject(dev):
-    """Безопасно извлечь съёмный диск: отмонтировать все разделы + снять питание."""
+    """Safely eject a removable disk: unmount all partitions + cut power."""
     if not re.match(r"^/dev/[\w-]+$", dev or ""):
-        return {"ok": False, "log": "недопустимое устройство"}
+        return {"ok": False, "log": "invalid device"}
     mps = _disk_mountpoints(dev)
     for mp in mps:
         if mp in _SYS_MPS or mp == STORAGE or mp.startswith("/mnt/disk") or mp.startswith("/mnt/parity"):
-            return {"ok": False, "log": "это системный или пуловый диск — извлечение запрещено"}
+            return {"ok": False, "log": "this is a system or pool disk — ejection is not allowed"}
     for mp in mps:
         r = _run(["umount", mp], timeout=20)
         if not r["ok"]:
-            return {"ok": False, "log": "диск занят (%s): %s" % (mp, r["log"][-80:])}
+            return {"ok": False, "log": "disk busy (%s): %s" % (mp, r["log"][-80:])}
     po = _run(["udisksctl", "power-off", "-b", dev], timeout=15)
-    return {"ok": True, "log": "можно отключать" + (" (питание снято)" if po["ok"] else " (отмонтировано)")}
+    return {"ok": True, "log": "safe to disconnect" + (" (power cut)" if po["ok"] else " (unmounted)")}
 
 _health_cache = {"t": 0, "data": None}
 _health_lock = threading.Lock()
 
 def health_report():
-    """Сводка здоровья с кэшем 60 с (тяжёлая: smartctl/systemctl/disks)."""
+    """Health summary cached for 60 s (heavy: smartctl/systemctl/disks)."""
     with _health_lock:
         if _health_cache["data"] is not None and time.time() - _health_cache["t"] < 60:
             return _health_cache["data"]
@@ -907,58 +907,58 @@ def _health_report_build():
         checks.append({"name": name, "value": value, "lvl": lvl, "hint": hint})
     s = stats()
     t = s.get("temp")
-    add("Температура CPU", ("%s °C" % t) if t is not None else "—",
+    add("CPU temperature", ("%s °C" % t) if t is not None else "—",
         "bad" if t and t >= 75 else "warn" if t and t >= 65 else "ok")
     thr = s.get("throttled") or {}
-    add("Питание и троттлинг", "просадка/троттлинг" if not thr.get("ok", True) else "в норме",
+    add("Power and throttling", "sag/throttling" if not thr.get("ok", True) else "normal",
         "bad" if not thr.get("ok", True) else "ok",
-        "Нехватка тока БП или перегрев" if not thr.get("ok", True) else "")
+        "PSU current shortage or overheating" if not thr.get("ok", True) else "")
     m = (s.get("mem") or {}).get("pct", 0)
-    add("Оперативная память", "%s%% занято" % m, "warn" if m >= 90 else "ok")
+    add("RAM", "%s%% used" % m, "warn" if m >= 90 else "ok")
     root = disk_info("/") or {}
     rp = root.get("pct", 0)
-    add("Системная карта /", "%s%% занято" % rp, "bad" if rp >= 95 else "warn" if rp >= 90 else "ok",
-        "Свободно %s" % _fmt_b(root.get("total", 0) - root.get("used", 0)) if root else "")
+    add("System card /", "%s%% used" % rp, "bad" if rp >= 95 else "warn" if rp >= 90 else "ok",
+        "Free %s" % _fmt_b(root.get("total", 0) - root.get("used", 0)) if root else "")
     pool = s.get("disk_pool") or {}
     if pool.get("path") == "/mnt/storage":
         pp = pool.get("pct", 0)
-        add("Хранилище (пул)", "%s%% занято" % pp, "bad" if pp >= 95 else "warn" if pp >= 90 else "ok",
-            "Свободно %s" % _fmt_b(pool.get("total", 0) - pool.get("used", 0)))
-    # диски: SMART здоровье и температура
+        add("Storage (pool)", "%s%% used" % pp, "bad" if pp >= 95 else "warn" if pp >= 90 else "ok",
+            "Free %s" % _fmt_b(pool.get("total", 0) - pool.get("used", 0)))
+    # disks: SMART health and temperature
     ds = disks()
     bad = [d["name"] for d in ds if (d.get("smart") or {}).get("healthy") is False]
     hot = [d["name"] for d in ds if isinstance((d.get("smart") or {}).get("temp"), int) and d["smart"]["temp"] >= 60]
-    add("Здоровье дисков (SMART)",
-        ("сбой: " + ", ".join(bad)) if bad else ("перегрев: " + ", ".join(hot)) if hot else "все исправны",
+    add("Disk health (SMART)",
+        ("failure: " + ", ".join(bad)) if bad else ("overheat: " + ", ".join(hot)) if hot else "all healthy",
         "bad" if bad else "warn" if hot else "ok")
-    # защита данных SnapRAID
+    # SnapRAID data protection
     sn = snapraid_status()
     if sn.get("configured"):
-        for kind, ru in (("sync", "синхронизация"), ("scrub", "проверка")):
+        for kind, ru in (("sync", "sync"), ("scrub", "scrub")):
             e = sn.get("last_" + kind)
             if e:
-                add("SnapRAID · " + ru, "%s (%s)" % ("успешно" if e["result"] == "ok" else "ошибка", (e.get("date") or "")[:10]),
+                add("SnapRAID · " + ru, "%s (%s)" % ("success" if e["result"] == "ok" else "error", (e.get("date") or "")[:10]),
                     "ok" if e["result"] == "ok" else "bad")
         if sn.get("blocked"):
-            add("SnapRAID · защита", "sync остановлен (массовое удаление)", "warn")
-    # упавшие службы
+            add("SnapRAID · protection", "sync halted (mass deletion)", "warn")
+    # failed services
     r = _run(["systemctl", "list-units", "--failed", "--no-legend", "--plain", "--no-pager"], timeout=8)
     failed = [l.split()[0] for l in (r.get("log") or "").splitlines() if l.strip()]
-    add("Службы systemd", (", ".join(failed[:5])) if failed else "все работают", "bad" if failed else "ok")
-    # перезагрузка/обновления
+    add("systemd services", (", ".join(failed[:5])) if failed else "all running", "bad" if failed else "ok")
+    # reboot/updates
     if os.path.exists("/var/run/reboot-required"):
-        add("Обновления", "нужна перезагрузка", "warn", "Обновления ядра/libc применятся после ребута")
+        add("Updates", "reboot required", "warn", "Kernel/libc updates apply after a reboot")
     order = {"bad": 2, "warn": 1, "ok": 0}
     overall = max((order[c["lvl"]] for c in checks), default=0)
     return {"checks": checks, "overall": ["ok", "warn", "bad"][overall], "ts": int(time.time())}
 
 def _fmt_b(n):
     n = float(n or 0)
-    for u in ("Б", "КБ", "МБ", "ГБ", "ТБ"):
+    for u in ("B", "KB", "MB", "GB", "TB"):
         if n < 1024:
             return "%.0f %s" % (n, u)
         n /= 1024
-    return "%.1f ПБ" % n
+    return "%.1f PB" % n
 
 SPINDOWN_FILE = os.path.join(NAS_CONFIG, "spindown.json")
 
@@ -972,18 +972,18 @@ def _load_spindown():
 def _hdparm_s_value(minutes):
     if minutes <= 0:
         return 0
-    if minutes <= 20:               # 1..240 → шаг 5 с
+    if minutes <= 20:               # 1..240 → step 5 s
         return max(1, min(240, int(round(minutes * 60 / 5))))
-    return min(251, 240 + int(round(minutes / 30.0)))   # 241.. → шаг 30 мин
+    return min(251, 240 + int(round(minutes / 30.0)))   # 241.. → step 30 min
 
 def disk_spindown(dev, minutes):
-    """Таймаут ухода диска в сон при простое (hdparm -S). minutes=0 — выключить."""
+    """Idle timeout before the disk spins down (hdparm -S). minutes=0 — disable."""
     if not re.match(r"^/dev/[\w-]+$", dev or ""):
-        return {"ok": False, "log": "недопустимое устройство"}
+        return {"ok": False, "log": "invalid device"}
     try:
         minutes = max(0, min(240, int(minutes)))
     except (ValueError, TypeError):
-        return {"ok": False, "log": "неверное значение"}
+        return {"ok": False, "log": "invalid value"}
     r = _run(["hdparm", "-S", str(_hdparm_s_value(minutes)), dev], timeout=20)
     cfg = _load_spindown()
     cfg[dev] = minutes
@@ -992,8 +992,8 @@ def disk_spindown(dev, minutes):
     except OSError:
         pass
     if not r["ok"]:
-        return {"ok": False, "log": "диск/USB-мост не поддерживает управление сном: " + r["log"][-80:]}
-    return {"ok": True, "log": ("диск засыпает через %d мин простоя" % minutes) if minutes else "сон отключён (диск всегда активен)"}
+        return {"ok": False, "log": "disk/USB bridge does not support sleep control: " + r["log"][-80:]}
+    return {"ok": True, "log": ("disk sleeps after %d min idle" % minutes) if minutes else "sleep disabled (disk always active)"}
 
 def apply_spindown_all():
     for dev, minutes in _load_spindown().items():
@@ -1004,7 +1004,7 @@ def apply_spindown_all():
                 pass
 
 def snapraid_status():
-    """Последние sync/scrub из /var/log/snapraid.log (для защиты данных)."""
+    """Last sync/scrub from /var/log/snapraid.log (for data protection)."""
     log = _read("/var/log/snapraid.log")
     st = {"configured": os.path.isfile("/etc/snapraid.conf")}
     if not log:
@@ -1018,12 +1018,12 @@ def snapraid_status():
         r = re.search(r"NASRESULT (sync|scrub) (ok|err)", l)
         if r:
             st["last_" + r.group(1)] = {"result": r.group(2), "date": date}
-        if "ABORT: удалено файлов" in l:
+        if "ABORT: files deleted" in l:
             st["blocked"] = l.strip()[-140:]
     return st
 
 # --------------------------------------------------------------------------- #
-#  Процессы и службы systemd
+#  Processes and systemd services
 # --------------------------------------------------------------------------- #
 def _pid_cputime(pid):
     st = _read(f"/proc/{pid}/stat")
@@ -1075,15 +1075,15 @@ def kill_process(pid, sig=15):
     try:
         pid = int(pid); sig = int(sig)
     except (ValueError, TypeError):
-        return {"ok": False, "log": "неверный pid/сигнал"}
-    # pid<=1 у os.kill означает «вся группа/все процессы» или init — категорически запрещаем
+        return {"ok": False, "log": "invalid pid/signal"}
+    # pid<=1 in os.kill means "the whole group/all processes" or init — strictly forbidden
     if pid <= 1:
-        return {"ok": False, "log": "недопустимый pid"}
+        return {"ok": False, "log": "invalid pid"}
     if pid == os.getpid():
-        return {"ok": False, "log": "нельзя убить сам сервер"}
+        return {"ok": False, "log": "cannot kill the server itself"}
     try:
         os.kill(pid, sig)
-        return {"ok": True, "log": f"сигнал {sig} -> {pid}"}
+        return {"ok": True, "log": f"signal {sig} -> {pid}"}
     except (ProcessLookupError, PermissionError, ValueError) as e:
         return {"ok": False, "log": str(e)}
 
@@ -1110,8 +1110,8 @@ def _track_unit(name, add=True):
         lst.remove(name); _save_created_units(lst)
 
 def _units_by_trigger(kind):
-    """Имена сервисов, за которыми стоит .timer или .socket — чтобы их «dead»
-    показывать как «по расписанию»/«по запросу», а не как поломку."""
+    """Names of services backed by a .timer or .socket — so their "dead" state can
+    be shown as "scheduled"/"on demand" rather than as a failure."""
     names = set()
     r = _run(["systemctl", "list-units", f"--type={kind}", "--all", "--no-legend",
               "--plain", "--no-pager"], timeout=8)
@@ -1131,7 +1131,7 @@ def systemd_units(kind="service"):
         parts = line.split(None, 4)
         if len(parts) < 4 or not parts[0].endswith("." + kind):
             continue
-        # чем «разбудят» неактивный юнит: таймер по расписанию или сокет по запросу
+        # what "wakes" an inactive unit: a timer on schedule or a socket on demand
         trig = "timer" if parts[0] in timers else ("socket" if parts[0] in sockets else None)
         out.append({"unit": parts[0], "load": parts[1], "active": parts[2],
                     "sub": parts[3], "desc": parts[4] if len(parts) > 4 else "",
@@ -1140,14 +1140,14 @@ def systemd_units(kind="service"):
 
 def systemd_action(unit, action):
     if action not in ("start", "stop", "restart", "enable", "disable"):
-        return {"ok": False, "log": "недопустимое действие"}
+        return {"ok": False, "log": "invalid action"}
     if not re.match(r"^[\w@.:-]+$", unit or ""):
-        return {"ok": False, "log": "недопустимое имя юнита"}
+        return {"ok": False, "log": "invalid unit name"}
     return _run(["systemctl", action, unit], timeout=30)
 
 def systemd_journal(unit, lines=200):
     if not re.match(r"^[\w@.:-]+$", unit or ""):
-        return {"ok": False, "log": "недопустимый юнит"}
+        return {"ok": False, "log": "invalid unit"}
     try:
         n = max(10, min(2000, int(lines)))
     except (ValueError, TypeError):
@@ -1159,12 +1159,12 @@ def renice(pid, nice):
     try:
         n = int(nice); pid = int(pid)
     except (ValueError, TypeError):
-        return {"ok": False, "log": "неверные аргументы"}
+        return {"ok": False, "log": "invalid arguments"}
     if n < -20 or n > 19:
-        return {"ok": False, "log": "приоритет вне диапазона -20..19"}
+        return {"ok": False, "log": "priority out of range -20..19"}
     r = _run(["renice", "-n", str(n), "-p", str(pid)], timeout=10)
     if r["ok"] and not r["log"]:
-        r["log"] = f"nice={n} для PID {pid}"
+        r["log"] = f"nice={n} for PID {pid}"
     return r
 
 UNIT_DIR = "/etc/systemd/system"
@@ -1172,7 +1172,7 @@ _UNIT_RE = re.compile(r"^[\w@.\-]+\.(service|timer|socket|mount|path|target)$")
 
 def unit_read(name):
     if not _UNIT_RE.match(name or ""):
-        return {"ok": False, "log": "имя вида name.service"}
+        return {"ok": False, "log": "name like name.service"}
     etc = os.path.join(UNIT_DIR, name)
     if os.path.isfile(etc):
         try:
@@ -1182,14 +1182,14 @@ def unit_read(name):
             return {"ok": False, "log": str(e)}
     r = _run(["systemctl", "cat", name], timeout=10)
     return {"ok": True, "name": name, "path": "", "editable": True, "base": True,
-            "content": r.get("log") or "# базовый юнит; сохранение создаст переопределение в " + UNIT_DIR}
+            "content": r.get("log") or "# base unit; saving will create an override in " + UNIT_DIR}
 
 def unit_write(name, content, create=False):
     if not _UNIT_RE.match(name or ""):
-        return {"ok": False, "log": "имя вида name.service"}
+        return {"ok": False, "log": "name like name.service"}
     path = os.path.join(UNIT_DIR, name)
     if create and os.path.exists(path):
-        return {"ok": False, "log": "юнит уже существует"}
+        return {"ok": False, "log": "unit already exists"}
     try:
         os.makedirs(UNIT_DIR, exist_ok=True)
         if os.path.isfile(path):
@@ -1205,12 +1205,12 @@ def unit_write(name, content, create=False):
 
 def unit_delete(name):
     if not _UNIT_RE.match(name or ""):
-        return {"ok": False, "log": "имя вида name.service"}
+        return {"ok": False, "log": "name like name.service"}
     path = os.path.realpath(os.path.join(UNIT_DIR, name))
     if not path.startswith(UNIT_DIR + os.sep):
-        return {"ok": False, "log": "вне каталога юнитов"}
+        return {"ok": False, "log": "outside the units directory"}
     if not os.path.isfile(path):
-        return {"ok": False, "log": "это базовый системный юнит — его нельзя удалить здесь"}
+        return {"ok": False, "log": "this is a base system unit — it cannot be deleted here"}
     _run(["systemctl", "disable", "--now", name], timeout=30)
     try:
         os.remove(path)
@@ -1222,7 +1222,7 @@ def unit_delete(name):
 
 def power(action):
     if action not in ("reboot", "poweroff"):
-        return {"ok": False, "log": "неизвестное действие"}
+        return {"ok": False, "log": "unknown action"}
     try:
         subprocess.Popen(["systemctl", action])
         return {"ok": True}
@@ -1240,10 +1240,10 @@ def save_snippets(d):
     _json_save(SNIPPETS_FILE, d, indent=2)
 
 # --------------------------------------------------------------------------- #
-#  История операций (загрузки, копирования, USB-импорт).
-#  Раньше жила только в localStorage браузера: у телефона была своя, пустая.
-#  Клиент шлёт сюда завершённые операции; USB-импорт сервер записывает сам,
-#  даже если панель не открыта ни в одном браузере.
+#  Operation history (uploads, copies, USB import).
+#  It used to live only in the browser's localStorage: the phone had its own,
+#  empty one. The client posts completed operations here; USB import is written
+#  by the server itself, even if the panel is not open in any browser.
 # --------------------------------------------------------------------------- #
 OPS_HIST_FILE = os.path.join(NAS_CONFIG, "ops-history.json")
 OPS_HIST_KEEP = 300
@@ -1280,13 +1280,13 @@ def ops_hist_list():
         return _ops_clean(_ops_hist_read())
 
 def ops_hist_add(e):
-    """Одна завершённая операция. uid — ключ дедупа (перезапуск панели, два браузера)."""
+    """One completed operation. uid — dedup key (panel restart, two browsers)."""
     if not isinstance(e, dict):
-        return {"ok": False, "log": "неверная запись"}
+        return {"ok": False, "log": "invalid entry"}
     uid = str(e.get("uid") or "")[:80]
     state = e.get("state")
     if not uid or state not in _OPS_STATES:
-        return {"ok": False, "log": "неверная запись"}
+        return {"ok": False, "log": "invalid entry"}
     try:
         ts = int(e.get("ts") or time.time())
     except (TypeError, ValueError):
@@ -1308,10 +1308,10 @@ def ops_hist_clear():
     return {"ok": True}
 
 # --------------------------------------------------------------------------- #
-#  MySpeed — виджет с последним замером скорости интернета.
-#  Ходим за данными сами: браузеру мешал бы CORS, а пароль (если включён)
-#  передаётся заголовком и не должен светиться в клиенте.
-#  Сервиса нет или он молчит → {"ok": false}, и виджет прячется целиком.
+#  MySpeed — widget with the latest internet speed measurement.
+#  We fetch the data ourselves: CORS would get in the browser's way, and the
+#  password (if enabled) is passed as a header and must not leak into the client.
+#  Service absent or silent → {"ok": false}, and the widget hides entirely.
 # --------------------------------------------------------------------------- #
 _ms_cache = {"t": 0, "data": {"ok": False}}
 _ms_lock = threading.Lock()
@@ -1332,7 +1332,7 @@ def _myspeed_ok(t):
     return isinstance(d, (int, float)) and not isinstance(d, bool) and d >= 0
 
 def myspeed_state():
-    """Последний удачный замер + краткая статистика. Кэш, чтобы виджет не долбил сервис."""
+    """Last successful measurement + brief statistics. Cached so the widget doesn't hammer the service."""
     with _ms_lock:
         if time.time() - _ms_cache["t"] < MYSPEED_TTL:
             return _ms_cache["data"]
@@ -1345,19 +1345,19 @@ def myspeed_state():
             tests = _myspeed_get(base, "/api/speedtests", pw)
             rows = [x for x in tests if isinstance(x, dict)] if isinstance(tests, list) else []
             if rows:
-                # MySpeed отдаёт новые первыми, но полагаться на порядок незачем
+                # MySpeed returns newest first, but there's no reason to rely on the order
                 newest = lambda seq: max(seq, key=lambda x: str(x.get("created") or ""),
                                          default=None)
                 last = newest(rows)
-                # Провалившийся замер записывается как -1/-1/-1 — показывать эти числа
-                # нельзя. Цифры берём из последнего удачного, а про сбой говорим отдельно.
+                # A failed measurement is stored as -1/-1/-1 — these numbers must not
+                # be shown. We take the figures from the last successful one and report the failure separately.
                 good = newest([x for x in rows if _myspeed_ok(x)]) or {}
                 out = {"ok": True, "url": base, "count": len(rows),
                        "download": good.get("download"), "upload": good.get("upload"),
                        "ping": good.get("ping"), "created": good.get("created"),
                        "failed": not _myspeed_ok(last), "failed_at": last.get("created"),
                        "error": last.get("error")}
-                try:                       # статистика необязательна — без неё виджет живёт
+                try:                       # statistics are optional — the widget lives without them
                     st = _myspeed_get(base, "/api/speedtests/statistics", pw)
                     out["avg"] = {"download": (st.get("download") or {}).get("avg"),
                                   "upload": (st.get("upload") or {}).get("avg"),
@@ -1371,10 +1371,10 @@ def myspeed_state():
     return out
 
 # --------------------------------------------------------------------------- #
-#  Автоопределение URL сервиса по имени контейнера и его ВНУТРЕННЕМУ порту.
-#  Читаем фактический проброс из живого Docker, поэтому порт в compose можно
-#  менять свободно — панель всегда возьмёт актуальный. Контейнера нет или он
-#  остановлен → None, и вызывающий просто ничего не показывает (без ошибок).
+#  Auto-detect the service URL by container name and its INTERNAL port.
+#  We read the actual port mapping from live Docker, so the port in compose can
+#  be changed freely — the panel always picks up the current one. Container
+#  absent or stopped → None, and the caller simply shows nothing (no errors).
 # --------------------------------------------------------------------------- #
 _svc_url_cache = {}
 _svc_url_lock = threading.Lock()
@@ -1408,9 +1408,9 @@ def docker_service_url(name, internal_port):
     return url
 
 # --------------------------------------------------------------------------- #
-#  Scrutiny — здоровье дисков (device_status), температура и наработка по данным
-#  его collector'а. Ключ сопоставления с нашими дисками — серийник. Контейнера
-#  нет → {ok:False}, и диски работают как раньше, на прямом SMART.
+#  Scrutiny — disk health (device_status), temperature and power-on hours from
+#  its collector's data. The key that matches our disks is the serial. Container
+#  absent → {ok:False}, and disks work as before, on direct SMART.
 # --------------------------------------------------------------------------- #
 _scrutiny_cache = {"t": 0, "data": {"ok": False}}
 _scrutiny_lock = threading.Lock()
@@ -1436,7 +1436,7 @@ def scrutiny_state():
                 serial = (dev.get("serial_number") or "").strip()
                 if serial:
                     by_serial[serial] = {
-                        "status": dev.get("device_status", 0),   # 0 = здоров
+                        "status": dev.get("device_status", 0),   # 0 = healthy
                         "temp": sm.get("temp"),
                         "power_on_hours": sm.get("power_on_hours"),
                         "uuid": dev.get("scrutiny_uuid") or uuid}
@@ -1447,50 +1447,50 @@ def scrutiny_state():
         _scrutiny_cache["t"] = time.time(); _scrutiny_cache["data"] = out
     return out
 
-# Понятные имена ключевых SMART-атрибутов Scrutiny (NVMe + SATA) для крупной сводки.
+# Human-readable names of key Scrutiny SMART attributes (NVMe + SATA) for the large summary.
 _SCR_NAMES = {
-    "percentage_used": ("Износ", "%"), "available_spare": ("Запас блоков", "%"),
-    "media_errors": ("Ошибки носителя", ""), "num_err_log_entries": ("Записей в логе ошибок", ""),
-    "critical_warning": ("Крит. предупреждений", ""), "unsafe_shutdowns": ("Небезопасных выключений", ""),
-    "power_cycles": ("Циклов питания", ""), "power_cycle_count": ("Циклов питания", ""),
-    "reallocated_sector_ct": ("Переназначено секторов", ""), "current_pending_sector": ("Ожидающих секторов", ""),
-    "offline_uncorrectable": ("Неисправимых секторов", ""), "udma_crc_error_count": ("Ошибок кабеля (CRC)", ""),
-    "data_units_written": ("Записано", "TB"), "temperature": ("Температура", "°C"),
+    "percentage_used": ("Wear", "%"), "available_spare": ("Spare blocks", "%"),
+    "media_errors": ("Media errors", ""), "num_err_log_entries": ("Error log entries", ""),
+    "critical_warning": ("Critical warnings", ""), "unsafe_shutdowns": ("Unsafe shutdowns", ""),
+    "power_cycles": ("Power cycles", ""), "power_cycle_count": ("Power cycles", ""),
+    "reallocated_sector_ct": ("Reallocated sectors", ""), "current_pending_sector": ("Pending sectors", ""),
+    "offline_uncorrectable": ("Uncorrectable sectors", ""), "udma_crc_error_count": ("Cable errors (CRC)", ""),
+    "data_units_written": ("Written", "TB"), "temperature": ("Temperature", "°C"),
 }
 _SCR_ORDER = ["percentage_used", "available_spare", "data_units_written", "media_errors",
               "reallocated_sector_ct", "current_pending_sector", "offline_uncorrectable",
               "udma_crc_error_count", "unsafe_shutdowns", "power_cycles", "power_cycle_count"]
 
-# Вердикт по каждому показателю (good/warn/bad/info) + человеческая подсказка.
-# level(value) → уровень; чистые числа сами по себе не читаются, поэтому объясняем.
+# Verdict for each metric (good/warn/bad/info) + a human-readable hint.
+# level(value) → level; bare numbers don't read on their own, so we explain.
 _SCR_META = {
-    "percentage_used": ("Износ ресурса записи SSD. До ~80% спокойно, ближе к 100% — планируйте замену.",
+    "percentage_used": ("SSD write-endurance wear. Fine up to ~80%, closer to 100% — plan a replacement.",
                         lambda v: "good" if v < 70 else "warn" if v < 90 else "bad"),
-    "available_spare": ("Запас резервных блоков SSD. 100% — идеально; падение к 10% — тревога.",
+    "available_spare": ("SSD spare-block reserve. 100% — perfect; dropping toward 10% — alarm.",
                         lambda v: "good" if v > 20 else "warn" if v > 10 else "bad"),
-    "media_errors": ("Неисправимые ошибки носителя. Норма — 0.", lambda v: "good" if v == 0 else "bad"),
-    "num_err_log_entries": ("Записей в логе ошибок контроллера. Норма — 0.", lambda v: "good" if v == 0 else "warn"),
-    "critical_warning": ("Критические предупреждения NVMe. Норма — 0.", lambda v: "good" if v == 0 else "bad"),
-    "reallocated_sector_ct": ("Переназначенные сбойные секторы. Норма — 0; рост — износ поверхности.",
+    "media_errors": ("Uncorrectable media errors. Normal — 0.", lambda v: "good" if v == 0 else "bad"),
+    "num_err_log_entries": ("Controller error-log entries. Normal — 0.", lambda v: "good" if v == 0 else "warn"),
+    "critical_warning": ("NVMe critical warnings. Normal — 0.", lambda v: "good" if v == 0 else "bad"),
+    "reallocated_sector_ct": ("Reallocated bad sectors. Normal — 0; growth — surface wear.",
                               lambda v: "good" if v == 0 else "warn"),
-    "current_pending_sector": ("Секторы, ждущие переназначения. Норма — 0; ненулевое — плохой признак.",
+    "current_pending_sector": ("Sectors awaiting reallocation. Normal — 0; nonzero — a bad sign.",
                                lambda v: "good" if v == 0 else "bad"),
-    "offline_uncorrectable": ("Неисправимые секторы. Норма — 0.", lambda v: "good" if v == 0 else "bad"),
-    "udma_crc_error_count": ("Ошибки передачи по кабелю SATA — обычно виноват кабель/контакт, а не диск.",
+    "offline_uncorrectable": ("Uncorrectable sectors. Normal — 0.", lambda v: "good" if v == 0 else "bad"),
+    "udma_crc_error_count": ("SATA cable transfer errors — usually the cable/contact is at fault, not the disk.",
                              lambda v: "good" if v == 0 else "warn"),
-    "unsafe_shutdowns": ("Сколько раз диск обесточили без корректного отключения. Не поломка, но много — повод к ИБП.",
+    "unsafe_shutdowns": ("How many times the disk lost power without a proper shutdown. Not a fault, but many — a reason for a UPS.",
                          lambda v: "info"),
-    "power_cycles": ("Число включений диска. Информационно.", lambda v: "info"),
-    "power_cycle_count": ("Число включений диска. Информационно.", lambda v: "info"),
-    "data_units_written": ("Всего записано на диск. Информационно (ресурс TBW зависит от модели).",
+    "power_cycles": ("Number of disk power-ons. Informational.", lambda v: "info"),
+    "power_cycle_count": ("Number of disk power-ons. Informational.", lambda v: "info"),
+    "data_units_written": ("Total written to the disk. Informational (TBW endurance depends on the model).",
                            lambda v: "info"),
-    "temperature": ("Текущая температура.", lambda v: "good" if v < 60 else "warn" if v < 70 else "bad"),
+    "temperature": ("Current temperature.", lambda v: "good" if v < 60 else "warn" if v < 70 else "bad"),
 }
 
 def _scr_verdict(key, value, status):
-    """Уровень показателя: сначала мнение Scrutiny (флаг status), затем наши пороги."""
+    """Metric level: first Scrutiny's opinion (the status flag), then our thresholds."""
     hint, lvlfn = _SCR_META.get(key, ("", None))
-    if status:                              # Scrutiny сам пометил атрибут проблемным
+    if status:                              # Scrutiny itself flagged the attribute as problematic
         return "bad", hint
     if lvlfn is not None and isinstance(value, (int, float)):
         try:
@@ -1500,8 +1500,8 @@ def _scr_verdict(key, value, status):
     return "info", hint
 
 def scrutiny_device(serial):
-    """Детальные атрибуты одного диска из Scrutiny: износ, запас, ошибки, история
-    температуры, помеченные проблемные атрибуты. Нет Scrutiny/данных → {ok:False}."""
+    """Detailed attributes of one disk from Scrutiny: wear, spare, errors, temperature
+    history, flagged problem attributes. No Scrutiny/data → {ok:False}."""
     dev = scrutiny_state().get("devices", {}).get((serial or "").strip())
     base = docker_service_url("scrutiny", 8080)
     if not dev or not base:
@@ -1525,7 +1525,7 @@ def scrutiny_device(serial):
             raw = a.get("value")
             val = raw
             if k == "data_units_written" and isinstance(raw, (int, float)):
-                val = round(raw * 512000 / 1e12, 2)          # NVMe: единицы по 512000 байт → TB
+                val = round(raw * 512000 / 1e12, 2)          # NVMe: units of 512000 bytes → TB
             level, hint = _scr_verdict(k, raw, a.get("status", 0))
             nm, unit = _SCR_NAMES.get(k, (k, ""))
             head.append({"name": nm, "value": val, "unit": unit, "status": a.get("status", 0),
@@ -1541,17 +1541,17 @@ def scrutiny_device(serial):
         return {"ok": False}
 
 # --------------------------------------------------------------------------- #
-#  vnstat — счётчик трафика по основному интерфейсу (сегодня/месяц/всего).
-#  Системный пакет; нет бинаря/данных → {ok:False}, и виджет прячется.
-#  vnstat 2.x (json v2) отдаёт rx/tx в БАЙТАХ.
+#  vnstat — traffic counter for the primary interface (today/month/total).
+#  System package; no binary/data → {ok:False}, and the widget hides.
+#  vnstat 2.x (json v2) returns rx/tx in BYTES.
 # --------------------------------------------------------------------------- #
 _vnstat_cache = {"t": 0, "data": {"ok": False}}
 _vnstat_lock = threading.Lock()
 VNSTAT_TTL = 30
 
-# Физические аплинки (eth0/wlan0/en*), но не docker-мосты (br-*), veth*, lo.
-# Суммируем их: при переключении кабель↔Wi-Fi (netguard) трафик идёт то по eth0,
-# то по wlan0 — сумма даёт цельную картину, а не «теряет» историю при смене линка.
+# Physical uplinks (eth0/wlan0/en*), but not docker bridges (br-*), veth*, lo.
+# We sum them: when switching cable↔Wi-Fi (netguard) traffic goes now over eth0,
+# now over wlan0 — the sum gives a whole picture instead of "losing" history on a link change.
 _PHYS_IF = re.compile(r"^(eth|en|end|wlan|wl)\d")
 
 def vnstat_state():
@@ -1594,14 +1594,14 @@ def vnstat_state():
     return out
 
 # --------------------------------------------------------------------------- #
-#  What's Up Docker (WUD) — сколько контейнеров ждут обновления образа.
-#  REST /api/containers. Нет контейнера → {ok:False}, показываем лишь бейдж-совет.
-#  Опрос редкий: WUD сам ходит в реестры по cron (6ч), чаще дёргать незачем.
+#  What's Up Docker (WUD) — how many containers are awaiting an image update.
+#  REST /api/containers. No container → {ok:False}, we show only a hint badge.
+#  Polling is rare: WUD itself hits the registries on cron (6h), no need to poke more often.
 # --------------------------------------------------------------------------- #
 _wud_cache = {"t": 0, "data": {"ok": False}}
 _wud_lock = threading.Lock()
-WUD_TTL = 45      # WUD пересчитывает «есть обновление» на docker-событие мгновенно;
-                  # держим кэш недолго, чтобы плашка гасла быстро и после внешних апдейтов
+WUD_TTL = 45      # WUD recomputes "update available" on a docker event instantly;
+                  # we keep the cache short so the badge clears quickly, also after external updates
 
 def wud_state():
     with _wud_lock:
@@ -1632,8 +1632,8 @@ def wud_state():
     return out
 
 def wud_invalidate():
-    """Сбросить кэш обновлений: после действия со стеком/контейнером (pull/up)
-    состояние «есть обновление» меняется, а иначе плашка висела бы до TTL."""
+    """Drop the updates cache: after a stack/container action (pull/up) the
+    "update available" state changes, otherwise the badge would linger until the TTL."""
     with _wud_lock:
         _wud_cache["t"] = 0
 
@@ -1649,28 +1649,28 @@ AVAIL_LOG = "/var/lib/nas-wizard/avail.log"   # written by nas-netguard.sh
 # (id, label-ru, label-en) — every tile the server can build. Collectors may
 # return None (service absent) — the tile silently disappears from the feed.
 GLANCE_TILES = [
-    ("pool",     "Пул",              "Pool"),
-    ("backup",   "Бэкап (общий)",    "Backup (all)"),
-    ("nbnext",   "Следующий бэкап",  "Next backup"),
-    ("avail",    "Доступность · 24h", "Uptime 24h"),
-    ("avail30",  "Доступность · 30d", "Uptime 30d"),
-    ("cputemp",  "Температура CPU",  "CPU temp"),
-    ("disktemp", "Температура дисков", "Disk temp"),
+    ("pool",     "Pool",             "Pool"),
+    ("backup",   "Backup (all)",     "Backup (all)"),
+    ("nbnext",   "Next backup",      "Next backup"),
+    ("avail",    "Uptime · 24h",     "Uptime 24h"),
+    ("avail30",  "Uptime · 30d",     "Uptime 30d"),
+    ("cputemp",  "CPU temp",         "CPU temp"),
+    ("disktemp", "Disk temp",        "Disk temp"),
     ("cpu",      "CPU",              "CPU"),
-    ("load",     "Нагрузка",         "Load"),
-    ("ram",      "Память",           "RAM"),
-    ("rootfs",   "Система",          "System SSD"),
-    ("uptime",   "Аптайм",           "Booted"),
-    ("net",      "Сеть",             "Network"),
-    ("netspeed", "Скорость сети",    "Net speed"),
-    ("inet",     "Интернет",         "Internet"),
-    ("traffic",  "Трафик",           "Traffic"),
-    ("speed",    "Спидтест",         "Speedtest"),
+    ("load",     "Load",             "Load"),
+    ("ram",      "RAM",              "RAM"),
+    ("rootfs",   "System",           "System SSD"),
+    ("uptime",   "Booted",           "Booted"),
+    ("net",      "Network",          "Network"),
+    ("netspeed", "Net speed",        "Net speed"),
+    ("inet",     "Internet",         "Internet"),
+    ("traffic",  "Traffic",          "Traffic"),
+    ("speed",    "Speedtest",        "Speedtest"),
     ("docker",   "Docker",           "Docker"),
-    ("wud",      "Образы",           "Images"),
-    ("updates",  "Обновления",       "Updates"),
+    ("wud",      "Images",           "Images"),
+    ("updates",  "Updates",          "Updates"),
     ("snapraid", "SnapRAID",         "SnapRAID"),
-    ("events",   "События",          "Events"),
+    ("events",   "Events",           "Events"),
 ]
 GLANCE_DEF_TILES = ["pool", "backup", "avail", "cputemp", "net", "docker"]
 
@@ -1683,14 +1683,14 @@ def glance_catalog():
         if t[0] == "backup":
             for pr in _safe(nb_profiles, []) or []:
                 nm = pr.get("name") or pr["id"]
-                cat.append(("nb:" + pr["id"], "Бэкап · " + nm, "Backup · " + nm))
+                cat.append(("nb:" + pr["id"], "Backup · " + nm, "Backup · " + nm))
     for s in _glance_scripts():
         cat.append((s["id"], s["name"], s["name"]))
-    # смонтированные тома: свободное место плиткой (вид «шкала» = заполнение)
+    # mounted volumes: free space as a tile ("gauge" view = fill level)
     for d in (_safe(_screen_heavy, {}) or {}).get("disks") or []:
         mts = d.get("mounts") or []
         nm = "System" if "/" in mts else (os.path.basename(mts[0]) if mts else d.get("name") or "?")
-        cat.append(("dk:" + (d.get("name") or "?"), "Диск · " + nm, "Disk · " + nm))
+        cat.append(("dk:" + (d.get("name") or "?"), "Disk · " + nm, "Disk · " + nm))
     return cat
 
 # User check scripts: any executable in ~/nas-config/scripts/glance/ becomes a
@@ -1723,7 +1723,7 @@ def _sc_refresh():
                 st = {0: "ok", 1: "warn"}.get(r.returncode, "danger")
                 txt = line
         except subprocess.TimeoutExpired:
-            st, txt = "warn", "таймаут"
+            st, txt = "warn", "timeout"
         except OSError as e:
             st, txt = "danger", str(e)
         out.append({"id": "sc:" + n, "name": os.path.splitext(n)[0],
@@ -1784,9 +1784,9 @@ def _gl_spark(field, points=48):
 
 
 def load_glance():
-    """Открытый статус-фид для внешних экранов: просто токен доступа и период
-    опроса доступности. Раскладку/выбор плиток делает само устройство —
-    endpoint отдаёт ВЕСЬ набор метрик (см. glance_payload)."""
+    """Open status feed for external displays: just an access token and the
+    availability polling interval. Layout/tile selection is done by the device
+    itself — the endpoint returns the WHOLE set of metrics (see glance_payload)."""
     d = _json_load_strict(GLANCE_FILE, {})
     return {"enabled": bool(d.get("enabled")),
             "token": d.get("token") or "",
@@ -1805,8 +1805,8 @@ def save_glance(d):
     pi = d.get("ping_interval")
     if pi in (15, 30, 60, 120):
         cur["ping_interval"] = pi
-        # период проверки доступности = период таймера netguard; drop-in меняет
-        # базовые 30 с, не трогая управляемый визардом юнит
+        # availability check interval = netguard timer interval; the drop-in changes
+        # the base 30 s without touching the wizard-managed unit
         try:
             os.makedirs("/etc/systemd/system/nas-netguard.timer.d", exist_ok=True)
             with open("/etc/systemd/system/nas-netguard.timer.d/override.conf", "w") as f:
@@ -1821,18 +1821,18 @@ def save_glance(d):
     return cur
 
 def _avail_segments(path=None):
-    """Журнал в RLE: «состояние сменилось на X в момент T». Строки читаются как
-    интервалы «до следующей строки», поэтому порядок ВАЖЕН.
+    """RLE journal: "state changed to X at moment T". Lines are read as intervals
+    "until the next line", so ORDER MATTERS.
 
-    А порядок не гарантирован: строку «был выключен» сторож дописывает ЗАДНИМ
-    числом (beat+30) уже после загрузки, и при стухшем beat она садится РАНЬШЕ
-    последней записи. Наивное чтение давало тогда отрицательный интервал (терялся)
-    и один «off» на три часа, накрывавший период, про который журнал говорит «up»:
-    в подсказке виджета появлялись два перекрывающихся простоя, а час, о котором
-    известны 2 минуты, красился в полный красный.
+    And the order is not guaranteed: the guard appends the "was off" line with a
+    BACKDATED timestamp (beat+30) after boot, and with a stale beat it lands BEFORE
+    the last record. A naive read then produced a negative interval (lost) and a
+    single three-hour "off" covering a period the journal calls "up": the widget
+    tooltip showed two overlapping outages, and an hour for which 2 minutes are
+    known was painted fully red.
 
-    Лечим на чтении: время монотонно (запись из прошлого прижимается к предыдущей),
-    подряд идущие одинаковые состояния схлопываются."""
+    We fix it on read: time is monotonic (a record from the past is clamped to the
+    previous one), consecutive identical states are collapsed."""
     raw = []
     try:
         with open(path or AVAIL_LOG) as f:
@@ -1845,16 +1845,16 @@ def _avail_segments(path=None):
     fixed = []
     prev_t = 0
     for t, s in raw:
-        t = max(t, prev_t)          # запись «из прошлого» не двигает время назад
+        t = max(t, prev_t)          # a record "from the past" does not move time backward
         prev_t = t
         fixed.append((t, s))
     segs = []
     for i, (t, s) in enumerate(fixed):
         nxt = fixed[i + 1][0] if i + 1 < len(fixed) else None
         if nxt is not None and nxt <= t:
-            continue                # нулевая длина — артефакт выравнивания, не период
+            continue                # zero length — a clamping artifact, not a period
         if segs and segs[-1][1] == s:
-            continue                # то же состояние — новый сегмент не начинается
+            continue                # same state — a new segment doesn't start
         segs.append((t, s))
     return segs
 
@@ -1892,8 +1892,8 @@ def avail_bars(hours=24, slots=96, path=None):
         v = rank[s]
         for k in range(max(0, s0), min(slots - 1, s1) + 1):
             bars[k] = v if bars[k] < 0 else min(bars[k], v)
-            # доля слота, накрытая этим сегментом: сегмент может лежать в слоте
-            # целиком, начинаться/кончаться внутри или проходить его насквозь
+            # the slot fraction covered by this segment: the segment may lie in the
+            # slot entirely, start/end inside it, or pass all the way through
             ov = min(b, start + (k + 1) * slot_w) - max(a, start + k * slot_w)
             if ov <= 0:
                 continue
@@ -1901,10 +1901,10 @@ def avail_bars(hours=24, slots=96, path=None):
             if s == "up":
                 up_s[k] += ov
     frac = [round(up_s[k] / kn_s[k], 4) if kn_s[k] > 0 else None for k in range(slots)]
-    # cov — какая ДОЛЯ слота вообще известна. Час, про который журнал знает две
-    # минуты, нельзя красить как полностью красный: 4 % аптайма от двух известных
-    # минут — это не «час простоя», это «мы почти ничего не знаем про этот час».
-    # Клиент приглушает цвет к «нет данных» пропорционально cov.
+    # cov — what SHARE of the slot is known at all. An hour the journal knows two
+    # minutes of must not be painted fully red: 4% uptime out of two known minutes
+    # is not "an hour of outage", it's "we know almost nothing about this hour".
+    # The client dims the color toward "no data" proportionally to cov.
     cov = [round(min(1.0, kn_s[k] / slot_w), 4) if slot_w else 0 for k in range(slots)]
     pct = round(100.0 * up_t / known_t, 1) if known_t else None
     return {"bars": bars, "frac": frac, "cov": cov, "pct": pct, "hours": hours,
@@ -1928,26 +1928,26 @@ def _inet_ok():
     return ok
 
 def _gl_ago(sec, en):
-    """Short age: '3д'/'3d', '5ч'/'5h', '12м'/'12m'."""
+    """Short age: '3d'/'3d', '5h'/'5h', '12m'/'12m'."""
     sec = max(0, int(sec))
     if sec >= 172800:
-        return "%dд" % (sec // 86400) if not en else "%dd" % (sec // 86400)
+        return "%dd" % (sec // 86400) if not en else "%dd" % (sec // 86400)
     if sec >= 5400:
-        return "%dч" % round(sec / 3600) if not en else "%dh" % round(sec / 3600)
-    return "%dм" % (sec // 60) if not en else "%dm" % (sec // 60)
+        return "%dh" % round(sec / 3600) if not en else "%dh" % round(sec / 3600)
+    return "%dm" % (sec // 60) if not en else "%dm" % (sec // 60)
 
 def _gl_gb(n, en):
     """Free space as a short number + unit tuple."""
     n = float(n or 0) / 1024 ** 3
     if n >= 1000:
-        return ("%.1f" % (n / 1024), "ТБ" if not en else "TB")
-    return ("%d" % n, "ГБ" if not en else "GB")
+        return ("%.1f" % (n / 1024), "TB" if not en else "TB")
+    return ("%d" % n, "GB" if not en else "GB")
 
 def _gl_bytes(n, en):
     """fmt_bytes with latin units for lang=en (TFT default fonts have no cyrillic)."""
     s = fmt_bytes(n)
     if en:
-        for a, b in (("КБ", "KB"), ("МБ", "MB"), ("ГБ", "GB"), ("ТБ", "TB"), ("ПБ", "PB"), ("Б", "B")):
+        for a, b in (("KB", "KB"), ("MB", "MB"), ("GB", "GB"), ("TB", "TB"), ("PB", "PB"), ("B", "B")):
             if s.endswith(a):
                 return s[:-len(a)] + b
     return s
@@ -1985,16 +1985,16 @@ def _nb_last_ok(pid):
 def _gl_backup_tile(best, en):
     if not best:
         return {"value": "—", "unit": "", "state": "warn",
-                "note": "ещё не было" if not en else "never ran", "raw": None}
+                "note": "never ran" if not en else "never ran", "raw": None}
     age = time.time() - best
     st = "danger" if age > 7 * 86400 else ("warn" if age > 2 * 86400 else "ok")
-    return {"value": _gl_ago(age, en), "unit": "назад" if not en else "ago", "state": st,
+    return {"value": _gl_ago(age, en), "unit": "ago" if not en else "ago", "state": st,
             "raw": {"ts": int(best), "age_s": int(age)}}
 
-# Цена КАЖДОГО поля ответа умножается на частоту опроса (грабля из CLAUDE.md).
-# glance опрашивают конструктор (?all=1, живые значения) и ESP32-экраны раз в
-# 3 с — а плитка «updates» честно запускала apt-get -s upgrade НА КАЖДЫЙ опрос:
-# поймано пять параллельных apt при load 14. У каждого источника свой TTL.
+# The cost of EACH response field is multiplied by the polling frequency (a trap from CLAUDE.md).
+# glance is polled by the constructor (?all=1, live values) and ESP32 displays every
+# 3 s — and the "updates" tile honestly ran apt-get -s upgrade ON EVERY poll:
+# five parallel apt caught at load 14. Each source has its own TTL.
 GLANCE_TILE_TTL = {"updates": 300, "disktemp": 120, "snapraid": 120, "inet": 60,
                    "docker": 15, "pool": 10, "rootfs": 10, "uptime": 5}
 _GL_TILES = {}
@@ -2023,10 +2023,10 @@ def _glance_tile(tid, en):
         di = disk_info(STORAGE) if os.path.ismount(STORAGE) else None
         if not di:
             return {"value": "—", "unit": "", "state": "danger",
-                    "note": "пул не смонтирован" if not en else "pool not mounted", "raw": None}
+                    "note": "pool not mounted" if not en else "pool not mounted", "raw": None}
         v, u = _gl_gb(di["free"], en)
         st = "danger" if di["pct"] >= 90 else ("warn" if di["pct"] >= 80 else "ok")
-        return {"value": v, "unit": u + (" своб." if not en else " free"), "state": st,
+        return {"value": v, "unit": u + (" free" if not en else " free"), "state": st,
                 "raw": {"free": di["free"], "used": di["used"], "pct": di["pct"]}}
     if tid == "backup":
         return _gl_backup_tile(max((_nb_last_ok(pr["id"]) for pr in nb_profiles()), default=0), en)
@@ -2041,7 +2041,7 @@ def _glance_tile(tid, en):
         if best is None:
             return None
         return {"value": _gl_ago(best - time.time(), en),
-                "unit": "до запуска" if not en else "until run", "state": "ok", "note": name,
+                "unit": "until run" if not en else "until run", "state": "ok", "note": name,
                 "raw": {"ts": int(best), "in_s": int(best - time.time()), "profile": name}}
     if tid.startswith("sc:"):
         s = next((x for x in _glance_scripts() if x["id"] == tid), None)
@@ -2051,7 +2051,7 @@ def _glance_tile(tid, en):
         return {"value": s["text"] or fall, "unit": "", "state": s["state"],
                 "raw": {"state": s["state"], "text": s["text"]}}
     if tid == "bright":
-        # слайдер подсветки: значение живёт НА устройстве, сервер лишь даёт плитку
+        # brightness slider: the value lives ON the device, the server only provides the tile
         return {"value": "", "unit": "", "state": "ok", "raw": {"local": True}}
     if tid.startswith("dk:"):
         d0 = next((x for x in (_safe(_screen_heavy, {}) or {}).get("disks") or []
@@ -2060,7 +2060,7 @@ def _glance_tile(tid, en):
             return None
         pct = round(d0["used_pct"])
         st = "danger" if pct >= 95 else ("warn" if pct >= 90 else "ok")
-        return {"value": _fmt_b(d0.get("free") or 0), "unit": "free" if en else "своб.",
+        return {"value": _fmt_b(d0.get("free") or 0), "unit": "free" if en else "free",
                 "state": st, "note": (d0.get("model") or d0.get("name") or ""),
                 "raw": {"pct": pct, "free": d0.get("free"), "used": d0.get("used"),
                         "size": d0.get("size"), "temp": d0.get("temp")}}
@@ -2070,10 +2070,10 @@ def _glance_tile(tid, en):
         if av["pct"] is None:
             return None
         st = "ok" if av["pct"] >= 99 else ("warn" if av["pct"] >= 95 else "danger")
-        unit = ("% / 24ч" if not en else "% / 24h") if tid == "avail" else \
-               ("% / 30д" if not en else "% / 30d")
-        # bars в raw: плитку доступности можно класть/растягивать как обычную,
-        # и устройство рисует ей uptime-kuma-полоски (вид bars)
+        unit = ("% / 24h" if not en else "% / 24h") if tid == "avail" else \
+               ("% / 30d" if not en else "% / 30d")
+        # bars in raw: the availability tile can be placed/stretched like a normal one,
+        # and the device draws uptime-kuma bars for it (bars view)
         return {"value": "%.1f" % av["pct"], "unit": unit, "state": st,
                 "raw": {"pct": av["pct"], "hours": hours,
                         "bars": av.get("bars") or [], "frac": av.get("frac") or []}}
@@ -2097,18 +2097,18 @@ def _glance_tile(tid, en):
     if tid == "netspeed":
         r = net_rate(default_iface()) or {}
         raw = {"rx": r.get("rx", 0), "tx": r.get("tx", 0)}
-        # rxh/txh — готовые строки для двухстрочного рендера на устройстве
-        # (download зелёным, upload красным, без стрелок-иконок)
+        # rxh/txh — ready-made strings for a two-line render on the device
+        # (download in green, upload in red, without arrow icons)
         if load_settings().get("netUnits") == "bits":  # panel-wide unit choice
             def _mb(x):
                 x = (x or 0) * 8 / 1e6
                 return "%d" % x if x >= 100 else "%.1f" % x
-            u = "Мбит/с" if not en else "Mbit/s"
+            u = "Mbit/s" if not en else "Mbit/s"
             raw["rxh"] = _mb(raw["rx"]) + " " + u
             raw["txh"] = _mb(raw["tx"]) + " " + u
             return {"value": "↓%s ↑%s" % (_mb(raw["rx"]), _mb(raw["tx"])),
                     "unit": u, "state": "ok", "raw": raw}
-        us = "/с" if not en else "/s"
+        us = "/s" if not en else "/s"
         raw["rxh"] = _gl_bytes(raw["rx"], en) + us
         raw["txh"] = _gl_bytes(raw["tx"], en) + us
         return {"value": "↓%s ↑%s" % (_gl_bytes(raw["rx"], en), _gl_bytes(raw["tx"], en)),
@@ -2139,7 +2139,7 @@ def _glance_tile(tid, en):
             return None
         st = "danger" if di["pct"] >= 90 else ("warn" if di["pct"] >= 80 else "ok")
         v, u = _gl_gb(di["free"], en)
-        return {"value": v, "unit": u + (" своб." if not en else " free"), "state": st,
+        return {"value": v, "unit": u + (" free" if not en else " free"), "state": st,
                 "raw": {"free": di["free"], "used": di["used"], "pct": di["pct"]}}
     if tid == "uptime":
         up = uptime_s()
@@ -2152,7 +2152,7 @@ def _glance_tile(tid, en):
                 "raw": {"ip": ip, "iface": default_iface(), "ok": good}}
     if tid == "inet":
         ok = _inet_ok()
-        return {"value": ("есть" if not en else "up") if ok else ("нет" if not en else "down"),
+        return {"value": ("up" if not en else "up") if ok else ("down" if not en else "down"),
                 "unit": "", "state": "ok" if ok else "danger", "raw": {"ok": ok}}
     if tid == "traffic":
         v = _safe(vnstat_state) or {}
@@ -2161,14 +2161,14 @@ def _glance_tile(tid, en):
         td = v.get("today") or {}
         return {"value": "↓%s ↑%s" % (_gl_bytes(td.get("rx"), en).replace(" ", ""),
                                        _gl_bytes(td.get("tx"), en).replace(" ", "")),
-                "unit": "сегодня" if not en else "today", "state": "ok",
+                "unit": "today" if not en else "today", "state": "ok",
                 "raw": {"rx": td.get("rx", 0), "tx": td.get("tx", 0)}}
     if tid == "speed":
         m = _safe(myspeed_state) or {}
         if not m.get("ok") or m.get("download") is None:
             return None
         return {"value": "↓%s ↑%s" % (m.get("download"), m.get("upload")),
-                "unit": "Мбит" if not en else "Mbit",
+                "unit": "Mbit" if not en else "Mbit",
                 "state": "warn" if m.get("failed") else "ok",
                 "raw": {"down": m.get("download"), "up": m.get("upload"),
                         "ping": m.get("ping"), "created": m.get("created")}}
@@ -2191,7 +2191,7 @@ def _glance_tile(tid, en):
         if not w.get("ok"):
             return None
         n = w.get("count", 0)
-        return {"value": str(n), "unit": "обнов." if not en else "upd",
+        return {"value": str(n), "unit": "upd" if not en else "upd",
                 "state": "warn" if n else "ok", "raw": {"count": n}}
     if tid == "updates":
         n = _safe(_apt_upgradable, 0) or 0
@@ -2220,7 +2220,7 @@ def _glance_tile(tid, en):
             unseen = sum(1 for e in ev.get("items", []) if e.get("id", 0) > ev.get("seen", 0))
         except (OSError, ValueError):
             unseen = 0
-        return {"value": str(unseen), "unit": "новых" if not en else "new", "state": "ok",
+        return {"value": str(unseen), "unit": "new" if not en else "new", "state": "ok",
                 "raw": {"unseen": unseen}}
     return None
 
@@ -2275,10 +2275,10 @@ def _translit(s):
 
 
 def glance_payload(lang="ru", screen=""):
-    """Открытый статус-фид: ВСЕ доступные плитки одним плоским списком (метрика
-    может исчезнуть — тогда её просто нет), плюс доступность 24h/30d, цвета
-    статусов и общий вердикт. Раскладку делает устройство. Кэш пара секунд,
-    seq растёт только при изменении (экран не перерисовывается зря)."""
+    """Open status feed: ALL available tiles as one flat list (a metric may
+    disappear — then it's simply gone), plus availability 24h/30d, status colors
+    and an overall verdict. Layout is done by the device. Cache a couple of seconds,
+    seq grows only on change (the screen isn't redrawn for nothing)."""
     en = (lang == "en")
     cfg = load_glance()
     with _GL_LOCK:
@@ -2349,8 +2349,8 @@ def load_notes_conf():
 def notes_root(create=True):
     root = (load_notes_conf().get("root") or "").strip()
     if not root:
-        # заметки — не бэкап: терять их из-за вынутого диска нельзя, поэтому при
-        # НЕсмонтированном хранилище честно уходим в домашнюю папку, а не в его точку
+        # notes are not a backup: we must not lose them because a disk was pulled, so with
+        # storage NOT mounted we honestly fall back to the home folder, not its mountpoint
         root = os.path.join(storage_root(), "notes") if storage_root() \
             else os.path.join(HOME, "nas-notes")
     if create and not os.path.isdir(root):
@@ -2363,7 +2363,7 @@ def _notes_abs(rel):
     rel = (rel or "").replace("\\", "/").strip("/")
     p = os.path.realpath(os.path.join(root, rel))
     if p != root and not p.startswith(root + os.sep):
-        raise ValueError("путь вне папки заметок")
+        raise ValueError("path outside the notes folder")
     return p
 
 _NOTE_FM = re.compile(r"^---\n(.*?)\n---\n?", re.S)
@@ -2483,10 +2483,10 @@ def notes_history(rel):
 
 def notes_hist_get(rel, ver):
     if not _NT_VER.match(ver or ""):
-        raise ValueError("плохая версия")
+        raise ValueError("bad version")
     fp = os.path.join(_nt_hist_dir(rel), ver)
     if not os.path.isfile(fp):
-        raise ValueError("нет такой версии")
+        raise ValueError("no such version")
     with open(fp, encoding="utf-8", errors="replace") as f:
         title, tags, body = _note_parse(f.read())
     return {"title": title, "tags": tags, "md": body, "ver": ver}
@@ -2519,7 +2519,7 @@ def notes_trash_restore(rel):
     src = _notes_abs(rel)
     parts = rel.strip("/").split("/")
     if parts[0] != ".trash" or not os.path.exists(src):
-        raise ValueError("это не корзина")
+        raise ValueError("not the trash")
     name = parts[-1]
     # restore to the folder the item was deleted from (recorded in .origins.json),
     # falling back to the notes root for items trashed before origins existed
@@ -2612,7 +2612,7 @@ def notes_gc():
 def note_get(rel):
     p = _notes_abs(rel)
     if not os.path.isfile(p):
-        raise ValueError("нет такой заметки")
+        raise ValueError("no such note")
     with open(p, encoding="utf-8", errors="replace") as f:
         text = f.read()
     title, tags, body = _note_parse(text)
@@ -2627,7 +2627,7 @@ def _note_slug(name):
 def note_save(rel, title, tags, md, pinned=False, base_mtime=0, force=False, conflict_copy=False):
     p = _notes_abs(rel)
     if not p.lower().endswith(".md"):
-        raise ValueError("не .md")
+        raise ValueError("not .md")
     out = {"ok": True}
     # optimistic lock: the file changed on disk after this client opened it
     # (another device or tab) — never clobber the other text silently
@@ -2641,7 +2641,7 @@ def note_save(rel, title, tags, md, pinned=False, base_mtime=0, force=False, con
             return {"ok": False, "conflict": True, "mtime": int(os.stat(p).st_mtime)}
         # unload-flush can't ask the user — park this client's text in a sibling;
         # the file name is a disk artifact, so it follows the UI language
-        word = "конфликт" if (load_settings().get("lang") or "en") == "ru" else "conflict"
+        word = "conflict" if (load_settings().get("lang") or "en") == "ru" else "conflict"
         stem = p[:-3] + " (" + word + time.strftime(" %Y-%m-%d %H-%M") + ")"
         cp, i = stem + ".md", 1
         while os.path.exists(cp):
@@ -2663,7 +2663,7 @@ def note_save(rel, title, tags, md, pinned=False, base_mtime=0, force=False, con
 
 def note_new(folder, title):
     lang = load_settings().get("lang") or "en"
-    base = _note_slug(title or ("Новая заметка" if lang == "ru" else "New note"))
+    base = _note_slug(title or ("New note" if lang == "ru" else "New note"))
     d = _notes_abs(folder)
     os.makedirs(d, exist_ok=True)
     _chown_user(d)
@@ -2672,7 +2672,7 @@ def note_new(folder, title):
         i += 1
         name = "%s %d" % (base, i)
     rel = ((folder.strip("/") + "/") if (folder or "").strip("/") else "") + name + ".md"
-    # title = deduped file name ("Новая заметка 2"), so duplicates are tellable apart
+    # title = deduped file name ("New note 2"), so duplicates are tellable apart
     note_save(rel, name, [], "")
     return {"ok": True, "path": rel}
 
@@ -2685,9 +2685,9 @@ def note_mkdir(folder, name):
 def note_move(rel, to):
     src, dst = _notes_abs(rel), _notes_abs(to)
     if not os.path.exists(src):
-        raise ValueError("нет источника")
+        raise ValueError("no source")
     if os.path.exists(dst):
-        raise ValueError("такое имя уже занято")
+        raise ValueError("that name is already taken")
     os.makedirs(os.path.dirname(dst), exist_ok=True)
     os.rename(src, dst)
     hd = _nt_hist_dir(rel)                      # history follows the note
@@ -2701,7 +2701,7 @@ def note_move(rel, to):
 def note_delete(rel):
     p = _notes_abs(rel)
     if not os.path.exists(p):
-        raise ValueError("нет такого пути")
+        raise ValueError("no such path")
     tr = os.path.join(notes_root(), ".trash", time.strftime("%Y-%m-%d"))
     os.makedirs(tr, exist_ok=True)
     name, i = os.path.basename(p), 1
@@ -2721,7 +2721,7 @@ def note_delete(rel):
 def note_upload(folder, name, data_b64):
     raw = base64.b64decode((data_b64 or "").split(",")[-1])
     if len(raw) > 30 * 1024 * 1024:
-        raise ValueError("файл больше 30 МБ")
+        raise ValueError("file larger than 30 MB")
     ad = os.path.join(_notes_abs(folder), "_assets")
     os.makedirs(ad, exist_ok=True)
     _chown_user(ad)
@@ -2757,28 +2757,28 @@ def notes_search(q):
     return {"hits": out}
 
 def notes_migrate(new_root):
-    """Move the whole notes tree to another folder (Настройки → Заметки)."""
+    """Move the whole notes tree to another folder (Settings → Notes)."""
     old = notes_root()
     new_root = (new_root or "").strip()
     if not new_root.startswith("/"):
-        raise ValueError("нужен абсолютный путь")
+        raise ValueError("an absolute path is required")
     new = os.path.realpath(new_root)
     if new == old:
-        return {"ok": True, "log": "уже там", "root": new}
+        return {"ok": True, "log": "already there", "root": new}
     if old.startswith(new + os.sep) or new.startswith(old + os.sep):
-        raise ValueError("папки вложены друг в друга")
+        raise ValueError("folders are nested in each other")
     os.makedirs(new, exist_ok=True)
     _chown_user(new)
     moved = 0
     for name in os.listdir(old):
         if os.path.exists(os.path.join(new, name)):
-            raise ValueError("в новой папке уже есть «%s»" % name)
+            raise ValueError("the new folder already contains \"%s\"" % name)
         shutil.move(os.path.join(old, name), os.path.join(new, name))
         moved += 1
     cur = load_notes_conf()
     cur["root"] = new
     _json_save(NOTES_CONF, cur, indent=2)
-    return {"ok": True, "log": "перенесено объектов: %d" % moved, "root": new}
+    return {"ok": True, "log": "objects moved: %d" % moved, "root": new}
 
 FAV_FILE = os.path.join(NAS_CONFIG, "fm-favorites.json")
 def load_favs():
@@ -2794,8 +2794,8 @@ SETTINGS_FILE = os.path.join(NAS_CONFIG, "desktop.json")
 def load_settings():
     return _json_load_strict(SETTINGS_FILE, {})
 def save_settings(d):
-    # MERGE, не перезапись: частичное обновление (например {lang} из мастера)
-    # не должно стирать остальные настройки
+    # MERGE, not overwrite: a partial update (e.g. {lang} from the wizard)
+    # must not wipe the other settings
     cur = load_settings()
     if isinstance(d, dict):
         cur.update(d)
@@ -2817,8 +2817,8 @@ def stats():
         "throttled": throttled(),
         "psu_ma": PSU_MA,
         "mem": mem_info(),
-        # пула нет — значит нет и его статистики (раньше молча подставлялась
-        # системная карта, и «заполнение пула» показывало ерунду)
+        # no pool means no pool stats either (it used to silently substitute the
+        # system card, and "pool usage" showed nonsense)
         "disk_pool": disk_info(STORAGE) if os.path.ismount(STORAGE) else None,
         "disk_root": disk_info("/"),
         "net": net_rate(iface),
@@ -2830,49 +2830,49 @@ def stats():
         # loss can't spin the icon forever; systemctl is only called while the
         # state flag is set, so the idle path stays cheap.
         "nb_running": any(nb_run_active(p["id"]) for p in nb_profiles()),
-        # USB-импорт идёт в фоне (udev), панель могла быть закрыта — показываем его
-        # в общем центре операций, а не только на вкладке настроек USB
+        # USB import runs in the background (udev), the panel may have been closed — show it
+        # in the shared operations center, not just on the USB settings tab
         "usb_import": _safe(lambda: usb_import_progress()["jobs"], []),
         "ts": int(time.time()),
     }
 
 # --------------------------------------------------------------------------- #
-#  Монитор-уведомления (temp / throttle / пул → Pushover)
+#  Monitor notifications (temp / throttle / pool → Pushover)
 # --------------------------------------------------------------------------- #
 MONITOR_FILE = os.path.join(NAS_CONFIG, "monitor.json")
 NOTIFY_CONF = "/etc/nas-wizard/notify.conf"
 _MON_LAST = {}
 _MON_BOOT_SENT = False
 _MON_SMART_LAST = 0
-_MON_DEVS = None      # набор томов с ФС на прошлом тике (для disk_add/disk_remove)
-_MON_IP = None        # последний известный локальный IP (для ip_changed)
-_MON_IFACE = None     # активный интерфейс по умолчанию (для link_changed)
-_MON_HEAT = 0         # счётчик подряд «горячих» тиков (для sustained_heat)
-_MON_HOURLY = {}      # ключ → время последней «часовой» проверки (updates, docker_space, …)
-_MON_WEEKLY = time.time()   # время последнего еженедельного отчёта (не слать сразу после рестарта)
-_MON_DISKSTAT = None  # предыдущий снимок /proc/diskstats (для slow_disk)
-_MON_HOG = {}         # pid → сколько тиков подряд процесс жрёт ресурсы
-_MON_USBIMP = time.time()   # старые записи журнала импорта не переигрываем
+_MON_DEVS = None      # set of volumes with a FS on the previous tick (for disk_add/disk_remove)
+_MON_IP = None        # last known local IP (for ip_changed)
+_MON_IFACE = None     # active default interface (for link_changed)
+_MON_HEAT = 0         # counter of consecutive "hot" ticks (for sustained_heat)
+_MON_HOURLY = {}      # key → time of the last "hourly" check (updates, docker_space, …)
+_MON_WEEKLY = time.time()   # time of the last weekly report (don't send right after a restart)
+_MON_DISKSTAT = None  # previous /proc/diskstats snapshot (for slow_disk)
+_MON_HOG = {}         # pid → how many consecutive ticks the process has been hogging resources
+_MON_USBIMP = time.time()   # don't replay old import-log entries
 _KNOWN_IPS_FILE = os.path.join(NAS_CONFIG, "known-ips.json")
 
-# Каталог событий: on (по умолчанию), priority (Pushover: -2 тихо … 2 экстренно), threshold.
-# priority-подсказка: 2 = риск потери данных (требует подтверждения), 1 = важно/срочно,
-# 0 = обычное, -1 = к сведению (без звука), -2 = только бейдж.
+# Event catalog: on (default), priority (Pushover: -2 quiet … 2 emergency), threshold.
+# priority hint: 2 = data-loss risk (requires acknowledgement), 1 = important/urgent,
+# 0 = normal, -1 = informational (no sound), -2 = badge only.
 def _def_monitor():
     return {"enabled": False, "cooldown": 1800, "events": {
-        # --- диски: подключение/отключение/режим ---
+        # --- disks: attach/detach/mode ---
         "disk_add":    {"on": True,  "priority": 0},
         "disk_remove": {"on": True,  "priority": 1},
         "readonly":    {"on": True,  "priority": 2},
         "fserror":     {"on": True,  "priority": 1},
-        # --- здоровье дисков (SMART, раз в 10 мин) ---
+        # --- disk health (SMART, every 10 min) ---
         "smart":       {"on": True,  "priority": 2},
         "smart_wear":  {"on": True,  "priority": 1, "threshold": 1},
         "disktemp":    {"on": True,  "priority": 1, "threshold": 60},
-        # --- место ---
+        # --- space ---
         "pool":        {"on": True,  "priority": 0, "threshold": 90},
         "diskfull":    {"on": True,  "priority": 0, "threshold": 90},
-        # --- Pi: питание/температура/ресурсы ---
+        # --- Pi: power/temperature/resources ---
         "temp":        {"on": True,  "priority": 1, "threshold": 75},
         "throttle":    {"on": True,  "priority": 1},
         "undervolt":   {"on": True,  "priority": 2},
@@ -2880,34 +2880,34 @@ def _def_monitor():
         "mem":         {"on": False, "priority": 0, "threshold": 92},
         "swap":        {"on": False, "priority": 0, "threshold": 60},
         "load":        {"on": False, "priority": 0, "threshold": 8},
-        # --- службы и контейнеры ---
+        # --- services and containers ---
         "svcfail":     {"on": True,  "priority": 1},
         "container":   {"on": True,  "priority": 0},
         "container_loop": {"on": True, "priority": 1},
         "docker_space":{"on": False, "priority": 0, "threshold": 20},
-        # --- доступ (вход в панель / SSH) ---
+        # --- access (panel login / SSH) ---
         "panel_new":   {"on": True,  "priority": 1},
         "panel_fail":  {"on": True,  "priority": 1, "threshold": 5},
         "ssh_login":   {"on": False, "priority": 0},
-        # --- сеть ---
+        # --- network ---
         "ip_changed":  {"on": True,  "priority": 0},
         "link_changed":{"on": True,  "priority": 0},
         "vpn_offline": {"on": True,  "priority": 1},
-        # --- защита данных (SnapRAID / mergerfs / бэкап) ---
+        # --- data protection (SnapRAID / mergerfs / backup) ---
         "snap_ok":     {"on": False, "priority": -1},
         "snap_err":    {"on": True,  "priority": 1},
         "scrub_err":   {"on": True,  "priority": 2},
         "delete_block":{"on": True,  "priority": 1},
         "backup":      {"on": False, "priority": 0},
         "mergerfs":    {"on": True,  "priority": 1},
-        # --- история файлов (fswatch); priority 2 = Pushover emergency (ретраи
-        #     каждую минуту до подтверждения) — по умолчанию не используем ---
+        # --- file history (fswatch); priority 2 = Pushover emergency (retries
+        #     every minute until acknowledged) — not used by default ---
         "fsw_corrupt": {"on": True,  "priority": 1},
         "fsw_guard":   {"on": True,  "priority": 1},
         "fsw_root":    {"on": True,  "priority": 1},
         "fsw_del":     {"on": True,  "priority": 0, "threshold": 50},
         "fsw_scan":    {"on": True,  "priority": -1},
-        # --- обслуживание ---
+        # --- maintenance ---
         "reboot_req":  {"on": True,  "priority": -1},
         "root_full":   {"on": True,  "priority": 1, "threshold": 90},
         "sd_degrade":  {"on": True,  "priority": 1},
@@ -2918,35 +2918,35 @@ def _def_monitor():
         "updates":     {"on": False, "priority": -1},
         "sec_updates": {"on": False, "priority": -1},
         "weekly":      {"on": False, "priority": -1},
-        # --- поведенческие ---
+        # --- behavioral ---
         "traffic":     {"on": False, "priority": 0, "threshold": 50},
         "slow_disk":   {"on": False, "priority": 0, "threshold": 250},
         "proc_hog":    {"on": False, "priority": 0, "threshold": 80},
         "inodes":      {"on": True,  "priority": 1, "threshold": 90},
         "boot":        {"on": False, "priority": -1},
-        # --- USB авто-импорт (итог копирования SD/флешки; Pushover off — скрипт
-        #     импорта умеет слать сам, чтобы не дублировать) ---
+        # --- USB auto-import (SD/flash copy result; Pushover off — the import
+        #     script can send on its own, to avoid duplicates) ---
         "usb_import":  {"on": False, "priority": 0, "desk": True},
-        # --- бэкап главного NAS на этот NAS (итог прогона) ---
+        # --- backup of the main NAS onto this NAS (run result) ---
         "nas_backup":  {"on": True, "priority": 0, "desk": True},
-        # --- здоровье бэкапа (периодические проверки, раз в 30 мин) ---
+        # --- backup health (periodic checks, every 30 min) ---
         "nb_conn":     {"on": True,  "priority": 1, "desk": True},
         "nb_srcmiss":  {"on": False, "priority": 1, "desk": True},
         "nb_stale":    {"on": True,  "priority": 1, "threshold": 7,  "desk": True},
         "nb_size":     {"on": False, "priority": 0, "threshold": 40, "desk": True},
         "nb_dest":     {"on": True,  "priority": 1, "threshold": 95, "desk": True},
-        "nb_guard":    {"on": True,  "priority": 2, "desk": True},   # сработала защита --max-delete
-        "nb_verify":   {"on": True,  "priority": 1, "desk": True},   # сверка контрольных сумм нашла расхождения
-        # --- надёжность: диск сам переподключился (авто-mount) ---
+        "nb_guard":    {"on": True,  "priority": 2, "desk": True},   # --max-delete guard fired
+        "nb_verify":   {"on": True,  "priority": 1, "desk": True},   # checksum verification found mismatches
+        # --- reliability: disk reconnected on its own (auto-mount) ---
         "disk_remount":{"on": True, "priority": 0, "desk": True},
-        # --- активная термозащита (предупреждение/действие) ---
+        # --- active thermal protection (warning/action) ---
         "thermal_guard":{"on": True, "priority": 1, "desk": True},
-        # --- ежедневная/еженедельная сводка состояния ---
+        # --- daily/weekly status summary ---
         "daily_summary":{"on": True, "priority": -1, "desk": False},
     }}
 
 def _monitor_defaults_desk(d):
-    """desk = показывать плашкой на рабочем столе; по умолчанию — всё важное (priority>=1)."""
+    """desk = show as a card on the desktop; by default — everything important (priority>=1)."""
     for k, v in d.get("events", {}).items():
         v.setdefault("desk", v.get("priority", 0) >= 1)
     return d
@@ -3024,11 +3024,11 @@ def save_notify(user, token):
     return {"ok": True}
 
 # --------------------------------------------------------------------------- #
-#  Серверный перевод тем же словарём, что и клиент (web/i18n.js). Нужен для того,
-#  что уходит МИМО браузера — прежде всего Pushover: там строки формируются на
-#  сервере по-русски и клиентский nasTr к ним не применяется. Правило переноса
-#  один в один: перевод по «целым словам» (границы — не-кириллица), длинные ключи
-#  приоритетнее. Язык берём из настроек (desktop.json:lang), кэшируем словарь.
+#  Server-side translation with the same dictionary as the client (web/i18n.js).
+#  Needed for what goes AROUND the browser — above all Pushover: there strings are
+#  built on the server in Russian and the client nasTr is not applied to them. The
+#  porting rule is one-to-one: translate by "whole words" (boundaries — non-Cyrillic),
+#  longer keys first. The language comes from settings (desktop.json:lang), dictionary cached.
 # --------------------------------------------------------------------------- #
 _I18N = None
 _I18N_RX = None
@@ -3047,7 +3047,7 @@ def _i18n_load():
                 v = json.loads('"' + m.group(2) + '"')
             except ValueError:
                 continue
-            if k and re.search(r"[А-Яа-яЁё]", k):      # ключ обязан быть русским (не шум из IIFE)
+            if k and re.search(r"[А-Яа-яЁё]", k):      # the key must be Russian (not noise from the IIFE)
                 d[k] = v
     except Exception:
         d = {}
@@ -3073,7 +3073,7 @@ def tr(text, lang=None):
     return _I18N_RX.sub(lambda m: _I18N.get(m.group(0), m.group(0)), text)
 
 def push_notify(title, msg, priority=0):
-    title = tr(title); msg = tr(msg)      # Pushover идёт мимо клиента — переводим тут
+    title = tr(title); msg = tr(msg)      # Pushover goes around the client — translate here
     try:
         priority = max(-2, min(2, int(priority)))
     except (ValueError, TypeError):
@@ -3083,7 +3083,7 @@ def push_notify(title, msg, priority=0):
         try:
             body = {"token": n["token"], "user": n["user"], "title": title,
                     "message": msg, "priority": priority}
-            if priority == 2:            # экстренный: Pushover требует retry/expire + подтверждение
+            if priority == 2:            # emergency: Pushover requires retry/expire + acknowledgement
                 body["retry"] = 60
                 body["expire"] = 3600
             data = urlencode(body).encode()
@@ -3097,17 +3097,17 @@ def push_notify(title, msg, priority=0):
     return False
 
 # --------------------------------------------------------------------------- #
-#  Журнал событий (центр уведомлений): всё важное — события монитора, действия
-#  пользователя, ошибки — пишется сюда и хранится ~месяц. Pushover/рабочий стол —
-#  лишь способы доставки, журнал ведётся всегда.
+#  Event log (notification center): everything important — monitor events, user
+#  actions, errors — is written here and kept for ~a month. Pushover/desktop are
+#  just delivery methods, the log is always kept.
 # --------------------------------------------------------------------------- #
 EVENTS_FILE = os.path.join(NAS_CONFIG, "events.json")
 EVENTS_CAP  = 3000
 EVENTS_DAYS = 31
 _events = None
 _events_lock = threading.Lock()
-# Условие на том же замке: long-poll /api/events спит на нём, log_event будит —
-# панель узнаёт о событии мгновенно, а не на следующем опросе.
+# Condition on the same lock: long-poll /api/events sleeps on it, log_event wakes it —
+# the panel learns of an event instantly, not on the next poll.
 _events_cond = threading.Condition(_events_lock)
 
 def _events_load():
@@ -3133,7 +3133,7 @@ def _events_save(ev):
     except OSError:
         pass
 
-# категория события каталога → раздел журнала (для фильтров в окне уведомлений)
+# catalog event category → log section (for filters in the notifications window)
 _EVENT_KIND = {}
 for _k in ("disk_add", "disk_remove", "readonly", "fserror", "smart", "smart_wear",
            "disktemp", "slow_disk", "sd_degrade", "usb_import", "disk_remount"):
@@ -3157,8 +3157,8 @@ for _k in ("snap_ok", "snap_err", "scrub_err", "delete_block", "backup", "merger
     _EVENT_KIND[_k] = "protect"
 
 def log_event(event, title, msg="", lvl=None, kind=None, desk=None):
-    """Записать событие в журнал. lvl: info|ok|warn|crit. desk=None → из настроек
-    события (показывать ли плашкой на рабочем столе)."""
+    """Write an event to the log. lvl: info|ok|warn|crit. desk=None → from the
+    event settings (whether to show as a card on the desktop)."""
     evc = load_monitor().get("events", {}).get(event) or {}
     if lvl is None:
         p = evc.get("priority", 0)
@@ -3172,10 +3172,10 @@ def log_event(event, title, msg="", lvl=None, kind=None, desk=None):
     with _events_lock:
         ev = _events_load()
         items = ev["items"]
-        # дедуп: то же некритичное событие с тем же заголовком за 4 ч → счётчик ×N.
-        # Склеиваем ТОЛЬКО непрочитанные записи: если пользователь уже прочитал
-        # старую, повтор должен создать новую (иначе бейдж/плашка не оживут).
-        # Критичные всегда добавляются заново — это и есть периодическое напоминание.
+        # dedup: the same non-critical event with the same title within 4 h → counter ×N.
+        # We merge ONLY unread entries: if the user has already read the old
+        # one, a repeat must create a new one (otherwise the badge/card won't come alive).
+        # Critical ones are always added anew — that is the periodic reminder.
         if lvl != "crit":
             for it in reversed(items[-40:]):
                 if it.get("event") == event and it.get("title") == title \
@@ -3196,13 +3196,13 @@ def log_event(event, title, msg="", lvl=None, kind=None, desk=None):
         if len(items) > EVENTS_CAP or (items and items[0].get("t", 0) < cutoff):
             ev["items"] = [it for it in items if it.get("t", 0) >= cutoff][-EVENTS_CAP:]
         _events_save(ev)
-        _events_cond.notify_all()      # разбудить long-poll ожидающих /api/events
+        _events_cond.notify_all()      # wake long-poll waiters on /api/events
         return ev["seq"]
 
 def events_list(after=0, limit=400, wait=0):
-    """wait>0 (сек) — long-poll: если новых событий нет, держим запрос до wait
-    секунд, пока log_event не разбудит. Так панель реагирует мгновенно, а не
-    ждёт следующего опроса. wait капим ниже таймаута сокета обработчика."""
+    """wait>0 (sec) — long-poll: if there are no new events, hold the request up to wait
+    seconds until log_event wakes it. This way the panel reacts instantly, not
+    waiting for the next poll. We cap wait below the handler socket timeout."""
     try:
         after = int(after or 0); limit = max(1, min(3000, int(limit or 400)))
         wait = max(0, min(25, int(wait or 0)))
@@ -3214,22 +3214,22 @@ def events_list(after=0, limit=400, wait=0):
         out = [it for it in items if it["id"] > after] if after else list(items)
         return {"events": out[-limit:], "seen": ev["seen"], "seq": ev["seq"],
                 "unseen": sum(1 for it in items if it["id"] > ev["seen"])}
-    with _events_cond:                          # тот же замок, что _events_lock
+    with _events_cond:                          # same lock as _events_lock
         while True:
             ev = _events_load()
-            # отдаём сразу: есть новое, либо это обычный опрос (не long-poll)
+            # return immediately: there's something new, or this is a normal poll (not long-poll)
             if ev["seq"] > after or not after or wait <= 0:
                 return snapshot(ev)
             remain = deadline - time.time()
             if remain <= 0:
-                return snapshot(ev)             # таймаут — пустой ответ с текущим seq
-            _events_cond.wait(min(remain, 10))  # спим; log_event разбудит раньше
+                return snapshot(ev)             # timeout — empty response with the current seq
+            _events_cond.wait(min(remain, 10))  # sleep; log_event wakes us sooner
 
 def events_seen(eid):
     try:
         eid = int(eid)
     except (ValueError, TypeError):
-        return {"ok": False, "log": "плохой id"}
+        return {"ok": False, "log": "bad id"}
     with _events_lock:
         ev = _events_load()
         ev["seen"] = max(ev["seen"], min(eid, ev["seq"]))
@@ -3244,47 +3244,47 @@ def events_clear():
         _events_save(ev)
     return {"ok": True}
 
-# --- журналирование действий пользователя (вызывается из do_POST) ------------
-_SYSD_RU = {"start": "запуск", "stop": "остановка", "restart": "перезапуск",
-            "enable": "автозапуск вкл", "disable": "автозапуск выкл", "reload": "reload"}
+# --- logging of user actions (called from do_POST) ------------
+_SYSD_RU = {"start": "start", "stop": "stop", "restart": "restart",
+            "enable": "autostart on", "disable": "autostart off", "reload": "reload"}
 
 def _act_title(p, b):
-    """Заголовок записи журнала для действия, или None если действие не журналируем."""
+    """Log entry title for the action, or None if the action isn't logged."""
     g = lambda k: str(b.get(k) or "")
     if p == "/api/power":
-        return {"reboot": "Перезагрузка по команде с панели",
-                "poweroff": "Выключение по команде с панели"}.get(g("action"))
+        return {"reboot": "Reboot by command from the panel",
+                "poweroff": "Shutdown by command from the panel"}.get(g("action"))
     if p == "/api/systemd":
-        return "Служба %s: %s" % (g("unit"), _SYSD_RU.get(g("action"), g("action")))
+        return "Service %s: %s" % (g("unit"), _SYSD_RU.get(g("action"), g("action")))
     if p == "/api/stack/action":
-        return "Стек %s: %s" % (g("name"), g("action"))
+        return "Stack %s: %s" % (g("name"), g("action"))
     if p == "/api/container/action":
-        return "Контейнер %s: %s" % (g("id")[:12], g("action"))
+        return "Container %s: %s" % (g("id")[:12], g("action"))
     if p == "/api/docker/prune":
-        return "Docker: очистка (%s)" % g("what")
+        return "Docker: prune (%s)" % g("what")
     if p == "/api/disk/format":
-        return None if b.get("dry") else "Форматирование %s → %s (%s)" % (g("dev"), g("fs") or "ext4", g("role") or "data")
+        return None if b.get("dry") else "Formatting %s → %s (%s)" % (g("dev"), g("fs") or "ext4", g("role") or "data")
     if p == "/api/disk/eject":
-        return "Извлечён диск %s" % g("dev")
+        return "Ejected disk %s" % g("dev")
     if p == "/api/disk/mount":
-        return ("Отмонтировано: %s" if b.get("unmount") else "Смонтировано: %s") % g("target")
+        return ("Unmounted: %s" if b.get("unmount") else "Mounted: %s") % g("target")
     if p == "/api/disk/mount-dev":
-        return "Подключение диска %s" % g("dev")
+        return "Mounting disk %s" % g("dev")
     if p == "/api/disk/label":
-        return "Метка диска %s → %s" % (g("dev"), g("label"))
+        return "Disk label %s → %s" % (g("dev"), g("label"))
     if p == "/api/disk/spindown":
         m = b.get("minutes") or 0
-        return "Сон диска %s: %s" % (g("dev"), ("%s мин" % m) if m else "выкл")
+        return "Disk sleep %s: %s" % (g("dev"), ("%s min" % m) if m else "off")
     if p == "/api/disk/smart-test":
-        return "SMART-тест %s (%s)" % (g("dev"), g("kind") or "short")
+        return "SMART test %s (%s)" % (g("dev"), g("kind") or "short")
     if p == "/api/fs/trash/empty":
-        return "Корзина очищена"
+        return "Trash emptied"
     if p == "/api/usb-import/run":
-        return "USB-импорт запущен вручную (%s)" % g("dev")
+        return "USB import started manually (%s)" % g("dev")
     if p == "/api/usb-import":
-        return "Настройки USB-импорта изменены"
+        return "USB import settings changed"
     if p == "/api/motd":
-        return "SSH-приветствие изменено"
+        return "SSH greeting changed"
     return None
 
 _ACT_KIND = {"/api/disk/": "disk", "/api/fs/": "files", "/api/power": "svc",
@@ -3298,7 +3298,7 @@ def log_action(p, body, result):
     ok = not (isinstance(result, dict) and result.get("ok") is False)
     kind = next((v for k, v in _ACT_KIND.items() if p.startswith(k)), "action")
     msg = "" if ok else str((result or {}).get("log") or "")[:300]
-    log_event("action", title + ("" if ok else " — ошибка"), msg,
+    log_event("action", title + ("" if ok else " — error"), msg,
               "ok" if ok else "warn", kind=kind, desk=False)
 
 def _phys_devs():
@@ -3308,10 +3308,10 @@ def _phys_devs():
         return []
 
 def _smart_scan():
-    """Один проход smartctl по всем физическим дискам → dict со здоровьем/износом/темп."""
+    """One smartctl pass over all physical disks → dict with health/wear/temp."""
     res = {}
     for dev in _phys_devs():
-        j = _smartctl_json(["-n", "standby", "-H", "-A"], dev, timeout=15)   # не будить спящие диски
+        j = _smartctl_json(["-n", "standby", "-H", "-A"], dev, timeout=15)   # don't wake sleeping disks
         if not _smart_has_data(j):
             continue
         passed = (j.get("smart_status") or {}).get("passed")
@@ -3323,13 +3323,13 @@ def _smart_scan():
             elif nm in ("Temperature_Celsius", "Airflow_Temperature_Cel") and temp is None: temp = raw
         if temp is None:
             temp = (j.get("temperature") or {}).get("current")
-        if isinstance(temp, int) and temp > 200:      # некоторые прошивки кладут в raw мусор
+        if isinstance(temp, int) and temp > 200:      # some firmwares put garbage in raw
             temp = temp & 0xff
         res[dev] = {"passed": passed, "realloc": realloc, "pending": pending, "temp": temp}
     return res
 
 def _block_volumes():
-    """Устройства с файловой системой: путь → метка (для событий подключён/отключён)."""
+    """Devices with a filesystem: path → label (for attached/detached events)."""
     vols = {}
     def walk(node):
         fs = node.get("fstype")
@@ -3344,9 +3344,9 @@ def _block_volumes():
     return vols
 
 def _removable_devs():
-    """Пути съёмных носителей (флешки, SD) вместе с разделами: разделы наследуют
-    флаг rm родителя. USB-SATA мосты с постоянными дисками сюда НЕ попадают —
-    у них rm=0, и тревога по ним обязана срабатывать."""
+    """Paths of removable media (flash drives, SD) together with partitions: partitions
+    inherit the parent's rm flag. USB-SATA bridges with permanent disks do NOT land here —
+    they have rm=0, and alerts for them must fire."""
     out = set()
     def walk(d, rm):
         rm = rm or d.get("rm") in (True, "1", 1)
@@ -3359,9 +3359,9 @@ def _removable_devs():
     return out
 
 def _readonly_mounts():
-    """Смонтированное ro, что похоже на сбой ФС. Съёмные носители исключаем:
-    флешка/карта, поднятая автомонтом только на чтение (грязный ext4, vfat с
-    ошибкой), — обычное дело, а не поломка NAS."""
+    """Mounted ro that looks like a FS failure. We exclude removable media:
+    a flash drive/card brought up read-only by automount (dirty ext4, vfat with
+    an error) is routine, not a NAS failure."""
     out = []
     rem = _safe(_removable_devs, set())
     amb = (automount_state().get("base") or "/media/nas").rstrip("/") + "/"
@@ -3374,7 +3374,7 @@ def _readonly_mounts():
             continue
         if not (mp.startswith("/mnt/") or mp.startswith("/media/")):
             continue
-        if mp.startswith(amb) or src in rem:      # съёмное — не наша забота
+        if mp.startswith(amb) or src in rem:      # removable — not our concern
             continue
         if re.search(r"(^|,)ro(,|$)", opts):
             out.append(mp)
@@ -3406,21 +3406,21 @@ def _bad_containers():
         if len(f) < 3:
             continue
         name, state, status = f[0], f[1], f[2]
-        # 0/143(SIGTERM)/137(SIGKILL) — штатная остановка (docker stop), не сбой
+        # 0/143(SIGTERM)/137(SIGKILL) — normal stop (docker stop), not a failure
         m = re.search(r"Exited \((\d+)\)", status)
         if state == "exited" and m and int(m.group(1)) not in (0, 143, 137):
-            bad.append("%s (упал, код %s)" % (name, m.group(1)))
+            bad.append("%s (crashed, code %s)" % (name, m.group(1)))
         elif "unhealthy" in status.lower():
             bad.append("%s (unhealthy)" % name)
     return bad
 
 # --------------------------------------------------------------------------- #
-#  Единая отправка события уведомления (проверяет вкл./cooldown/приоритет).
-#  Зовётся и из monitor_tick, и из хука входа в панель.
+#  Unified sending of a notification event (checks on/cooldown/priority).
+#  Called both from monitor_tick and from the panel-login hook.
 # --------------------------------------------------------------------------- #
 def _safe(fn, default=None):
-    """Вызвать детектор, проглотив исключение — один сбойный детектор не должен
-    останавливать весь monitor_tick."""
+    """Call a detector, swallowing the exception — one failing detector must not
+    stop the whole monitor_tick."""
     try:
         return fn()
     except Exception:
@@ -3435,7 +3435,7 @@ def mon_notify(dedup_key, title, msg, event=None):
         return False
     _MON_LAST[dedup_key] = now
     try:
-        log_event(ev_name, title, msg)      # журнал — всегда
+        log_event(ev_name, title, msg)      # log — always
     except Exception:
         pass
     if cfg.get("enabled") and ev.get("on"):
@@ -3457,7 +3457,7 @@ def _remember_ip(ip):
         pass
 
 def _jrnl(since, *match):
-    """Строки журнала за интервал, содержащие любой из паттернов (регистронезависимо)."""
+    """Journal lines within the interval containing any of the patterns (case-insensitive)."""
     r = _run(["journalctl", "--since", since, "--no-pager", "-q"] + list(match), timeout=8)
     return (r.get("log") or "").splitlines()
 
@@ -3480,19 +3480,19 @@ def _tailscale_offline():
         return None
 
 def _snapraid_events():
-    """Разобрать хвост /var/log/snapraid.log (маркеры NASRESULT от обёртки)."""
+    """Parse the tail of /var/log/snapraid.log (NASRESULT markers from the wrapper)."""
     log = _read("/var/log/snapraid.log")
     if not log:
         return None
     tail = log.splitlines()[-80:]
     ev = {}
     for l in tail:
-        if "ABORT: удалено файлов" in l:
+        if "ABORT: files deleted" in l:
             ev["delete_blocked"] = l.strip()[-160:]
-        mm = re.search(r"(\d+) errors", l)          # scrub: счётчик ошибок > 0
+        mm = re.search(r"(\d+) errors", l)          # scrub: error counter > 0
         if (mm and int(mm.group(1)) > 0) or "silent error" in l.lower():
             ev["scrub_err"] = l.strip()[-160:]
-    for l in reversed(tail):                          # последний итог sync
+    for l in reversed(tail):                          # last sync result
         if "NASRESULT sync ok" in l:
             ev.setdefault("sync_ok", l.replace("NASRESULT ", "").strip()); break
         if "NASRESULT sync err" in l:
@@ -3500,8 +3500,8 @@ def _snapraid_events():
     return ev or None
 
 def _usb_import_events(since):
-    """Новые записи журнала USB-импорта (/var/log/nas-usb-import.log) после метки since.
-    → ([(lvl, title, msg, ts), ...], новая метка)."""
+    """New USB-import log entries (/var/log/nas-usb-import.log) after the since mark.
+    → ([(lvl, title, msg, ts), ...], new mark)."""
     log = _read("/var/log/nas-usb-import.log")
     out, latest = [], since
     for l in log.splitlines()[-30:] if log else []:
@@ -3517,15 +3517,15 @@ def _usb_import_events(since):
         latest = max(latest, ts)
         rest = m.group(2).strip()
         if rest.startswith("import OK ->"):
-            out.append(("ok", "USB-импорт завершён", "Скопировано в " + rest.split("->", 1)[1].strip(), ts))
+            out.append(("ok", "USB import finished", "Copied to " + rest.split("->", 1)[1].strip(), ts))
         elif rest.startswith("import FAIL"):
-            out.append(("warn", "USB-импорт: ошибка", "Не удалось скопировать (" + rest[len("import FAIL"):].strip() + ") — подробности в /var/log/nas-usb-import.log", ts))
+            out.append(("warn", "USB import: error", "Failed to copy (" + rest[len("import FAIL"):].strip() + ") — details in /var/log/nas-usb-import.log", ts))
         elif rest.startswith("import ") and "->" in rest:
-            out.append(("info", "USB-импорт начат", rest[len("import "):], ts))
+            out.append(("info", "USB import started", rest[len("import "):], ts))
     return out, latest
 
 def _mergerfs_missing():
-    """Диски данных из fstab, которые сейчас НЕ смонтированы (ветка выпала из пула)."""
+    """Data disks from fstab that are NOT currently mounted (a branch dropped out of the pool)."""
     fstab = _read("/etc/fstab")
     want = set(re.findall(r"\s(/mnt/disk\d+)\s", fstab))
     return sorted(mp for mp in want if not os.path.ismount(mp))
@@ -3553,10 +3553,10 @@ _APT_LOCK = threading.Lock()
 
 
 def apt_updates(refresh=False):
-    """Список пакетов, доступных к обновлению: [{name, cur, new, security}].
+    """List of packages available to upgrade: [{name, cur, new, security}].
 
-    Кэш 5 минут + одиночный вход: apt-get -s upgrade стоит ~секунду и держит
-    ~130 МБ, а звали его отовсюду (плитки glance, экран, панель)."""
+    5-minute cache + single entry: apt-get -s upgrade costs ~a second and holds
+    ~130 MB, and it was called from everywhere (glance tiles, screen, panel)."""
     with _APT_LOCK:
         if not refresh and _APT_CACHE["d"] is not None \
                 and time.time() - _APT_CACHE["t"] < 300:
@@ -3570,7 +3570,7 @@ def _apt_updates_run(refresh=False):
     r = _run(["apt-get", "-s", "-o", "Debug::NoLocking=true", "upgrade"], timeout=60)
     pkgs = []
     for l in (r.get("log") or "").splitlines():
-        # формат: Inst bash [5.2.15-2] (5.2.15-3 Debian:12/stable [arm64])
+        # format: Inst bash [5.2.15-2] (5.2.15-3 Debian:12/stable [arm64])
         m = re.match(r"^Inst (\S+) \[([^\]]*)\] \((\S+)\s+([^)]*)\)", l)
         if m:
             src = m.group(4)
@@ -3611,7 +3611,7 @@ def _cron_failures():
     return [j.get("id") or j.get("name") for j in (st.get("failed") or [])][:8] if isinstance(st, dict) else []
 
 def _ntp_unsynced():
-    # chrony часто держит NTPSynchronized=no, будучи синхронным — сначала спросим сам chrony
+    # chrony often keeps NTPSynchronized=no while being synced — ask chrony itself first
     if shutil.which("chronyc"):
         r = _run(["chronyc", "-n", "tracking"], timeout=6)
         log = r.get("log") or ""
@@ -3621,7 +3621,7 @@ def _ntp_unsynced():
     return (r.get("log") or "").strip() == "no"
 
 def _diskstat_await():
-    """await (мс/операцию) по /proc/diskstats с прошлого снимка → dict dev→await."""
+    """await (ms/operation) from /proc/diskstats since the last snapshot → dict dev→await."""
     global _MON_DISKSTAT
     cur = {}
     for l in _read("/proc/diskstats").splitlines():
@@ -3631,7 +3631,7 @@ def _diskstat_await():
         dev = f[2]
         if not re.match(r"^(sd[a-z]|nvme\d+n\d+|mmcblk\d+)$", dev):
             continue
-        # поля: reads(3) ... read_ticks(6), writes(7) ... write_ticks(10)
+        # fields: reads(3) ... read_ticks(6), writes(7) ... write_ticks(10)
         ios = int(f[3]) + int(f[7]); ticks = int(f[6]) + int(f[10])
         cur[dev] = (ios, ticks)
     out = {}
@@ -3640,13 +3640,13 @@ def _diskstat_await():
             p = _MON_DISKSTAT.get(dev)
             if p:
                 dios, dticks = ios - p[0], ticks - p[1]
-                if dios > 20:                       # только под заметной нагрузкой
+                if dios > 20:                       # only under noticeable load
                     out[dev] = dticks / dios
     _MON_DISKSTAT = cur
     return out
 
 def _proc_hog(cpu_thr):
-    """Процесс, устойчиво жрущий CPU (по нескольким тикам)."""
+    """A process steadily hogging CPU (over several ticks)."""
     global _MON_HOG
     try:
         procs = processes("cpu", 6).get("processes", [])
@@ -3658,7 +3658,7 @@ def _proc_hog(cpu_thr):
     for pid, p in hot.items():
         n = _MON_HOG.get(pid, 0) + 1
         new[pid] = n
-        if n == 3:                                  # ~3 тика подряд
+        if n == 3:                                  # ~3 ticks in a row
             fired = "%s (pid %s) — %s%% CPU" % (p.get("name"), pid, round(p.get("cpu") or 0))
     _MON_HOG = new
     return fired
@@ -3680,15 +3680,15 @@ def monitor_tick():
     global _MON_BOOT_SENT, _MON_SMART_LAST, _MON_DEVS, _MON_IP, _MON_IFACE, _MON_HEAT, _MON_WEEKLY, _MON_USBIMP
     cfg = load_monitor()
     ev = cfg.get("events", {})
-    # Детекция и ЖУРНАЛ работают всегда. Настройки события управляют только
-    # доставкой: Pushover = cfg.enabled + ev.on (проверяется в fire),
-    # плашка на рабочем столе = ev.desk (проверяется клиентом по журналу).
+    # Detection and the LOG always work. Event settings only control
+    # delivery: Pushover = cfg.enabled + ev.on (checked in fire),
+    # the desktop card = ev.desk (checked by the client via the log).
     on  = lambda k: True
     pri = lambda k: ev.get(k, {}).get("priority", 0)
     thr = lambda k, dv: ev.get(k, {}).get("threshold", dv)
     now = time.time()
     cd = cfg.get("cooldown", 1800)
-    if len(_MON_LAST) > 400:            # не копить ключи вечно (ssh:/panel_new: по IP)
+    if len(_MON_LAST) > 400:            # don't accumulate keys forever (ssh:/panel_new: by IP)
         for k in [k for k, v in list(_MON_LAST.items()) if now - v > max(cd * 2, 7200)]:
             _MON_LAST.pop(k, None)
     def fire(key, title, msg, priority=0, ev_name=None, lvl=None):
@@ -3703,29 +3703,29 @@ def monitor_tick():
         if cfg.get("enabled") and ev.get(name, {}).get("on"):
             push_notify(title, msg, priority)
     s = _safe(stats)
-    if not s:                       # без базовых метрик тик пропускаем (следующий повторит)
+    if not s:                       # without base metrics, skip the tick (the next one retries)
         return
     host = s.get("host", "NAS")
 
-    # --- запуск системы ---
+    # --- system startup ---
     if not _MON_BOOT_SENT:
         try:
-            log_event("boot", "Система запущена", "%s снова в сети" % host, "ok")
+            log_event("boot", "System started", "%s is back online" % host, "ok")
         except Exception:
             pass
         if cfg.get("enabled") and ev.get("boot", {}).get("on"):
-            push_notify("NAS: система запущена", "%s снова в сети" % host, pri("boot"))
+            push_notify("NAS: system started", "%s is back online" % host, pri("boot"))
         _MON_BOOT_SENT = True
 
-    # --- повреждённые файлы настроек (очередь набита загрузчиком) ---
+    # --- corrupted settings files (queue filled by the loader) ---
     while _BAD_CONFIGS:
         bad = _BAD_CONFIGS.pop(0)
-        fire("cfg_corrupt:%s" % bad, "NAS: файл настроек повреждён",
-             "%s не читается — сохранён как %s.bad, применены значения по умолчанию. "
-             "Проверьте настройки." % (bad, bad), pri("cfg_corrupt"),
+        fire("cfg_corrupt:%s" % bad, "NAS: settings file corrupted",
+             "%s is unreadable — saved as %s.bad, defaults applied. "
+             "Check your settings." % (bad, bad), pri("cfg_corrupt"),
              ev_name="cfg_corrupt", lvl="warn")
 
-    # --- USB авто-импорт: итоги копирования из журнала импорта ---
+    # --- USB auto-import: copy results from the import log ---
     imp = _safe(lambda: _usb_import_events(_MON_USBIMP))
     if imp:
         evs, _MON_USBIMP = imp
@@ -3733,229 +3733,229 @@ def monitor_tick():
             fire("usbimp:%d" % int(ts_), title_, msg_, pri("usb_import"),
                  ev_name="usb_import", lvl=lvl_)
 
-    # --- подключение / отключение дисков (по изменению набора томов) ---
+    # --- disk attach / detach (by change in the set of volumes) ---
     vols = _safe(_block_volumes)
-    if vols is not None:            # при сбое не портим _MON_DEVS (иначе ложные add/remove)
+    if vols is not None:            # on failure don't corrupt _MON_DEVS (otherwise false add/remove)
         if _MON_DEVS is not None:
             added   = [vols[d] for d in vols if d not in _MON_DEVS]
             removed = [_MON_DEVS[d] for d in _MON_DEVS if d not in vols]
             if added and on("disk_add"):
-                fire("disk_add", "NAS: диск подключён", "Появился: " + ", ".join(map(str, added)), pri("disk_add"))
+                fire("disk_add", "NAS: disk connected", "Appeared: " + ", ".join(map(str, added)), pri("disk_add"))
             if removed and on("disk_remove"):
-                fire("disk_remove", "NAS: диск отключён", "Пропал: " + ", ".join(map(str, removed)), pri("disk_remove"))
+                fire("disk_remove", "NAS: disk disconnected", "Gone: " + ", ".join(map(str, removed)), pri("disk_remove"))
         _MON_DEVS = vols
 
-    # --- авто-освежение анализатора места (сам троттлит до раза в 15 мин) ---
+    # --- auto-refresh of the space analyzer (self-throttles to once per 15 min) ---
     _safe(lambda: _duscan_auto(load_maintenance().get("duscan_hours", 0)))
-    # --- авто-синхронизация firewall: держать открытыми нужные порты (панель/SSH/
-    #     Cockpit/шары + docker), чтобы новый контейнер/смена порта не остались за UFW ---
+    # --- firewall auto-sync: keep the needed ports open (panel/SSH/
+    #     Cockpit/shares + docker), so a new container/port change isn't left behind UFW ---
     _safe(ufw_autosync)
 
-    # --- файловая система в режиме «только чтение» (риск данных) ---
+    # --- filesystem in "read-only" mode (data risk) ---
     if on("readonly"):
         ro = _safe(_readonly_mounts, [])
         if ro:
-            fire("readonly", "NAS: диск только для чтения",
-                 "Смонтировано ro (сбой ФС?): " + ", ".join(ro), pri("readonly"))
+            fire("readonly", "NAS: disk is read-only",
+                 "Mounted ro (FS failure?): " + ", ".join(ro), pri("readonly"))
 
-    # --- ошибки ФС/ввода-вывода в журнале ядра ---
+    # --- FS/IO errors in the kernel log ---
     if on("fserror"):
         errs = _safe(_kernel_fs_errors, [])
         if errs:
-            fire("fserror", "NAS: ошибки диска в логе ядра", "\n".join(errs), pri("fserror"))
+            fire("fserror", "NAS: disk errors in the kernel log", "\n".join(errs), pri("fserror"))
 
-    # --- Pi: температура / троттлинг / память / swap / нагрузка ---
+    # --- Pi: temperature / throttling / memory / swap / load ---
     t = s.get("temp")
     if on("temp") and t and t >= thr("temp", 75):
-        fire("temp", "NAS: перегрев", "Температура %s°C (порог %s°C)" % (t, thr("temp", 75)), pri("temp"))
+        fire("temp", "NAS: overheating", "Temperature %s°C (threshold %s°C)" % (t, thr("temp", 75)), pri("temp"))
     tr = s.get("throttled") or {}
-    # Просадка — это про блок питания, троттлинг — про охлаждение. Разные события:
-    # флаг просадки гаснет только при снятии питания, так что сообщить надо сразу.
+    # Undervolt is about the power supply, throttling is about cooling. Different events:
+    # the undervolt flag clears only when power is removed, so report it right away.
     if on("undervolt") and tr.get("undervolt"):
-        fire("undervolt", "NAS: просадка питания",
-             "Блоку питания не хватает тока (флаги %s) — плата может внезапно выключиться. "
-             "Проверьте БП и кабель." % tr.get("raw", ""), pri("undervolt"), lvl="warn")
+        fire("undervolt", "NAS: undervoltage",
+             "The PSU cannot supply enough current (flags %s) — the board may power off without warning. "
+             "Check the PSU and cable." % tr.get("raw", ""), pri("undervolt"), lvl="warn")
     if on("throttle") and tr.get("throttle"):
-        fire("throttle", "NAS: троттлинг частоты",
-             "CPU снизил частоту (флаги %s)" % tr.get("raw", ""), pri("throttle"))
+        fire("throttle", "NAS: frequency throttling",
+             "CPU lowered its frequency (flags %s)" % tr.get("raw", ""), pri("throttle"))
     m = (s.get("mem") or {}).get("pct", 0)
     if on("mem") and m >= thr("mem", 92):
-        fire("mem", "NAS: мало памяти", "RAM занята на %s%%" % m, pri("mem"))
+        fire("mem", "NAS: low memory", "RAM usage at %s%%" % m, pri("mem"))
     mem = _safe(mem_info, {})
     if on("swap") and mem.get("swap_total"):
         swp = round(100 * (mem["swap_total"] - mem["swap_free"]) / mem["swap_total"])
         if swp >= thr("swap", 60):
-            fire("swap", "NAS: активный swap", "Подкачка занята на %s%% — не хватает ОЗУ" % swp, pri("swap"))
+            fire("swap", "NAS: active swap", "Swap usage at %s%% — not enough RAM" % swp, pri("swap"))
     load1 = (s.get("load") or [0])[0]
     if on("load") and load1 >= thr("load", 8):
-        fire("load", "NAS: высокая нагрузка", "Load average 1м = %.2f" % load1, pri("load"))
+        fire("load", "NAS: high load", "Load average 1m = %.2f" % load1, pri("load"))
 
-    # --- место: пул + отдельные диски ---
+    # --- space: pool + individual disks ---
     pool = s.get("disk_pool") or {}
     if on("pool") and pool.get("pct", 0) >= thr("pool", 90):
-        fire("pool", "NAS: хранилище заполнено", "%s занят на %s%%" % (pool.get("path", "пул"), pool.get("pct")), pri("pool"))
+        fire("pool", "NAS: storage full", "%s usage at %s%%" % (pool.get("path", "pool"), pool.get("pct")), pri("pool"))
     if on("diskfull"):
         for mp, pct in _safe(_data_mounts_usage, []):
             if mp == "/mnt/storage":
                 continue
             if pct >= thr("diskfull", 90):
-                fire("diskfull:" + mp, "NAS: диск заполняется", "%s занят на %s%%" % (mp, pct), pri("diskfull"))
+                fire("diskfull:" + mp, "NAS: disk filling up", "%s usage at %s%%" % (mp, pct), pri("diskfull"))
 
-    # --- службы и контейнеры ---
+    # --- services and containers ---
     if on("svcfail"):
         r = _run(["systemctl", "list-units", "--failed", "--no-legend", "--plain", "--no-pager"], timeout=10)
         failed = [l.split()[0] for l in (r.get("log") or "").splitlines() if l.strip()]
         if failed:
-            fire("svcfail", "NAS: сбой службы", "Упали: " + ", ".join(failed[:8]), pri("svcfail"))
+            fire("svcfail", "NAS: service failure", "Went down: " + ", ".join(failed[:8]), pri("svcfail"))
     if on("container") and shutil.which("docker"):
         bad = _safe(_bad_containers, [])
         if bad:
-            fire("container", "NAS: проблема с контейнером", "; ".join(bad[:8]), pri("container"))
+            fire("container", "NAS: container problem", "; ".join(bad[:8]), pri("container"))
 
-    # --- требуется перезагрузка (обновления ядра/libc) ---
+    # --- reboot required (kernel/libc updates) ---
     if on("reboot_req") and os.path.exists("/var/run/reboot-required"):
-        fire("reboot_req", "NAS: нужна перезагрузка", "Обновления применятся после ребута", pri("reboot_req"))
+        fire("reboot_req", "NAS: reboot required", "Updates will apply after a reboot", pri("reboot_req"))
 
-    # --- SMART: единым проходом раз в N минут (настройка smart_scan_min) ---
+    # --- SMART: single pass every N minutes (smart_scan_min setting) ---
     _scan_s = max(300, (_safe(load_maintenance, {}) or {}).get("smart_scan_min", 10) * 60)
     if (on("smart") or on("smart_wear") or on("disktemp")) and now - _MON_SMART_LAST >= _scan_s:
         _MON_SMART_LAST = now
         scan = _safe(_smart_scan, {})
         for dev, d in scan.items():
             if on("smart") and d.get("passed") is False:
-                fire("smart:" + dev, "NAS: диск не прошёл SMART", "%s — SMART FAIL, замените диск" % dev, pri("smart"))
+                fire("smart:" + dev, "NAS: disk failed SMART", "%s — SMART FAIL, replace the disk" % dev, pri("smart"))
             if on("smart_wear"):
                 bad = []
                 if isinstance(d.get("realloc"), int) and d["realloc"] >= thr("smart_wear", 1):
-                    bad.append("переназначено секторов: %d" % d["realloc"])
+                    bad.append("reallocated sectors: %d" % d["realloc"])
                 if isinstance(d.get("pending"), int) and d["pending"] >= thr("smart_wear", 1):
-                    bad.append("ожидают: %d" % d["pending"])
+                    bad.append("pending: %d" % d["pending"])
                 if bad:
-                    fire("wear:" + dev, "NAS: износ диска", "%s — %s" % (dev, ", ".join(bad)), pri("smart_wear"), ev_name="smart_wear")
+                    fire("wear:" + dev, "NAS: disk wear", "%s — %s" % (dev, ", ".join(bad)), pri("smart_wear"), ev_name="smart_wear")
             if on("disktemp") and isinstance(d.get("temp"), int) and d["temp"] >= thr("disktemp", 60):
-                fire("dtemp:" + dev, "NAS: диск перегрет", "%s — %s°C" % (dev, d["temp"]), pri("disktemp"), ev_name="disktemp")
+                fire("dtemp:" + dev, "NAS: disk overheated", "%s — %s°C" % (dev, d["temp"]), pri("disktemp"), ev_name="disktemp")
 
-    # --- контейнеры: restart-loop + распухший docker ---
+    # --- containers: restart-loop + bloated docker ---
     if shutil.which("docker"):
         if on("container_loop"):
             loops = _safe(_restart_loops, [])
             if loops:
-                fire("cloop", "NAS: контейнер не поднимается", "Перезапускается по кругу: " + ", ".join(loops[:8]), pri("container_loop"), ev_name="container_loop")
+                fire("cloop", "NAS: container won't start", "Restarting in a loop: " + ", ".join(loops[:8]), pri("container_loop"), ev_name="container_loop")
         if on("docker_space") and _hourly("docker_space"):
             gb = _safe(_docker_reclaimable_gb, 0) or 0
             if gb >= thr("docker_space", 20):
-                fire("dspace", "NAS: docker распух", "Можно освободить ~%s ГБ (prune)" % gb, pri("docker_space"), ev_name="docker_space")
+                fire("dspace", "NAS: docker bloated", "Can free ~%s GB (prune)" % gb, pri("docker_space"), ev_name="docker_space")
 
-    # --- SSH-вход ---
+    # --- SSH login ---
     if on("ssh_login"):
         for user, ip in _safe(_ssh_logins, []):
-            fire("ssh:" + ip, "NAS: вход по SSH", "%s с %s" % (user, ip), pri("ssh_login"), ev_name="ssh_login")
+            fire("ssh:" + ip, "NAS: SSH login", "%s from %s" % (user, ip), pri("ssh_login"), ev_name="ssh_login")
 
-    # --- сеть: смена IP / линка / VPN (через fire → cooldown, не спамим при мерцании) ---
+    # --- network: IP / link / VPN change (via fire → cooldown, no spam on flapping) ---
     ip = s.get("ip")
     if _MON_IP is not None and ip and ip != _MON_IP and on("ip_changed"):
-        fire("ip_changed", "NAS: сменился IP", "Было %s → стало %s" % (_MON_IP, ip), pri("ip_changed"))
+        fire("ip_changed", "NAS: IP changed", "Was %s → now %s" % (_MON_IP, ip), pri("ip_changed"))
     _MON_IP = ip or _MON_IP
     iface = s.get("iface")
-    # только реальные переходы между непустыми интерфейсами (иначе мерцание null → спам)
+    # only real transitions between non-empty interfaces (otherwise null flapping → spam)
     if _MON_IFACE is not None and iface and iface != _MON_IFACE and on("link_changed"):
-        fire("link_changed", "NAS: смена сети", "Активный интерфейс: %s → %s" % (_MON_IFACE, iface), pri("link_changed"))
+        fire("link_changed", "NAS: network changed", "Active interface: %s → %s" % (_MON_IFACE, iface), pri("link_changed"))
     _MON_IFACE = iface or _MON_IFACE
     if on("vpn_offline") and _safe(_tailscale_offline):
-        fire("vpn", "NAS: VPN offline", "Tailscale не в сети — удалённый доступ недоступен", pri("vpn_offline"), ev_name="vpn_offline")
+        fire("vpn", "NAS: VPN offline", "Tailscale is offline — remote access unavailable", pri("vpn_offline"), ev_name="vpn_offline")
 
-    # --- здоровье бэкапа главного NAS (связь/папки/давно/размер/место) ---
+    # --- backup health of the main NAS (connection/folders/staleness/size/space) ---
     _safe(lambda: nb_health_tick(fire, ev, pri, thr, now))
-    # --- защита данных: SnapRAID + mergerfs + бэкап ---
-    # берём последние sync/scrub с датой (snapraid_status) и включаем дату в ключ дедупа —
-    # так каждое событие уведомляет ОДИН раз, а не каждый cooldown, пока строка в хвосте лога
+    # --- data protection: SnapRAID + mergerfs + backup ---
+    # take the last sync/scrub with a date (snapraid_status) and include the date in the dedup key —
+    # so each event notifies ONCE, not every cooldown while the line sits in the log tail
     sn = _safe(snapraid_status, {}) or {}
     ls, lsc = sn.get("last_sync") or {}, sn.get("last_scrub") or {}
     if on("snap_ok") and ls.get("result") == "ok":
-        fire("snapok:" + str(ls.get("date")), "NAS: SnapRAID sync ок", "Синхронизация чётности прошла (%s)" % (ls.get("date") or ""), pri("snap_ok"), ev_name="snap_ok", lvl="ok")
+        fire("snapok:" + str(ls.get("date")), "NAS: SnapRAID sync OK", "Parity sync succeeded (%s)" % (ls.get("date") or ""), pri("snap_ok"), ev_name="snap_ok", lvl="ok")
     if on("snap_err") and ls.get("result") == "err":
-        fire("snaperr:" + str(ls.get("date")), "NAS: SnapRAID sync ошибка", "Синхронизация чётности не удалась (%s)" % (ls.get("date") or ""), pri("snap_err"), ev_name="snap_err")
+        fire("snaperr:" + str(ls.get("date")), "NAS: SnapRAID sync error", "Parity sync failed (%s)" % (ls.get("date") or ""), pri("snap_err"), ev_name="snap_err")
     if on("scrub_err") and lsc.get("result") == "err":
-        fire("scruberr:" + str(lsc.get("date")), "NAS: SnapRAID scrub ошибка", "Проверка нашла проблему (%s)" % (lsc.get("date") or ""), pri("scrub_err"), ev_name="scrub_err")
+        fire("scruberr:" + str(lsc.get("date")), "NAS: SnapRAID scrub error", "Check found a problem (%s)" % (lsc.get("date") or ""), pri("scrub_err"), ev_name="scrub_err")
     if on("delete_block") and sn.get("blocked"):
-        fire("delblk", "NAS: sync остановлен защитой", sn["blocked"], pri("delete_block"), ev_name="delete_block")
+        fire("delblk", "NAS: sync stopped by protection", sn["blocked"], pri("delete_block"), ev_name="delete_block")
     if on("mergerfs"):
         miss = _safe(_mergerfs_missing, [])
         if miss:
-            fire("mfs", "NAS: диск выпал из пула", "Не смонтированы: " + ", ".join(miss), pri("mergerfs"), ev_name="mergerfs")
+            fire("mfs", "NAS: disk dropped from the pool", "Not mounted: " + ", ".join(miss), pri("mergerfs"), ev_name="mergerfs")
     if on("backup"):
         blog = _read("/var/log/nas-backup.log")
         if blog:
             last = blog.splitlines()[-1]
-            if re.search(r"\b(FAIL|ошибка|error)\b", last, re.I):
-                fire("bkp", "NAS: бэкап не удался", last[-160:], pri("backup"), ev_name="backup", lvl="warn")
-            elif re.search(r"\b(OK|успешно|done)\b", last, re.I):
-                fire("bkp", "NAS: бэкап выполнен", last[-160:], pri("backup"), ev_name="backup", lvl="ok")
+            if re.search(r"\b(FAIL|failed|error)\b", last, re.I):
+                fire("bkp", "NAS: backup failed", last[-160:], pri("backup"), ev_name="backup", lvl="warn")
+            elif re.search(r"\b(OK|success|done)\b", last, re.I):
+                fire("bkp", "NAS: backup completed", last[-160:], pri("backup"), ev_name="backup", lvl="ok")
 
-    # --- обслуживание ---
+    # --- maintenance ---
     root = _safe(lambda: disk_info("/")) or {}
     if on("root_full") and root.get("pct", 0) >= thr("root_full", 90):
-        fire("rootfull", "NAS: мало места на системной карте", "Раздел / занят на %s%%" % root.get("pct"), pri("root_full"), ev_name="root_full")
+        fire("rootfull", "NAS: low space on the system card", "Partition / usage at %s%%" % root.get("pct"), pri("root_full"), ev_name="root_full")
     if on("sd_degrade"):
         sd = _safe(_sd_errors, [])
         if sd:
-            fire("sderr", "NAS: сбои SD-карты", "\n".join(sd), pri("sd_degrade"), ev_name="sd_degrade")
+            fire("sderr", "NAS: SD card errors", "\n".join(sd), pri("sd_degrade"), ev_name="sd_degrade")
     if on("sustained_heat"):
         hot = (t and t >= thr("temp", 75)) or not tr.get("ok", True)
         _MON_HEAT = _MON_HEAT + 1 if hot else 0
         if _MON_HEAT >= thr("sustained_heat", 10):
-            fire("heat", "NAS: держится перегрев/троттлинг", "Уже %d мин подряд — проверьте охлаждение/питание" % _MON_HEAT, pri("sustained_heat"), ev_name="sustained_heat")
+            fire("heat", "NAS: sustained overheating/throttling", "Already %d min in a row — check cooling/power" % _MON_HEAT, pri("sustained_heat"), ev_name="sustained_heat")
     if on("fan_stall"):
         rpm = _safe(_fan_rpm)
         if rpm == 0 and t and t >= thr("temp", 75):
-            fire("fan", "NAS: вентилятор стоит", "0 об/мин при %s°C — проверьте кулер" % t, pri("fan_stall"), ev_name="fan_stall")
+            fire("fan", "NAS: fan stopped", "0 rpm at %s°C — check the cooler" % t, pri("fan_stall"), ev_name="fan_stall")
     if on("cron_failed"):
         cf = _safe(_cron_failures, [])
         if cf:
-            fire("cron", "NAS: задача по расписанию упала", "Ошибка: " + ", ".join(map(str, cf)), pri("cron_failed"), ev_name="cron_failed")
+            fire("cron", "NAS: scheduled task failed", "Error: " + ", ".join(map(str, cf)), pri("cron_failed"), ev_name="cron_failed")
     if on("time_drift") and _safe(_ntp_unsynced):
-        fire("ntp", "NAS: время не синхронизировано", "Часы могут уплыть — проверьте chrony/timesyncd", pri("time_drift"), ev_name="time_drift")
+        fire("ntp", "NAS: time not synchronized", "The clock may drift — check chrony/timesyncd", pri("time_drift"), ev_name="time_drift")
     if on("updates") and _hourly("updates"):
         n = _safe(_apt_upgradable, 0) or 0
         if n > 0:
-            fire("upd", "NAS: доступны обновления", "Можно обновить пакетов: %d" % n, pri("updates"), ev_name="updates")
+            fire("upd", "NAS: updates available", "Packages available to update: %d" % n, pri("updates"), ev_name="updates")
     if on("sec_updates") and _hourly("sec_updates"):
         su = _safe(_sec_updates_recent, [])
         if su:
-            fire("secupd", "NAS: накатились security-обновления", su[-1], pri("sec_updates"), ev_name="sec_updates")
+            fire("secupd", "NAS: security updates applied", su[-1], pri("sec_updates"), ev_name="sec_updates")
 
-    # --- поведенческие ---
+    # --- behavioral ---
     tx = (s.get("net") or {}).get("tx", 0)
     if on("traffic") and tx >= thr("traffic", 50) * 1024 * 1024:
-        fire("traffic", "NAS: большой исходящий трафик", "Отдача %s/с — проверьте, что это ожидаемо" % fmt_bytes(tx), pri("traffic"))
+        fire("traffic", "NAS: heavy outbound traffic", "Upload %s/s — check that this is expected" % fmt_bytes(tx), pri("traffic"))
     if on("slow_disk"):
         for dev, aw in (_safe(_diskstat_await, {}) or {}).items():
             if aw >= thr("slow_disk", 250):
-                fire("slow:" + dev, "NAS: диск отвечает медленно", "%s — задержка %d мс/операцию" % (dev, round(aw)), pri("slow_disk"), ev_name="slow_disk")
+                fire("slow:" + dev, "NAS: disk responding slowly", "%s — latency %d ms/operation" % (dev, round(aw)), pri("slow_disk"), ev_name="slow_disk")
     if on("proc_hog"):
         hog = _safe(lambda: _proc_hog(thr("proc_hog", 80)))
         if hog:
-            fire("hog", "NAS: процесс грузит систему", hog, pri("proc_hog"), ev_name="proc_hog")
+            fire("hog", "NAS: a process is hogging the system", hog, pri("proc_hog"), ev_name="proc_hog")
     if on("inodes"):
         ino = _safe(lambda: _inodes_full(thr("inodes", 90)), [])
         if ino:
-            fire("inodes", "NAS: заканчиваются inode", "; ".join(ino), pri("inodes"))
+            fire("inodes", "NAS: running out of inodes", "; ".join(ino), pri("inodes"))
 
-    # --- еженедельный отчёт «жив» ---
+    # --- weekly "alive" report ---
     if now - _MON_WEEKLY >= 7 * 86400:
         _MON_WEEKLY = now
-        wmsg = ("%s · аптайм %s · CPU %s%% · темп %s°C · пул %s%%"
+        wmsg = ("%s · uptime %s · CPU %s%% · temp %s°C · pool %s%%"
                 % (host, fmt_uptime(s.get("uptime", 0)), s.get("cpu"),
                    s.get("temp") or "—", (pool.get("pct") if pool else "—")))
         try:
-            log_event("weekly", "Недельный отчёт", wmsg, "info")
+            log_event("weekly", "Weekly report", wmsg, "info")
         except Exception:
             pass
         if cfg.get("enabled") and ev.get("weekly", {}).get("on"):
-            push_notify("NAS: недельный отчёт", wmsg, pri("weekly"))
+            push_notify("NAS: weekly report", wmsg, pri("weekly"))
 
 def _hourly(key):
-    """True не чаще раза в час (для тяжёлых проверок)."""
+    """True at most once per hour (for heavy checks)."""
     now = time.time()
     if now - _MON_HOURLY.get(key, 0) >= 3600:
         _MON_HOURLY[key] = now
@@ -3964,23 +3964,23 @@ def _hourly(key):
 
 def fmt_bytes(n):
     n = float(n or 0)
-    for u in ("Б", "КБ", "МБ", "ГБ", "ТБ"):
+    for u in ("B", "KB", "MB", "GB", "TB"):
         if n < 1024:
             return "%.0f %s" % (n, u)
         n /= 1024
-    return "%.0f ПБ" % n
+    return "%.0f PB" % n
 
 def fmt_uptime(sec):
     sec = int(sec or 0); d, h = sec // 86400, (sec % 86400) // 3600
-    return ("%dд %dч" % (d, h)) if d else ("%dч %dм" % (h, (sec % 3600) // 60))
+    return ("%dd %dh" % (d, h)) if d else ("%dh %dm" % (h, (sec % 3600) // 60))
 
 # --------------------------------------------------------------------------- #
-#  История метрик (лёгкий тайм-серия для графиков за сутки)
+#  Metrics history (lightweight time-series for the day's graphs)
 # --------------------------------------------------------------------------- #
 HISTORY_FILE = os.path.join(NAS_CONFIG, "history.json")
-HISTORY_CAP  = 1500          # ~25 часов при шаге 60 с
+HISTORY_CAP  = 1500          # ~25 hours at a 60 s step
 HISTORY_LONG_FILE = os.path.join(NAS_CONFIG, "history-long.json")
-HISTORY_LONG_CAP  = 4600     # шаг 10 мин → ~32 дня
+HISTORY_LONG_CAP  = 4600     # 10 min step → ~32 days
 _history = None
 _history_long = None
 _hist_dirty = 0
@@ -4008,13 +4008,13 @@ def _load_history_long():
         _history_long = []
     return _history_long
 
-# период → (какая серия, срез в секундах, шаг точки)
+# period → (which series, window in seconds, point step)
 _HIST_RANGES = {"1h": ("fine", 3600, 60), "6h": ("fine", 6 * 3600, 60),
                 "24h": ("fine", 25 * 3600, 60), "7d": ("long", 7 * 86400, 600),
                 "30d": ("long", 31 * 86400, 600)}
 
 def history_snapshot(rng="24h"):
-    """Копия истории за период под локом — безопасно сериализовать в HTTP-потоке."""
+    """A copy of the history for the period under lock — safe to serialize in the HTTP thread."""
     series, span, step = _HIST_RANGES.get(rng, _HIST_RANGES["24h"])
     cutoff = time.time() - span
     with _hist_lock:
@@ -4022,7 +4022,7 @@ def history_snapshot(rng="24h"):
         return {"history": [p for p in h if p.get("t", 0) >= cutoff], "step": step, "range": rng}
 
 def history_sample():
-    """Снять одну точку метрик и добавить в историю (зовётся раз в минуту)."""
+    """Take one metrics point and append it to the history (called once per minute)."""
     global _hist_dirty
     try:
         s = stats()
@@ -4043,7 +4043,7 @@ def history_sample():
         if write:
             _hist_dirty = 0
             snap = list(h)
-        # длинная серия: раз в 10 минут — агрегат минутных точек (avg, для temp — max)
+        # long series: every 10 minutes — aggregate of minute points (avg, max for temp)
         hl = _load_history_long()
         last_t = hl[-1]["t"] if hl else 0
         if pt["t"] - last_t >= 600:
@@ -4060,7 +4060,7 @@ def history_sample():
             if len(hl) > HISTORY_LONG_CAP:
                 del hl[:len(hl) - HISTORY_LONG_CAP]
             snap_long = list(hl)
-    if write:                            # запись на диск вне лока (не держим мониторинг)
+    if write:                            # write to disk outside the lock (don't hold up monitoring)
         try:
             os.makedirs(NAS_CONFIG, exist_ok=True)
             tmp = HISTORY_FILE + ".tmp"
@@ -4080,9 +4080,9 @@ def history_sample():
             pass
 
 # =========================================================================== #
-#  Time Machine — этот NAS как приёмник macOS Time Machine (Samba + vfs_fruit +
-#  Avahi). Полностью отдельная фича: свой include-конфиг, свой avahi-сервис,
-#  своя папка. Движок применения — nas-wizard.sh api timemachine[-off].
+#  Time Machine — this NAS as a macOS Time Machine target (Samba + vfs_fruit +
+#  Avahi). A fully separate feature: its own include-config, its own avahi-service,
+#  its own folder. The apply engine is nas-wizard.sh api timemachine[-off].
 # =========================================================================== #
 TM_CONF   = "/etc/nas-wizard/timemachine.conf"          # persisted params
 TM_INC    = "/etc/samba/nas-timemachine.conf"
@@ -4090,7 +4090,7 @@ TM_AVAHI  = "/etc/avahi/services/nas-timemachine.service"
 TM_BUNDLE_EXT = (".sparsebundle", ".backupbundle")
 
 def _tm_read_conf():
-    """Прочитать /etc/nas-wizard/timemachine.conf (key=value) → dict."""
+    """Read /etc/nas-wizard/timemachine.conf (key=value) → dict."""
     d = {}
     try:
         with open(TM_CONF) as f:
@@ -4111,8 +4111,8 @@ def _pkg_installed(name):
         return False
 
 def tm_status():
-    """Состояние приёмника Time Machine: установка, активность, папка, лимит,
-    место и список бэкапов Mac (sparsebundle)."""
+    """Time Machine target state: installation, activity, folder, quota,
+    space and the list of Mac backups (sparsebundle)."""
     conf = _tm_read_conf()
     path = conf.get("path") or storage_sub("TimeMachine") or (STORAGE + "/TimeMachine")
     user = conf.get("user") or "timemachine"      # dedicated TM-only account (not the system user)
@@ -4125,7 +4125,7 @@ def tm_status():
     active = _safe(lambda: subprocess.run(
         ["systemctl", "is-active", "--quiet", "smbd"], timeout=5).returncode == 0, False)
     advertised = os.path.exists(TM_AVAHI)
-    # место на разделе с папкой
+    # space on the partition with the folder
     space = None
     try:
         st = os.statvfs(path if os.path.isdir(path) else os.path.dirname(path) or "/")
@@ -4134,7 +4134,7 @@ def tm_status():
         space = {"total": total, "free": free, "used": total - free}
     except OSError:
         pass
-    # бэкапы Mac: каждый *.sparsebundle/*.backupbundle — отдельная машина
+    # Mac backups: each *.sparsebundle/*.backupbundle is a separate machine
     backups = []
     try:
         for name in sorted(os.listdir(path)):
@@ -4153,22 +4153,22 @@ def tm_status():
             "space": space, "backups": backups}
 
 # --------------------------------------------------------------------------- #
-#  Автообслуживание: ежедневные фоновые задачи (авто-очистка корзины и т.п.)
+#  Auto-maintenance: daily background tasks (auto trash cleanup, etc.)
 # --------------------------------------------------------------------------- #
 # =========================================================================== #
-#  Бэкап главного NAS на этот NAS (rsync-демон или SSH), отдельное мини-приложение
+#  Backup of the main NAS onto this NAS (rsync daemon or SSH), a separate mini-app
 # =========================================================================== #
-NB_CONF   = "/etc/nas-os/nas-backup.json"                 # секреты → root 600
+NB_CONF   = "/etc/nas-os/nas-backup.json"                 # secrets → root 600
 NB_QUEUE  = os.path.join(NAS_CONFIG, "nas-backup-queue.json")
-NB_MAIN   = "main"                        # id первого (легаси) профиля
+NB_MAIN   = "main"                        # id of the first (legacy) profile
 NB_MAX_PROFILES = 8
 _NB_PID_RE = re.compile(r"^[a-z0-9]{1,12}$")
 
-# Прогон бэкапа запускается ОТДЕЛЬНЫМ процессом в транзиентном systemd-юните
-# (вне cgroup службы) → переживает перезапуск/обновление nas-web. Драйвер пишет
-# вывод в файл-лог и статус в json; UI/сервер их читают и переподключаются.
-# Всё состояние — ПОФАЙЛОВО НА ПРОФИЛЬ. У легаси-профиля имена без суффикса,
-# чтобы миграция не потеряла историю и статус существующего бэкапа.
+# A backup run is launched as a SEPARATE process in a transient systemd unit
+# (outside the service cgroup) → it survives a restart/update of nas-web. The driver
+# writes output to a log file and status to json; the UI/server read them and reconnect.
+# All state is PER-FILE PER-PROFILE. The legacy profile has names without a suffix,
+# so migration doesn't lose the history and status of the existing backup.
 def _nb_f(pid, kind, ext):
     sfx = "" if pid == NB_MAIN else "-" + pid
     return os.path.join(NAS_CONFIG, "nas-backup-%s%s.%s" % (kind, sfx, ext))
@@ -4202,7 +4202,7 @@ def _nb_unit_active(pid):
         return False
 
 def nb_run_active(pid=NB_MAIN):
-    """Идёт ли прогон: флаг в state И живой транзиентный юнит (чтобы не залипало после краха)."""
+    """Whether a run is in progress: the state flag AND a live transient unit (so it doesn't stick after a crash)."""
     st = _nb_run_state_read(pid)
     if not st.get("running"):
         return False
@@ -4228,10 +4228,10 @@ def nb_run_active(pid=NB_MAIN):
     return False
 
 def nb_any_active():
-    """Идёт ли прогон хоть какого-нибудь профиля (одновременно разрешён один)."""
+    """Whether any profile's run is in progress (only one allowed at a time)."""
     return any(nb_run_active(p["id"]) for p in nb_profiles())
 
-# ---- очередь: параллельные прогоны запрещены, лишние ждут (см. _nb_queue_drain) ----
+# ---- queue: parallel runs are forbidden, extras wait (see _nb_queue_drain) ----
 def _nb_queue_read():
     try:
         with open(NB_QUEUE) as f:
@@ -4267,7 +4267,7 @@ def _nb_queue_remove(pid):
     q2 = [x for x in q if x["pid"] != pid]
     if len(q2) != len(q):
         _nb_queue_write(q2)
-# разрешённые корни для локальных папок-приёмников (не системные каталоги)
+# allowed roots for local destination folders (not system directories)
 _NB_DEST_OK = ("/mnt/", "/media/", "/srv/", "/home/")
 
 def _nb_defaults():
@@ -4275,11 +4275,11 @@ def _nb_defaults():
     # to an external disk (transport=local) or to another server (transport=ssh)
     return {"direction": "pull", "verify": False,
          "transport": "rsync", "host": "", "user": "", "password": "", "ssh_port": 22,
-         # auth: "password" (sshpass, как было) или "key" — ключ, созданный панелью.
-         # provider: "" = обычный сервер, "rsyncnet" = аккаунт rsync.net (ограниченный
-         # шелл, пути ОТ ДОМАШНЕЙ папки, ретеншен не нужен — у них ZFS-снапшоты).
+         # auth: "password" (sshpass, as before) or "key" — a key created by the panel.
+         # provider: "" = a regular server, "rsyncnet" = an rsync.net account (restricted
+         # shell, paths FROM the HOME folder, no retention needed — they have ZFS snapshots).
          "auth": "password", "provider": "",
-         "dst2": {},          # приёмник-SSH у pull-профиля (режим SSH→SSH через мост)
+         "dst2": {},          # SSH destination for a pull profile (SSH→SSH bridge mode)
          "remote_sudo": False,
          "dest_mode": "single", "dest_base": (storage_sub("nas-backup") or "/mnt/storage/nas-backup"),
          "jobs": [],
@@ -4303,9 +4303,9 @@ def _nb_read_raw():
         return {}
 
 def nb_profiles():
-    """Все профили бэкапа. Всегда хотя бы один. Старый плоский конфиг (v1)
-    читается как единственный профиль «Основной» — на диск ничего не пишем,
-    запись делает _nb_migrate() один раз при старте."""
+    """All backup profiles. Always at least one. The old flat config (v1)
+    is read as a single "Default" profile — we write nothing to disk,
+    _nb_migrate() does the write once at startup."""
     raw = _nb_read_raw()
     if isinstance(raw, dict) and isinstance(raw.get("profiles"), list):
         items = raw["profiles"]
@@ -4331,7 +4331,7 @@ def nb_profiles():
     return out
 
 def nb_load(pid=None):
-    """Профиль по id; без id — первый (совместимость со старым кодом и API)."""
+    """Profile by id; without id — the first (compatibility with old code and API)."""
     profs = nb_profiles()
     if pid:
         for p in profs:
@@ -4350,30 +4350,30 @@ def _nb_write_profiles(profs):
         pass
 
 def _nb_migrate():
-    """v1 (плоский конфиг) → v2 (список профилей). Один раз, с резервной копией."""
+    """v1 (flat config) → v2 (list of profiles). Once, with a backup copy."""
     raw = _nb_read_raw()
     if not isinstance(raw, dict) or isinstance(raw.get("profiles"), list):
         return False
-    if not raw:                       # конфига ещё нет — писать нечего
+    if not raw:                       # no config yet — nothing to write
         return False
     try:
         shutil.copy2(NB_CONF, NB_CONF + ".v1.bak")
     except OSError:
         pass
     _nb_write_profiles(nb_profiles())
-    log_event("info", "Бэкап NAS: конфиг переведён в формат профилей", "", "ok",
+    log_event("info", "NAS backup: config migrated to profile format", "", "ok",
               kind="backup", desk=False)
     return True
 
 # --------------------------------------------------------------------------
-# Две независимые стороны: источник и приёмник, каждая — локальная или удалённая.
-# На диске профиль по-прежнему хранит СТАРЫЕ поля (direction/transport/host/…):
-# они остаются источником правды для кода вне бэкапа (плитки экрана, dest_off,
-# ретеншен) и для старых профилей. src/dst — это ВЫВОД из них, а nb_save делает
-# обратную свёртку. Так свободный выбор сторон появляется без миграции файла и
-# без риска, что старый профиль поедет.
+# Two independent sides: source and destination, each — local or remote.
+# On disk the profile still stores the OLD fields (direction/transport/host/…):
+# they remain the source of truth for code outside backup (screen tiles, dest_off,
+# retention) and for old profiles. src/dst are DERIVED from them, and nb_save does
+# the reverse folding. This way a free choice of sides appears without migrating the file
+# and without the risk of an old profile breaking.
 def _nb_sides(cfg):
-    """(src, dst) — нормализованные стороны. kind: local|ssh|rsyncd."""
+    """(src, dst) — normalized sides. kind: local|ssh|rsyncd."""
     cfg = cfg or {}
     conn = {"host": cfg.get("host", ""), "user": cfg.get("user", ""),
             "password": cfg.get("password", ""), "port": int(cfg.get("ssh_port", 22) or 22),
@@ -4385,7 +4385,7 @@ def _nb_sides(cfg):
         dst = dict(conn, kind="ssh") if tr == "ssh" else {"kind": "local"}
     else:
         src = dict(conn, kind=("rsyncd" if tr == "rsync" else "ssh"))
-        # приёмник pull-профиля может быть и удалённым — это и есть SSH→SSH
+        # a pull profile's destination can also be remote — that is SSH→SSH
         d2 = cfg.get("dst2") or {}
         if d2.get("kind") == "ssh":
             dst = {"kind": "ssh", "host": d2.get("host", ""), "user": d2.get("user", ""),
@@ -4399,9 +4399,9 @@ def _nb_sides(cfg):
 
 
 def _nb_remote_both(cfg):
-    """SSH→SSH: rsync такое не умеет («source and destination cannot both be
-    remote»), поэтому источник монтируем по sshfs и копируем как из локальной
-    папки. Данные идут через NAS — это цена, о которой панель предупреждает."""
+    """SSH→SSH: rsync can't do this ("source and destination cannot both be
+    remote"), so we mount the source over sshfs and copy as if from a local
+    folder. Data goes through the NAS — a cost the panel warns about."""
     src, dst = _nb_sides(cfg)
     return src["kind"] != "local" and dst["kind"] != "local"
 
@@ -4440,9 +4440,9 @@ def nb_save(patch, pid=None):
         cur["direction"] = patch["direction"]
     if "verify" in patch:
         cur["verify"] = bool(patch["verify"])
-    # Свободный выбор сторон: UI шлёт {"src":{...},"dst":{...}}. Раскладываем это
-    # в поля профиля (direction/transport/host/…), чтобы весь остальной код —
-    # плитки экрана, dest_off, ретеншен — продолжал работать без изменений.
+    # Free choice of sides: the UI sends {"src":{...},"dst":{...}}. We unpack it
+    # into profile fields (direction/transport/host/…), so all the rest of the code —
+    # screen tiles, dest_off, retention — keeps working unchanged.
     for sd in ("src", "dst"):
         if not isinstance(patch.get(sd), dict):
             continue
@@ -4463,7 +4463,7 @@ def nb_save(patch, pid=None):
             cs = side
         else:
             cd = side
-        # свёртка обратно в профиль
+        # fold back into the profile
         if cs["kind"] == "local":
             cur["direction"] = "push"
             cur["transport"] = "ssh" if cd["kind"] == "ssh" else "local"
@@ -4473,7 +4473,7 @@ def nb_save(patch, pid=None):
             cur["direction"] = "pull"
             cur["transport"] = "rsync" if cs["kind"] == "rsyncd" else "ssh"
             far = cs
-            # удалённый приёмник у pull-профиля = SSH→SSH (мост через NAS)
+            # a pull profile's remote destination = SSH→SSH (bridge through the NAS)
             cur["dst2"] = {k: cd.get(k, "") for k in
                            ("host", "user", "password", "port", "auth", "provider")} \
                 if cd["kind"] == "ssh" else {}
@@ -4515,13 +4515,13 @@ def nb_save(patch, pid=None):
         dst_ok = _nb_valid_push_dest if _nb_push_ssh(cur) else _nb_valid_dest
         for j in patch["jobs"][:200]:
             if not isinstance(j, dict): continue
-            src = str(j.get("src", "")).strip().rstrip("/")   # ведущий / сохраняем (SSH abs-пути)
+            src = str(j.get("src", "")).strip().rstrip("/")   # keep the leading / (SSH abs paths)
             dst = os.path.normpath(str(j.get("dest", "")).strip())
             if not src or not dst_ok(dst): continue
             job = {"src": src, "dest": dst, "enabled": bool(j.get("enabled", True))}
-            # per-job исключения: анкорные rsync-паттерны относительно src (ведущий /).
-            # так снятие галочки с вложенной папки исключает её, а родитель копирует
-            # всё остальное — включая то, что появится в нём позже.
+            # per-job excludes: anchored rsync patterns relative to src (leading /).
+            # so unchecking a nested folder excludes it, while the parent copies
+            # everything else — including what appears in it later.
             if isinstance(j.get("excludes"), list):
                 ex = []
                 for x in j["excludes"]:
@@ -4561,44 +4561,44 @@ def nb_save(patch, pid=None):
             j["dest"] = _nb_dest_for(cur, j["src"])
     final_ok = _nb_valid_push_dest if _nb_push_ssh(cur) else _nb_valid_dest
     cur["jobs"] = [j for j in (cur.get("jobs") or []) if final_ok(j.get("dest", ""))]
-    cur["saved"] = int(time.time())   # какой профиль трогали последним — его и открывать
+    cur["saved"] = int(time.time())   # the last-touched profile is the one to open
     profs = [cur if p["id"] == cur["id"] else p for p in nb_profiles()]
     _nb_write_profiles(profs)
     return cur
 
 def nb_public(cfg=None):
-    """Конфиг для UI без утечки пароля."""
+    """Config for the UI without leaking the password."""
     c = dict(cfg or nb_load())
     c["has_password"] = bool(c.get("password"))
     c["password"] = ""
-    c["key"] = _safe(nb_key_info, {}) or {}      # ключ панели: есть ли, публичная часть
+    c["key"] = _safe(nb_key_info, {}) or {}      # panel key: whether it exists, the public part
     src, dst = _nb_sides(cfg or nb_load())
     for sd in (src, dst):
         sd["has_password"] = bool(sd.pop("password", ""))
-    c["src"], c["dst"] = src, dst                # свободные стороны для UI
+    c["src"], c["dst"] = src, dst                # free sides for the UI
     c["both_remote"] = src["kind"] != "local" and dst["kind"] != "local"
     return c
 
 def _nb_pid(pid):
-    """Нормализовать id профиля: None/мусор/неизвестный -> первый профиль."""
+    """Normalize the profile id: None/garbage/unknown -> the first profile."""
     return nb_load(pid)["id"]
 
 def _nb_qpid(q):
-    """id профиля из query (?p=…); пусто -> первый профиль."""
+    """profile id from the query (?p=…); empty -> the first profile."""
     v = (q.get("p") or [""])[0]
     return v if _NB_PID_RE.match(v or "") else None
 
 def _nb_bpid(b):
-    """id профиля из тела POST."""
+    """profile id from the POST body."""
     v = str((b or {}).get("p") or "")
     return v if _NB_PID_RE.match(v) else None
 
 def nb_profiles_public():
-    """Короткая сводка по каждому профилю — для полосы вкладок."""
+    """A short summary per profile — for the tab bar."""
     out = []
     for p in nb_profiles():
         pid = p["id"]
-        # push на локальный диск настроен без хоста — достаточно приёмника и задач
+        # push to a local disk is configured without a host — a destination and jobs are enough
         conn = bool(p.get("host")) or (p.get("direction") == "push" and p.get("transport") == "local"
                                        and bool(p.get("dest_base")))
         st = _nb_run_state_read(pid)
@@ -4606,7 +4606,7 @@ def nb_profiles_public():
                     "running": nb_run_active(pid), "queued": nb_queued(pid),
                     "jobs": len(p.get("jobs") or []),
                     "configured": bool(conn and p.get("jobs")),
-                    # чем окно открывать: «последний, что трогали» = правка конфига или прогон
+                    # which window to open with: "last touched" = a config edit or a run
                     "saved": int(p.get("saved") or 0),
                     "last_run": int(st.get("started") or 0)})
     return out
@@ -4619,8 +4619,8 @@ def _nb_new_pid(existing):
     return None
 
 def _nb_free_dest(base, taken):
-    """Уникальная папка-приёмник: два профиля в одну базу писать не должны —
-    их «защита от массового удаления» и архив _deleted перемешаются."""
+    """Unique destination folder: two profiles must not write into the same base —
+    their "mass-deletion guard" and _deleted archive would mix together."""
     cand, n = base, 2
     while cand in taken and n < 50:
         cand = "%s-%d" % (base.rstrip("/"), n); n += 1
@@ -4629,12 +4629,12 @@ def _nb_free_dest(base, taken):
 def nb_profile_add(name="", clone_from="", direction=""):
     profs = nb_profiles()
     if len(profs) >= NB_MAX_PROFILES:
-        return {"ok": False, "log": "больше %d профилей нельзя" % NB_MAX_PROFILES}
+        return {"ok": False, "log": "cannot have more than %d profiles" % NB_MAX_PROFILES}
     pid = _nb_new_pid({p["id"] for p in profs})
     if not pid:
-        return {"ok": False, "log": "не удалось выделить id"}
-    # имя по умолчанию нейтральное к языку: панель по умолчанию английская,
-    # а имя профиля — данные, через i18n они не проходят
+        return {"ok": False, "log": "could not allocate an id"}
+    # default name is language-neutral: the panel defaults to English,
+    # and a profile name is data — it does not go through i18n
     name = str(name or "").strip()[:40]
     if not name:
         used = {p["name"] for p in profs}
@@ -4645,9 +4645,9 @@ def nb_profile_add(name="", clone_from="", direction=""):
     if clone_from:
         src = next((p for p in profs if p["id"] == clone_from), None)
         if not src:
-            return {"ok": False, "log": "нет такого профиля"}
-        # копируем подключение, исключения и политики; ИСТОЧНИКИ и расписание — нет:
-        # пути на другом NAS другие, а два включённых расписания сразу — сюрприз
+            return {"ok": False, "log": "no such profile"}
+        # copy the connection, excludes and policies; SOURCES and schedule — no:
+        # paths on the other NAS differ, and two enabled schedules at once is a surprise
         new = dict(src)
         new["jobs"] = []
         new["schedule"] = dict(src.get("schedule") or {}, enabled=False)
@@ -4663,16 +4663,16 @@ def nb_profile_add(name="", clone_from="", direction=""):
         new["dest_base"] = _nb_free_dest(new.get("dest_base") or "/mnt/storage/nas-backup", taken)
     profs.append(new)
     _nb_write_profiles(profs)
-    log_event("action", "Бэкап NAS: создан профиль «%s»" % name, "", "ok", kind="backup", desk=False)
+    log_event("action", "NAS backup: profile «%s» created" % name, "", "ok", kind="backup", desk=False)
     return {"ok": True, "id": pid, "config": nb_public(new)}
 
 def nb_profile_rename(pid, name):
     name = str(name or "").strip()[:40]
     if not name:
-        return {"ok": False, "log": "пустое имя"}
+        return {"ok": False, "log": "empty name"}
     profs = nb_profiles()
     if not any(p["id"] == pid for p in profs):
-        return {"ok": False, "log": "нет такого профиля"}
+        return {"ok": False, "log": "no such profile"}
     for p in profs:
         if p["id"] == pid:
             p["name"] = name
@@ -4680,34 +4680,34 @@ def nb_profile_rename(pid, name):
     return {"ok": True}
 
 def nb_profile_delete(pid, confirm=""):
-    """Защита от дурака: последний профиль не удалить; сначала убрать все источники;
-    имя надо ввести вручную. Данные в приёмнике НЕ трогаем — исчезает только
-    конфиг, история и логи."""
+    """Foolproofing: the last profile cannot be deleted; remove all sources first;
+    the name must be typed by hand. Data in the destination is NOT touched — only
+    the config, history and logs disappear."""
     profs = nb_profiles()
     if len(profs) <= 1:
-        return {"ok": False, "log": "последний профиль удалить нельзя"}
+        return {"ok": False, "log": "cannot delete the last profile"}
     p = next((x for x in profs if x["id"] == pid), None)
     if not p:
-        return {"ok": False, "log": "нет такого профиля"}
+        return {"ok": False, "log": "no such profile"}
     if p.get("jobs"):
-        return {"ok": False, "log": "сначала уберите все источники (%d осталось)" % len(p["jobs"])}
+        return {"ok": False, "log": "remove all sources first (%d left)" % len(p["jobs"])}
     if nb_run_active(pid):
-        return {"ok": False, "log": "идёт прогон — сначала остановите"}
+        return {"ok": False, "log": "a run is in progress — stop it first"}
     if str(confirm or "").strip() != p["name"]:
-        return {"ok": False, "log": "имя профиля не совпало"}
+        return {"ok": False, "log": "profile name did not match"}
     _nb_queue_remove(pid)
     _nb_write_profiles([x for x in profs if x["id"] != pid])
     for f in (nb_status_file(pid), nb_run_log(pid), nb_run_state(pid),
               nb_run_cancel(pid), nb_history_file(pid), nb_health_file(pid)):
         try: os.remove(f)
         except OSError: pass
-    log_event("action", "Бэкап NAS: удалён профиль «%s»" % p["name"],
-              "скопированные данные в приёмнике остались нетронутыми", "ok", kind="backup", desk=False)
+    log_event("action", "NAS backup: profile «%s» deleted" % p["name"],
+              "the copied data in the destination is left untouched", "ok", kind="backup", desk=False)
     return {"ok": True}
 
-# Ключ для бэкапов держим отдельно от системных ключей root: его создаёт и
-# показывает панель, его же ставят на приёмник. rsync.net (и любой приличный
-# сервер) для автоматики хочет именно ключ, а не пароль.
+# Keep the backup key separate from root's system keys: the panel creates and
+# shows it, and it is installed on the destination. rsync.net (and any decent
+# server) wants a key rather than a password for automation.
 NB_KEY = "/root/.ssh/nas-backup"
 
 
@@ -4731,25 +4731,25 @@ def nb_key_gen(force=False):
 
 
 def nb_key_install(cfg, side="dst"):
-    """Положить публичный ключ на выбранную сторону, войдя ОДИН раз по паролю."""
+    """Install the public key on the chosen side, logging in ONCE with a password."""
     src_s, dst_s = _nb_sides(cfg)
     sd = src_s if side == "src" else dst_s
     if sd["kind"] != "ssh":
-        return {"ok": False, "log": "эта сторона не SSH"}
+        return {"ok": False, "log": "this side is not SSH"}
     cfg = dict(cfg, host=sd.get("host", ""), user=sd.get("user", ""),
                password=sd.get("password", ""), ssh_port=sd.get("port", 22),
                provider=sd.get("provider", ""))
     if not (cfg.get("host") and cfg.get("user")):
-        return {"ok": False, "log": "не заданы адрес/пользователь"}
+        return {"ok": False, "log": "address/user not set"}
     if not nb_key_info()["exists"]:
         g = nb_key_gen()
         if not g.get("ok"):
             return g
     pw = cfg.get("password") or ""
     if not pw:
-        return {"ok": False, "log": "нужен пароль сервера — введите его, ключ поставится один раз"}
+        return {"ok": False, "log": "the server password is required — enter it once and the key gets installed"}
     if not shutil.which("sshpass"):
-        return {"ok": False, "log": "нет sshpass — скопируйте ключ на сервер вручную"}
+        return {"ok": False, "log": "sshpass is missing — copy the key to the server manually"}
     port = str(int(cfg.get("ssh_port", 22) or 22))
     tgt = "%s@%s" % (cfg["user"], cfg["host"])
     env = dict(_C_ENV, SSHPASS=pw)
@@ -4757,8 +4757,8 @@ def nb_key_install(cfg, side="dst"):
               "-o", "StrictHostKeyChecking=accept-new", tgt], timeout=45, env=env)
     if not r["ok"]:
         log = (r.get("log") or "").strip()
-        # у rsync.net и других ограниченных шеллов ssh-copy-id не работает (нет sh),
-        # зато у них есть свой способ — кладём ключ их же командой
+        # ssh-copy-id doesn't work on rsync.net and other restricted shells (no sh),
+        # but they have their own way — install the key with their command
         if cfg.get("provider") == "rsyncnet":
             pub = nb_key_info()["pubkey"]
             r2 = _run(["sshpass", "-e", "ssh", "-p", port,
@@ -4766,15 +4766,15 @@ def nb_key_install(cfg, side="dst"):
                        "echo %s >> .ssh/authorized_keys" % shlex.quote(pub)],
                       timeout=45, env=env)
             if r2["ok"]:
-                return {"ok": True, "log": "ключ установлен"}
+                return {"ok": True, "log": "key installed"}
             log = (r2.get("log") or log).strip()
         return {"ok": False, "log": _nb_err(log) or log[-200:]}
-    return {"ok": True, "log": "ключ установлен"}
+    return {"ok": True, "log": "key installed"}
 
 
 def _nb_ssh_auth(cfg):
-    """Аргументы аутентификации ssh: (список опций, env). Ключ — если выбран
-    и создан; иначе пароль через sshpass, как было раньше."""
+    """ssh auth arguments: (list of options, env). Key — if chosen and
+    created; otherwise a password via sshpass, as before."""
     if cfg.get("auth") == "key" and nb_key_info()["exists"]:
         return (["-i", NB_KEY, "-o", "IdentitiesOnly=yes", "-o", "BatchMode=yes"],
                 dict(_C_ENV), False)
@@ -4785,7 +4785,7 @@ def _nb_ssh_auth(cfg):
 
 
 def _nb_side_env(side):
-    """(префикс пути, env, доп.аргументы rsync) для ОДНОЙ стороны."""
+    """(path prefix, env, extra rsync args) for ONE side."""
     kind = (side or {}).get("kind") or "local"
     if kind == "local":
         return ("", dict(_C_ENV), [])
@@ -4798,12 +4798,12 @@ def _nb_side_env(side):
         rsh = ("sshpass -e " + base) if use_pw else base
         return ("%s@%s:" % (user, host), env, ["-e", rsh.strip()])
     env = dict(_C_ENV, RSYNC_PASSWORD=side.get("password", ""))
-    return ("%s@%s::" % (user, host), env, [])            # rsync-демон — пароль через RSYNC_PASSWORD
+    return ("%s@%s::" % (user, host), env, [])            # rsync daemon — password via RSYNC_PASSWORD
 
 
 def _nb_remote_env(cfg):
-    """Совместимость: «удалённая сторона» профиля (какая именно — зависит от
-    направления). Новый код берёт стороны через _nb_sides()/_nb_side_env()."""
+    """Compatibility: the profile's "remote side" (which one depends on the
+    direction). New code gets sides via _nb_sides()/_nb_side_env()."""
     src, dst = _nb_sides(cfg)
     side = dst if src["kind"] == "local" else src
     return _nb_side_env(side)
@@ -4820,56 +4820,56 @@ def _nb_ssh_run(cfg, remote_cmd, timeout=30):
     return _run(argv + [tgt, remote_cmd], timeout=timeout, env=env)
 
 def _nb_err(raw):
-    """Короткое человекочитаемое объяснение ошибки rsync/ssh (без простыни на весь экран)."""
+    """Short human-readable explanation of an rsync/ssh error (no full-screen wall of text)."""
     low = (raw or "").lower()
     if "sshpass" in low and ("not found" in low or "no such" in low):
-        return "sshpass не установлен (нужен для пароля по SSH)"
-    if "sudo:" in low or "not in the sudoers" in low:      # sudo на источнике (до общей проверки пароля)
+        return "sshpass is not installed (needed for SSH password auth)"
+    if "sudo:" in low or "not in the sudoers" in low:      # sudo on the source (before the shared password check)
         if "not allowed" in low or "not in the sudoers" in low or "may not run" in low:
-            return "sudo на источнике не разрешён для rsync — добавьте правило NOPASSWD в sudoers"
+            return "sudo on the source isn't allowed for rsync — add a NOPASSWD rule to sudoers"
         if "command not found" in low:
-            return "на источнике не найден sudo"
-        return "на источнике sudo требует пароль/TTY — нужен NOPASSWD sudo для rsync (см. подсказку у тумблера)"
+            return "sudo not found on the source"
+        return "sudo on the source needs a password/TTY — set up NOPASSWD sudo for rsync (see the tooltip)"
     if "invalid path" in low:
-        return ("приёмник принимает только пути от «модуля» (NAS с принудительным rsync-демоном) — "
-                "укажите путь БЕЗ ведущего /, напр. HDD6TB/Downloads/backup; «Проверить» покажет доступные корни")
+        return ("the destination only accepts module-style paths (a NAS with a forced rsync daemon) — "
+                "set the path WITHOUT a leading /, e.g. HDD6TB/Downloads/backup; «Check» lists the available roots")
     if "permission denied" in low or "auth" in low or "password" in low:
-        return "доступ отклонён — проверьте пользователя и пароль (или ключ)"
+        return "access denied — check the username and password (or key)"
     if "connection refused" in low:
-        return "соединение отклонено — служба/порт недоступны на источнике"
+        return "connection refused — service/port unavailable on the source"
     if "timed out" in low or "timeout" in low:
-        return "таймаут соединения"
+        return "connection timeout"
     if "@error" in low:
-        return "rsync-демон отклонил запрос (модуль или пароль)"
+        return "rsync daemon rejected the request (module or password)"
     if "host key" in low or "remote host identification" in low:
-        return "проблема с host-key SSH источника"
+        return "problem with the source's SSH host key"
     lines = [l.strip() for l in (raw or "").splitlines() if l.strip()]
-    return (lines[-1] if lines else "неизвестная ошибка")[:180]
+    return (lines[-1] if lines else "unknown error")[:180]
 
 def _nb_test_side(cfg, side, what):
-    """Проверка одной стороны: локальная — папка/диск, удалённая — связь и путь."""
+    """Check one side: local — folder/disk, remote — connectivity and path."""
     if side["kind"] == "local":
         if what == "dst":
             base = side.get("base") or ""
             if not base:
-                return {"ok": False, "log": "не выбрана папка-приёмник"}
+                return {"ok": False, "log": "no destination folder selected"}
             if _dest_disk_absent(base):
-                return {"ok": False, "log": "диск приёмника не смонтирован (%s)" % base}
-        return {"ok": True, "log": "локальная папка на месте"}
+                return {"ok": False, "log": "the destination disk is not mounted (%s)" % base}
+        return {"ok": True, "log": "local folder is in place"}
     if not (side.get("host") and side.get("user")):
-        return {"ok": False, "log": "не заданы адрес/пользователь"}
+        return {"ok": False, "log": "address/user not set"}
     if subprocess.run(["ping", "-c", "1", "-W", "3", "--", side["host"]],
                       capture_output=True, timeout=10).returncode != 0:
-        return {"ok": False, "log": "%s не отвечает на ping" % side["host"]}
+        return {"ok": False, "log": "%s does not respond to ping" % side["host"]}
     if side["kind"] == "ssh" and side.get("auth") != "key" and side.get("password") \
             and not shutil.which("sshpass"):
-        return {"ok": False, "log": "для пароля по SSH нужен sshpass — или используйте ключ"}
+        return {"ok": False, "log": "SSH password auth needs sshpass — or use a key"}
     prefix, env, rsh = _nb_side_env(side)
     r = subprocess.run(["rsync"] + rsh + ["--list-only", prefix], capture_output=True,
                        text=True, env=env, timeout=25)
     if r.returncode != 0:
         return {"ok": False, "log": _nb_err((r.stderr or r.stdout)[-300:])}
-    return {"ok": True, "log": "связь есть"}
+    return {"ok": True, "log": "connection OK"}
 
 
 def nb_test(cfg=None):
@@ -4877,39 +4877,39 @@ def nb_test(cfg=None):
     checks that a destination folder is chosen and its disk is mounted."""
     cfg = cfg or nb_load()
     if _nb_remote_both(cfg):
-        # SSH→SSH: проверяем обе стороны, каждую своим способом
+        # SSH→SSH: check both sides, each in its own way
         src, dst = _nb_sides(cfg)
         a1 = _nb_test_side(cfg, src, "src")
         if not a1.get("ok"):
-            return {"ok": False, "log": "источник: " + (a1.get("log") or "")}
+            return {"ok": False, "log": "source: " + (a1.get("log") or "")}
         a2 = _nb_test_side(cfg, dst, "dst")
         if not a2.get("ok"):
-            return {"ok": False, "log": "приёмник: " + (a2.get("log") or "")}
+            return {"ok": False, "log": "destination: " + (a2.get("log") or "")}
         if not shutil.which("sshfs"):
-            return {"ok": False, "log": "для режима SSH→SSH нужен sshfs"}
-        return {"ok": True, "log": "обе стороны на связи · копия пойдёт через этот NAS"}
+            return {"ok": False, "log": "SSH to SSH mode requires sshfs"}
+        return {"ok": True, "log": "both sides are reachable · the copy will go through this NAS"}
     if cfg.get("transport") == "local":
         base = cfg.get("dest_base") or ""
         if not base:
-            return {"ok": False, "log": "не выбрана папка-приёмник"}
+            return {"ok": False, "log": "no destination folder selected"}
         if _dest_disk_absent(base):
-            return {"ok": False, "log": "диск приёмника не смонтирован (%s)" % base}
-        return {"ok": True, "log": "приёмник на месте"}
+            return {"ok": False, "log": "the destination disk is not mounted (%s)" % base}
+        return {"ok": True, "log": "destination is in place"}
     if not cfg.get("host") or not cfg.get("user"):
-        return {"ok": False, "log": "не заданы адрес/пользователь"}
+        return {"ok": False, "log": "address/user not set"}
     if subprocess.run(["ping", "-c", "1", "-W", "3", "--", cfg["host"]],
                       capture_output=True, timeout=10).returncode != 0:
-        return {"ok": False, "log": "%s не отвечает на ping" % cfg["host"]}
+        return {"ok": False, "log": "%s does not respond to ping" % cfg["host"]}
     remote, env, rsh = _nb_remote_env(cfg)
     if cfg.get("transport") == "ssh":
         if cfg.get("password") and not shutil.which("sshpass"):
-            return {"ok": False, "log": "для пароля по SSH нужен sshpass (переустановите/обновите систему) — или используйте ключ"}
-        extra = ["--rsync-path=sudo rsync"] if cfg.get("remote_sudo") else []   # проверяем и сам sudo-путь
+            return {"ok": False, "log": "SSH password auth needs sshpass (reinstall/update the system) — or use a key"}
+        extra = ["--rsync-path=sudo rsync"] if cfg.get("remote_sudo") else []   # verify the sudo path too
         # push: list the root WITHOUT «/» — on a forced-rsync-daemon NAS
         # (UGREEN/Synology) «/» is an invalid path while an empty path lists modules
         r = _run(["rsync"] + rsh + extra + ["--list-only", remote if _nb_push(cfg) else remote + "/"],
                  timeout=25, env=env)
-        ok_msg = "SSH-подключение работает" + (" · sudo на источнике ок" if cfg.get("remote_sudo") else "")
+        ok_msg = "SSH connection works" + (" · sudo on source OK" if cfg.get("remote_sudo") else "")
         if r["ok"] and _nb_push(cfg):
             roots = []
             for l in (r.get("log") or "").splitlines():
@@ -4917,27 +4917,27 @@ def nb_test(cfg=None):
                 if m and m.group(1) not in (".", ""):
                     roots.append(m.group(1))
             if roots:
-                ok_msg += " · корни: " + ", ".join(roots[:8])
+                ok_msg += " · roots: " + ", ".join(roots[:8])
         return {"ok": r["ok"], "log": ok_msg if r["ok"] else _nb_err(r["log"])}
     r = subprocess.run(["rsync", remote], capture_output=True, text=True, env=env, timeout=25)
     out = (r.stdout + r.stderr).strip()
     if r.returncode != 0 or "auth failed" in out or "@ERROR" in out:
         return {"ok": False, "log": _nb_err(out)}
     mods = [l.split("\t")[0].split()[0] for l in out.splitlines() if l.strip() and not l.startswith("@")]
-    return {"ok": True, "modules": [m for m in mods if m], "log": "подключение работает"}
+    return {"ok": True, "modules": [m for m in mods if m], "log": "connection works"}
 
 _NB_JUNK = {".DS_Store", "Thumbs.db", "desktop.ini", ".localized",
             ".Spotlight-V100", ".Trashes", ".fseventsd", ".TemporaryItems", ".apdisk"}
 def _nb_is_junk(name):
-    # мусорные служебные файлы ОС — не показываем в пикере (AppleDouble ._*, .DS_Store и пр.)
+    # OS junk/service files — not shown in the picker (AppleDouble ._*, .DS_Store, etc.)
     return name in _NB_JUNK or name.startswith("._")
 
 _NB_ROOT_SKIP = {"proc", "sys", "dev", "run", "tmp", "boot", "lost+found"}
 
 def _nb_ls(cfg, spec, timeout=30):
     """--list-only of a remote path (spec is appended to the transport prefix as-is).
-    side — конкретная сторона (источник/приёмник); без неё берётся удалённая
-    сторона профиля, как раньше."""
+    side — a specific side (source/destination); without it the profile's remote
+    side is used, as before."""
     remote, env, rsh = _nb_side_env(side) if side else _nb_remote_env(cfg)
     try:
         r = subprocess.run(["rsync"] + rsh + ["--list-only", "--no-h", remote + spec],
@@ -4976,14 +4976,14 @@ def _nb_remote_shell_fs(cfg, side=None):
     return bool(_nb_ls(cfg, "/etc/", timeout=15, side=side).get("ok"))
 
 def nb_browse_dest(cfg, path):
-    """Пикер папок ПРИЁМНИКА (удалённого). Корень зависит от режима сервера:
-    обычный шелл — «/», принудительный демон и rsync.net — список модулей / дом."""
+    """DESTINATION folder picker (remote). The root depends on the server mode:
+    a normal shell — «/», a forced daemon and rsync.net — a module list / home."""
     dside = _nb_dst_side(cfg)
     if dside["kind"] != "ssh":
-        return {"ok": False, "log": "приёмник не SSH"}
+        return {"ok": False, "log": "the destination is not SSH"}
     path = str(path or "").strip().rstrip("/")
     if ".." in path:
-        return {"ok": False, "log": "недопустимый путь"}
+        return {"ok": False, "log": "invalid path"}
     if not path:
         if _nb_remote_shell_fs(cfg, dside):
             r = _nb_ls(cfg, "/", side=dside)
@@ -5005,7 +5005,7 @@ def nb_browse(cfg, path):
     if _nb_push(cfg):
         path = path.lstrip("/")
         if ".." in path:
-            return {"ok": False, "log": "недопустимый путь"}
+            return {"ok": False, "log": "invalid path"}
         base = "/" + path if path else "/"
         entries = []
         try:
@@ -5025,7 +5025,7 @@ def nb_browse(cfg, path):
         return {"ok": True, "path": path, "entries": entries}
     remote, env, rsh = _nb_remote_env(cfg)
     if cfg.get("transport") == "rsync" and not path:
-        # корень rsync-демона = список модулей
+        # rsync daemon root = list of modules
         t = nb_test(cfg)
         if not t.get("ok"): return {"ok": False, "log": t.get("log", "")}
         return {"ok": True, "path": "", "entries": [{"name": m, "dir": True} for m in t.get("modules", [])]}
@@ -5036,18 +5036,18 @@ def nb_browse(cfg, path):
         return {"ok": False, "log": (r.stderr or r.stdout)[-160:]}
     entries = []
     for l in r.stdout.splitlines():
-        # формат: "drwxr-xr-x  4096 2024/01/01 12:00:00 имя"
+        # format: "drwxr-xr-x  4096 2024/01/01 12:00:00 name"
         m = re.match(r"^(.)\S*\s+[\d,]+\s+\S+\s+\S+\s+(.+)$", l)
         if not m: continue
         name = m.group(2)
         if name in (".", ""): continue
-        if _nb_is_junk(name): continue        # не засорять пикер мусором (.DS_Store, ._*, Thumbs.db…)
+        if _nb_is_junk(name): continue        # don't clutter the picker with junk (.DS_Store, ._*, Thumbs.db…)
         entries.append({"name": name, "dir": m.group(1) == "d"})
     entries.sort(key=lambda e: (not e["dir"], e["name"].lower()))
     return {"ok": True, "path": path, "entries": entries}
 
 def _nb_prune(cfg):
-    """Ретеншен архива удалённых (_deleted/ДАТА): по дням И по суммарному размеру (ГБ)."""
+    """Retention of the deleted-files archive (_deleted/DATE): by days AND by total size (GB)."""
     days = int(cfg.get("retention_days", 0) or 0)
     gb   = int(cfg.get("retention_gb", 0) or 0)
     snaps = []   # (mtime, path, size)
@@ -5073,7 +5073,7 @@ def _nb_prune(cfg):
                 try: shutil.rmtree(p); removed += 1; snaps.remove([mt, p, _])
                 except OSError: pass
     if gb > 0:
-        snaps.sort()  # старые сначала
+        snaps.sort()  # oldest first
         total = sum(s[2] for s in snaps)
         cap = gb * 1024**3
         for mt, p, sz in snaps:
@@ -5087,7 +5087,7 @@ _NB_MONTHS = ["", "January", "February", "March", "April", "May", "June", "July"
               "August", "September", "October", "November", "December"]
 
 def _nb_render_tpl(tpl, t=None):
-    """Раскрыть токены шаблона папки удалённых ({date}/{year}/{month}/… как в USB-импорте)."""
+    """Expand deleted-folder template tokens ({date}/{year}/{month}/… as in USB import)."""
     t = t or time.localtime()
     rep = {"{date}": time.strftime("%Y-%m-%d", t), "{time}": time.strftime("%H-%M-%S", t),
            "{datetime}": time.strftime("%Y-%m-%d_%H-%M-%S", t), "{year}": time.strftime("%Y", t),
@@ -5097,13 +5097,13 @@ def _nb_render_tpl(tpl, t=None):
     s = tpl or ""
     for k, v in rep.items():
         s = s.replace(k, v)
-    s = re.sub(r"\{[^}]*\}", "", s)                              # выкинуть неизвестные токены
+    s = re.sub(r"\{[^}]*\}", "", s)                              # drop unknown tokens
     s = re.sub(r"[^\w \-.А-Яа-яЁё/]", "", s).replace("..", "")
     s = re.sub(r"/+", "/", s).strip("/")
     return s
 
 def nb_deleted_top(cfg):
-    """Верхняя (статическая) папка архива удалённых — для exclude и ретеншена."""
+    """Top (static) folder of the deleted-files archive — for exclude and retention."""
     top = _nb_render_tpl((cfg.get("deleted_dir") or "_deleted/{date}").split("/")[0])
     return top or "_deleted"
 
@@ -5112,19 +5112,19 @@ def nb_deleted_rel(cfg, t=None):
     return rel or ("_deleted/" + time.strftime("%Y-%m-%d", t or time.localtime()))
 
 def nb_build_cmd(cfg, job, dry, prev_files=0, mkpath=False, allow_delete=False, stage=None):
-    """rsync-команда (+env) для одной задачи. prev_files — число файлов в прошлый
-    прогон (для защиты --max-delete по проценту). stage — sshfs-монтирование
-    источника (режим SSH→SSH)."""
+    """rsync command (+env) for one job. prev_files — the number of files in the
+    previous run (for the percentage --max-delete guard). stage — sshfs mount of
+    the source (SSH→SSH mode)."""
     env, rsh = _nb_cmd_ctx(cfg, stage)
     dest = job["dest"].rstrip("/") + "/"
     owner = TARGET_USER
     limited = nb_dest_fs(cfg, job.get("dest")) in NB_FS_LIMITED
     if limited:
-        # exFAT/NTFS/FAT: симлинков и спецфайлов там не бывает — не «-l»/«-D», и rsync
-        # просто пропустит их (код 0), вместо того чтобы падать в 23 каждый прогон.
-        # --modify-window=1: у FAT-подобных время файла округлено до 2 с, без этого
-        # rsync считает файлы изменившимися и гоняет их заново КАЖДЫЙ раз.
-        # --chown тоже не нужен: владельца такая ФС не хранит (он берётся из uid= в mount)
+        # exFAT/NTFS/FAT: no symlinks or special files there — drop «-l»/«-D», and rsync
+        # simply skips them (code 0) instead of failing with 23 every run.
+        # --modify-window=1: on FAT-like filesystems file times are rounded to 2 s, without it
+        # rsync thinks the files changed and re-copies them EVERY time.
+        # --chown isn't needed either: such an FS doesn't store an owner (it comes from uid= in mount)
         args = ["rsync", "-rt", "--modify-window=1", "--info=progress2", "--stats",
                 "--no-inc-recursive", "--no-owner", "--no-group", "--no-perms"] + rsh
     else:
@@ -5135,8 +5135,8 @@ def nb_build_cmd(cfg, job, dry, prev_files=0, mkpath=False, allow_delete=False, 
     dm = cfg.get("delete_mode", "archive")
     if dm in ("archive", "mirror"):
         args.append("--delete")
-        # защита: не удалять больше N% файлов (от числа в прошлый прогон) — иначе rsync
-        # выходит с кодом 25 и НИЧЕГО не удаляет. Спасает от «источник стёрли/размонтировали».
+        # guard: don't delete more than N% of files (of the previous run's count) — otherwise rsync
+        # exits with code 25 and deletes NOTHING. Saves you from "the source was wiped/unmounted".
         pct = int(cfg.get("max_delete_pct", 20) or 0)
         if pct > 0 and prev_files > 0 and not allow_delete:
             args.append("--max-delete=%d" % max(1, int(prev_files * pct / 100.0)))
@@ -5147,18 +5147,18 @@ def nb_build_cmd(cfg, job, dry, prev_files=0, mkpath=False, allow_delete=False, 
         snap = nb_deleted_rel(cfg) if (_nb_push_ssh(cfg) and not job["dest"].startswith("/")) \
             else os.path.join(dest, nb_deleted_rel(cfg))
         args += ["--backup", "--backup-dir=" + snap]
-        args.append("--exclude=/" + nb_deleted_top(cfg)) # не бэкапить сам архив удалённых
+        args.append("--exclude=/" + nb_deleted_top(cfg)) # don't back up the deleted-files archive itself
     for ex in cfg.get("excludes", []):
         args.append("--exclude=" + ex)
-    for ex in job.get("excludes", []):          # per-job: снятые в дереве вложенные папки
+    for ex in job.get("excludes", []):          # per-job: nested folders unchecked in the tree
         args.append("--exclude=" + str(ex))
     bw = int(cfg.get("bwlimit", 0) or 0)
     if bw > 0:
-        args.append("--bwlimit=%d" % bw)                 # КБ/с
+        args.append("--bwlimit=%d" % bw)                 # KB/s
     if cfg.get("transport") == "ssh" and cfg.get("remote_sudo"):
-        args.append("--rsync-path=sudo rsync")   # читать файлы без доступа у пользователя (нужен NOPASSWD sudo на источнике)
+        args.append("--rsync-path=sudo rsync")   # read files the user can't access (needs NOPASSWD sudo on the source)
     if mkpath:
-        args.append("--mkpath")   # принудительный демон: папки в модуле создаёт сам rsync (≥3.2.3)
+        args.append("--mkpath")   # forced daemon: rsync itself creates module folders (≥3.2.3)
     if dry:
         args.append("--dry-run")
     args += _nb_src_dst(cfg, job, stage)
@@ -5168,15 +5168,15 @@ NB_STAGE_DIR = "/mnt/nb-src"
 
 
 def _nb_stage_mount(cfg, pid, writer):
-    """Смонтировать удалённый ИСТОЧНИК по sshfs (только чтение) — так SSH→SSH
-    превращается в «локальная папка → удалённый приёмник», которое rsync умеет.
-    Демон живёт в своём transient-юните: рестарт панели (наш обычный цикл
-    разработки) не должен уносить маунт посреди прогона."""
+    """Mount the remote SOURCE over sshfs (read-only) — this turns SSH→SSH into
+    a "local folder → remote destination", which rsync can do. The daemon lives
+    in its own transient unit: a panel restart (our usual development cycle) must
+    not tear the mount away mid-run."""
     src, _ = _nb_sides(cfg)
     if src["kind"] != "ssh":
-        return None, "источник по rsync-демону нельзя смонтировать — выберите SSH"
+        return None, "a source over an rsync daemon cannot be mounted — choose SSH"
     if not shutil.which("sshfs"):
-        return None, "нет sshfs (переустановите систему — пакет ставит визард)"
+        return None, "sshfs is missing (reinstall the system — the wizard installs the package)"
     mp = os.path.join(NB_STAGE_DIR, re.sub(r"[^\w-]", "", str(pid))[:24] or "x")
     _nb_stage_umount(pid)
     os.makedirs(mp, mode=0o755, exist_ok=True)
@@ -5192,9 +5192,9 @@ def _nb_stage_mount(cfg, pid, writer):
     else:
         pw = src.get("password") or ""
         if not pw:
-            return None, "для источника нужен пароль или ключ"
-        # пароль — через окружение юнита (его читает только root), НЕ в argv:
-        # /proc/<pid>/cmdline виден всем
+            return None, "the source needs a password or a key"
+        # password — via the unit's environment (only root reads it), NOT in argv:
+        # /proc/<pid>/cmdline is visible to everyone
         argv.append("--setenv=SSHFS_PW=" + pw)
         opts.append("password_stdin")
     tgt = "%s@%s:%s" % (src.get("user", ""), src.get("host", ""), "/")
@@ -5204,17 +5204,17 @@ def _nb_stage_mount(cfg, pid, writer):
     r = _run(argv + ["/bin/bash", "-c", cmd], timeout=40)
     if not r["ok"]:
         return None, (r.get("log") or "").strip()[-200:]
-    for _ in range(30):                       # ждём, пока маунт реально появится
+    for _ in range(30):                       # wait until the mount actually appears
         time.sleep(0.4)
         try:
             os.statvfs(mp)
             if os.path.ismount(mp):
-                writer("источник смонтирован (sshfs): %s@%s" % (src.get("user"), src.get("host")))
+                writer("source mounted (sshfs): %s@%s" % (src.get("user"), src.get("host")))
                 return mp, ""
         except OSError:
             pass
     _nb_stage_umount(pid)
-    return None, "не удалось смонтировать источник по sshfs"
+    return None, "could not mount the source over sshfs"
 
 
 def _nb_stage_umount(pid):
@@ -5224,8 +5224,8 @@ def _nb_stage_umount(pid):
 
 
 def _nb_cmd_ctx(cfg, stage=None):
-    """(env, доп.аргументы rsync) прогона. После sshfs-стейджа удалённой стороной
-    может быть только ОДНА — rsync больше одного «-e» и не примет."""
+    """(env, extra rsync args) for the run. After the sshfs stage there can be only
+    ONE remote side — rsync won't accept more than one «-e» anyway."""
     src, dst = _nb_sides(cfg)
     if stage:
         src = {"kind": "local"}
@@ -5241,8 +5241,8 @@ def _nb_cmd_ctx(cfg, stage=None):
 
 
 def _nb_src_dst(cfg, job, stage=None):
-    """[src, dst] для rsync по сторонам профиля. stage — путь sshfs-монтирования
-    источника (SSH→SSH): тогда источник выглядит локальной папкой."""
+    """[src, dst] for rsync from the profile's sides. stage — the sshfs mount path
+    of the source (SSH→SSH): then the source looks like a local folder."""
     src, dst = _nb_sides(cfg)
     sp, _, _ = _nb_side_env(src)
     dp, _, _ = _nb_side_env(dst)
@@ -5272,25 +5272,25 @@ def nb_verify_cmd(cfg, job, stage=None):
     return args, env
 
 def _mountpoint_of(p):
-    """Ближайшая вверх точка монтирования для пути (существующего или нет)."""
+    """Nearest mount point upward for a path (existing or not)."""
     p = os.path.abspath(p)
     while p != "/" and not os.path.ismount(p):
         p = os.path.dirname(p)
     return p
 
 # Filesystems that cannot hold what a Linux backup normally carries: no symlinks,
-# no sockets/fifos, no owner/perms, and они запрещают «:» и CR в именах. rsync
-# упирается в это КАЖДЫЙ прогон и выходит с кодом 23 — поэтому такие приёмники
-# обслуживаем иначе (см. nb_build_cmd), а не делаем вид, что это случайный сбой.
+# no sockets/fifos, no owner/perms, and they forbid «:» and CR in names. rsync
+# hits this EVERY run and exits with code 23 — so such destinations are handled
+# differently (see nb_build_cmd) rather than pretending it's a random failure.
 NB_FS_LIMITED = {"exfat", "vfat", "msdos", "fat", "fat32", "ntfs", "ntfs3", "fuseblk", "hfsplus"}
 NB_FS_FAT     = {"vfat", "msdos", "fat", "fat32"}   # hard 4 GiB per-file cap — aborts the run
-# «файл не лезет в эту ФС», а не «сбой»: запрещённое имя (22), симлинк/сокет (1),
-# нет такой возможности у ФС (ENOSYS)
+# "file doesn't fit this FS", not a "failure": a forbidden name (22), symlink/socket (1),
+# the FS lacks the capability (ENOSYS)
 _NB_FS_ERR_RX = re.compile(r"failed: (Invalid argument \(22\)|Operation not permitted \(1\)|"
                            r"Function not implemented)")
 
 def _fs_type(path):
-    """Тип ФС для пути (по /proc/mounts, ближайшая точка монтирования). "" — не знаем."""
+    """FS type for a path (from /proc/mounts, nearest mount point). "" — unknown."""
     mp = _mountpoint_of(path)
     best, best_len = "", -1
     try:
@@ -5307,33 +5307,33 @@ def _fs_type(path):
     return best
 
 def nb_dest_fs(cfg, dest=None):
-    """Тип ФС приёмника — только когда он ЛОКАЛЕН (push по SSH мы не щупаем)."""
+    """Destination FS type — only when it is LOCAL (we don't probe a push over SSH)."""
     if _nb_push_ssh(cfg):
         return ""
     d = dest or cfg.get("dest_base") or ""
     return _fs_type(d) if d.startswith("/") else ""
 
 def _dest_disk_absent(dest):
-    """dest под /mnt|/media|/srv подразумевает отдельный носитель. Если он НЕ
-    смонтирован, точка проваливается в корень (mountpoint = '/') — писать туда
-    нельзя: rsync молча зальёт системный диск. Пул /mnt/storage смонтирован →
-    его mountpoint не '/', проверка проходит. Так безопасны и съёмные диски."""
+    """A dest under /mnt|/media|/srv implies a separate medium. If it is NOT mounted,
+    the path falls through to root (mountpoint = '/') — writing there is unsafe:
+    rsync would silently fill the system disk. The pool /mnt/storage is mounted →
+    its mountpoint isn't '/', the check passes. This keeps removable disks safe too."""
     return bool(re.match(r"^/(mnt|media|srv)/", dest or "")) and _mountpoint_of(dest) == "/"
 
 def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None, allow_delete=False):
-    """Прогнать все включённые задачи. writer(line) — вывод; cancel() — прерывание.
+    """Run all enabled jobs. writer(line) — output; cancel() — interruption.
     on_job(done, total) — after every finished job, so the UI can paint folder dots
     live instead of waiting for the whole run to end.
-    allow_delete — ОДНОРАЗОВОЕ разрешение от пользователя: снять защиту --max-delete для
-    этого прогона (он сам стёр много файлов на источнике и подтвердил это в панели).
-    В конфиг НЕ пишется: следующий прогон снова под защитой."""
+    allow_delete — a ONE-TIME permission from the user: lift the --max-delete guard for
+    this run (they deleted many files on the source themselves and confirmed it in the panel).
+    NOT written to the config: the next run is guarded again."""
     cfg = cfg or nb_load()
     jobs = [j for j in cfg.get("jobs", []) if j.get("enabled", True)]
     if not jobs:
-        writer("нет задач для бэкапа"); return {"ok": False, "jobs": []}
+        writer("no jobs to back up"); return {"ok": False, "jobs": []}
     t = nb_test(cfg)
     if not t.get("ok"):
-        writer("ОШИБКА связи: " + t.get("log", "")); return {"ok": False, "unreachable": True, "jobs": []}
+        writer("CONNECTION ERROR: " + t.get("log", "")); return {"ok": False, "unreachable": True, "jobs": []}
     pid = cfg.get("id") or NB_MAIN
     try:
         with open(nb_status_file(pid)) as f:
@@ -5342,38 +5342,38 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None, allow_delete=Fal
         prevf = {}
     t0 = time.time()
     push, push_ssh = _nb_push(cfg), _nb_push_ssh(cfg)
-    # SSH→SSH: rsync такое не умеет — монтируем источник по sshfs и копируем как
-    # из локальной папки (данные идут через NAS, о чём панель предупреждает)
+    # SSH→SSH: rsync can't do this — mount the source over sshfs and copy as if
+    # from a local folder (data goes through the NAS, which the panel warns about)
     stage = None
     if _nb_remote_both(cfg):
-        writer("источник и приёмник оба удалённые — поднимаю мост через этот NAS")
+        writer("source and destination are both remote — bringing up a bridge through this NAS")
         stage, err = _nb_stage_mount(cfg, pid, writer)
         if not stage:
-            writer("не смонтировать источник: %s" % err)
+            writer("could not mount the source: %s" % err)
             return {"ok": False, "jobs": []}
     sides_dst = _nb_sides(cfg)[1]
-    push_ssh = push_ssh or (sides_dst["kind"] == "ssh")   # приёмник удалённый — та же ветка
+    push_ssh = push_ssh or (sides_dst["kind"] == "ssh")   # remote destination — the same branch
     shell_fs = None   # push-ssh: real FS (mkdir over SSH) vs forced daemon (--mkpath)
     if push_ssh:
         shell_fs = _nb_remote_shell_fs(cfg)
         if not shell_fs:
-            writer("приёмник — rsync-демон с «модулями»: папки создаст сам rsync")
+            writer("the destination is an rsync daemon with «modules»: rsync will create the folders itself")
     if allow_delete:
-        writer("РАЗРЕШЕНИЕ ПОЛЬЗОВАТЕЛЯ: защита от массового удаления снята на ЭТОТ прогон — "
-               "лишнее в копии будет удалено (в режиме «архив» — перенесено в архив удалённых)")
+        writer("USER PERMISSION: the mass-deletion guard is lifted for THIS run — "
+               "extra files in the copy will be deleted (in «archive» mode — moved to the deleted-files archive)")
     dest_fs = nb_dest_fs(cfg)
     if dest_fs in NB_FS_LIMITED:
-        writer("приёмник в %s: эта файловая система не хранит симлинки, спецфайлы и права — "
-               "они будут пропущены; имена с «:» и переносом строки она тоже не принимает"
+        writer("destination on %s: this filesystem does not store symlinks, special files or permissions — "
+               "they will be skipped; it also rejects names with «:» and newlines"
                % dest_fs)
     # The FAT family caps a single file at 4 GiB. Unlike the notes above this is not a
     # "some files are skipped" nuisance: rsync dies with «File too large (27)» and the whole
     # job stops, so it has to be said loudly and up front (2026-07-12: a backup of game
     # repacks onto a FAT32 stick died on the first multi-gigabyte archive).
     if dest_fs in NB_FS_FAT:
-        writer("ВНИМАНИЕ: %s не умеет файлы больше 4 ГиБ — на первом же таком файле прогон "
-               "ОБОРВЁТСЯ с «File too large». Переформатируйте приёмник в ext4 (или exfat, "
-               "если диск нужен и на Windows/Mac)" % dest_fs)
+        writer("WARNING: %s can't handle files larger than 4 GiB — on the first such file the run "
+               "will ABORT with «File too large». Reformat the destination to ext4 (or exfat, "
+               "if the disk is also needed on Windows/Mac)" % dest_fs)
     results = []
     def emit(r):
         results.append(r)
@@ -5382,12 +5382,12 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None, allow_delete=Fal
             except Exception: pass
     for j in jobs:
         if cancel():
-            writer("— отменено —"); break
+            writer("— cancelled —"); break
         writer("")
         writer("=== %s → %s ===" % (j["src"], j["dest"]))
         if push and not os.path.exists("/" + j["src"].lstrip("/")):
-            writer("⚠ ПРОПУЩЕНО: источника нет на этом NAS (/%s) — папку удалили "
-                   "или диск не смонтирован." % j["src"].lstrip("/"))
+            writer("⚠ SKIPPED: the source is missing on this NAS (/%s) — the folder was deleted "
+                   "or the disk is not mounted." % j["src"].lstrip("/"))
             emit({"src": j["src"], "ok": False, "src_missing": True}); continue
         if push_ssh:
             # plain server: mkdir over SSH (works with any remote rsync).
@@ -5396,24 +5396,24 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None, allow_delete=Fal
             if shell_fs:
                 mk = _nb_ssh_run(cfg, "mkdir -p " + shlex.quote(j["dest"]), timeout=25)
                 if not mk["ok"]:
-                    writer("не создать папку на приёмнике: %s" % (mk.get("log") or "").strip()[-160:])
+                    writer("could not create the folder on the destination: %s" % (mk.get("log") or "").strip()[-160:])
                     emit({"src": j["src"], "ok": False}); continue
         else:
             # belt: a local destination must be an absolute allowed path — a relative
             # one (left over from a transport switch) would be created under cwd (/)
             if not _nb_valid_dest(j["dest"]):
-                writer("⚠ ПРОПУЩЕНО: недопустимый локальный приёмник (%s) — выберите "
-                       "папку в /mnt, /media, /srv или /home." % j["dest"])
+                writer("⚠ SKIPPED: invalid local destination (%s) — choose "
+                       "a folder in /mnt, /media, /srv or /home." % j["dest"])
                 emit({"src": j["src"], "ok": False}); continue
             if _dest_disk_absent(j["dest"]):
-                writer("⚠ ПРОПУЩЕНО: целевой диск не смонтирован (%s ведёт в системный "
-                       "раздел). Бэкап пропущен, чтобы НЕ заполнить системный диск — "
-                       "подключите диск назначения." % j["dest"])
+                writer("⚠ SKIPPED: the target disk is not mounted (%s leads into the system "
+                       "partition). Backup skipped so as NOT to fill the system disk — "
+                       "connect the target disk." % j["dest"])
                 emit({"src": j["src"], "ok": False, "not_mounted": True}); continue
             try:
                 os.makedirs(j["dest"], exist_ok=True)
             except OSError as e:
-                writer("не создать папку: %s" % e); emit({"src": j["src"], "ok": False}); continue
+                writer("could not create the folder: %s" % e); emit({"src": j["src"], "ok": False}); continue
         args, env = nb_build_cmd(cfg, j, dry, prev_files=prevf.get(j["src"], 0),
                                  mkpath=bool(push_ssh and not shell_fs),
                                  allow_delete=allow_delete, stage=stage)
@@ -5422,10 +5422,10 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None, allow_delete=Fal
             p = subprocess.Popen(args, env=env, stdout=subprocess.PIPE,
                                  stderr=subprocess.STDOUT, text=True, bufsize=1)
         except OSError as e:
-            writer("не запустить rsync: %s" % e); emit({"src": j["src"], "ok": False}); continue
-        # «Стоп» = флаг-файл, а rsync умеет молчать минутами (строит список файлов) —
-        # проверки внутри цикла чтения там не случается вовсе. Сторож смотрит флаг сам,
-        # поэтому остановка занимает ≤1 с, а не «сколько-нибудь»
+            writer("could not start rsync: %s" % e); emit({"src": j["src"], "ok": False}); continue
+        # "Stop" = a flag file, and rsync can stay silent for minutes (building the file list) —
+        # no check happens inside the read loop there at all. The watcher checks the flag itself,
+        # so stopping takes ≤1 s rather than "some amount of time"
         done_ev = threading.Event()
         def _watch_cancel(proc=p):
             while not done_ev.wait(0.5):
@@ -5448,8 +5448,8 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None, allow_delete=Fal
                     if len(err_lines) < 3:
                         err_lines.append(line.strip())
                     if _NB_FS_ERR_RX.search(line):
-                        # приёмник физически не может принять этот файл (имя с «:» или CR,
-                        # симлинк, сокет) — это не поломка, это предел его файловой системы
+                        # the destination physically cannot accept this file (name with «:» or CR,
+                        # symlink, socket) — not a breakage, but the limit of its filesystem
                         fs_bad += 1
                         mm = re.search(r'"([^"]+)"', line)
                         if mm and len(fs_files) < 8:
@@ -5461,20 +5461,20 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None, allow_delete=Fal
             done_ev.set()
         try: p.stdout.close()
         except OSError: pass
-        ok = p.returncode in (0, 24)     # 24 = vanished files — не ошибка
+        ok = p.returncode in (0, 24)     # 24 = vanished files — not an error
         stt = _nb_parse_stats(stat_lines)
         if not ok and push_ssh and not shell_fs and p.returncode == 1:
             # old receiver rsync (<3.2.3) rejects --mkpath as unknown option
-            writer("подсказка: если выше «unknown option» — на приёмнике старый rsync "
-                   "без --mkpath; создайте папки на нём вручную (файловым менеджером NAS)")
-        if p.returncode == 25:           # сработала защита --max-delete
+            writer("hint: if «unknown option» appears above — the destination has an old rsync "
+                   "without --mkpath; create the folders on it manually (with the NAS file manager)")
+        if p.returncode == 25:           # the --max-delete guard tripped
             pf = prevf.get(j["src"], 0)
             pctv = int(cfg.get("max_delete_pct", 20) or 0)
             res_limit = max(1, int(pf * pctv / 100.0)) if (pf and pctv) else 0
             stt.setdefault("guard_limit", res_limit)
             stt.setdefault("guard_pct", pctv)
-            writer("⚠ ОСТАНОВЛЕНО ЗАЩИТОЙ: rsync попытался удалить слишком много файлов "
-                   "(> %d%%). Ничего не удалено. Проверьте источник." % int(cfg.get("max_delete_pct", 20) or 0))
+            writer("⚠ STOPPED BY THE GUARD: rsync tried to delete too many files "
+                   "(> %d%%). Nothing was deleted. Check the source." % int(cfg.get("max_delete_pct", 20) or 0))
         sz = None
         if not dry and not push_ssh:
             try: sz = _du_bytes(j["dest"])
@@ -5482,20 +5482,20 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None, allow_delete=Fal
         res = {"src": j["src"], "dest": j["dest"], "ok": ok, "code": p.returncode, "size": sz,
                "files": stt.get("files", prevf.get(j["src"], 0)), "xfer": stt.get("xfer", 0),
                "xfer_bytes": stt.get("xfer_bytes", 0), "deleted": stt.get("deleted", 0)}
-        if p.returncode == 25:      # UI покажет, какой был порог, и предложит разрешить удаление
+        if p.returncode == 25:      # the UI shows the threshold that applied and offers to allow deletion
             res["guard_limit"] = stt.get("guard_limit", 0)
             res["guard_pct"] = stt.get("guard_pct", 0)
         if cancel():
-            # мы сами убили rsync по «Стопу» — это не ошибка передачи (иначе в панели
-            # висело бы «ошибка rsync, код -9», и поди догадайся, что это твой же стоп)
+            # we killed rsync ourselves on "Stop" — not a transfer error (otherwise the panel
+            # would show "rsync error, code -9", and good luck guessing it was your own stop)
             res["stopped"] = True
         elif not ok:
             if err_lines:
                 res["err"] = err_lines[0][:180]
                 res["errn"] = errs
             if p.returncode == 23 and fs_bad and fs_bad == errs:
-                # ВСЕ жалобы — про предел ФС приёмника. Остальное скопировалось; красная
-                # точка тут врала бы каждый прогон, поэтому это отдельный, жёлтый исход
+                # ALL complaints are about the destination FS limit. The rest copied; a red
+                # dot here would lie every run, so this is a separate, yellow outcome
                 res["fs_limit"] = fs_bad
                 res["fs_files"] = fs_files
                 res["fs"] = dest_fs
@@ -5503,21 +5503,21 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None, allow_delete=Fal
             vb, vn, ve = _nb_verify_job(cfg, j, writer, cancel, stage=stage)
             res["verify_bad"], res["verify_new"], res["verify_err"] = vb, vn, ve
         emit(res)
-        extra = " · %d файлов, передано %s" % (stt.get("xfer", 0), fmt_bytes(stt.get("xfer_bytes", 0))) if stt else ""
-        writer("[%s] %s%s%s" % ("ок" if ok else ("остановлено" if p.returncode == 25 else "ошибка %d" % p.returncode),
+        extra = " · %d files, transferred %s" % (stt.get("xfer", 0), fmt_bytes(stt.get("xfer_bytes", 0))) if stt else ""
+        writer("[%s] %s%s%s" % ("OK" if ok else ("stopped" if p.returncode == 25 else "error %d" % p.returncode),
                                 j["src"], (" · " + fmt_bytes(sz)) if sz else "", extra))
     vbad = sum(int(r.get("verify_bad") or 0) for r in results)
     verr = any(r.get("verify_err") for r in results)
-    stopped = cancel()          # остановлен пользователем — это не «бэкап с ошибками»
+    stopped = cancel()          # stopped by the user — this is not a "backup with errors"
     allok = (all(r["ok"] for r in results) and len(results) == len(jobs)
              and not vbad and not verr and not stopped)
     if stage:
         _safe(lambda: _nb_stage_umount(pid))
-        writer("мост источника размонтирован")
+        writer("source bridge unmounted")
     if not dry:
         try: pruned = _nb_prune_remote(cfg, writer, shell_fs) if push_ssh else _nb_prune(cfg)
         except Exception: pruned = 0
-        if pruned: writer("очищено старых снимков удалённых: %d" % pruned)
+        if pruned: writer("old deleted-files snapshots cleaned: %d" % pruned)
         _nb_write_status(pid, results)
         try: _nb_history_add(pid, {"ts": int(time.time()), "dur": int(time.time() - t0),
                               "result": "stopped" if stopped else ("ok" if allok else "warn"),
@@ -5530,13 +5530,13 @@ def _nb_verify_job(cfg, job, writer, cancel, stage=None):
     """Post-run verify of one job: rsync -c -n re-reads both sides and compares
     checksums. Returns (mismatches, new-after-run, verify-error).
     «>f» without «+» = content differs; «>f+++» = the file appeared after the run."""
-    writer("— сверка контрольных сумм (перечитывает все файлы — может быть долго)…")
+    writer("— checksum verification (re-reads all files — may take a while)…")
     args, env = nb_verify_cmd(cfg, job, stage)
     try:
         p = subprocess.Popen(args, env=env, stdout=subprocess.PIPE,
                              stderr=subprocess.STDOUT, text=True, bufsize=1)
     except OSError as e:
-        writer("сверка не запустилась: %s" % e); return 0, 0, True
+        writer("verification failed to start: %s" % e); return 0, 0, True
     # while everything matches rsync prints NOTHING, so readline() can block for the
     # whole scan — a side thread keeps the Cancel button responsive
     def _killer():
@@ -5562,17 +5562,17 @@ def _nb_verify_job(cfg, job, writer, cancel, stage=None):
     try: p.stdout.close()
     except OSError: pass
     if cancel():
-        writer("— сверка прервана —")   # user cancel is not a verification failure
+        writer("— verification interrupted —")   # user cancel is not a verification failure
         return len(bad), new, False
     if p.returncode not in (0, 24):
-        writer("сверка завершилась с ошибкой (код %d)" % p.returncode)
+        writer("verification finished with an error (code %d)" % p.returncode)
         return len(bad), new, True
     if bad:
-        writer("⚠ СВЕРКА: содержимое %d файла(ов) отличается от источника%s" %
-               (len(bad), " (показаны первые 20)" if len(bad) > 20 else ""))
+        writer("⚠ VERIFY: the content of %d file(s) differs from the source%s" %
+               (len(bad), " (first 20 shown)" if len(bad) > 20 else ""))
     else:
-        writer("сверка ок — расхождений нет" +
-               (" · %d новых файлов появилось после прогона" % new if new else ""))
+        writer("verification OK — no mismatches" +
+               (" · %d new files appeared after the run" % new if new else ""))
     return len(bad), new, False
 
 def _nb_prune_remote(cfg, writer, shell_fs=None):
@@ -5588,7 +5588,7 @@ def _nb_prune_remote(cfg, writer, shell_fs=None):
     if not shell_fs:
         # forced rsync daemon: the SSH shell lives in a DIFFERENT path namespace,
         # find/rm can't reach inside the module — the archive is cleaned manually
-        writer("модульный приёмник: автоочистка архива удалённых недоступна — чистите %s вручную" % top)
+        writer("module-style destination: auto-cleanup of the deleted-files archive is unavailable — clean %s manually" % top)
         return 0
     dests = set(j["dest"] for j in cfg.get("jobs", [])) | {cfg.get("dest_base", "")}
     removed = 0
@@ -5606,11 +5606,11 @@ def _nb_prune_remote(cfg, writer, shell_fs=None):
             if rr["ok"]:
                 removed += 1
             else:
-                writer("не удалить старый снимок %s: %s" % (p, (rr.get("log") or "").strip()[-120:]))
+                writer("could not remove old snapshot %s: %s" % (p, (rr.get("log") or "").strip()[-120:]))
     return removed
 
 def _nb_parse_stats(lines):
-    """Вытащить числа из блока rsync --stats."""
+    """Extract numbers from the rsync --stats block."""
     out = {}
     pats = {"files": r"Number of files:\s*([\d,]+)",
             "xfer": r"Number of regular files transferred:\s*([\d,]+)",
@@ -5632,7 +5632,7 @@ def _nb_history_add(pid, entry):
     except (OSError, ValueError):
         hist = []
     hist.append(entry)
-    hist = hist[-50:]                    # последние 50 прогонов
+    hist = hist[-50:]                    # last 50 runs
     try:
         _json_save(nb_history_file(pid), hist)
     except OSError:
@@ -5658,7 +5658,7 @@ def nb_history(pid=None):
         return []
 
 def nb_history_clear(pid=None, ts=None):
-    """ts=None → стереть всю историю профиля; иначе удалить одну запись по её ts."""
+    """ts=None → wipe the whole profile history; otherwise delete one entry by its ts."""
     pid = _nb_pid(pid)
     f = nb_history_file(pid)
     if ts is None:
@@ -5703,9 +5703,9 @@ def nb_status(pid=None):
     return st
 
 def nb_dest_state(pid=None):
-    """Реальное состояние приёмника СЕЙЧАС: существуют ли папки задач и не пусты ли.
-    Быстро (isdir/listdir, без du). Ловит ручное удаление папок из приёмника —
-    точки последнего прогона этого не видят."""
+    """The destination's actual state NOW: whether the job folders exist and are non-empty.
+    Fast (isdir/listdir, no du). Catches manual deletion of folders from the destination —
+    which the last run's dots don't see."""
     cfg = nb_load(pid)
     base = cfg.get("dest_base") or ("" if _nb_push(cfg) else "/mnt/storage/nas-backup")
     if _nb_push(cfg) and not base:
@@ -5739,7 +5739,7 @@ def nb_dest_state(pid=None):
             "fs": fs, "fs_limited": fs in NB_FS_LIMITED, "fs_fat": fs in NB_FS_FAT}
 
 def nb_log_tail(since, pid=None):
-    """Хвост лога текущего/последнего прогона (из файла) — для переподключения UI."""
+    """Tail of the current/last run's log (from file) — for UI reconnection."""
     pid = _nb_pid(pid)
     try:
         since = int(since)
@@ -5754,12 +5754,12 @@ def nb_log_tail(since, pid=None):
             lines.pop()
     except OSError:
         lines = []
-    cur_line = ""                            # последняя строка прогресса rsync (для полосы в UI)
+    cur_line = ""                            # the last rsync progress line (for the UI bar)
     for l in reversed(lines[-8:]):
         if "%" in l and "/s" in l:
             cur_line = l.strip(); break
     base = 0
-    if len(lines) > 2000:                    # ограничить объём ответа
+    if len(lines) > 2000:                    # cap the response size
         base = len(lines) - 2000; lines = lines[-2000:]
     end = base + len(lines)
     start = max(0, since - base)
@@ -5771,9 +5771,9 @@ def nb_log_tail(since, pid=None):
             "seq": end, "base": base, "lines": lines[start:]}
 
 # --------------------------------------------------------------------------- #
-#  Здоровье бэкапа — периодические проверки (события nb_conn/nb_srcmiss/nb_stale/
-#  nb_size/nb_dest). Гоняются не чаще раза в 30 мин и только если включена хоть
-#  одна проверка И бэкап настроен (есть адрес и задачи) — иначе тишина.
+#  Backup health — periodic checks (events nb_conn/nb_srcmiss/nb_stale/
+#  nb_size/nb_dest). Run at most once every 30 min and only if at least one
+#  check is enabled AND the backup is configured (has an address and jobs) — otherwise silent.
 # --------------------------------------------------------------------------- #
 _nb_health_last = 0
 
@@ -5798,8 +5798,8 @@ def _du_bytes(path):
         return None
 
 def nb_health_tick(fire, ev, pri, thr, now):
-    """Периодические проверки бэкапа; fire()/ev/pri/thr — из monitor_tick.
-    Гоняем по каждому профилю отдельно: свой кулдаун, свой файл здоровья."""
+    """Periodic backup checks; fire()/ev/pri/thr — from monitor_tick.
+    Run per profile separately: its own cooldown, its own health file."""
     global _nb_health_last
     HK = ("nb_conn", "nb_srcmiss", "nb_stale", "nb_size", "nb_dest")
     if not any(ev.get(k, {}).get("on") for k in HK):
@@ -5816,8 +5816,8 @@ def nb_health_tick(fire, ev, pri, thr, now):
 
 def _nb_health_one(cfg, many, fire, ev, pri, thr, now):
     pid = cfg["id"]
-    # с несколькими профилями «NAS-бэкап: источник недоступен» бесполезно —
-    # дописываем имя, а ключ кулдауна делаем пер-профильным
+    # with multiple profiles "NAS backup: source unreachable" is useless —
+    # append the name, and make the cooldown key per-profile
     sfx = (" · " + cfg["name"]) if many else ""
     def fire_p(key, title, msg, priority, ev_name=None, lvl=None):
         fire(key + ":" + pid, title + sfx, msg, priority, ev_name=ev_name or key, lvl=lvl)
@@ -5834,8 +5834,8 @@ def _nb_health_one(cfg, many, fire, ev, pri, thr, now):
         t = nb_test(cfg)
         conn_ok = t.get("ok")
         if not conn_ok:
-            fire_p("nb_conn", "Бэкап: приёмник недоступен" if push else "NAS-бэкап: источник недоступен",
-                 "Не удаётся подключиться к %s: %s" % (cfg.get("host"), t.get("log", "")),
+            fire_p("nb_conn", "Backup: destination unreachable" if push else "NAS backup: source unreachable",
+                 "Cannot connect to %s: %s" % (cfg.get("host"), t.get("log", "")),
                  pri("nb_conn"), ev_name="nb_conn", lvl="warn")
     # --- source folders still present (push: locally; pull: only when reachable) ---
     if ev.get("nb_srcmiss", {}).get("on"):
@@ -5852,9 +5852,9 @@ def _nb_health_one(cfg, many, fire, ev, pri, thr, now):
                     if not r["ok"] and re.search(r"no such file|not found|failed to", r["log"].lower()):
                         missing.append(j["src"])
         if missing:
-            fire_p("nb_srcmiss", "NAS-бэкап: пропала исходная папка",
-                 "Нет на источнике: " + ", ".join(missing), pri("nb_srcmiss"), ev_name="nb_srcmiss", lvl="warn")
-    # --- давно не было прогона ---
+            fire_p("nb_srcmiss", "NAS backup: source folder disappeared",
+                 "Missing on the source: " + ", ".join(missing), pri("nb_srcmiss"), ev_name="nb_srcmiss", lvl="warn")
+    # --- no run for a long time ---
     if ev.get("nb_stale", {}).get("on"):
         days = thr("nb_stale", 7)
         try:
@@ -5864,15 +5864,15 @@ def _nb_health_one(cfg, many, fire, ev, pri, thr, now):
             ts = 0
         if days > 0 and not nb_run_active(pid):
             if not ts:
-                fire_p("nb_stale", "NAS-бэкап: ещё не выполнялся",
-                     "Бэкап настроен, но не было ни одного прогона", pri("nb_stale"), ev_name="nb_stale", lvl="warn")
+                fire_p("nb_stale", "NAS backup: never run yet",
+                     "The backup is configured, but there hasn't been a single run", pri("nb_stale"), ev_name="nb_stale", lvl="warn")
             elif now - ts > days * 86400:
-                fire_p("nb_stale", "NAS-бэкап: давно не обновлялся",
-                     "Последний прогон %d дн назад (порог %d)" % (int((now - ts) / 86400), days),
+                fire_p("nb_stale", "NAS backup: not updated for a long time",
+                     "Last run %d days ago (threshold %d)" % (int((now - ts) / 86400), days),
                      pri("nb_stale"), ev_name="nb_stale", lvl="warn")
     if push_ssh:
         return   # do not monitor size/space of a destination on a foreign server over SSH
-    # --- резкое изменение размера приёмника ---
+    # --- sharp change in destination size ---
     if ev.get("nb_size", {}).get("on") and not nb_run_active(pid):
         base_dir = cfg.get("dest_base") or "/mnt/storage/nas-backup"
         if os.path.isdir(base_dir):
@@ -5883,18 +5883,18 @@ def _nb_health_one(cfg, many, fire, ev, pri, thr, now):
                     delta = abs(cur_sz - prev) * 100.0 / prev
                     lim = thr("nb_size", 40)
                     if delta >= lim:
-                        arrow = "вырос" if cur_sz > prev else "уменьшился"
-                        fire_p("nb_size", "NAS-бэкап: резко изменился размер",
-                             "Приёмник %s на %.0f%% (%s → %s)" % (arrow, delta, fmt_bytes(prev), fmt_bytes(cur_sz)),
+                        arrow = "grew" if cur_sz > prev else "shrank"
+                        fire_p("nb_size", "NAS backup: size changed sharply",
+                             "Destination %s by %.0f%% (%s → %s)" % (arrow, delta, fmt_bytes(prev), fmt_bytes(cur_sz)),
                              pri("nb_size"), ev_name="nb_size", lvl="warn")
                 hs["dest_size"] = cur_sz
-    # --- приёмник: место / смонтирован ли ---
+    # --- destination: free space / whether it is mounted ---
     if ev.get("nb_dest", {}).get("on"):
         base_dir = cfg.get("dest_base") or "/mnt/storage/nas-backup"
         top = "/mnt/storage" if base_dir.startswith("/mnt/storage") else base_dir
         if top == "/mnt/storage" and not os.path.ismount("/mnt/storage"):
-            fire_p("nb_dest", "NAS-бэкап: приёмник не смонтирован",
-                 "Пул /mnt/storage не смонтирован — бэкап писать некуда", pri("nb_dest"), ev_name="nb_dest", lvl="warn")
+            fire_p("nb_dest", "NAS backup: destination not mounted",
+                 "The pool /mnt/storage is not mounted — nowhere to write the backup", pri("nb_dest"), ev_name="nb_dest", lvl="warn")
         elif not os.path.isdir(base_dir):
             pass   # destination missing (USB disk unplugged) — nothing to say about space
         else:
@@ -5903,25 +5903,25 @@ def _nb_health_one(cfg, many, fire, ev, pri, thr, now):
                 used = 100.0 * (st.f_blocks - st.f_bfree) / max(st.f_blocks, 1)
                 lim = thr("nb_dest", 95)
                 if used >= lim:
-                    fire_p("nb_dest", "NAS-бэкап: мало места в приёмнике",
-                         "%s заполнен на %.0f%% (порог %d%%)" % (base_dir, used, lim),
+                    fire_p("nb_dest", "NAS backup: low space on the destination",
+                         "%s is %.0f%% full (threshold %d%%)" % (base_dir, used, lim),
                          pri("nb_dest"), ev_name="nb_dest", lvl="warn")
             except OSError:
                 pass
     _nb_health_save(pid, hs)
 
 def _nb_start_unit(pid, dry, allow_delete=False):
-    """Поднять транзиентный юнит с драйвером прогона. True — процесс стартовал."""
+    """Bring up a transient unit with the run driver. True — the process started."""
     try:
         if os.path.exists(nb_run_cancel(pid)):
             os.remove(nb_run_cancel(pid))
     except OSError:
         pass
-    # начальный статус (драйвер перезапишет) — чтобы UI сразу увидел «идёт»
+    # initial status (the driver overwrites it) — so the UI immediately sees "running"
     _nb_run_state_write(pid, {"running": True, "started": int(time.time()), "dry": bool(dry),
                               "cur": "", "result": None})
     cmd = ["systemd-run", "--collect", "--quiet", "--unit", nb_unit(pid),
-           "--setenv=SUDO_USER=" + TARGET_USER, "--setenv=HOME=" + HOME,   # тот же NAS_CONFIG, что у службы
+           "--setenv=SUDO_USER=" + TARGET_USER, "--setenv=HOME=" + HOME,   # the same NAS_CONFIG as the service
            sys.executable, os.path.join(HERE, "nas-web.py"), "backup-run", pid] \
         + (["dry"] if dry else []) + (["allow-delete"] if allow_delete else [])
     try:
@@ -5935,21 +5935,21 @@ def _nb_start_unit(pid, dry, allow_delete=False):
     return True
 
 def nb_run_bg(pid=None, dry=False, allow_delete=False):
-    """Запустить прогон профиля. Одновременно идёт РОВНО ОДИН прогон: пока занято,
-    остальные ждут в очереди (два rsync на одном HDD только мешают друг другу)."""
+    """Start a profile run. EXACTLY ONE run happens at a time: while busy,
+    the rest wait in a queue (two rsyncs on one HDD only get in each other's way)."""
     cfg = nb_load(pid); pid = cfg["id"]
     if nb_run_active(pid):
-        return {"ok": False, "log": "уже выполняется"}
+        return {"ok": False, "log": "already running"}
     if nb_any_active():
         _nb_queue_add(pid, dry, allow_delete)
-        return {"ok": True, "queued": True, "log": "поставлено в очередь"}
+        return {"ok": True, "queued": True, "log": "queued"}
     _nb_queue_remove(pid)
     if not _nb_start_unit(pid, dry, allow_delete):
-        return {"ok": False, "log": "не удалось запустить"}
-    return {"ok": True, "queued": False, "log": "запущено"}
+        return {"ok": False, "log": "failed to start"}
+    return {"ok": True, "queued": False, "log": "started"}
 
 def _nb_queue_drain():
-    """Раз в минуту: если ничего не идёт — запустить первого из очереди."""
+    """Once a minute: if nothing is running — start the first one in the queue."""
     q = _nb_queue_read()
     if not q or nb_any_active():
         return
@@ -5963,8 +5963,8 @@ def _nb_queue_drain():
     _nb_queue_write(q)
 
 def nb_run_cli(pid=None, dry=False, allow_delete=False):
-    """Драйвер прогона (запускается в транзиентном юните). Пишет лог в файл и
-    статус в json — независимо от того, жив ли основной процесс nas-web."""
+    """Run driver (started in a transient unit). Writes the log to a file and
+    the status to json — regardless of whether the main nas-web process is alive."""
     cfg = nb_load(pid); pid = cfg["id"]
     many = len(nb_profiles()) > 1
     sfx = (" · " + cfg["name"]) if many else ""
@@ -5972,7 +5972,7 @@ def nb_run_cli(pid=None, dry=False, allow_delete=False):
     _nb_run_state_write(pid, {"running": True, "started": started, "dry": bool(dry),
                               "cur": "", "result": None, "pid": os.getpid()})
     try:
-        logf = open(nb_run_log(pid), "w", buffering=1)     # усечь и открыть на дозапись построчно
+        logf = open(nb_run_log(pid), "w", buffering=1)     # truncate and open for line-buffered appends
     except OSError:
         logf = None
     def w(l):
@@ -5997,39 +5997,39 @@ def nb_run_cli(pid=None, dry=False, allow_delete=False):
     def cancel():
         return os.path.exists(nb_run_cancel(pid))
     push = _nb_push(cfg)
-    title = ("Бэкап с этого NAS" if push else "Бэкап главного NAS") + sfx
+    title = ("Backup from this NAS" if push else "Main NAS backup") + sfx
     res = None
     try:
         r = nb_run(cfg, dry, w, cancel, on_job, allow_delete)
         res = ("ok" if r.get("ok") else "stopped" if r.get("stopped")
                else "unreachable" if r.get("unreachable") else "warn")
         if not dry and r.get("stopped"):
-            try: log_event("nas_backup", title, "остановлен вручную", "info", kind="backup", desk=True)
+            try: log_event("nas_backup", title, "stopped by hand", "info", kind="backup", desk=True)
             except Exception: pass
         if not dry and not r.get("stopped"):
             guarded = [j.get("src") for j in r.get("jobs", []) if j.get("code") == 25]
-            if guarded:      # сработала защита от массового удаления — отдельное важное уведомление
-                try: notify_event("nb_guard", "nb_guard:" + pid, "NAS-бэкап: остановлен защитой" + sfx,
-                                  "Защита от массового удаления сработала: " + ", ".join(guarded) +
-                                  ". Ничего не удалено — проверьте источник (не стёрли/размонтировали ли его).",
+            if guarded:      # the mass-deletion guard tripped — a separate important notification
+                try: notify_event("nb_guard", "nb_guard:" + pid, "NAS backup: stopped by guard" + sfx,
+                                  "Mass-deletion guard triggered: " + ", ".join(guarded) +
+                                  ". Nothing was deleted — check the source (did you wipe or unmount it?).",
                                   "crit", cooldown=0)
                 except Exception: pass
             vbad, verr = int(r.get("verify_bad") or 0), bool(r.get("verify_err"))
             if vbad or verr:      # checksum verify found mismatches / could not finish
-                try: notify_event("nb_verify", "nb_verify:" + pid, "Бэкап: сверка нашла проблемы" + sfx,
-                                  ("Содержимое %d файла(ов) в копии отличается от источника — "
-                                   "подробности в журнале прогона." % vbad) if vbad
-                                  else "Сверка не смогла завершиться — см. журнал прогона.",
+                try: notify_event("nb_verify", "nb_verify:" + pid, "Backup: verification found problems" + sfx,
+                                  ("The content of %d file(s) in the copy differs from the source — "
+                                   "details in the run log." % vbad) if vbad
+                                  else "The verification could not finish — see the run log.",
                                   "warn", cooldown=0)
                 except Exception: pass
-            msg = ("все задачи выполнены" + (" · сверка ок" if cfg.get("verify") and not vbad and not verr else "")) if r.get("ok") \
-                else (("приёмник недоступен — пропущено" if push else "главный NAS недоступен — пропущено") if r.get("unreachable")
-                      else ("сверка: %d расхождений" % vbad if vbad else "часть задач с ошибками"))
+            msg = ("all tasks done" + (" · verification OK" if cfg.get("verify") and not vbad and not verr else "")) if r.get("ok") \
+                else (("destination unreachable — skipped" if push else "main NAS unreachable — skipped") if r.get("unreachable")
+                      else ("verification: %d mismatches" % vbad if vbad else "some tasks had errors"))
             try: log_event("nas_backup", title, msg, "ok" if r.get("ok") else "warn", kind="backup", desk=True)
             except Exception: pass
     except Exception as e:
-        res = "warn"; w("сбой: %s" % e)
-        try: log_event("nas_backup", title, "сбой: %s" % e, "warn", kind="backup", desk=True)
+        res = "warn"; w("failure: %s" % e)
+        try: log_event("nas_backup", title, "failure: %s" % e, "warn", kind="backup", desk=True)
         except Exception: pass
     finally:
         st = _nb_run_state_read(pid)
@@ -6043,7 +6043,7 @@ def nb_run_cli(pid=None, dry=False, allow_delete=False):
             except OSError: pass
 
 def nb_schedule_due(cfg, nowt):
-    """Пора ли запускать по расписанию (вызывается раз в минуту из monitor_loop)."""
+    """Whether it's time to run on schedule (called once a minute from monitor_loop)."""
     s = cfg.get("schedule", {})
     if not s.get("enabled"):
         return False
@@ -6061,33 +6061,33 @@ MAINT_FILE = os.path.join(NAS_CONFIG, "maintenance.json")
 _maint_last = 0
 
 def load_maintenance():
-    # 0 = выключено (для *_days); все значения попадают в бэкап настроек вместе с файлом
+    # 0 = disabled (for *_days); all values go into the settings backup along with the file
     d = {"trash_days": 30, "pool_alias": "",
-         "duscan_hours": 0,         # авто-освежение анализатора места: пересканить тома с кэшем старше N часов (0 = выкл)
-         "thumb_cache_mb": 512,     # лимит кэша миниатюр ФМ, МБ (0 = без лимита)
-         "import_stale_hours": 24,  # снести брошенные .incomplete-* старше N часов (0 = не трогать)
-         "import_keep_days": 0,     # удалять импорты старше N дней (0 = хранить вечно)
-         "import_warm_thumbs": True,  # прогреть превью сразу после импорта
-         "myspeed_url": "http://127.0.0.1:5216",  # виджет MySpeed ("" = выключить)
-         "myspeed_password": "",                  # если в MySpeed включён пароль
-         "smart_scan_min": 10,      # фоновый опрос SMART-статуса, минут
-         "smart_short_days": 7,     # короткий самотест дисков, раз в N дней (ночью)
-         "smart_long_days": 30,     # длинный самотест, раз в N дней (ночью)
-         "backup_days": 7,          # авто-бэкап настроек, раз в N дней
-         "backup_keep": 10,         # сколько бэкапов хранить
-         "settings_backup_dir": "",     # путь бэкапа настроек ("" = /mnt/storage/nas-settings-backup)
-         "settings_backup_hide": True,  # скрывать эту папку в файловом менеджере (по умолчанию да)
-         "snap_sync_time": "03:00",   # SnapRAID: ежедневный sync
-         "snap_scrub_dow": "Sun",     # SnapRAID: день недели scrub
-         "snap_scrub_time": "05:00",  # SnapRAID: время scrub
-         "automount_recover": True,   # авто-перемонтирование отвалившегося диска
-         "summary_enabled": False,    # сводка состояния (в Pushover/журнал)
+         "duscan_hours": 0,         # auto-refresh of the space analyzer: rescan volumes with a cache older than N hours (0 = off)
+         "thumb_cache_mb": 512,     # FM thumbnail cache limit, MB (0 = no limit)
+         "import_stale_hours": 24,  # remove abandoned .incomplete-* older than N hours (0 = leave alone)
+         "import_keep_days": 0,     # delete imports older than N days (0 = keep forever)
+         "import_warm_thumbs": True,  # warm up previews right after the import
+         "myspeed_url": "http://127.0.0.1:5216",  # MySpeed widget ("" = disable)
+         "myspeed_password": "",                  # if a password is enabled in MySpeed
+         "smart_scan_min": 10,      # background SMART-status polling, minutes
+         "smart_short_days": 7,     # short disk self-test, every N days (at night)
+         "smart_long_days": 30,     # long self-test, every N days (at night)
+         "backup_days": 7,          # auto settings backup, every N days
+         "backup_keep": 10,         # how many backups to keep
+         "settings_backup_dir": "",     # settings backup path ("" = /mnt/storage/nas-settings-backup)
+         "settings_backup_hide": True,  # hide this folder in the file manager (default yes)
+         "snap_sync_time": "03:00",   # SnapRAID: daily sync
+         "snap_scrub_dow": "Sun",     # SnapRAID: day of week for scrub
+         "snap_scrub_time": "05:00",  # SnapRAID: scrub time
+         "automount_recover": True,   # auto-remount of a dropped disk
+         "summary_enabled": False,    # status summary (to Pushover/journal)
          "summary_freq": "daily",     # daily | weekly
          "summary_time": "09:00",     # HH:MM
-         "summary_dow": "Mon",        # для weekly
-         "thermal_mode": "warn",      # off | warn | auto (активная термозащита)
-         "thermal_hot": 80,           # порог «горячо», °C
-         "thermal_crit": 85}          # порог «критично» (в auto — стоп контейнера)
+         "summary_dow": "Mon",        # for weekly
+         "thermal_mode": "warn",      # off | warn | auto (active thermal protection)
+         "thermal_hot": 80,           # "hot" threshold, °C
+         "thermal_crit": 85}          # "critical" threshold (in auto — stop the container)
     saved = _json_load_strict(MAINT_FILE, {})
     if isinstance(saved, dict):
         d.update(saved)
@@ -6099,9 +6099,9 @@ _ALIAS_RESERVED = ("/bin", "/boot", "/dev", "/etc", "/home", "/lib", "/media", "
 _DOW = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")
 
 def _snap_sched_apply(cfg):
-    """Расписание SnapRAID: drop-in override для таймеров визарда.
-    Если таймеров ещё нет (SnapRAID не настроен) — тихо выходим; применится
-    при старте службы после настройки."""
+    """SnapRAID schedule: a drop-in override for the wizard's timers.
+    If the timers don't exist yet (SnapRAID not configured) — quietly exit; it
+    applies at service start after configuration."""
     if not os.path.isfile("/etc/systemd/system/snapraid-sync.timer"):
         return ""
     try:
@@ -6120,8 +6120,8 @@ def _snap_sched_apply(cfg):
         return str(e)
 
 def _pool_alias_apply(alias, old=""):
-    """Симлинк-псевдоним пула (напр. /volume2 → /mnt/storage). Возвращает ''/ошибку.
-    Старый псевдоним убираем, только если это НАШ симлинк на пул."""
+    """Symlink alias for the pool (e.g. /volume2 → /mnt/storage). Returns ''/error.
+    Remove the old alias only if it is OUR symlink to the pool."""
     if old and old != alias and os.path.islink(old):
         try:
             if os.readlink(old) == STORAGE:
@@ -6136,7 +6136,7 @@ def _pool_alias_apply(alias, old=""):
                 return ""
             os.remove(alias)
         elif os.path.exists(alias):
-            return "путь %s уже существует и не является псевдонимом пула" % alias
+            return "path %s already exists and is not a pool alias" % alias
         os.symlink(STORAGE, alias)
         return ""
     except OSError as e:
@@ -6145,7 +6145,7 @@ def _pool_alias_apply(alias, old=""):
 def save_maintenance(d):
     cur = load_maintenance()
     err = ""
-    # числовые настройки: ключ → (мин, макс)
+    # numeric settings: key → (min, max)
     for k, (lo, hi) in {"trash_days": (0, 365), "notes_trash_days": (0, 365),
                         "smart_scan_min": (5, 120),
                         "duscan_hours": (0, 8760),
@@ -6158,7 +6158,7 @@ def save_maintenance(d):
                 cur[k] = max(lo, min(hi, int(d[k])))
             except (ValueError, TypeError):
                 pass
-    # расписание SnapRAID
+    # SnapRAID schedule
     snap_changed = False
     for k in ("snap_sync_time", "snap_scrub_time"):
         if k in d and re.match(r"^([01]\d|2[0-3]):[0-5]\d$", str(d[k] or "")):
@@ -6170,7 +6170,7 @@ def save_maintenance(d):
         err = _snap_sched_apply(cur) or err
         if not err:
             try:
-                log_event("action", "Расписание SnapRAID изменено",
+                log_event("action", "SnapRAID schedule changed",
                           "sync %s · scrub %s %s" % (cur["snap_sync_time"], cur["snap_scrub_dow"], cur["snap_scrub_time"]),
                           "ok", kind="protect", desk=False)
             except Exception:
@@ -6178,27 +6178,27 @@ def save_maintenance(d):
     if "pool_alias" in d:
         v = str(d["pool_alias"] or "").strip().rstrip("/")
         if v and (not re.match(r"^/[A-Za-z0-9._-]{1,32}$", v) or v.lower() in _ALIAS_RESERVED):
-            err = "недопустимое имя: одно слово в корне, латиница/цифры (например /volume2)"
+            err = "invalid name: a single word at the root, latin letters/digits (e.g. /volume2)"
         else:
             err = _pool_alias_apply(v, cur.get("pool_alias", ""))
             if not err:
                 if v != cur.get("pool_alias", ""):
                     try:
-                        log_event("action", ("Псевдоним пула: %s → /mnt/storage" % v) if v
-                                  else "Псевдоним пула отключён", "", "ok", kind="disk", desk=False)
+                        log_event("action", ("Pool alias: %s → /mnt/storage" % v) if v
+                                  else "Pool alias disabled", "", "ok", kind="disk", desk=False)
                     except Exception:
                         pass
                 cur["pool_alias"] = v
-    # путь и скрытие папки бэкапа настроек
+    # path and hiding of the settings backup folder
     if "settings_backup_dir" in d:
         v = str(d["settings_backup_dir"] or "").strip().rstrip("/")
         if v == "" or (v.startswith("/") and len(v) > 1 and ".." not in v and v not in _ALIAS_RESERVED):
             cur["settings_backup_dir"] = v
         else:
-            err = err or "недопустимый путь: абсолютный, не системный корень"
+            err = err or "invalid path: must be absolute, not a system root"
     if "settings_backup_hide" in d:
         cur["settings_backup_hide"] = bool(d["settings_backup_hide"])
-    # --- надёжность/отчёты/термозащита ---
+    # --- reliability/reports/thermal protection ---
     if "automount_recover" in d:
         cur["automount_recover"] = bool(d["automount_recover"])
     if "summary_enabled" in d:
@@ -6246,7 +6246,7 @@ def _trash_autoclean(days):
     return removed
 
 def maintenance_daily():
-    """Раз в сутки: авто-очистка корзины + еженедельный авто-бэкап настроек."""
+    """Once a day: auto-cleanup of the trash + weekly auto settings backup."""
     global _maint_last
     now = time.time()
     if now - _maint_last < 86400:
@@ -6275,53 +6275,53 @@ def maintenance_daily():
         pass
 
 # --------------------------------------------------------------------------- #
-#  Бэкап ВСЕХ настроек: nas-config (без журналов/истории), конфиги визарда,
-#  веб-пароль, samba, compose-файлы стеков; fstab/snapraid — справочно
-#  (не восстанавливаются автоматически: железо может отличаться).
+#  Backup of ALL settings: nas-config (without journals/history), wizard configs,
+#  the web password, samba, stack compose files; fstab/snapraid — for reference
+#  (not restored automatically: the hardware may differ).
 # --------------------------------------------------------------------------- #
 import tarfile, io
 
 BACKUP_KEEP = 10
 _BK_NAME_RE = re.compile(r"^nas-settings-[\w.-]+\.tar\.gz$")
-# archive-префикс → (источник, восстанавливать ли автоматически)
+# archive prefix → (source, whether to restore automatically)
 _BK_EXCLUDE = ("events.json", "history.json", "history-long.json", "sessions.json")
 
-# Разделы выборочного восстановления: (ключ, название, секрет?, префиксы в архиве).
-# Порядок значим дважды: он же порядок в диалоге, и раздел файла — ПЕРВЫЙ
-# совпавший префикс (иначе "etc/nas-wizard/" из maint проглотил бы notify.conf).
-# Секретные разделы в диалоге по умолчанию сняты: восстановление старого архива
-# не должно молча подменить пароль входа тем, что был полгода назад.
+# Sections for selective restore: (key, title, secret?, prefixes in the archive).
+# The order matters twice: it's also the order in the dialog, and a file's section is the FIRST
+# matching prefix (otherwise "etc/nas-wizard/" from maint would swallow notify.conf).
+# Secret sections are unchecked by default in the dialog: restoring an old archive
+# must not silently replace the login password with the one from half a year ago.
 _BK_SECTIONS = (
-    ("desktop",   "Рабочий стол",              False, ("nas-config/desktop.json", "nas-config/winpos.json",
+    ("desktop",   "Desktop",                   False, ("nas-config/desktop.json", "nas-config/winpos.json",
                                                        "nas-config/wallpaper.", "nas-config/fm-favorites.json",
                                                        "nas-config/icons/")),
-    ("notify",    "Уведомления",               False, ("nas-config/monitor.json", "etc/nas-wizard/notify.conf")),
-    ("maint",     "Обслуживание и расписания", False, ("nas-config/maintenance.json", "etc/nas-wizard/")),
-    ("samba",     "Общие папки (Samba)",       False, ("etc/samba/", "var/lib/samba/")),
-    ("stacks",    "Docker-стеки",              False, ("opt/stacks/",)),
-    ("disks",     "Диски и пул",               False, ("nas-config/fstab.",)),
-    ("webauth",   "Пароль панели",             True,  ("etc/nas-os/webauth.json",)),
-    ("nasbackup", "Бэкап главного NAS",        True,  ("etc/nas-os/nas-backup.json", "nas-config/nas-backup-",
-                                                       # store.json / remotes.json содержат SSH-пароли,
-                                                       # root/.ssh/nas-backup — ключ push-бэкапов на серверы
+    ("notify",    "Notifications",             False, ("nas-config/monitor.json", "etc/nas-wizard/notify.conf")),
+    ("maint",     "Maintenance and schedules", False, ("nas-config/maintenance.json", "etc/nas-wizard/")),
+    ("samba",     "Shared folders (Samba)",    False, ("etc/samba/", "var/lib/samba/")),
+    ("stacks",    "Docker stacks",             False, ("opt/stacks/",)),
+    ("disks",     "Disks and pool",            False, ("nas-config/fstab.",)),
+    ("webauth",   "Panel password",            True,  ("etc/nas-os/webauth.json",)),
+    ("nasbackup", "Main NAS backup",           True,  ("etc/nas-os/nas-backup.json", "nas-config/nas-backup-",
+                                                       # store.json / remotes.json contain SSH passwords,
+                                                       # root/.ssh/nas-backup — the key for push backups to servers
                                                        "nas-config/store.json", "nas-config/remotes.json",
                                                        "root/.ssh/nas-backup")),
-    ("network",   "Сеть (Wi-Fi, IP)",          True,  ("reference/etc/netplan/",)),   # пароль Wi-Fi → секрет; восстановление руками (reference)
-    ("other",     "Прочее",                    False, ()),      # всё, что не подошло выше
+    ("network",   "Network (Wi-Fi, IP)",       True,  ("reference/etc/netplan/",)),   # Wi-Fi password → secret; restore by hand (reference)
+    ("other",     "Other",                     False, ()),      # everything not matched above
 )
 
-# короткое человеческое «что перезапишется» для каждого раздела (диалог восстановления)
+# a short human "what gets overwritten" for each section (restore dialog)
 _BK_DESC = {
-    "desktop":   "тема, обои, расположение окон и ярлыков",
-    "notify":    "правила уведомлений и Pushover",
-    "maint":     "расписания обслуживания и авто-бэкапа",
-    "samba":     "список общих папок и пароли доступа к ним",
-    "stacks":    "compose и .env стеков (сами данные контейнеров НЕ трогаются)",
-    "disks":     "сохранённая конфигурация дисков (справочно)",
-    "webauth":   "пароль входа в веб-панель",
-    "nasbackup": "профили приложения «Бэкап», SSH-пароли и ключ",
-    "network":   "профили сети netplan: Wi-Fi и статический IP (кладётся рядом, применяется вручную)",
-    "other":     "токен внешнего экрана, выбор основного хранилища, история операций",
+    "desktop":   "theme, wallpaper, window and shortcut layout",
+    "notify":    "notification rules and Pushover",
+    "maint":     "maintenance and auto-backup schedules",
+    "samba":     "the list of shared folders and their access passwords",
+    "stacks":    "stack compose and .env (the container data itself is NOT touched)",
+    "disks":     "the saved disk configuration (for reference)",
+    "webauth":   "the web-panel login password",
+    "nasbackup": "«Backup» app profiles, SSH passwords and key",
+    "network":   "netplan network profiles: Wi-Fi and static IP (placed alongside, applied manually)",
+    "other":     "external screen token, main storage choice, operation history",
 }
 
 def _bk_section(nm):
@@ -6332,15 +6332,15 @@ def _bk_section(nm):
     return "other"
 
 def _bk_restorable(m, nm):
-    """Члены архива, которые вообще можно восстановить (reference/* — только справка).
-    .git отвергаем и на восстановлении: старые архивы несут его внутри, а разливать
-    чужую историю поверх рабочего репозитория nas-config нельзя."""
+    """Archive members that can be restored at all (reference/* — reference only).
+    .git is rejected on restore too: old archives carry it inside, and spilling
+    a foreign history over the working nas-config repository is not allowed."""
     parts = nm.split("/")
     return m.isreg() and nm != "manifest.json" and not nm.startswith("reference/") \
         and ".." not in parts and ".git" not in parts and not nm.startswith("/")
 
 def settings_backup_inspect(path):
-    """Какие разделы есть в архиве — для диалога с чекбоксами."""
+    """Which sections are in the archive — for the checkbox dialog."""
     seen = {}
     try:
         with tarfile.open(path, "r:gz") as tar:
@@ -6351,22 +6351,22 @@ def settings_backup_inspect(path):
                 c = seen.setdefault(_bk_section(nm), [0, 0])
                 c[0] += 1; c[1] += m.size
     except (OSError, tarfile.TarError) as e:
-        return {"ok": False, "log": "плохой архив: %s" % e}
+        return {"ok": False, "log": "bad archive: %s" % e}
     return {"ok": True, "sections": [
         {"key": k, "title": t, "secret": s, "files": seen[k][0], "bytes": seen[k][1],
          "desc": _BK_DESC.get(k, "")}
         for k, t, s, _p in _BK_SECTIONS if k in seen]}
 
 def settings_backup_path():
-    """Куда складывать бэкап настроек: свой путь из maintenance или дефолт.
-    Дефолт — на пуле (переживает переустановку), отдельная папка (не общая «backups»)."""
+    """Where to put the settings backup: a custom path from maintenance or the default.
+    Default — on the pool (survives reinstall), a separate folder (not the shared «backups»)."""
     custom = (load_maintenance().get("settings_backup_dir") or "").strip().rstrip("/")
     if custom and custom.startswith("/") and ".." not in custom:
         return custom
-    # бэкап настроек обязан существовать ВСЕГДА (им поднимают систему после
-    # переустановки), поэтому без смонтированного хранилища — на системный диск
+    # the settings backup must ALWAYS exist (it's used to bring the system up after
+    # a reinstall), so without mounted storage — onto the system disk
     return os.path.join(storage_root(), "nas-settings-backup") if storage_root() \
-        else "/var/backups/nas-os"        # storage_root() = пул ИЛИ выбранный USB
+        else "/var/backups/nas-os"        # storage_root() = the pool OR the chosen USB
 
 def settings_backup_dir():
     d = settings_backup_path()
@@ -6385,15 +6385,15 @@ def _bk_add_file(tar, src, arc):
         pass
     return None
 
-# Пересоздаваемое и нескончаемое: кэш анализатора места, логи прогонов бэкапа,
-# огрызки после сбоя. Каталог .git репозитория nas-config — тем более: он весил
-# больше всех настроек вместе взятых и разливался поверх чужой истории.
+# Recreatable and endless: the space analyzer cache, backup run logs,
+# leftovers after a failure. The .git directory of the nas-config repository even
+# more so: it weighed more than all settings combined and spilled over a foreign history.
 _BK_SKIP_DIRS = (".git",)
 _BK_SKIP_FILE = re.compile(r"^duscan-.+\.json$|\.(log|tmp|bad)$")
 
 def _bk_sources():
-    """(src, arcname) всех файлов бэкапа. Каталоги обходим целиком —
-    будущие настройки попадут в бэкап автоматически."""
+    """(src, arcname) of all backup files. Directories are walked whole —
+    future settings land in the backup automatically."""
     out = []
     for base, arcroot in ((NAS_CONFIG, "nas-config"), ("/etc/nas-wizard", "etc/nas-wizard")):
         if os.path.isdir(base):
@@ -6408,21 +6408,21 @@ def _bk_sources():
                    (NB_CONF, "etc/nas-os/nas-backup.json"),
                    ("/etc/samba/smb.conf", "etc/samba/smb.conf"),
                    ("/var/lib/samba/private/passdb.tdb", "var/lib/samba/private/passdb.tdb"),
-                   # SSH-ключ приложения «Бэкап» (push на серверы по ключу): без него
-                   # после переустановки push-профили на ключе перестанут входить
+                   # SSH key of the «Backup» app (key-based push to servers): without it
+                   # key-based push profiles stop authenticating after a reinstall
                    (NB_KEY, "root/.ssh/nas-backup"),
                    (NB_KEY + ".pub", "root/.ssh/nas-backup.pub"),
                    ("/etc/fstab", "reference/etc/fstab"),
                    ("/etc/snapraid.conf", "reference/etc/snapraid.conf"),
                    ("/etc/exports", "reference/etc/exports")):
         out.append((p, arc))
-    # Сеть: netplan-профили (Wi-Fi с паролем/ключом, статический IP). В reference —
-    # восстановление руками: имена привязаны к железу/UUID, слепо накатывать поверх
-    # свежего образа нельзя, но иметь под рукой пароль Wi-Fi и настройки после
-    # переустановки бесценно (иначе NAS может остаться без сети).
+    # Network: netplan profiles (Wi-Fi with a password/key, static IP). Under reference —
+    # restore by hand: names are tied to hardware/UUID, blindly applying over a
+    # fresh image is not allowed, but having the Wi-Fi password and settings at hand
+    # after a reinstall is priceless (otherwise the NAS may be left without network).
     for np in sorted(glob.glob("/etc/netplan/*.yaml")):
         out.append((np, "reference/etc/netplan/" + os.path.basename(np)))
-    if os.path.isdir(STACKS_DIR):            # compose/env стеков (не данные томов)
+    if os.path.isdir(STACKS_DIR):            # stack compose/env (not volume data)
         for root, _, files in os.walk(STACKS_DIR):
             for fn in files:
                 if re.match(r"^(compose|docker-compose)\.ya?ml$|^\.env$|\.(yml|yaml|env|txt|md)$", fn):
@@ -6433,7 +6433,7 @@ def _bk_sources():
 def settings_backup_make(auto=False):
     d = settings_backup_dir()
     try:
-        os.chmod(d, 0o700)      # внутри архивов — пароль главного NAS и хеш пароля панели
+        os.chmod(d, 0o700)      # inside the archives — the main NAS password and the panel password hash
     except OSError:
         pass
     name = "nas-settings-%s.tar.gz" % time.strftime("%Y%m%d-%H%M%S")
@@ -6456,7 +6456,7 @@ def settings_backup_make(auto=False):
         except OSError:
             pass
         return {"ok": False, "log": str(e)}
-    # ротация (сколько хранить — настройка backup_keep)
+    # rotation (how many to keep — the backup_keep setting)
     try:
         keep = load_maintenance().get("backup_keep", BACKUP_KEEP)
         old = sorted(f for f in os.listdir(d) if _BK_NAME_RE.match(f))
@@ -6465,8 +6465,8 @@ def settings_backup_make(auto=False):
     except OSError:
         pass
     try:
-        log_event("action", "Бэкап настроек создан" + (" (по расписанию)" if auto else ""),
-                  "%s · файлов: %d" % (path, len(added)), "ok", kind="action", desk=False)
+        log_event("action", "Settings backup created" + (" (scheduled)" if auto else ""),
+                  "%s · files: %d" % (path, len(added)), "ok", kind="action", desk=False)
     except Exception:
         pass
     return {"ok": True, "name": name, "files": len(added), "dir": d}
@@ -6483,8 +6483,8 @@ def settings_backup_list():
         pass
     cfg = load_maintenance()
     custom = bool((cfg.get("settings_backup_dir") or "").strip())
-    # эфемерно = лежит на системном диске (пул не смонтирован и путь не задан):
-    # такой бэкап затрётся при переустановке ОС — ради чего он и делается
+    # ephemeral = sits on the system disk (pool not mounted and no path set):
+    # such a backup is wiped on an OS reinstall — the very thing it's made for
     ephemeral = (not custom) and d.startswith("/var/")
     return {"ok": True, "dir": d, "days": cfg.get("backup_days", 7),
             "keep": cfg.get("backup_keep", BACKUP_KEEP), "list": out,
@@ -6492,15 +6492,15 @@ def settings_backup_list():
             "pool": bool(storage_root())}
 
 def settings_backup_restore(path, sections=None):
-    """Восстановить из архива. Проверяем каждого члена: только обычные файлы,
-    без ../, только известные префиксы, разумный размер. reference/* не трогаем.
-    sections=None — восстановить всё (совместимость со старым клиентом), иначе
-    только перечисленные разделы из _BK_SECTIONS."""
+    """Restore from an archive. Check every member: regular files only,
+    no ../, only known prefixes, a sane size. reference/* is not touched.
+    sections=None — restore everything (compatibility with the old client), otherwise
+    only the listed sections from _BK_SECTIONS."""
     global _events, _history, _history_long
     sel = None if sections is None else {s for s in sections if isinstance(s, str)}
     if sel is not None and not sel:
-        return {"ok": False, "log": "не выбрано ни одного раздела"}
-    # префиксы архива → куда восстанавливать (STACKS_DIR определяется ниже по файлу)
+        return {"ok": False, "log": "no section selected"}
+    # archive prefixes → where to restore (STACKS_DIR is defined further down the file)
     restore_map = [("etc/nas-wizard/", "/etc/nas-wizard"),
                    ("etc/nas-os/webauth.json", "/etc/nas-os/webauth.json"),
                    ("etc/nas-os/nas-backup.json", "/etc/nas-os/nas-backup.json"),
@@ -6514,7 +6514,7 @@ def settings_backup_restore(path, sections=None):
                 nm = m.name.lstrip("./")
                 if not m.isreg() or ".." in nm.split("/") or nm.startswith("/"):
                     continue
-                # снятый раздел — не ошибка, а осознанный выбор: не в skipped
+                # an unchecked section is not an error but a deliberate choice: not in skipped
                 if sel is not None and _bk_restorable(m, nm) and _bk_section(nm) not in sel:
                     deselected += 1; continue
                 if m.size > 16 * 1024 * 1024:
@@ -6538,16 +6538,16 @@ def settings_backup_restore(path, sections=None):
                 os.makedirs(os.path.dirname(dest), exist_ok=True)
                 with open(dest, "wb") as f:
                     shutil.copyfileobj(src, f)
-                # секреты: пароль панели, ключи Pushover, пароль главного NAS
+                # secrets: the panel password, Pushover keys, the main NAS password
                 if any(x in dest for x in ("webauth", "notify.conf", "nas-backup.json")):
                     os.chmod(dest, 0o600)
                 restored.append(nm)
     except (OSError, tarfile.TarError) as e:
-        return {"ok": False, "log": "плохой архив: %s" % e}
+        return {"ok": False, "log": "bad archive: %s" % e}
     if not restored:
-        return {"ok": False, "log": "в выбранных разделах нет файлов" if deselected
-                else "в архиве нет файлов настроек NAS-OS"}
-    # сбросить кэши в памяти, применить сон дисков
+        return {"ok": False, "log": "no files in the selected sections" if deselected
+                else "the archive has no NAS-OS settings files"}
+    # reset in-memory caches, apply disk spindown
     with _events_lock:
         _events = None
     with _hist_lock:
@@ -6557,20 +6557,20 @@ def settings_backup_restore(path, sections=None):
     except Exception:
         pass
     titles = dict((k, t) for k, t, _s, _p in _BK_SECTIONS)
-    what = ("разделы: " + ", ".join(titles[k] for k, _t, _s, _p in _BK_SECTIONS if k in sel)) \
-        if sel is not None else "все разделы"
+    what = ("sections: " + ", ".join(titles[k] for k, _t, _s, _p in _BK_SECTIONS if k in sel)) \
+        if sel is not None else "all sections"
     try:
-        log_event("action", "Настройки восстановлены из бэкапа",
-                  "%s · файлов: %d%s" % (what, len(restored),
-                                         (" · пропущено: %d" % len(skipped)) if skipped else ""),
+        log_event("action", "Settings restored from backup",
+                  "%s · files: %d%s" % (what, len(restored),
+                                         (" · skipped: %d" % len(skipped)) if skipped else ""),
                   "warn", kind="action", desk=False)
     except Exception:
         pass
     return {"ok": True, "restored": len(restored), "skipped": len(skipped),
-            "log": "восстановлено файлов: %d — обновите страницу" % len(restored)}
+            "log": "files restored: %d — refresh the page" % len(restored)}
 
 def _settings_backup_auto():
-    """Авто-бэкап раз в backup_days дней (0 = выключен); зовётся из maintenance_daily."""
+    """Auto backup every backup_days days (0 = disabled); called from maintenance_daily."""
     days = load_maintenance().get("backup_days", 7)
     if days <= 0:
         return
@@ -6583,12 +6583,12 @@ def _settings_backup_auto():
     if time.time() - latest >= days * 86400:
         settings_backup_make(auto=True)
 
-# --- периодические SMART-самотесты (короткий/длинный) ночью ------------------
+# --- periodic SMART self-tests (short/long) at night ------------------
 SMARTTEST_FILE = os.path.join(NAS_CONFIG, "smart-selftest.json")
 
 def _smart_selftest_tick():
-    """Раз в N дней запускать самотест дисков (в 03–06 ночи, один вид за ночь;
-    длинный приоритетнее). Сам тест идёт внутри диска и не мешает работе."""
+    """Every N days run a disk self-test (between 03:00–06:00, one kind per night;
+    the long one takes priority). The test runs inside the disk and doesn't interfere."""
     if not (3 <= time.localtime().tm_hour < 6):
         return
     cfg = load_maintenance()
@@ -6614,14 +6614,14 @@ def _smart_selftest_tick():
             pass
         if devs:
             try:
-                log_event("action", "SMART-самотест (%s) запущен" % ("длинный" if kind == "long" else "короткий"),
-                          "Диски: " + ", ".join(devs), "info", kind="disk", desk=False)
+                log_event("action", "SMART self-test (%s) started" % ("long" if kind == "long" else "short"),
+                          "Disks: " + ", ".join(devs), "info", kind="disk", desk=False)
             except Exception:
                 pass
-        break                      # один вид тестов за ночь
+        break                      # one kind of test per night
 
 def _nb_sched_tick():
-    """Запуск бэкапа главного NAS по расписанию (раз в минуту, без повтора в ту же минуту)."""
+    """Start the main NAS backup on schedule (once a minute, no repeat in the same minute)."""
     global _nb_last_sched
     now = time.time(); slot = time.strftime("%Y-%m-%d %H:%M", time.localtime(now))
     if slot != _nb_last_sched:
@@ -6629,11 +6629,11 @@ def _nb_sched_tick():
         for cfg in nb_profiles():
             if nb_schedule_due(cfg, now):
                 nb_run_bg(cfg["id"], dry=False)
-    _nb_queue_drain()      # освободилось — берём следующего из очереди
+    _nb_queue_drain()      # freed up — take the next one from the queue
 
 def notify_event(name, key, title, msg, lvl=None, priority=None, cooldown=1800):
-    """Доставка события вне monitor_tick: журнал всегда + Pushover, если включён и ev.on.
-    key — ключ кулдауна (реюзает _MON_LAST, как fire())."""
+    """Deliver an event outside monitor_tick: always journal + Pushover, if enabled and ev.on.
+    key — the cooldown key (reuses _MON_LAST, like fire())."""
     now = time.time()
     if cooldown and now - _MON_LAST.get(key, 0) < cooldown:
         return False
@@ -6684,11 +6684,11 @@ def agent_notify(b):
             pass
     return {"ok": True, "sent": bool(push_notify(title, msg, priority))}
 
-# ---- надёжность: авто-перемонтирование отвалившегося диска ----
-_MOUNT_TRY = {}   # mp -> время последней попытки (не чаще раза в 5 мин)
+# ---- reliability: auto-remount of a dropped disk ----
+_MOUNT_TRY = {}   # mp -> time of the last attempt (at most once every 5 min)
 
 def _fstab_targets():
-    """Точки монтирования данных/пула из fstab (под /mnt), которые должны быть смонтированы."""
+    """Data/pool mount points from fstab (under /mnt) that should be mounted."""
     out = []
     for line in _read("/etc/fstab").splitlines():
         line = line.strip()
@@ -6706,11 +6706,11 @@ def _mounted(mp):
     try:
         return subprocess.run(["mountpoint", "-q", mp], timeout=8).returncode == 0
     except subprocess.SubprocessError:
-        return False   # зависший/мёртвый mount не должен держать поток запроса вечно
+        return False   # a hung/dead mount must not hold the request thread forever
 
 def _stale_endpoint(mp):
-    """Мёртвый FUSE-эндпоинт (mergerfs упал): stat() даёт ENOTCONN «Transport endpoint
-    is not connected». mount на нём падает — точку сначала надо снять (umount -l)."""
+    """A dead FUSE endpoint (mergerfs crashed): stat() gives ENOTCONN «Transport endpoint
+    is not connected». mount on it fails — the point must be unmounted first (umount -l)."""
     try:
         os.stat(mp)
         return False
@@ -6724,38 +6724,38 @@ def _automount_tick():
         return
     now = time.time()
     for mp in _fstab_targets():
-        stale = _stale_endpoint(mp)           # завис ли FUSE-эндпоинт (пул mergerfs)
+        stale = _stale_endpoint(mp)           # is the FUSE endpoint hung (mergerfs pool)
         if _mounted(mp) and not stale:
             _MOUNT_TRY.pop(mp, None)
             continue
-        # завис mergerfs — снимаем чаще (раз в минуту), обычный remount — не чаще 5 мин
+        # mergerfs hung — retry more often (once a minute), a normal remount — at most every 5 min
         if now - _MOUNT_TRY.get(mp, 0) < (55 if stale else 300):
             continue
         _MOUNT_TRY[mp] = now
         if stale:
-            # снять зависший эндпоинт, иначе mount выдаёт «Transport endpoint is not connected»
+            # tear down the hung endpoint, otherwise mount gives «Transport endpoint is not connected»
             _run(["umount", "-l", mp], timeout=20)
             _run(["fusermount", "-uz", mp], timeout=20)
         _run(["mount", mp], timeout=30)
         if _mounted(mp):
             notify_event("disk_remount", "remount:%s" % mp,
-                         "NAS: пул переподключён" if stale else "NAS: диск переподключён",
-                         "%s снова смонтирован автоматически" % mp, "ok", cooldown=120)
-    # Пул mergerfs держит systemd-сервис с Restart=always — он сам поднимается за секунды.
-    # Подстрахуем на случай, если сервис в failed: точка мертва/отсутствует → рестартим сервис.
+                         "NAS: pool reconnected" if stale else "NAS: disk reconnected",
+                         "%s was automatically remounted" % mp, "ok", cooldown=120)
+    # The mergerfs pool is held by a systemd service with Restart=always — it comes up on its own in seconds.
+    # Backstop in case the service is failed: the point is dead/absent → restart the service.
     if os.path.exists("/etc/systemd/system/nas-mergerfs.service"):
         if (_stale_endpoint(STORAGE) or not _mounted(STORAGE)) and \
                 now - _MOUNT_TRY.get(STORAGE, 0) >= 55:
             _MOUNT_TRY[STORAGE] = now
             _run(["systemctl", "restart", "nas-mergerfs.service"], timeout=40)
             if _mounted(STORAGE):
-                notify_event("disk_remount", "remount:%s" % STORAGE, "NAS: пул переподключён",
-                             "%s поднят сервисом nas-mergerfs" % STORAGE, "ok", cooldown=120)
+                notify_event("disk_remount", "remount:%s" % STORAGE, "NAS: pool reconnected",
+                             "%s brought up by the nas-mergerfs service" % STORAGE, "ok", cooldown=120)
 
 def _pool_recovery():
-    """Состояние сервиса пула mergerfs: активен ли и сколько раз systemd его
-    автоматически перезапускал (= крашей FUSE восстановлено) с момента загрузки.
-    None — если пул ещё не переведён на сервис (старая схема через fstab)."""
+    """State of the mergerfs pool service: whether it is active and how many times
+    systemd auto-restarted it (= FUSE crashes recovered) since boot.
+    None — if the pool isn't on a service yet (the old scheme via fstab)."""
     if not os.path.exists("/etc/systemd/system/nas-mergerfs.service"):
         return None
     st = {"service": True, "active": _mounted(STORAGE), "restarts": 0}
@@ -6770,7 +6770,7 @@ def _pool_recovery():
         pass
     return st
 
-# ---- ежедневная/еженедельная сводка состояния ----
+# ---- daily/weekly status summary ----
 _LAST_SUMMARY = ""
 
 def _build_summary():
@@ -6780,25 +6780,25 @@ def _build_summary():
     up = s.get("uptime")
     if isinstance(up, (int, float)) and up > 0:
         d, rem = divmod(int(up), 86400); h, rem = divmod(rem, 3600); mi = rem // 60
-        lines.append("Аптайм: " + (("%dд %dч" % (d, h)) if d else ("%dч %dм" % (h, mi)) if h else ("%dм" % mi)))
+        lines.append("Uptime: " + (("%dd %dh" % (d, h)) if d else ("%dh %dm" % (h, mi)) if h else ("%dm" % mi)))
     elif up:
-        lines.append("Аптайм: %s" % up)
+        lines.append("Uptime: %s" % up)
     t = s.get("temp")
     if isinstance(t, (int, float)):
-        lines.append("Температура: %d°C" % t)
+        lines.append("Temperature: %d°C" % t)
     mem = (s.get("mem") or {}).get("pct")
     if isinstance(mem, (int, float)):
-        lines.append("Память: %d%%" % mem)
+        lines.append("Memory: %d%%" % mem)
     try:
         u = shutil.disk_usage(STORAGE)
-        lines.append("Пул: занято %d%% (свободно %.0f ГБ)" % (
+        lines.append("Pool: %d%% used (%.0f GB free)" % (
             round(100 * u.used / u.total), u.free / 1024**3))
     except OSError:
         pass
     try:
         h = health_report()
         bad = [c for c in (h.get("checks") or []) if c.get("lvl") in ("warn", "bad")]
-        lines.append("Здоровье: %s" % ("всё в норме" if not bad
+        lines.append("Health: %s" % ("all normal" if not bad
                      else ", ".join(c.get("name", "?") for c in bad[:4])))
     except Exception:
         pass
@@ -6809,10 +6809,10 @@ def _build_summary():
                 continue
             okn = sum(1 for j in st.get("jobs", []) if j.get("ok"))
             _nm = (" «%s»" % _p["name"]) if len(nb_profiles()) > 1 else ""
-            lines.append("Бэкап NAS%s: %d/%d ок" % (_nm, okn, len(st.get("jobs", []))))
+            lines.append("NAS backup%s: %d/%d OK" % (_nm, okn, len(st.get("jobs", []))))
     except Exception:
         pass
-    return "NAS: сводка (%s)" % host, "\n".join(lines) or "нет данных"
+    return "NAS: summary (%s)" % host, "\n".join(lines) or "no data"
 
 def _summary_tick():
     global _LAST_SUMMARY
@@ -6831,11 +6831,11 @@ def _summary_tick():
     title, body = _build_summary()
     notify_event("daily_summary", "summary:%s" % slot, title, body, "info", cooldown=0)
 
-# ---- активная термозащита ----
+# ---- active thermal protection ----
 _THERM = {"hot": 0, "cool": 0, "acted": {}}   # acted: name -> {"cpus": orig, "paused": bool}
-# Что термозащита остановила/придушила — на диск. Иначе краш/ребут службы, пока
-# контейнер на паузе, терял бы этот список: контейнер остался бы на паузе НАВСЕГДА,
-# а панель бы «забыла», что сама его остановила. При старте осиротевшее снимаем.
+# What thermal protection stopped/throttled — persisted to disk. Otherwise a crash/reboot
+# of the service while a container is paused would lose this list: the container would stay
+# paused FOREVER, and the panel would "forget" it paused it itself. On start we clear orphans.
 THERM_FILE = os.path.join(NAS_CONFIG, "thermal-acted.json")
 
 def _therm_save():
@@ -6845,15 +6845,15 @@ def _therm_save():
         pass
 
 def _therm_recover():
-    """Разовое восстановление при старте: снять то, что термозащита оставила
-    остановленным до краша/ребута. Если всё ещё горячо — тик снова среагирует."""
+    """One-time recovery at start: release what thermal protection left stopped
+    before a crash/reboot. If it's still hot — the tick reacts again."""
     acted = _json_load_strict(THERM_FILE, {})
     if isinstance(acted, dict) and acted:
         _THERM["acted"] = acted
-        _therm_restore()   # разпаузит/вернёт cpus и очистит файл
+        _therm_restore()   # unpauses/restores cpus and clears the file
 
 def _hottest_container():
-    """(имя, %CPU) самого нагружающего CPU контейнера, или (None, 0)."""
+    """(name, %CPU) of the most CPU-loading container, or (None, 0)."""
     r = _run(["docker", "stats", "--no-stream", "--format", "{{.Name}}\t{{.CPUPerc}}"], timeout=12)
     best, bestv = None, 0.0
     for l in (r.get("log") or "").splitlines():
@@ -6897,25 +6897,25 @@ def _thermal_tick():
         _THERM["cool"] += 1; _THERM["hot"] = 0
         if _THERM["cool"] >= 5 and _THERM["acted"]:
             if _therm_restore():
-                notify_event("thermal_guard", "therm:restore", "NAS: температура в норме",
-                             "остыло до %d°C — ограничения контейнеров сняты" % t, "ok", cooldown=300)
+                notify_event("thermal_guard", "therm:restore", "NAS: temperature back to normal",
+                             "cooled to %d°C — container limits lifted" % t, "ok", cooldown=300)
         return
     else:
         return
-    if _THERM["hot"] < 3:      # реагируем только на устойчивый перегрев (~3 мин)
+    if _THERM["hot"] < 3:      # react only to sustained overheating (~3 min)
         return
     victim, cpu = _hottest_container()
     if mode == "warn":
         notify_event("thermal_guard", "therm:warn",
-                     "NAS: перегрев %d°C" % t,
-                     "температура держится ≥%d°C%s — проверьте охлаждение" % (
-                         hot, (" (грузит: %s, %.0f%% CPU)" % (victim, cpu)) if victim else ""),
+                     "NAS: overheating %d°C" % t,
+                     "temperature holding ≥%d°C%s — check cooling" % (
+                         hot, (" (load: %s, %.0f%% CPU)" % (victim, cpu)) if victim else ""),
                      "warn", cooldown=1800)
         return
-    # auto: душим/паузим самый жадный контейнер
+    # auto: throttle/pause the greediest container
     if not victim:
-        notify_event("thermal_guard", "therm:auto", "NAS: перегрев %d°C" % t,
-                     "нет контейнера-виновника — снизьте нагрузку вручную", "warn", cooldown=1800)
+        notify_event("thermal_guard", "therm:auto", "NAS: overheating %d°C" % t,
+                     "no culprit container — reduce load manually", "warn", cooldown=1800)
         return
     if t >= crit:
         try:
@@ -6925,15 +6925,15 @@ def _thermal_tick():
         except Exception:
             pass
         notify_event("thermal_guard", "therm:auto",
-                     "NAS: критический перегрев %d°C" % t,
-                     "контейнер %s приостановлен до охлаждения" % victim, "crit", cooldown=600)
+                     "NAS: critical overheating %d°C" % t,
+                     "container %s paused until it cools down" % victim, "crit", cooldown=600)
     else:
         if victim not in _THERM["acted"]:
             _THERM["acted"][victim] = {"cpus": _container_cpus(victim), "paused": False}
             _therm_save()
             _run(["docker", "update", "--cpus=0.5", victim], timeout=15)
-            notify_event("thermal_guard", "therm:auto", "NAS: перегрев %d°C" % t,
-                         "нагрузка %s ограничена (0.5 CPU) до охлаждения" % victim, "warn", cooldown=900)
+            notify_event("thermal_guard", "therm:auto", "NAS: overheating %d°C" % t,
+                         "load of %s limited (0.5 CPU) until cooldown" % victim, "warn", cooldown=900)
 
 def _container_cpus(name):
     r = _run(["docker", "inspect", "-f", "{{.HostConfig.NanoCpus}}", name], timeout=10)
@@ -6942,8 +6942,8 @@ def _container_cpus(name):
     except (ValueError, TypeError):
         return 0
 
-# Файл-сигнал: udev-хуки (монтирование/извлечение USB) трогают его, вотчер будит
-# monitor_loop немедленно — вставка диска детектится за ~1-2с, а не на 60-сек тике.
+# Signal file: udev hooks (USB mount/eject) touch it, the watcher wakes
+# monitor_loop immediately — disk insertion is detected in ~1-2s, not on the 60s tick.
 POKE_FILE = "/run/nas-web-refresh"
 _mon_wake = threading.Event()
 
@@ -6955,18 +6955,18 @@ def _poke_watcher():
         except OSError:
             m = None
         if m != last:
-            if last is not None:      # первый заход только запоминает — не будим на старте
+            if last is not None:      # first pass only remembers — don't wake on startup
                 _mon_wake.set()
             last = m
         time.sleep(1.5)
 
 def monitor_loop():
-    _safe(_therm_recover)      # снять контейнеры, осиротевшие термозащитой до краша/ребута
+    _safe(_therm_recover)      # release containers orphaned by thermal guard before a crash/reboot
     threading.Thread(target=_poke_watcher, daemon=True).start()
     while True:
         poked = _mon_wake.wait(60); _mon_wake.clear()
-        # на poke (вставка/извлечение диска) гоняем только про изменения — быстро и
-        # без лишнего: истории/расписаний/самотестов не трогаем, у них свой график.
+        # on poke (disk insert/eject) run only the change-related checks — fast and
+        # lean: history/schedules/self-tests are left alone, they run on their own cadence.
         funcs = ((monitor_tick, _automount_tick, usb_ops_sync) if poked else
                  (history_sample, monitor_tick, maintenance_daily, _smart_selftest_tick,
                   _nb_sched_tick, _automount_tick, _summary_tick, _thermal_tick, usb_ops_sync,
@@ -6979,7 +6979,7 @@ def monitor_loop():
                 pass
 
 # --------------------------------------------------------------------------- #
-#  Docker-сервисы / стеки (GUI-менеджер)
+#  Docker services / stacks (GUI manager)
 # --------------------------------------------------------------------------- #
 STACKS_DIR = "/opt/stacks"
 _STACK_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$")
@@ -7006,7 +7006,7 @@ def load_notes():
 
 def save_stack_note(name, note):
     if not _STACK_RE.match(name or ""):
-        return {"ok": False, "log": "имя"}
+        return {"ok": False, "log": "name"}
     d = load_notes()
     if note:
         d[name] = note
@@ -7092,9 +7092,9 @@ def docker_stacks():
 
 def stack_validate(name):
     if not _STACK_RE.match(name or ""):
-        return {"ok": False, "log": "имя"}
+        return {"ok": False, "log": "name"}
     r = _dc(name, "config", "-q", timeout=30)
-    return {"ok": r["ok"], "log": (r.get("log") or "").strip() or ("OK" if r["ok"] else "ошибка")}
+    return {"ok": r["ok"], "log": (r.get("log") or "").strip() or ("OK" if r["ok"] else "error")}
 
 def docker_stats():
     r = _run(["docker", "stats", "--no-stream", "--format", "{{json .}}"], timeout=15)
@@ -7131,9 +7131,9 @@ def docker_volumes():
     return {"ok": True, "volumes": out}
 
 def docker_overview():
-    """Сводка для дашборда Docker: контейнеры, место (system df), версия."""
+    """Summary for the Docker dashboard: containers, space (system df), version."""
     if not shutil.which("docker"):
-        return {"ok": False, "log": "docker не установлен"}
+        return {"ok": False, "log": "docker is not installed"}
     out = {"ok": True}
     r = _run(["docker", "ps", "-a", "--format", "{{.State}}"], timeout=15)
     states = [l.strip() for l in (r.get("log") or "").splitlines() if l.strip()]
@@ -7152,7 +7152,7 @@ def docker_overview():
     out["df"] = df
     r = _run(["docker", "--version"], timeout=10)
     out["version"] = (r.get("log") or "").strip().replace("Docker version ", "").split(",")[0]
-    _w = wud_state()      # обновления образов (если WUD установлен)
+    _w = wud_state()      # image updates (if WUD is installed)
     out["wud"] = {"ok": _w.get("ok", False), "count": _w.get("count", 0),
                   "updates": _w.get("updates", []), "url": _w.get("url")}
     return out
@@ -7164,7 +7164,7 @@ def docker_prune(what):
             "builder": ["docker", "builder", "prune", "-f"],
             "system": ["docker", "system", "prune", "-f"]}
     if what not in cmds:
-        return {"ok": False, "log": "неизвестно"}
+        return {"ok": False, "log": "unknown"}
     return _run(cmds[what], timeout=180)
 
 def docker_image_rm(iid):
@@ -7174,7 +7174,7 @@ def docker_image_rm(iid):
 
 def docker_volume_rm(name):
     if not re.match(r"^[\w.-]+$", name or ""):
-        return {"ok": False, "log": "имя"}
+        return {"ok": False, "log": "name"}
     return _run(["docker", "volume", "rm", name], timeout=60)
 
 def _read_file(p):
@@ -7186,7 +7186,7 @@ def _read_file(p):
 
 def stack_read(name):
     if not _STACK_RE.match(name or ""):
-        return {"ok": False, "log": "недопустимое имя"}
+        return {"ok": False, "log": "invalid name"}
     cp = _compose_path(name)
     return {"ok": True, "name": name, "compose": _read_file(cp),
             "env": _read_file(os.path.join(STACKS_DIR, name, ".env")),
@@ -7194,11 +7194,11 @@ def stack_read(name):
 
 def stack_save(name, compose, env, create=False):
     if not _STACK_RE.match(name or ""):
-        return {"ok": False, "log": "имя: буквы/цифры/._-"}
+        return {"ok": False, "log": "name: letters/digits/._-"}
     d = os.path.join(STACKS_DIR, name)
     cp = _compose_path(name)
     if create and os.path.isdir(d) and os.path.isfile(cp):
-        return {"ok": False, "log": "стек уже существует"}
+        return {"ok": False, "log": "stack already exists"}
     try:
         os.makedirs(d, exist_ok=True)
         if os.path.isfile(cp):
@@ -7217,8 +7217,8 @@ def stack_save(name, compose, env, create=False):
 
 def stack_action(name, action):
     if not _STACK_RE.match(name or ""):
-        return {"ok": False, "log": "недопустимое имя"}
-    wud_invalidate()      # образы могли обновиться — плашка «есть обновление» пересчитается
+        return {"ok": False, "log": "invalid name"}
+    wud_invalidate()      # images may have updated — the "update available" badge will recompute
     if action == "rebuild-nocache":
         r = _dc(name, "build", "--no-cache", timeout=900)
         if not r["ok"]:
@@ -7228,16 +7228,16 @@ def stack_action(name, action):
             "stop": ["stop"], "start": ["start"], "pull": ["pull"], "build": ["build"],
             "rebuild": ["up", "-d", "--build"], "recreate": ["up", "-d", "--force-recreate"]}
     if action not in amap:
-        return {"ok": False, "log": "недопустимое действие"}
+        return {"ok": False, "log": "invalid action"}
     to = 900 if action in ("rebuild", "build", "pull") else 200
     return _dc(name, *amap[action], timeout=to)
 
 def stack_delete(name):
     if not _STACK_RE.match(name or ""):
-        return {"ok": False, "log": "недопустимое имя"}
+        return {"ok": False, "log": "invalid name"}
     d = os.path.realpath(os.path.join(STACKS_DIR, name))
     if not d.startswith(STACKS_DIR + os.sep):
-        return {"ok": False, "log": "путь вне каталога стеков"}
+        return {"ok": False, "log": "path outside the stacks directory"}
     if not os.path.isdir(d):
         return _stack_zap(name)
     _dc(name, "down")
@@ -7262,13 +7262,13 @@ def _stack_zap(name):
     nids = (n.get("log") or "").split()
     if nids:
         _run(["docker", "network", "rm", *nids], timeout=60)
-    log_event("action", "Docker: убран осиротевший стек %s" % name,
-              "контейнеров: %d" % len(ids), "ok", kind="svc", desk=False)
-    return {"ok": True, "log": "контейнеров удалено: %d" % len(ids)}
+    log_event("action", "Docker: removed orphaned stack %s" % name,
+              "containers: %d" % len(ids), "ok", kind="svc", desk=False)
+    return {"ok": True, "log": "containers removed: %d" % len(ids)}
 
 def stack_logs(name, tail=200):
     if not _STACK_RE.match(name or ""):
-        return {"ok": False, "log": "недопустимое имя"}
+        return {"ok": False, "log": "invalid name"}
     try:
         n = max(10, min(2000, int(tail)))
     except (ValueError, TypeError):
@@ -7278,17 +7278,17 @@ def stack_logs(name, tail=200):
 
 def container_action(cid, action):
     if not re.match(r"^[a-zA-Z0-9_.-]+$", cid or ""):
-        return {"ok": False, "log": "недопустимый контейнер"}
-    wud_invalidate()      # пересоздание/рестарт мог сменить образ — плашка пересчитается
+        return {"ok": False, "log": "invalid container"}
+    wud_invalidate()      # recreate/restart may have changed the image — the badge will recompute
     if action not in ("start", "stop", "restart", "rm"):
-        return {"ok": False, "log": "недопустимое действие"}
+        return {"ok": False, "log": "invalid action"}
     args = ["rm", "-f", cid] if action == "rm" else [action, cid]
     return _run(["docker", *args], timeout=60)
 
 # --------------------------------------------------------------------------- #
-#  Магазин приложений: каталог services/ (compose + meta.json) → /opt/stacks.
-#  Установка = копия папки + .env из полей диалога + docker compose up (стрим).
-#  store.json: карточки «своих» стеков (custom) и конфиги реплик (replica).
+#  App store: services/ catalog (compose + meta.json) → /opt/stacks.
+#  Install = folder copy + .env from dialog fields + docker compose up (streamed).
+#  store.json: cards for "own" stacks (custom) and replica configs (replica).
 # --------------------------------------------------------------------------- #
 SERVICES_DIR = os.path.join(HERE, "services")
 STORE_FILE = os.path.join(NAS_CONFIG, "store.json")
@@ -7318,8 +7318,8 @@ def _store_subst(val):
         val = val.replace("{tz}", _read("/etc/timezone") or "UTC")
     if "{rand}" in val:
         val = val.replace("{rand}", secrets.token_urlsafe(12))
-    # {storage} в compose стеков — тоже основное хранилище (на боксе без пула это
-    # внешний том, а не несуществующая /mnt/storage)
+    # {storage} in stack compose is also the primary storage (on a box without a pool
+    # that's the external volume, not the nonexistent /mnt/storage)
     return val.replace("{storage}", storage_base() or STORAGE).replace("{host}", lan_ip())
 
 def _replica_dir(sid):
@@ -7359,7 +7359,7 @@ def store_catalog():
                 "installed": bool(s), "running": bool(s and s["running"]),
                 "total": (s or {}).get("total", 0)}
         if s and item["fields"]:
-            # «Настроить…»: prefill the dialog with the live .env; secrets are
+            # «Configure…»: prefill the dialog with the live .env; secrets are
             # never sent back — the field just reports whether a value is set
             env = _stack_env(sid)
             for f in item["fields"]:
@@ -7378,8 +7378,8 @@ def store_catalog():
                                "dest_default": _stack_env(sid).get(rep.get("data_env") or "", ""),
                                "state": _replica_state(sid)}
         out.append(item)
-    # свои стеки (не из каталога) — кандидаты на карточку/ярлык; published-порты
-    # достаём из живых контейнеров, чтобы не гонять пользователя в редактор compose
+    # own stacks (not from the catalog) — candidates for a card/shortcut; published ports
+    # are pulled from live containers so the user doesn't have to open the compose editor
     custom = st.get("custom") or {}
     def _host_ports(s):
         pts = set()
@@ -7405,7 +7405,7 @@ def _stack_env(name):
 def store_install(sid, values):
     src = _store_compose_src(sid) if _STACK_RE.match(sid or "") else None
     if not src:
-        return {"ok": False, "log": "нет такого приложения"}
+        return {"ok": False, "log": "no such app"}
     m = _store_meta(sid)
     src_dir, dst = os.path.join(SERVICES_DIR, sid), os.path.join(STACKS_DIR, sid)
     os.makedirs(dst, exist_ok=True)
@@ -7433,26 +7433,26 @@ def store_install(sid, values):
                 pass
     with open(os.path.join(dst, ".env"), "w") as fh:   # env_file: .env must exist
         fh.write("\n".join("%s=%s" % kv for kv in env.items()) + "\n")
-    log_event("action", "Магазин: установка %s" % (m.get("name") or sid), "", "ok",
+    log_event("action", "Store: install %s" % (m.get("name") or sid), "", "ok",
               kind="svc", desk=False)
     return {"ok": True}
 
 def store_icon_upload(stack, data_url):
-    """Пользовательская иконка ярлыка: кладём в тот же кэш иконок под псевдо-URL
-    custom://<stack>#<ts> (метка времени в ключе = браузерный кэш не отдаст старую
-    картинку после замены)."""
+    """User-supplied shortcut icon: store it in the same icon cache under a pseudo-URL
+    custom://<stack>#<ts> (the timestamp in the key means the browser cache won't serve
+    the old image after a replacement)."""
     if not _STACK_RE.match(stack or ""):
-        return {"ok": False, "log": "имя"}
+        return {"ok": False, "log": "name"}
     m = re.match(r"^data:image/(png|jpeg|svg\+xml|webp|gif|x-icon|vnd\.microsoft\.icon);base64,(.+)$",
                  data_url or "", re.S)
     if not m:
-        return {"ok": False, "log": "нужна картинка: png / svg / jpeg / webp / gif / ico"}
+        return {"ok": False, "log": "image required: png / svg / jpeg / webp / gif / ico"}
     try:
         raw = base64.b64decode(m.group(2))
     except (ValueError, TypeError):
-        return {"ok": False, "log": "битые данные"}
+        return {"ok": False, "log": "corrupt data"}
     if len(raw) > 1024 * 1024:
-        return {"ok": False, "log": "иконка больше 1 МБ"}
+        return {"ok": False, "log": "icon larger than 1 MB"}
     ext = {"png": ".png", "jpeg": ".jpg", "svg+xml": ".svg", "webp": ".webp",
            "gif": ".gif", "x-icon": ".ico", "vnd.microsoft.icon": ".ico"}[m.group(1)]
     url = "custom://%s#%d" % (stack, int(time.time()))
@@ -7464,7 +7464,7 @@ def store_icon_upload(stack, data_url):
 
 def store_custom_save(stack, name, icon, port):
     if not _STACK_RE.match(stack or ""):
-        return {"ok": False, "log": "имя"}
+        return {"ok": False, "log": "name"}
     st = _store_load()
     cust = st.setdefault("custom", {})
     if not (name or "").strip():
@@ -7493,23 +7493,23 @@ def _store_custom_forget(stacks):
     _store_save(st)
     # the stack name goes last: tr() substitutes literal Cyrillic fragments, so a
     # %s in the middle of the phrase would break the dictionary match
-    log_event("user_action", "Ярлык убран со стола",
-              "стек удалён, карточка ярлыка больше не нужна: %s" % ", ".join(gone),
+    log_event("user_action", "Shortcut removed from the desktop",
+              "stack deleted, the shortcut card is no longer needed: %s" % ", ".join(gone),
               lvl="info", kind="docker", desk=False)
 
-# ---- реплика приложения с другого NAS (рецепт в meta.json:replica) ----
+# ---- app replica from another NAS (recipe in meta.json:replica) ----
 def store_replica_save(sid, cfg):
     if not _store_meta(sid).get("replica"):
-        return {"ok": False, "log": "у приложения нет рецепта реплики"}
+        return {"ok": False, "log": "the app has no replica recipe"}
     st = _store_load()
     cur = st.setdefault("replica", {}).setdefault(sid, {})
     for k in ("host", "user", "src_data", "dest_data"):
         if k in cfg:
             cur[k] = str(cfg.get(k) or "").strip()
-    if "auto" in cfg:                       # "HH:MM" = ежедневный автосинк, "" = выкл
+    if "auto" in cfg:                       # "HH:MM" = daily auto-sync, "" = off
         a = str(cfg.get("auto") or "").strip()
         cur["auto"] = a if re.match(r"^([01]\d|2[0-3]):[0-5]\d$", a) else ""
-    if cfg.get("pass"):                     # пустое поле = пароль не трогаем
+    if cfg.get("pass"):                     # empty field = leave the password untouched
         cur["pass"] = str(cfg["pass"])
     if cfg.get("clear_pass"):
         cur.pop("pass", None)
@@ -7517,83 +7517,83 @@ def store_replica_save(sid, cfg):
     return {"ok": True}
 
 def _replica_ssh(cfg):
-    """(ssh-команда, env) — sshpass при пароле, иначе ключевой вход."""
+    """(ssh command, env) — sshpass when a password is set, otherwise key-based login."""
     tgt = "%s@%s" % (cfg.get("user") or "root", cfg["host"])
     opts = "-o StrictHostKeyChecking=accept-new -o ConnectTimeout=10"
     if cfg.get("pass"):
         if not shutil.which("sshpass"):
-            raise ValueError("для входа по паролю нужен sshpass: sudo apt install sshpass")
+            raise ValueError("password login requires sshpass: sudo apt install sshpass")
         return "sshpass -e ssh %s %s" % (opts, tgt), {"SSHPASS": cfg["pass"]}
     return "ssh %s %s" % (opts, tgt), {}
 
 def store_replica_script(sid, mode):
-    """(bash-скрипт, env) для стрима: mode=sync (дамп+rsync) | restore (поднять реплику).
-    ValueError с человекочитаемым текстом, если что-то не настроено."""
+    """(bash script, env) for streaming: mode=sync (dump+rsync) | restore (bring up the replica).
+    ValueError with human-readable text if something is not configured."""
     rep = _store_meta(sid).get("replica") or {}
     if not rep:
-        raise ValueError("у приложения нет рецепта реплики")
+        raise ValueError("the app has no replica recipe")
     cfg = (_store_load().get("replica") or {}).get(sid) or {}
     rd = _replica_dir(sid)
     dump = os.path.join(rd, "dump.sql.gz")
     if mode == "sync":
         if not cfg.get("host") or not cfg.get("src_data"):
-            raise ValueError("реплика не настроена: адрес источника и путь медиатеки")
+            raise ValueError("replica not configured: source address and media library path")
         dest = cfg.get("dest_data") or _stack_env(sid).get(rep.get("data_env") or "", "")
         if not dest:
-            raise ValueError("не задана папка данных на этом NAS (установите приложение или укажите путь)")
+            raise ValueError("no data folder set on this NAS (install the app or specify a path)")
         os.makedirs(rd, exist_ok=True)
         ssh, env = _replica_ssh(cfg)
-        rsync_e = ssh.rsplit(" ", 1)[0]     # та же команда без host — для rsync -e
+        rsync_e = ssh.rsplit(" ", 1)[0]     # the same command without host — for rsync -e
         q = shlex.quote
         script = """set -e
-echo "== версия на источнике"
+echo "== version on the source"
 VER=$(%(ssh)s %(vcmd)s); echo "$VER"
 printf '%%s' "$VER" > %(vfile)s
-echo "== дамп базы на источнике (pg_dumpall | gzip)"
+echo "== database dump on the source (pg_dumpall | gzip)"
 %(ssh)s %(dcmd)s > %(dump)s.part
 mv %(dump)s.part %(dump)s
 ls -lh %(dump)s
-echo "== rsync медиатеки (первый раз может быть долго)"
+echo "== rsync of the media library (the first run may take a while)"
 mkdir -p %(dest)s
 rsync -a --delete --info=progress2 -e %(re)s %(tgt)s:%(srcd)s/ %(dest)s/
-echo "== синхронизация завершена: версия источника $VER"
+echo "== sync complete: source version $VER"
 """ % {"ssh": ssh, "vcmd": q(rep["version_cmd"]), "vfile": q(os.path.join(rd, "version")),
        "dcmd": q(rep["dump_cmd"]), "dump": q(dump), "re": q(rsync_e),
        "tgt": "%s@%s" % (cfg.get("user") or "root", cfg["host"]),
        "srcd": q(cfg["src_data"].rstrip("/")), "dest": q(dest.rstrip("/"))}
         return script, env
-    # restore: поднять реплику той же версией, что источник в момент дампа
+    # restore: bring up the replica with the same version the source had at dump time
     comp = _compose_path(sid)
     if not os.path.isfile(comp):
-        raise ValueError("приложение не установлено на этом NAS — сначала «Установить»")
+        raise ValueError("the app is not installed on this NAS — run «Install» first")
     if not os.path.isfile(dump):
-        raise ValueError("нет дампа — сначала «Синхронизировать»")
+        raise ValueError("no dump — run «Sync» first")
     ver = _read(os.path.join(rd, "version"))
     tag = ver.rsplit(":", 1)[-1] if ":" in ver else ""
     if not tag:
-        raise ValueError("не удалось определить версию источника — повторите синхронизацию")
+        raise ValueError("could not determine the source version — repeat the sync")
     q = shlex.quote
     script = """set -e
 cd %(dir)s
-echo "== реплика поднимается версией источника: %(tag)s"
+echo "== bringing up the replica with the source version: %(tag)s"
 if grep -q '^%(vkey)s=' .env 2>/dev/null; then
   sed -i 's|^%(vkey)s=.*|%(vkey)s=%(tag)s|' .env
 else
   echo '%(vkey)s=%(tag)s' >> .env
 fi
 DC="docker compose -f %(comp)s -p %(sid)s"
-echo "== останавливаем стек"
+echo "== stopping the stack"
 $DC down --remove-orphans
-echo "== поднимаем базу"
+echo "== bringing up the database"
 $DC up -d %(dbsvc)s
-echo "== ждём готовность Postgres"
+echo "== waiting for Postgres to be ready"
 docker exec %(dbc)s %(wait)s
-echo "== восстанавливаем дамп (вывод psql скрыт)"
+echo "== restoring the dump (psql output hidden)"
 gunzip -c %(dump)s | docker exec -i %(dbc)s %(psql)s > /dev/null
-echo "== тянем образы и запускаем всё"
+echo "== pulling images and starting everything"
 $DC pull --quiet || true
 $DC up -d
-echo "== реплика обновлена: версия %(tag)s, дамп от $(date -r %(dump)s '+%%F %%T')"
+echo "== replica updated: version %(tag)s, dump from $(date -r %(dump)s '+%%F %%T')"
 """ % {"dir": q(os.path.join(STACKS_DIR, sid)), "comp": q(comp), "sid": q(sid),
        "tag": tag, "vkey": rep.get("version_env") or "VERSION",
        "dbsvc": rep.get("db_service") or "database",
@@ -7602,7 +7602,7 @@ echo "== реплика обновлена: версия %(tag)s, дамп от 
        "dump": q(dump)}
     return script, {}
 
-# ---- автосинхронизация реплик (store.json: replica.<id>.auto = "HH:MM") ----
+# ---- replica auto-sync (store.json: replica.<id>.auto = "HH:MM") ----
 _REPLICA_RUN = set()          # sids syncing right now (manual runs don't set this)
 
 def _replica_tick():
@@ -7624,7 +7624,7 @@ def _replica_tick():
         try:
             script, env = store_replica_script(sid, "sync")
         except ValueError as e:
-            log_event("replica_auto", "Реплика %s: автосинк не запущен" % sid, str(e),
+            log_event("replica_auto", "Replica %s: auto-sync not started" % sid, str(e),
                       "warn", kind="svc", desk=True)
             continue
         def run(sid=sid, script=script, env=env, rd=rd):
@@ -7635,11 +7635,11 @@ def _replica_tick():
                 _safe(lambda: open(os.path.join(rd, "sync.log"), "w").write(out))
                 ok = r.returncode == 0
                 log_event("replica_auto",
-                          "Реплика %s: %s" % (sid, "синхронизирована" if ok else "ошибка автосинка"),
+                          "Replica %s: %s" % (sid, "synced" if ok else "auto-sync error"),
                           "" if ok else "\n".join(out.splitlines()[-5:])[:400],
                           "ok" if ok else "warn", kind="svc", desk=not ok)
             except Exception as e:
-                log_event("replica_auto", "Реплика %s: ошибка автосинка" % sid, str(e),
+                log_event("replica_auto", "Replica %s: auto-sync error" % sid, str(e),
                           "warn", kind="svc", desk=True)
             finally:
                 _REPLICA_RUN.discard(sid)
@@ -7647,8 +7647,8 @@ def _replica_tick():
         threading.Thread(target=run, daemon=True).start()
 
 # --------------------------------------------------------------------------- #
-#  Внешние SSH-серверы в файловом менеджере: sshfs-маунты в /mnt/remote/<id>.
-#  Смонтированный сервер — обычная папка, все операции ФМ работают как есть.
+#  External SSH servers in the file manager: sshfs mounts in /mnt/remote/<id>.
+#  A mounted server is a regular folder; all FM operations work as-is.
 # --------------------------------------------------------------------------- #
 REMOTES_FILE = os.path.join(NAS_CONFIG, "remotes.json")
 REMOTE_MNT = "/mnt/remote"
@@ -7708,7 +7708,7 @@ def remotes_save(d):
     host = str(d.get("host") or "").strip()
     user = str(d.get("user") or "").strip() or "root"
     if not re.match(r"^[\w.\-]+$", host or "") or not re.match(r"^[\w.\-]+$", user):
-        return {"ok": False, "log": "проверьте адрес и пользователя"}
+        return {"ok": False, "log": "check the address and user"}
     rid = str(d.get("id") or "").strip()
     lst = _remotes_load()
     cur = next((r for r in lst if r["id"] == rid), None)
@@ -7726,8 +7726,8 @@ def remotes_save(d):
         port = 22
     cur.update({"name": str(d.get("name") or "").strip()[:40] or host,
                 "host": host, "user": user, "port": port,
-                # пусто = домашняя папка (sshfs "host:"): у rsync.net и подобных
-                # SFTP-хостингов корень / закрыт, доступен только home
+                # empty = home folder (sshfs "host:"): on rsync.net and similar
+                # SFTP hosting the root / is closed, only home is accessible
                 "path": str(d.get("path") or "").strip(),
                 "auto": bool(d.get("auto"))})
     if d.get("pass"):
@@ -7748,16 +7748,16 @@ def remotes_delete(rid):
 def remote_mount(rid):
     r = next((x for x in _remotes_load() if x["id"] == rid), None)
     if not r:
-        return {"ok": False, "log": "нет такого подключения"}
+        return {"ok": False, "log": "no such connection"}
     if _remote_mounted(rid):
         return {"ok": True, "mount": _remote_mp(rid)}
     _remote_unstale(rid)          # dead daemon still in /proc/mounts → clear it, then remount
     if not shutil.which("sshfs"):
-        return {"ok": False, "log": "sshfs не установлен: sudo apt install sshfs"}
+        return {"ok": False, "log": "sshfs is not installed: sudo apt install sshfs"}
     mp = _remote_mp(rid)
     os.makedirs(mp, exist_ok=True)
-    # reconnect+ServerAlive: гуляющий Wi-Fi не оставляет «мёртвый» маунт, listing
-    # падает с ошибкой за секунды, а не виснет; allow_other — папку видят и samba/oleg
+    # reconnect+ServerAlive: a wandering Wi-Fi doesn't leave a "dead" mount, a listing
+    # fails with an error in seconds instead of hanging; allow_other — the folder is visible to samba/oleg too
     opts = ("reconnect,ServerAliveInterval=15,ServerAliveCountMax=3,allow_other,"
             "default_permissions,StrictHostKeyChecking=accept-new,ConnectTimeout=10")
     if r.get("pass"):
@@ -7787,7 +7787,7 @@ def remote_mount(rid):
     try:
         p = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
     except subprocess.TimeoutExpired:
-        return {"ok": False, "log": "сервер не ответил за 30 с"}
+        return {"ok": False, "log": "the server did not respond within 30s"}
     except OSError as e:
         return {"ok": False, "log": str(e)}
     # systemd-run returns as soon as the unit starts; the mount appears a moment later.
@@ -7800,19 +7800,19 @@ def remote_mount(rid):
     if not ok:
         msg = (_run(["systemctl", "status", "--no-pager", "-n", "10", unit],
                     timeout=10).get("log") or p.stderr or p.stdout
-               or "не смонтировалось").strip()[-300:]
+               or "failed to mount").strip()[-300:]
         _run(["systemctl", "stop", unit], timeout=15)
-        # sshfs = SFTP: если SSH пускает, а данные не идут — на сервере, скорее
-        # всего, выключена служба SFTP (частый случай на Synology)
+        # sshfs = SFTP: if SSH lets you in but no data flows, the server most
+        # likely has the SFTP service disabled (common on Synology)
         if "Input/output error" in msg or "Connection reset" in msg:
-            msg += " — похоже, на сервере выключен SFTP. Synology: Панель управления → Файловые службы → FTP → включить SFTP."
+            msg += " — looks like SFTP is disabled on the server. Synology: Control Panel → File Services → FTP → enable SFTP."
         return {"ok": False, "log": msg}
-    log_event("action", "Подключён сервер: %s" % (r.get("name") or r["host"]), "", "ok",
+    log_event("action", "Server connected: %s" % (r.get("name") or r["host"]), "", "ok",
               kind="files", desk=False)
     return {"ok": True, "mount": mp}
 
-# авто-маунт: помеченные auto подключаются сами (после ребута, обрыва, недоступности);
-# бэкофф 5 минут, чтобы не долбить выключенный сервер каждый тик
+# auto-mount: those flagged auto connect themselves (after a reboot, dropout, unavailability);
+# 5-minute backoff so we don't hammer a powered-off server on every tick
 _REMOTE_TRY = {}
 
 def _remotes_tick():
@@ -7827,9 +7827,9 @@ def _remotes_tick():
         threading.Thread(target=lambda i=rid: _safe(lambda: remote_mount(i)),
                          daemon=True).start()
 
-# резолв «настоящего» пути прямо на сервере: readlink -f + /proc/self/mountinfo
-# раскрывают И симлинки, И bind-mount'ы (Ugreen: /Backup — bind на /volume2/Backup,
-# через sftp это обычный каталог, симлинк-обходом не взять)
+# resolve the "real" path right on the server: readlink -f + /proc/self/mountinfo
+# expand BOTH symlinks AND bind mounts (Ugreen: /Backup is a bind onto /volume2/Backup,
+# over sftp it's a regular directory, a symlink walk won't catch it)
 _REMOTE_REALPATH_SH = r'''p="$0"
 if [ -e "$p" ]; then
   rp=$(readlink -f -- "$p" 2>/dev/null || echo "$p")
@@ -7848,8 +7848,8 @@ if [ -e "$p" ]; then
     print "REAL " ((out=="")?"/":out)
   }' /proc/self/mountinfo
 else
-  # путь есть только в chroot-витрине SFTP (Ugreen/Synology): ищем шару по имени
-  # на томах и отдаём кандидатов с mtime — панель сверит с видом через sftp
+  # the path exists only in the SFTP chroot facade (Ugreen/Synology): look up the share by name
+  # across volumes and return candidates with mtime — the panel will cross-check against the sftp view
   share="${p#/}"; share="${share%%/*}"
   rest="${p#/"$share"}"
   for c in /volume*/"$share"; do
@@ -7858,7 +7858,7 @@ else
 fi'''
 
 def _remote_realpath_ssh(r, remote_path):
-    """Спросить настоящий путь у самого сервера; None, если шелла/awk там нет."""
+    """Ask the server itself for the real path; None if there's no shell/awk there."""
     cmd = ["ssh", "-p", str(r.get("port") or 22),
            "-o", "StrictHostKeyChecking=accept-new", "-o", "ConnectTimeout=8"]
     env = dict(_C_ENV)
@@ -7890,28 +7890,28 @@ def _remote_realpath_ssh(r, remote_path):
     return real, cands
 
 def remote_realpath(rid, local_path):
-    """Настоящий путь В ПРОСТРАНСТВЕ СЕРВЕРА для файла внутри sshfs-маунта.
-    Нельзя ни резолвить локально (realpath уйдёт за пределы маунта), ни тупо
-    клеить базовый префикс: у NAS-ов (Ugreen/Synology) папки в корне SSH-вида —
-    симлинки на /volumeN/…. Идём по компонентам: lstat/readlink через sshfs
-    возвращают ЦЕЛИ ссылок в серверных путях — из них и собираем ответ."""
+    """The real path IN THE SERVER'S NAMESPACE for a file inside an sshfs mount.
+    You can neither resolve it locally (realpath would escape the mount) nor blindly
+    glue on the base prefix: on NAS boxes (Ugreen/Synology) the folders at the root of the SSH view
+    are symlinks onto /volumeN/…. Walk it component by component: lstat/readlink over sshfs
+    return the link TARGETS as server paths — the answer is assembled from those."""
     r = next((x for x in _remotes_load() if x["id"] == rid), None)
     mp = _remote_mp(rid)
     lp0 = os.path.normpath(local_path or "")
     if not r or not (lp0 == mp or lp0.startswith(mp + os.sep)):
-        return {"ok": False, "log": "путь вне маунта"}
+        return {"ok": False, "log": "path outside the mount"}
     rp_cfg = (r.get("path") or "").strip()
-    home_mode = rp_cfg == ""                 # маунт домашней папки: серверные пути относительные
+    home_mode = rp_cfg == ""                 # home folder mount: server paths are relative
     base = "" if rp_cfg in ("", "/") else rp_cfg.rstrip("/")
     def to_local(remote_abs):
-        # серверный абсолютный путь → локальный через маунт (если достижим)
+        # server absolute path → local via the mount (if reachable)
         if not base:
             return mp + remote_abs
         if remote_abs == base or remote_abs.startswith(base + "/"):
             return mp + remote_abs[len(base):]
         return None
-    # идём только по хвосту ОТ базовой папки: компоненты самой базы через маунт
-    # не видны (и резолвить их не нужно — пользователь задал базу буквально)
+    # walk only the tail FROM the base folder: the base's own components aren't visible
+    # through the mount (and don't need resolving — the user gave the base literally)
     parts = [p for p in lp0[len(mp):].split("/") if p]
     res, i, hops = base, 0, 0
     while i < len(parts):
@@ -7922,8 +7922,8 @@ def remote_realpath(rid, local_path):
             res = res.rsplit("/", 1)[0]; i += 1; continue
         nxt = res + "/" + seg
         lp = to_local(nxt)
-        if lp is None:      # цель ссылки за пределами базовой папки — дальше не заглянуть,
-            break           # но сам серверный путь уже собран верно
+        if lp is None:      # link target outside the base folder — can't peek further,
+            break           # but the server path itself is already assembled correctly
         try:
             st = os.lstat(lp)
         except OSError:
@@ -7935,7 +7935,7 @@ def remote_realpath(rid, local_path):
             if tgt.startswith("/"):
                 res, i = "", 0
                 parts = [p for p in tgt.split("/") if p] + tail
-            else:                            # относительная ссылка — от текущего res
+            else:                            # relative link — from the current res
                 parts = [p for p in tgt.split("/") if p] + tail
                 i = 0
             continue
@@ -7943,8 +7943,8 @@ def remote_realpath(rid, local_path):
     if i < len(parts):
         res = res + "/" + "/".join(parts[i:])
     res = res or "/"
-    # точнее знает сам сервер: bind-mounts и chroot-витрины SFTP через sshfs не
-    # видны. Нет шелла на той стороне (rsync.net и т.п.) — остаёмся на sshfs-резолве
+    # the server knows more precisely: bind mounts and SFTP chroot facades aren't
+    # visible through sshfs. No shell on the far side (rsync.net etc.) — we stay on the sshfs resolve
     ask = (res.lstrip("/") or ".") if home_mode else res
     got = _remote_realpath_ssh(r, ask)
     if got:
@@ -7954,8 +7954,8 @@ def remote_realpath(rid, local_path):
         if len(cands) == 1:
             return {"ok": True, "path": cands[0][0]}
         if len(cands) > 1:
-            # шара с этим именем есть на нескольких томах — сверяем mtime
-            # каталога через sftp с кандидатами
+            # a share with this name exists on several volumes — compare the directory's
+            # mtime over sftp against the candidates
             try:
                 mt = int(os.stat(lp0).st_mtime)
                 hit = [c for c, m in cands if m == mt]
@@ -7973,12 +7973,12 @@ def remote_umount(rid):
     # an older build (or one whose daemon already died).
     _run(["systemctl", "stop", _remote_unit(rid)], timeout=20)
     if _remote_listed(rid):
-        _run(["fusermount", "-uz", _remote_mp(rid)], timeout=15)   # lazy: не ждём зависший io
+        _run(["fusermount", "-uz", _remote_mp(rid)], timeout=15)   # lazy: don't wait on hung io
     ok = not _remote_listed(rid)
-    return {"ok": ok, "log": "" if ok else "не размонтировалось"}
+    return {"ok": ok, "log": "" if ok else "failed to unmount"}
 
 # --------------------------------------------------------------------------- #
-#  Docker-сервисы
+#  Docker services
 # --------------------------------------------------------------------------- #
 def _docker_ps():
     try:
@@ -7989,9 +7989,9 @@ def _docker_ps():
         return []
 
 def discover_desktop_apps():
-    """Ярлыки рабочего стола из docker-лейблов web-desktop.* на любых контейнерах.
-    Метки: web-desktop.name / .url / .icon / .enable(=false → скрыть).
-    Видит контейнеры независимо от того, кто их запустил (в т.ч. из Dockge)."""
+    """Desktop shortcuts from web-desktop.* docker labels on any containers.
+    Labels: web-desktop.name / .url / .icon / .enable(=false → hide).
+    Sees containers regardless of who started them (including from Dockge)."""
     try:
         ids = subprocess.run(["docker", "ps", "-a", "--format", "{{.ID}}"],
                              capture_output=True, text=True, timeout=8).stdout.split()
@@ -7999,7 +7999,7 @@ def discover_desktop_apps():
         return []
     if not ids:
         return []
-    US, RS = "\x1f", "\x1e"   # разделители, которых не бывает в значениях меток
+    US, RS = "\x1f", "\x1e"   # separators that never occur in label values
     try:
         fmt = "{{.Name}}%s{{.State.Status}}%s{{json .Config.Labels}}%s" % (US, US, RS)
         raw = subprocess.run(["docker", "inspect", "-f", fmt] + ids,
@@ -8033,16 +8033,16 @@ def discover_desktop_apps():
             "status": status,
             "_proj": labels.get("com.docker.compose.project") or "",
         })
-    # свои стеки, оформленные карточкой в магазине (store.json: custom) — ярлык
-    # без правки чужого compose; стек с готовыми web-desktop-метками не дублируем
+    # own stacks given a card in the store (store.json: custom) — a shortcut
+    # without editing someone else's compose; a stack with ready web-desktop labels isn't duplicated
     cust = _safe(lambda: _store_load().get("custom") or {}, {})
     if cust:
         ps, stale = None, []
         for stack, c in sorted(cust.items()):
             hit = [a for a in apps if a.get("_proj") == stack]
             if hit:
-                # ярлык, настроенный в панели, главнее web-desktop-меток compose:
-                # метки часто приезжают с другого хоста с чужим URL
+                # a shortcut configured in the panel wins over compose web-desktop labels:
+                # the labels often come from another host with someone else's URL
                 for a in hit:
                     if c.get("name"):
                         a["name"] = c["name"]
@@ -8056,10 +8056,10 @@ def discover_desktop_apps():
             conts = [x for x in ps
                      if ("com.docker.compose.project=%s" % stack) in (x.get("Labels") or "")]
             if not conts and not os.path.isdir(os.path.join(STACKS_DIR, stack)):
-                # Стек снесли (ни контейнеров, ни папки в /opt/stacks) — карточка-призрак:
-                # ярлык на столе живёт вечно, пока не почистить store.json. Чистим только
-                # если docker вообще ответил (ps непустой), иначе мёртвый демон = пустой ps
-                # и мы бы стёрли карточки живых стеков.
+                # The stack was removed (no containers, no folder in /opt/stacks) — a ghost card:
+                # the desktop shortcut lives forever until store.json is cleaned. Clean only
+                # if docker actually responded (ps non-empty), otherwise a dead daemon = empty ps
+                # and we'd wipe the cards of live stacks.
                 if ps:
                     stale.append(stack)
                 continue
@@ -8077,14 +8077,14 @@ def discover_desktop_apps():
     return apps
 
 # --------------------------------------------------------------------------- #
-#  Кэш иконок ярлыков (web-desktop.icon).  Браузер грузит иконку не из интернета,
-#  а с NAS: сервер один раз качает картинку по URL и кладёт в ~/nas-config/icons/.
-#  Ключ кэша = сам URL, поэтому смена метки (нового URL) = свежая загрузка,
-#  а старый файл просто перестаёт использоваться.
+#  Shortcut icon cache (web-desktop.icon).  The browser loads the icon not from the
+#  internet but from the NAS: the server fetches the image by URL once and stores it in ~/nas-config/icons/.
+#  The cache key = the URL itself, so changing the label (a new URL) = a fresh download,
+#  and the old file simply stops being used.
 # --------------------------------------------------------------------------- #
 ICON_CACHE_DIR = os.path.join(NAS_CONFIG, "icons")
-ICON_MAX_BYTES = 2 * 1024 * 1024          # 2 МБ на иконку — потолок
-_icon_sem = threading.Semaphore(4)        # не долбить сеть десятками потоков
+ICON_MAX_BYTES = 2 * 1024 * 1024          # 2 MB per icon — the cap
+_icon_sem = threading.Semaphore(4)        # don't hammer the network with dozens of threads
 _ICON_CT_EXT = {
     "image/png": ".png", "image/jpeg": ".jpg", "image/jpg": ".jpg",
     "image/gif": ".gif", "image/webp": ".webp", "image/svg+xml": ".svg",
@@ -8094,7 +8094,7 @@ _ICON_CT_EXT = {
 _ICON_EXTS = (".png", ".jpg", ".svg", ".ico", ".gif", ".webp", ".avif", ".bmp", "")
 
 def _icon_cached_path(url):
-    """Готовый файл кэша для URL (ищем <hash>.* среди известных расширений) или None."""
+    """The ready cache file for a URL (look for <hash>.* among known extensions) or None."""
     h = hashlib.sha1(url.encode("utf-8", "surrogatepass")).hexdigest()
     base = os.path.join(ICON_CACHE_DIR, h)
     for ext in _ICON_EXTS:
@@ -8104,8 +8104,8 @@ def _icon_cached_path(url):
     return None
 
 def fetch_icon(url):
-    """Путь к локальной копии иконки по http(s)-URL (качает при отсутствии) или None.
-    custom:// — загруженные пользователем иконки ярлыков: только кэш, не качаем."""
+    """Path to a local copy of the icon by http(s) URL (downloads if missing) or None.
+    custom:// — user-uploaded shortcut icons: cache only, we don't download."""
     if re.match(r"custom://", url or "", re.I):
         return _icon_cached_path(url)
     if not re.match(r"https?://", url or "", re.I):
@@ -8114,7 +8114,7 @@ def fetch_icon(url):
     if hit:
         return hit
     with _icon_sem:
-        hit = _icon_cached_path(url)          # мог скачать параллельный запрос
+        hit = _icon_cached_path(url)          # a parallel request may have downloaded it
         if hit:
             return hit
         try:
@@ -8127,7 +8127,7 @@ def fetch_icon(url):
         if not data or len(data) > ICON_MAX_BYTES:
             return None
         ext = _ICON_CT_EXT.get(ct)
-        if not ext:                            # тип не пришёл — угадать по URL
+        if not ext:                            # no type came back — guess from the URL
             path = urlparse(url).path.lower()
             for e in (".png", ".jpg", ".jpeg", ".svg", ".ico", ".gif", ".webp", ".avif", ".bmp"):
                 if path.endswith(e):
@@ -8148,10 +8148,10 @@ def fetch_icon(url):
             return None
 
 # --------------------------------------------------------------------------- #
-#  Cronmaster — прокси к его REST API (один origin, без CORS и ключей)
+#  Cronmaster — proxy to its REST API (one origin, no CORS or keys)
 # --------------------------------------------------------------------------- #
 def _cron(method, path, body=None, timeout=12):
-    """Запрос к cronmaster. Возвращает {ok, status, data} или {ok:False, offline?, log}."""
+    """Request to cronmaster. Returns {ok, status, data} or {ok:False, offline?, log}."""
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(CRON_URL + path, data=data, method=method,
                                  headers={"Content-Type": "application/json"})
@@ -8165,18 +8165,18 @@ def _cron(method, path, body=None, timeout=12):
     except urllib.error.HTTPError as e:
         return {"ok": False, "status": e.code, "log": e.read().decode("utf-8", "replace")[:400]}
     except (urllib.error.URLError, OSError):
-        return {"ok": False, "offline": True, "log": "Cronmaster не запущен (установите его через Мастер → Dockge)"}
+        return {"ok": False, "offline": True, "log": "Cronmaster is not running (install it via Wizard → Dockge)"}
 
 def cron_jobs():
     r = _cron("GET", "/api/cronjobs")
     if not r.get("ok"):
         return r
-    d = r["data"]                              # cronmaster оборачивает: {success, data:[...]}
+    d = r["data"]                              # cronmaster wraps it: {success, data:[...]}
     jobs = d.get("data") if isinstance(d, dict) else d
     return {"ok": True, "jobs": jobs or []}
 
 def cron_stats():
-    r = _cron("GET", "/api/system-stats")      # плоский объект {uptime, memory, cpu, network}
+    r = _cron("GET", "/api/system-stats")      # flat object {uptime, memory, cpu, network}
     return {"ok": True, "stats": r["data"]} if r.get("ok") else r
 
 def cron_run(jid):
@@ -8206,22 +8206,22 @@ def cron_logs(run_id, offset=0, max_lines=500):
     return {"ok": True, **r["data"]} if r.get("ok") and isinstance(r.get("data"), dict) else r
 
 # --------------------------------------------------------------------------- #
-#  Файловый менеджер (нативный, от root — вся ФС). LAN-админ-инструмент.
+#  File manager (native, running as root — the whole FS). A LAN admin tool.
 # --------------------------------------------------------------------------- #
-FS_TEXT_MAX = 3 * 1024 * 1024   # больше — не грузим в редактор
+FS_TEXT_MAX = 3 * 1024 * 1024   # larger — we don't load into the editor
 
 def _fs_entry(full):
     st = os.lstat(full)
-    isdir = os.path.isdir(full)   # следует по симлинку на каталог
+    isdir = os.path.isdir(full)   # follows a symlink to a directory
     return {"name": os.path.basename(full) or full, "path": full,
             "type": "dir" if isdir else "file",
             "size": 0 if isdir else st.st_size, "mtime": int(st.st_mtime),
             "mode": oct(st.st_mode & 0o777)[2:], "link": os.path.islink(full)}
 
 def _chown_user(path, stop=None):
-    """Отдать созданное обычному пользователю: панель работает от root, иначе
-    загруженные файлы и папки остаются root:root и правятся только через sudo.
-    stop — каталог, выше которого не подниматься (владельца там не меняем)."""
+    """Hand off what was created to the regular user: the panel runs as root, otherwise
+    uploaded files and folders stay root:root and can only be edited via sudo.
+    stop — the directory above which not to climb (we don't change ownership there)."""
     try:
         pw = pwd.getpwnam(TARGET_USER)
     except KeyError:
@@ -8250,37 +8250,37 @@ def _uniq(dst):
         i += 1
     return "%s (%d)%s" % (base, i, ext)
 
-# ---- thumbnails (кэш + генерация через ffmpeg/pdftoppm) ----
+# ---- thumbnails (cache + generation via ffmpeg/pdftoppm) ----
 THUMBS_DIR = "/var/cache/nas-thumbs"
 THUMB_PX   = 320
-THUMB_MAX_SWEEP = 400     # не прогревать гигантские каталоги за раз
+THUMB_MAX_SWEEP = 400     # don't prewarm giant directories in one go
 _THUMB_IMG = {"png","jpg","jpeg","gif","webp","bmp","ico","avif","tif","tiff","svg","heic","heif"}
 _THUMB_VID = {"mp4","mkv","avi","mov","webm","m4v","ogv","wmv","flv","3gp","mpg","mpeg"}
 _THUMB_AUD = {"mp3","flac","m4a","aac","ogg","opus","wma"}
 _THUMB_PDF = {"pdf"}
-# HEIC с айфона нарезан плитками 512×512 (напр. 8×6 для 4032×3024). ffmpeg читает
-# его mov-демуксером и отдаёт ПЕРВУЮ ПЛИТКУ — миниатюра получалась куском угла.
-# libheif (heif-convert) собирает картинку целиком. TIFF браузеры не рисуют вовсе.
+# iPhone HEIC is sliced into 512×512 tiles (e.g. 8×6 for 4032×3024). ffmpeg reads
+# it with the mov demuxer and returns the FIRST TILE — the thumbnail came out as a corner piece.
+# libheif (heif-convert) assembles the whole image. Browsers don't render TIFF at all.
 _HEIF_EXT  = {"heic","heif"}
-_VIEW_CONV = {"heic","heif","tif","tiff"}   # что нужно перегнать в JPEG для показа
-# Крупные снимки (камера отдаёт 26 МП / 17 МБ) тоже уменьшаем: гнать оригинал в
-# браузер бессмысленно — 40× трафика и тяжёлое декодирование на клиенте.
-# gif/svg/ico не трогаем: анимация и вектор потеряются.
+_VIEW_CONV = {"heic","heif","tif","tiff"}   # what needs converting to JPEG for display
+# Large photos (a camera puts out 26 MP / 17 MB) are downscaled too: pushing the original to
+# the browser is pointless — 40× the traffic and heavy decoding on the client.
+# gif/svg/ico left alone: animation and vectors would be lost.
 _VIEW_BIG_EXT = {"jpg","jpeg","png","webp","bmp","avif"}
 VIEW_BIG_BYTES = 2 * 1024 * 1024
 VIEW_PX    = 2560
-_thumb_sem = threading.Semaphore(2)   # ограничить одновременный ffmpeg (миниатюры)
-_view_sem  = threading.Semaphore(2)   # просмотр не должен ждать очередь миниатюр
+_thumb_sem = threading.Semaphore(2)   # limit concurrent ffmpeg (thumbnails)
+_view_sem  = threading.Semaphore(2)   # viewing shouldn't wait on the thumbnail queue
 
 def _ext(name):
     return name.rsplit(".", 1)[-1].lower() if "." in name else ""
 
 def _heif_decode(src, out_jpg):
-    """HEIC/HEIF → JPEG через libheif. True, если получилось.
-    Промежуточный формат обязан быть JPEG, а не PNG: libheif декодирует
-    12-мегапиксельный снимок за доли секунды, но zlib-сжатие PNG (~14 МБ)
-    отнимало ещё ~4.7 с на каждое фото. JPEG q=92 отдаёт то же изображение
-    (PSNR 45 dB против PNG-пути) в 12 раз быстрее.
+    """HEIC/HEIF → JPEG via libheif. True if it worked.
+    The intermediate format must be JPEG, not PNG: libheif decodes
+    a 12-megapixel photo in a fraction of a second, but PNG's zlib compression (~14 MB)
+    took another ~4.7s per photo. JPEG q=92 yields the same image
+    (PSNR 45 dB vs. the PNG path) 12 times faster.
     """
     if not shutil.which("heif-convert"):
         return False
@@ -8310,7 +8310,7 @@ def _thumb_fresh(src, tp):
         return False
 
 def gen_thumb(src):
-    """Путь к готовому превью (генерит при отсутствии/устаревании) или None."""
+    """Path to the ready preview (generates it if missing/stale) or None."""
     kind = thumb_kind(os.path.basename(src))
     if not kind or not os.path.isfile(src):
         return None
@@ -8325,36 +8325,36 @@ def gen_thumb(src):
         os.makedirs(os.path.dirname(tp), exist_ok=True)
     except OSError:
         return None
-    # вписать в коробку THUMB_PX×THUMB_PX (портретные/вертикальные не становятся огромными)
+    # fit into a THUMB_PX×THUMB_PX box (portrait/vertical ones don't become huge)
     scale = "scale='min(%d,iw)':'min(%d,ih)':force_original_aspect_ratio=decrease" % (THUMB_PX, THUMB_PX)
-    # уникальный суффикс на КАЖДЫЙ вызов (pid одинаков во всех потоках, до 3 генераций разом)
+    # unique suffix on EVERY call (pid is the same across all threads, up to 3 generations at once)
     uniq = "%d.%s" % (os.getpid(), secrets.token_hex(4))
     tmp = tp + "." + uniq + ".tmp.jpg"
     ok = False
     with _thumb_sem:
         try:
             if kind == "img":
-                # HEIC/HEIF сначала собираем через libheif — иначе ffmpeg возьмёт одну плитку
+                # HEIC/HEIF: assemble via libheif first — otherwise ffmpeg grabs a single tile
                 if _ext(src) in _HEIF_EXT:
                     heif_tmp = tp + "." + uniq + ".heif.jpg"
                     if not _heif_decode(src, heif_tmp):
-                        raise RuntimeError("heif-convert не смог")
+                        raise RuntimeError("heif-convert failed")
                     ff_in = heif_tmp
                 else:
                     ff_in = src
-                # прозрачность PNG/WebP → подкладываем белый фон (иначе JPEG рисует мусор на месте альфы)
+                # PNG/WebP transparency → lay a white background under it (otherwise JPEG draws garbage where alpha was)
                 cmd = ["ffmpeg","-y","-v","error","-i",ff_in,"-filter_complex",
                        "color=c=white:s=2x2[bg];[0:v]%s[fg];[bg][fg]scale2ref[bg2][fg2];[bg2][fg2]overlay=format=auto[o]" % scale,
                        "-map","[o]","-frames:v","1",tmp]
             elif kind == "vid":
-                ss = 3.0   # запасной вариант, если длительность неизвестна
+                ss = 3.0   # fallback if the duration is unknown
                 try:
                     pr = subprocess.run(["ffprobe","-v","error","-show_entries","format=duration",
                                          "-of","default=nk=1:nw=1", src],
                                         capture_output=True, text=True, timeout=10)
                     dur = float((pr.stdout or "").strip() or 0)
                     if dur > 0:
-                        ss = max(1.0, dur * 0.1)   # ~10% от длительности
+                        ss = max(1.0, dur * 0.1)   # ~10% of the duration
                 except Exception:
                     pass
                 cmd = ["ffmpeg","-y","-v","error","-ss","%.2f" % ss,"-i",src,"-vf",scale,"-frames:v","1",tmp]
@@ -8374,7 +8374,7 @@ def gen_thumb(src):
         except Exception:
             ok = False
         finally:
-            # подчистить все временные файлы этого вызова (в т.ч. варианты pdftoppm base-*.jpg)
+            # clean up all temp files from this call (including pdftoppm base-*.jpg variants)
             try:
                 for leftover in glob.glob(tp + "." + uniq + "*") + glob.glob(tp[:-4] + "." + uniq + "*.jpg"):
                     try: os.remove(leftover)
@@ -8388,7 +8388,7 @@ def gen_thumb(src):
     return None
 
 def prewarm_thumbs(path):
-    """Фоновая догенерация недостающих превью для каталога (при листинге)."""
+    """Background generation of missing previews for a directory (on listing)."""
     if not (shutil.which("ffmpeg") or shutil.which("pdftoppm")):
         return
     def work():
@@ -8409,7 +8409,7 @@ def prewarm_thumbs(path):
     threading.Thread(target=work, daemon=True).start()
 
 def video_meta(path):
-    """Длительность + кодеки + список аудиодорожек и субтитров (для плеера/транскода)."""
+    """Duration + codecs + list of audio tracks and subtitles (for the player/transcode)."""
     path = os.path.realpath(path)
     if not os.path.isfile(path) or not shutil.which("ffprobe"):
         return {"ok": False}
@@ -8436,7 +8436,7 @@ def video_meta(path):
                                "title": title, "ch": s.get("channels", 0)})
                 ai += 1
             elif ct == "subtitle":
-                # только текстовые сабы можно отдать как WebVTT (картиночные pgs/dvdsub — нет)
+                # only text subs can be served as WebVTT (image-based pgs/dvdsub — no)
                 cn = (s.get("codec_name") or "").lower()
                 subs.append({"i": si, "codec": cn, "lang": lang, "title": title,
                              "text": cn in ("subrip", "srt", "ass", "ssa", "mov_text", "webvtt", "text")})
@@ -8447,7 +8447,7 @@ def video_meta(path):
             "audios": audios, "subs": subs}
 
 def thumbs_sweep(dirs):
-    """Рекурсивный прогрев кэша превью (для ночного таймера)."""
+    """Recursive prewarming of the preview cache (for the nightly timer)."""
     n = 0
     for d in dirs:
         for root, _dirs, files in os.walk(os.path.realpath(d)):
@@ -8463,7 +8463,7 @@ def thumbs_sweep(dirs):
     return n
 
 def thumbs_cache_stat():
-    """(суммарный размер в байтах, число файлов) кэша миниатюр."""
+    """(total size in bytes, number of files) of the thumbnail cache."""
     total = n = 0
     for root, _dirs, files in os.walk(THUMBS_DIR):
         for f in files:
@@ -8474,7 +8474,7 @@ def thumbs_cache_stat():
     return total, n
 
 def thumbs_cache_clear():
-    """Полностью очистить кэш миниатюр. Возвращает число удалённых файлов."""
+    """Fully clear the thumbnail cache. Returns the number of files removed."""
     n = 0
     for root, _dirs, files in os.walk(THUMBS_DIR):
         for f in files:
@@ -8485,8 +8485,8 @@ def thumbs_cache_clear():
     return n
 
 def thumbs_cache_gc(limit_mb):
-    """Держим кэш в пределах лимита: удаляем самые старые (по mtime), пока не влезем.
-    limit_mb<=0 → без лимита (ничего не делаем). Возвращает число удалённых файлов."""
+    """Keep the cache within the limit: remove the oldest (by mtime) until it fits.
+    limit_mb<=0 → no limit (do nothing). Returns the number of files removed."""
     try:
         limit_mb = int(limit_mb)
     except (ValueError, TypeError):
@@ -8505,7 +8505,7 @@ def thumbs_cache_gc(limit_mb):
             files.append((st.st_mtime, st.st_size, fp)); total += st.st_size
     if total <= limit:
         return 0
-    files.sort()          # старые первыми
+    files.sort()          # oldest first
     removed = 0
     for _mt, sz, fp in files:
         if total <= limit:
@@ -8519,12 +8519,12 @@ def thumbs_cache_gc(limit_mb):
 def fs_list(path):
     path = os.path.realpath(path or "/")
     if not os.path.isdir(path):
-        return {"ok": False, "log": "не каталог: " + path}
+        return {"ok": False, "log": "not a directory: " + path}
     entries = []
     try:
         names = os.listdir(path)
     except PermissionError:
-        return {"ok": False, "log": "нет доступа к " + path}
+        return {"ok": False, "log": "no access to " + path}
     except OSError as e:
         return {"ok": False, "log": str(e)}
     for name in names:
@@ -8537,11 +8537,11 @@ def fs_list(path):
             "parent": (os.path.dirname(path) if path != "/" else None),
             "entries": entries}
 
-# Деревья, которые НИКОГДА не должны быть целью разрушительной операции файлового
-# менеджера — даже для авторизованного админа: сам движок, корень ОС, системные
-# каталоги. Острый край — пустой путь: os.path.realpath("") — это рабочий каталог
-# процесса (/opt/nas-os), он проскакивал наивную проверку глубины и однажды унёс
-# движок в корзину при пустом теле запроса. Чтение НЕ ограничиваем (это админ-панель).
+# Trees that must NEVER be the target of a destructive file manager operation —
+# even for an authorized admin: the engine itself, the OS root, system
+# directories. The sharp edge is the empty path: os.path.realpath("") is the process's
+# working directory (/opt/nas-os); it slipped past the naive depth check and once dropped
+# the engine into the trash on an empty request body. Reading is NOT restricted (this is an admin panel).
 _FS_PROTECTED = (HERE, "/etc", "/usr", "/bin", "/sbin", "/lib", "/lib64",
                  "/boot", "/proc", "/sys", "/dev", "/run", "/var")
 
@@ -8558,19 +8558,19 @@ def _fs_guard(path, into=False):
         making /home/backups is as harmless as making /home/oleg/backups.
         Blocked here: the root itself and the protected system trees."""
     if not path or not str(path).strip():
-        return None, "пустой путь"
+        return None, "empty path"
     rp = os.path.realpath(path)
     if rp == "/" or (not into and rp.count("/") < 2):
-        return None, "слишком опасный путь: " + rp
+        return None, "path is too dangerous: " + rp
     for prot in _FS_PROTECTED:
         if rp == prot or rp.startswith(prot.rstrip("/") + os.sep):
-            return None, "защищённый системный путь: " + rp
+            return None, "protected system path: " + rp
     return rp, None
 
 def fs_read(path):
     path = os.path.realpath(path)
     if not os.path.isfile(path):
-        return {"ok": False, "log": "не файл"}
+        return {"ok": False, "log": "not a file"}
     size = os.path.getsize(path)
     if size > FS_TEXT_MAX:
         return {"ok": True, "path": path, "binary": True, "size": size}
@@ -8586,15 +8586,15 @@ def fs_read(path):
         return {"ok": True, "path": path, "binary": True, "size": size}
 
 def fs_write(path, content):
-    # защита от перезаписи движка/системных файлов через редактор ФМ (для этого
-    # есть отдельные потоки; пустой путь тут — это realpath("")=/opt/nas-os)
+    # guard against overwriting the engine/system files via the FM editor (for that
+    # there are separate flows; an empty path here is realpath("")=/opt/nas-os)
     path, err = _fs_guard(path)
     if err:
         return {"ok": False, "log": err}
     if not os.path.isdir(os.path.dirname(path)):
-        return {"ok": False, "log": "каталог не существует"}
+        return {"ok": False, "log": "directory does not exist"}
     if os.path.isdir(path):
-        return {"ok": False, "log": "это каталог"}
+        return {"ok": False, "log": "this is a directory"}
     try:
         if os.path.isfile(path):
             shutil.copy2(path, path + ".bak")
@@ -8607,7 +8607,7 @@ def fs_write(path, content):
 def _child(path, name):
     return os.path.join(os.path.realpath(path), os.path.basename((name or "").strip()))
 
-# ---- загрузка файла по URL (сервер качает потоково в папку, с прогрессом) ----
+# ---- file download by URL (the server streams it into a folder, with progress) ----
 _FETCH_JOBS = {}
 _FETCH_LOCK = threading.Lock()
 
@@ -8615,18 +8615,18 @@ def fs_fetch_start(path, url, name=""):
     from urllib.parse import urlparse as _up, unquote
     url = (url or "").strip()
     if not re.match(r"^https?://", url):
-        return {"ok": False, "log": "нужен http(s) URL"}
-    d, err = _fs_guard(path, into=True)   # не качать в системные деревья/движок
+        return {"ok": False, "log": "an http(s) URL is required"}
+    d, err = _fs_guard(path, into=True)   # don't download into system trees/the engine
     if err:
         return {"ok": False, "log": err}
     if not os.path.isdir(d):
-        return {"ok": False, "log": "не каталог назначения"}
+        return {"ok": False, "log": "destination is not a directory"}
     fname = os.path.basename((name or "").strip()) or os.path.basename(unquote(_up(url).path)) or ""
     jid = hashlib.md5((url + str(time.time())).encode()).hexdigest()[:12]
     job = {"id": jid, "name": fname or "…", "total": 0, "got": 0,
            "done": False, "ok": False, "log": "", "path": "", "cancel": False}
     with _FETCH_LOCK:
-        # лёгкая уборка старых завершённых задач
+        # light cleanup of old finished jobs
         for k in [k for k, v in _FETCH_JOBS.items() if v.get("done")][:-20]:
             _FETCH_JOBS.pop(k, None)
         _FETCH_JOBS[jid] = job
@@ -8656,9 +8656,9 @@ def fs_fetch_start(path, url, name=""):
                         f.write(chunk)
                         job["got"] += len(chunk)
                         if job["cancel"]:
-                            raise IOError("отменено пользователем")
+                            raise IOError("cancelled by the user")
                         if job["got"] > limit:
-                            raise IOError("файл больше 40 ГБ — прервано")
+                            raise IOError("file larger than 40 GB — aborted")
             job["ok"] = True
             job["path"] = dest
             if thumb_kind(os.path.basename(dest)):
@@ -8683,29 +8683,29 @@ def fs_fetch_status(jid):
     with _FETCH_LOCK:
         job = _FETCH_JOBS.get(jid)
     if not job:
-        return {"ok": False, "log": "задача не найдена"}
+        return {"ok": False, "log": "job not found"}
     return {"ok": True, "job": dict(job)}
 
 def fs_fetch_cancel(jid):
     with _FETCH_LOCK:
         job = _FETCH_JOBS.get(jid)
     if not job:
-        return {"ok": False, "log": "задача не найдена"}
+        return {"ok": False, "log": "job not found"}
     job["cancel"] = True
     return {"ok": True}
 
 def fs_mkdir(path, name):
-    # создаём ВНУТРИ каталога — сам он не страдает, поэтому /home и /mnt разрешены
+    # we create INSIDE the directory — it isn't affected, so /home and /mnt are allowed
     parent, err = _fs_guard(path, into=True)
     if err:
         return {"ok": False, "log": err}
     d = _child(parent, name)
     if not os.path.basename(d):
-        return {"ok": False, "log": "пустое имя"}
+        return {"ok": False, "log": "empty name"}
     try:
         os.makedirs(d, exist_ok=False)
     except FileExistsError:
-        return {"ok": False, "log": "уже существует"}
+        return {"ok": False, "log": "already exists"}
     except OSError as e:
         return {"ok": False, "log": str(e)}
     return {"ok": True, "path": d}
@@ -8716,10 +8716,10 @@ def fs_rename(src, name):
         return {"ok": False, "log": err}
     base = os.path.basename((name or "").strip())
     if not base:
-        return {"ok": False, "log": "пустое имя"}
+        return {"ok": False, "log": "empty name"}
     dst = os.path.join(os.path.dirname(src), base)
     if os.path.exists(dst):
-        return {"ok": False, "log": "уже существует"}
+        return {"ok": False, "log": "already exists"}
     try:
         os.rename(src, dst)
     except OSError as e:
@@ -8742,7 +8742,7 @@ def fs_delete(path):
 def fs_upload(path, name, data_b64):
     full = _child(path, name)
     if not os.path.basename(full):
-        return {"ok": False, "log": "нет имени файла"}
+        return {"ok": False, "log": "no file name"}
     try:
         raw = base64.b64decode((data_b64 or "").split(",")[-1])
         with open(full, "wb") as f:
@@ -8754,9 +8754,9 @@ def fs_upload(path, name, data_b64):
 def fs_newfile(path, name):
     full = _child(path, name)
     if not os.path.basename(full):
-        return {"ok": False, "log": "пустое имя"}
+        return {"ok": False, "log": "empty name"}
     if os.path.exists(full):
-        return {"ok": False, "log": "уже существует"}
+        return {"ok": False, "log": "already exists"}
     try:
         open(full, "x").close()
     except OSError as e:
@@ -8769,11 +8769,11 @@ def _into_self(src, dst_dir):
 def fs_copy(src, dst_dir):
     src = os.path.realpath(src); dst_dir = os.path.realpath(dst_dir)
     if not os.path.exists(src):
-        return {"ok": False, "log": "нет источника"}
+        return {"ok": False, "log": "no source"}
     if not os.path.isdir(dst_dir):
-        return {"ok": False, "log": "цель не каталог"}
+        return {"ok": False, "log": "target is not a directory"}
     if os.path.isdir(src) and _into_self(src, dst_dir):
-        return {"ok": False, "log": "нельзя копировать в себя"}
+        return {"ok": False, "log": "cannot copy into itself"}
     dst = _uniq(os.path.join(dst_dir, os.path.basename(src)))
     try:
         if os.path.isdir(src) and not os.path.islink(src):
@@ -8785,16 +8785,16 @@ def fs_copy(src, dst_dir):
     return {"ok": True, "path": dst}
 
 def fs_move(src, dst_dir):
-    src, err = _fs_guard(src)          # источник уносится — защищаем от системных деревьев
+    src, err = _fs_guard(src)          # the source is moved away — guard against system trees
     if err:
         return {"ok": False, "log": err}
     dst_dir = os.path.realpath(dst_dir)
     if not os.path.exists(src):
-        return {"ok": False, "log": "нет источника"}
+        return {"ok": False, "log": "no source"}
     if not os.path.isdir(dst_dir):
-        return {"ok": False, "log": "цель не каталог"}
+        return {"ok": False, "log": "target is not a directory"}
     if _into_self(src, dst_dir) or os.path.dirname(src) == dst_dir:
-        return {"ok": False, "log": "нельзя переместить сюда"}
+        return {"ok": False, "log": "cannot move here"}
     dst = _uniq(os.path.join(dst_dir, os.path.basename(src)))
     try:
         shutil.move(src, dst)
@@ -8822,11 +8822,11 @@ def fs_search(path, query, limit=400):
 def fs_chmod(path, mode, recursive=False):
     path = os.path.realpath(path)
     if path == "/" or path.count("/") < 2:
-        return {"ok": False, "log": "слишком опасный путь: " + path}
+        return {"ok": False, "log": "path is too dangerous: " + path}
     try:
         m = int(str(mode).strip(), 8)
     except ValueError:
-        return {"ok": False, "log": "неверный режим (нужно восьмеричное, напр. 644)"}
+        return {"ok": False, "log": "invalid mode (octal required, e.g. 644)"}
     try:
         os.chmod(path, m)
         if recursive and os.path.isdir(path) and not os.path.islink(path):
@@ -8856,14 +8856,14 @@ def _resolve_gid(group):
 def fs_chown(path, owner, group, recursive=False):
     path = os.path.realpath(path)
     if path == "/" or path.count("/") < 2:
-        return {"ok": False, "log": "слишком опасный путь: " + path}
+        return {"ok": False, "log": "path is too dangerous: " + path}
     try:
         uid = _resolve_uid(owner)
         gid = _resolve_gid(group)
     except (KeyError, ValueError):
-        return {"ok": False, "log": "нет такого пользователя или группы"}
+        return {"ok": False, "log": "no such user or group"}
     if uid == -1 and gid == -1:
-        return {"ok": False, "log": "не указан владелец или группа"}
+        return {"ok": False, "log": "no owner or group specified"}
     try:
         os.chown(path, uid, gid)
         if recursive and os.path.isdir(path) and not os.path.islink(path):
@@ -8896,18 +8896,18 @@ def fs_du(path):
     return {"ok": True, "size": total, "files": files, "dirs": dirs}
 
 # --------------------------------------------------------------------------- #
-#  Анализатор места (DaisyDisk-подобный). Фоновый обход одного тома (в пределах
-#  одной ФС, как `du -x`), строим плоскую карту каталогов с размерами, кэшируем
-#  в ~/nas-config/duscan-<hash>.json. Фронт запрашивает по одному узлу (ленивый
-#  drill-down) → маленькие ответы даже на терабайтных пулах.
+#  Disk usage analyzer (DaisyDisk-like). Background walk of a single volume (within
+#  one FS, like `du -x`), build a flat map of directories with sizes, cache it
+#  in ~/nas-config/duscan-<hash>.json. The frontend requests one node at a time (lazy
+#  drill-down) → small responses even on terabyte pools.
 # --------------------------------------------------------------------------- #
-DUSCAN_TOPF = 12     # хранить топ-N крупнейших файлов на каталог
-DUSCAN_MAXCH = 60    # максимум детей в узле (остальное → «прочее»)
-DUSCAN_BIGN = 300    # глобальный топ-N крупнейших файлов тома
-DUSCAN_DUPMIN = 1024 * 1024      # кандидаты в дубликаты — от 1 МиБ (мелочь не интересна)
-DUSCAN_DUPCAP = 6000             # максимум файлов-кандидатов в кэше (защита от гигантских деревьев)
-_duscan = {}         # root -> статус/прогресс скана
-_duscache = {}       # root -> загруженное дерево {nodes, ts, size, files, dirs}
+DUSCAN_TOPF = 12     # keep the top-N largest files per directory
+DUSCAN_MAXCH = 60    # max children in a node (the rest → "other")
+DUSCAN_BIGN = 300    # global top-N largest files of the volume
+DUSCAN_DUPMIN = 1024 * 1024      # duplicate candidates — from 1 MiB (small stuff isn't interesting)
+DUSCAN_DUPCAP = 6000             # max candidate files in the cache (protection against giant trees)
+_duscan = {}         # root -> scan status/progress
+_duscache = {}       # root -> loaded tree {nodes, ts, size, files, dirs}
 _duscan_lock = threading.Lock()
 
 def _duscan_cache_path(root):
@@ -8918,11 +8918,11 @@ def _duscan_build(root):
     dev = os.stat(root).st_dev
     own = {}; topf = {}; nfiles = {}; kids = {}; parent = {}; order = []
     tb = [0]
-    bigheap = []          # min-heap (size, path) — глобальный топ крупнейших файлов
-    dupmap = {}; dupn = [0]  # size -> [paths] для поиска дубликатов (>= DUPMIN)
+    bigheap = []          # min-heap (size, path) — global top of largest files
+    dupmap = {}; dupn = [0]  # size -> [paths] for finding duplicates (>= DUPMIN)
     for dp, dns, fns in os.walk(root, topdown=True, onerror=lambda e: None, followlinks=False):
         keep = []
-        for d in dns:                       # не выходим за пределы ФС и не идём по симлинкам
+        for d in dns:                       # don't cross the FS boundary and don't follow symlinks
             fp = os.path.join(dp, d)
             try:
                 if os.path.islink(fp):
@@ -8943,12 +8943,12 @@ def _duscan_build(root):
             except OSError:
                 continue
             ob += sz; nf += 1; fl.append((sz, fn))
-            # глобальный топ крупнейших файлов
+            # global top of largest files
             if len(bigheap) < DUSCAN_BIGN:
                 heapq.heappush(bigheap, (sz, fp))
             elif sz > bigheap[0][0]:
                 heapq.heapreplace(bigheap, (sz, fp))
-            # кандидаты в дубликаты: группируем по размеру (только крупные)
+            # duplicate candidates: group by size (large ones only)
             if sz >= DUSCAN_DUPMIN and dupn[0] < DUSCAN_DUPCAP:
                 dupmap.setdefault(sz, []).append(fp); dupn[0] += 1
         fl.sort(reverse=True)
@@ -8967,7 +8967,7 @@ def _duscan_build(root):
         if p in kids:
             kids[p].append(d)
     total = {}
-    for d in sorted(order, key=lambda x: x.count("/"), reverse=True):   # дети раньше родителей
+    for d in sorted(order, key=lambda x: x.count("/"), reverse=True):   # children before parents
         t = own.get(d, 0)
         for c in kids.get(d, []):
             t += total.get(c, 0)
@@ -8984,14 +8984,14 @@ def _duscan_build(root):
         if extra > 0:
             esz = own.get(d, 0) - sum(s for s, _ in topf.get(d, []))
             if esz > 0:
-                ch.append({"n": "… ещё %d" % extra, "s": esz, "o": 1})
+                ch.append({"n": "… %d more" % extra, "s": esz, "o": 1})
         ch.sort(key=lambda x: x["s"], reverse=True)
         if len(ch) > DUSCAN_MAXCH:
             rest = ch[DUSCAN_MAXCH:]; ch = ch[:DUSCAN_MAXCH]
-            ch.append({"n": "… прочее (%d)" % len(rest), "s": sum(x["s"] for x in rest), "o": 1})
+            ch.append({"n": "… other (%d)" % len(rest), "s": sum(x["s"] for x in rest), "o": 1})
         nodes[d] = {"s": total.get(d, 0), "ch": ch}
     bigfiles = [{"p": p, "s": s} for s, p in sorted(bigheap, reverse=True)]
-    # кандидаты-дубликаты: только размеры, встретившиеся >1 раза; топ по потенциальной экономии
+    # duplicate candidates: only sizes seen more than once; sorted by potential savings
     dupcand = [{"s": sz, "paths": ps} for sz, ps in dupmap.items() if len(ps) > 1]
     dupcand.sort(key=lambda g: g["s"] * (len(g["paths"]) - 1), reverse=True)
     dupcand = dupcand[:500]
@@ -9021,9 +9021,9 @@ def _duscan_run(root):
 _duscan_auto_last = 0
 
 def _duscan_auto(hours):
-    """Периодически освежать УЖЕ сканированные тома (кэш старше N часов). 0 = выкл.
-    Зовётся из monitor_tick (раз в минуту), но проверяет не чаще раза в ~15 мин;
-    один скан за проход — du нагружает диск, пачкой гонять незачем."""
+    """Periodically refresh ALREADY scanned volumes (cache older than N hours). 0 = off.
+    Called from monitor_tick (once a minute), but checks no more than once every ~15 min;
+    one scan per pass — du loads the disk, no point running them in a batch."""
     global _duscan_auto_last
     try:
         hours = float(hours or 0)
@@ -9032,7 +9032,7 @@ def _duscan_auto(hours):
     if hours <= 0:
         return
     now = time.time()
-    if now - _duscan_auto_last < 900:      # не чаще раза в 15 минут
+    if now - _duscan_auto_last < 900:      # no more than once every 15 minutes
         return
     _duscan_auto_last = now
     for f in sorted(glob.glob(os.path.join(NAS_CONFIG, "duscan-*.json"))):
@@ -9047,13 +9047,13 @@ def _duscan_auto(hours):
         with _duscan_lock:
             if (_duscan.get(root) or {}).get("status") == "scanning":
                 continue
-        duscan_start(root)      # фоновый; освежит кэш и его ts
-        break                   # по одному за проход — остальные освежатся в следующие проверки
+        duscan_start(root)      # background; refreshes the cache and its ts
+        break                   # one per pass — the rest refresh on the next checks
 
 def duscan_start(root):
     root = os.path.realpath(root or "/")
     if not os.path.isdir(root):
-        return {"ok": False, "log": "не каталог: " + root}
+        return {"ok": False, "log": "not a directory: " + root}
     with _duscan_lock:
         s = _duscan.get(root)
         if s and s.get("status") == "scanning":
@@ -9100,17 +9100,17 @@ def duscan_node(root, path, depth=1):
     path = os.path.realpath(path or root)
     data = _duscan_load_cache(root)
     if not data:
-        return {"ok": False, "log": "нет данных — запустите скан"}
+        return {"ok": False, "log": "no data — run a scan"}
     nodes = data.get("nodes", {})
-    # раньше падали, если пути нет в скане; теперь показываем живой листинг (новые папки после скана)
+    # we used to fail if the path wasn't in the scan; now we show a live listing (new folders after the scan)
     if path not in nodes and not os.path.isdir(path):
-        return {"ok": False, "log": "нет данных по этому пути (пере-сканируйте)"}
+        return {"ok": False, "log": "no data for this path (re-scan)"}
     try:
         depth = max(1, min(3, int(depth)))
     except (ValueError, TypeError):
         depth = 1
-    # build СЛИВАЕТ реальные подпапки (os.listdir) с размерами из скана: новые папки
-    # помечаются new (нет размера), удалённые не показываются, файлы берём из скана.
+    # build MERGES the real subfolders (os.listdir) with sizes from the scan: new folders
+    # are flagged new (no size), deleted ones aren't shown, files are taken from the scan.
     def build(p, dep):
         nd = nodes.get(p)
         scan_dirs, scan_rest = {}, []
@@ -9119,7 +9119,7 @@ def duscan_node(root, path, depth=1):
                 if c.get("d") and c.get("p"):
                     scan_dirs[c["p"]] = c
                 else:
-                    scan_rest.append(c)   # файлы + агрегаты «… ещё/прочее»
+                    scan_rest.append(c)   # files + the «… more/other» aggregates
         try:
             live = sorted(n for n in os.listdir(p) if os.path.isdir(os.path.join(p, n)))
         except OSError:
@@ -9137,7 +9137,7 @@ def duscan_node(root, path, depth=1):
                         if sub:
                             it["c"] = sub
                 else:
-                    it["s"] = 0; it["new"] = 1   # папки нет в скане — не считана
+                    it["s"] = 0; it["new"] = 1   # folder not in the scan — not counted
                 out.append(it)
             for c in scan_rest:
                 it = {"n": c["n"], "s": c.get("s", 0)}
@@ -9166,17 +9166,17 @@ def duscan_node(root, path, depth=1):
             "ch": build(path, depth), "scanTs": data.get("ts")}
 
 def duscan_bigfiles(root):
-    """Глобальный топ крупнейших файлов тома (собран при скане)."""
+    """Global top of the volume's largest files (collected during the scan)."""
     data = _duscan_load_cache(os.path.realpath(root or "/"))
     if not data:
-        return {"ok": False, "log": "нет данных — запустите скан"}
-    # фильтруем удалённые после скана
+        return {"ok": False, "log": "no data — run a scan"}
+    # filter out those deleted after the scan
     bf = [f for f in data.get("bigfiles", []) if os.path.isfile(f["p"])]
     return {"ok": True, "root": root, "files": bf[:300], "scanTs": data.get("ts")}
 
 def _file_hash_partial(p, sz):
-    """Быстрый отпечаток: голова+хвост по 256 КБ + размер. При равном размере
-    практически исключает ложные совпадения (для дедуп-инструмента достаточно)."""
+    """Fast fingerprint: head+tail of 256 KB each + size. For equal sizes this
+    practically rules out false matches (good enough for a dedup tool)."""
     h = hashlib.md5()
     with open(p, "rb") as f:
         h.update(f.read(262144))
@@ -9186,10 +9186,10 @@ def _file_hash_partial(p, sz):
     return h.hexdigest()
 
 def duscan_dups(root):
-    """Найти дубликаты среди кандидатов скана (равный размер → сверка отпечатка)."""
+    """Find duplicates among the scan candidates (equal size → fingerprint check)."""
     data = _duscan_load_cache(os.path.realpath(root or "/"))
     if not data:
-        return {"ok": False, "log": "нет данных — запустите скан"}
+        return {"ok": False, "log": "no data — run a scan"}
     cand = data.get("dupcand", [])
     groups = []; t0 = time.time(); truncated = False
     for g in cand:
@@ -9213,7 +9213,7 @@ def duscan_dups(root):
             "scanTs": data.get("ts")}
 
 # --------------------------------------------------------------------------- #
-#  File history & integrity ("История файлов"): incremental manifest of the
+#  File history & integrity ("File history"): incremental manifest of the
 #  user's folders (SQLite: path/size/mtime/BLAKE2b) + event journal
 #  (add / del / mod / move / corrupt) + rotating content re-verification to
 #  catch bitrot without SnapRAID parity. A scan is metadata-cheap: content is
@@ -9237,11 +9237,11 @@ class _FswCancel(Exception):
 
 def _fsw_human(n):
     n = float(n or 0)
-    for u in ("Б", "КБ", "МБ", "ГБ"):
+    for u in ("B", "KB", "MB", "GB"):
         if n < 1024:
-            return ("%d %s" if u == "Б" else "%.1f %s") % (n, u)
+            return ("%d %s" if u == "B" else "%.1f %s") % (n, u)
         n /= 1024
-    return "%.1f ТБ" % n
+    return "%.1f TB" % n
 
 def fsw_load():
     d = {"enabled": True, "roots": [], "exclude": list(FSW_DEF_EXCLUDE),
@@ -9255,8 +9255,8 @@ def fsw_load():
                 d[k] = u[k]
     except (OSError, ValueError):
         pass
-    # ismount, а НЕ isdir: пустая папка /mnt/storage (пула нет) — это системная
-    # карта, и индексатор миниатюр честно ходил бы по ней
+    # ismount, NOT isdir: an empty /mnt/storage folder (no pool) is the system
+    # card, and the thumbnail indexer would faithfully walk it
     if not d["roots"] and storage_root():
         d["roots"] = [storage_root()]
     return d
@@ -9414,8 +9414,8 @@ def _fsw_run(deep=False, manual=False):
             had = any(under(p, r) for p in man)
             (ok_roots if (os.path.isdir(r) and (nonempty or not had)) else bad_roots).append(r)
         if bad_roots:
-            _fsw_fire("fsw_root", "NAS: папка наблюдения недоступна",
-                      "Не вижу содержимого: %s. Диск не смонтирован? Удаления не записаны."
+            _fsw_fire("fsw_root", "NAS: watched folder unavailable",
+                      "Cannot see contents: %s. Disk not mounted? Deletions not recorded."
                       % ", ".join(bad_roots), lvl="warn")
         added, mods, ev_rows, corrupt = [], [], [], []
         seen = set()
@@ -9495,9 +9495,9 @@ def _fsw_run(deep=False, manual=False):
         if guard:
             _fsw_meta(db, "pending", json.dumps(
                 {"ts": now, "count": len(gone), "total": len(man), "sample": gone[:20]}))
-            _fsw_fire("fsw_guard", "NAS: массовая пропажа файлов",
-                      "Пропало %d из %d файлов под наблюдением. События не записаны — "
-                      "подтвердите удаление в «Истории файлов» или проверьте диски."
+            _fsw_fire("fsw_guard", "NAS: mass file disappearance",
+                      "%d of %d watched files gone. Events not recorded — "
+                      "confirm the deletion in “File history” or check the disks."
                       % (len(gone), len(man)), lvl="crit")
         else:
             _fsw_meta(db, "pending", "")
@@ -9558,7 +9558,7 @@ def _fsw_run(deep=False, manual=False):
             if h and h2 != h:
                 corrupt.append(p)
                 ev_rows.append((now, "corrupt", p, None, size,
-                                "содержимое изменилось при прежних дате и размере"))
+                                "content changed with the same date and size"))
             db.execute("UPDATE files SET hash=?,verified=? WHERE path=?", (h2, now, p))
         if ev_rows:
             db.executemany("INSERT INTO events(ts,kind,path,dst,size,info) "
@@ -9577,8 +9577,8 @@ def _fsw_run(deep=False, manual=False):
         _fsw_meta(db, "baseline", "1")
         db.commit()
         if corrupt:
-            _fsw_fire("fsw_corrupt", "NAS: повреждены файлы (битрот)",
-                      "%d файл(ов) изменились без изменения даты/размера: %s"
+            _fsw_fire("fsw_corrupt", "NAS: corrupted files (bitrot)",
+                      "%d file(s) changed without a change in date/size: %s"
                       % (len(corrupt), ", ".join(os.path.basename(x) for x in corrupt[:3])),
                       lvl="crit")
         try:
@@ -9587,15 +9587,15 @@ def _fsw_run(deep=False, manual=False):
         except Exception:
             thr = 50
         if dels and thr and len(dels) >= thr:
-            _fsw_fire("fsw_del", "NAS: удалено %d файлов" % len(dels),
-                      "С прошлого скана исчезло %d файлов (%s). Подробности — в «Истории файлов»."
+            _fsw_fire("fsw_del", "NAS: %d files deleted" % len(dels),
+                      "%d files vanished since the last scan (%s). Details in “File history”."
                       % (len(dels), _fsw_human(sum(s for _, s in dels))), lvl="warn")
         if baseline:
-            _fsw_fire("fsw_scan", "История файлов: индекс построен",
-                      "Проиндексировано %d файлов (%s)." % (n_files, _fsw_human(n_size)), lvl="ok")
+            _fsw_fire("fsw_scan", "File history: index built",
+                      "Indexed %d files (%s)." % (n_files, _fsw_human(n_size)), lvl="ok")
         elif manual:
-            _fsw_fire("fsw_scan", "История файлов: скан завершён",
-                      "+%d −%d ~%d →%d · повреждений: %d · проверено %s за %d сек" %
+            _fsw_fire("fsw_scan", "File history: scan finished",
+                      "+%d −%d ~%d →%d · corrupt: %d · verified %s in %d sec" %
                       (summary["added"], summary["removed"], summary["modified"],
                        summary["moved"], summary["corrupt"], _fsw_human(vbytes),
                        summary["dur"]), lvl="ok")
@@ -9614,7 +9614,7 @@ def _fsw_run(deep=False, manual=False):
 def fsw_start(deep=False, manual=True):
     with _fsw_lock:
         if _fsw.get("status") in ("scan", "verify"):
-            return {"ok": False, "log": "скан уже идёт"}
+            return {"ok": False, "log": "a scan is already running"}
         _fsw.clear()
         _fsw.update({"status": "scan", "started": int(time.time()),
                      "files": 0, "bytes": 0, "deep": bool(deep)})
@@ -9855,7 +9855,7 @@ def fsw_clear(mode):
     """mode='events' wipes the history journal; 'all' drops the whole index
     (files + events + meta) so the next scan starts a fresh baseline."""
     if _fsw.get("status") in ("scan", "verify"):
-        return {"ok": False, "log": "скан уже идёт"}
+        return {"ok": False, "log": "a scan is already running"}
     try:
         db = _fsw_db()
         try:
@@ -9950,13 +9950,13 @@ def _trash_load():
         return []
 
 def _trash_save(items):
-    # Атомарно: не-атомарная запись при крахе/гонке рвала index.json → корзина
-    # «пустела», а файлы в files/ оставались осиротевшими и молча копили гигабайты.
+    # Atomic: a non-atomic write on crash/race tore index.json → the trash
+    # "emptied", while files in files/ were left orphaned and silently piled up gigabytes.
     _json_save(os.path.join(TRASH, "index.json"), items)
 
 def _trash_orphans(known_ids):
-    """Каталоги в files/, которых нет в индексе (индекс был повреждён/сброшен, а
-    файлы остались). Возвращаем их как записи корзины — иначе место не вернуть."""
+    """Directories in files/ that are not in the index (the index was
+    corrupted/reset but the files remain). Return them as trash entries — otherwise the space can't be reclaimed."""
     out = []
     store_dir = os.path.join(TRASH, "files")
     try:
@@ -9996,10 +9996,10 @@ def fs_trash(path):
     if err:
         return {"ok": False, "log": err}
     if not os.path.lexists(path):
-        # список в панели мог отстать: объект уже удалён или перемещён другим окном
-        return {"ok": False, "log": "уже удалён или перемещён"}
+        # the panel list may be stale: the object was already deleted or moved by another window
+        return {"ok": False, "log": "already deleted or moved"}
     if path == TRASH or path.startswith(TRASH + os.sep):
-        return {"ok": False, "log": "уже в корзине"}
+        return {"ok": False, "log": "already in trash"}
     store_dir = os.path.join(TRASH, "files")
     try:
         os.makedirs(store_dir, exist_ok=True)
@@ -10030,8 +10030,8 @@ def fs_trash_list():
         it = dict(it)
         it["exists"] = os.path.lexists(it.get("store", ""))
         items.append(it)
-    # осиротевшие файлы (в files/, но не в индексе) — тоже показываем, иначе их
-    # место не вернуть из UI; помечаем orphan, restore для них недоступен (orig="")
+    # orphaned files (in files/ but not in the index) — show them too, otherwise
+    # their space can't be reclaimed from the UI; mark orphan, restore is unavailable for them (orig="")
     for orp in _trash_orphans({i.get("id") for i in indexed}):
         orp["exists"] = True
         items.append(orp)
@@ -10039,33 +10039,33 @@ def fs_trash_list():
     return {"ok": True, "items": items}
 
 def fs_trash_restore(tid, dest_dir=""):
-    """Восстановить из корзины. dest_dir пуст → в исходную папку (orig); задан →
-    в выбранную. Осиротевшие (orig неизвестен) можно вернуть только выбором папки."""
+    """Restore from trash. dest_dir empty → to the original folder (orig); set →
+    to the chosen one. Orphaned entries (orig unknown) can only be restored by choosing a folder."""
     items = _trash_load()
     hit = next((i for i in items if i.get("id") == tid), None)
     orphan = False
-    if not hit:                                  # не в индексе — ищем среди осиротевших
+    if not hit:                                  # not in the index — search among orphans
         hit = next((o for o in _trash_orphans({i.get("id") for i in items})
                     if o.get("id") == tid), None)
         orphan = bool(hit)
     if not hit:
-        return {"ok": False, "log": "не найдено в корзине"}
+        return {"ok": False, "log": "not found in trash"}
     store = hit.get("store")
     if not store or not os.path.lexists(store):
         if not orphan:
             _trash_save([i for i in items if i.get("id") != tid])
-        return {"ok": False, "log": "файл отсутствует в хранилище"}
+        return {"ok": False, "log": "file missing from storage"}
     if dest_dir:
-        d, err = _fs_guard(dest_dir, into=True)   # кладём в каталог, а не сносим его
+        d, err = _fs_guard(dest_dir, into=True)   # place into the directory, don't delete it
         if err:
             return {"ok": False, "log": err}
         if not os.path.isdir(d):
-            return {"ok": False, "log": "цель не каталог"}
+            return {"ok": False, "log": "target is not a directory"}
         target = os.path.join(d, hit.get("name") or os.path.basename(store))
     elif hit.get("orig"):
         target = hit["orig"]
     else:
-        return {"ok": False, "log": "исходный путь неизвестен — выберите папку"}
+        return {"ok": False, "log": "original path unknown — choose a folder"}
     dest = _uniq(target)
     try:
         os.makedirs(os.path.dirname(dest), exist_ok=True)
@@ -10079,11 +10079,11 @@ def fs_trash_restore(tid, dest_dir=""):
 def fs_trash_delete(tid):
     items = _trash_load()
     hit = next((i for i in items if i.get("id") == tid), None)
-    if not hit:                                  # не в индексе — возможно, осиротевший
+    if not hit:                                  # not in the index — possibly an orphan
         hit = next((o for o in _trash_orphans({i.get("id") for i in items})
                     if o.get("id") == tid), None)
     if not hit:
-        return {"ok": False, "log": "не найдено"}
+        return {"ok": False, "log": "not found"}
     try:
         _trash_rm(hit.get("store"))
     except OSError as e:
@@ -10092,8 +10092,8 @@ def fs_trash_delete(tid):
     return {"ok": True}
 
 def fs_trash_empty():
-    # Чистим ВСЮ папку files/, а не только индекс: иначе осиротевшее (индекс был
-    # повреждён/сброшен) осталось бы на диске и «пустая» корзина копила бы гигабайты.
+    # Clean the WHOLE files/ folder, not just the index: otherwise orphans (index
+    # was corrupted/reset) would stay on disk and an "empty" trash would pile up gigabytes.
     items = _trash_load()
     store_dir = os.path.join(TRASH, "files")
     removed = 0
@@ -10112,14 +10112,14 @@ def fs_archive(items, dest, name):
     import zipfile
     dest = os.path.realpath(dest or "/")
     if not os.path.isdir(dest):
-        return {"ok": False, "log": "цель не каталог"}
+        return {"ok": False, "log": "target is not a directory"}
     name = (name or "archive").strip() or "archive"
     if not name.endswith(".zip"):
         name += ".zip"
     out = _uniq(os.path.join(dest, os.path.basename(name)))
     items = [os.path.realpath(i) for i in (items or []) if i]
     if not items:
-        return {"ok": False, "log": "нечего архивировать"}
+        return {"ok": False, "log": "nothing to archive"}
     try:
         with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
             for it in items:
@@ -10138,22 +10138,22 @@ def fs_archive(items, dest, name):
 def fs_unzip(path, dest=None):
     path = os.path.realpath(path)
     if not os.path.isfile(path):
-        return {"ok": False, "log": "нет архива"}
+        return {"ok": False, "log": "no archive"}
     dest = os.path.realpath(dest) if dest else os.path.dirname(path)
     try:
         os.makedirs(dest, exist_ok=True)
         shutil.unpack_archive(path, dest)
     except (shutil.ReadError, OSError, ValueError) as e:
-        return {"ok": False, "log": "не распаковать: " + str(e)}
+        return {"ok": False, "log": "cannot extract: " + str(e)}
     return {"ok": True, "path": dest}
 
 HP_CATALOG = [
-    ("Cockpit",      9090, True,  "cockpit",    "Панель управления сервером"),
-    ("Dockge",       5001, False, "dockge",     "Менеджер docker-стеков"),
-    ("Dozzle",       8083, False, "dozzle",     "Логи контейнеров"),
-    ("Scrutiny",     8084, False, "scrutiny",   "SMART-здоровье дисков"),
-    ("Syncthing",    8384, False, "syncthing",  "Синхронизация файлов"),
-    ("NextExplorer", 3000, False, "mdi-folder", "Файловый менеджер"),
+    ("Cockpit",      9090, True,  "cockpit",    "Server control panel"),
+    ("Dockge",       5001, False, "dockge",     "Docker stack manager"),
+    ("Dozzle",       8083, False, "dozzle",     "Container logs"),
+    ("Scrutiny",     8084, False, "scrutiny",   "SMART disk health"),
+    ("Syncthing",    8384, False, "syncthing",  "File synchronization"),
+    ("NextExplorer", 3000, False, "mdi-folder", "File manager"),
 ]
 def load_creds():
     try:
@@ -10174,14 +10174,14 @@ def save_creds(data):
         pass
 
 # --------------------------------------------------------------------------- #
-#  Аутентификация веб-UI: пароль (PBKDF2 на диске) + сессии в памяти.
-#  Файл создаётся лениво самим сервером — установщику ничего делать не нужно.
+#  Web UI authentication: password (PBKDF2 on disk) + in-memory sessions.
+#  The file is created lazily by the server — the installer needs to do nothing.
 # --------------------------------------------------------------------------- #
 AUTH_FILE   = "/etc/nas-os/webauth.json"
-SESS_FILE   = "/etc/nas-os/sessions.json"   # сессии переживают перезапуск службы
+SESS_FILE   = "/etc/nas-os/sessions.json"   # sessions survive a service restart
 SESSION_TTL = 30 * 86400
 _sess_lock  = threading.Lock()
-_login_fail = {"n": 0, "t": 0.0}        # антибрутфорс: пауза после серии неудач
+_login_fail = {"n": 0, "t": 0.0}        # anti-bruteforce: pause after a run of failures
 _login_lock = threading.Lock()
 
 def _load_sessions():
@@ -10204,7 +10204,7 @@ def _save_sessions():
     except OSError:
         pass
 
-_sessions   = _load_sessions()          # token -> unix-время истечения
+_sessions   = _load_sessions()          # token -> unix expiry time
 
 def _pw_hash(password, salt):
     return hashlib.pbkdf2_hmac("sha256", password.encode(), salt, 200_000).hex()
@@ -10214,7 +10214,7 @@ def auth_configured():
 
 def auth_set_password(password):
     if len(password or "") < 4:
-        return {"ok": False, "log": "пароль слишком короткий (минимум 4 символа)"}
+        return {"ok": False, "log": "password too short (minimum 4 characters)"}
     salt = secrets.token_bytes(16)
     os.makedirs(os.path.dirname(AUTH_FILE), exist_ok=True)
     tmp = AUTH_FILE + ".tmp"
@@ -10223,8 +10223,8 @@ def auth_set_password(password):
                    "hash": _pw_hash(password, salt)}, f)
     os.chmod(tmp, 0o600)
     os.replace(tmp, AUTH_FILE)
-    # смена пароля отзывает ВСЕ прежние сессии (в т.ч. возможную украденную куку);
-    # вызывающий сразу получит новую сессию в обработчике
+    # a password change revokes ALL prior sessions (incl. a possibly stolen cookie);
+    # the caller immediately gets a new session in the handler
     with _sess_lock:
         _sessions.clear()
         _save_sessions()
@@ -10259,7 +10259,7 @@ def session_valid(tok):
             if exp:
                 _sessions.pop(tok, None); _save_sessions()
             return False
-        # скользящее продление; на диск пишем только при заметном сдвиге (не чаще ~раз в сутки)
+        # sliding renewal; write to disk only on a noticeable shift (at most ~once a day)
         if exp - now < SESSION_TTL - 86400:
             _sessions[tok] = now + SESSION_TTL
             _save_sessions()
@@ -10271,27 +10271,27 @@ def session_drop(tok):
             _save_sessions()
 
 # --------------------------------------------------------------------------- #
-#  Мост к движку nas-wizard.sh api
+#  Bridge to the nas-wizard.sh api engine
 # --------------------------------------------------------------------------- #
 ENGINE_ACTION_RE = re.compile(r"^[a-z0-9-]{1,40}$")
 
 def _engine_env(params, dry):
-    """Собрать NASW_* окружение, отфильтровав опасный ввод: имена параметров —
-    только [A-Za-z0-9_], значения — без управляющих символов и разумной длины."""
+    """Build the NASW_* environment, filtering dangerous input: parameter names —
+    only [A-Za-z0-9_], values — no control characters and a reasonable length."""
     env = dict(os.environ)
     env["NASW_DRYRUN"] = "1" if dry else "0"
     for k, v in (params or {}).items():
         if not re.match(r"^[A-Za-z0-9_]{1,32}$", str(k)):
-            raise ValueError("недопустимое имя параметра: %r" % k)
+            raise ValueError("invalid parameter name: %r" % k)
         v = str(v)
         if len(v) > 4096 or re.search(r"[\x00-\x1f]", v):
-            raise ValueError("недопустимое значение параметра %s" % k)
+            raise ValueError("invalid value for parameter %s" % k)
         env["NASW_" + k.upper()] = v
     return env
 
 def engine(action, params=None, dry=False):
     if not ENGINE_ACTION_RE.match(action or ""):
-        return {"ok": False, "code": -1, "log": "недопустимое действие: %r" % action}
+        return {"ok": False, "code": -1, "log": "invalid action: %r" % action}
     try:
         env = _engine_env(params, dry)
     except ValueError as e:
@@ -10305,16 +10305,16 @@ def engine(action, params=None, dry=False):
         return {"ok": False, "code": -1, "log": str(e)}
 
 # --------------------------------------------------------------------------- #
-#  Настройки системы: чтение текущего состояния + запись (обе стороны).
-#  Пакеты/скрипты ставит движок nas-wizard.sh (api pi|security|shares);
-#  простые правки конфигов и переключение служб делаем здесь напрямую.
+#  System settings: read current state + write (both directions).
+#  Packages/scripts are installed by the nas-wizard.sh engine (api pi|security|shares);
+#  simple config edits and service toggling are done here directly.
 # --------------------------------------------------------------------------- #
 HOSTNAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,62}$")
 SIZE_RE     = re.compile(r"^\d{1,6}[KMG]?$")
 IP_RE       = re.compile(r"^\d{1,3}(\.\d{1,3}){3}$")
 
 def _sc(*args, timeout=15):
-    """Короткий системный вызов -> stdout строкой ('' при ошибке)."""
+    """Short system call -> stdout as a string ('' on error)."""
     try:
         return subprocess.run(list(args), capture_output=True, text=True,
                               timeout=timeout).stdout.strip()
@@ -10322,7 +10322,7 @@ def _sc(*args, timeout=15):
         return ""
 
 def _svc(units):
-    """Состояние службы (первой существующей из списка альтернативных имён)."""
+    """Service state (the first existing one from the list of alternative names)."""
     if isinstance(units, str):
         units = [units]
     for u in units:
@@ -10340,44 +10340,44 @@ def _svc_toggle(unit, on):
     return _run(["systemctl", "enable" if on else "disable", "--now", unit], timeout=40)
 
 def _zram_swap_active():
-    """Есть ли активный zram-своп в /proc/swaps."""
+    """Whether there is an active zram swap in /proc/swaps."""
     for l in _read("/proc/swaps").splitlines():
         if l.startswith("/dev/zram"):
             return True
     return False
 
 def _zram_status():
-    """Состояние zram-swap: штатный (systemd-zram-generator/rpi-swap) или
-    legacy zram-tools (zramswap.service). На современном Pi OS zram поднимает
-    генератор, а zramswap.service мы глушим — поэтому статус берём по факту."""
+    """zram-swap state: standard (systemd-zram-generator/rpi-swap) or
+    legacy zram-tools (zramswap.service). On modern Pi OS zram is brought up by
+    the generator, while we mute zramswap.service — so we take the status by fact."""
     for u in ("dev-zram0.swap", "systemd-zram-setup@zram0.service"):
         s = _svc(u)
         if s["installed"]:
-            # generated/static-юниты: "enabled" по факту активного свопа
+            # generated/static units: "enabled" by fact of an active swap
             s["enabled"] = s["active"] or _zram_swap_active()
             return s
     return _svc("zramswap")
 
 def _zram_off():
-    """Выключить zram-swap: и штатный генератор, и legacy zramswap."""
+    """Disable zram-swap: both the standard generator and legacy zramswap."""
     # legacy
     if _svc("zramswap")["installed"]:
         _svc_toggle("zramswap", False)
-    # штатный: убрать zram на следующей загрузке
+    # standard: remove zram on the next boot
     try:
         if os.path.isfile("/etc/rpi/swap.conf"):
             os.makedirs("/etc/rpi/swap.conf.d", exist_ok=True)
             with open("/etc/rpi/swap.conf.d/60-nas-os.conf", "w") as f:
-                f.write("# NAS-OS: zram-swap выключен из веб-панели. См. swap.conf(5).\n"
+                f.write("# NAS-OS: zram-swap disabled from the web panel. See swap.conf(5).\n"
                         "[Main]\nMechanism=swapfile\n")
         elif os.path.isfile("/etc/systemd/zram-generator.conf") or \
                 os.path.isfile("/usr/lib/systemd/zram-generator.conf"):
             with open("/etc/systemd/zram-generator.conf", "w") as f:
-                f.write("# NAS-OS: zram-swap выключен (нет секции [zram0]).\n")
+                f.write("# NAS-OS: zram-swap disabled (no [zram0] section).\n")
     except OSError:
         pass
     _run(["systemctl", "daemon-reload"], timeout=20)
-    # снять на живую (best-effort)
+    # take it down live (best-effort)
     _run(["swapoff", "/dev/zram0"], timeout=20)
     for u in ("dev-zram0.swap", "systemd-zram-setup@zram0.service"):
         _run(["systemctl", "stop", u], timeout=20)
@@ -10412,9 +10412,9 @@ def _cfg_has(path, prefix):
     return False
 
 def _cfg_set(path, prefix, line, on):
-    """Идемпотентно добавить/убрать активную строку в config.txt (с бэкапом)."""
+    """Idempotently add/remove an active line in config.txt (with a backup)."""
     if not path:
-        return {"ok": False, "log": "config.txt не найден"}
+        return {"ok": False, "log": "config.txt not found"}
     lines = _read(path).split("\n")
     kept = [l for l in lines
             if not (l.strip().startswith(prefix) and not l.strip().startswith("#"))]
@@ -10432,13 +10432,13 @@ def _cfg_set(path, prefix, line, on):
         except OSError as e:
             return {"ok": False, "log": str(e)}
     return {"ok": True, "reboot": True,
-            "log": "включено (применится после перезагрузки)" if on else "выключено"}
+            "log": "enabled (applies after a reboot)" if on else "disabled"}
 
 def _cmdline_set(add=(), remove_prefixes=()):
-    """Правка cmdline.txt (одна строка, токены через пробел)."""
+    """Edit cmdline.txt (a single line, space-separated tokens)."""
     path = _cmdline_path()
     if not path:
-        return {"ok": False, "log": "cmdline.txt не найден"}
+        return {"ok": False, "log": "cmdline.txt not found"}
     line = (_read(path).split("\n") or [""])[0]
     toks = [t for t in line.split()
             if not any(t.startswith(p) for p in remove_prefixes)]
@@ -10454,13 +10454,13 @@ def _cmdline_set(add=(), remove_prefixes=()):
         except OSError as e:
             return {"ok": False, "log": str(e)}
     return {"ok": True, "reboot": True,
-            "log": "применится после перезагрузки"}
+            "log": "applies after a reboot"}
 
 def _throttled_decode():
     m = re.search(r"0x[0-9a-fA-F]+", _sc("vcgencmd", "get_throttled"))
     v = int(m.group(0), 16) if m else 0
-    bits = {0: "понижено напряжение", 1: "частота ограничена",
-            2: "троттлинг", 3: "близко к тепловому пределу"}
+    bits = {0: "undervoltage", 1: "frequency capped",
+            2: "throttling", 3: "near thermal limit"}
     return {"raw": m.group(0) if m else "0x0",
             "now": [bits[b] for b in bits if v & (1 << b)],
             "ever": [bits[b] for b in bits if v & (1 << (b + 16))]}
@@ -10508,21 +10508,21 @@ def _net_state():
             "avahi": _svc("avahi-daemon")}
 
 def _ufw_managed_ports():
-    """Порты, которые firewall обязан держать открытыми, с подписями «для чего».
-    Системные (панель/SSH/Cockpit/шары) + все опубликованные docker-порты —
-    последние подхватываются автоматически при смене порта или новом контейнере."""
+    """Ports the firewall must keep open, with "what for" labels.
+    System ones (panel/SSH/Cockpit/shares) + all published docker ports —
+    the latter are picked up automatically on a port change or a new container."""
     ports = {}
     def add(p, label):
         ports.setdefault(p, label)
-    add("%d/tcp" % PORT, "Веб-панель NAS")
+    add("%d/tcp" % PORT, "NAS web panel")
     add("22/tcp", "SSH")
-    add("5353/udp", "Обнаружение (mDNS / .local)")   # иначе UFW режет avahi → pi5.local отваливается
+    add("5353/udp", "Discovery (mDNS / .local)")   # otherwise UFW cuts avahi → pi5.local drops off
     if os.path.exists("/lib/systemd/system/cockpit.socket") or shutil.which("cockpit-bridge"):
         add("9090/tcp", "Cockpit")
     if shutil.which("smbd") or os.path.exists("/etc/samba/smb.conf"):
-        add("445/tcp", "Файлы (Samba)")
+        add("445/tcp", "Files (Samba)")
     if os.path.exists("/etc/exports") and os.path.getsize("/etc/exports") > 0:
-        add("2049/tcp", "Файлы (NFS)")
+        add("2049/tcp", "Files (NFS)")
     try:
         r = subprocess.run(["docker", "ps", "--format", "{{.Names}}\t{{.Ports}}"],
                            capture_output=True, text=True, timeout=8)
@@ -10540,8 +10540,8 @@ def _ufw_managed_ports():
 _ufw_sync_last = 0
 
 def ufw_autosync():
-    """Держать открытыми нужные порты, пока UFW активен: новый docker-контейнер или
-    смена порта не должны оставаться за firewall. Троттл — раз в 2 минуты."""
+    """Keep the needed ports open while UFW is active: a new docker container or
+    a port change must not stay behind the firewall. Throttle — once every 2 minutes."""
     global _ufw_sync_last
     if not shutil.which("ufw"):
         return
@@ -10555,7 +10555,7 @@ def ufw_autosync():
     have = set(re.findall(r"(?m)^(\S+)\s+ALLOW", status))
     ssh_ok = "OpenSSH" in have or "22/tcp" in have
     for port in _ufw_managed_ports():
-        if port == "22/tcp" and ssh_ok:      # OpenSSH-правило уже покрывает SSH
+        if port == "22/tcp" and ssh_ok:      # the OpenSSH rule already covers SSH
             continue
         if port not in have:
             _run(["ufw", "allow", port], timeout=15)
@@ -10564,8 +10564,8 @@ def _ufw_state():
     out = _sc("ufw", "status")
     ports = sorted(set(m.group(1) for m in re.finditer(r"(?m)^(\S+)\s+ALLOW", out)))
     labels = dict(_ufw_managed_ports())
-    labels.setdefault("OpenSSH", "SSH")      # app-правила ufw → человеческая подпись
-    labels.setdefault("Samba", "Файлы (Samba)")
+    labels.setdefault("OpenSSH", "SSH")      # ufw app rules → human-readable label
+    labels.setdefault("Samba", "Files (Samba)")
     rows = [{"port": p, "label": labels.get(p, ""), "auto": p in labels} for p in ports]
     return {"installed": bool(shutil.which("ufw")),
             "active": "Status: active" in out, "ports": ports, "rows": rows}
@@ -10590,38 +10590,38 @@ def _fail2ban_state():
 
 def fail2ban_save(maxretry, bantime):
     if not shutil.which("fail2ban-client"):
-        return {"ok": False, "log": "fail2ban не установлен"}
+        return {"ok": False, "log": "fail2ban not installed"}
     try:
         mr = max(1, min(100, int(maxretry)))
     except (ValueError, TypeError):
-        return {"ok": False, "log": "порог: число"}
+        return {"ok": False, "log": "threshold: a number"}
     bt = str(bantime or "").strip()
-    if bt != "-1" and not re.match(r"^\d+[smhdw]?$", bt):     # 600 / 30m / 1h / 1d / -1 (навсегда)
-        return {"ok": False, "log": "время бана: напр. 30m, 1h, 1d или -1 (навсегда)"}
+    if bt != "-1" and not re.match(r"^\d+[smhdw]?$", bt):     # 600 / 30m / 1h / 1d / -1 (forever)
+        return {"ok": False, "log": "ban time: e.g. 30m, 1h, 1d or -1 (forever)"}
     try:
         with open(F2B_CONF, "w") as f:
             f.write("[sshd]\nenabled = true\nmaxretry = %d\nbantime = %s\n" % (mr, bt))
     except OSError as e:
         return {"ok": False, "log": str(e)}
     _run(["systemctl", "reload-or-restart", "fail2ban"], timeout=20)
-    return {"ok": True, "log": "сохранено"}
+    return {"ok": True, "log": "saved"}
 
 def fail2ban_unban(ip):
     if not re.match(r"^[0-9A-Fa-f.:]+$", ip or ""):
-        return {"ok": False, "log": "плохой IP"}
+        return {"ok": False, "log": "bad IP"}
     r = _run(["fail2ban-client", "set", "sshd", "unbanip", ip], timeout=15)
     return {"ok": r["ok"], "log": (r.get("log") or "")[:200]}
 
 def ufw_port(action, port):
     if not shutil.which("ufw"):
-        return {"ok": False, "log": "ufw не установлен"}
+        return {"ok": False, "log": "ufw not installed"}
     if not re.match(r"^\d{1,5}(/(tcp|udp))?$", port or ""):
-        return {"ok": False, "log": "порт: напр. 8080 или 8080/tcp"}
+        return {"ok": False, "log": "port: e.g. 8080 or 8080/tcp"}
     if action == "deny":
-        # нельзя закрыть порт самой панели и SSH — иначе пользователь запрёт себя
+        # cannot close the panel's own port or SSH — otherwise the user locks themselves out
         num = port.split("/")[0]
         if num in (str(PORT), "80", "22"):
-            return {"ok": False, "log": "нельзя закрыть порт панели или SSH — потеряете доступ"}
+            return {"ok": False, "log": "cannot close the panel port or SSH — you would lose access"}
     r = _run(["ufw", "allow", port] if action == "allow" else
              ["ufw", "delete", "allow", port], timeout=15)
     return {"ok": r["ok"], "log": (r.get("log") or "")[:200]}
@@ -10636,7 +10636,7 @@ def _journald_max():
     return ""
 
 def sysconf():
-    """Полное текущее состояние всех настраиваемых параметров."""
+    """Full current state of all configurable parameters."""
     cfg, cl = _boot_config(), _cmdline_path()
     return {
         "system": {
@@ -10690,8 +10690,8 @@ def _wifi_ps(off):
         _run(["iw", "dev", ifc, "set", "power_save", "on"])
         if _svc("wifi-powersave-off.service")["installed"]:
             _svc_toggle("wifi-powersave-off.service", False)
-    return {"ok": True, "log": "энергосбережение Wi-Fi " +
-            ("отключено" if off else "включено")}
+    return {"ok": True, "log": "Wi-Fi power saving " +
+            ("disabled" if off else "enabled")}
 
 def _watchdog(on):
     p = "/etc/systemd/system.conf.d/watchdog.conf"
@@ -10705,12 +10705,12 @@ def _watchdog(on):
         except OSError:
             pass
     _run(["systemctl", "daemon-reexec"], timeout=30)
-    return {"ok": True, "log": "watchdog " + ("включён" if on else "выключен")}
+    return {"ok": True, "log": "watchdog " + ("enabled" if on else "disabled")}
 
 def _set_governor(val):
     av = _read("/sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors").split()
     if val not in av:
-        return {"ok": False, "log": "governor недоступен: " + ", ".join(av)}
+        return {"ok": False, "log": "governor unavailable: " + ", ".join(av)}
     n = 0
     for g in glob.glob("/sys/devices/system/cpu/cpu*/cpufreq/scaling_governor"):
         try:
@@ -10722,14 +10722,14 @@ def _set_governor(val):
     note = ""
     if _svc("nas-governor.timer")["active"]:
         _svc_toggle("nas-governor.timer", False)
-        note = " (адаптивный governor отключён — иначе перезапишет)"
-    return {"ok": n > 0, "log": f"governor={val} на {n} ядрах" + note}
+        note = " (adaptive governor disabled — otherwise it would overwrite)"
+    return {"ok": n > 0, "log": f"governor={val} on {n} cores" + note}
 
 def _net_apply(method, extra):
     ifc = _primary_iface()
     conn = _active_conn(ifc)
     if not conn:
-        return {"ok": False, "log": "активное подключение не найдено"}
+        return {"ok": False, "log": "no active connection found"}
     if method == "auto":
         r = _run(["nmcli", "connection", "modify", conn, "ipv4.method", "auto",
                   "ipv4.addresses", "", "ipv4.gateway", "", "ipv4.dns", ""])
@@ -10737,7 +10737,7 @@ def _net_apply(method, extra):
         ip, gw = extra.get("ip", ""), extra.get("gw", "")
         dns, prefix = extra.get("dns", ""), str(extra.get("prefix", "24"))
         if not IP_RE.match(ip):
-            return {"ok": False, "log": "неверный IP-адрес"}
+            return {"ok": False, "log": "invalid IP address"}
         args = ["nmcli", "connection", "modify", conn, "ipv4.method", "manual",
                 "ipv4.addresses", f"{ip}/{prefix}"]
         args += ["ipv4.gateway", gw] if gw else []
@@ -10745,7 +10745,7 @@ def _net_apply(method, extra):
         r = _run(args)
     if r["ok"]:
         _run(["nmcli", "connection", "up", conn], timeout=30)
-        r["log"] = r.get("log") or "сетевые настройки применены"
+        r["log"] = r.get("log") or "network settings applied"
     return r
 
 def sysconf_set(key, val, extra=None):
@@ -10754,19 +10754,19 @@ def sysconf_set(key, val, extra=None):
     try:
         if key == "hostname":
             if not HOSTNAME_RE.match(str(val or "")):
-                return {"ok": False, "log": "недопустимое имя хоста"}
+                return {"ok": False, "log": "invalid hostname"}
             r = _run(["hostnamectl", "set-hostname", val])
-            r["log"] = r.get("log") or ("имя хоста: " + val)
+            r["log"] = r.get("log") or ("hostname: " + val)
             return r
         if key == "timezone":
             if not os.path.isfile("/usr/share/zoneinfo/" + str(val)):
-                return {"ok": False, "log": "неизвестный часовой пояс"}
+                return {"ok": False, "log": "unknown timezone"}
             r = _run(["timedatectl", "set-timezone", val])
-            r["log"] = r.get("log") or ("часовой пояс: " + val)
+            r["log"] = r.get("log") or ("timezone: " + val)
             return r
         if key == "journald_max":
             if not SIZE_RE.match(str(val or "")):
-                return {"ok": False, "log": "размер вида 200M / 1G"}
+                return {"ok": False, "log": "size like 200M / 1G"}
             os.makedirs("/etc/systemd/journald.conf.d", exist_ok=True)
             with open("/etc/systemd/journald.conf.d/00-nas.conf", "w") as f:
                 f.write("[Journal]\nSystemMaxUse=%s\nSystemMaxFileSize=50M\n" % val)
@@ -10786,7 +10786,7 @@ def sysconf_set(key, val, extra=None):
                 with open(p, "w") as f:
                     f.write('APT::Periodic::Update-Package-Lists "0";\n'
                             'APT::Periodic::Unattended-Upgrade "0";\n')
-            return {"ok": True, "log": "автообновления выключены"}
+            return {"ok": True, "log": "automatic updates disabled"}
         if key == "net_method":
             return _net_apply(val, extra)
         if key == "wifi_ps_off":
@@ -10800,7 +10800,7 @@ def sysconf_set(key, val, extra=None):
             r = engine("security", {"keys": "ufw"})
             global _ufw_sync_last
             _ufw_sync_last = 0
-            _safe(ufw_autosync)      # сразу открыть docker-порты, не ждать тик
+            _safe(ufw_autosync)      # open docker ports at once, don't wait for the tick
             return r
         if key == "fail2ban":
             return engine("security", {"keys": "fail2ban"}) if b \
@@ -10833,18 +10833,18 @@ def sysconf_set(key, val, extra=None):
         if key == "check_updates":
             _run(["apt-get", "update"], timeout=180)
             n = len(re.findall(r"^Inst ", _sc("apt-get", "-s", "upgrade"), re.M))
-            return {"ok": True, "count": n, "log": f"{n} обновлений доступно"}
+            return {"ok": True, "count": n, "log": f"{n} updates available"}
         if key == "restart_web":
             subprocess.Popen(["systemctl", "restart", "nas-web"])
-            return {"ok": True, "log": "перезапуск службы…"}
-        return {"ok": False, "log": "неизвестная настройка: " + str(key)}
+            return {"ok": True, "log": "restarting service…"}
+        return {"ok": False, "log": "unknown setting: " + str(key)}
     except Exception as e:
         return {"ok": False, "log": repr(e)}
 
 # --------------------------------------------------------------------------- #
-#  Обои рабочего стола: загрузка с ПК (base64) или скачивание по URL.
-#  Активная картинка кэшируется локально (~/nas-config/wallpaper.<ext>) и
-#  отдаётся с /api/wallpaper/img — стабильна между перезагрузками и клиентами.
+#  Desktop wallpaper: upload from a PC (base64) or download by URL.
+#  The active image is cached locally (~/nas-config/wallpaper.<ext>) and
+#  served from /api/wallpaper/img — stable across reboots and clients.
 # --------------------------------------------------------------------------- #
 def _img_ext(data):
     if data[:3] == b"\xff\xd8\xff":
@@ -10862,16 +10862,16 @@ def _wallpaper_path():
     return g[0] if g else ""
 
 def _wallpaper_screen_refresh():
-    """Обои сменились — пересобрать копию под экран, не дожидаясь первого запроса."""
+    """Wallpaper changed — rebuild the screen-sized copy without waiting for the first request."""
     threading.Thread(target=lambda: _safe(_wallpaper_screen), daemon=True).start()
 
 
 def _wallpaper_save(data):
     ext = _img_ext(data)
     if not ext:
-        return {"ok": False, "log": "не изображение (нужен jpg/png/webp/gif)"}
+        return {"ok": False, "log": "not an image (need jpg/png/webp/gif)"}
     if len(data) > 30 * 1024 * 1024:
-        return {"ok": False, "log": "слишком большой файл (>30 МБ)"}
+        return {"ok": False, "log": "file too large (>30 MB)"}
     os.makedirs(NAS_CONFIG, exist_ok=True)
     for old in glob.glob(os.path.join(NAS_CONFIG, "wallpaper.*")):
         try:
@@ -10883,40 +10883,40 @@ def _wallpaper_save(data):
             f.write(data)
     except OSError as e:
         return {"ok": False, "log": str(e)}
-    _wallpaper_screen_refresh()      # сразу готовим копию под маленький экран
+    _wallpaper_screen_refresh()      # prepare the small-screen copy right away
     return {"ok": True, "ext": ext}
 
 def wallpaper_fetch(url):
     if not re.match(r"^https?://", url or ""):
-        return {"ok": False, "log": "нужен http(s) URL"}
+        return {"ok": False, "log": "need an http(s) URL"}
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "nas-web"})
         with urllib.request.urlopen(req, timeout=25) as r:
             data = r.read(30 * 1024 * 1024 + 1)
     except Exception as e:
-        return {"ok": False, "log": "не удалось загрузить: " + str(e)}
+        return {"ok": False, "log": "failed to download: " + str(e)}
     return _wallpaper_save(data)
 
 def wallpaper_upload(b64):
     try:
         data = base64.b64decode((b64 or "").split(",")[-1])
     except Exception:
-        return {"ok": False, "log": "плохие данные изображения"}
+        return {"ok": False, "log": "bad image data"}
     return _wallpaper_save(data)
 
 # --------------------------------------------------------------------------- #
-#  USB авто-импорт: при вставке флешки копировать её содержимое в заданную папку
-#  (udev-хук → helper-скрипт → rsync; только копирование, с флешки ничего не удаляется)
+#  USB auto-import: on inserting a flash drive, copy its contents into a chosen folder
+#  (udev hook → helper script → rsync; copy only, nothing is deleted from the drive)
 # --------------------------------------------------------------------------- #
 # --------------------------------------------------------------------------- #
-#  SSH-приветствие (MOTD). Скрипт /etc/update-motd.d/20-nas-os ставит визард;
-#  здесь только правим пользовательский текст и два флага. Текст выводится
-#  через `cat` — не исполняется, поэтому экранировать нечего.
+#  SSH greeting (MOTD). The /etc/update-motd.d/20-nas-os script is installed by the wizard;
+#  here we only edit the user text and two flags. The text is printed
+#  via `cat` — not executed, so there is nothing to escape.
 # --------------------------------------------------------------------------- #
 MOTD_CONF   = "/etc/nas-wizard/motd.conf"
-# Приветствие складывается из нескольких источников, и наш скрипт — лишь один из них.
-# pam_motd выполняет ВСЁ из update-motd.d и печатает файлы из /etc/motd.d,
-# а «Last login» добавляет уже sshd. Дадим по тумблеру на каждый.
+# The greeting is assembled from several sources, and our script is only one of them.
+# pam_motd runs EVERYTHING in update-motd.d and prints files from /etc/motd.d,
+# while "Last login" is added by sshd itself. Give a toggle for each.
 MOTD_UNAME_SH   = "/etc/update-motd.d/10-uname"
 MOTD_COCKPIT_LN = "/etc/motd.d/cockpit"
 MOTD_COCKPIT_TARGET = "../../run/cockpit/issue"
@@ -10941,21 +10941,21 @@ def motd_load():
         k = k.strip()
         if k in _MOTD_FLAGS:
             cfg[_MOTD_FLAGS[k]] = v.strip().strip('"').strip("'") == "1"
-    # состояние на диске важнее записанного: файлы мог поменять кто-то ещё
+    # on-disk state beats what was recorded: someone else may have changed the files
     cfg["has_uname"] = os.path.isfile(MOTD_UNAME_SH)
     cfg["has_cockpit"] = os.path.isdir(os.path.dirname(MOTD_COCKPIT_LN))
     return cfg
 
 def _motd_extras_apply(cfg):
-    """Погасить/вернуть чужие куски приветствия. Зовётся из motd_save и при старте,
-    чтобы настройка пережила переустановку (motd.conf лежит в бэкапе настроек)."""
-    # 1) строка ядра: снимаем бит исполнения, pam_motd её пропустит
+    """Suppress/restore other parts of the greeting. Called from motd_save and at startup,
+    so the setting survives a reinstall (motd.conf is in the settings backup)."""
+    # 1) the kernel line: strip the execute bit, pam_motd will skip it
     if os.path.isfile(MOTD_UNAME_SH):
         try:
             os.chmod(MOTD_UNAME_SH, 0o755 if cfg.get("show_uname", True) else 0o644)
         except OSError:
             pass
-    # 2) баннер Cockpit: симлинк в /etc/motd.d
+    # 2) Cockpit banner: a symlink in /etc/motd.d
     try:
         d = os.path.dirname(MOTD_COCKPIT_LN)
         if cfg.get("show_cockpit", True):
@@ -10965,23 +10965,23 @@ def _motd_extras_apply(cfg):
             os.remove(MOTD_COCKPIT_LN)
     except OSError:
         pass
-    # 3) «Last login» печатает sshd, не pam_motd
+    # 3) "Last login" is printed by sshd, not pam_motd
     try:
         want = not cfg.get("show_lastlog", True)
         have = os.path.isfile(MOTD_SSHD_CONF)
         if want and not have:
             os.makedirs(os.path.dirname(MOTD_SSHD_CONF), exist_ok=True)
             with open(MOTD_SSHD_CONF, "w") as f:
-                f.write("# nas-wizard: строку «Last login» отключили в панели\nPrintLastLog no\n")
+                f.write("# nas-wizard: the \"Last login\" line was disabled in the panel\nPrintLastLog no\n")
         elif not want and have:
             os.remove(MOTD_SSHD_CONF)
         else:
             return
-        if _run(["sshd", "-t"], timeout=8)["ok"]:          # не перезагружать битый конфиг
+        if _run(["sshd", "-t"], timeout=8)["ok"]:          # don't reload a broken config
             _run(["systemctl", "reload", "ssh"], timeout=10)
         elif have and not want:
             pass
-        else:                                              # конфиг не принят — откатываем
+        else:                                              # config rejected — roll back
             try: os.remove(MOTD_SSHD_CONF)
             except OSError: pass
     except OSError:
@@ -10990,27 +10990,27 @@ def _motd_extras_apply(cfg):
 def motd_preview():
     if not os.path.isfile(MOTD_SCRIPT):
         return ""
-    env = dict(os.environ); env["NO_COLOR"] = "1"   # предпросмотр без ANSI-кодов
+    env = dict(os.environ); env["NO_COLOR"] = "1"   # preview without ANSI codes
     r = _run(["/bin/bash", MOTD_SCRIPT], timeout=15, env=env)
     return r["log"]
 
 def motd_save(b):
     if not os.path.isfile(MOTD_SCRIPT):
-        return {"ok": False, "log": "приветствие не установлено: nas-wizard.sh api motd"}
+        return {"ok": False, "log": "greeting not installed: nas-wizard.sh api motd"}
     text = b.get("text", "")
     if not isinstance(text, str) or len(text) > MOTD_MAX:
-        return {"ok": False, "log": "слишком длинный текст (макс. %d символов)" % MOTD_MAX}
+        return {"ok": False, "log": "text too long (max %d characters)" % MOTD_MAX}
     try:
         with open(MOTD_TXT, "w") as f:
             f.write(text if text.endswith("\n") or not text else text + "\n")
         with open(MOTD_CONF, "w") as f:
-            f.write("# nas-wizard: что показывать при входе по SSH\n")
+            f.write("# nas-wizard: what to show on SSH login\n")
             for key, name in _MOTD_FLAGS.items():
                 f.write("%s=%d\n" % (key, 1 if b.get(name, True) else 0))
     except OSError as e:
         return {"ok": False, "log": str(e)}
     _motd_extras_apply(motd_load())
-    return {"ok": True, "log": "сохранено", "preview": motd_preview()}
+    return {"ok": True, "log": "saved", "preview": motd_preview()}
 
 USB_IMPORT_CONF = "/etc/nas-wizard/usb-import.conf"
 USB_IMPORT_SH   = "/usr/local/bin/nas-usb-import.sh"
@@ -11019,9 +11019,9 @@ _USB_DEFAULT = {"enabled": False, "dest": "/mnt/storage/imports",
                 "subdir": "{label}-{date}-{time}", "notify": False, "eject": False,
                 "media_only": False, "restrict": False, "allow": []}
 _USB_SH = r'''#!/bin/bash
-# nas-wizard: авто-импорт содержимого вставленного USB в заданную папку.
-# Копирование only-forward: с флешки ничего не удаляется. Стейджинг в .incomplete
-# с переименованием на успехе — прерванный импорт виден и не путается с готовым.
+# nas-wizard: auto-import the contents of an inserted USB into a chosen folder.
+# Copy is only-forward: nothing is deleted from the drive. Staging in .incomplete
+# with a rename on success — an interrupted import is visible and not confused with a finished one.
 CONF=/etc/nas-wizard/usb-import.conf
 [ -r "$CONF" ] || exit 0
 . "$CONF"
@@ -11044,19 +11044,19 @@ if [ "${IMPORT_FORCE:-0}" != "1" ]; then
   # no property (odd bridge, udevadm unavailable) → fall back to plain uptime
   case "$seen_us" in ''|*[!0-9]*) seen_us="$(awk '{printf "%d", $1*1000000}' /proc/uptime)" ;; esac
   if [ "$seen_us" -lt "$COLDPLUG_US" ]; then
-    log "skip $dev: носитель был вставлен до загрузки — автоимпорт только на «горячую» вставку"
+    log "skip $dev: medium was inserted before boot — auto-import only on a hot insertion"
     exit 0
   fi
 fi
-# udev дёргает нас отдельно на КАЖДЫЙ раздел диска. Регистрируем задание, чтобы
-# извлечение в конце не вырвало устройство из-под ещё копирующегося соседа.
-# Через pgrep это делать нельзя: подоболочка скрипта имеет ту же командную
-# строку, но другой PID, — сам себя увидишь и будешь ждать вечно.
+# udev triggers us separately for EACH partition of the disk. Register a job so the
+# eject at the end does not yank the device out from under a still-copying sibling.
+# Doing this via pgrep won't work: the script's subshell has the same command
+# line but a different PID — you'd see yourself and wait forever.
 pk="$(lsblk -no PKNAME "$dev" 2>/dev/null | head -1)"
 JOBD="/run/nas-usb-import.jobs/${pk:-none}"
 mkdir -p "$JOBD" 2>/dev/null && : > "$JOBD/$$" 2>/dev/null
 trap 'rm -f "$JOBD/$$" 2>/dev/null' EXIT
-# сколько ЖИВЫХ соседей копируют этот же диск (мёртвые записи подчищаем)
+# how many LIVE siblings are copying this same disk (dead entries are cleaned up)
 siblings(){
   local n=0 f b
   for f in "$JOBD"/*; do
@@ -11067,10 +11067,10 @@ siblings(){
   done
   echo "$n"
 }
-# белый список: если ограничение включено — автоимпорт ТОЛЬКО с разрешённых устройств
-# (по VID:PID). Ручной «импорт сейчас» (IMPORT_FORCE=1) список игнорирует.
-# UAS-мосты не дают ID_VENDOR_ID — падаем на ID_USB_VENDOR_ID. Регистр нормализуем:
-# в конфиге VID:PID хранится строчными.
+# allowlist: if the restriction is on — auto-import ONLY from allowed devices
+# (by VID:PID). Manual "import now" (IMPORT_FORCE=1) ignores the list.
+# UAS bridges don't give ID_VENDOR_ID — fall back to ID_USB_VENDOR_ID. Normalize case:
+# in the config VID:PID is stored lowercase.
 if [ "${IMPORT_FORCE:-0}" != "1" ] && [ "${IMPORT_RESTRICT:-0}" = "1" ]; then
   props="$(udevadm info -q property -n "$dev" 2>/dev/null)"
   prop(){ printf '%s\n' "$props" | sed -n "s/^$1=//p" | head -1; }
@@ -11078,11 +11078,11 @@ if [ "${IMPORT_FORCE:-0}" != "1" ] && [ "${IMPORT_RESTRICT:-0}" = "1" ]; then
   pid="$(prop ID_MODEL_ID)";  [ -n "$pid" ] || pid="$(prop ID_USB_MODEL_ID)"
   did="$(printf '%s:%s' "$vid" "$pid" | tr 'A-Z' 'a-z')"
   if [ -z "$vid" ] || [ -z "$pid" ]; then
-    log "skip $dev: не удалось определить VID:PID"; notify "USB пропущен" "Не удалось определить устройство"; exit 0
+    log "skip $dev: could not determine VID:PID"; notify "USB skipped" "Could not identify the device"; exit 0
   fi
   case " $(printf '%s' "${IMPORT_ALLOW}" | tr 'A-Z' 'a-z') " in
     *" $did "*) : ;;
-    *) log "skip $dev ($did): не в списке разрешённых устройств"; notify "USB пропущен" "Устройство $did не в списке автоимпорта"; exit 0 ;;
+    *) log "skip $dev ($did): not in the list of allowed devices"; notify "USB skipped" "Device $did is not in the auto-import list"; exit 0 ;;
   esac
 fi
 label="$(blkid -o value -s LABEL "$dev" 2>/dev/null)"; [ -n "$label" ] || label="usb-$(basename "$dev")"
@@ -11094,42 +11094,42 @@ if [ -z "$mp" ]; then
   if mount -o ro "$dev" "$mp" 2>>"$LOG"; then
     selfmount=1
   else
-    # Гонка с автомонтированием: оба скрипта висят на одном udev-событии ADD.
-    # findmnt выше сказал «не смонтирован», но пока мы шли к mount, automount
-    # успел занять носитель — тогда не падаем, а читаем из его точки.
+    # Race with automount: both scripts hang on the same udev ADD event.
+    # findmnt above said "not mounted", but while we were headed to mount, automount
+    # managed to grab the medium — then don't fail, read from its mount point.
     rmdir "$mp" 2>/dev/null
     mp="$(findmnt -n -o TARGET --source "$dev" 2>/dev/null | head -1)"
-    [ -n "$mp" ] || { log "import FAIL $dev: не удалось смонтировать"; exit 1; }
-    log "носитель уже смонтирован автомонтированием — читаю из $mp"
+    [ -n "$mp" ] || { log "import FAIL $dev: failed to mount"; exit 1; }
+    log "medium already mounted by automount — reading from $mp"
   fi
 fi
 cleanup(){ [ "$selfmount" = "1" ] && { umount "$mp" 2>>"$LOG"; rmdir "$mp" 2>/dev/null; }; }
 base="${IMPORT_DEST:-/mnt/storage/imports}"
-# Приёмник под /mnt|/media|/srv подразумевает ОТДЕЛЬНЫЙ носитель. Не подключён —
-# путь проваливается в корень, и rsync молча зальёт системную карту (так 8 ГБ
-# импорта однажды легли в /mnt/storage на SD, потому что пула не было вовсе).
-# Та же проверка, что у бэкапа (_dest_disk_absent в панели): ближайшая вверх
-# точка монтирования обязана быть НЕ «/». Каталог может ещё не существовать —
-# поднимаемся по dirname, пока не упрёмся в смонтированный.
+# A destination under /mnt|/media|/srv implies a SEPARATE medium. Not connected —
+# the path falls through to root, and rsync silently fills the system card (that's how 8 GB
+# of an import once landed in /mnt/storage on the SD, because there was no pool at all).
+# The same check as in backup (_dest_disk_absent in the panel): the nearest mount point
+# above must NOT be "/". The directory may not exist yet —
+# walk up by dirname until we hit a mounted one.
 mnt_of(){ local p; p="$(readlink -f "$1")"
   while [ "$p" != "/" ] && ! mountpoint -q "$p" 2>/dev/null; do p="$(dirname "$p")"; done
   printf '%s' "$p"; }
 case "$base" in
   /mnt/*|/media/*|/srv/*)
     if [ "$(mnt_of "$base")" = "/" ]; then
-      log "import FAIL $dev: приёмник $base не смонтирован — носитель приёмника не подключён"
-      notify "USB-импорт отменён" "Приёмник $base не смонтирован — импорт залил бы системный диск"
+      log "import FAIL $dev: destination $base not mounted — destination medium not connected"
+      notify "USB import canceled" "Destination $base not mounted — the import would fill the system disk"
       cleanup; exit 1
     fi ;;
 esac
-# защита от импорта самого себя (напр. флешка примонтирована внутри приёмника)
-case "$(readlink -f "$base")/" in "$(readlink -f "$mp")"/*) log "self-import guard: $mp внутри $base"; cleanup; exit 0;; esac
-# раскладка подпапок: шаблон с токенами {label}/{date}/{time}/{year}/{month}/
-# {month-name}/{day}/{hour}/{minute}/{datetime}. Легаси-ключи мапим на шаблоны.
-# ВНИМАНИЕ: фигурные скобки в значении по умолчанию ломают разбор ${VAR:-...} —
-# первая же '}' закрывает подстановку, а хвост приклеивается как текст. Поэтому
-# дефолт ставим отдельной строкой. Проверяем на «задана ли» (+set), а не на
-# «непуста»: пустой шаблон — это осознанный режим «без подпапки».
+# guard against importing itself (e.g. the drive is mounted inside the destination)
+case "$(readlink -f "$base")/" in "$(readlink -f "$mp")"/*) log "self-import guard: $mp inside $base"; cleanup; exit 0;; esac
+# subfolder layout: a template with tokens {label}/{date}/{time}/{year}/{month}/
+# {month-name}/{day}/{hour}/{minute}/{datetime}. Legacy keys are mapped to templates.
+# WARNING: curly braces in the default value break the ${VAR:-...} parse —
+# the first '}' closes the substitution, and the tail glues on as text. So
+# the default is set on a separate line. We test for "is it set" (+set), not for
+# "non-empty": an empty template is a deliberate "no subfolder" mode.
 if [ -z "${IMPORT_SUBDIR+set}" ]; then
   tpl='{label}-{date}-{time}'
 else
@@ -11152,12 +11152,12 @@ if [ -n "$sub" ]; then
   sub="${sub//\{day\}/$(date '+%d')}"
   sub="${sub//\{hour\}/$(date '+%H')}"
   sub="${sub//\{minute\}/$(date '+%M')}"
-  # безопасность пути: убрать .., ведущие слэши, схлопнуть повторы, обрезать пробелы у сегментов.
-  # Фигурные скобки вычищаем: после подстановки их оставляет только опечатка в
-  # токене ({lable}) — пусть будет «lable», а не мусор в имени папки.
+  # path safety: strip .., leading slashes, collapse repeats, trim spaces on segments.
+  # Curly braces are cleaned out: after substitution only a typo in a token
+  # ({lable}) leaves them — let it be "lable", not junk in the folder name.
   sub="$(printf '%s' "$sub" | tr -d '{}' | sed 's#\.\.##g; s#^/*##; s#/*$##; s#/\{2,\}#/#g')"
 fi
-# фильтр «только фото/видео» (регистронезависимо)
+# "photos/videos only" filter (case-insensitive)
 filter=(); if [ "${IMPORT_MEDIA_ONLY:-0}" = "1" ]; then
   filter=(--include='*/')
   for e in jpg jpeg png gif heic heif webp tif tiff bmp dng raw arw cr2 cr3 nef orf rw2 raf srw \
@@ -11166,14 +11166,14 @@ filter=(); if [ "${IMPORT_MEDIA_ONLY:-0}" = "1" ]; then
   done
   filter+=(--exclude='*')
 fi
-# проверка свободного места (нужно + 5% запас)
+# free space check (needed + 5% margin)
 need="$(du -sb "$mp" 2>/dev/null | cut -f1)"; avail="$(df -PB1 "$base" 2>/dev/null | awk 'NR==2{print $4}')"
 if [ -n "$need" ] && [ -n "$avail" ] && [ "$avail" -lt "$((need + need/20 + 10485760))" ]; then
-  log "no space: need=$need avail=$avail"; notify "USB-импорт: мало места" "«$label» не поместится в $base"; cleanup; exit 1
+  log "no space: need=$need avail=$avail"; notify "USB import: low space" "\"$label\" won't fit in $base"; cleanup; exit 1
 fi
-# Стейджинг — ОДНА папка верхнего уровня. Раньше шаблон подставлялся прямо в имя
-# (.incomplete-$$-{year}/{month}/...), и при вложенном шаблоне mv падал: каталога
-# назначения ещё нет, а «.incomplete-123-2026/07/...» — это уже три уровня.
+# Staging — ONE top-level folder. Previously the template was substituted right into the name
+# (.incomplete-$$-{year}/{month}/...), and with a nested template mv failed: the destination
+# directory doesn't exist yet, while ".incomplete-123-2026/07/..." is already three levels.
 if [ -n "$sub" ]; then
   dest="$base/$sub"
   stage="$base/.incomplete-$$-$label"
@@ -11183,16 +11183,16 @@ else
 fi
 mkdir -p "$stage" 2>>"$LOG"
 log "import $dev ($label) -> $dest"
-notify "USB-импорт начат" "Копирую «$label» → $dest"
+notify "USB import started" "Copying \"$label\" → $dest"
 
-# --- прогресс для панели -----------------------------------------------------
-# rsync --info=progress2 обновляет строку через \r; гоним её в файл в /run.
-# pid пишем, чтобы панель отличила «идёт» от «процесс убили».
+# --- progress for the panel --------------------------------------------------
+# rsync --info=progress2 updates the line via \r; we push it into a file in /run.
+# We write the pid so the panel can tell "running" from "process killed".
 PROGD=/run/nas-usb-import.progress
 PROG="$PROGD/${dev##*/}"
 START="$(date +%s)"
 mkdir -p "$PROGD" 2>/dev/null
-prog(){                       # $1=статус  $2=строка rsync
+prog(){                       # $1=status  $2=rsync line
   { printf 'pid=%s\ndev=%s\nlabel=%s\ndest=%s\ntotal=%s\nstarted=%s\nstatus=%s\n' \
       "$$" "$dev" "$label" "$dest" "${need:-0}" "$START" "$1"
     [ "$1" != "running" ] && printf 'finished=%s\n' "$(date +%s)"
@@ -11203,9 +11203,9 @@ prog(){                       # $1=статус  $2=строка rsync
 prog running ""
 trap 'rm -f "$JOBD/$$" "$PROG.tmp" 2>/dev/null' EXIT
 
-# LC_ALL=C — чтобы разделитель тысяч был запятой и парсер не гадал по локали.
-# --no-inc-recursive: сканирует всё заранее, зато процент честный, а не «от
-# увиденного до сих пор».
+# LC_ALL=C — so the thousands separator is a comma and the parser doesn't guess by locale.
+# --no-inc-recursive: scans everything up front, but the percentage is honest, not "of
+# what's been seen so far".
 LC_ALL=C rsync -a --info=progress2 --no-inc-recursive "${filter[@]}" "$mp"/ "$stage"/ 2>>"$LOG" \
   | tr '\r' '\n' \
   | while IFS= read -r pl; do
@@ -11216,60 +11216,60 @@ own="$(getent passwd 1000 | cut -d: -f1)"; [ -n "$own" ] && chown -R "$own:$own"
 if [ "$rc" = 0 ] || [ "$rc" = 23 ] || [ "$rc" = 24 ]; then
   if [ "$stage" != "$dest" ]; then
     mkdir -p "$(dirname "$dest")" 2>>"$LOG"
-    # не сливаться с уже существующей папкой: mv положил бы стейджинг ВНУТРЬ неё
+    # don't merge with an existing folder: mv would place the staging INSIDE it
     d="$dest"; n=2
     while [ -e "$d" ]; do d="$dest ($n)"; n=$((n+1)); done
     if mv "$stage" "$d" 2>>"$LOG"; then
       dest="$d"
     else
-      log "import FAIL $dev: не перенести $stage -> $d (данные остались в стейджинге)"
-      notify "USB-импорт: ошибка" "Не удалось разложить «$label» по папкам"
+      log "import FAIL $dev: could not move $stage -> $d (data left in staging)"
+      notify "USB import: error" "Failed to sort \"$label\" into folders"
       prog fail "mv"; cleanup; exit 1
     fi
   fi
-  log "import OK -> $dest"; notify "USB-импорт готов" "«$label» скопирован в $dest"
-  # сохранить последнюю строку rsync: иначе в «готово» пропадут байты и итог
+  log "import OK -> $dest"; notify "USB import done" "\"$label\" copied to $dest"
+  # keep the last rsync line: otherwise the byte count and total drop out of "done"
   prog done "$(sed -n 's/^line=//p' "$PROG" 2>/dev/null | tail -1)"
 else
-  log "import FAIL $dev rc=$rc (частичное в $stage)"; notify "USB-импорт: ошибка" "Не удалось скопировать «$label» (rc=$rc)"
+  log "import FAIL $dev rc=$rc (partial in $stage)"; notify "USB import: error" "Failed to copy \"$label\" (rc=$rc)"
   prog fail "rc=$rc"
 fi
 cleanup
 if [ "${IMPORT_EJECT:-0}" = "1" ] && [ -n "$pk" ]; then
-  # дождаться соседних разделов того же диска (потолок 2 часа)
+  # wait for sibling partitions of the same disk (cap 2 hours)
   waited=0
   while [ "$(siblings)" -gt 0 ] && [ "$waited" -lt 7200 ]; do
-    [ "$waited" = 0 ] && log "eject ждёт: копируются другие разделы /dev/$pk"
+    [ "$waited" = 0 ] && log "eject waiting: other partitions of /dev/$pk are still copying"
     sleep 1; waited=$((waited+1))
   done
-  # автомонт мог поднять разделы в /media — пока они смонтированы, power-off
-  # отказывает («drive in use») и остаётся только грубый eject с висящим монтом
+  # automount may have brought partitions up in /media — while they're mounted, power-off
+  # refuses ("drive in use") and only a rough eject with a hanging mount remains
   for part in $(lsblk -lnpo NAME "/dev/$pk" 2>/dev/null); do
     for mp in $(findmnt -rno TARGET -S "$part" 2>/dev/null); do
       umount "$mp" 2>>"$LOG" || udisksctl unmount -b "$part" >>"$LOG" 2>&1 || true
     done
   done
   sync
-  # Сначала мягко извлекаем НОСИТЕЛЬ, и только если не вышло — обесточиваем УСТРОЙСТВО.
-  # У картридера power-off убирает с шины сам ридер: вставлять карту потом некуда,
-  # пока не передёрнешь кабель. eject же выбрасывает карту, ридер остаётся живым и
-  # следующая вставка снова запускает импорт. Для флешки eject останавливает
-  # устройство — данные сброшены, вынимать безопасно.
+  # First gently eject the MEDIUM, and only if that fails — power off the DEVICE.
+  # For a card reader, power-off removes the reader itself from the bus: there's nowhere
+  # to insert a card afterward until you re-plug the cable. eject, however, ejects the card, the reader stays alive and
+  # the next insertion starts an import again. For a flash drive, eject stops
+  # the device — data is flushed, safe to remove.
   if eject "/dev/$pk" >>"$LOG" 2>&1; then
     log "eject media /dev/$pk"
   elif udisksctl power-off -b "/dev/$pk" >>"$LOG" 2>&1; then
     log "power-off /dev/$pk"
   else
-    log "eject /dev/$pk не удался"
+    log "eject /dev/$pk failed"
   fi
-  touch /run/nas-web-refresh 2>/dev/null   # диск исчез — разбудить панель сразу
+  touch /run/nas-web-refresh 2>/dev/null   # disk vanished — wake the panel immediately
 fi
 '''
-# матчим по ID_USB_DRIVER (usb-storage/uas), а не ID_BUS==usb — иначе USB-SATA
-# мосты (ID_BUS=ata) не срабатывают.
-# --unit даёт читаемое имя вместо run-p564-i565.service (иначе «упала служба
-# run-p…» ничего не говорит), --collect убирает упавший юнит сразу: без него он
-# висит в failed и следующая вставка того же носителя не смогла бы стартовать.
+# match by ID_USB_DRIVER (usb-storage/uas), not ID_BUS==usb — otherwise USB-SATA
+# bridges (ID_BUS=ata) don't fire.
+# --unit gives a readable name instead of run-p564-i565.service (otherwise "service
+# run-p… failed" says nothing), --collect removes a failed unit at once: without it it
+# stays failed and the next insertion of the same medium couldn't start.
 _USB_RULE = ('ACTION=="add", SUBSYSTEM=="block", ENV{ID_USB_DRIVER}=="?*", '
             'ENV{ID_FS_USAGE}=="filesystem", '
             'RUN+="/usr/bin/systemd-run --no-block --collect '
@@ -11277,7 +11277,7 @@ _USB_RULE = ('ACTION=="add", SUBSYSTEM=="block", ENV{ID_USB_DRIVER}=="?*", '
 
 def usb_import_load():
     cfg = dict(_USB_DEFAULT)
-    cfg["dest"] = storage_sub("imports") or _USB_DEFAULT["dest"]   # следует за хранилищем
+    cfg["dest"] = storage_sub("imports") or _USB_DEFAULT["dest"]   # follows storage
     for l in _read(USB_IMPORT_CONF).splitlines():
         if "=" not in l:
             continue
@@ -11295,12 +11295,12 @@ def usb_import_load():
     return cfg
 
 USB_PROG_DIR = "/run/nas-usb-import.progress"
-# «  1,234,567  45%   12.34MB/s    0:00:12» — формат rsync --info=progress2 при LC_ALL=C
+# "  1,234,567  45%   12.34MB/s    0:00:12" — rsync --info=progress2 format under LC_ALL=C
 _RSYNC_PROG = re.compile(r"^\s*([\d,]+)\s+(\d+)%\s+(\S+)\s+(\S+)")
 
 def usb_import_progress():
-    """Активные и недавно завершённые задания импорта. Файлы живут в /run,
-    поэтому перезагрузка чистит их сама."""
+    """Active and recently finished import jobs. The files live in /run,
+    so a reboot cleans them up on its own."""
     jobs = []
     now = time.time()
     try:
@@ -11316,7 +11316,7 @@ def usb_import_progress():
             meta[k] = v
         st = meta.get("status", "running")
         pid = meta.get("pid", "")
-        # процесс убили (или ребут udev-задания) — иначе задание висело бы «идёт» вечно
+        # process killed (or reboot of the udev job) — otherwise the job would hang "running" forever
         if st == "running" and pid and not os.path.isdir("/proc/" + pid):
             st = "aborted"
         fin = int(meta.get("finished") or 0)
@@ -11342,7 +11342,7 @@ def _view_path(src):
     return os.path.join(THUMBS_DIR, h[:2], h + ".view.jpg")
 
 def view_needed(src):
-    """Нужна ли перекодировка для показа: браузер не умеет формат ИЛИ файл огромный."""
+    """Whether transcoding is needed for display: the browser can't handle the format OR the file is huge."""
     e = _ext(src)
     if e in _VIEW_CONV:
         return True
@@ -11354,9 +11354,9 @@ def view_needed(src):
     return False
 
 def gen_view(src):
-    """Крупный JPEG для просмотрщика: HEIC/HEIF и TIFF браузеры не рисуют,
-    а 17-мегабайтные снимки с камеры незачем гнать целиком.
-    Кэшируется рядом с миниатюрами, чистится тем же GC."""
+    """A large JPEG for the viewer: browsers don't render HEIC/HEIF and TIFF,
+    and there's no point pushing 17-megabyte camera shots whole.
+    Cached next to the thumbnails, cleaned by the same GC."""
     if not os.path.isfile(src) or not view_needed(src):
         return None
     vp = _view_path(src)
@@ -11377,7 +11377,7 @@ def gen_view(src):
             ff_in = src
             if _ext(src) in _HEIF_EXT:
                 if not _heif_decode(src, heif_tmp):
-                    raise RuntimeError("heif-convert не смог")
+                    raise RuntimeError("heif-convert failed")
                 ff_in = heif_tmp
             scale = ("scale='min(%d,iw)':'min(%d,ih)'"
                      ":force_original_aspect_ratio=decrease" % (VIEW_PX, VIEW_PX))
@@ -11397,9 +11397,9 @@ def gen_view(src):
 _IMPORT_ROOTS_OK = ("/mnt/", "/media/", "/srv/", "/home/")
 
 def usb_import_gc(stale_hours, keep_days):
-    """Прибрать приёмник импорта: брошенные стейджинги .incomplete-* и, если
-    попросили, старые импорты. Работаем ТОЛЬКО внутри папки назначения и только
-    если она под разрешённым корнем — иначе рекурсивное удаление слишком опасно."""
+    """Tidy the import destination: abandoned .incomplete-* stagings and, if
+    asked, old imports. Work ONLY inside the destination folder and only
+    if it's under an allowed root — otherwise recursive deletion is too dangerous."""
     dest = os.path.realpath(usb_import_load().get("dest") or "")
     if not dest.startswith(_IMPORT_ROOTS_OK) or dest.count("/") < 2 or not os.path.isdir(dest):
         return 0
@@ -11418,11 +11418,11 @@ def usb_import_gc(stale_hours, keep_days):
         except OSError:
             continue
         stale = name.startswith(".incomplete-")
-        # брошенный стейджинг: процесс импорта давно умер, папка мусорная
+        # abandoned staging: the import process died long ago, the folder is junk
         if stale and stale_hours > 0 and age > stale_hours * 3600:
             try:
                 shutil.rmtree(p); removed += 1
-                log_event("info", "USB-импорт: убран брошенный стейджинг", name, "ok",
+                log_event("info", "USB import: removed abandoned staging", name, "ok",
                           kind="disk", desk=False)
             except OSError:
                 pass
@@ -11434,8 +11434,8 @@ def usb_import_gc(stale_hours, keep_days):
     return removed
 
 def _thumbs_warm_bg(dest):
-    """Прогреть превью импортированной папки в фоне. os.nice — чтобы карточка
-    диска и панель не тормозили: миниатюра снимка 26 МП стоит ~0.8 с."""
+    """Warm up previews of the imported folder in the background. os.nice — so the disk
+    card and panel don't stall: a thumbnail of a 26 MP shot costs ~0.8 s."""
     try:
         os.nice(15)
     except OSError:
@@ -11443,29 +11443,29 @@ def _thumbs_warm_bg(dest):
     try:
         n = thumbs_sweep([dest])
         if n:
-            log_event("info", "Превью подготовлены", "%s: %d шт." % (dest, n), "ok",
+            log_event("info", "Previews prepared", "%s: %d items" % (dest, n), "ok",
                       kind="files", desk=False)
     except Exception:
         pass
 
 def usb_ops_sync():
-    """Занести завершённые задания импорта в историю операций. Зовётся из
-    monitor_loop, поэтому история пополняется и с закрытой панелью. Новый
-    (не дублирующий) успешный импорт заодно запускает прогрев превью."""
+    """Record finished import jobs into the operations history. Called from
+    monitor_loop, so the history grows even with the panel closed. A new
+    (non-duplicate) successful import also triggers preview warming."""
     warm = load_maintenance().get("import_warm_thumbs", True)
     for j in usb_import_progress()["jobs"]:
         if j["status"] == "running":
             continue
         bits = [j.get("label") or j.get("dev") or ""]
         if j.get("bytes") is not None:
-            bits.append(fmt_bytes(j["bytes"]) + (" из " + fmt_bytes(j["total"]) if j.get("total") else ""))
+            bits.append(fmt_bytes(j["bytes"]) + (" of " + fmt_bytes(j["total"]) if j.get("total") else ""))
         if j.get("dest"):
             bits.append(j["dest"])
         r = ops_hist_add({"uid": "usb:%s:%s" % (j["dev"], j["started"]),
                           "state": "done" if j["status"] == "done" else "err",
                           "ts": j.get("finished") or j.get("started") or int(time.time()),
-                          "title": "Импорт с USB", "label": " · ".join(x for x in bits if x)})
-        # прогрев ровно один раз на импорт: dup означает, что мы его уже видели
+                          "title": "USB import", "label": " · ".join(x for x in bits if x)})
+        # warm exactly once per import: dup means we've already seen it
         if warm and r.get("ok") and not r.get("dup") and j["status"] == "done" \
            and j.get("dest") and os.path.isdir(j["dest"]):
             threading.Thread(target=_thumbs_warm_bg, args=(j["dest"],), daemon=True).start()
@@ -11481,21 +11481,21 @@ def usb_import_history(n=8):
         if not str(e.get("uid") or "").startswith("usb:"):
             continue
         bits = [b.strip() for b in str(e.get("label") or "").split("·")]
-        # «130 МБ из 130 МБ» — в строку плашки лезет только скопированное
+        # "130 MB of 130 MB" — only the copied amount goes into the tile string
         full = next((b for b in bits[1:] if not b.startswith("/")), "")
         out.append({"name": (bits[0] if bits and bits[0] else "USB"),
                     "ts": int(e.get("ts") or 0),
                     "ok": e.get("state") == "done",
-                    "size": re.split(r"\s+(?:из|of)\s+", full)[0],
+                    "size": re.split(r"\s+(?:of|of)\s+", full)[0],
                     "size_full": full,
                     "dest": next((b for b in bits if b.startswith("/")), "")})
     out.sort(key=lambda x: -x["ts"])
     return out[:n]
 
 def _usb_sh_sync():
-    """Перезаписать хелпер и udev-правило, если они разошлись с кодом. Раньше и то
-    и другое обновлялось только при сохранении настроек, поэтому после обновления
-    панели на диске оставалась старая версия со старыми багами."""
+    """Rewrite the helper and udev rule if they diverged from the code. Previously both
+    were updated only when settings were saved, so after a panel update
+    the disk kept the old version with old bugs."""
     changed = []
     # _read() strips the trailing newline — compare stripped, or every service
     # start "updates" an identical helper and spams the event log
@@ -11503,23 +11503,23 @@ def _usb_sh_sync():
         with open(USB_IMPORT_SH, "w") as f:
             f.write(_USB_SH)
         os.chmod(USB_IMPORT_SH, 0o755)
-        changed.append("хелпер")
-    # правило трогаем только если оно уже стоит: его отсутствие = импорт выключен
+        changed.append("helper")
+    # touch the rule only if it is already present: its absence = import disabled
     if os.path.isfile(USB_IMPORT_RULE) and _read(USB_IMPORT_RULE) != _USB_RULE.strip():
         with open(USB_IMPORT_RULE, "w") as f:
             f.write(_USB_RULE)
         _run(["udevadm", "control", "--reload"], timeout=15)
-        changed.append("udev-правило")
+        changed.append("udev rule")
     if changed:
-        log_event("info", "USB-импорт: %s обновлён до текущей версии" % " + ".join(changed),
+        log_event("info", "USB import: %s updated to the current version" % " + ".join(changed),
                   "", "ok", kind="disk", desk=False)
 
 def _usb_install(enabled):
     try:
-        with open(USB_IMPORT_SH, "w") as f:      # helper всегда (нужен и для «импорт сейчас»)
+        with open(USB_IMPORT_SH, "w") as f:      # helper always (needed for "import now" too)
             f.write(_USB_SH)
         os.chmod(USB_IMPORT_SH, 0o755)
-        if enabled:                               # udev-хук только когда включено
+        if enabled:                               # udev hook only when enabled
             with open(USB_IMPORT_RULE, "w") as f:
                 f.write(_USB_RULE)
         elif os.path.isfile(USB_IMPORT_RULE):
@@ -11532,8 +11532,8 @@ def _usb_install(enabled):
 def usb_import_save(cfg):
     dest = str(cfg.get("dest", "")).strip() or "/mnt/storage/imports"
     if dest == "/" or not re.match(r"^/[\w /.+-]{1,}$", dest):
-        return {"ok": False, "log": "недопустимый путь назначения"}
-    # раскладка: легаси-ключ ИЛИ шаблон с токенами (разрешаем буквы/цифры/пробел/-_.{}/ )
+        return {"ok": False, "log": "invalid destination path"}
+    # layout: legacy key OR template with tokens (allow letters/digits/space/-_.{}/ )
     subdir = str(cfg.get("subdir", "{label}-{date}-{time}")).strip()
     if subdir not in ("dated", "label", "flat"):
         subdir = re.sub(r"[^\w \-.{}/А-Яа-яЁё]", "", subdir).replace("..", "").strip("/")[:120]
@@ -11543,15 +11543,15 @@ def usb_import_save(cfg):
         os.makedirs("/etc/nas-wizard", exist_ok=True)
         with open(USB_IMPORT_CONF, "w") as f:
             f.write("IMPORT_ENABLED=%d\n" % (1 if cfg.get("enabled") else 0))
-            # ЗНАЧЕНИЯ В КАВЫЧКАХ: конфиг сорсится шеллом, а шаблон и путь могут
-            # содержать пробелы. Без кавычек bash видит «VAR=x cmd args» и переменная
-            # в шелл не попадает вовсе — молча включался дефолтный шаблон.
+            # QUOTED VALUES: the config is sourced by the shell, and the template and path may
+            # contain spaces. Without quotes bash sees "VAR=x cmd args" and the variable
+            # never reaches the shell at all — the default template silently kicked in.
             f.write('IMPORT_DEST="%s"\n' % dest)
             f.write('IMPORT_SUBDIR="%s"\n' % subdir)
             f.write("IMPORT_NOTIFY=%d\n" % (1 if cfg.get("notify") else 0))
             f.write("IMPORT_EJECT=%d\n" % (1 if cfg.get("eject") else 0))
             f.write("IMPORT_MEDIA_ONLY=%d\n" % (1 if cfg.get("media_only") else 0))
-            # белый список устройств (VID:PID hex, через пробел) + флаг ограничения
+            # device allow-list (VID:PID hex, space-separated) + restrict flag
             allow = [str(x).lower() for x in (cfg.get("allow") or [])
                      if re.match(r"^[0-9a-fA-F]{1,4}:[0-9a-fA-F]{1,4}$", str(x))]
             f.write("IMPORT_RESTRICT=%d\n" % (1 if cfg.get("restrict") else 0))
@@ -11562,8 +11562,8 @@ def usb_import_save(cfg):
     if err:
         return {"ok": False, "log": err}
     if cfg.get("enabled") and not shutil.which("rsync"):
-        return {"ok": True, "warn": "rsync не установлен — импорт не сработает (ставится на этапе «Система»)"}
-    return {"ok": True, "log": "сохранено"}
+        return {"ok": True, "warn": "rsync is not installed — import will not run (installed during the \"System\" stage)"}
+    return {"ok": True, "log": "saved"}
 
 def usb_removable():
     out = []
@@ -11576,7 +11576,7 @@ def usb_removable():
     SYSMOUNTS = ("/", "/boot", "/boot/firmware", "/var", "/usr", "/home", "[SWAP]")
     def walk(nodes, usb_ancestor=False):
         for n in nodes:
-            usb = usb_ancestor or n.get("tran") == "usb"   # SD/NVMe (tran mmc/nvme) исключены
+            usb = usb_ancestor or n.get("tran") == "usb"   # SD/NVMe (tran mmc/nvme) excluded
             mp = n.get("mountpoint")
             if usb and mp and mp not in SYSMOUNTS and n.get("type") in ("part", "disk"):
                 out.append({"path": n.get("path"), "label": n.get("label") or n.get("name"),
@@ -11600,7 +11600,7 @@ def _udev_props(dev):
     return props
 
 def usb_devices():
-    """USB-накопители сейчас: VID:PID/модель/серийник — для белого списка автоимпорта."""
+    """USB drives right now: VID:PID/model/serial — for the auto-import allow-list."""
     cfg = usb_import_load()
     allow = set(cfg.get("allow", []))
     out = []
@@ -11611,8 +11611,8 @@ def usb_devices():
         if not dev:
             continue
         props = _udev_props(dev)
-        # UAS-мосты отдают ID_BUS=ata (и lsblk TRAN может быть не "usb") — ловим по
-        # ID_USB_DRIVER, он выставлен и для usb-storage, и для uas.
+        # UAS bridges report ID_BUS=ata (and lsblk TRAN may not be "usb") — match by
+        # ID_USB_DRIVER, it is set for both usb-storage and uas.
         if not props.get("ID_USB_DRIVER") and d.get("tran") != "usb":
             continue
         vid = props.get("ID_VENDOR_ID") or props.get("ID_USB_VENDOR_ID") or ""
@@ -11628,20 +11628,20 @@ def usb_devices():
 
 def usb_import_run(dev):
     if not re.match(r"^/dev/[\w-]+$", dev or ""):
-        return {"ok": False, "log": "неверное устройство"}
+        return {"ok": False, "log": "invalid device"}
     if not os.path.isfile(USB_IMPORT_SH):
-        return {"ok": False, "log": "сначала сохраните настройки импорта"}
+        return {"ok": False, "log": "save the import settings first"}
     env = dict(os.environ); env["IMPORT_FORCE"] = "1"
     try:
         p = subprocess.run([USB_IMPORT_SH, dev], env=env, capture_output=True,
                            text=True, timeout=3600)
         return {"ok": p.returncode == 0,
-                "log": (p.stdout + p.stderr).strip() or ("импорт запущен" if p.returncode == 0 else "ошибка")}
+                "log": (p.stdout + p.stderr).strip() or ("import started" if p.returncode == 0 else "error")}
     except (OSError, subprocess.SubprocessError) as e:
         return {"ok": False, "log": str(e)}
 
 # --------------------------------------------------------------------------- #
-#  Нативный терминал: WebSocket <-> PTY (bash), без пароля, под текущим юзером
+#  Native terminal: WebSocket <-> PTY (bash), no password, as the current user
 # --------------------------------------------------------------------------- #
 _WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 def _ws_accept(key):
@@ -11699,7 +11699,7 @@ XTERM_ASSETS = {
     "xterm-addon-search.js": "https://cdn.jsdelivr.net/npm/xterm-addon-search@0.13.0/lib/xterm-addon-search.js",
     "xterm-addon-web-links.js": "https://cdn.jsdelivr.net/npm/xterm-addon-web-links@0.9.0/lib/xterm-addon-web-links.js",
 }
-# CodeMirror 5 (редактор в файловом менеджере) — моды самодостаточны, цепляются к глобалу CodeMirror
+# CodeMirror 5 (editor in the file manager) — modes are self-contained, attach to the CodeMirror global
 CM = "https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16"
 CM_ASSETS = {
     "codemirror.js":    CM + "/codemirror.min.js",
@@ -11721,18 +11721,18 @@ def ensure_web_assets():
             continue
         try:
             urllib.request.urlretrieve(url, p)
-            print(f"  загружен {fn}")
+            print(f"  downloaded {fn}")
         except OSError as e:
-            print(f"  не удалось загрузить {fn}: {e}")
+            print(f"  failed to download {fn}: {e}")
 
 # --------------------------------------------------------------------------- #
 #  HTTP
 # --------------------------------------------------------------------------- #
 class _Server(ThreadingHTTPServer):
-    daemon_threads = True          # рабочие потоки не держат остановку службы
+    daemon_threads = True          # worker threads do not hold up service shutdown
     def handle_error(self, request, client_address):
-        # браузер оборвал загрузку (закрыл вкладку, отменил картинку) — это норма,
-        # а не сбой: полный трейсбек в journal только зашумляет. Всё прочее — как было.
+        # the browser aborted the load (closed the tab, cancelled an image) — this is normal,
+        # not a failure: a full traceback in journal is just noise. Everything else — as before.
         e = sys.exc_info()[1]
         if isinstance(e, (BrokenPipeError, ConnectionResetError, TimeoutError)):
             return
@@ -11776,9 +11776,9 @@ def load_screen():
             "night_from": _hhmm("night_from", "23:00"),
             "night_to": _hhmm("night_to", "07:00"),
             "night_bright": _i("night_bright", 0, 0, 255),
-            "idle_min": _i("idle_min", 0, 0, 240),      # 0 = не гасить по простою
-            "clock_min": _i("clock_min", 3, 0, 240),    # часы при простое; 0 = выкл
-            "poll": _i("poll", 1500, 500, 30000),       # как часто экран спрашивает данные, мс
+            "idle_min": _i("idle_min", 0, 0, 240),      # 0 = do not dim on idle
+            "clock_min": _i("clock_min", 3, 0, 240),    # clock on idle; 0 = off
+            "poll": _i("poll", 1500, 500, 30000),       # how often the screen polls for data, ms
             "actions": d.get("actions") is not False,
             "lang": "ru" if d.get("lang") == "ru" else "en"}
 
@@ -11791,7 +11791,7 @@ def save_screen(d):
     _json_save(SCREEN_FILE, cur, indent=2)
     _safe(lambda: _screen_apply(force=True))
     if cur["enabled"] != was:
-        # саму службу киоска включает/выключает движок (визард), а не панель
+        # the kiosk service itself is enabled/disabled by the engine (wizard), not the panel
         threading.Thread(target=lambda: _safe(
             lambda: engine("screen", {"enable": "1" if cur["enabled"] else "0"})),
             daemon=True).start()
@@ -11875,7 +11875,7 @@ def screen_bright_set(v):
             with open(d + "/bl_power", "w") as f:
                 f.write("4" if v == 0 else "0")
         except OSError:
-            pass                      # нет bl_power у драйвера — хотя бы PWM в ноль
+            pass                      # driver has no bl_power — at least set PWM to zero
         with open(d + "/brightness", "w") as f:
             f.write(str(v))
         if v == 0:
@@ -11898,7 +11898,7 @@ def _in_night(cfg, now=None):
         a, b = m(cfg["night_from"]), m(cfg["night_to"])
     except ValueError:
         return False
-    # окно почти всегда через полночь (23:00 -> 07:00), поэтому не «a <= cur < b»
+    # the window almost always crosses midnight (23:00 -> 07:00), so not "a <= cur < b"
     return (a <= cur < b) if a < b else (cur >= a or cur < b)
 
 
@@ -11911,12 +11911,12 @@ def _screen_apply(force=False):
     now = time.time()
     hp = _safe(health_report, {}) or {}
     if hp.get("overall") == "bad":
-        want = cfg["bright"]                       # тревога — жечь экран
-        _SCR["sleep"] = False                      # ... и будить его насильно
+        want = cfg["bright"]                       # alarm — light up the screen
+        _SCR["sleep"] = False                      # ... and wake it forcibly
     elif _SCR["sleep"]:
-        want = 0                                   # усыпили кнопкой — спим до касания
+        want = 0                                   # put to sleep by button — sleep until touched
     elif now - _SCR["touch"] < 60:
-        want = cfg["bright"]                       # минуту после касания светим всегда
+        want = cfg["bright"]                       # always lit for a minute after a touch
     elif _in_night(cfg):
         want = cfg["night_bright"]
     elif cfg["idle_min"] and now - _SCR["touch"] > cfg["idle_min"] * 60:
@@ -11933,8 +11933,8 @@ def _screen_tick():
 
 
 def _nb_live(pid):
-    """Живой прогресс прогона: состояние + хвост лога. Весь лог читать нельзя —
-    экран опрашивается раз в полторы секунды."""
+    """Live run progress: state + log tail. Reading the whole log is not allowed —
+    the screen is polled every one and a half seconds."""
     rs = _nb_run_state_read(pid)
     out = {"cur": rs.get("cur") or "", "done": len(rs.get("jobs") or []),
            "total": rs.get("total") or 0, "started": rs.get("started") or 0,
@@ -11956,8 +11956,8 @@ def _nb_live(pid):
     return out
 
 
-# Сколько секунд плитка живёт в кэше. "updates" запускает apt-get -s upgrade, а
-# "disktemp"/"snapraid" ходят к дискам — их нельзя считать на каждый опрос экрана.
+# How many seconds a tile lives in cache. "updates" runs apt-get -s upgrade, and
+# "disktemp"/"snapraid" hit the disks — they must not be computed on every screen poll.
 SCREEN_TILE_TTL = {"updates": 300, "disktemp": 120, "snapraid": 120, "inet": 60,
                    "docker": 15, "pool": 10, "rootfs": 10}
 _SCR_TILES = {}
@@ -11965,16 +11965,16 @@ _SCR_HEAVY = {"t": 0, "d": {}}
 
 
 def _screen_heavy():
-    """Disks + containers: не гоняем их на каждый опрос (экран спрашивает раз в
-    полторы секунды), держим свой кэш."""
+    """Disks + containers: don't recompute on every poll (the screen asks every one
+    and a half seconds), keep our own cache."""
     now = time.time()
     if now - _SCR_HEAVY["t"] < 10 and _SCR_HEAVY["d"]:
         return _SCR_HEAVY["d"]
     dk = []
     for d in (_safe(disks, []) or []):
-        # На экране показываем только СМОНТИРОВАННЫЕ тома: пустой кардридер — это
-        # диск без файловой системы, у него нет ни заполнения, ни температуры,
-        # и строка «— · —» на стене только пугает.
+        # On the screen we show only MOUNTED volumes: an empty card reader is
+        # a disk without a filesystem, it has neither usage nor temperature,
+        # and a "— · —" line on the wall is just alarming.
         if not (d.get("mounts") or []):
             continue
         sm = d.get("smart") or {}
@@ -11988,8 +11988,8 @@ def _screen_heavy():
                    "dev": d.get("path") or "",
                    "removable": bool(d.get("removable")) or d.get("tran") == "usb",
                    "hours": sm.get("power_on_hours")})
-    # системный — всегда первым: на экране умещается 4 строки, и он не должен
-    # уезжать из них из-за алфавита
+    # system — always first: the screen fits 4 rows, and it must not
+    # scroll out of them because of alphabetical order
     dk.sort(key=lambda x: (0 if (x["role"] == "system" or "/" in x["mounts"]) else 1,
                            x["name"] or ""))
     ct = []
@@ -12009,10 +12009,10 @@ def _screen_heavy():
     return _SCR_HEAVY["d"]
 
 
-# Вторая страница экрана. Источники тут дорогие (vnstat, apt, cron, tm) и меняются
-# редко — считаем их раз в 30 с и ТОЛЬКО когда экран действительно на этой странице
-# (клиент просит ?p2=1). Иначе быстрый опрос первой страницы тащил бы их за собой —
-# ровно та ошибка, из-за которой бокс уходил в load 14.
+# Screen page two. The sources here are expensive (vnstat, apt, cron, tm) and change
+# rarely — compute them once every 30 s and ONLY when the screen is actually on this page
+# (the client requests ?p2=1). Otherwise the fast first-page poll would drag them along —
+# exactly the bug that sent the box into load 14.
 _SCR_P2 = {"t": 0, "d": {}}
 
 
@@ -12029,24 +12029,24 @@ def _screen_page2():
     sched = []
     for p in (_safe(nb_profiles_public, []) or []):
         for h in (_safe(lambda pid=p["id"]: nb_history(pid), []) or [])[:3]:
-            # у записи прогона нет полей files/size — они лежат в её задачах (jobs)
+            # a run record has no files/size fields — they live in its jobs
             hist.append({"name": p["name"], "ts": h.get("ts") or 0,
                          "result": h.get("result") or "", "files": _nb_run_files(h),
                          "size": _nb_run_bytes(h), "dur": h.get("dur")})
-        # запланированный прогон профиля — для плашки «Следующие запуски»
+        # scheduled run of the profile — for the "Next runs" tile
         pc = _safe(lambda pid=p["id"]: nb_load(pid), {}) or {}
         t = _safe(lambda: _nb_next_run(pc))
         if t:
             sched.append({"name": p["name"], "next": int(t), "kind": "backup"})
     hist.sort(key=lambda x: -x["ts"])
     d = {
-        # Time Machine: сервис может быть не настроен — тогда просто пусто
+        # Time Machine: the service may not be configured — then just empty
         "tm": {"enabled": bool(tm.get("enabled")), "installed": bool(tm.get("installed")),
                "path": tm.get("path") or "", "size": tm.get("size"),
                "free": (tm.get("space") or {}).get("free") if isinstance(tm.get("space"), dict) else tm.get("free"),
                "backups": tm.get("backups"), "mtime": tm.get("mtime") or 0,
                "quota_gb": tm.get("quota_gb")},
-        # vnstat: сервиса нет -> ok:false, плашка просто не рисуется
+        # vnstat: no service -> ok:false, the tile is simply not drawn
         "traffic": {"ok": bool(vn.get("ok")), "today": vn.get("today") or {},
                     "month": vn.get("month") or {}},
         "updates": {"apt": ap.get("count") or 0, "security": ap.get("security") or 0,
@@ -12075,15 +12075,15 @@ def _screen_usb_cfg():
 
 
 def screen_payload(lang="", p2=False):
-    # язык экрана задаётся в screen.json, а НЕ браузером киоска: i18n.js по умолчанию
-    # ставит NAS_LANG=en, и без этого сервер слал бы английские подписи под русскую
-    # разметку страницы — на экране получалась каша из двух языков
+    # the screen language is set in screen.json, NOT by the kiosk browser: i18n.js by default
+    # sets NAS_LANG=en, and without this the server would send English labels under the Russian
+    # page markup — the screen ended up a jumble of two languages
     cfg0 = load_screen()
     lang = lang or cfg0["lang"]
     en = (lang == "en")
     st = _safe(stats, {}) or {}
-    # _glance_tile отдаёт value/unit/state/raw, но НЕ label — его glance_payload
-    # подмешивает из каталога; здесь делаем то же самое
+    # _glance_tile returns value/unit/state/raw, but NOT label — glance_payload
+    # mixes it in from the catalog; here we do the same
     labels = {t[0]: (t[2] if en else t[1]) for t in glance_catalog()}
     tiles = {}
     now = time.time()
@@ -12108,13 +12108,13 @@ def screen_payload(lang="", p2=False):
                  "lvl": c.get("lvl"), "hint": c.get("hint") or ""}
                 for c in (hp.get("checks") or []) if c.get("lvl") in ("bad", "warn")]
     ev = _safe(lambda: events_list(0, 40), {}) or {}
-    events = list(reversed(ev.get("events") or []))[:30]   # новые сверху
+    events = list(reversed(ev.get("events") or []))[:30]   # newest on top
     bks = []
     for p in (_safe(nb_profiles_public, []) or []):
         h = _safe(lambda pid=p["id"]: nb_history(pid), []) or []   # newest first
         last = h[0] if h else {}
-        # приёмник может быть на вынутом диске — на стене это надо ВИДЕТЬ, а не
-        # узнавать из провалившегося прогона
+        # the destination may be on an ejected disk — on the wall this must be SEEN, not
+        # learned from a failed run
         pc = _safe(lambda pid=p["id"]: nb_load(pid), {}) or {}
         pbase = pc.get("dest_base") or ""
         b = {"id": p["id"], "name": p["name"],
@@ -12130,17 +12130,17 @@ def screen_payload(lang="", p2=False):
         if b["running"]:
             b["live"] = _safe(lambda pid=p["id"]: _nb_live(pid), {}) or {}
         bks.append(b)
-    # 24 полоски = по часу, 30 = по дню (как на статус-пейджах). Цвет считает
-    # клиент по frac (доле аптайма слота), а не по «худшему состоянию».
-    av = _safe(lambda: avail_bars(24, 24), {}) or {}    # 2=up 1=local 0=off -1=нет данных
+    # 24 bars = one per hour, 30 = one per day (as on status pages). The color is computed by the
+    # client from frac (the slot's uptime fraction), not by the "worst state".
+    av = _safe(lambda: avail_bars(24, 24), {}) or {}    # 2=up 1=local 0=off -1=no data
     av30 = _safe(lambda: avail_bars(720, 30), {}) or {}
     hv = _safe(_screen_heavy, {}) or {}
-    # обои и их обработка — ТЕ ЖЕ, что на рабочем столе: экран читает desktop.json,
-    # поэтому смена обоев/затемнения в браузере доезжает до панели сама (wpVer в URL)
+    # the wallpaper and its processing are THE SAME as on the desktop: the screen reads desktop.json,
+    # so changing wallpaper/dimming in the browser reaches the panel on its own (wpVer in URL)
     ds = _safe(load_settings, {}) or {}
-    # Экран ВСЕГДА тёмный, даже если панель переключили в светлую тему: он висит на
-    # стене. Поэтому берём стилевые ключи из ТЁМНОГО профиля (SET.themeProfiles.dark),
-    # а не из активного — иначе смена темы в браузере красила бы стену в белое.
+    # The screen is ALWAYS dark, even if the panel is switched to a light theme: it hangs on
+    # the wall. So we take the style keys from the DARK profile (SET.themeProfiles.dark),
+    # not the active one — otherwise a theme change in the browser would paint the wall white.
     dark = (ds.get("themeProfiles") or {}).get("dark") or {}
     look = {"wpVer": ds.get("wpVer") or 0, "theme": "dark"}
     for k in ("fxDim", "fxBlur", "fxNoise", "wdgOp", "wdgBlur", "wdgSat",
@@ -12168,19 +12168,19 @@ def screen_payload(lang="", p2=False):
             "disks": hv.get("disks") or [], "containers": hv.get("containers") or [],
             "stacks": hv.get("stacks") or [],
             "usb": _safe(lambda: usb_import_progress()["jobs"], []) or [],
-            # история импортов переживает ребут (ops-history.json), в отличие от /run
+            # import history survives reboot (ops-history.json), unlike /run
             "usbhist": _safe(lambda: usb_import_history(8), []) or [],
-            # единицы скорости сети — общая настройка панели (МБ/с vs Мбит/с)
+            # network speed units — a shared panel setting (MB/s vs Mbit/s)
             "netUnits": ds.get("netUnits") or "",
-            # приёмник импорта: включён ли автоимпорт и на месте ли носитель.
-            # Отказ импорта виден в «Событиях», но это ПРОШЛОЕ — на плашке нужно
-            # текущее состояние: «диск вынут, импортировать некуда».
+            # import destination: whether auto-import is enabled and whether the media is present.
+            # An import failure shows in "Events", but that is the PAST — the tile needs
+            # the current state: "disk ejected, nowhere to import".
             "usbcfg": _safe(_screen_usb_cfg, {}) or {},
             "swap": (st.get("mem") or {}).get("swap_total"),
             "throttled": st.get("throttled"), "psu_ma": st.get("psu_ma"),
             "asleep": bool(_SCR["sleep"]),
-            # подсветка сейчас погашена (сон/ночь/простой): первый тап должен
-            # только будить, а не нажимать плашку под пальцем — клиент ставит щит
+            # the backlight is currently off (sleep/night/idle): the first tap should
+            # only wake, not press the tile under the finger — the client puts up a shield
             "dark": _SCR["last"] == 0,
             "speed": _SCR["spd"], "speed_running": bool(_SCR["spd_run"]),
             "actions": cfg["actions"], "lang": cfg["lang"], "poll": cfg["poll"],
@@ -12194,12 +12194,12 @@ def screen_action(b):
     signal, so it works even when the action buttons are switched off."""
     a = str(b.get("a") or "")
     if a == "touch":
-        # клик по кнопке «погасить» приходит вместе с pointerdown -> touch, и тот
-        # мог прийти ПОСЛЕ sleep и разбудить экран сразу же. Полсекунды грейса.
+        # a click on the "dim" button arrives together with pointerdown -> touch, and that
+        # could arrive AFTER sleep and wake the screen right away. Half a second of grace.
         if _SCR["sleep"] and time.time() - _SCR.get("slept_at", 0) < 1.0:
             return {"ok": True, "ignored": True}
         _SCR["touch"] = time.time()
-        _SCR["sleep"] = False                      # любое касание будит
+        _SCR["sleep"] = False                      # any touch wakes
         _safe(lambda: _screen_apply(force=True))
         return {"ok": True}
     if a == "sleep":
@@ -12209,7 +12209,7 @@ def screen_action(b):
         return {"ok": True}
     cfg = load_screen()
     if not cfg["actions"]:
-        return {"ok": False, "log": "действия с экрана выключены"}
+        return {"ok": False, "log": "actions from the screen are disabled"}
     if a == "backup":
         return nb_run_bg(_nb_bpid(b))
     if a == "eject":
@@ -12220,7 +12220,7 @@ def screen_action(b):
             dev = "/dev/" + dev
         r = disk_eject(dev)
         if r.get("ok"):
-            _SCR_HEAVY["t"] = 0            # диск исчез — лист должен увидеть сразу
+            _SCR_HEAVY["t"] = 0            # the disk is gone — the list must see it immediately
         return r
     if a == "speed":
         if _SCR["spd_run"]:
@@ -12234,25 +12234,25 @@ def screen_action(b):
                 _SCR["spd"] = r
             finally:
                 _SCR["spd_run"] = False
-        # спидтест блокирует на 10-18 с — экран не должен висеть на fetch
+        # the speed test blocks for 10-18 s — the screen must not hang on fetch
         threading.Thread(target=go, daemon=True).start()
         return {"ok": True, "running": True}
     if a == "stack":
         op = str(b.get("op") or "")
         if op not in ("up", "down", "restart", "stop", "start"):
-            return {"ok": False, "log": "неизвестная операция"}
+            return {"ok": False, "log": "unknown operation"}
         return stack_action(str(b.get("name") or ""), op)
     if a in ("reboot", "poweroff"):
-        log_event("screen_power", "С экрана: " + ("перезагрузка" if a == "reboot" else "выключение"),
-                  "запрошено кнопкой на локальном экране", "warn", "system")
+        log_event("screen_power", "From the screen: " + ("reboot" if a == "reboot" else "shutdown"),
+                  "requested by a button on the local screen", "warn", "system")
         return power(a)
-    return {"ok": False, "log": "неизвестное действие"}
+    return {"ok": False, "log": "unknown action"}
 
 
-# Обои под локальный экран: исходник — под рабочий стол (2-4 МБ, 2560+ px), а панели
-# нужно 800x480. Хром на Pi 4 тащил полный кадр в память И мылил его blur(27px) —
-# это заметная работа на слабой GPU. Держим ужатую копию рядом с оригиналом и отдаём её
-# киоску; пересобираем, когда оригинал изменился (обои крутятся по таймеру).
+# Wallpaper for the local screen: the source is for the desktop (2-4 MB, 2560+ px), but the panel
+# needs 800x480. Chromium on the Pi 4 pulled the full frame into memory AND blurred it with blur(27px) —
+# that is noticeable work on a weak GPU. We keep a downscaled copy next to the original and serve it
+# to the kiosk; we rebuild it when the original changes (the wallpaper rotates on a timer).
 _WALL_SCR_LOCK = threading.Lock()
 
 
@@ -12267,7 +12267,7 @@ def _wallpaper_screen(w=800, h=480):
     except OSError:
         pass
     with _WALL_SCR_LOCK:
-        try:                                   # пока ждали лок, кто-то мог собрать
+        try:                                   # while we waited for the lock, someone may have built it
             if os.path.isfile(dst) and os.path.getmtime(dst) >= os.path.getmtime(src):
                 return dst
         except OSError:
@@ -12279,7 +12279,7 @@ def _wallpaper_screen(w=800, h=480):
                                 "-vf", vf, "-quality", "82", tmp],
                                capture_output=True, text=True, timeout=60)
             if p.returncode != 0 or not os.path.isfile(tmp):
-                return src                     # не вышло — отдаём оригинал, не падаем
+                return src                     # failed — serve the original, don't crash
             os.replace(tmp, dst)
         except (OSError, subprocess.SubprocessError):
             return src
@@ -12288,10 +12288,10 @@ def _wallpaper_screen(w=800, h=480):
 
 class H(BaseHTTPRequestHandler):
     server_version = "nas-web"
-    # Таймаут сокета: без него зависшее/медленное соединение (slowloris) держит
-    # поток вечно. Пул потоков не ограничен, так что вечные потоки = падение.
+    # Socket timeout: without it a hung/slow connection (slowloris) holds a
+    # thread forever. The thread pool is unbounded, so eternal threads = crash.
     timeout = 30
-    def log_message(self, *a):  # тихо
+    def log_message(self, *a):  # quiet
         pass
 
     def _json(self, obj, code=200, cookie=None):
@@ -12305,7 +12305,7 @@ class H(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    # ---- аутентификация ----
+    # ---- authentication ----
     def _cookie_token(self):
         for part in (self.headers.get("Cookie") or "").split(";"):
             k, _, v = part.strip().partition("=")
@@ -12314,8 +12314,8 @@ class H(BaseHTTPRequestHandler):
         return ""
 
     def _client_ip(self):
-        # сервер слушает 0.0.0.0 напрямую (без доверенного прокси), поэтому берём
-        # реальный адрес сокета, а НЕ подделываемый клиентом X-Forwarded-For
+        # the server listens on 0.0.0.0 directly (no trusted proxy), so we take
+        # the real socket address, NOT the client-spoofable X-Forwarded-For
         try:
             return self.client_address[0]
         except (AttributeError, IndexError):
@@ -12325,12 +12325,12 @@ class H(BaseHTTPRequestHandler):
         return session_valid(self._cookie_token())
 
     def _local(self):
-        """Запрос пришёл с самого бокса (киоск-браузер локального экрана)."""
+        """Request came from the box itself (the local screen's kiosk browser)."""
         return self.client_address[0] in ("127.0.0.1", "::1", "::ffff:127.0.0.1")
 
     def _origin_ok(self):
-        """Защита от CSRF и cross-site WebSocket: Origin (если прислан) должен
-        совпадать с Host. Запросы без Origin (curl) пропускаем — сессия всё равно нужна."""
+        """Protection against CSRF and cross-site WebSocket: Origin (if sent) must
+        match Host. Requests without Origin (curl) are allowed — a session is still required."""
         origin = self.headers.get("Origin")
         if not origin:
             return True
@@ -12342,29 +12342,29 @@ class H(BaseHTTPRequestHandler):
         return "nasauth=%s; Max-Age=%d; Path=/; HttpOnly; SameSite=Lax" % (tok, SESSION_TTL)
 
     def _auth_endpoints(self, p):
-        """Открытые ручки /api/auth/*. Возвращает True, если запрос обработан."""
+        """Open /api/auth/* endpoints. Returns True if the request was handled."""
         if p == "/api/auth/state":
             self._json({"configured": auth_configured(), "authed": self._authed()})
         elif p == "/api/auth/login":
             b = self._body()
-            # антибрутфорс под локом: гейтим ДО проверки пароля, чтобы параллельные
-            # запросы не проскочили пачкой (ThreadingHTTPServer)
+            # anti-bruteforce under lock: gate BEFORE checking the password, so parallel
+            # requests don't slip through in a batch (ThreadingHTTPServer)
             with _login_lock:
                 now = time.time()
-                if now - _login_fail["t"] > 60:           # окно попыток — минута
+                if now - _login_fail["t"] > 60:           # attempt window — one minute
                     _login_fail["n"] = 0
                 blocked = _login_fail["n"] >= 8
             if blocked:
                 time.sleep(1.0)
-                self._json({"ok": False, "log": "слишком много попыток, подождите минуту"}, 429)
+                self._json({"ok": False, "log": "too many attempts, wait a minute"}, 429)
             elif auth_configured() and auth_check_password(b.get("password", "")):
                 with _login_lock:
                     _login_fail["n"] = 0
                 ip = self._client_ip()
-                if ip and ip not in _known_ips():         # вход с нового адреса
+                if ip and ip not in _known_ips():         # login from a new address
                     _remember_ip(ip)
                     threading.Thread(target=mon_notify, args=("panel_new:" + ip,
-                        "NAS: вход в панель с нового адреса", "Успешный вход с %s" % ip, "panel_new"),
+                        "NAS: panel login from a new address", "Successful login from %s" % ip, "panel_new"),
                         daemon=True).start()
                 self._json({"ok": True}, cookie=self._session_cookie(session_new()))
             else:
@@ -12372,12 +12372,12 @@ class H(BaseHTTPRequestHandler):
                     _login_fail["n"] += 1; _login_fail["t"] = time.time(); n = _login_fail["n"]
                 if n >= load_monitor().get("events", {}).get("panel_fail", {}).get("threshold", 5):
                     threading.Thread(target=mon_notify, args=("panel_fail",
-                        "NAS: подбор пароля к панели", "%d неудачных попыток входа (последняя с %s)"
+                        "NAS: panel password guessing attempt", "%d failed login attempts (last from %s)"
                         % (n, self._client_ip() or "?"), "panel_fail"), daemon=True).start()
-                time.sleep(0.5)     # притормозить перебор
-                self._json({"ok": False, "log": "неверный пароль"}, 403)
+                time.sleep(0.5)     # slow down bruteforce
+                self._json({"ok": False, "log": "wrong password"}, 403)
         elif p == "/api/auth/setup":
-            # первичная установка пароля; со активной сессией — смена пароля
+            # initial password setup; with an active session — password change
             if auth_configured() and not self._authed():
                 self._json({"error": "auth"}, 401)
             else:
@@ -12394,10 +12394,10 @@ class H(BaseHTTPRequestHandler):
         return True
 
     def _stream_engine(self, action, params, dry):
-        """Запустить движок и стримить stdout построчно (для живого лога в мастере)."""
+        """Run the engine and stream stdout line by line (for the live log in the wizard)."""
         if not ENGINE_ACTION_RE.match(action or ""):
-            self._json({"error": "недопустимое действие"}, 400); return
-        env = _engine_env(params, dry)   # ValueError уйдёт наружу -> 400
+            self._json({"error": "invalid action"}, 400); return
+        env = _engine_env(params, dry)   # ValueError propagates out -> 400
         self.send_response(200)
         self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
@@ -12408,8 +12408,8 @@ class H(BaseHTTPRequestHandler):
                                  stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                  text=True, bufsize=1)
         except OSError as e:
-            self.wfile.write(("ошибка запуска: %s\n__EXIT__1\n" % e).encode()); return
-        # сторож: убить зависший движок (напр. блок на мёртвом mount), чтобы не течь потоком/сокетом
+            self.wfile.write(("launch error: %s\n__EXIT__1\n" % e).encode()); return
+        # watchdog: kill a hung engine (e.g. blocked on a dead mount) to avoid leaking a thread/socket
         deadline = threading.Timer(1800, lambda: p.poll() is None and p.kill())
         deadline.daemon = True; deadline.start()
         try:
@@ -12430,13 +12430,13 @@ class H(BaseHTTPRequestHandler):
         if not dry:
             try:
                 ok = p.returncode == 0
-                log_event("action", "Мастер: %s%s" % (action, "" if ok else " — ошибка"),
+                log_event("action", "Wizard: %s%s" % (action, "" if ok else " — error"),
                           "", "ok" if ok else "warn", kind="action", desk=False)
             except Exception:
                 pass
 
     def _stream_cmd(self, cmd, env=None, timeout=1800):
-        """Стримить stdout произвольной команды построчно с маркером __EXIT__ (как _stream_engine)."""
+        """Stream an arbitrary command's stdout line by line with an __EXIT__ marker (like _stream_engine)."""
         self.send_response(200)
         self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
@@ -12446,7 +12446,7 @@ class H(BaseHTTPRequestHandler):
             p = subprocess.Popen(cmd, env=env or _C_ENV, stdout=subprocess.PIPE,
                                  stderr=subprocess.STDOUT, text=True, bufsize=1)
         except OSError as e:
-            self.wfile.write(("ошибка запуска: %s\n__EXIT__1\n" % e).encode()); return
+            self.wfile.write(("launch error: %s\n__EXIT__1\n" % e).encode()); return
         deadline = threading.Timer(timeout, lambda: p.poll() is None and p.kill())
         deadline.daemon = True; deadline.start()
         try:
@@ -12466,9 +12466,9 @@ class H(BaseHTTPRequestHandler):
             pass
 
     def _body(self):
-        # Потолок ДО чтения: иначе Content-Length: 2000000000 (даже до авторизации,
-        # на /api/auth/login) заставил бы прочитать 2 ГБ в один поток и убить службу
-        # по OOM на Pi. Большие бинарные загрузки идут через потоковый _upload_raw.
+        # Cap BEFORE reading: otherwise Content-Length: 2000000000 (even before auth,
+        # on /api/auth/login) would force reading 2 GB into a single thread and kill the service
+        # with OOM on the Pi. Large binary uploads go through the streaming _upload_raw.
         try:
             n = int(self.headers.get("Content-Length", 0) or 0)
         except ValueError:
@@ -12498,10 +12498,10 @@ class H(BaseHTTPRequestHandler):
         with open(full, "rb") as f:
             data = f.read()
         ext = os.path.splitext(full)[1]
-        # ETag из mtime+size: no-cache без валидатора мобильные браузеры трактовали
-        # как «можно взять из кэша» — так застревал старый i18n.js (весь UI по-русски
-        # при EN). С валидатором ревалидация РАБОТАЕТ: не менялось → 304, менялось →
-        # свежий файл. HTML остаётся no-store (там валидатору не доверяли вовсе).
+        # ETag from mtime+size: no-cache without a validator was treated by mobile browsers
+        # as "can be taken from cache" — that is how the old i18n.js got stuck (whole UI in Russian
+        # under EN). With a validator revalidation WORKS: unchanged → 304, changed →
+        # fresh file. HTML stays no-store (there the validator was not trusted at all).
         try:
             st_ = os.stat(full)
             etag = '"%x-%x"' % (int(st_.st_mtime), st_.st_size)
@@ -12515,8 +12515,8 @@ class H(BaseHTTPRequestHandler):
             return
         self.send_response(200)
         self.send_header("Content-Type", ctype)
-        # HTML — НЕ кэшировать вовсе (мобильные браузеры при no-cache без валидатора
-        # всё равно показывали старую оболочку); JS/CSS ревалидировать по ETag.
+        # HTML — do NOT cache at all (mobile browsers with no-cache without a validator
+        # still showed the old shell); revalidate JS/CSS by ETag.
         if ext == ".html":
             self.send_header("Cache-Control", "no-store, must-revalidate")
             self.send_header("Pragma", "no-cache")
@@ -12538,7 +12538,7 @@ class H(BaseHTTPRequestHandler):
         except OSError:
             self.send_error(500); return
         ctype = mimetypes.guess_type(path)[0] or "application/octet-stream"
-        # HTTP Range → перемотка видео/аудио работает + стрим без загрузки файла в память
+        # HTTP Range → video/audio seeking works + streaming without loading the file into memory
         start, end, partial = 0, size - 1, False
         rng = self.headers.get("Range")
         if rng:
@@ -12578,7 +12578,7 @@ class H(BaseHTTPRequestHandler):
                     self.wfile.write(chunk)
                     remaining -= len(chunk)
         except (BrokenPipeError, ConnectionResetError):
-            pass   # браузер перемотал/закрыл — норма
+            pass   # browser seeked/closed — normal
         except OSError:
             pass
 
@@ -12594,7 +12594,7 @@ class H(BaseHTTPRequestHandler):
         ctype = mimetypes.guess_type(fp)[0] or "image/png"
         self.send_response(200)
         self.send_header("Content-Type", ctype)
-        # URL-ключ стабилен → можно смело держать в кэше браузера надолго
+        # the URL key is stable → safe to keep in the browser cache for a long time
         self.send_header("Cache-Control", "public, max-age=604800")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
@@ -12612,7 +12612,7 @@ class H(BaseHTTPRequestHandler):
             self.send_error(404)
 
     def _transcode(self):
-        """Потоковый транскод в browser-friendly mp4 (для HEVC/экзотики). t = старт, сек."""
+        """Streaming transcode into browser-friendly mp4 (for HEVC/exotics). t = start, sec."""
         q = parse_qs(urlparse(self.path).query)
         src = os.path.realpath((q.get("path") or [""])[0])
         try:
@@ -12620,7 +12620,7 @@ class H(BaseHTTPRequestHandler):
         except ValueError:
             t = 0.0
         try:
-            aidx = max(0, int((q.get("a") or ["0"])[0]))   # выбранная аудиодорожка (0:a:aidx)
+            aidx = max(0, int((q.get("a") or ["0"])[0]))   # selected audio track (0:a:aidx)
         except ValueError:
             aidx = 0
         if not os.path.isfile(src) or not shutil.which("ffmpeg"):
@@ -12633,7 +12633,7 @@ class H(BaseHTTPRequestHandler):
             vcodec = (pr.stdout or "").strip()
         except Exception:
             pass
-        # h264 уже поддержан браузером — только ремукс (быстро, без нагрузки); иначе перекодируем
+        # h264 is already supported by the browser — remux only (fast, no load); otherwise re-encode
         if vcodec == "h264":
             vargs = ["-c:v", "copy"]
         else:
@@ -12642,7 +12642,7 @@ class H(BaseHTTPRequestHandler):
         cmd = ["ffmpeg", "-v", "error"]
         if t > 0:
             cmd += ["-ss", "%.3f" % t]
-        # маппинг: видео + выбранная аудиодорожка ('?' — не падать, если её нет)
+        # mapping: video + selected audio track ('?' — don't fail if it's missing)
         maps = ["-map", "0:v:0?", "-map", "0:a:%d?" % aidx]
         cmd += ["-i", src] + maps + vargs + ["-c:a", "aac", "-b:a", "128k", "-ac", "2",
                 "-movflags", "frag_keyframe+empty_moov+default_base_moof", "-f", "mp4", "pipe:1"]
@@ -12673,7 +12673,7 @@ class H(BaseHTTPRequestHandler):
                 pass
 
     def _extract_sub(self):
-        """Извлечь встроенную ТЕКСТОВУЮ дорожку субтитров (0:s:idx) как WebVTT."""
+        """Extract the embedded TEXT subtitle track (0:s:idx) as WebVTT."""
         q = parse_qs(urlparse(self.path).query)
         src = os.path.realpath((q.get("path") or [""])[0])
         try:
@@ -12701,27 +12701,27 @@ class H(BaseHTTPRequestHandler):
             pass
 
     def _upload_raw(self):
-        """Потоковая бинарная загрузка (без base64 — не роняет вкладку на больших файлах).
-        rel — путь подпапок внутри назначения (загрузка папки целиком)."""
+        """Streaming binary upload (no base64 — doesn't crash the tab on large files).
+        rel — subfolder path inside the destination (uploading a whole folder)."""
         q = parse_qs(urlparse(self.path).query)
-        d, err = _fs_guard((q.get("path") or [""])[0], into=True)   # не загружать в системные деревья/движок
+        d, err = _fs_guard((q.get("path") or [""])[0], into=True)   # don't upload into system trees/engine
         if err:
             return {"ok": False, "log": err}
         name = os.path.basename(((q.get("name") or [""])[0]).strip())
         if not os.path.isdir(d):
-            return {"ok": False, "log": "не каталог назначения"}
+            return {"ok": False, "log": "destination is not a directory"}
         if not name:
-            return {"ok": False, "log": "нет имени файла"}
-        # подпапки при загрузке папки. Каждый сегмент проверяем отдельно: «..» и
-        # абсолютные пути сюда не пролезут, symlink наружу тоже (сверяем realpath).
+            return {"ok": False, "log": "no file name"}
+        # subfolders when uploading a folder. Each segment is checked separately: ".." and
+        # absolute paths won't get through here, nor will a symlink pointing out (we verify realpath).
         rel = ((q.get("rel") or [""])[0]).strip().replace("\\", "/")
         if rel:
             segs = [x for x in rel.split("/") if x not in ("", ".")]
             if len(segs) > 32 or any(x == ".." or "/" in x or "\0" in x for x in segs):
-                return {"ok": False, "log": "недопустимый путь"}
+                return {"ok": False, "log": "invalid path"}
             sub = os.path.realpath(os.path.join(d, *segs))
             if sub != d and not sub.startswith(d + os.sep):
-                return {"ok": False, "log": "путь вне каталога назначения"}
+                return {"ok": False, "log": "path outside the destination directory"}
             try:
                 os.makedirs(sub, exist_ok=True)
             except OSError as e:
@@ -12747,12 +12747,12 @@ class H(BaseHTTPRequestHandler):
             except OSError:
                 pass
             return {"ok": False, "log": str(e)}
-        if got < n:                      # обрыв/отмена — не оставлять обрезанный файл
+        if got < n:                      # abort/cancel — don't leave a truncated file
             try:
                 os.remove(dest)
             except OSError:
                 pass
-            return {"ok": False, "log": "загрузка прервана"}
+            return {"ok": False, "log": "upload aborted"}
         _chown_user(dest)
         if thumb_kind(name):
             threading.Thread(target=gen_thumb, args=(dest,), daemon=True).start()
@@ -12807,22 +12807,22 @@ class H(BaseHTTPRequestHandler):
             ("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n"
              "Connection: Upgrade\r\nSec-WebSocket-Accept: " + _ws_accept(key) + "\r\n\r\n").encode())
         sock = self.connection
-        sock.settimeout(None)      # WS-терминал живёт долго и простаивает между нажатиями —
-                                   # общий timeout=30 (анти-slowloris) рвал бы его каждые 30с
+        sock.settimeout(None)      # the WS terminal lives long and idles between keystrokes —
+                                   # the global timeout=30 (anti-slowloris) would tear it every 30s
         ex = (parse_qs(urlparse(self.path).query).get("exec") or [""])[0]
         ex = ex if re.match(r"^[a-zA-Z0-9_.-]+$", ex or "") else ""
         pid, master = pty.fork()
-        if pid == 0:                       # ребёнок -> bash или docker exec
+        if pid == 0:                       # child -> bash or docker exec
             os.environ["TERM"] = "xterm-256color"
-            if ex:                         # exec в контейнер — остаёмся root (нужен доступ к docker.sock)
+            if ex:                         # exec into a container — stay root (need access to docker.sock)
                 os.execvp("docker", ["docker", "exec", "-it", ex, "sh", "-c",
                                      "command -v bash >/dev/null && exec bash || exec sh"])
                 os._exit(1)
             try:
-                if os.geteuid() == 0:      # если сервер root — уронить права до пользователя
+                if os.geteuid() == 0:      # if the server is root — drop privileges to the user
                     u = pwd.getpwnam(TARGET_USER)
-                    # initgroups до setuid: иначе shell без вспомогательных групп (video,
-                    # docker, gpio…) и падает vcgencmd/docker без sudo. setgid ПОСЛЕ.
+                    # initgroups before setuid: otherwise the shell has no supplementary groups (video,
+                    # docker, gpio…) and vcgencmd/docker fail without sudo. setgid AFTER.
                     try:
                         os.initgroups(TARGET_USER, u.pw_gid)
                     except OSError:
@@ -12838,8 +12838,8 @@ class H(BaseHTTPRequestHandler):
             while True:
                 r, _, _ = select.select([master, sock], [], [], 30)
                 if not r:
-                    # простой — не рвём соединение, а шлём WS-ping: это keepalive
-                    # (терминал не отваливается) и заодно детект мёртвого пира (send упадёт)
+                    # idle — don't drop the connection, send a WS ping: this is keepalive
+                    # (the terminal doesn't drop) and also detects a dead peer (send will fail)
                     try:
                         _ws_send(sock, b"", 0x9)
                         continue
@@ -12863,7 +12863,7 @@ class H(BaseHTTPRequestHandler):
                     elif op == 0x9:
                         _ws_send(sock, pay, 0xA)
                     elif op in (0x1, 0x2):
-                        if pay[:1] == b"\x01":          # управляющее: resize
+                        if pay[:1] == b"\x01":          # control: resize
                             try:
                                 d = json.loads(pay[1:].decode())
                                 _set_winsize(master, int(d["rows"]), int(d["cols"]))
@@ -12916,8 +12916,8 @@ class H(BaseHTTPRequestHandler):
                 self._json(pl)
             return
         if p in ("/screen", "/screen/"):
-            # из локалки страницу можно смотреть, но ей нужны /api/screen/* —
-            # без сессии они отдают 401, и получался «тёмный экран с иконками»
+            # from the LAN the page can be viewed, but it needs /api/screen/* —
+            # without a session they return 401, and you got a "dark screen with icons"
             if not (self._local() or self._authed()):
                 self.send_response(302)
                 self.send_header("Location", "/?next=/screen")
@@ -12925,9 +12925,9 @@ class H(BaseHTTPRequestHandler):
                 return
             self._static("/screen.html"); return
         if p == "/api/icon" and (self._local() or self._authed()):
-            self._send_icon((q.get("u") or [""])[0]); return   # иконки стеков для экрана
+            self._send_icon((q.get("u") or [""])[0]); return   # stack icons for the screen
         if p == "/api/wallpaper/img" and (self._local() or self._authed()):
-            # киоск рисует те же обои, но в размер своей панели (см. _wallpaper_screen)
+            # the kiosk draws the same wallpaper, but sized to its panel (see _wallpaper_screen)
             wp = (_safe(_wallpaper_screen) if (q.get("screen") or [""])[0]
                   else None) or _wallpaper_path()
             if wp:
@@ -12940,7 +12940,7 @@ class H(BaseHTTPRequestHandler):
             self._json({"config": load_screen(), "present": bool(_bl_dir()),
                         "unit": (u.get("log") or "").strip()}); return
         if p == "/api/screen/data":
-            # локальный экран ходит без сессии; из локалки — только по паролю
+            # the local screen works without a session; from the LAN — only with a password
             if not (self._local() or self._authed()):
                 self._json({"error": "auth"}, 401); return
             self._json(screen_payload((q.get("lang") or [""])[0],
@@ -12951,8 +12951,8 @@ class H(BaseHTTPRequestHandler):
             if p == "/api/stats":
                 self._json(stats())
             elif p == "/api/screen/config":
-                # _run() возвращает СЛОВАРЬ {ok,code,log}: .strip() у него ронял ручку
-                # в 500, и вкладка настроек показывала только заголовок
+                # _run() returns a DICT {ok,code,log}: calling .strip() on it dropped the endpoint
+                # to 500, and the settings tab showed only the header
                 u = _run(["systemctl", "is-enabled", "nas-screen"], timeout=5)
                 self._json({"config": load_screen(), "present": bool(_bl_dir()),
                             "unit": (u.get("log") or "").strip()})
@@ -12979,7 +12979,7 @@ class H(BaseHTTPRequestHandler):
                 if os.path.isfile(fp):
                     self._sendraw(fp)
                 else:
-                    self._json({"error": "нет файла"}, 404)
+                    self._json({"error": "no file"}, 404)
             elif p == "/api/net":
                 self._json(net_info())
             elif p == "/api/net/speedtest":
@@ -12996,14 +12996,14 @@ class H(BaseHTTPRequestHandler):
                 nm = (q.get("name") or [""])[0]
                 fp = os.path.join(settings_backup_dir(), nm)
                 if not _BK_NAME_RE.match(nm) or not os.path.isfile(fp):
-                    self._json({"ok": False, "log": "нет такого бэкапа"}, 404)
+                    self._json({"ok": False, "log": "no such backup"}, 404)
                 else:
                     self._json(settings_backup_inspect(fp))
             elif p == "/api/settings-backup/get":
                 nm = (q.get("name") or [""])[0]
                 fp = os.path.join(settings_backup_dir(), nm)
                 if not _BK_NAME_RE.match(nm) or not os.path.isfile(fp):
-                    self._json({"ok": False, "log": "нет такого бэкапа"}, 404)
+                    self._json({"ok": False, "log": "no such backup"}, 404)
                 else:
                     self._sendraw(fp, True)
             elif p == "/api/health":
@@ -13162,8 +13162,8 @@ class H(BaseHTTPRequestHandler):
             elif p == "/api/scrutiny/device":
                 self._json(scrutiny_device((q.get("serial") or [""])[0]))
             elif p == "/api/wallpaper/img":
-                # screen=1 -> копия под маленький экран (та же логика, что и для киоска;
-                # раньше параметр работал только с loopback, и из локалки отдавался оригинал)
+                # screen=1 -> a copy for the small screen (the same logic as for the kiosk;
+                # previously the parameter worked only with loopback, and the LAN got the original)
                 wp = (_safe(_wallpaper_screen) if (q.get("screen") or [""])[0]
                       else None) or _wallpaper_path()
                 if wp:
@@ -13210,7 +13210,7 @@ class H(BaseHTTPRequestHandler):
                 self._static(p)
         except ValueError as e:
             self._json({"error": str(e)}, 400)
-        except Exception as e:  # не роняем сервер
+        except Exception as e:  # don't crash the server
             self._json({"error": repr(e)}, 500)
 
     # ---- POST ----
@@ -13223,8 +13223,8 @@ class H(BaseHTTPRequestHandler):
                 self._json({"error": "unknown endpoint"}, 404)
             return
         if p == "/api/screen/act":
-            # тач на самом боксе = физический доступ; пароль на этом экране не спрашиваем.
-            # Из панели (сессия) тоже можно — там уже вошли по паролю.
+            # touch on the box itself = physical access; we don't ask for a password on this screen.
+            # From the panel (session) it's allowed too — there you already logged in with a password.
             if not (self._local() or self._authed()):
                 self._json({"error": "forbidden"}, 403); return
             self._json(screen_action(self._body())); return
@@ -13235,8 +13235,8 @@ class H(BaseHTTPRequestHandler):
             self._json(agent_notify(self._body())); return
         if not self._authed():
             self._json({"error": "auth", "configured": auth_configured()}, 401); return
-        # журналирование действий: кэшируем тело и перехватываем ответ; в finally
-        # обязательно снимаем инстанс-атрибуты (keep-alive переиспользует handler)
+        # action logging: cache the body and intercept the response; in finally
+        # be sure to remove the instance attributes (keep-alive reuses the handler)
         _oj, _ob, _bc = self._json, self._body, {}
         def _body_cached():
             if "b" not in _bc:
@@ -13341,8 +13341,8 @@ class H(BaseHTTPRequestHandler):
             elif p == "/api/monitor":
                 b = self._body()
                 if b.get("test"):
-                    ok = push_notify("NAS: тест", "Проверка уведомлений с панели управления")
-                    self._json({"ok": ok, "log": "" if ok else "Pushover не настроен: заполните ключи"})
+                    ok = push_notify("NAS: test", "Notification test from the control panel")
+                    self._json({"ok": ok, "log": "" if ok else "Pushover is not configured: fill in the keys"})
                 else:
                     out = {}
                     if isinstance(b.get("notify"), dict):
@@ -13370,7 +13370,7 @@ class H(BaseHTTPRequestHandler):
                 b = self._body(); nm = b.get("name", "")
                 fp = os.path.join(settings_backup_dir(), nm)
                 if not _BK_NAME_RE.match(nm) or not os.path.isfile(fp):
-                    self._json({"ok": False, "log": "нет такого бэкапа"}, 404)
+                    self._json({"ok": False, "log": "no such backup"}, 404)
                 else:
                     secs = b.get("sections")
                     self._json(settings_backup_restore(
@@ -13379,14 +13379,14 @@ class H(BaseHTTPRequestHandler):
                 b = self._body(); nm = b.get("name", "")
                 fp = os.path.join(settings_backup_dir(), nm)
                 if not _BK_NAME_RE.match(nm) or not os.path.isfile(fp):
-                    self._json({"ok": False, "log": "нет такого бэкапа"}, 404)
+                    self._json({"ok": False, "log": "no such backup"}, 404)
                 else:
                     os.remove(fp); self._json({"ok": True})
             elif p == "/api/settings-backup/upload":
-                # восстановление из файла с компьютера: тело запроса = tar.gz
+                # restore from a file on the computer: request body = tar.gz
                 n = int(self.headers.get("Content-Length", 0) or 0)
                 if n <= 0 or n > 64 * 1024 * 1024:
-                    self._json({"ok": False, "log": "плохой размер архива"}, 400)
+                    self._json({"ok": False, "log": "bad archive size"}, 400)
                 else:
                     tmp = os.path.join(settings_backup_dir(), ".upload.tmp")
                     with open(tmp, "wb") as f:
@@ -13396,25 +13396,25 @@ class H(BaseHTTPRequestHandler):
                             if not chunk:
                                 break
                             f.write(chunk); remaining -= len(chunk)
-                    # Не восстанавливаем сразу: кладём архив в список и отдаём имя,
-                    # чтобы клиент показал тот же диалог выбора разделов. Иначе
-                    # чужой файл молча перезаписал бы пароль панели.
+                    # Don't restore right away: put the archive in the list and return its name,
+                    # so the client shows the same section-selection dialog. Otherwise
+                    # a foreign file would silently overwrite the panel password.
                     info = settings_backup_inspect(tmp) if remaining == 0 \
-                        else {"ok": False, "log": "обрыв загрузки"}
+                        else {"ok": False, "log": "upload interrupted"}
                     if not info.get("ok") or not info.get("sections"):
                         try:
                             os.remove(tmp)
                         except OSError:
                             pass
                         self._json({"ok": False, "log": info.get("log")
-                                    or "в архиве нет файлов настроек NAS-OS"}, 400)
+                                    or "the archive contains no NAS-OS settings files"}, 400)
                     else:
-                        # дата в имени — чтобы ротация по backup_keep резала по возрасту
+                        # date in the name — so rotation by backup_keep cuts by age
                         name = "nas-settings-%s-up.tar.gz" % time.strftime("%Y%m%d-%H%M%S")
                         dst = os.path.join(settings_backup_dir(), name)
                         os.replace(tmp, dst); os.chmod(dst, 0o600)
                         self._json({"ok": True, "name": name, "sections": info["sections"],
-                                    "log": "архив загружен"})
+                                    "log": "archive uploaded"})
             elif p == "/api/unit/save":
                 b = self._body(); self._json(unit_write(b.get("name", ""), b.get("content", "")))
             elif p == "/api/unit/create":
@@ -13454,35 +13454,35 @@ class H(BaseHTTPRequestHandler):
             elif p == "/api/disk/label":
                 b = self._body(); dev = b.get("dev", ""); label = b.get("label", "")
                 if not re.match(r"^/dev/[\w-]+$", dev or ""):
-                    self._json({"ok": False, "log": "недопустимое устройство"}, 400)
+                    self._json({"ok": False, "log": "invalid device"}, 400)
                 elif not re.match(r"^[A-Za-z0-9._-]{1,16}$", label or ""):
-                    self._json({"ok": False, "log": "недопустимая метка (латиница/цифры/._-, до 16)"}, 400)
+                    self._json({"ok": False, "log": "invalid label (Latin letters/digits/._-, up to 16)"}, 400)
                 else:
                     self._json(engine("label-disk", {"dev": dev, "label": label}))
             elif p == "/api/disk/format":
                 b = self._body(); dev = b.get("dev", ""); label = b.get("label", "")
                 if not re.match(r"^/dev/[\w-]+$", dev or ""):
-                    self._json({"ok": False, "log": "недопустимое устройство"}, 400)
+                    self._json({"ok": False, "log": "invalid device"}, 400)
                 elif b.get("role", "data") not in ("data", "parity", "usb"):
-                    self._json({"ok": False, "log": "недопустимая роль"}, 400)
+                    self._json({"ok": False, "log": "invalid role"}, 400)
                 elif b.get("fs", "ext4") not in ("ext4", "xfs", "btrfs", "exfat", "ntfs", "vfat"):
-                    self._json({"ok": False, "log": "недопустимая ФС"}, 400)
+                    self._json({"ok": False, "log": "invalid filesystem"}, 400)
                 elif label and not re.match(r"^[A-Za-z0-9._-]{1,16}$", label):
-                    self._json({"ok": False, "log": "недопустимая метка (латиница/цифры/._-, до 16)"}, 400)
+                    self._json({"ok": False, "log": "invalid label (Latin letters/digits/._-, up to 16)"}, 400)
                 elif any(mp in _SYS_MPS or mp == STORAGE or mp.startswith("/mnt/disk") or mp.startswith("/mnt/parity")
                          for mp in _disk_mountpoints(dev)):
-                    # защита в вебе поверх движка: не форматировать системный/пуловый диск
-                    self._json({"ok": False, "log": "это системный или пуловый диск — форматирование запрещено"}, 400)
+                    # web-side guard on top of the engine: don't format the system/pool disk
+                    self._json({"ok": False, "log": "this is a system or pool disk — formatting is not allowed"}, 400)
                 else:
                     self._json(engine("format-disk", {"dev": dev, "role": b.get("role", "data"),
                         "fs": b.get("fs", "ext4"), "label": label}, dry=b.get("dry", False)))
             elif p == "/api/disk/mount-dev":
                 b = self._body(); dev = b.get("dev", ""); target = (b.get("target") or "").strip()
                 if not re.match(r"^/dev/[\w-]+$", dev or ""):
-                    self._json({"ok": False, "log": "недопустимое устройство"}, 400)
+                    self._json({"ok": False, "log": "invalid device"}, 400)
                 elif target and (not re.match(r"^/[A-Za-z0-9._/ -]{1,120}$", target) or ".." in target
                                  or target in ("/", "/etc", "/usr", "/bin", "/boot", "/home", "/var", "/root")):
-                    self._json({"ok": False, "log": "недопустимая точка монтирования"}, 400)
+                    self._json({"ok": False, "log": "invalid mount point"}, 400)
                 else:
                     params = {"dev": dev}
                     if target:
@@ -13503,9 +13503,9 @@ class H(BaseHTTPRequestHandler):
                 b = self._body()
                 user = b.get("user", TARGET_USER); base = b.get("base", "/media/nas")
                 if not re.match(r"^[a-z_][a-z0-9_-]{0,31}$", user or ""):
-                    self._json({"ok": False, "log": "недопустимое имя пользователя"}, 400)
+                    self._json({"ok": False, "log": "invalid user name"}, 400)
                 elif not re.match(r"^/[A-Za-z0-9._/-]{1,120}$", base or "") or ".." in base:
-                    self._json({"ok": False, "log": "недопустимый базовый каталог"}, 400)
+                    self._json({"ok": False, "log": "invalid base directory"}, 400)
                 else:
                     self._json(engine("automount", {"enable": "1" if b.get("enable", True) else "0",
                         "user": user, "base": base}))
@@ -13581,30 +13581,30 @@ class H(BaseHTTPRequestHandler):
                 b = self._body()
                 self._json(store_replica_save(b.get("id", ""), b))
             elif p == "/api/store/replica/run":
-                # синхронизация/восстановление реплики — долгий bash со стримом лога
+                # replica sync/restore — a long bash with a log stream
                 b = self._body()
                 try:
                     script, env = store_replica_script(b.get("id", ""),
                                                        "restore" if b.get("mode") == "restore" else "sync")
                 except ValueError as e:
                     self._json({"ok": False, "log": str(e)}); return
-                log_event("action", "Реплика %s: %s" % (b.get("id", ""),
-                          "восстановление" if b.get("mode") == "restore" else "синхронизация"),
+                log_event("action", "Replica %s: %s" % (b.get("id", ""),
+                          "restore" if b.get("mode") == "restore" else "sync"),
                           "", "ok", kind="svc", desk=False)
                 self._stream_cmd(["bash", "-c", script],
                                  env=dict(_C_ENV, **env), timeout=86400)
             elif p == "/api/stack/stream":
-                # долгие compose-действия (up при установке, pull) — стримом
+                # long compose actions (up on install, pull) — via stream
                 b = self._body()
                 name, action = b.get("name", ""), b.get("action", "")
                 amap = {"up": ["up", "-d"], "pull": ["pull"], "update": ["pull"],
                         "rebuild": ["up", "-d", "--build"]}
                 if not _STACK_RE.match(name) or not os.path.isfile(_compose_path(name)) \
                         or action not in amap:
-                    self._json({"ok": False, "log": "недопустимый стек/действие"}); return
+                    self._json({"ok": False, "log": "invalid stack/action"}); return
                 wud_invalidate()
                 args = ["docker", "compose", "-f", _compose_path(name), "-p", name] + amap[action]
-                if action == "update":       # pull + перезапуск одной кнопкой
+                if action == "update":       # pull + restart with one button
                     self._stream_cmd(["bash", "-c",
                         "%s && docker compose -f %s -p %s up -d" %
                         (" ".join(map(shlex.quote, args)),
@@ -13612,7 +13612,7 @@ class H(BaseHTTPRequestHandler):
                 else:
                     self._stream_cmd(args, timeout=3600)
             elif p == "/api/updates/apply":
-                # установка обновлений apt со стримом лога; DEBIAN_FRONTEND чтобы не задавало вопросов
+                # installing apt updates with a log stream; DEBIAN_FRONTEND so it asks no questions
                 self._body()
                 env = dict(_C_ENV, DEBIAN_FRONTEND="noninteractive")
                 self._stream_cmd(["apt-get", "-y",
@@ -13620,7 +13620,7 @@ class H(BaseHTTPRequestHandler):
                                   "-o", "Dpkg::Options::=--force-confdef", "upgrade"],
                                  env=env, timeout=3600)
                 try:
-                    log_event("action", "Обновление пакетов apt", "", "ok", kind="action", desk=True)
+                    log_event("action", "apt package update", "", "ok", kind="action", desk=True)
                 except Exception:
                     pass
             elif p == "/api/backup/config":
@@ -13652,13 +13652,13 @@ class H(BaseHTTPRequestHandler):
             elif p == "/api/backup/cancel":
                 b = self._body()
                 pid = nb_load(_nb_bpid(b))["id"]
-                _nb_queue_remove(pid)                        # если ещё не стартовал — просто выкинуть из очереди
+                _nb_queue_remove(pid)                        # if it hasn't started yet — just drop it from the queue
                 try:
-                    open(nb_run_cancel(pid), "w").close()    # флаг для процесса-драйвера в юните
+                    open(nb_run_cancel(pid), "w").close()    # flag for the driver process in the unit
                 except OSError:
                     pass
-                # пометить остановку в состоянии: панель показывает «останавливаю…» даже
-                # если страницу перезагрузили, пока rsync доумирает
+                # mark the stop in the state: the panel shows "stopping…" even
+                # if the page was reloaded while rsync finishes dying
                 st = _nb_run_state_read(pid)
                 if st.get("running"):
                     st["stopping"] = int(time.time())
@@ -13670,12 +13670,12 @@ class H(BaseHTTPRequestHandler):
                 path = str(b.get("path", "")).strip()
                 if path:
                     if not path.startswith("/") or ".." in path:
-                        self._json({"ok": False, "log": "путь должен быть абсолютным без .."}); return
+                        self._json({"ok": False, "log": "the path must be absolute without .."}); return
                     params["tm_path"] = path
                 user = str(b.get("user", "")).strip()
                 if user:
                     if not re.match(r"^[a-z_][a-z0-9_-]{0,31}$", user):
-                        self._json({"ok": False, "log": "недопустимое имя пользователя"}); return
+                        self._json({"ok": False, "log": "invalid user name"}); return
                     params["tm_user"] = user
                 if b.get("password"):
                     params["tm_pass"] = str(b.get("password"))
@@ -13699,7 +13699,7 @@ class H(BaseHTTPRequestHandler):
                     try: ts = int(b.get("ts"))
                     except (TypeError, ValueError): ts = None
                     self._json(nb_history_clear(_nb_bpid(b), ts) if ts is not None
-                               else {"ok": False, "log": "нет ts"})
+                               else {"ok": False, "log": "no ts"})
             elif p == "/api/backup/profile":
                 b = self._body(); act = b.get("action", "")
                 if act == "add":
@@ -13710,7 +13710,7 @@ class H(BaseHTTPRequestHandler):
                 elif act == "delete":
                     self._json(nb_profile_delete(_nb_bpid(b), b.get("confirm", "")))
                 else:
-                    self._json({"ok": False, "log": "неизвестное действие"})
+                    self._json({"ok": False, "log": "unknown action"})
             elif p.startswith("/api/setup/"):
                 action = p[len("/api/setup/"):]
                 b = self._body()
@@ -13737,33 +13737,33 @@ def main():
     os.makedirs(WEB_DIR, exist_ok=True)
     ensure_web_assets()
     try:
-        apply_spindown_all()          # восстановить настройки сна дисков после старта/ребута
+        apply_spindown_all()          # restore disk sleep settings after start/reboot
     except Exception:
         pass
     try:
-        _pool_alias_apply(load_maintenance().get("pool_alias", ""))   # симлинк пула (напр. /volume2)
+        _pool_alias_apply(load_maintenance().get("pool_alias", ""))   # pool symlink (e.g. /volume2)
     except Exception:
         pass
     try:
-        _snap_sched_apply(load_maintenance())    # расписание SnapRAID из настроек
+        _snap_sched_apply(load_maintenance())    # SnapRAID schedule from settings
     except Exception:
         pass
     try:
-        _usb_sh_sync()      # хелпер импорта на диске мог протухнуть после git pull
+        _usb_sh_sync()      # the import helper on disk may have gone stale after git pull
     except Exception:
         pass
     try:
-        _nb_migrate()       # старый плоский конфиг бэкапа -> список профилей
+        _nb_migrate()       # old flat backup config -> list of profiles
     except Exception:
         pass
     try:
-        _motd_extras_apply(motd_load())   # чужие куски приветствия — по настройке
+        _motd_extras_apply(motd_load())   # third-party greeting fragments — per setting
     except Exception:
         pass
     threading.Thread(target=monitor_loop, daemon=True).start()
     srv = _Server(("0.0.0.0", PORT), H)
     ip = lan_ip()
-    print(f"nas-web запущен:  http://{ip}:{PORT}   (http://{socket.gethostname()}.local:{PORT})")
+    print(f"nas-web started:  http://{ip}:{PORT}   (http://{socket.gethostname()}.local:{PORT})")
     print(f"  web/     : {WEB_DIR}")
     print(f"  services : {SERVICES}")
     try:
@@ -13775,7 +13775,7 @@ def main():
 if __name__ == "__main__":
     import sys
     if len(sys.argv) > 2 and sys.argv[1] == "thumbs-sweep":
-        print("thumbs-sweep: сгенерировано", thumbs_sweep(sys.argv[2:]), "превью")
+        print("thumbs-sweep: generated", thumbs_sweep(sys.argv[2:]), "previews")
     elif len(sys.argv) > 1 and sys.argv[1] == "backup-run":
         _args = sys.argv[2:]
         _pid = next((a for a in _args if a not in ("dry", "allow-delete")), NB_MAIN)

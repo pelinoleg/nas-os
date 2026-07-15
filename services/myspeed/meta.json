@@ -1,6 +1,6 @@
 {
   "name": "MySpeed",
-  "desc": "Спидтесты интернета по расписанию с историей",
+  "desc": "Scheduled internet speed tests with history",
   "category": "monitor",
   "icon": "https://cdn.jsdelivr.net/gh/selfhst/icons@main/png/myspeed.png",
   "port": 5216

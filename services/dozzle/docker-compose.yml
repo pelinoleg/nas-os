@@ -1,5 +1,5 @@
-# Dozzle — просмотр логов контейнеров в реальном времени. http://<pi>:8083
-# Порт 8080 у Dozzle и Scrutiny совпадает — Dozzle вынесен на 8083.
+# Dozzle — real-time container log viewer. http://<pi>:8083
+# Dozzle and Scrutiny both default to port 8080 — Dozzle moved to 8083.
 services:
   dozzle:
     image: amir20/dozzle:v10.6.7

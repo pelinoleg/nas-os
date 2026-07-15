@@ -1,4 +1,4 @@
-# Dockge — менеджер docker-compose стеков (веб UI). http://<pi>:5001
+# Dockge — docker-compose stack manager (web UI). http://<pi>:5001
 services:
   dockge:
     image: louislam/dockge:1.5.0
@@ -13,6 +13,6 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /opt/docker/dockge/data:/app/data
-      - /opt/stacks:/opt/stacks           # стеки, которыми управляет Dockge
+      - /opt/stacks:/opt/stacks           # stacks managed by Dockge
     environment:
       - DOCKGE_STACKS_DIR=/opt/stacks

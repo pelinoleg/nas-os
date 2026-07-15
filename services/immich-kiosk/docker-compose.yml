@@ -1,6 +1,6 @@
-# Immich Kiosk — цифровая фоторамка поверх Immich (слайдшоу на ТВ/планшете).
-# http://<pi>:3001. Требует работающий Immich и его API-ключ (Immich →
-# Account Settings → API Keys). Секреты и персональные списки — в .env.
+# Immich Kiosk — digital photo frame on top of Immich (slideshow on TV/tablet).
+# http://<pi>:3001. Requires a running Immich and its API key (Immich →
+# Account Settings → API Keys). Secrets and personal lists — in .env.
 name: immich-kiosk
 
 services:
@@ -9,20 +9,20 @@ services:
     container_name: immich-kiosk
     environment:
       TZ: ${TZ:-Europe/Madrid}
-      # -- подключение к Immich (задаётся в .env) --
+      # -- connection to Immich (set in .env) --
       KIOSK_IMMICH_URL: ${KIOSK_IMMICH_URL}
       KIOSK_IMMICH_API_KEY: ${KIOSK_IMMICH_API_KEY}
-      # внешний адрес для ссылок/QR-кодов на фото (пусто = не показывать)
+      # external address for links/QR codes on photos (empty = don't show)
       KIOSK_IMMICH_EXTERNAL_URL: ${KIOSK_IMMICH_EXTERNAL_URL:-}
-      # -- что показывать --
-      KIOSK_ALBUMS: ${KIOSK_ALBUMS:-}            # id альбомов через запятую (пусто = все)
+      # -- what to show --
+      KIOSK_ALBUMS: ${KIOSK_ALBUMS:-}            # comma-separated album ids (empty = all)
       KIOSK_EXCLUDED_ALBUMS: ${KIOSK_EXCLUDED_ALBUMS:-}
-      KIOSK_PEOPLE: ${KIOSK_PEOPLE:-}            # id людей через запятую
-      KIOSK_DATES: ${KIOSK_DATES:-}              # напр. "last-7-days, last-30-days"
+      KIOSK_PEOPLE: ${KIOSK_PEOPLE:-}            # comma-separated people ids
+      KIOSK_DATES: ${KIOSK_DATES:-}              # e.g. "last-7-days, last-30-days"
       KIOSK_MEMORIES: ${KIOSK_MEMORIES:-true}
       KIOSK_SHOW_ARCHIVED: "false"
       KIOSK_ALBUM_ORDER: random
-      # -- часы и подписи --
+      # -- clock and labels --
       KIOSK_SHOW_TIME: "true"
       KIOSK_TIME_FORMAT: 24
       KIOSK_SHOW_DATE: "true"
@@ -36,8 +36,8 @@ services:
       KIOSK_SHOW_MORE_INFO: "true"
       KIOSK_SHOW_MORE_INFO_IMAGE_LINK: "true"
       KIOSK_SHOW_MORE_INFO_QR_CODE: "true"
-      # -- поведение и вид --
-      KIOSK_DURATION: ${KIOSK_DURATION:-15}      # секунд на кадр
+      # -- behavior and appearance --
+      KIOSK_DURATION: ${KIOSK_DURATION:-15}      # seconds per slide
       KIOSK_DISABLE_SCREENSAVER: "true"
       KIOSK_OPTIMIZE_IMAGES: "true"
       KIOSK_USE_GPU: "true"
@@ -48,7 +48,7 @@ services:
       KIOSK_TRANSITION: none
       KIOSK_SHOW_PROGRESS_BAR: "true"
       KIOSK_FONT_SIZE: ${KIOSK_FONT_SIZE:-200}
-      # -- служебное --
+      # -- internal --
       KIOSK_PORT: 3001
       KIOSK_PREFETCH: "true"
       KIOSK_FETCHED_ASSETS_SIZE: 500

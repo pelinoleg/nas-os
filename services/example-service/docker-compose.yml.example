@@ -1,8 +1,8 @@
-# ШАБЛОН. Скопируйте папку, переименуйте файл в docker-compose.yml, отредактируйте.
-# Визард видит только docker-compose.yml / .yaml / compose.yml / .yaml (НЕ .example).
+# TEMPLATE. Copy the folder, rename the file to docker-compose.yml, edit it.
+# The wizard only sees docker-compose.yml / .yaml / compose.yml / .yaml (NOT .example).
 services:
   myservice:
-    image: ghcr.io/example/myservice:1.2.3    # фиксированный тег, НЕ latest
+    image: ghcr.io/example/myservice:1.2.3    # pinned tag, NOT latest
     container_name: myservice
     restart: unless-stopped
     environment:
@@ -12,7 +12,7 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - /opt/docker/myservice/config:/config          # конфиг контейнера
-      - /mnt/storage/myservice:/data                   # данные на пуле mergerfs
+      - /opt/docker/myservice/config:/config          # container config
+      - /mnt/storage/myservice:/data                   # data on the mergerfs pool
     security_opt:
       - no-new-privileges:true

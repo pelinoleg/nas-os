@@ -1,6 +1,6 @@
 {
   "name": "Zerobyte",
-  "desc": "Бэкапы наружу: restic-снимки в облако/на другой диск, веб-интерфейс",
+  "desc": "Off-site backups: restic snapshots to a cloud/another disk, web UI",
   "category": "backup",
   "icon": "https://cdn.jsdelivr.net/gh/selfhst/icons@main/svg/zerobyte.svg",
   "port": 4096

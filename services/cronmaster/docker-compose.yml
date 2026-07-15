@@ -1,10 +1,10 @@
-# Cronmaster — управление cron-задачами ХОСТА (веб-UI + REST API). http://<pi>:8123
-# Открытый доступ в LAN: AUTH_PASSWORD и API_KEY НЕ заданы → без пароля (как договорено).
-# Управляет кроном хоста напрямую → нужны privileged, pid:host и docker.sock (штатно для cronmaster).
-# Данные/скрипты/сниппеты лежат рядом со стеком (./data ./scripts ./snippets в каталоге Dockge).
+# Cronmaster — manages HOST cron jobs (web UI + REST API). http://<pi>:8123
+# Open access on the LAN: AUTH_PASSWORD and API_KEY are NOT set → no password (as agreed).
+# Manages the host's cron directly → needs privileged, pid:host and docker.sock (standard for cronmaster).
+# Data/scripts/snippets live next to the stack (./data ./scripts ./snippets in the Dockge folder).
 services:
   cronmaster:
-    image: ghcr.io/fccview/cronmaster:latest   # проверьте/зафиксируйте тег после установки
+    image: ghcr.io/fccview/cronmaster:latest   # check/pin the tag after installing
     container_name: cronmaster
     user: "root"
     restart: unless-stopped

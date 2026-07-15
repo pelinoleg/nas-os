@@ -1,5 +1,5 @@
-# nas-wizard: тёмная тема для dialog. Подключается через DIALOGRC.
-# Формат: element = (foreground, background, highlight)
+# nas-wizard: dark theme for dialog. Enabled via DIALOGRC.
+# Format: element = (foreground, background, highlight)
 use_shadow = ON
 use_colors = ON
 

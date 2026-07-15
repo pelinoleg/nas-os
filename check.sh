@@ -17,8 +17,8 @@ ok(){   printf '  \033[32m✓\033[0m %s\n' "$1"; }
 bad(){  printf '  \033[31m✗\033[0m %s\n' "$1"; FAIL=$((FAIL+1)); }
 skip(){ printf '  \033[33m—\033[0m %s\n' "$1"; }
 head(){ printf '\n\033[1m%s\033[0m\n' "$1"; }
-# NB: не называть массив GROUPS — это встроенная переменная bash (id групп),
-# присваивание в неё молча игнорируется.
+# NB: don't name the array GROUPS — that's a bash builtin variable (group ids),
+# assigning to it is silently ignored.
 CHECKS=("$@"); [ ${#CHECKS[@]} -eq 0 ] && CHECKS=(py sh gen js css i18n git)
 has(){ local g; for g in "${CHECKS[@]}"; do [ "$g" = "$1" ] && return 0; done; return 1; }
 
@@ -62,7 +62,7 @@ PY
 }
 
 node_check(){   # node_check <file> <label>
-  if ! command -v docker >/dev/null 2>&1; then skip "$2 (нет docker)"; return; fi
+  if ! command -v docker >/dev/null 2>&1; then skip "$2 (no docker)"; return; fi
   local d; d="$(cd "$(dirname "$1")" && pwd)"
   if docker run --rm -v "$d":/w node:20-alpine node --check "/w/$(basename "$1")" >/dev/null 2>&1
     then ok "$2"; else bad "$2"; fi
@@ -72,7 +72,7 @@ node_check(){   # node_check <file> <label>
 if has py; then
   head "Python"
   RUN=1
-  python3 -m py_compile nas-web.py 2>/dev/null && ok "nas-web.py компилируется" || bad "nas-web.py"
+  python3 -m py_compile nas-web.py 2>/dev/null && ok "nas-web.py compiles" || bad "nas-web.py"
 fi
 
 # ------------------------------------------------------------------- shell --
@@ -87,36 +87,36 @@ fi
 
 # ------------------------------------ scripts generated at install/run time --
 if has gen; then
-  head "Генерируемые скрипты (heredoc)"
+  head "Generated scripts (heredoc)"
   RUN=1
   for k in usb-import netguard motd dispatcher; do
     if extract "$k" "$TMP/$k.sh" 2>/dev/null; then
       bash -n "$TMP/$k.sh" 2>/dev/null && ok "$k" || bad "$k (bash -n)"
     else
-      bad "$k (блок не найден — переименовали heredoc?)"
+      bad "$k (block not found — heredoc renamed?)"
     fi
   done
 fi
 
 # ------------------------------------------------------------- html js/css --
 if has js || has css; then
-  head "Веб"
+  head "Web"
   RUN=1
-  if split_html web/desktop.html 2>"$TMP/css.err"; then ok "desktop.html: CSS сбалансирован"
+  if split_html web/desktop.html 2>"$TMP/css.err"; then ok "desktop.html: CSS balanced"
   else bad "desktop.html: $(cat "$TMP/css.err")"; fi
-  has js && node_check "$TMP/inline.js" "desktop.html: инлайн-JS"
+  has js && node_check "$TMP/inline.js" "desktop.html: inline JS"
   has js && for f in web/i18n.js web/sw.js; do node_check "$f" "$f"; done
 fi
 
 # --------------------------------------------------------------------- i18n --
 if has i18n; then
-  head "Переводы"
+  head "Translations"
   RUN=1
-python3 - <<'PY' && ok "все строки UI переведены" || bad "есть непереведённые строки (см. выше)"
+python3 - <<'PY' && ok "all UI strings are translated" || bad "there are untranslated strings (see above)"
 import re, sys
 src = open("web/i18n.js", encoding="utf-8").read()
-# пары ищем где угодно: в i18n.js часть словаря записана по несколько пар в строку,
-# и построчный разбор молча терял их (дни недели считались непереведёнными)
+# search for pairs anywhere: part of the dictionary in i18n.js has several pairs per line,
+# and a line-by-line parse would silently lose them (weekday names counted as untranslated)
 pairs = re.findall(r'"((?:[^"\\]|\\.)*)"\s*:\s*"((?:[^"\\]|\\.)*)"', src)
 m = {a.replace('\\"', '"'): b for a, b in pairs}
 keys = sorted([k for k in m if k], key=len, reverse=True)
@@ -134,20 +134,20 @@ for t in lits:
     lit = next((x for x in t if x), "")
     if not CY.search(lit):
         continue
-    # теги НЕ вырезаем: nasTr переводит сырую строку innerHTML, и ключи вроде
-    # "<имя>.local" содержат угловые скобки. Убираем только ${...}-вставки.
+    # tags are NOT stripped: nasTr translates the raw innerHTML string, and keys like
+    # "<name>.local" contain angle brackets. Only ${...} interpolations are removed.
     s = re.sub(r"\$\{[^{}]*\}", "", lit)
     left = CY.findall(tr(s))
     if left:
         bad.append((sorted(set(left))[:4], lit[:70].replace("\n", " ")))
 for words, ex in bad[:12]:
-    print("      осталось %s  ⟵ %s" % (", ".join(words), ex), file=sys.stderr)
+    print("      left over %s  ⟵ %s" % (", ".join(words), ex), file=sys.stderr)
 if len(bad) > 12:
-    print("      … ещё %d" % (len(bad) - 12), file=sys.stderr)
+    print("      … %d more" % (len(bad) - 12), file=sys.stderr)
 
-# серверные строки уведомлений (fire/log_event/notify_event/push_notify) уходят в
-# Pushover через серверный tr() и в панель через клиентский — оба берут тот же
-# словарь, поэтому непереведённый фрагмент здесь = русская Pushover-нотификация.
+# server-side notification strings (fire/log_event/notify_event/push_notify) go to
+# Pushover through the server-side tr() and to the panel through the client-side one — both use
+# the same dictionary, so an untranslated fragment here means a Russian Pushover notification.
 import ast
 NOTIFY = {"fire", "log_event", "notify_event", "push_notify"}
 nstr = set()
@@ -166,7 +166,7 @@ for s in nstr:
         if [w for w in left if len(w) > 1]:
             nbad.append((sorted(set(left))[:4], s[:60].replace("\n", " ")))
 for words, ex in nbad[:12]:
-    print("      [уведомление] осталось %s  ⟵ %s" % (", ".join(words), ex), file=sys.stderr)
+    print("      [notification] left over %s  ⟵ %s" % (", ".join(words), ex), file=sys.stderr)
 
 sys.exit(1 if bad or nbad else 0)
 PY
@@ -176,11 +176,11 @@ fi
 if has git; then
   head "Git"
   RUN=1
-  if [ -z "$(git status --porcelain)" ]; then ok "дерево чистое"
-  else skip "есть незакоммиченные правки"; git status --short | sed 's/^/      /'; fi
+  if [ -z "$(git status --porcelain)" ]; then ok "tree is clean"
+  else skip "there are uncommitted changes"; git status --short | sed 's/^/      /'; fi
 fi
 
 printf '\n'
-if [ "$RUN" = 0 ]; then echo "нечего запускать: неизвестные группы"; exit 2; fi
-if [ "$FAIL" = 0 ]; then printf '\033[32mВСЁ ЧИСТО\033[0m\n'; else printf '\033[31mПРОВАЛОВ: %d\033[0m\n' "$FAIL"; fi
+if [ "$RUN" = 0 ]; then echo "nothing to run: unknown groups"; exit 2; fi
+if [ "$FAIL" = 0 ]; then printf '\033[32mALL CLEAN\033[0m\n'; else printf '\033[31mFAILURES: %d\033[0m\n' "$FAIL"; fi
 exit $((FAIL > 0))

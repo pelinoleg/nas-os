@@ -1,6 +1,6 @@
 {
   "name": "Whats Up Docker",
-  "desc": "Следит за обновлениями docker-образов (панель уже интегрирована)",
+  "desc": "Watches for docker image updates (already integrated with the panel)",
   "category": "tools",
   "icon": "https://cdn.jsdelivr.net/gh/selfhst/icons@main/svg/whats-up-docker.svg",
   "port": 3005

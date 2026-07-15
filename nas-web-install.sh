@@ -1,26 +1,26 @@
 #!/usr/bin/env bash
-# Установить рабочий стол NAS как системную службу (автозапуск после перезагрузки,
-# от root — чтобы работали SMART, управление контейнерами и питание).
-# Запуск:  sudo ./nas-web-install.sh
+# Install the NAS desktop as a system service (autostart after reboot,
+# runs as root — so SMART, container management and power all work).
+# Run:  sudo ./nas-web-install.sh
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
 PORT="${NAS_WEB_PORT:-80}"
 
 if [ "$(id -u)" -ne 0 ]; then
-  echo "Нужен root. Запустите: sudo $0"
+  echo "Root required. Run: sudo $0"
   exit 1
 fi
 
-# кто вызвал sudo — для SUDO_USER (терминал роняет root -> этот юзер) и прав
+# whoever invoked sudo — for SUDO_USER (the terminal drops root -> this user) and permissions
 TARGET_USER="${SUDO_USER:-}"
 [ -n "$TARGET_USER" ] || TARGET_USER="$(logname 2>/dev/null || id -un 1000 2>/dev/null || echo root)"
 
-# остановить фоновый экземпляр, если запускался вручную
+# stop the background instance if it was started manually
 pkill -f "nas-web.py" 2>/dev/null || true
 sleep 1
 
-# Юнит генерируем из фактического расположения и пользователя (а не из статического
-# файла с захардкоженным путём) — чтобы работал из любого каталога (/opt/nas-os, ~, …).
+# The unit is generated from the actual location and user (not from a static
+# file with a hardcoded path) — so it works from any directory (/opt/nas-os, ~, …).
 cat >/etc/systemd/system/nas-web.service <<UNIT
 [Unit]
 Description=NAS OS web desktop & setup wizard
@@ -47,4 +47,4 @@ sleep 1
 systemctl --no-pager --lines=3 status nas-web.service || true
 IP="$(hostname -I 2>/dev/null | awk '{print $1}')"
 echo
-echo "Готово. Рабочий стол:  http://$(hostname).local   (http://${IP})   — порт $PORT"
+echo "Done. Desktop:  http://$(hostname).local   (http://${IP})   — port $PORT"

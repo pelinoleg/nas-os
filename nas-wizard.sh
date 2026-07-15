@@ -1,59 +1,59 @@
 #!/usr/bin/env bash
 #
-# nas-wizard.sh — Wizard настройки NAS на Raspberry Pi 5
+# nas-wizard.sh — NAS setup wizard for Raspberry Pi 5
 #
-# Реализованы этапы (по ТЗ):
-#   1.  Подготовка системы (NAS-стек + утилиты + Pi-пакеты, cockpit, docker,
-#       группы, fstrim, каталоги, hostname/tz)
-#   2.  Работа с диском (формат -> fstab -> mount), данные ИЛИ parity
-#   2b. mergerfs — пул из >=2 дисков данных (авто при добавлении 2-го диска)
-#   3.  SnapRAID — snapraid.conf, sync с защитой от массового удаления,
-#       systemd-таймеры (sync ежедневно / scrub еженедельно), уведомления
-#   4.  Docker — читает ./services/<service>/*.yml РЯДОМ СО СКРИПТОМ, чеклист
-#       "какие поднять", up/down, генерирует deploy.sh ("применить всё разом")
-#   5.  Pi-тюнинг — PCIe Gen3, USB max current, memory cgroup, sysctl, zram,
-#       watchdog, EEPROM, Wi-Fi powersave, temp/throttle (opt-in чеклист)
-#   6.  Безопасность — unattended-upgrades, journald cap, log2ram, ufw, fail2ban,
-#       SSH key-only (безопасно: только при наличии ключей)
-#   7.  Сетевые шары — Samba / NFS к /mnt/storage + Avahi (mDNS)
-#   8.  Бэкапы/мониторинг — smartd-алерты, health-таймер (диск/температура),
-#       Уведомления через Pushover. Плюс api-режим для веб-морды (nas-web.py).
+# Implemented stages (per spec):
+#   1.  System preparation (NAS stack + utilities + Pi packages, cockpit, docker,
+#       groups, fstrim, directories, hostname/tz)
+#   2.  Disk handling (format -> fstab -> mount), data OR parity
+#   2b. mergerfs — pool of >=2 data disks (auto when a 2nd disk is added)
+#   3.  SnapRAID — snapraid.conf, sync with mass-delete protection,
+#       systemd timers (sync daily / scrub weekly), notifications
+#   4.  Docker — reads ./services/<service>/*.yml NEXT TO THE SCRIPT, checklist
+#       "which to bring up", up/down, generates deploy.sh ("apply everything at once")
+#   5.  Pi tuning — PCIe Gen3, USB max current, memory cgroup, sysctl, zram,
+#       watchdog, EEPROM, Wi-Fi powersave, temp/throttle (opt-in checklist)
+#   6.  Security — unattended-upgrades, journald cap, log2ram, ufw, fail2ban,
+#       SSH key-only (safe: only when keys are present)
+#   7.  Network shares — Samba / NFS to /mnt/storage + Avahi (mDNS)
+#   8.  Backups/monitoring — smartd alerts, health timer (disk/temperature),
+#       Notifications via Pushover. Plus api mode for the web UI (nas-web.py).
 #
-# Принципы: идемпотентность, --dry-run, логирование, подтверждение разрушительных
-# операций, бэкап fstab, защита системного диска, версионирование конфигов в git.
+# Principles: idempotency, --dry-run, logging, confirmation of destructive
+# operations, fstab backup, system disk protection, config versioning in git.
 #
-# Использование:
-#   sudo ./nas-wizard.sh                   # интерактивное меню
-#   sudo ./nas-wizard.sh --dry-run         # ничего не меняет, печатает план действий
-#   sudo ./nas-wizard.sh --stage snapraid  # прогнать только один этап
-#     (этапы: system | disk | mergerfs | snapraid | docker)
+# Usage:
+#   sudo ./nas-wizard.sh                   # interactive menu
+#   sudo ./nas-wizard.sh --dry-run         # changes nothing, prints the action plan
+#   sudo ./nas-wizard.sh --stage snapraid  # run only one stage
+#     (stages: system | disk | mergerfs | snapraid | docker)
 #
 set -o pipefail
 
 # ---------------------------------------------------------------------------
-# Глобальные настройки
+# Global settings
 # ---------------------------------------------------------------------------
 DRY_RUN=0
 FORCE_STAGE=""
 LOG="/var/log/nas-wizard.log"
 
-# Каталог самого скрипта (docker-сервисы лежат рядом со скриптом, в ./services/)
+# Directory of the script itself (docker services live next to the script, in ./services/)
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "$0" 2>/dev/null || echo "$0")")" 2>/dev/null && pwd || echo "$PWD")"
 SERVICES_SRC="$SCRIPT_DIR/services"
 
-# --- Пакеты (whiptail не ставим — он нужен, чтобы этот скрипт вообще работал) ---
-# NAS-стек
-# docker-ce/compose-plugin ставятся отдельно из официального репо Docker (см. ensure_docker_repo) —
-# в репах Debian/RPi OS их нет. Здесь только пакеты, доступные в штатных репозиториях.
+# --- Packages (we don't install whiptail — it's needed for this script to work at all) ---
+# NAS stack
+# docker-ce/compose-plugin are installed separately from the official Docker repo (see ensure_docker_repo) —
+# they aren't in the Debian/RPi OS repos. Here only packages available in the stock repositories.
 STACK_PACKAGES=(cockpit cockpit-storaged cockpit-networkmanager mergerfs snapraid smartmontools)
-# Утилиты общего назначения — то, что почти всегда нужно на сервере/NAS
+# General-purpose utilities — what a server/NAS almost always needs
 UTIL_PACKAGES=(
-  vnstat              # счётчик трафика по интерфейсам (виджет «Трафик» в панели)
-  sshfs               # «Серверы» в файловом менеджере панели: SSH-маунты в /mnt/remote
+  vnstat              # per-interface traffic counter («Traffic» widget in the panel)
+  sshfs               # «Servers» in the panel file manager: SSH mounts in /mnt/remote
   dialog
-  libheif-examples   # heif-convert: HEIC с айфона нарезан плитками, ffmpeg берёт лишь одну
-  eject              # мягкое извлечение носителя после USB-импорта (power-off гасит весь ридер)
-  iputils-arping     # nas-netguard: запасная проверка шлюза, если он молчит на ICMP
+  libheif-examples   # heif-convert: iPhone HEIC is sliced into tiles, ffmpeg takes only one
+  eject              # soft media ejection after USB import (power-off kills the whole reader)
+  iputils-arping     # nas-netguard: fallback gateway check when it stays silent on ICMP
   curl wget ca-certificates gnupg
   git rsync sshpass
   vim nano
@@ -68,14 +68,14 @@ UTIL_PACKAGES=(
   unattended-upgrades apt-listchanges
   ffmpeg poppler-utils
 )
-# Pi-специфичное
+# Pi-specific
 PI_PACKAGES=(libraspberrypi-bin raspi-config rpi-eeprom)
 
-# Точки монтирования / каталоги
+# Mount points / directories
 STORAGE_MNT="/mnt/storage"
-DOCKER_ROOT="/opt/docker"          # конфиги контейнеров: /opt/docker/<service>/
+DOCKER_ROOT="/opt/docker"          # container configs: /opt/docker/<service>/
 
-# Пользователь, от имени которого настраиваем (не root)
+# The user we set things up for (not root)
 TARGET_USER="${SUDO_USER:-$(logname 2>/dev/null || echo "")}"
 if [ -z "$TARGET_USER" ] || [ "$TARGET_USER" = "root" ]; then
     TARGET_USER="$(id -un 1000 2>/dev/null || echo "oleg")"
@@ -85,28 +85,28 @@ TARGET_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
 NAS_CONFIG="$TARGET_HOME/nas-config"
 
 # ---------------------------------------------------------------------------
-# Разбор аргументов
+# Argument parsing
 # ---------------------------------------------------------------------------
 usage() {
     cat <<EOF
-nas-wizard.sh — настройка NAS на Raspberry Pi 5
+nas-wizard.sh — NAS setup on Raspberry Pi 5
 
-  --dry-run           Печатать команды, ничего не менять
-  --stage system      Этап 1: подготовка системы
-  --stage disk        Этап 2: работа с диском (формат/fstab/mount)
-  --stage mergerfs    Этап 2b: собрать/обновить пул mergerfs
-  --stage snapraid    Этап 3: SnapRAID (conf, sync, таймеры)
-  --stage docker      Этап 4: Docker (найти compose-папки и поднять)
-  --stage pi          Этап 5: Pi-тюнинг (PCIe, USB-питание, watchdog)
-  --stage security    Этап 6: Безопасность (ufw, fail2ban, SSH, journald)
-  --stage shares      Этап 7: Сетевые шары (Samba/NFS/Avahi)
-  --stage backup      Этап 8: Бэкапы и мониторинг (SMART, health)
-  -h, --help          Эта справка
+  --dry-run           Print commands, change nothing
+  --stage system      Stage 1: system preparation
+  --stage disk        Stage 2: disk handling (format/fstab/mount)
+  --stage mergerfs    Stage 2b: build/update the mergerfs pool
+  --stage snapraid    Stage 3: SnapRAID (conf, sync, timers)
+  --stage docker      Stage 4: Docker (find compose folders and bring up)
+  --stage pi          Stage 5: Pi tuning (PCIe, USB power, watchdog)
+  --stage security    Stage 6: Security (ufw, fail2ban, SSH, journald)
+  --stage shares      Stage 7: Network shares (Samba/NFS/Avahi)
+  --stage backup      Stage 8: Backups and monitoring (SMART, health)
+  -h, --help          This help
 EOF
 }
 
-# Headless API-режим для веб-морды (nas-web.py): `nas-wizard.sh api <action>`.
-# Параметры приходят через переменные окружения NASW_*, dry-run через NASW_DRYRUN=1.
+# Headless API mode for the web UI (nas-web.py): `nas-wizard.sh api <action>`.
+# Parameters arrive via NASW_* environment variables, dry-run via NASW_DRYRUN=1.
 API_ACTION=""
 if [ "${1:-}" = "api" ]; then
     API_ACTION="${2:-}"
@@ -120,28 +120,28 @@ while [ $# -gt 0 ]; do
         --stage)   FORCE_STAGE="$2"; shift ;;
         --stage=*) FORCE_STAGE="${1#*=}" ;;
         -h|--help) usage; exit 0 ;;
-        *) echo "Неизвестный аргумент: $1" >&2; usage; exit 2 ;;
+        *) echo "Unknown argument: $1" >&2; usage; exit 2 ;;
     esac
     shift
 done
 
 # ---------------------------------------------------------------------------
-# Логирование
+# Logging
 # ---------------------------------------------------------------------------
 ts() { date '+%Y-%m-%d %H:%M:%S'; }
 
 log() {
-    # Пишем в лог (и на stderr в dry-run для наглядности)
+    # Write to the log (and to stderr in dry-run for visibility)
     local msg="$*"
     { printf '%s [%s] %s\n' "$(ts)" "$([ "$DRY_RUN" -eq 1 ] && echo DRY || echo RUN)" "$msg" >>"$LOG"; } 2>/dev/null
 }
 
 info()  { echo "  $*"; log "INFO: $*"; }
 warn()  { echo "  ! $*" >&2; log "WARN: $*"; }
-die()   { echo "  ОШИБКА: $*" >&2; log "ERROR: $*"; exit 1; }
+die()   { echo "  ERROR: $*" >&2; log "ERROR: $*"; exit 1; }
 
-# run — обёртка для МУТИРУЮЩИХ команд (mkfs, mount, systemctl, apt, mkdir ...).
-# Читающие команды (lsblk, blkid, df, findmnt) вызываем напрямую — им dry-run не нужен.
+# run — wrapper for MUTATING commands (mkfs, mount, systemctl, apt, mkdir ...).
+# Read-only commands (lsblk, blkid, df, findmnt) we call directly — they don't need dry-run.
 run() {
     log "CMD: $*"
     if [ "$DRY_RUN" -eq 1 ]; then
@@ -151,18 +151,18 @@ run() {
     "$@" >>"$LOG" 2>&1
     local rc=$?
     if [ $rc -ne 0 ]; then
-        warn "команда завершилась с кодом $rc: $*"
+        warn "command exited with code $rc: $*"
     fi
     return $rc
 }
 
-# remove_fstab_mount — удалить из /etc/fstab строки, монтирующие в заданную точку
-# (кроме комментариев); нужно перед добавлением новой строки с новым UUID.
+# remove_fstab_mount — remove from /etc/fstab the lines mounting to a given point
+# (except comments); needed before adding a new line with a new UUID.
 remove_fstab_mount() {
     local mp="$1"
     [ -n "$mp" ] || return 0
     if [ "$DRY_RUN" -eq 1 ]; then
-        printf '  [DRY-RUN] удалить старые строки fstab для %s\n' "$mp"
+        printf '  [DRY-RUN] remove old fstab lines for %s\n' "$mp"
         return 0
     fi
     [ -f /etc/fstab ] || return 0
@@ -170,11 +170,11 @@ remove_fstab_mount() {
         && cat /etc/fstab.nastmp > /etc/fstab && rm -f /etc/fstab.nastmp
 }
 
-# append_line — идемпотентно дописать строку в файл (для fstab и т.п.)
+# append_line — idempotently append a line to a file (for fstab etc.)
 append_line() {
     local line="$1" file="$2"
     if [ -f "$file" ] && grep -qsF "$line" "$file"; then
-        info "уже присутствует в $file, пропускаю"
+        info "already present in $file, skipping"
         return 0
     fi
     log "APPEND -> $file : $line"
@@ -182,15 +182,15 @@ append_line() {
         printf '  [DRY-RUN] echo %q >> %s\n' "$line" "$file"
         return 0
     fi
-    # гарантировать перевод строки в конце файла, иначе новая строка слипнется с последней
-    # (порча предыдущей записи fstab → возможен сбой загрузки)
+    # ensure a trailing newline at end of file, otherwise the new line sticks to the last one
+    # (corrupts the previous fstab entry → possible boot failure)
     if [ -s "$file" ] && [ -n "$(tail -c1 "$file")" ]; then
         printf '\n' >>"$file"
     fi
     printf '%s\n' "$line" >>"$file"
 }
 
-# run_as — выполнить команду от имени TARGET_USER (для git в его домашке)
+# run_as — run a command as TARGET_USER (for git in their home directory)
 run_as() {
     log "CMD(as $TARGET_USER): $*"
     if [ "$DRY_RUN" -eq 1 ]; then
@@ -200,7 +200,7 @@ run_as() {
     sudo -u "$TARGET_USER" "$@" >>"$LOG" 2>&1
 }
 
-# run_visible — как run(), но вывод виден пользователю (для долгих ops: snapraid sync)
+# run_visible — like run(), but output is visible to the user (for long ops: snapraid sync)
 run_visible() {
     log "CMD(visible): $*"
     if [ "$DRY_RUN" -eq 1 ]; then
@@ -211,13 +211,13 @@ run_visible() {
     return "${PIPESTATUS[0]}"
 }
 
-# write_file — записать файл целиком (контент из stdin). Уважает dry-run, бэкапит существующий.
+# write_file — write a whole file (content from stdin). Respects dry-run, backs up the existing one.
 write_file() {
     local path="$1" content
     content="$(cat)"
-    log "WRITE -> $path ($(printf '%s' "$content" | wc -l) строк)"
+    log "WRITE -> $path ($(printf '%s' "$content" | wc -l) lines)"
     if [ "$DRY_RUN" -eq 1 ]; then
-        printf '  [DRY-RUN] записать файл %s (%s строк)\n' "$path" "$(printf '%s\n' "$content" | wc -l)"
+        printf '  [DRY-RUN] write file %s (%s lines)\n' "$path" "$(printf '%s\n' "$content" | wc -l)"
         return 0
     fi
     if [ -f "$path" ]; then
@@ -226,12 +226,12 @@ write_file() {
     printf '%s\n' "$content" > "$path"
 }
 
-# commit_config — снять снапшот ключевых конфигов в git-репозиторий и закоммитить
+# commit_config — take a snapshot of key configs into the git repository and commit
 commit_config() {
     local msg="$1"
     [ -d "$NAS_CONFIG/.git" ] || return 0
     if [ "$DRY_RUN" -eq 1 ]; then
-        info "[DRY-RUN] git commit конфигов: $msg"
+        info "[DRY-RUN] git commit configs: $msg"
         return 0
     fi
     [ -f /etc/fstab ]          && cp -a /etc/fstab          "$NAS_CONFIG/fstab.snapshot"
@@ -241,7 +241,7 @@ commit_config() {
     run_as git -C "$NAS_CONFIG" -c user.email="nas@localhost" -c user.name="nas-wizard" commit -q -m "$msg" || true
 }
 
-# docker_compose_cmd — определить, какой compose доступен ("docker compose" | "docker-compose")
+# docker_compose_cmd — determine which compose is available ("docker compose" | "docker-compose")
 docker_compose_cmd() {
     if docker compose version >/dev/null 2>&1; then
         echo "docker compose"
@@ -252,7 +252,7 @@ docker_compose_cmd() {
     fi
 }
 
-# install_packages <label> pkg...  — идемпотентно; пропускает уже стоящие и недоступные в репо
+# install_packages <label> pkg...  — idempotent; skips already installed and repo-unavailable ones
 install_packages() {
     local label="$1"; shift
     local to_install=() pkg
@@ -261,23 +261,23 @@ install_packages() {
         if apt-cache show "$pkg" >/dev/null 2>&1; then
             to_install+=("$pkg")
         else
-            warn "$label: пакет недоступен в репозитории, пропускаю: $pkg"
+            warn "$label: package not available in the repository, skipping: $pkg"
         fi
     done
     if [ "${#to_install[@]}" -eq 0 ]; then
-        info "$label: всё уже установлено"
+        info "$label: everything already installed"
         return 0
     fi
-    info "$label: устанавливаю (${#to_install[@]}): ${to_install[*]}"
+    info "$label: installing (${#to_install[@]}): ${to_install[*]}"
     run apt-get install -y "${to_install[@]}"
 }
 
 # ---------------------------------------------------------------------------
-# ensure_docker_repo — подключить официальный репозиторий Docker CE и поставить движок.
-# Зачем: docker-compose-plugin (v2, «docker compose») и docker-ce НЕ входят в репозитории
-# Debian/Raspberry Pi OS — они живут только на download.docker.com. Без этого репо
-# docker_compose_cmd пуст → Stage 4, Dockge, deploy.sh, nas-stacks.service — no-op на
-# чистой машине. Идемпотентно: повторный запуск лишь досоздаёт недостающее.
+# ensure_docker_repo — hook up the official Docker CE repository and install the engine.
+# Why: docker-compose-plugin (v2, «docker compose») and docker-ce are NOT in the
+# Debian/Raspberry Pi OS repositories — they live only on download.docker.com. Without this repo
+# docker_compose_cmd is empty → Stage 4, Dockge, deploy.sh, nas-stacks.service — no-op on
+# a clean machine. Idempotent: a repeat run only recreates what's missing.
 # ---------------------------------------------------------------------------
 ensure_docker_repo() {
     local keyring=/etc/apt/keyrings/docker.asc
@@ -286,13 +286,13 @@ ensure_docker_repo() {
     arch="$(dpkg --print-architecture)"
     codename="$(. /etc/os-release && echo "${VERSION_CODENAME:-bookworm}")"
 
-    # curl + ca-certificates нужны для загрузки GPG-ключа (на RPi OS обычно уже есть)
-    install_packages "Docker: зависимости" ca-certificates curl
+    # curl + ca-certificates are needed to download the GPG key (usually already present on RPi OS)
+    install_packages "Docker: dependencies" ca-certificates curl
 
-    # Docker публикует не каждый релиз Debian сразу. Если для нашего codename
-    # репозитория ещё нет — откатываемся на bookworm (совместимый бинарь).
+    # Docker doesn't publish every Debian release right away. If there's no repository
+    # for our codename yet — fall back to bookworm (compatible binary).
     if ! curl -fsS --max-time 10 -o /dev/null "https://download.docker.com/linux/debian/dists/${codename}/Release" 2>/dev/null; then
-        warn "Docker: репозиторий для '$codename' пока недоступен, использую bookworm"
+        warn "Docker: repository for '$codename' not available yet, using bookworm"
         codename="bookworm"
     fi
 
@@ -302,14 +302,14 @@ ensure_docker_repo() {
         run chmod a+r "$keyring"
     fi
 
-    # источник переписываем только если изменился (напр. сменился codename)
+    # rewrite the source only if it changed (e.g. the codename changed)
     local want="deb [arch=${arch} signed-by=${keyring}] https://download.docker.com/linux/debian ${codename} stable"
     if [ "$(cat "$list" 2>/dev/null)" != "$want" ]; then
         printf '%s\n' "$want" | write_file "$list"
         run apt-get update
     fi
 
-    # убрать конфликтующие distro-пакеты (на чистой машине их нет — no-op)
+    # remove conflicting distro packages (absent on a clean machine — no-op)
     local p present=()
     for p in docker.io docker-compose docker-doc podman-docker containerd runc; do
         dpkg -s "$p" >/dev/null 2>&1 && present+=("$p")
@@ -320,17 +320,17 @@ ensure_docker_repo() {
 }
 
 # ---------------------------------------------------------------------------
-# ensure_gh — GitHub CLI (gh) из официального репозитория cli.github.com.
-# gh НЕ входит в репозитории Debian/Raspberry Pi OS — нужен свой источник.
-# Пригодится, чтобы пушить код панели в github.com/pelinoleg/nas-os прямо
-# с бокса. Идемпотентно: если gh уже стоит — сразу выходим.
+# ensure_gh — GitHub CLI (gh) from the official repository cli.github.com.
+# gh is NOT in the Debian/Raspberry Pi OS repositories — it needs its own source.
+# Handy for pushing panel code to github.com/pelinoleg/nas-os straight
+# from the box. Idempotent: if gh is already installed — exit right away.
 # ---------------------------------------------------------------------------
 ensure_gh() {
-    command -v gh >/dev/null 2>&1 && { info "gh уже установлен ($(gh --version 2>/dev/null | head -1))"; return 0; }
+    command -v gh >/dev/null 2>&1 && { info "gh already installed ($(gh --version 2>/dev/null | head -1))"; return 0; }
     local keyring=/etc/apt/keyrings/githubcli-archive-keyring.gpg
     local list=/etc/apt/sources.list.d/github-cli.list
     local arch; arch="$(dpkg --print-architecture)"
-    install_packages "gh: зависимости" ca-certificates curl
+    install_packages "gh: dependencies" ca-certificates curl
     run install -m 0755 -d /etc/apt/keyrings
     if [ ! -s "$keyring" ]; then
         run curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o "$keyring"
@@ -345,22 +345,22 @@ ensure_gh() {
 }
 
 # ---------------------------------------------------------------------------
-# UI-обёртки — бэкенд dialog (богаче, темизируется) с откатом на whiptail
+# UI wrappers — dialog backend (richer, themeable) with a fallback to whiptail
 # ---------------------------------------------------------------------------
-UI_BIN="whiptail"     # реальное значение выставляет ui_init()
-UI_OPTS=()            # доп. опции бэкенда (напр. --colors для dialog)
+UI_BIN="whiptail"     # the real value is set by ui_init()
+UI_OPTS=()            # extra backend options (e.g. --colors for dialog)
 
-# ui_init — выбрать бэкенд и применить тёмную тему. Вызывается из main().
+# ui_init — pick the backend and apply the dark theme. Called from main().
 ui_init() {
     if command -v dialog >/dev/null 2>&1; then
         UI_BIN="dialog"
         UI_OPTS=(--colors)
-        # тема: файл dialogrc-nas рядом со скриптом (если есть)
+        # theme: dialogrc-nas file next to the script (if present)
         [ -f "$SCRIPT_DIR/dialogrc-nas" ] && export DIALOGRC="$SCRIPT_DIR/dialogrc-nas"
     elif command -v whiptail >/dev/null 2>&1; then
         UI_BIN="whiptail"
         UI_OPTS=()
-        # тёмная тема для whiptail (newt)
+        # dark theme for whiptail (newt)
         export NEWT_COLORS='
 root=,black
 window=,black
@@ -376,7 +376,7 @@ entry=brightwhite,black
 textbox=white,black
 label=brightcyan,black'
     else
-        die "не найден ни dialog, ни whiptail (apt install whiptail)"
+        die "neither dialog nor whiptail found (apt install whiptail)"
     fi
     log "UI backend: $UI_BIN"
 }
@@ -387,37 +387,37 @@ ui_password()  { "$UI_BIN" "${UI_OPTS[@]}" --title "$1" --passwordbox "$2" 12 78
 ui_yesno()     { "$UI_BIN" "${UI_OPTS[@]}" --title "$1" --yesno "$2" 18 78; }   # 0 = Yes
 ui_msg()       { "$UI_BIN" "${UI_OPTS[@]}" --title "$1" --msgbox "$2" 20 78; }
 ui_checklist() { "$UI_BIN" "${UI_OPTS[@]}" --title "$1" --checklist "$2" 20 78 10 "${@:3}" 3>&1 1>&2 2>&3; }
-# ui_gauge — читает проценты (0..100) из stdin: <cmd> | ui_gauge "Заголовок" "Текст"
+# ui_gauge — reads percent (0..100) from stdin: <cmd> | ui_gauge "Title" "Text"
 ui_gauge()     { "$UI_BIN" "${UI_OPTS[@]}" --title "$1" --gauge "$2" 8 78 0; }
 
 # ---------------------------------------------------------------------------
-# Предпроверки
+# Pre-checks
 # ---------------------------------------------------------------------------
 require_root() {
     if [ "$(id -u)" -ne 0 ]; then
-        die "нужны права root. Запустите: sudo $0 $*"
+        die "root privileges required. Run: sudo $0 $*"
     fi
 }
 
 ensure_log() {
     if [ "$DRY_RUN" -eq 0 ]; then
-        touch "$LOG" 2>/dev/null || die "не могу писать в $LOG"
+        touch "$LOG" 2>/dev/null || die "cannot write to $LOG"
         chmod 640 "$LOG" 2>/dev/null || true
     fi
-    log "===== запуск nas-wizard (dry_run=$DRY_RUN, stage='${FORCE_STAGE:-menu}', user=$TARGET_USER) ====="
+    log "===== nas-wizard start (dry_run=$DRY_RUN, stage='${FORCE_STAGE:-menu}', user=$TARGET_USER) ====="
 }
 
 # ---------------------------------------------------------------------------
-# Работа с дисками: определение системных/защищённых устройств
+# Disk handling: identifying system/protected devices
 # ---------------------------------------------------------------------------
 
-# Родительский диск для точки монтирования (например / -> mmcblk0)
+# Parent disk for a mount point (for example / -> mmcblk0)
 disk_of_mountpoint() {
     local mp="$1" src pk mm
     src="$(findmnt -no SOURCE "$mp" 2>/dev/null)" || return 1
     [ -z "$src" ] && return 1
-    # findmnt может отдать псевдо-источник (/dev/root) — привести к реальному
-    # устройству через MAJ:MIN, иначе системный диск выпадет из-под защиты
+    # findmnt may return a pseudo-source (/dev/root) — resolve to the real
+    # device via MAJ:MIN, otherwise the system disk drops out of protection
     if [ ! -b "$src" ] || [ "$src" = "/dev/root" ]; then
         mm="$(findmnt -no MAJ:MIN "$mp" 2>/dev/null | head -1)"
         [ -n "$mm" ] && [ -e "/dev/block/$mm" ] || return 1
@@ -427,12 +427,12 @@ disk_of_mountpoint() {
     if [ -n "$pk" ]; then
         echo "/dev/$pk"
     else
-        # src уже может быть цельным диском
+        # src may already be a whole disk
         echo "$src"
     fi
 }
 
-# Список защищённых дисков (система). Возвращает строки /dev/xxx
+# List of protected disks (system). Returns /dev/xxx lines
 protected_disks() {
     local mp d src pk
     {
@@ -440,7 +440,7 @@ protected_disks() {
             d="$(disk_of_mountpoint "$mp" 2>/dev/null)"
             [ -n "$d" ] && echo "$d"
         done
-        # диск с активным swap-разделом тоже под защитой
+        # a disk with an active swap partition is also protected
         while read -r src _; do
             [ -b "$src" ] || continue
             case "$src" in /dev/zram*) continue ;; esac
@@ -450,7 +450,7 @@ protected_disks() {
     } | grep -v '^$' | sort -u
 }
 
-# Диск занят? (сам или любой его раздел куда-то смонтирован)
+# Disk busy? (itself or any of its partitions mounted somewhere)
 disk_in_use() {
     local dev="$1" mps
     mps="$(lsblk -nro MOUNTPOINT "$dev" 2>/dev/null | grep -c . )"
@@ -467,17 +467,17 @@ dev_holders() {
                     | while read -r p; do ps -o comm= -p "$p" 2>/dev/null; done | sort -u | tr '\n' ' ')"
     done < <(lsblk -nro MOUNTPOINT "$dev" 2>/dev/null | grep .)
     out="$(echo "$out" | tr -s ' ')"
-    [ -n "${out// /}" ] && echo "$out" || echo "неизвестно"
+    [ -n "${out// /}" ] && echo "$out" || echo "unknown"
 }
 
-# Отмонтировать все точки устройства и его разделов. Без lazy-umount: ленивый umount
-# оставляет открытые файлы, а следом идёт mkfs — так можно потерять данные молча.
+# Unmount all mount points of the device and its partitions. No lazy umount: a lazy umount
+# leaves open files, and mkfs comes next — that way data can be lost silently.
 unmount_dev() {
     local dev="$1" mp rc=0
     while read -r mp; do
         [ -n "$mp" ] || continue
         if ! run umount "$mp"; then
-            sleep 2                      # дать доотпустить (индексатор/автомонтировщик)
+            sleep 2                      # give it time to release (indexer/automounter)
             run umount "$mp" || rc=1
         fi
     done < <(lsblk -nro MOUNTPOINT "$dev" 2>/dev/null | grep .)
@@ -492,13 +492,13 @@ is_protected() {
     return 1
 }
 
-# Собрать список дисков-кандидатов (не система, не смонтированы, размер > 0)
-# Печатает: DEV<TAB>SIZE<TAB>MODEL
+# Build the list of candidate disks (not system, not mounted, size > 0)
+# Prints: DEV<TAB>SIZE<TAB>MODEL
 candidate_disks() {
     local dev size model type sizebytes
     while read -r dev type sizebytes; do
         [ "$type" = "disk" ] || continue
-        # пропускаем zram/loop
+        # skip zram/loop
         case "$dev" in
             /dev/zram*|/dev/loop*) continue ;;
         esac
@@ -507,29 +507,29 @@ candidate_disks() {
         disk_in_use "$dev" && continue
         size="$(lsblk -dno SIZE "$dev" 2>/dev/null | tr -d ' ')"
         model="$(lsblk -dno MODEL "$dev" 2>/dev/null | sed 's/[[:space:]]*$//')"
-        [ -z "$model" ] && model="(нет модели)"
+        [ -z "$model" ] && model="(no model)"
         printf '%s\t%s\t%s\n' "$dev" "$size" "$model"
     done < <(lsblk -dpno NAME,TYPE,SIZE -b 2>/dev/null)
 }
 
-# Информация о диске для подтверждения
+# Disk info for confirmation
 disk_info_block() {
     local dev="$1"
-    echo "Устройство : $dev"
-    echo "Модель     : $(lsblk -dno MODEL "$dev" 2>/dev/null | sed 's/[[:space:]]*$//')"
-    echo "Серийник   : $(lsblk -dno SERIAL "$dev" 2>/dev/null)"
-    echo "Размер     : $(lsblk -dno SIZE "$dev" 2>/dev/null | tr -d ' ')"
+    echo "Device     : $dev"
+    echo "Model      : $(lsblk -dno MODEL "$dev" 2>/dev/null | sed 's/[[:space:]]*$//')"
+    echo "Serial     : $(lsblk -dno SERIAL "$dev" 2>/dev/null)"
+    echo "Size       : $(lsblk -dno SIZE "$dev" 2>/dev/null | tr -d ' ')"
     local mps
     mps="$(lsblk -nro NAME,MOUNTPOINT "$dev" 2>/dev/null | awk 'NF>1{print "  "$1" -> "$2}')"
     if [ -n "$mps" ]; then
-        echo "Смонтировано:"
+        echo "Mounted:"
         echo "$mps"
     else
-        echo "Смонтировано: нет"
+        echo "Mounted: no"
     fi
 }
 
-# Следующий свободный номер для /mnt/diskN (по факту: dir/fstab)
+# Next free number for /mnt/diskN (in practice: dir/fstab)
 next_disk_number() {
     local n=1
     while grep -qsE "[[:space:]]/mnt/disk${n}[[:space:]]" /etc/fstab || { [ -d "/mnt/disk${n}" ] && [ -n "$(ls -A "/mnt/disk${n}" 2>/dev/null)" ]; }; do
@@ -546,7 +546,7 @@ next_parity_number() {
     echo "$n"
 }
 
-# Размер в байтах самого большого диска ДАННЫХ (по mount /mnt/disk*)
+# Size in bytes of the largest DATA disk (by mount /mnt/disk*)
 largest_data_disk_bytes() {
     local max=0 mp src b
     for mp in /mnt/disk*; do
@@ -559,7 +559,7 @@ largest_data_disk_bytes() {
     echo "$max"
 }
 
-# Смонтированные диски данных / чётности (по одному пути на строку, натуральная сортировка)
+# Mounted data / parity disks (one path per line, natural sort)
 mounted_data_disks() {
     local m
     for m in $(ls -d /mnt/disk* 2>/dev/null | sort -V); do
@@ -574,133 +574,133 @@ mounted_parity_disks() {
 }
 
 # ---------------------------------------------------------------------------
-# Бэкап fstab
+# fstab backup
 # ---------------------------------------------------------------------------
 backup_fstab() {
     local stamp bak
     stamp="$(date '+%Y%m%d-%H%M%S')"
     bak="/etc/fstab.bak.${stamp}"
     if [ "$DRY_RUN" -eq 1 ]; then
-        info "[DRY-RUN] бэкап /etc/fstab -> $bak"
+        info "[DRY-RUN] backup /etc/fstab -> $bak"
         return 0
     fi
-    cp -a /etc/fstab "$bak" && info "бэкап fstab: $bak"
-    # копия снапшота и в git-репозиторий конфигов
+    cp -a /etc/fstab "$bak" && info "fstab backup: $bak"
+    # a copy of the snapshot into the config git repository as well
     if [ -d "$NAS_CONFIG" ]; then
         run_as cp -a /etc/fstab "$NAS_CONFIG/fstab.snapshot"
     fi
 }
 
 # ---------------------------------------------------------------------------
-# ЭТАП 0: подготовка системы
+# STAGE 0: system preparation
 # ---------------------------------------------------------------------------
 stage_system() {
     echo
-    echo "=== Этап 0: подготовка системы ==="
+    echo "=== Stage 0: system preparation ==="
     log "--- stage_system start ---"
 
-    # 0.1 apt update / full-upgrade (по согласию)
-    if ui_yesno "Обновление системы" "Выполнить apt update && apt full-upgrade?\n\nМожет занять время. Рекомендуется при первой настройке."; then
+    # 0.1 apt update / full-upgrade (with consent)
+    if ui_yesno "System update" "Run apt update && apt full-upgrade?\n\nMay take a while. Recommended on first setup."; then
         run apt-get update
         run apt-get full-upgrade -y
     else
-        info "обновление системы пропущено"
+        info "system update skipped"
     fi
 
-    # 0.2 установка софта: NAS-стек + утилиты + Pi-специфичное (идемпотентно, недоступные пропускаются)
+    # 0.2 software install: NAS stack + utilities + Pi-specific (idempotent, unavailable ones skipped)
     run apt-get update
-    install_packages "NAS-стек"   "${STACK_PACKAGES[@]}"
-    install_smartd_guard   # smartmontools ставится тут же — сразу закрыть failed без дисков
-    install_screen         # локальный тач-экран: ставится, только если панель реально подключена
-    install_packages "утилиты"    "${UTIL_PACKAGES[@]}"
-    install_packages "Pi-пакеты"  "${PI_PACKAGES[@]}"
-    ensure_docker_repo   # docker-ce + compose-plugin из официального репо Docker
-    ensure_gh            # GitHub CLI (для пуша кода панели с бокса)
+    install_packages "NAS stack"   "${STACK_PACKAGES[@]}"
+    install_smartd_guard   # smartmontools is installed right here — immediately clear failed with no disks
+    install_screen         # local touch screen: installed only if the panel is actually connected
+    install_packages "utilities"    "${UTIL_PACKAGES[@]}"
+    install_packages "Pi packages"  "${PI_PACKAGES[@]}"
+    ensure_docker_repo   # docker-ce + compose-plugin from the official Docker repo
+    ensure_gh            # GitHub CLI (for pushing panel code from the box)
 
-    # 0.3 включить/запустить сервисы (идемпотентно)
+    # 0.3 enable/start services (idempotent)
     local svc
     for svc in cockpit.socket docker; do
         if systemctl is-enabled "$svc" >/dev/null 2>&1; then
-            info "сервис уже включён: $svc"
+            info "service already enabled: $svc"
         else
             run systemctl enable "$svc"
         fi
         if systemctl is-active "$svc" >/dev/null 2>&1; then
-            info "сервис уже запущен: $svc"
+            info "service already running: $svc"
         else
             run systemctl start "$svc"
         fi
     done
 
-    # 0.3b TRIM для SSD/NVMe (еженедельно) — снижает износ и держит скорость
+    # 0.3b TRIM for SSD/NVMe (weekly) — reduces wear and keeps speed
     if systemctl list-unit-files fstrim.timer >/dev/null 2>&1; then
         if systemctl is-enabled fstrim.timer >/dev/null 2>&1; then
-            info "fstrim.timer уже включён"
+            info "fstrim.timer already enabled"
         else
             run systemctl enable --now fstrim.timer
         fi
     fi
 
-    # 0.4 добавить пользователя в группу docker
+    # 0.4 add the user to the docker group
     if id -nG "$TARGET_USER" 2>/dev/null | tr ' ' '\n' | grep -qx docker; then
-        info "пользователь $TARGET_USER уже в группе docker"
+        info "user $TARGET_USER already in the docker group"
     else
         run usermod -aG docker "$TARGET_USER"
-        info "пользователь $TARGET_USER добавлен в группу docker (нужен релогин)"
+        info "user $TARGET_USER added to the docker group (relogin required)"
     fi
 
-    # 0.5 проверка сетевого интерфейса (определяем динамически)
+    # 0.5 network interface check (detected dynamically)
     local iface
     iface="$(ip route show default 2>/dev/null | awk '/default/{print $5; exit}')"
     if [ -z "$iface" ]; then
-        warn "не удалось определить сетевой интерфейс по умолчанию"
+        warn "could not determine the default network interface"
     elif [ "$iface" = "end0" ]; then
-        info "сетевой интерфейс: end0 (штатно для Pi5/Bookworm)"
+        info "network interface: end0 (standard for Pi5/Bookworm)"
     else
-        warn "сетевой интерфейс по умолчанию: '$iface' (ожидался end0 на Pi5/Bookworm)."
-        ui_msg "Сеть" "Основной интерфейс: $iface\n\nНа Raspberry Pi 5 / Bookworm проводной обычно называется end0. Если вы используете Wi-Fi ('$iface' похоже на беспроводной) — учтите, что для NAS предпочтителен стабильный проводной линк.\n\nИмя интерфейса нигде не захардкожено — просто предупреждение."
+        warn "default network interface: '$iface' (expected end0 on Pi5/Bookworm)."
+        ui_msg "Network" "Primary interface: $iface\n\nOn Raspberry Pi 5 / Bookworm the wired one is usually named end0. If you use Wi-Fi ('$iface' looks like a wireless one) — note that a stable wired link is preferred for a NAS.\n\nThe interface name isn't hardcoded anywhere — just a warning."
     fi
 
-    # 0.6 структура каталогов
-    info "создаю структуру каталогов"
+    # 0.6 directory structure
+    info "creating directory structure"
     run mkdir -p "$STORAGE_MNT" "$DOCKER_ROOT" "$SERVICES_SRC"
-    # nas-config — в домашке пользователя, git-репозиторий
+    # nas-config — in the user's home, a git repository
     if [ ! -d "$NAS_CONFIG" ]; then
         run mkdir -p "$NAS_CONFIG/scripts"
         run chown -R "$TARGET_USER:$TARGET_USER" "$NAS_CONFIG"
     fi
-    # git init + первый коммит
+    # git init + first commit
     if [ ! -d "$NAS_CONFIG/.git" ]; then
         run_as git -C "$NAS_CONFIG" init -q
         if [ "$DRY_RUN" -eq 0 ]; then
             if [ ! -f "$NAS_CONFIG/README.md" ]; then
-                printf '# nas-config\n\nВерсионируемые конфиги NAS (fstab-сниппеты, snapraid.conf, docker-compose).\nСгенерировано nas-wizard.sh.\n' \
+                printf '# nas-config\n\nVersioned NAS configs (fstab snippets, snapraid.conf, docker-compose).\nGenerated by nas-wizard.sh.\n' \
                     | sudo -u "$TARGET_USER" tee "$NAS_CONFIG/README.md" >/dev/null
             fi
             run_as git -C "$NAS_CONFIG" add -A
             run_as git -C "$NAS_CONFIG" -c user.email="nas@localhost" -c user.name="nas-wizard" commit -q -m "init nas-config" || true
         else
-            info "[DRY-RUN] git init + первый коммит в $NAS_CONFIG"
+            info "[DRY-RUN] git init + first commit in $NAS_CONFIG"
         fi
     else
-        info "git-репозиторий уже существует: $NAS_CONFIG"
+        info "git repository already exists: $NAS_CONFIG"
     fi
 
     # 0.7 hostname / timezone
     local cur_host cur_tz
     cur_host="$(hostnamectl --static 2>/dev/null || hostname)"
     cur_tz="$(timedatectl show -p Timezone --value 2>/dev/null)"
-    if ui_yesno "Hostname" "Текущий hostname: $cur_host\n\nИзменить?"; then
+    if ui_yesno "Hostname" "Current hostname: $cur_host\n\nChange it?"; then
         local newhost
-        newhost="$(ui_input "Hostname" "Новое имя хоста:" "$cur_host")" && \
+        newhost="$(ui_input "Hostname" "New host name:" "$cur_host")" && \
             [ -n "$newhost" ] && [ "$newhost" != "$cur_host" ] && run hostnamectl set-hostname "$newhost"
     fi
     if [ "$cur_tz" != "Europe/Madrid" ]; then
-        if ui_yesno "Timezone" "Текущая таймзона: ${cur_tz:-не задана}\n\nУстановить Europe/Madrid?"; then
+        if ui_yesno "Timezone" "Current timezone: ${cur_tz:-not set}\n\nSet Europe/Madrid?"; then
             run timedatectl set-timezone "Europe/Madrid"
         fi
     else
-        info "таймзона уже Europe/Madrid"
+        info "timezone already Europe/Madrid"
     fi
 
     # summary
@@ -710,75 +710,75 @@ stage_system() {
 
 stage_system_summary() {
     local msg
-    msg="Этап 0 завершён.
+    msg="Stage 0 complete.
 
-Проверка:
+Check:
   systemctl status cockpit.socket docker
   df -h
   ls -la $NAS_CONFIG
 
 Cockpit:  https://$(hostname -I 2>/dev/null | awk '{print $1}'):9090
-Осталось: подключить диски (этап 2).
+Remaining: attach disks (stage 2).
 
-ВНИМАНИЕ: членство в группе docker применится после релогина $TARGET_USER."
-    ui_msg "Итог: подготовка системы" "$msg"
+NOTE: docker group membership applies after $TARGET_USER relogs in."
+    ui_msg "Summary: system preparation" "$msg"
     echo "$msg"
 }
 
 # ---------------------------------------------------------------------------
-# ЭТАП 2: работа с одним диском
+# STAGE 2: working with a single disk
 # ---------------------------------------------------------------------------
 
-# Тройная проверка + требование ввести имя устройства текстом
+# Triple confirmation + requirement to type the device name as text
 confirm_destructive() {
     local dev="$1" purpose="$2" fs="$3" label="$4"
     local block typed
     block="$(disk_info_block "$dev")"
 
-    if ! ui_yesno "ПОДТВЕРЖДЕНИЕ ФОРМАТИРОВАНИЯ" \
-"БУДЕТ ОТФОРМАТИРОВАН диск как $fs (метка: $label), назначение: $purpose.
+    if ! ui_yesno "FORMAT CONFIRMATION" \
+"THE DISK WILL BE FORMATTED as $fs (label: $label), purpose: $purpose.
 
 $block
 
-ВСЕ ДАННЫЕ НА ЭТОМ ДИСКЕ БУДУТ БЕЗВОЗВРАТНО УДАЛЕНЫ.
+ALL DATA ON THIS DISK WILL BE PERMANENTLY ERASED.
 
-Продолжить?"; then
-        info "форматирование отменено пользователем"
+Continue?"; then
+        info "formatting cancelled by user"
         return 1
     fi
 
-    # Требуем ввести имя устройства текстом
-    typed="$(ui_input "Финальное подтверждение" \
-"Чтобы подтвердить форматирование, введите ИМЯ УСТРОЙСТВА точно так:
+    # Require typing the device name as text
+    typed="$(ui_input "Final confirmation" \
+"To confirm formatting, type the DEVICE NAME exactly like this:
 
-$dev" "")" || { info "отменено"; return 1; }
+$dev" "")" || { info "cancelled"; return 1; }
 
     if [ "$typed" != "$dev" ]; then
-        ui_msg "Отмена" "Введено '$typed', ожидалось '$dev'. Форматирование ОТМЕНЕНО."
-        info "имя устройства не совпало ('$typed' != '$dev') — форматирование отменено"
+        ui_msg "Cancel" "Got '$typed', expected '$dev'. Formatting CANCELLED."
+        info "device name did not match ('$typed' != '$dev') — formatting cancelled"
         return 1
     fi
     return 0
 }
 
-# Формат диска + fstab + mount. Аргументы: dev mountpoint fs label pass
-# mkfs.<fs> присутствует?
+# Format disk + fstab + mount. Arguments: dev mountpoint fs label pass
+# Is mkfs.<fs> present?
 mkfs_available() { command -v "mkfs.$1" >/dev/null 2>&1; }
 
-# Создать ФС на устройстве с меткой. Поддержка: ext4/xfs/btrfs/exfat/ntfs/vfat.
+# Create FS on device with a label. Supported: ext4/xfs/btrfs/exfat/ntfs/vfat.
 make_fs() {
     local dev="$1" fs="$2" label="$3"
-    mkfs_available "$fs" || die "нет mkfs.$fs — установите пакет (exfatprogs/ntfs-3g/btrfs-progs/xfsprogs)"
-    # mkfs ДОЛЖЕН падать жёстко: иначе format_and_mount возьмёт старый UUID (blkid),
-    # смонтирует недоформатированную ФС и внесёт её в fstab/пул → потеря/каша данных.
+    mkfs_available "$fs" || die "no mkfs.$fs — install the package (exfatprogs/ntfs-3g/btrfs-progs/xfsprogs)"
+    # mkfs MUST fail hard: otherwise format_and_mount would take the old UUID (blkid),
+    # mount the not-fully-formatted FS and add it to fstab/pool → data loss/mess.
     case "$fs" in
-        ext4)  run mkfs.ext4  -F -L "$label" "$dev" || die "mkfs.ext4 не удался на $dev" ;;
-        xfs)   run mkfs.xfs   -f -L "$(printf '%s' "$label" | cut -c1-12)" "$dev" || die "mkfs.xfs не удался на $dev" ;;
-        btrfs) run mkfs.btrfs -f -L "$label" "$dev" || die "mkfs.btrfs не удался на $dev" ;;
-        exfat) run mkfs.exfat -L "$label" "$dev" || die "mkfs.exfat не удался на $dev" ;;
-        ntfs)  run mkfs.ntfs  -Q -L "$label" "$dev" || die "mkfs.ntfs не удался на $dev" ;;
-        vfat)  run mkfs.vfat  -n "$(printf '%s' "$label" | tr 'a-z' 'A-Z' | tr -cd 'A-Z0-9_-' | cut -c1-11)" "$dev" || die "mkfs.vfat не удался на $dev" ;;
-        *)     die "неизвестная ФС: $fs" ;;
+        ext4)  run mkfs.ext4  -F -L "$label" "$dev" || die "mkfs.ext4 failed on $dev" ;;
+        xfs)   run mkfs.xfs   -f -L "$(printf '%s' "$label" | cut -c1-12)" "$dev" || die "mkfs.xfs failed on $dev" ;;
+        btrfs) run mkfs.btrfs -f -L "$label" "$dev" || die "mkfs.btrfs failed on $dev" ;;
+        exfat) run mkfs.exfat -L "$label" "$dev" || die "mkfs.exfat failed on $dev" ;;
+        ntfs)  run mkfs.ntfs  -Q -L "$label" "$dev" || die "mkfs.ntfs failed on $dev" ;;
+        vfat)  run mkfs.vfat  -n "$(printf '%s' "$label" | tr 'a-z' 'A-Z' | tr -cd 'A-Z0-9_-' | cut -c1-11)" "$dev" || die "mkfs.vfat failed on $dev" ;;
+        *)     die "unknown FS: $fs" ;;
     esac
 }
 
@@ -790,44 +790,44 @@ format_and_mount() {
 
     make_fs "$dev" "$fs" "$label"
 
-    # UUID (в dry-run — плейсхолдер, т.к. диск не форматировался)
+    # UUID (in dry-run — a placeholder, since the disk was not formatted)
     if [ "$DRY_RUN" -eq 1 ]; then
-        uuid="<UUID-появится-после-mkfs>"
+        uuid="<UUID-appears-after-mkfs>"
     else
         uuid="$(blkid -s UUID -o value "$dev" 2>/dev/null)"
-        [ -z "$uuid" ] && die "не удалось получить UUID $dev после форматирования"
+        [ -z "$uuid" ] && die "failed to get UUID of $dev after formatting"
     fi
 
-    # каталог точки монтирования
+    # mount point directory
     run mkdir -p "$mp"
 
-    # убрать устаревшие строки fstab для этой же точки (после переформатирования UUID меняется —
-    # иначе останется мёртвая строка со старым UUID для того же /mnt/diskN)
+    # remove stale fstab lines for this same mount point (after reformatting the UUID changes —
+    # otherwise a dead line with the old UUID for the same /mnt/diskN would remain)
     remove_fstab_mount "$mp"
 
-    # fstab по UUID (+ nofail: чтобы отсутствие диска не блокировало загрузку NAS)
+    # fstab by UUID (+ nofail: so a missing disk does not block the NAS boot)
     local fstab_line="UUID=$uuid  $mp  $fs  defaults,noatime,nofail,x-systemd.device-timeout=10  0  $pass"
     append_line "$fstab_line" /etc/fstab
-    # сниппет в git-репозиторий
+    # snippet into the git repository
     if [ -d "$NAS_CONFIG" ]; then
         append_line "$fstab_line" "$NAS_CONFIG/fstab.snippets"
     fi
 
-    # монтируем и проверяем
+    # mount and verify
     run systemctl daemon-reload
     run mount -a
     if [ "$DRY_RUN" -eq 0 ]; then
         if findmnt -no TARGET "$mp" >/dev/null 2>&1; then
-            info "смонтировано: $mp"
+            info "mounted: $mp"
         else
-            warn "точка $mp не смонтирована — проверьте /etc/fstab и вывод mount -a"
+            warn "mount point $mp is not mounted — check /etc/fstab and the mount -a output"
         fi
     fi
 }
 
-# Идемпотентность: диск уже настроен?
+# Idempotency: is the disk already configured?
 disk_already_configured() {
-    # Диск уже настроен, если его UUID (или UUID любого его раздела) есть в fstab.
+    # The disk is already configured if its UUID (or the UUID of any of its partitions) is in fstab.
     local dev="$1" uuid u
     uuid="$(blkid -s UUID -o value "$dev" 2>/dev/null)"
     [ -n "$uuid" ] && grep -qsF "UUID=$uuid" /etc/fstab && return 0
@@ -839,90 +839,90 @@ disk_already_configured() {
 
 stage_disk() {
     echo
-    echo "=== Этап 2: работа с диском ==="
+    echo "=== Stage 2: working with a disk ==="
     log "--- stage_disk start ---"
 
-    # Собираем кандидатов
+    # Collect candidates
     local rows dev size model
     rows="$(candidate_disks)"
     if [ -z "$rows" ]; then
-        ui_msg "Нет свободных дисков" "Не найдено свободных блочных устройств.
+        ui_msg "No free disks" "No free block devices found.
 
-Кандидаты исключаются, если диск:
- - является системным (/, /boot, /home, /var),
- - уже куда-то смонтирован,
- - имеет нулевой размер.
+Candidates are excluded if the disk:
+ - is a system disk (/, /boot, /home, /var),
+ - is already mounted somewhere,
+ - has zero size.
 
-Проверьте подключение диска и запустите этап снова."
-        info "нет дисков-кандидатов"
+Check the disk connection and run the stage again."
+        info "no candidate disks"
         return 0
     fi
 
-    # Меню выбора диска
+    # Disk selection menu
     local menu_args=()
     while IFS=$'\t' read -r dev size model; do
         [ -z "$dev" ] && continue
         menu_args+=("$dev" "$size — $model")
     done <<< "$rows"
 
-    dev="$(ui_menu "Выбор диска" "Свободные диски (исключены системный и смонтированные):" "${menu_args[@]}")" || {
-        info "выбор диска отменён"; return 0;
+    dev="$(ui_menu "Disk selection" "Free disks (system and mounted disks excluded):" "${menu_args[@]}")" || {
+        info "disk selection cancelled"; return 0;
     }
-    [ -z "$dev" ] && { info "диск не выбран"; return 0; }
+    [ -z "$dev" ] && { info "no disk selected"; return 0; }
 
-    # Двойная страховка: диск не защищён и не занят
-    if is_protected "$dev"; then die "$dev — системный диск, работа запрещена"; fi
-    if disk_in_use "$dev"; then die "$dev сейчас смонтирован — сначала размонтируйте"; fi
+    # Double safeguard: the disk is not protected and not busy
+    if is_protected "$dev"; then die "$dev — system disk, operation forbidden"; fi
+    if disk_in_use "$dev"; then die "$dev is currently mounted — unmount it first"; fi
 
-    # Идемпотентность
+    # Idempotency
     if disk_already_configured "$dev"; then
-        ui_msg "Диск уже настроен" "$dev уже присутствует в /etc/fstab по UUID. Пропускаю."
-        info "$dev уже настроен, пропуск"
+        ui_msg "Disk already configured" "$dev is already present in /etc/fstab by UUID. Skipping."
+        info "$dev already configured, skipping"
         return 0
     fi
 
-    # Данные или parity?
+    # Data or parity?
     local role
-    role="$(ui_menu "Назначение диска" "Диск $dev — для чего?" \
-        "data"   "Диск ДАННЫХ" \
-        "parity" "Диск ЧЁТНОСТИ (SnapRAID parity)")" || { info "отменено"; return 0; }
+    role="$(ui_menu "Disk role" "Disk $dev — what for?" \
+        "data"   "DATA disk" \
+        "parity" "PARITY disk (SnapRAID parity)")" || { info "cancelled"; return 0; }
 
-    # Выбор ФС
+    # FS selection
     local fs
-    fs="$(ui_menu "Файловая система" "ФС для $dev:" \
-        "ext4" "ext4 (по умолчанию, рекомендуется)" \
-        "xfs"  "xfs")" || { info "отменено"; return 0; }
+    fs="$(ui_menu "File system" "FS for $dev:" \
+        "ext4" "ext4 (default, recommended)" \
+        "xfs"  "xfs")" || { info "cancelled"; return 0; }
     [ -z "$fs" ] && fs="ext4"
 
     if [ "$role" = "data" ]; then
         local n mp label
         n="$(next_disk_number)"
-        # Путь ФИКСИРОВАН как /mnt/diskN, а не свободный ввод: вся дискавери
-        # (mounted_data_disks, largest_data_disk_bytes, next_disk_number, имена
-        # snapraid d$n) находит диски данных по шаблону /mnt/disk*. Кастомная точка
-        # сделала бы диск невидимым для пула и SnapRAID — тихая дыра в защите данных.
+        # The path is FIXED as /mnt/diskN, not free input: all discovery
+        # (mounted_data_disks, largest_data_disk_bytes, next_disk_number, snapraid
+        # d$n names) finds data disks by the /mnt/disk* pattern. A custom mount point
+        # would make the disk invisible to the pool and SnapRAID — a silent hole in data protection.
         mp="/mnt/disk${n}"
         label="disk${n}"
 
-        confirm_destructive "$dev" "ДАННЫЕ ($mp)" "$fs" "$label" || return 0
+        confirm_destructive "$dev" "DATA ($mp)" "$fs" "$label" || return 0
         format_and_mount "$dev" "$mp" "$fs" "$label" 2
 
-        # mergerfs: пул объединяем только при >= 2 дисках данных (по ТЗ)
+        # mergerfs: merge into a pool only with >= 2 data disks (per spec)
         local data_count
         data_count="$(mounted_data_disks | grep -c .)"
         if [ "$data_count" -lt 2 ]; then
-            ui_msg "mergerfs" "У вас $data_count диск(а) данных.
+            ui_msg "mergerfs" "You have $data_count data disk(s).
 
-mergerfs-пул объединять пока нет смысла (нужно >= 2 дисков).
-Он будет настроен автоматически, когда вы добавите второй диск данных."
-            info "$data_count диск данных — mergerfs не настраивается (по ТЗ)"
+There is no point merging a mergerfs pool yet (>= 2 disks needed).
+It will be configured automatically once you add a second data disk."
+            info "$data_count data disk — mergerfs not configured (per spec)"
         else
-            info "дисков данных: $data_count — настраиваю mergerfs"
+            info "data disks: $data_count — configuring mergerfs"
             generate_mergerfs
         fi
 
     else  # parity
-        # Проверка размера parity >= самого большого диска данных
+        # Check that parity size >= the largest data disk
         local pn mp label pbytes maxdata
         pbytes="$(lsblk -bdno SIZE "$dev" 2>/dev/null | head -1)"
         maxdata="$(largest_data_disk_bytes)"
@@ -930,20 +930,20 @@ mergerfs-пул объединять пока нет смысла (нужно >=
             local phr mhr risk
             phr="$(numfmt --to=iec "$pbytes" 2>/dev/null || echo "$pbytes")"
             mhr="$(numfmt --to=iec "$maxdata" 2>/dev/null || echo "$maxdata")"
-            warn "parity ($phr) МЕНЬШЕ самого большого диска данных ($mhr)"
-            if ! ui_yesno "РИСК: маленький parity-диск" \
-"Диск чётности ($phr) МЕНЬШЕ самого большого диска данных ($mhr).
+            warn "parity ($phr) is SMALLER than the largest data disk ($mhr)"
+            if ! ui_yesno "RISK: small parity disk" \
+"The parity disk ($phr) is SMALLER than the largest data disk ($mhr).
 
-SnapRAID НЕ СМОЖЕТ защитить данные полностью: parity обязан быть >= самого большого диска данных.
+SnapRAID WILL NOT be able to protect the data fully: parity must be >= the largest data disk.
 
-Это опасная конфигурация. Продолжить?"; then
-                info "parity меньше данных — пользователь отказался"
+This is a dangerous configuration. Continue?"; then
+                info "parity smaller than data — user declined"
                 return 0
             fi
-            risk="$(ui_input "Подтверждение риска" "Введите фразу: я понимаю риск" "")" || return 0
-            if [ "$risk" != "я понимаю риск" ]; then
-                ui_msg "Отмена" "Фраза не совпала. Операция отменена."
-                info "фраза подтверждения риска не совпала"
+            risk="$(ui_input "Risk confirmation" "Type the phrase: I understand the risk" "")" || return 0
+            if [ "$risk" != "I understand the risk" ]; then
+                ui_msg "Cancel" "The phrase did not match. Operation cancelled."
+                info "risk confirmation phrase did not match"
                 return 0
             fi
         fi
@@ -954,9 +954,9 @@ SnapRAID НЕ СМОЖЕТ защитить данные полностью: par
         confirm_destructive "$dev" "PARITY ($mp)" "$fs" "$label" || return 0
         format_and_mount "$dev" "$mp" "$fs" "$label" 2
 
-        ui_msg "SnapRAID" "Parity-диск смонтирован в $mp.
+        ui_msg "SnapRAID" "Parity disk mounted at $mp.
 
-Теперь можно настроить SnapRAID: выберите в меню пункт \"Этап 3: SnapRAID\" (или запустите с --stage snapraid)."
+Now you can configure SnapRAID: pick \"Stage 3: SnapRAID\" from the menu (or run with --stage snapraid)."
     fi
 
     stage_disk_summary "$dev"
@@ -965,52 +965,52 @@ SnapRAID НЕ СМОЖЕТ защитить данные полностью: par
 
 stage_disk_summary() {
     local dev="$1" msg
-    msg="Этап 2 (диск $dev) завершён.
+    msg="Stage 2 (disk $dev) complete.
 
-Текущее состояние:
+Current state:
 $(findmnt -rno TARGET,SOURCE,FSTYPE,SIZE /mnt/disk* /mnt/parity* 2>/dev/null | sed 's/^/  /')
 
-Проверка:
+Check:
   lsblk -f
   df -h
   cat /etc/fstab
 
-Бэкапы fstab: ls -la /etc/fstab.bak.*
-Конфиги в git: $NAS_CONFIG"
-    ui_msg "Итог: работа с диском" "$msg"
+fstab backups: ls -la /etc/fstab.bak.*
+Configs in git: $NAS_CONFIG"
+    ui_msg "Summary: working with a disk" "$msg"
     echo "$msg"
 }
 
 # ---------------------------------------------------------------------------
-# ЭТАП 2b: mergerfs (пул из >= 2 дисков данных)
+# STAGE 2b: mergerfs (pool from >= 2 data disks)
 # ---------------------------------------------------------------------------
-# nofail — не блокировать загрузку в emergency mode, если пул не смонтировался.
-# x-systemd.requires=<ветка> добавляется на каждую ветку динамически в generate_mergerfs
-# (пути дисков не статичны), чтобы пул монтировался ТОЛЬКО после своих веток, а не поверх пустых /mnt/diskN.
+# nofail — do not block boot in emergency mode if the pool did not mount.
+# x-systemd.requires=<branch> is added to each branch dynamically in generate_mergerfs
+# (disk paths are not static), so the pool mounts ONLY after its branches, not over empty /mnt/diskN.
 MERGERFS_OPTS="defaults,nofail,allow_other,use_ino,category.create=mfs,minfreespace=20G,fsname=mergerfs"
 
 remove_fstab_mergerfs() {
     if [ "$DRY_RUN" -eq 1 ]; then
-        info "[DRY-RUN] удалить строку fuse.mergerfs из /etc/fstab"
+        info "[DRY-RUN] remove the fuse.mergerfs line from /etc/fstab"
         return 0
     fi
     sed -i '/fuse\.mergerfs/d' /etc/fstab
 }
 
-# Опции mergerfs для КОМАНДНОЙ строки (-o ...): без fstab-конструкций defaults/nofail.
+# mergerfs options for the COMMAND line (-o ...): without the fstab constructs defaults/nofail.
 MERGERFS_SVC_OPTS="allow_other,use_ino,category.create=mfs,minfreespace=20G,fsname=mergerfs"
 MERGERFS_UNIT="/etc/systemd/system/nas-mergerfs.service"
-# Пул mergerfs держим systemd-СЕРВИСОМ с Restart=always, а НЕ строкой fstab. Причина:
-# FUSE-процесс может упасть («Transport endpoint is not connected»), и fstab-mount тогда
-# мёртв до ручного umount+mount. Сервис же systemd поднимает за секунды сам (+ ExecStartPre
-# снимает зависшую точку). Ветки /mnt/disk* по-прежнему в fstab; пул зависит от local-fs.
+# Keep the mergerfs pool as a systemd SERVICE with Restart=always, NOT an fstab line. Reason:
+# the FUSE process may crash ("Transport endpoint is not connected"), and an fstab mount is then
+# dead until a manual umount+mount. The systemd service brings it back in seconds by itself (+ ExecStartPre
+# clears the stuck mount point). The /mnt/disk* branches stay in fstab; the pool depends on local-fs.
 generate_mergerfs() {
     local branches=() mp
     while read -r mp; do [ -n "$mp" ] && branches+=("$mp"); done < <(mounted_data_disks)
     local count="${#branches[@]}"
     if [ "$count" -lt 2 ]; then
-        info "смонтировано дисков данных: $count — mergerfs не требуется (нужно >= 2)"
-        # диск вышел из пула — снять сервис, если был
+        info "mounted data disks: $count — mergerfs not needed (>= 2 required)"
+        # a disk left the pool — remove the service if it existed
         if [ -e "$MERGERFS_UNIT" ]; then
             run systemctl disable --now nas-mergerfs.service
             run rm -f "$MERGERFS_UNIT"
@@ -1023,8 +1023,8 @@ generate_mergerfs() {
     branchspec="$(IFS=:; printf '%s' "${branches[*]}")"
     mergerfs_bin="$(command -v mergerfs 2>/dev/null || echo /usr/bin/mergerfs)"
 
-    # миграция со старой схемы: убрать строку пула из fstab (теперь пулом рулит сервис).
-    # Ветки /mnt/disk* в fstab не трогаем.
+    # migration from the old scheme: remove the pool line from fstab (the service now runs the pool).
+    # We do not touch the /mnt/disk* branches in fstab.
     if grep -qsE 'fuse\.mergerfs' /etc/fstab; then
         backup_fstab
         findmnt -no TARGET "$STORAGE_MNT" >/dev/null 2>&1 && run umount -l "$STORAGE_MNT"
@@ -1032,7 +1032,7 @@ generate_mergerfs() {
     fi
     run mkdir -p "$STORAGE_MNT"
 
-    # \$(seq …) экранируем — это команда времени ЗАПУСКА сервиса, а не генерации файла
+    # We escape \$(seq …) — this is a command run at service START, not at file generation
     write_file "$MERGERFS_UNIT" <<EOF
 [Unit]
 Description=NAS mergerfs pool (${STORAGE_MNT})
@@ -1058,40 +1058,40 @@ EOF
     if [ "$DRY_RUN" -eq 0 ]; then
         sleep 1
         if findmnt -no TARGET "$STORAGE_MNT" >/dev/null 2>&1; then
-            info "mergerfs-пул поднят сервисом nas-mergerfs (Restart=always): $STORAGE_MNT ($count дисков)"
+            info "mergerfs pool brought up by the nas-mergerfs service (Restart=always): $STORAGE_MNT ($count disks)"
         else
-            warn "пул $STORAGE_MNT не поднялся — проверьте: systemctl status nas-mergerfs"
+            warn "pool $STORAGE_MNT did not come up — check: systemctl status nas-mergerfs"
         fi
     fi
-    commit_config "mergerfs: сервис nas-mergerfs (пул из $count дисков)"
+    commit_config "mergerfs: nas-mergerfs service (pool from $count disks)"
 }
 
 stage_mergerfs() {
     echo
-    echo "=== Этап 2b: mergerfs ==="
+    echo "=== Stage 2b: mergerfs ==="
     log "--- stage_mergerfs start ---"
     local count
     count="$(mounted_data_disks | grep -c .)"
     if [ "$count" -lt 2 ]; then
-        ui_msg "mergerfs" "Смонтировано дисков данных: $count.
+        ui_msg "mergerfs" "Mounted data disks: $count.
 
-Нужно минимум 2 диска данных, чтобы объединять их в пул mergerfs.
-Добавьте ещё диск данных (этап 2) и вернитесь сюда."
-        info "mergerfs: недостаточно дисков ($count)"
+At least 2 data disks are needed to merge them into a mergerfs pool.
+Add another data disk (stage 2) and come back here."
+        info "mergerfs: not enough disks ($count)"
         return 0
     fi
     generate_mergerfs
     if [ "$DRY_RUN" -eq 0 ]; then
-        ui_msg "Итог: mergerfs" "Пул $STORAGE_MNT собран из $count дисков.
+        ui_msg "Summary: mergerfs" "Pool $STORAGE_MNT assembled from $count disks.
 
-Проверка:
+Check:
 $(df -h "$STORAGE_MNT" 2>/dev/null | sed 's/^/  /')"
     fi
     log "--- stage_mergerfs end ---"
 }
 
 # ---------------------------------------------------------------------------
-# ЭТАП 3: SnapRAID
+# STAGE 3: SnapRAID
 # ---------------------------------------------------------------------------
 SNAPRAID_CONF="/etc/snapraid.conf"
 
@@ -1103,22 +1103,22 @@ ensure_snapraid_conf() {
     while read -r m; do [ -n "$m" ] && parity_mounts+=("$m"); done < <(mounted_parity_disks)
 
     if [ "${#data_mounts[@]}" -eq 0 ]; then
-        ui_msg "SnapRAID" "Нет смонтированных дисков данных (/mnt/disk*). Сначала добавьте диск данных (этап 2)."
+        ui_msg "SnapRAID" "No mounted data disks (/mnt/disk*). Add a data disk first (stage 2)."
         return 1
     fi
     if [ "${#parity_mounts[@]}" -eq 0 ]; then
-        ui_msg "SnapRAID" "Нет parity-диска (/mnt/parity*). SnapRAID требует минимум один диск чётности. Добавьте parity (этап 2)."
+        ui_msg "SnapRAID" "No parity disk (/mnt/parity*). SnapRAID requires at least one parity disk. Add parity (stage 2)."
         return 1
     fi
 
     run mkdir -p /var/snapraid
 
     if [ ! -f "$SNAPRAID_CONF" ]; then
-        # Свежая генерация
-        info "генерирую $SNAPRAID_CONF ($((${#data_mounts[@]})) данных, $((${#parity_mounts[@]})) parity)"
+        # Fresh generation
+        info "generating $SNAPRAID_CONF ($((${#data_mounts[@]})) data, $((${#parity_mounts[@]})) parity)"
         {
-            echo "# snapraid.conf — сгенерировано nas-wizard $(date '+%F %T')"
-            echo "# Диски правьте через визард; excludes можно дописывать вручную."
+            echo "# snapraid.conf — generated by nas-wizard $(date '+%F %T')"
+            echo "# Edit disks via the wizard; excludes can be added manually."
             echo
             local i=1 p kw
             for p in "${parity_mounts[@]}"; do
@@ -1146,8 +1146,8 @@ ensure_snapraid_conf() {
             echo "exclude .snapraid.content*"
         } | write_file "$SNAPRAID_CONF"
     else
-        # Идемпотентная дозапись недостающих строк (excludes НЕ трогаем)
-        info "$SNAPRAID_CONF существует — дописываю недостающие диски"
+        # Idempotent append of missing lines (we do NOT touch excludes)
+        info "$SNAPRAID_CONF exists — appending missing disks"
         local i=1 p kw d n
         for p in "${parity_mounts[@]}"; do
             kw="$(parity_keyword "$i")"
@@ -1160,7 +1160,7 @@ ensure_snapraid_conf() {
             if ! grep -qsE "^data[[:space:]]+\S+[[:space:]]+$d\$" "$SNAPRAID_CONF"; then
                 append_line "data d$n $d" "$SNAPRAID_CONF"
             else
-                info "data-диск уже в конфиге: $d"
+                info "data disk already in config: $d"
             fi
         done
     fi
@@ -1171,7 +1171,7 @@ ensure_snapraid_conf() {
 install_snapraid_wrapper() {
     write_file /usr/local/bin/nas-snapraid.sh <<'WRAP'
 #!/usr/bin/env bash
-# nas-wizard: обёртка snapraid sync/scrub с защитой от массового удаления + пинг статуса
+# nas-wizard: snapraid sync/scrub wrapper with mass-deletion protection + status ping
 set -uo pipefail
 ACTION="${1:-sync}"
 LOG=/var/log/snapraid.log
@@ -1180,30 +1180,30 @@ DELETE_THRESHOLD=500
 HEALTHCHECK_URL=""
 [ -f "$CONF" ] && . "$CONF"
 notify(){ [ -x /usr/local/bin/nas-notify.sh ] && /usr/local/bin/nas-notify.sh "$@" || true; }
-# пинг Healthchecks/ntfy/webhook: успех — базовый URL, ошибка — /fail (конвенция Healthchecks)
+# Healthchecks/ntfy/webhook ping: success — the base URL, error — /fail (Healthchecks convention)
 ping_hc(){ [ -n "$HEALTHCHECK_URL" ] && curl -fsS -m 12 --retry 2 "$HEALTHCHECK_URL$1" >/dev/null 2>&1 || true; }
 
 {
     echo "===== $(date '+%F %T') snapraid $ACTION ====="
-    # ЗАЩИТА ДАННЫХ: если хоть один диск данных из конфига не смонтирован, его файлы
-    # выглядят как «удалённые» → sync записал бы удаления в чётность. Прерываем.
+    # DATA PROTECTION: if any data disk from the config is not mounted, its files
+    # look "deleted" → sync would record the deletions into parity. We abort.
     miss=""
     while read -r _ _ dpath; do
         [ -n "$dpath" ] || continue
         mountpoint -q "$dpath" || miss="$miss $dpath"
     done < <(grep -E '^data ' /etc/snapraid.conf 2>/dev/null)
     if [ -n "$miss" ]; then
-        echo "ABORT: диски данных не смонтированы:$miss — $ACTION ПРОПУЩЕН (защита чётности)."
+        echo "ABORT: data disks not mounted:$miss — $ACTION SKIPPED (parity protection)."
         ping_hc "/fail"
         echo "NASRESULT $ACTION err rc=9" >>"$LOG"
         exit 9
     fi
     if [ "$ACTION" = "sync" ]; then
-        # diff должен отработать корректно (0=нет изменений, 2=есть изменения); иначе — НЕ синкать
+        # diff must run correctly (0=no changes, 2=changes present); otherwise — do NOT sync
         diff_out="$(snapraid diff 2>&1)"; diff_rc=$?
         printf '%s\n' "$diff_out"
         if [ "$diff_rc" != 0 ] && [ "$diff_rc" != 2 ]; then
-            echo "ABORT: snapraid diff завершился с кодом $diff_rc — sync ПРОПУЩЕН (не удалось оценить удаления)."
+            echo "ABORT: snapraid diff exited with code $diff_rc — sync SKIPPED (could not assess deletions)."
             ping_hc "/fail"
             exit 1
         fi
@@ -1211,7 +1211,7 @@ ping_hc(){ [ -n "$HEALTHCHECK_URL" ] && curl -fsS -m 12 --retry 2 "$HEALTHCHECK_
         removed=${removed:-0}
         echo "diff: removed=$removed threshold=$DELETE_THRESHOLD"
         if [ "$removed" -gt "$DELETE_THRESHOLD" ]; then
-            echo "ABORT: удалено файлов $removed > порога $DELETE_THRESHOLD — sync ПРОПУЩЕН (защита данных)."
+            echo "ABORT: files removed $removed > threshold $DELETE_THRESHOLD — sync SKIPPED (data protection)."
             ping_hc "/fail"
             exit 1
         fi
@@ -1221,7 +1221,7 @@ ping_hc(){ [ -n "$HEALTHCHECK_URL" ] && curl -fsS -m 12 --retry 2 "$HEALTHCHECK_
     fi
 } >>"$LOG" 2>&1
 rc=$?
-# NASRESULT-маркеры читает nas-web (единые уведомления с приоритетами Pushover)
+# NASRESULT markers are read by nas-web (unified notifications with Pushover priorities)
 if [ "$rc" -eq 0 ]; then echo "NASRESULT $ACTION ok $(date '+%F %T')" >>"$LOG"; ping_hc ""
 else echo "NASRESULT $ACTION err rc=$rc" >>"$LOG"; ping_hc "/fail"; fi
 exit "$rc"
@@ -1283,42 +1283,42 @@ UNIT
 }
 
 setup_snapraid_notify() {
-    if ui_yesno "Уведомления" "Настроить пинг статуса snapraid sync (Healthchecks.io / ntfy / webhook)?
+    if ui_yesno "Notifications" "Set up a snapraid sync status ping (Healthchecks.io / ntfy / webhook)?
 
-При успехе дёргается URL; для Healthchecks при ошибке добавляется /fail. У вас уже есть Healthchecks/Uptime Kuma — можно указать их URL."; then
+On success the URL is pinged; for Healthchecks /fail is appended on error. If you already have Healthchecks/Uptime Kuma — you can point to their URL."; then
         local url
-        url="$(ui_input "URL пинга" "URL, который дёргать при УСПЕХЕ:" "")" || return 0
-        if [ -z "$url" ]; then info "URL пуст — уведомления не настроены"; return 0; fi
+        url="$(ui_input "Ping URL" "URL to ping on SUCCESS:" "")" || return 0
+        if [ -z "$url" ]; then info "URL is empty — notifications not configured"; return 0; fi
         notify_conf_set HEALTHCHECK_URL "$url"
-        info "уведомления настроены: $url"
+        info "notifications configured: $url"
     else
-        info "уведомления не настраиваются"
+        info "notifications not configured"
     fi
 }
 
 stage_snapraid() {
     echo
-    echo "=== Этап 3: SnapRAID ==="
+    echo "=== Stage 3: SnapRAID ==="
     log "--- stage_snapraid start ---"
 
     ensure_snapraid_conf || { log "--- stage_snapraid aborted ---"; return 0; }
 
-    # Уведомления (до установки wrapper — чтобы notify.conf уже существовал)
+    # Notifications (before installing the wrapper — so notify.conf already exists)
     setup_snapraid_notify
 
-    # Обёртка + systemd-таймеры
+    # Wrapper + systemd timers
     install_snapraid_wrapper
     install_snapraid_timers
 
-    # Первый sync (по согласию)
-    if ui_yesno "SnapRAID sync" "Выполнить первый snapraid sync СЕЙЧАС?
+    # First sync (with consent)
+    if ui_yesno "SnapRAID sync" "Run the first snapraid sync NOW?
 
-ВНИМАНИЕ: на больших дисках может занять ОЧЕНЬ долго. Прогресс будет виден в терминале.
-Пропустите, если хотите дождаться ночного авто-sync (таймер уже настроен)."; then
-        echo "--- snapraid sync (прогресс ниже) ---"
+WARNING: on large disks this may take a VERY long time. Progress will be visible in the terminal.
+Skip it if you want to wait for the nightly auto-sync (the timer is already configured)."; then
+        echo "--- snapraid sync (progress below) ---"
         run_visible snapraid sync
     else
-        info "первый sync пропущен (сработает по таймеру в 03:00)"
+        info "first sync skipped (will run by the timer at 03:00)"
     fi
 
     stage_snapraid_summary
@@ -1326,28 +1326,28 @@ stage_snapraid() {
 }
 
 stage_snapraid_summary() {
-    local status="(запустите: sudo snapraid status)"
+    local status="(run: sudo snapraid status)"
     [ "$DRY_RUN" -eq 0 ] && status="$(snapraid status 2>/dev/null | tail -n 15 | sed 's/^/  /')"
-    ui_msg "Итог: SnapRAID" "Конфиг: $SNAPRAID_CONF
-Обёртка: /usr/local/bin/nas-snapraid.sh
-Таймеры: snapraid-sync.timer (ежедневно 03:00), snapraid-scrub.timer (еженедельно вс 05:00)
-Лог: /var/log/snapraid.log
+    ui_msg "Summary: SnapRAID" "Config: $SNAPRAID_CONF
+Wrapper: /usr/local/bin/nas-snapraid.sh
+Timers: snapraid-sync.timer (daily 03:00), snapraid-scrub.timer (weekly Sun 05:00)
+Log: /var/log/snapraid.log
 
-Проверка:
+Check:
   systemctl list-timers 'snapraid-*'
   sudo snapraid status
   sudo snapraid sync"
-    echo "Этап 3 завершён."
+    echo "Stage 3 complete."
     echo "$status"
 }
 
 # ---------------------------------------------------------------------------
-# ЭТАП 4: Docker (discovery-based: читаем папки с compose-файлами)
+# STAGE 4: Docker (discovery-based: read folders with compose files)
 # ---------------------------------------------------------------------------
 
-# Печатает: SERVICE<TAB>COMPOSE_FILE — по одной строке на найденный сервис.
-# Ищет в каталоге services/ рядом со скриптом (аргумент $1 переопределяет каталог).
-# shellcheck disable=SC2120  # $1 опционален, по умолчанию $SERVICES_SRC
+# Prints: SERVICE<TAB>COMPOSE_FILE — one line per discovered service.
+# Searches the services/ directory next to the script ($1 overrides the directory).
+# shellcheck disable=SC2120  # $1 is optional, defaults to $SERVICES_SRC
 discover_compose_services() {
     local base="${1:-$SERVICES_SRC}" d f
     for d in "$base"/*/; do
@@ -1361,7 +1361,7 @@ discover_compose_services() {
     done
 }
 
-# Запущен ли сервис (есть хотя бы один running-контейнер)?
+# Is the service running (at least one running container)?
 service_running() {
     local file="$1" ids running
     ids="$($DC -f "$file" ps -q 2>/dev/null)"
@@ -1372,11 +1372,11 @@ service_running() {
 
 generate_deploy_script() {
     run_as mkdir -p "$NAS_CONFIG/scripts"
-    # SERVICES_SRC подставляется на этапе генерации, чтобы deploy.sh был самодостаточным
+    # SERVICES_SRC is substituted at generation time so deploy.sh is self-contained
     write_file "$NAS_CONFIG/scripts/deploy.sh" <<DEPLOY
 #!/usr/bin/env bash
-# Автоген nas-wizard. Идемпотентно поднимает ВСЕ compose-сервисы из services/ рядом со скриптом.
-# "Применить желаемое состояние": docker compose up -d по каждому найденному файлу.
+# Auto-generated by nas-wizard. Idempotently brings up ALL compose services from services/ next to the script.
+# "Apply the desired state": docker compose up -d for each discovered file.
 set -uo pipefail
 COMPOSE_DIR="${SERVICES_SRC}"
 DC="docker compose"
@@ -1400,14 +1400,14 @@ DEPLOY
     run chown "$TARGET_USER:$TARGET_USER" "$NAS_CONFIG/scripts/deploy.sh" 2>/dev/null || true
 }
 
-# Порядок загрузки: docker ждёт mergerfs-пул, стеки поднимаются после монтирования.
-# Защищает от записи контейнеров в ПУСТУЮ точку /mnt/storage, если пул ещё не смонтирован.
+# Boot order: docker waits for the mergerfs pool, stacks come up after mounting.
+# Protects against containers writing into an EMPTY /mnt/storage mount point if the pool is not mounted yet.
 install_stacks_autostart() {
-    # НАМЕРЕННО не вешаем RequiresMountsFor на сам docker.service: это делало бы
-    # запуск демона (а значит и ВСЕХ контейнеров) зависимым от пула — один
-    # пропавший/переименованный диск ронял бы весь Docker. Ждём пул только на
-    # уровне nas-stacks.service (bring-up стеков), не демона.
-    # Подчищаем drop-in, если его оставил старый запуск wizard'а:
+    # We DELIBERATELY do not put RequiresMountsFor on docker.service itself: that would make
+    # starting the daemon (and thus ALL containers) depend on the pool — one
+    # missing/renamed disk would take down the whole Docker. We wait for the pool only at
+    # the nas-stacks.service level (stacks bring-up), not the daemon.
+    # Clean up the drop-in if an old wizard run left it behind:
     if [ -f /etc/systemd/system/docker.service.d/wait-storage.conf ]; then
         run rm -f /etc/systemd/system/docker.service.d/wait-storage.conf
         rmdir /etc/systemd/system/docker.service.d 2>/dev/null || true
@@ -1437,44 +1437,44 @@ EOF
 
 stage_docker() {
     echo
-    echo "=== Этап 4: Docker ==="
+    echo "=== Stage 4: Docker ==="
     log "--- stage_docker start ---"
 
     DC="$(docker_compose_cmd)"
     if [ -z "$DC" ]; then
-        ui_msg "Docker" "Docker Compose не найден. Сначала прогоните этап 0 (подготовка системы), он ставит docker-ce + docker-compose-plugin из официального репо Docker."
-        info "docker compose недоступен"
+        ui_msg "Docker" "Docker Compose not found. Run stage 0 first (system preparation), it installs docker-ce + docker-compose-plugin from the official Docker repo."
+        info "docker compose unavailable"
         return 0
     fi
 
     run mkdir -p "$DOCKER_ROOT" "$SERVICES_SRC"
 
-    # deploy.sh генерируем всегда — чтобы существовал с первого дня
+    # Always generate deploy.sh — so it exists from day one
     generate_deploy_script
-    # автозапуск стеков после загрузки + ожидание пула
+    # autostart stacks after boot + wait for the pool
     install_stacks_autostart
 
     local rows
     rows="$(discover_compose_services)"
     if [ -z "$rows" ]; then
-        ui_msg "Docker: нет сервисов" "В $SERVICES_SRC не найдено ни одного compose-файла.
+        ui_msg "Docker: no services" "No compose file found in $SERVICES_SRC.
 
-Модель работы: docker-сервисы лежат РЯДОМ СО СКРИПТОМ, в папке services/.
-Каждый сервис — своя подпапка с docker-compose.yml. Скрипт их находит и предлагает поднять.
+How it works: docker services live NEXT TO THE SCRIPT, in the services/ folder.
+Each service is its own subfolder with a docker-compose.yml. The script finds them and offers to bring them up.
 
-Пример:
+Example:
   mkdir -p $SERVICES_SRC/immich
   \$EDITOR $SERVICES_SRC/immich/docker-compose.yml
 
-Конфиги/данные держите в $DOCKER_ROOT/<service>/ и $STORAGE_MNT/<service>/.
-Затем снова запустите этот этап.
+Keep configs/data in $DOCKER_ROOT/<service>/ and $STORAGE_MNT/<service>/.
+Then run this stage again.
 
-Уже создан: $NAS_CONFIG/scripts/deploy.sh (поднимает всё разом)."
-        info "compose-сервисы не найдены в $SERVICES_SRC"
+Already created: $NAS_CONFIG/scripts/deploy.sh (brings everything up at once)."
+        info "no compose services found in $SERVICES_SRC"
         return 0
     fi
 
-    # Чеклист: помечаем уже запущенные
+    # Checklist: mark the already running ones
     local menu_args=() svc file state
     while IFS=$'\t' read -r svc file; do
         [ -z "$svc" ] && continue
@@ -1483,25 +1483,25 @@ stage_docker() {
     done <<< "$rows"
 
     local raw
-    raw="$(ui_checklist "Docker: какие сервисы поднять" \
-        "Отметьте сервисы для 'up -d' (уже запущенные помечены). Снятые с отметки запущенные будет предложено остановить." \
-        "${menu_args[@]}")" || { info "выбор сервисов отменён"; return 0; }
+    raw="$(ui_checklist "Docker: which services to bring up" \
+        "Check the services for 'up -d' (already running ones are marked). Unchecked running ones will be offered to stop." \
+        "${menu_args[@]}")" || { info "service selection cancelled"; return 0; }
 
-    # Разбираем выбранные (whiptail возвращает в кавычках)
+    # Parse the selected ones (whiptail returns them quoted)
     local selected
     selected="$(printf '%s' "$raw" | tr -d '"')"
 
-    # Множество выбранных для быстрой проверки
+    # Set of selected ones for a quick check
     local want=" $selected "
 
-    # Поднимаем выбранные, собираем "запущенные, но не выбранные"
+    # Bring up the selected ones, collect "running but not selected"
     local to_stop=() up_count=0
     while IFS=$'\t' read -r svc file; do
         [ -z "$svc" ] && continue
         if [[ "$want" == *" $svc "* ]]; then
-            # предупреждение о плавающих тегах
+            # warning about floating tags
             if grep -qsE 'image:.*:latest([[:space:]]|$)|image:[[:space:]]*[^:]+$' "$file"; then
-                warn "$svc: образ без фиксированного тега (:latest или без тега) — по ТЗ рекомендуются фиксированные версии"
+                warn "$svc: image without a pinned tag (:latest or no tag) — pinned versions are recommended"
             fi
             info "up -d: $svc"
             run_visible $DC -f "$file" up -d
@@ -1511,45 +1511,45 @@ stage_docker() {
         fi
     done <<< "$rows"
 
-    # Предложить остановить снятые с отметки, но запущенные
+    # Offer to stop services that were unchecked but are running
     if [ "${#to_stop[@]}" -gt 0 ]; then
         local names=""
         local item
         for item in "${to_stop[@]}"; do names+="  ${item%%|*}\n"; done
-        if ui_yesno "Остановить сервисы?" "Эти сервисы запущены, но НЕ отмечены:\n\n$names\nОстановить их (docker compose down)?"; then
+        if ui_yesno "Stop services?" "These services are running but NOT checked:\n\n$names\nStop them (docker compose down)?"; then
             for item in "${to_stop[@]}"; do
                 svc="${item%%|*}"; file="${item##*|}"
                 info "down: $svc"
                 run_visible $DC -f "$file" down
             done
         else
-            info "снятые сервисы оставлены запущенными"
+            info "unchecked services left running"
         fi
     fi
 
-    commit_config "docker: deploy.sh + up ($up_count сервисов)"
+    commit_config "docker: deploy.sh + up ($up_count services)"
     stage_docker_summary "$up_count"
     log "--- stage_docker end ---"
 }
 
 stage_docker_summary() {
     local n="$1"
-    ui_msg "Итог: Docker" "Поднято сервисов: $n
-Compose-папки: $SERVICES_SRC/<service>/ (рядом со скриптом)
-deploy.sh:     $NAS_CONFIG/scripts/deploy.sh (применить всё разом)
+    ui_msg "Summary: Docker" "Services started: $n
+Compose folders: $SERVICES_SRC/<service>/ (next to the script)
+deploy.sh:     $NAS_CONFIG/scripts/deploy.sh (apply everything at once)
 
-Проверка:
+Check:
   docker ps
   docker compose ls
   bash $NAS_CONFIG/scripts/deploy.sh
 
-Рекомендации (ТЗ): фиксированные теги образов (не latest), restart: unless-stopped,
-volumes на $STORAGE_MNT/<service>/."
-    echo "Этап 4 завершён. Поднято сервисов: $n"
+Recommendations: pinned image tags (not latest), restart: unless-stopped,
+volumes under $STORAGE_MNT/<service>/."
+    echo "Stage 4 complete. Services started: $n"
 }
 
 # ---------------------------------------------------------------------------
-# Общие помощники для этапов 5-8
+# Shared helpers for stages 5-8
 # ---------------------------------------------------------------------------
 enable_service() {
     local svc="$1"
@@ -1560,8 +1560,8 @@ enable_service() {
 backup_file() {
     local f="$1"
     [ -f "$f" ] || return 0
-    if [ "$DRY_RUN" -eq 1 ]; then info "[DRY-RUN] бэкап $f"; return 0; fi
-    cp -a "$f" "${f}.bak.$(date '+%Y%m%d-%H%M%S')" && info "бэкап: $f"
+    if [ "$DRY_RUN" -eq 1 ]; then info "[DRY-RUN] backup $f"; return 0; fi
+    cp -a "$f" "${f}.bak.$(date '+%Y%m%d-%H%M%S')" && info "backup: $f"
 }
 
 boot_config_path() {
@@ -1570,24 +1570,24 @@ boot_config_path() {
     else echo ""; fi
 }
 
-# LAN-подсеть вида 192.168.1.0/24 (по connected-маршруту)
+# LAN subnet like 192.168.1.0/24 (from the connected route)
 detect_lan_cidr() {
     ip -o -f inet route show scope link 2>/dev/null \
         | awk '$1 ~ /\// && $1 !~ /^169\.254/ {print $1; exit}'
 }
 
-# checklist -> " tag1 tag2 " для проверки вида: case " $sel " in *" tag "*)
+# checklist -> " tag1 tag2 " for checks like: case " $sel " in *" tag "*)
 checklist_selected() { printf ' %s ' "$(printf '%s' "$1" | tr -d '"')"; }
 
 # ---------------------------------------------------------------------------
-# ЭТАП 5: Pi-тюнинг (железо). config.txt-правки требуют перезагрузки.
+# STAGE 5: Pi tuning (hardware). config.txt edits require a reboot.
 # ---------------------------------------------------------------------------
 pi_pcie3() {
     local cfg="$1"
-    if [ -z "$cfg" ]; then warn "config.txt не найден — PCIe Gen3 пропущен"; return 0; fi
+    if [ -z "$cfg" ]; then warn "config.txt not found — PCIe Gen3 skipped"; return 0; fi
     backup_file "$cfg"
     append_line "dtparam=pciex1_gen=3" "$cfg"
-    info "PCIe Gen3 для NVMe добавлен в $cfg (применится после reboot)"
+    info "PCIe Gen3 for NVMe added to $cfg (takes effect after reboot)"
 }
 pi_wifi_powersave_off() {
     run mkdir -p /etc/NetworkManager/conf.d
@@ -1596,7 +1596,7 @@ pi_wifi_powersave_off() {
 wifi.powersave = 2
 EOF
     systemctl is-active NetworkManager >/dev/null 2>&1 && run systemctl restart NetworkManager
-    info "Wi-Fi power-save отключён"
+    info "Wi-Fi power-save disabled"
 }
 pi_watchdog() {
     run mkdir -p /etc/systemd/system.conf.d
@@ -1606,34 +1606,34 @@ RuntimeWatchdogSec=15s
 RebootWatchdogSec=2min
 EOF
     run systemctl daemon-reexec
-    info "watchdog включён (RuntimeWatchdogSec=15s)"
+    info "watchdog enabled (RuntimeWatchdogSec=15s)"
 }
-# USB max current — на Pi5 без этого суммарный ток USB режется до 600mA => просадки на USB-SSD
+# USB max current — on Pi5, without this the total USB current is capped at 600mA => brownouts on USB-SSD
 pi_usb_power() {
     local cfg="$1"
-    if [ -z "$cfg" ]; then warn "config.txt не найден — USB power пропущен"; return 0; fi
+    if [ -z "$cfg" ]; then warn "config.txt not found — USB power skipped"; return 0; fi
     backup_file "$cfg"
     append_line "usb_max_current_enable=1" "$cfg"
-    info "usb_max_current_enable=1 (питание USB-дисков; применится после reboot)"
+    info "usb_max_current_enable=1 (power for USB disks; takes effect after reboot)"
 }
-# Memory cgroup для docker-лимитов (правка cmdline.txt — файл в ОДНУ строку!)
+# Memory cgroup for docker limits (editing cmdline.txt — a SINGLE-line file!)
 pi_cgroup() {
     local cl=/boot/firmware/cmdline.txt
     [ -f "$cl" ] || cl=/boot/cmdline.txt
-    [ -f "$cl" ] || { warn "cmdline.txt не найден — cgroup пропущен"; return 0; }
-    if grep -qs 'cgroup_enable=memory' "$cl"; then info "memory cgroup уже включён"; return 0; fi
+    [ -f "$cl" ] || { warn "cmdline.txt not found — cgroup skipped"; return 0; }
+    if grep -qs 'cgroup_enable=memory' "$cl"; then info "memory cgroup already enabled"; return 0; fi
     backup_file "$cl"
     if [ "$DRY_RUN" -eq 1 ]; then
-        info "[DRY-RUN] добавить cgroup_enable=memory cgroup_memory=1 в $cl"
+        info "[DRY-RUN] add cgroup_enable=memory cgroup_memory=1 to $cl"
         return 0
     fi
     sed -i 's/\bcgroup_disable=memory\b//g; s/[[:space:]]\+/ /g; s/[[:space:]]*$//' "$cl"
     sed -i '1 s|$| cgroup_enable=memory cgroup_memory=1|' "$cl"
-    info "memory cgroup включён в $cl (нужен reboot; лимиты памяти в docker-compose)"
+    info "memory cgroup enabled in $cl (reboot needed; memory limits in docker-compose)"
 }
 pi_sysctl() {
     write_file /etc/sysctl.d/99-nas.conf <<'EOF'
-# nas-wizard: тюнинг для NAS
+# nas-wizard: tuning for NAS
 vm.swappiness = 10
 net.core.somaxconn = 512
 net.ipv4.tcp_keepalive_time = 120
@@ -1641,24 +1641,24 @@ net.ipv4.tcp_keepalive_intvl = 30
 net.ipv4.tcp_keepalive_probes = 3
 EOF
     run sysctl --system
-    info "sysctl-тюнинг применён (swappiness=10, somaxconn=512, tcp keepalive)"
+    info "sysctl tuning applied (swappiness=10, somaxconn=512, tcp keepalive)"
 }
-# Глушим legacy-службу zramswap.service (пакет zram-tools). На современном
-# Raspberry Pi OS zram-swap поднимает systemd-zram-generator/rpi-swap, и
-# zramswap.service ВОЮЕТ с ним за /dev/zram0: "Device or resource busy",
-# "zram0 is mounted; will not make swapspace" — вечный спам failed в журнале.
+# Silence the legacy zramswap.service (zram-tools package). On modern
+# Raspberry Pi OS zram-swap is brought up by systemd-zram-generator/rpi-swap, and
+# zramswap.service FIGHTS it over /dev/zram0: "Device or resource busy",
+# "zram0 is mounted; will not make swapspace" — endless failed spam in the journal.
 zram_disable_zramtools() {
     if systemctl list-unit-files 2>/dev/null | grep -q '^zramswap\.service' \
        || [ -e /etc/systemd/system/zramswap.service ]; then
         run systemctl stop zramswap.service 2>/dev/null || true
         run systemctl disable zramswap.service 2>/dev/null || true
-        # самопальный оверрайд-юнит в /etc (от прежних версий) — убрать
+        # home-grown override unit in /etc (from older versions) — remove it
         [ -e /etc/systemd/system/zramswap.service ] && run rm -f /etc/systemd/system/zramswap.service
         run systemctl daemon-reload 2>/dev/null || true
         run systemctl mask zramswap.service 2>/dev/null || true
     fi
 }
-# Есть ли штатный zram-генератор (современный Pi OS Bookworm+)?
+# Is there a native zram generator (modern Pi OS Bookworm+)?
 zram_have_native() {
     [ -e /usr/lib/systemd/system/systemd-zram-setup@.service ] \
     || [ -f /etc/rpi/swap.conf ] \
@@ -1667,14 +1667,14 @@ zram_have_native() {
 }
 pi_zram() {
     if zram_have_native; then
-        # 1) гасим конфликтующий zramswap.service, чтобы он не лез в zram0
+        # 1) silence the conflicting zramswap.service so it doesn't touch zram0
         zram_disable_zramtools
-        # 2) настраиваем штатный zram: ~50% RAM (кап 4 GiB), zstd (kernel default)
+        # 2) configure native zram: ~50% RAM (cap 4 GiB), zstd (kernel default)
         if [ "$DRY_RUN" -eq 0 ]; then
             if [ -f /etc/rpi/swap.conf ]; then
                 run mkdir -p /etc/rpi/swap.conf.d
                 cat > /etc/rpi/swap.conf.d/60-nas-os.conf <<'EOF'
-# NAS-OS: zram-swap включён (~50% RAM, кап 4 GiB). См. swap.conf(5).
+# NAS-OS: zram-swap enabled (~50% RAM, cap 4 GiB). See swap.conf(5).
 [Main]
 Mechanism=zram+file
 [Zram]
@@ -1684,24 +1684,24 @@ EOF
             else
                 run mkdir -p /etc/systemd
                 cat > /etc/systemd/zram-generator.conf <<'EOF'
-# NAS-OS: zram-swap (zstd, ~50% RAM, кап 4 GiB). См. zram-generator.conf(5).
+# NAS-OS: zram-swap (zstd, ~50% RAM, cap 4 GiB). See zram-generator.conf(5).
 [zram0]
 zram-size = min(ram / 2, 4096)
 compression-algorithm = zstd
 EOF
             fi
             run systemctl daemon-reload 2>/dev/null || true
-            # применить на живую (best-effort; полностью — со следующей загрузки).
-            # reset-failed — иначе быстрый рестарт .swap ловит start-limit и
-            # оставляет систему вообще без свопа.
+            # apply live (best-effort; fully from the next boot).
+            # reset-failed — otherwise a quick .swap restart hits start-limit and
+            # leaves the system with no swap at all.
             run systemctl reset-failed dev-zram0.swap systemd-zram-setup@zram0.service 2>/dev/null || true
             run systemctl restart dev-zram0.swap 2>/dev/null \
                 || run systemctl start dev-zram0.swap 2>/dev/null || true
         fi
-        info "zram-swap: zstd, ~50% RAM (штатный systemd-zram-generator)"
+        info "zram-swap: zstd, ~50% RAM (native systemd-zram-generator)"
         return 0
     fi
-    # Legacy-система без генератора — ставим zram-tools
+    # Legacy system without a generator — install zram-tools
     install_packages "zram" zram-tools
     if [ -f /etc/default/zramswap ] && [ "$DRY_RUN" -eq 0 ]; then
         backup_file /etc/default/zramswap
@@ -1712,7 +1712,7 @@ EOF
     fi
     info "zram-swap: zstd, 50% RAM (zram-tools)"
 }
-# VID:PID USB-накопителей (для usb-storage.quirks) — по одному на строку, уникально
+# VID:PID of USB storage devices (for usb-storage.quirks) — one per line, unique
 detect_usb_storage_ids() {
     local b p vid pid
     for b in /sys/block/sd*; do
@@ -1734,25 +1734,25 @@ detect_usb_storage_ids() {
 uas_seed_cmdline() {
     local cl=/boot/firmware/cmdline.txt
     [ -f "$cl" ] || cl=/boot/cmdline.txt
-    [ -f "$cl" ] || { warn "cmdline.txt не найден — UAS-quirks пропущены"; return 0; }
+    [ -f "$cl" ] || { warn "cmdline.txt not found — UAS quirks skipped"; return 0; }
     local ids; ids="${NASW_QUIRKS:-$(detect_usb_storage_ids)}"
-    [ -n "$ids" ] || { info "USB-дисков сейчас нет — quirks добавит udev при подключении"; return 0; }
+    [ -n "$ids" ] || { info "no USB disks right now — udev adds quirks on plug-in"; return 0; }
     local want="" id
     for id in $ids; do want="${want:+$want,}${id}:u"; done
     local line cur merged
     line="$(head -1 "$cl")"
     cur="$(printf '%s\n' "$line" | grep -o 'usb-storage\.quirks=[^ ]*' | head -1 | sed 's/usb-storage\.quirks=//')"
     merged="$(printf '%s,%s' "$cur" "$want" | tr ',' '\n' | sed '/^$/d' | sort -u | paste -sd, -)"
-    if [ -n "$cur" ] && [ "$cur" = "$merged" ]; then info "usb-storage.quirks уже настроен ($cur)"; return 0; fi
+    if [ -n "$cur" ] && [ "$cur" = "$merged" ]; then info "usb-storage.quirks already configured ($cur)"; return 0; fi
     backup_file "$cl"
-    if [ "$DRY_RUN" -eq 1 ]; then info "[DRY-RUN] usb-storage.quirks=$merged в $cl"; return 0; fi
+    if [ "$DRY_RUN" -eq 1 ]; then info "[DRY-RUN] usb-storage.quirks=$merged in $cl"; return 0; fi
     if [ -n "$cur" ]; then
         line="$(printf '%s\n' "$line" | sed "s#usb-storage\.quirks=[^ ]*#usb-storage.quirks=$merged#")"
     else
         line="$line usb-storage.quirks=$merged"
     fi
     printf '%s\n' "$line" > "$cl"
-    info "UAS отключён для USB-мостов: $merged (в $cl; нужен reboot)"
+    info "UAS disabled for USB bridges: $merged (in $cl; reboot needed)"
 }
 # Disable UAS for every USB-SATA bridge — current and future. NOT optional, on purpose.
 #
@@ -1783,12 +1783,12 @@ log(){ printf '%s nas-uas-off: %s\n' "$(date '+%F %T')" "$*" >>"$LOG" 2>/dev/nul
        logger -t nas-uas-off -- "$*" 2>/dev/null || true; }
 
 Q=/sys/module/usb_storage/parameters/quirks
-[ -w "$Q" ] || { log "нет $Q — пропуск"; exit 0; }
+[ -w "$Q" ] || { log "no $Q — skipping"; exit 0; }
 cur="$(tr -d '\n' <"$Q" 2>/dev/null)"
 # Already quirked (the normal path on every boot after the first) — nothing to do.
 case ",$cur," in *",$VID:$PID:u,"*) exit 0 ;; esac
 new="${cur:+$cur,}$VID:$PID:u"
-printf '%s' "$new" >"$Q" 2>/dev/null || { log "не записать $Q"; exit 0; }
+printf '%s' "$new" >"$Q" 2>/dev/null || { log "cannot write $Q"; exit 0; }
 
 CL=/boot/firmware/cmdline.txt; [ -f "$CL" ] || CL=/boot/cmdline.txt
 if [ -f "$CL" ]; then
@@ -1797,7 +1797,7 @@ if [ -f "$CL" ]; then
     *usb-storage.quirks=*) line="$(printf '%s' "$line" | sed "s#usb-storage\.quirks=[^ ]*#usb-storage.quirks=$new#")" ;;
     *)                     line="$line usb-storage.quirks=$new" ;;
   esac
-  printf '%s\n' "$line" >"$CL" 2>/dev/null || log "не записать $CL"
+  printf '%s\n' "$line" >"$CL" 2>/dev/null || log "cannot write $CL"
 fi
 
 # The bridge is bound to uas right now; only a re-enumeration makes the kernel re-probe it.
@@ -1810,12 +1810,12 @@ for blk in "$SYS"/*/host*/target*/*/block/*; do
   for p in /dev/"$b" /dev/"$b"[0-9]*; do
     [ -b "$p" ] || continue
     t="$(findmnt -rn -S "$p" -o TARGET 2>/dev/null | head -1)"
-    [ -n "$t" ] && { umount -l "$t" 2>/dev/null && log "снят $t перед переподнятием"; }
+    [ -n "$t" ] && { umount -l "$t" 2>/dev/null && log "unmounted $t before re-enumeration"; }
   done
 done
 sync
-[ -w "$SYS/authorized" ] || { log "нет $SYS/authorized — переподнять нечем"; exit 0; }
-log "UAS выключен для $VID:$PID — переподнимаю $DEV (вернётся на usb-storage)"
+[ -w "$SYS/authorized" ] || { log "no $SYS/authorized — nothing to re-enumerate with"; exit 0; }
+log "UAS disabled for $VID:$PID — re-enumerating $DEV (will fall back to usb-storage)"
 echo 0 >"$SYS/authorized" 2>/dev/null
 sleep 2
 echo 1 >"$SYS/authorized" 2>/dev/null
@@ -1823,41 +1823,41 @@ UASOFF
     run chmod +x /usr/local/bin/nas-uas-off.sh
     # Separate rules file on purpose: turning automount OFF must not turn this protection off.
     write_file /etc/udev/rules.d/99-nas-uas-off.rules <<'RULES'
-# nas-wizard: любой USB-мост, УМЕЮЩИЙ UAS, переводим на usb-storage (см. install_uas_off).
-# Матчим по ID_USB_INTERFACES: ":080662:" = mass-storage/UAS. У моста без UAS его нет,
-# и правило его не трогает; обычные флешки (только ":080650:" = BOT) тоже не задеваются.
-# systemd-run --no-block обязателен: скрипт переподнимает устройство и ждёт, а udev
-# убивает своих детей по таймауту — блокировать udev нельзя.
+# nas-wizard: any USB bridge that CAN do UAS is switched to usb-storage (see install_uas_off).
+# Match by ID_USB_INTERFACES: ":080662:" = mass-storage/UAS. A bridge without UAS lacks it,
+# and the rule leaves it alone; ordinary flash drives (only ":080650:" = BOT) are untouched too.
+# systemd-run --no-block is mandatory: the script re-enumerates the device and waits, while udev
+# kills its children on timeout — udev must not be blocked.
 ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_USB_INTERFACES}=="*:080662:*", RUN+="/usr/bin/systemd-run --no-block /usr/local/bin/nas-uas-off.sh $env{ID_VENDOR_ID} $env{ID_MODEL_ID} %k"
 RULES
     run udevadm control --reload-rules
     uas_seed_cmdline
 }
 # ---------------------------------------------------------------------------
-# Local touch screen (DSI panel) — киоск-дашборд на самом боксе
+# Local touch screen (DSI panel) — kiosk dashboard on the box itself
 # ---------------------------------------------------------------------------
-# Драйвер панели ставить НЕ нужно: на актуальной PiOS её поднимает сам ядерный
-# vc4 по display_auto_detect=1 (Waveshare 4.3" DSI 800x480 отдаёт DSI-1 connected,
-# тач приезжает как edt_ft5x06 на i2c). Ставим РЕНДЕРЕР: cage (минимальный
-# Wayland-композитор для киоска, без рабочего стола) + chromium, который смотрит
-# на http://127.0.0.1/screen — nas-web отдаёт эту страницу ДО auth-гейта, но только
-# на loopback, поэтому на экране не спрашивается пароль, а из локалки её не открыть.
+# No panel driver needed: on current PiOS it is brought up by the kernel
+# vc4 via display_auto_detect=1 (Waveshare 4.3" DSI 800x480 reports DSI-1 connected,
+# touch arrives as edt_ft5x06 on i2c). We install the RENDERER: cage (minimal
+# Wayland compositor for a kiosk, no desktop) + chromium pointed
+# at http://127.0.0.1/screen — nas-web serves this page BEFORE the auth gate, but only
+# on loopback, so the screen never asks for a password and it can't be opened from the LAN.
 screen_present() {
     local f
     for f in /sys/class/drm/card*-DSI-*/status; do
         [ -e "$f" ] && [ "$(cat "$f" 2>/dev/null)" = "connected" ] && return 0
     done
-    # часть панелей видна только по подсветке
+    # some panels are visible only via the backlight
     for f in /sys/class/backlight/*/brightness; do [ -e "$f" ] && return 0; done
     return 1
 }
 install_screen() {
     if ! screen_present; then
-        info "экран не подключён — киоск не ставлю"
+        info "screen not connected — not installing the kiosk"
         return 0
     fi
-    install_packages "экран" cage chromium seatd
-    # сессия киоска рисует в DRM и читает тач напрямую
+    install_packages "screen" cage chromium seatd
+    # the kiosk session draws to DRM and reads touch directly
     run usermod -aG video,input,render "$TARGET_USER"
 
     # true backlight-off pokes the panel's ATTINY over /dev/i2c-* (PC_LED_EN bit:
@@ -1867,9 +1867,9 @@ i2c-dev
 EOF
     run modprobe i2c-dev || true
 
-    # Chromium слушается ТОЛЬКО managed-policy: флаги --disable-features=Translate
-    # плашку перевода не убирают (проверено на 150.x). Киоск не должен показывать
-    # НИЧЕГО всплывающего — ни перевода, ни менеджера паролей, ни запросов доступа.
+    # Chromium obeys ONLY managed policy: the --disable-features=Translate flags
+    # don't remove the translate bar (verified on 150.x). The kiosk must show
+    # NOTHING popping up — no translation, no password manager, no access prompts.
     run mkdir -p /etc/chromium/policies/managed
     write_file /etc/chromium/policies/managed/nas-kiosk.json <<'EOF'
 {
@@ -1892,30 +1892,30 @@ EOF
 }
 EOF
 
-    # Подсветка: sysfs root-only, а ночной режим и слайдер яркости в панели должны
-    # уметь её крутить без root.
+    # Backlight: sysfs is root-only, but night mode and the brightness slider in the
+    # panel must be able to change it without root.
     write_file /etc/udev/rules.d/99-nas-backlight.rules <<'EOF'
-# nas-wizard: подсветка панели — группа video может менять яркость без root.
+# nas-wizard: panel backlight — the video group can change brightness without root.
 SUBSYSTEM=="backlight", ACTION=="add", RUN+="/bin/chgrp video /sys/class/backlight/%k/brightness /sys/class/backlight/%k/bl_power", RUN+="/bin/chmod 0664 /sys/class/backlight/%k/brightness /sys/class/backlight/%k/bl_power"
 EOF
-    # Курсор мыши на настенном экране выглядит как баг: композитор рисует указатель,
-    # как только к боксу воткнут USB-донгл (у клавиатур он тоже заявлен как мышь).
-    # CSS cursor:none и XCURSOR_SIZE его не убирают — гасим сам pointer на уровне
-    # libinput. Клавиатура и тач продолжают работать.
+    # A mouse cursor on the wall screen looks like a bug: the compositor draws a pointer
+    # as soon as a USB dongle is plugged into the box (keyboards declare themselves as a mouse too).
+    # CSS cursor:none and XCURSOR_SIZE don't remove it — we kill the pointer itself at the
+    # libinput level. Keyboard and touch keep working.
     write_file /etc/udev/rules.d/99-nas-nopointer.rules <<'EOF'
-# nas-wizard: киоску нужен ТОЛЬКО палец. Всё остальное композитору не отдаём.
-# Иначе он рисует курсор: указателем оказываются и мышь донгла, и его «Consumer Control»
-# (у него есть относительные оси, но метки ID_INPUT_MOUSE нет), и даже джеки HDMI на Pi 4
-# (ID_INPUT_POINTINGSTICK). Правило действует только на libinput (сессию киоска) —
-# консоль и SSH это не трогает.
+# nas-wizard: the kiosk needs ONLY a finger. We give the compositor nothing else.
+# Otherwise it draws a cursor: the pointer turns out to be the dongle's mouse, its "Consumer Control"
+# (which has relative axes but no ID_INPUT_MOUSE label), and even the HDMI jacks on Pi 4
+# (ID_INPUT_POINTINGSTICK). The rule affects only libinput (the kiosk session) —
+# console and SSH are untouched.
 SUBSYSTEM=="input", ENV{ID_INPUT}=="1", ENV{ID_INPUT_TOUCHSCREEN}!="1", ENV{LIBINPUT_IGNORE_DEVICE}="1"
 EOF
     run udevadm control --reload-rules
     run udevadm trigger --subsystem-match=backlight --action=add
     run udevadm trigger --subsystem-match=input --action=add
 
-    # Пустой курсор: wlroots рисует указатель по центру, даже когда мыши нет.
-    # Кладём тему с прозрачным Xcursor 1x1 (генерим на месте — не тащить xcursorgen).
+    # Empty cursor: wlroots draws a pointer in the center even when there's no mouse.
+    # Drop in a theme with a transparent 1x1 Xcursor (generated in place — no need for xcursorgen).
     run mkdir -p /usr/share/icons/nas-blank/cursors
     python3 - <<'PYCUR'
 import struct, os
@@ -1940,14 +1940,14 @@ PYCUR
 Description=NAS local screen — cage + chromium kiosk on the DSI panel
 After=nas-web.service systemd-user-sessions.service
 Wants=nas-web.service
-# cage забирает VT — getty на tty1 дрался бы с ним за экран
+# cage takes the VT — getty on tty1 would fight it for the screen
 Conflicts=getty@tty1.service
 After=getty@tty1.service
 
 [Service]
 Type=simple
 User=$TARGET_USER
-# PAMName=login даёт процессу logind-сессию на seat0 (libseat -> DRM master)
+# PAMName=login gives the process a logind session on seat0 (libseat -> DRM master)
 PAMName=login
 TTYPath=/dev/tty1
 TTYReset=yes
@@ -1957,9 +1957,9 @@ StandardInput=tty-fail
 StandardOutput=journal
 StandardError=journal
 Environment=XDG_SESSION_TYPE=wayland
-# курсор мыши: композитор рисует свой указатель, если к боксу воткнута USB-мышь
-# (донгл клавиатуры тоже считается мышью). CSS cursor:none его не убирает — гасим
-# размером курсора, при этом сама мышь продолжает работать.
+# mouse cursor: the compositor draws its pointer if a USB mouse is plugged into the box
+# (a keyboard dongle counts as a mouse too). CSS cursor:none doesn't remove it — we kill it
+# via cursor size, while the mouse itself keeps working.
 Environment=XCURSOR_SIZE=1
 Environment=XCURSOR_THEME=nas-blank
 ExecStart=/usr/bin/cage -d -- /usr/bin/chromium \\
@@ -1978,19 +1978,19 @@ WantedBy=multi-user.target
 EOF
     run systemctl daemon-reload
     enable_service nas-screen
-    info "экран включён (cage+chromium -> http://127.0.0.1/screen, tty1)"
+    info "screen enabled (cage+chromium -> http://127.0.0.1/screen, tty1)"
 }
 api_screen() {
     if [ "${NASW_ENABLE:-1}" = "0" ]; then
         run systemctl disable --now nas-screen
-        run systemctl start getty@tty1   # вернуть консоль на панель
-        info "экран выключен"
+        run systemctl start getty@tty1   # return the console to the panel
+        info "screen disabled"
         return 0
     fi
     install_screen
 }
 
-# Точное время: chrony вместо systemd-timesyncd
+# Accurate time: chrony instead of systemd-timesyncd
 pi_chrony() {
     install_packages "chrony" chrony
     if [ "$DRY_RUN" -eq 0 ]; then
@@ -2001,13 +2001,13 @@ pi_chrony() {
         if   systemctl list-unit-files chrony.service  >/dev/null 2>&1; then enable_service chrony
         elif systemctl list-unit-files chronyd.service >/dev/null 2>&1; then enable_service chronyd; fi
     fi
-    info "chrony включён, systemd-timesyncd отключён (точная синхронизация времени)"
+    info "chrony enabled, systemd-timesyncd disabled (accurate time sync)"
 }
-# Адаптивный CPU-governor по температуре/троттлингу (для безвентиляторного корпуса)
+# Adaptive CPU governor by temperature/throttling (for a fanless case)
 pi_governor() {
     write_file /usr/local/bin/nas-governor.sh <<'EOF'
 #!/bin/bash
-# nas-wizard: адаптивный CPU governor по температуре/троттлингу
+# nas-wizard: adaptive CPU governor by temperature/throttling
 tz=/sys/class/thermal/thermal_zone0/temp
 temp=0; [ -r "$tz" ] && temp=$(( $(cat "$tz") / 1000 ))
 thr_hex="$(vcgencmd get_throttled 2>/dev/null | sed 's/.*=//')"
@@ -2037,11 +2037,11 @@ WantedBy=timers.target
 EOF
     run systemctl daemon-reload
     enable_service nas-governor.timer
-    info "адаптивный CPU governor включён (каждые 2 мин: ≥80°C или троттл → powersave, иначе ondemand)"
+    info "adaptive CPU governor enabled (every 2 min: ≥80°C or throttle → powersave, else ondemand)"
 }
 
 stage_pi() {
-    echo; echo "=== Этап 5: Pi-тюнинг ==="
+    echo; echo "=== Stage 5: Pi tuning ==="
     log "--- stage_pi start ---"
     local cfg temp throttled
     cfg="$(boot_config_path)"
@@ -2049,19 +2049,19 @@ stage_pi() {
     throttled="$(vcgencmd get_throttled 2>/dev/null)"
 
     local raw
-    raw="$(ui_checklist "Pi-тюнинг (железо)" \
-        "Тек. темп: ${temp:-?}  throttle: ${throttled:-?}\nОтметьте действия (правки config.txt/cmdline требуют перезагрузки):" \
-        "usbpower" "USB max current — питание USB-дисков (Pi5)" ON \
-        "trim"     "Включить fstrim.timer (TRIM для SSD/NVMe)" ON \
-        "pcie3"    "PCIe Gen3 для NVMe — быстрее, но вне спеки" OFF \
-        "cgroup"   "Memory cgroup — лимиты памяти для docker" OFF \
-        "sysctl"   "Sysctl-тюнинг (swappiness, somaxconn, tcp)" OFF \
+    raw="$(ui_checklist "Pi tuning (hardware)" \
+        "Current temp: ${temp:-?}  throttle: ${throttled:-?}\nCheck the actions (config.txt/cmdline edits require a reboot):" \
+        "usbpower" "USB max current — power for USB disks (Pi5)" ON \
+        "trim"     "Enable fstrim.timer (TRIM for SSD/NVMe)" ON \
+        "pcie3"    "PCIe Gen3 for NVMe — faster, but out of spec" OFF \
+        "cgroup"   "Memory cgroup — memory limits for docker" OFF \
+        "sysctl"   "Sysctl tuning (swappiness, somaxconn, tcp)" OFF \
         "zram"     "zram-swap (zstd, 50% RAM)" OFF \
-        "chrony"   "chrony вместо timesyncd (точное время)" OFF \
-        "governor" "Адаптивный CPU governor по температуре" OFF \
-        "eeprom"   "Обновить прошивку EEPROM (rpi-eeprom)" OFF \
-        "wifips"   "Отключить Wi-Fi power-save (стабильность)" OFF \
-        "watchdog" "Watchdog: авто-ребут при зависании" ON)" || { info "отменено"; return 0; }
+        "chrony"   "chrony instead of timesyncd (accurate time)" OFF \
+        "governor" "Adaptive CPU governor by temperature" OFF \
+        "eeprom"   "Update EEPROM firmware (rpi-eeprom)" OFF \
+        "wifips"   "Disable Wi-Fi power-save (stability)" OFF \
+        "watchdog" "Watchdog: auto-reboot on hang" ON)" || { info "cancelled"; return 0; }
 
     local sel; sel="$(checklist_selected "$raw")"
     local need_reboot=0
@@ -2081,18 +2081,18 @@ stage_pi() {
     local extra=""
     [ "$need_reboot" -eq 1 ] && extra="
 
-ВНИМАНИЕ: изменения config.txt/EEPROM применятся после ПЕРЕЗАГРУЗКИ."
-    ui_msg "Итог: Pi-тюнинг" "Готово.$extra
+WARNING: config.txt/EEPROM changes take effect after a REBOOT."
+    ui_msg "Summary: Pi tuning" "Done.$extra
 
-Проверка:
+Check:
   vcgencmd measure_temp
-  vcgencmd get_throttled   (0x0 = всё ок)
-  sudo lspci -vv | grep -i speed   (после reboot для PCIe)"
+  vcgencmd get_throttled   (0x0 = all good)
+  sudo lspci -vv | grep -i speed   (after reboot for PCIe)"
     log "--- stage_pi end ---"
 }
 
 # ---------------------------------------------------------------------------
-# ЭТАП 6: Безопасность / базовые настройки
+# STAGE 6: Security / basic settings
 # ---------------------------------------------------------------------------
 sec_unattended() {
     install_packages "security" unattended-upgrades apt-listchanges
@@ -2101,7 +2101,7 @@ APT::Periodic::Update-Package-Lists "1";
 APT::Periodic::Unattended-Upgrade "1";
 APT::Periodic::AutocleanInterval "7";
 EOF
-    info "unattended-upgrades включены (только security по умолчанию)"
+    info "unattended-upgrades enabled (security only by default)"
 }
 sec_journald() {
     run mkdir -p /etc/systemd/journald.conf.d
@@ -2121,12 +2121,12 @@ EOF
     run systemd-tmpfiles --create --prefix /var/log/journal
     # log2ram keeps /var/log on tmpfs, so the journal would never reach the disk
     if systemctl is-enabled log2ram >/dev/null 2>&1; then
-        warn "log2ram держит /var/log в оперативке — журнал не переживёт выключение"
+        warn "log2ram keeps /var/log in RAM — the journal won't survive a power-off"
         run systemctl disable --now log2ram
-        info "log2ram отключён ради постоянного журнала"
+        info "log2ram disabled for a persistent journal"
     fi
     run systemctl restart systemd-journald
-    info "journald: постоянный журнал, лимит 200M"
+    info "journald: persistent journal, 200M limit"
 }
 sec_log2ram() {
     # log2ram spares an SD card from write wear. On an NVMe/SSD root it buys nothing
@@ -2136,41 +2136,41 @@ sec_log2ram() {
     rootdev="$(findmnt -no SOURCE / 2>/dev/null | sed 's|^/dev/||')"
     case "$rootdev" in
         mmcblk*) ;;
-        *) warn "корень не на SD-карте (/dev/${rootdev:-?}) — log2ram не нужен и лишает вас логов при аварийном выключении"
+        *) warn "root is not on an SD card (/dev/${rootdev:-?}) — log2ram is unneeded and costs you logs on an emergency power-off"
            return 0 ;;
     esac
-    if dpkg -s log2ram >/dev/null 2>&1; then info "log2ram уже установлен"; return 0; fi
-    info "подключаю внешний репозиторий azlux для log2ram"
+    if dpkg -s log2ram >/dev/null 2>&1; then info "log2ram already installed"; return 0; fi
+    info "adding the external azlux repository for log2ram"
     run mkdir -p /usr/share/keyrings
     if [ "$DRY_RUN" -eq 1 ]; then
-        info "[DRY-RUN] добавить ключ+репо azlux, apt install log2ram"
+        info "[DRY-RUN] add azlux key+repo, apt install log2ram"
     else
-        wget -qO- https://azlux.fr/repo.gpg 2>>"$LOG" | gpg --dearmor > /usr/share/keyrings/azlux.gpg 2>>"$LOG" || { warn "не удалось получить ключ azlux"; return 1; }
+        wget -qO- https://azlux.fr/repo.gpg 2>>"$LOG" | gpg --dearmor > /usr/share/keyrings/azlux.gpg 2>>"$LOG" || { warn "failed to fetch azlux key"; return 1; }
         echo "deb [signed-by=/usr/share/keyrings/azlux.gpg] http://packages.azlux.fr/debian/ stable main" > /etc/apt/sources.list.d/azlux.list
         run apt-get update
         run apt-get install -y log2ram
     fi
-    info "log2ram установлен (логи в RAM, сброс на диск по таймеру)"
+    info "log2ram installed (logs in RAM, flushed to disk on a timer)"
 }
 sec_ufw() {
     install_packages "firewall" ufw
-    # СНАЧАЛА разрешаем SSH, потом включаем — чтобы не заблокировать себя
+    # FIRST allow SSH, then enable — so we don't lock ourselves out
     run ufw --force reset
     run ufw default deny incoming
     run ufw default allow outgoing
     if ufw app list 2>/dev/null | grep -q OpenSSH; then run ufw allow OpenSSH; else run ufw allow 22/tcp; fi
-    # КРИТИЧНО: порт самой веб-панели (nas-web) — иначе включение firewall закрывает
-    # доступ к панели, из которой его и включили. Порт из юнита, дефолт 80.
+    # CRITICAL: the web panel's own port (nas-web) — otherwise enabling the firewall closes
+    # access to the panel it was enabled from. Port from the unit, default 80.
     local WEBPORT="${NAS_WEB_PORT:-80}"
     run ufw allow "${WEBPORT}/tcp"
     run ufw allow 9090/tcp    # Cockpit
-    run ufw allow 5353/udp    # mDNS (avahi) — иначе <host>.local не резолвится
-    # Открыть порты шар, если они установлены
+    run ufw allow 5353/udp    # mDNS (avahi) — otherwise <host>.local won't resolve
+    # Open share ports if they are installed
     if dpkg -s samba >/dev/null 2>&1; then run ufw allow Samba 2>/dev/null || run ufw allow 445/tcp; fi
     if dpkg -s nfs-kernel-server >/dev/null 2>&1; then run ufw allow 2049/tcp; run ufw allow 111/tcp; fi
     run ufw --force enable
-    info "ufw включён (панель :${WEBPORT}, SSH, Cockpit 9090, шары — если есть)"
-    warn "docker публикует порты в обход ufw (iptables) — учитывайте это"
+    info "ufw enabled (panel :${WEBPORT}, SSH, Cockpit 9090, shares — if present)"
+    warn "docker publishes ports bypassing ufw (iptables) — keep that in mind"
 }
 sec_fail2ban() {
     install_packages "fail2ban" fail2ban
@@ -2181,16 +2181,16 @@ maxretry = 5
 bantime = 1h
 EOF
     enable_service fail2ban
-    info "fail2ban включён (jail sshd)"
+    info "fail2ban enabled (jail sshd)"
 }
 sec_sshkeys() {
     local akeys="$TARGET_HOME/.ssh/authorized_keys"
     if [ ! -s "$akeys" ]; then
-        ui_msg "SSH: небезопасно" "У пользователя $TARGET_USER НЕТ SSH-ключей ($akeys пуст/отсутствует).
+        ui_msg "SSH: unsafe" "User $TARGET_USER has NO SSH keys ($akeys is empty/missing).
 
-Отключение входа по паролю ЗАБЛОКИРУЕТ вам доступ. Пропускаю — сначала добавьте ключ:
+Disabling password login would LOCK YOU OUT. Skipping — add a key first:
   ssh-copy-id $TARGET_USER@<pi>"
-        warn "SSH-ключи не найдены — вход по паролю НЕ отключён (защита от блокировки)"
+        warn "no SSH keys found — password login NOT disabled (lockout protection)"
         return 0
     fi
     run mkdir -p /etc/ssh/sshd_config.d
@@ -2200,33 +2200,33 @@ PermitRootLogin prohibit-password
 PubkeyAuthentication yes
 EOF
     run systemctl restart ssh 2>/dev/null || run systemctl restart sshd
-    info "SSH: вход по паролю отключён (ключи есть)"
+    info "SSH: password login disabled (keys present)"
 }
 
 stage_security() {
-    echo; echo "=== Этап 6: Безопасность ==="
+    echo; echo "=== Stage 6: Security ==="
     log "--- stage_security start ---"
     local raw
-    raw="$(ui_checklist "Безопасность / базовые настройки" "Отметьте, что настроить:" \
-        "unattended" "Авто security-обновления (unattended-upgrades)" ON \
-        "journald"   "Лимит journald 200M (меньше износ SD)" ON \
-        "log2ram"    "log2ram: логи в RAM (внешний репозиторий)" OFF \
-        "ufw"        "Firewall ufw (SSH, Cockpit, шары)" OFF \
-        "fail2ban"   "fail2ban для SSH" OFF \
-        "sshkeys"    "SSH: отключить пароль (нужны ключи!)" OFF)" || { info "отменено"; return 0; }
+    raw="$(ui_checklist "Security / basic settings" "Check what to configure:" \
+        "unattended" "Auto security updates (unattended-upgrades)" ON \
+        "journald"   "journald 200M limit (less SD wear)" ON \
+        "log2ram"    "log2ram: logs in RAM (external repository)" OFF \
+        "ufw"        "ufw firewall (SSH, Cockpit, shares)" OFF \
+        "fail2ban"   "fail2ban for SSH" OFF \
+        "sshkeys"    "SSH: disable password (keys required!)" OFF)" || { info "cancelled"; return 0; }
 
     local sel; sel="$(checklist_selected "$raw")"
     case "$sel" in *" unattended "*) sec_unattended ;; esac
     case "$sel" in *" journald "*)   sec_journald ;; esac
     case "$sel" in *" log2ram "*)    sec_log2ram ;; esac
     case "$sel" in *" fail2ban "*)   sec_fail2ban ;; esac
-    case "$sel" in *" ufw "*)        sec_ufw ;; esac   # ufw после шар/fail2ban, чтобы открыть их порты
+    case "$sel" in *" ufw "*)        sec_ufw ;; esac   # ufw after shares/fail2ban, to open their ports
     case "$sel" in *" sshkeys "*)    sec_sshkeys ;; esac
 
     commit_config "security"
-    ui_msg "Итог: Безопасность" "Готово.
+    ui_msg "Summary: Security" "Done.
 
-Проверка:
+Check:
   sudo ufw status verbose
   sudo fail2ban-client status sshd
   systemctl status unattended-upgrades
@@ -2235,15 +2235,15 @@ stage_security() {
 }
 
 # ---------------------------------------------------------------------------
-# ЭТАП 7: Сетевые шары (Samba / NFS / Avahi) к /mnt/storage
+# STAGE 7: Network shares (Samba / NFS / Avahi) to /mnt/storage
 # ---------------------------------------------------------------------------
 shares_samba() {
     install_packages "samba" samba
     local user pass1 pass2 share="/mnt/storage"
-    findmnt -no TARGET "$share" >/dev/null 2>&1 || warn "$share пока не смонтирован (пул mergerfs) — шара будет отдавать локальную папку"
+    findmnt -no TARGET "$share" >/dev/null 2>&1 || warn "$share not mounted yet (mergerfs pool) — the share will serve a local folder"
     if ! grep -qs '^\[storage\]' /etc/samba/smb.conf; then
         backup_file /etc/samba/smb.conf
-        user="$(ui_input "Samba" "Пользователь для доступа к шаре:" "$TARGET_USER")" || return 0
+        user="$(ui_input "Samba" "User for share access:" "$TARGET_USER")" || return 0
         [ -z "$user" ] && user="$TARGET_USER"
         {
             echo ""
@@ -2255,19 +2255,19 @@ shares_samba() {
             echo "   create mask = 0664"
             echo "   directory mask = 0775"
         } >> /etc/samba/smb.conf 2>/dev/null
-        [ "$DRY_RUN" -eq 1 ] && info "[DRY-RUN] добавить [storage] в /etc/samba/smb.conf для $user"
-        # пароль Samba
+        [ "$DRY_RUN" -eq 1 ] && info "[DRY-RUN] add [storage] to /etc/samba/smb.conf for $user"
+        # Samba password
         if [ "$DRY_RUN" -eq 0 ]; then
-            pass1="$(ui_password "Samba пароль" "Пароль Samba для $user:")" || pass1=""
-            pass2="$(ui_password "Samba пароль" "Повторите пароль:")" || pass2=""
+            pass1="$(ui_password "Samba password" "Samba password for $user:")" || pass1=""
+            pass2="$(ui_password "Samba password" "Repeat password:")" || pass2=""
             if [ -n "$pass1" ] && [ "$pass1" = "$pass2" ]; then
-                printf '%s\n%s\n' "$pass1" "$pass1" | smbpasswd -a -s "$user" >>"$LOG" 2>&1 && info "Samba-пароль установлен для $user"
+                printf '%s\n%s\n' "$pass1" "$pass1" | smbpasswd -a -s "$user" >>"$LOG" 2>&1 && info "Samba password set for $user"
             else
-                warn "пароли не совпали/пусты — задайте вручную: sudo smbpasswd -a $user"
+                warn "passwords did not match / empty — set manually: sudo smbpasswd -a $user"
             fi
         fi
     else
-        info "[storage] уже есть в smb.conf"
+        info "[storage] already present in smb.conf"
     fi
     enable_service smbd
     systemctl list-unit-files nmbd.service >/dev/null 2>&1 && enable_service nmbd
@@ -2277,14 +2277,14 @@ shares_nfs() {
     install_packages "nfs" nfs-kernel-server
     local cidr share="/mnt/storage"
     cidr="$(detect_lan_cidr)"; [ -z "$cidr" ] && cidr="192.168.0.0/24"
-    cidr="$(ui_input "NFS" "Кому разрешить доступ (подсеть):" "$cidr")" || return 0
+    cidr="$(ui_input "NFS" "Who may access (subnet):" "$cidr")" || return 0
     local line="$share $cidr(rw,sync,no_subtree_check,root_squash)"
     if ! grep -qsF "$share " /etc/exports; then
         backup_file /etc/exports
         append_line "$line" /etc/exports
         run exportfs -ra
     else
-        info "экспорт $share уже есть в /etc/exports"
+        info "export $share already present in /etc/exports"
     fi
     enable_service nfs-server
     info "NFS: $share -> $cidr"
@@ -2292,13 +2292,13 @@ shares_nfs() {
 shares_avahi() {
     install_packages "avahi" avahi-daemon
     enable_service avahi-daemon
-    info "Avahi/mDNS включён: $(hostname).local"
+    info "Avahi/mDNS enabled: $(hostname).local"
 }
 
 # --------------------------------------------------------------------------- #
-#  Time Machine — этот NAS как приёмник macOS Time Machine (Samba + vfs_fruit +
-#  Avahi _adisk). ПОЛНОСТЬЮ отдельно от общих шар: свой include-файл, свой
-#  avahi-сервис, своя папка. Ничего из общего Samba не трогаем.
+#  Time Machine — this NAS as a macOS Time Machine target (Samba + vfs_fruit +
+#  Avahi _adisk). COMPLETELY separate from the shared folders: its own include
+#  file, its own avahi service, its own folder. Nothing in the shared Samba is touched.
 # --------------------------------------------------------------------------- #
 TM_CONF="/etc/nas-wizard/timemachine.conf"       # persisted params (in settings backup)
 TM_INC="/etc/samba/nas-timemachine.conf"          # dedicated smb include (managed)
@@ -2309,7 +2309,7 @@ tm_write_share() {
     local path="$1" user="$2" quota="$3" qline=""
     [ "${quota:-0}" -gt 0 ] 2>/dev/null && qline="   fruit:time machine max size = ${quota}G"
     write_file "$TM_INC" <<EOF
-# NAS-OS Time Machine — управляется панелью. Руками не редактировать.
+# NAS-OS Time Machine — managed by the panel. Do not edit by hand.
 [global]
    fruit:aapl = yes
    fruit:model = TimeCapsule8,119
@@ -2375,7 +2375,7 @@ EOF
                 (!done && tolower($0) ~ /^\[global\]/){print inc; done=1}
             ' "$SMB_CONF" > "$SMB_CONF.tmp" && mv "$SMB_CONF.tmp" "$SMB_CONF"
         fi
-        info "include Time Machine добавлен в smb.conf"
+        info "Time Machine include added to smb.conf"
     fi
 }
 
@@ -2384,7 +2384,7 @@ tm_apply() {
     local user="${NASW_TM_USER:-timemachine}"
     local quota="${NASW_TM_QUOTA:-0}"
     local pass="${NASW_TM_PASS:-}"
-    case "$path" in /*) : ;; *) warn "путь должен быть абсолютным"; return 2 ;; esac
+    case "$path" in /*) : ;; *) warn "path must be absolute"; return 2 ;; esac
 
     install_packages "samba" samba
     install_packages "avahi" avahi-daemon
@@ -2394,8 +2394,8 @@ tm_apply() {
     # the TM share, so it gives no access to anything else on the box.
     if ! id "$user" >/dev/null 2>&1; then
         run useradd --system --no-create-home --shell /usr/sbin/nologin "$user" \
-            && info "создан отдельный пользователь Time Machine: $user" \
-            || warn "не удалось создать пользователя $user"
+            && info "created dedicated Time Machine user: $user" \
+            || warn "failed to create user $user"
     fi
 
     run mkdir -p "$path"
@@ -2406,13 +2406,13 @@ tm_apply() {
     tm_write_share "$path" "$user" "$quota"
     tm_write_avahi
 
-    # Samba-пароль (нужен для приёмника; Mac спросит имя/пароль при подключении)
+    # Samba password (required for the target; the Mac asks for name/password on connect)
     if [ -n "$pass" ] && [ "$DRY_RUN" -eq 0 ]; then
         printf '%s\n%s\n' "$pass" "$pass" | smbpasswd -a -s "$user" >>"$LOG" 2>&1 \
-            && info "Samba-пароль для $user установлен" || warn "не удалось задать Samba-пароль"
+            && info "Samba password for $user set" || warn "failed to set Samba password"
     fi
 
-    # firewall (если ufw активен)
+    # firewall (if ufw is active)
     if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi active; then
         run ufw allow Samba 2>/dev/null || run ufw allow 445/tcp
     fi
@@ -2430,11 +2430,11 @@ EOF
     run systemctl restart smbd
     enable_service avahi-daemon
     run systemctl reload avahi-daemon 2>/dev/null || run systemctl restart avahi-daemon
-    info "Time Machine готов: //$(hostname)/TimeMachine  (папка $path, пользователь $user)"
+    info "Time Machine ready: //$(hostname)/TimeMachine  (folder $path, user $user)"
 }
 
 tm_disable() {
-    # перестаём анонсировать и отдаём share; ДАННЫЕ и пароль не трогаем
+    # stop announcing and remove the share; DATA and password are left untouched
     [ -f "$TM_AVAHI" ] && run rm -f "$TM_AVAHI"
     if [ -f "$SMB_CONF" ] && grep -qs "include = $TM_INC" "$SMB_CONF"; then
         backup_file "$SMB_CONF"
@@ -2445,7 +2445,7 @@ tm_disable() {
     fi
     run systemctl restart smbd 2>/dev/null
     run systemctl reload avahi-daemon 2>/dev/null || true
-    info "Time Machine выключен (данные сохранены)"
+    info "Time Machine disabled (data preserved)"
 }
 
 # reapply on a fresh system stage if it was configured (survives reinstall once
@@ -2459,71 +2459,71 @@ tm_reapply_if_configured() {
 }
 
 stage_shares() {
-    echo; echo "=== Этап 7: Сетевые шары ==="
+    echo; echo "=== Stage 7: Network shares ==="
     log "--- stage_shares start ---"
     local raw
-    raw="$(ui_checklist "Сетевые шары" "Доступ к /mnt/storage по сети:" \
-        "samba" "Samba (SMB) — Windows/Mac/телефон" OFF \
-        "nfs"   "NFS — Linux-клиенты" OFF \
-        "avahi" "Avahi/mDNS — виден как <host>.local" ON)" || { info "отменено"; return 0; }
+    raw="$(ui_checklist "Network shares" "Access to /mnt/storage over the network:" \
+        "samba" "Samba (SMB) — Windows/Mac/phone" OFF \
+        "nfs"   "NFS — Linux clients" OFF \
+        "avahi" "Avahi/mDNS — visible as <host>.local" ON)" || { info "cancelled"; return 0; }
 
     local sel; sel="$(checklist_selected "$raw")"
     case "$sel" in *" samba "*) shares_samba ;; esac
     case "$sel" in *" nfs "*)   shares_nfs ;; esac
     case "$sel" in *" avahi "*) shares_avahi ;; esac
 
-    ui_msg "Итог: Сетевые шары" "Готово.
+    ui_msg "Summary: Network shares" "Done.
 
-Проверка:
+Check:
   smbclient -L localhost -U <user>      (Samba)
   showmount -e localhost                 (NFS)
   avahi-browse -a                        (mDNS)
 
-Если включён ufw — порты шар уже открыты (при повторном запуске этапа 6)."
+If ufw is enabled, the share ports are already open (on a repeated run of stage 6)."
     log "--- stage_shares end ---"
 }
 
 # ---------------------------------------------------------------------------
-# ЭТАП 8: Бэкапы и мониторинг (SMART-алерты, health)
+# STAGE 8: Backups and monitoring (SMART alerts, health)
 # ---------------------------------------------------------------------------
-# smartd на боксе без SMART-дисков: DEVICESCAN ничего не находит, smartd выходит
-# с кодом 17 ("No devices to monitor"), systemd красит юнит в failed, а панель
-# показывает его в списке упавших служб. При этом НИЧЕГО не сломано — мониторить
-# просто нечего (Pi загружен с SD-карты, NVMe-слота нет вовсе, диски ещё не воткнуты).
-# smartmontools лежит в STACK_PACKAGES, и Debian включает его юнит при установке,
-# так что это ловит КАЖДЫЙ свежий бокс до первого диска — не только bk_smartd.
+# smartd on a box with no SMART disks: DEVICESCAN finds nothing, smartd exits
+# with code 17 ("No devices to monitor"), systemd marks the unit failed, and the
+# panel shows it in the list of failed services. Yet NOTHING is broken — there is
+# simply nothing to monitor (Pi booted from an SD card, no NVMe slot at all, disks
+# not plugged in yet). smartmontools is in STACK_PACKAGES, and Debian enables its
+# unit on install, so this hits EVERY fresh box before the first disk — not just bk_smartd.
 #
-# Два слоя, потому что «нечего мониторить» бывает двух видов:
-#   1. дисков нет вообще -> ConditionPathExistsGlob вообще не даёт стартовать
-#      ('|' = triggering condition: достаточно, чтобы выполнилось одно из двух);
-#   2. диск есть, но SMART не отдаёт (флешка) -> smartd всё равно выходит с 17.
-#      Одного SuccessExitStatus мало: при штатном Type=notify выход ДО READY=1 даёт
-#      Result=protocol -> failed, что бы ни стояло в SuccessExitStatus (проверено).
-#      smartd и так живёт с -n (без форка), и после него никто не выстраивается,
-#      поэтому Type=simple безопасен и делает 17 чистым выходом.
-# udev-правило поднимает smartd, как только появился настоящий диск. Только start и
-# только если не запущен: слепой restart на каждый add переопрашивал бы ВСЕ диски и
-# будил спящие.
+# Two layers, because "nothing to monitor" comes in two kinds:
+#   1. no disks at all -> ConditionPathExistsGlob prevents starting entirely
+#      ('|' = triggering condition: it is enough for one of the two to hold);
+#   2. a disk exists but does not report SMART (flash drive) -> smartd still exits with 17.
+#      SuccessExitStatus alone is not enough: with the default Type=notify, exiting BEFORE
+#      READY=1 yields Result=protocol -> failed, whatever SuccessExitStatus says (verified).
+#      smartd already runs with -n (no fork), and nothing lines up behind it,
+#      so Type=simple is safe and makes 17 a clean exit.
+# The udev rule brings smartd up as soon as a real disk appears. Only start and
+# only if not running: a blind restart on every add would re-poll ALL disks and
+# wake sleeping ones.
 install_smartd_guard() {
     systemctl list-unit-files smartmontools.service >/dev/null 2>&1 || return 0
     run mkdir -p /etc/systemd/system/smartmontools.service.d
     write_file /etc/systemd/system/smartmontools.service.d/nas-nodisk.conf <<'EOF'
 [Unit]
-# nas-wizard: нет ни одного SMART-диска (Pi с одной SD-картой) — не стартуем вовсе.
+# nas-wizard: no SMART disk at all (Pi with just an SD card) — do not start at all.
 ConditionPathExistsGlob=|/dev/sd*
 ConditionPathExistsGlob=|/dev/nvme*n*
 
 [Service]
-# nas-wizard: диск есть, но SMART не отдаёт (флешка) — smartd выходит с кодом 17.
-# Type=notify превращает ранний выход в Result=protocol (failed) независимо от
-# SuccessExitStatus, поэтому переводим в simple: smartd и так живёт с -n (без форка).
+# nas-wizard: a disk exists but does not report SMART (flash drive) — smartd exits with code 17.
+# Type=notify turns an early exit into Result=protocol (failed) regardless of
+# SuccessExitStatus, so we switch to simple: smartd already runs with -n (no fork).
 Type=simple
 SuccessExitStatus=17
 EOF
     write_file /etc/udev/rules.d/99-nas-smartd.rules <<'RULES'
-# nas-wizard: поднять smartd, когда появился первый настоящий диск (до него юнит
-# пропускается по ConditionPathExistsGlob). Только start и только если не запущен:
-# restart на каждый add переопрашивал бы ВСЕ диски и будил спящие.
+# nas-wizard: bring smartd up when the first real disk appears (before that the unit
+# is skipped by ConditionPathExistsGlob). Only start and only if not running:
+# a restart on every add would re-poll ALL disks and wake sleeping ones.
 ACTION=="add", SUBSYSTEM=="block", ENV{DEVTYPE}=="disk", KERNEL=="sd*|nvme*", RUN+="/bin/sh -c 'systemctl is-active --quiet smartmontools.service || systemctl start --no-block smartmontools.service'"
 RULES
     run udevadm control --reload-rules
@@ -2536,12 +2536,12 @@ bk_smartd() {
     install_packages "smart" smartmontools
     write_file /usr/local/bin/nas-smart-alert.sh <<'ALERT'
 #!/usr/bin/env bash
-# nas-wizard: вызывается smartd при проблеме с диском
+# nas-wizard: called by smartd on a disk problem
 LOG=/var/log/nas-smart.log
 echo "$(date '+%F %T') SMART ALERT: ${SMARTD_MESSAGE:-unknown} (${SMARTD_DEVICE:-?})" >> "$LOG"
 # event/key match the panel monitor's SMART scan ("smart:/dev/sdX") so the
 # same failing disk is reported once, not by both watchers
-[ -x /usr/local/bin/nas-notify.sh ] && /usr/local/bin/nas-notify.sh "SMART: проблема диска" "${SMARTD_DEVICE:-?}: ${SMARTD_MESSAGE:-error}" 1 smart "smart:${SMARTD_DEVICE:-?}" || true
+[ -x /usr/local/bin/nas-notify.sh ] && /usr/local/bin/nas-notify.sh "SMART: disk problem" "${SMARTD_DEVICE:-?}: ${SMARTD_MESSAGE:-error}" 1 smart "smart:${SMARTD_DEVICE:-?}" || true
 ALERT
     run chmod +x /usr/local/bin/nas-smart-alert.sh
     install_notify_helper
@@ -2550,18 +2550,18 @@ ALERT
     if ! grep -qs 'nas-smart-alert' /etc/smartd.conf 2>/dev/null; then
         backup_file /etc/smartd.conf
         write_file /etc/smartd.conf <<'EOF'
-# nas-wizard: мониторить все диски, алерт через nas-smart-alert.sh
+# nas-wizard: monitor all disks, alert via nas-smart-alert.sh
 DEVICESCAN -a -o on -S on -n standby,q -s (S/../.././02|L/../../6/03) -W 4,45,55 -m root -M exec /usr/local/bin/nas-smart-alert.sh
 EOF
     fi
     install_smartd_guard   # no disks yet -> skip start instead of failing
     enable_service smartd
-    info "smartd включён (алерты -> /var/log/nas-smart.log + ping)"
+    info "smartd enabled (alerts -> /var/log/nas-smart.log + ping)"
 }
 bk_spacetemp() {
     write_file /usr/local/bin/nas-health-check.sh <<'HEALTH'
 #!/usr/bin/env bash
-# nas-wizard: алерт по заполнению пула и температуре Pi
+# nas-wizard: alert on pool fill and Pi temperature
 set -uo pipefail
 LOG=/var/log/nas-health.log
 DISK_PCT_MAX=90
@@ -2575,15 +2575,15 @@ case "$code" in ''|000|5*) ;; *) exit 0 ;; esac
 alert=0; msg=""
 if mountpoint -q /mnt/storage; then
     pct=$(df --output=pcent /mnt/storage 2>/dev/null | tr -dc '0-9')
-    if [ -n "$pct" ] && [ "$pct" -ge "$DISK_PCT_MAX" ]; then alert=1; msg="$msg диск=${pct}%"; fi
+    if [ -n "$pct" ] && [ "$pct" -ge "$DISK_PCT_MAX" ]; then alert=1; msg="$msg disk=${pct}%"; fi
 fi
 if command -v vcgencmd >/dev/null 2>&1; then
     t=$(vcgencmd measure_temp 2>/dev/null | tr -dc '0-9.' | cut -d. -f1)
-    if [ -n "$t" ] && [ "$t" -ge "$TEMP_MAX" ]; then alert=1; msg="$msg темп=${t}C"; fi
+    if [ -n "$t" ] && [ "$t" -ge "$TEMP_MAX" ]; then alert=1; msg="$msg temp=${t}C"; fi
 fi
 if [ "$alert" -eq 1 ]; then
     echo "$(date '+%F %T') HEALTH ALERT:$msg" >> "$LOG"
-    [ -x /usr/local/bin/nas-notify.sh ] && /usr/local/bin/nas-notify.sh "NAS: внимание" "Порог превышен:$msg" 1 || true
+    [ -x /usr/local/bin/nas-notify.sh ] && /usr/local/bin/nas-notify.sh "NAS: attention" "Threshold exceeded:$msg" 1 || true
 fi
 HEALTH
     run chmod +x /usr/local/bin/nas-health-check.sh
@@ -2608,26 +2608,26 @@ WantedBy=timers.target
 EOF
     run systemctl daemon-reload
     run systemctl enable --now nas-health.timer
-    info "health-таймер включён (диск>90% / темп>75C -> ping+лог)"
+    info "health timer enabled (disk>90% / temp>75C -> ping+log)"
 }
 stage_backup() {
-    echo; echo "=== Этап 8: Бэкапы и мониторинг ==="
+    echo; echo "=== Stage 8: Backups and monitoring ==="
     log "--- stage_backup start ---"
     local raw
-    raw="$(ui_checklist "Бэкапы и мониторинг" "Что настроить:" \
-        "smartd"    "SMART-мониторинг дисков + алерт" ON \
-        "spacetemp" "Алерт: заполнение диска и температура Pi" ON)" || { info "отменено"; return 0; }
+    raw="$(ui_checklist "Backups and monitoring" "What to configure:" \
+        "smartd"    "SMART disk monitoring + alert" ON \
+        "spacetemp" "Alert: disk fill and Pi temperature" ON)" || { info "cancelled"; return 0; }
 
     local sel; sel="$(checklist_selected "$raw")"
     case "$sel" in *" smartd "*)    bk_smartd ;; esac
     case "$sel" in *" spacetemp "*) bk_spacetemp ;; esac
 
     commit_config "backup/monitoring"
-    ui_msg "Итог: Бэкапы/мониторинг" "Готово.
+    ui_msg "Summary: Backups/monitoring" "Done.
 
-Уведомления используют /etc/nas-wizard/notify.conf (Pushover).
+Notifications use /etc/nas-wizard/notify.conf (Pushover).
 
-Проверка:
+Check:
   systemctl status smartd
   systemctl list-timers 'nas-*'
   cat /var/log/nas-smart.log /var/log/nas-health.log"
@@ -2635,23 +2635,23 @@ stage_backup() {
 }
 
 # ---------------------------------------------------------------------------
-# Главное меню
+# Main menu
 # ---------------------------------------------------------------------------
 main_menu() {
     while true; do
         local choice
         choice="$(ui_menu "NAS Wizard (Raspberry Pi 5)$([ "$DRY_RUN" -eq 1 ] && echo '  [DRY-RUN]')" \
-            "Выберите этап. Лог: $LOG" \
-            "system"   "Этап 1: подготовка системы (пакеты, cockpit, docker, каталоги)" \
-            "disk"     "Этап 2: подключить диск (формат -> fstab -> mount)" \
-            "mergerfs" "Этап 2b: собрать/обновить пул mergerfs (>=2 дисков)" \
-            "snapraid" "Этап 3: SnapRAID (conf, sync, таймеры, уведомления)" \
-            "docker"   "Этап 4: Docker (найти compose-папки и поднять)" \
-            "pi"       "Этап 5: Pi-тюнинг (PCIe, USB-питание, watchdog, temp)" \
-            "security" "Этап 6: Безопасность (ufw, fail2ban, SSH, journald)" \
-            "shares"   "Этап 7: Сетевые шары (Samba/NFS/Avahi)" \
-            "backup"   "Этап 8: Бэкапы и мониторинг (SMART, health, restic)" \
-            "quit"     "Выход")" || break
+            "Choose a stage. Log: $LOG" \
+            "system"   "Stage 1: system preparation (packages, cockpit, docker, directories)" \
+            "disk"     "Stage 2: attach a disk (format -> fstab -> mount)" \
+            "mergerfs" "Stage 2b: build/update the mergerfs pool (>=2 disks)" \
+            "snapraid" "Stage 3: SnapRAID (conf, sync, timers, notifications)" \
+            "docker"   "Stage 4: Docker (find compose folders and bring them up)" \
+            "pi"       "Stage 5: Pi tuning (PCIe, USB power, watchdog, temp)" \
+            "security" "Stage 6: Security (ufw, fail2ban, SSH, journald)" \
+            "shares"   "Stage 7: Network shares (Samba/NFS/Avahi)" \
+            "backup"   "Stage 8: Backups and monitoring (SMART, health, restic)" \
+            "quit"     "Exit")" || break
 
         case "$choice" in
             system)   stage_system ;;
@@ -2666,15 +2666,15 @@ main_menu() {
             quit|"") break ;;
         esac
     done
-    echo "Готово. Полный лог: $LOG"
+    echo "Done. Full log: $LOG"
 }
 
 # ---------------------------------------------------------------------------
-# Уведомления (Pushover) — единый помощник, зовётся из обёрток
+# Notifications (Pushover) — single helper, called from the wrappers
 # ---------------------------------------------------------------------------
 NOTIFY_CONF=/etc/nas-wizard/notify.conf
-# Точечно выставить KEY="VAL" в notify.conf, не затирая чужие ключи: у файла
-# три писателя (Healthchecks-URL из мастера, Pushover из api notify и веб-UI).
+# Set a single KEY="VAL" in notify.conf without clobbering other keys: the file
+# has three writers (Healthchecks URL from the wizard, Pushover from api notify and the web UI).
 notify_conf_set() {
     local key="$1" val="${2//\"/}"
     log "NOTIFY-CONF: $key"
@@ -2723,14 +2723,14 @@ NOTIFY
     run chmod +x /usr/local/bin/nas-notify.sh
 }
 # ---------------------------------------------------------------------------
-# Сторож сети: «один активный линк за раз» + уведомление о смене сети.
+# Network guard: "one active link at a time" + notification on network change.
 #
-# Зачем. eth0 и wlan0 живут в одной подсети 192.168.1.0/24. Когда оба подняты,
-# Linux ломается предсказуемо: ARP-flux (оба интерфейса отвечают на ARP за чужой
-# адрес), NM снимает on-link маршрут подсети по ложному ACD-конфликту, ответы
-# соседям уходят через шлюз, путь становится асимметричным — и роутер, видя лишь
-# половину TCP-сессии, впрыскивает RST. Симптом: ping идёт, а HTTP висит.
-# Лечится тем, что активным держим ровно один интерфейс.
+# Why. eth0 and wlan0 live in the same subnet 192.168.1.0/24. When both are up,
+# Linux breaks predictably: ARP flux (both interfaces answer ARP for the other's
+# address), NM drops the subnet's on-link route on a false ACD conflict, replies
+# to neighbours go out via the gateway, the path becomes asymmetric — and the
+# router, seeing only half of the TCP session, injects RST. Symptom: ping works,
+# HTTP hangs. Cured by keeping exactly one interface active.
 # ---------------------------------------------------------------------------
 # comitup ships with the Pi image for headless Wi-Fi provisioning, but on a NAS that lives on
 # ethernet it does more harm than good: while the wire is up netguard keeps the home Wi-Fi
@@ -2741,7 +2741,7 @@ NOTIFY
 # fallback does not need comitup — the home profile lives in NM and netguard brings it up itself.
 disable_comitup() {
     local units u c found=0
-    # имена юнитов у разных образов разные (comitup / comitup-watch / comitup-web) — гасим те, что есть
+    # unit names differ across images (comitup / comitup-watch / comitup-web) — disable whichever exist
     units="$(systemctl list-unit-files --no-legend 2>/dev/null | awk '$1 ~ /^comitup/ {print $1}')"
     [ -n "$units" ] || return 0
     for u in $units; do
@@ -2752,21 +2752,21 @@ disable_comitup() {
         run systemctl reset-failed "$u" || true
         found=1
     done
-    # без демона хотспот-профили всё равно мертвы, но пусть не мозолят глаза в списке сетей
+    # without the daemon the hotspot profiles are dead anyway, but keep them out of the network list
     for c in $(nmcli -t -f NAME connection show 2>/dev/null | grep '^comitup-' || true); do
         run nmcli connection delete "$c" || true
     done
-    [ "$found" -eq 1 ] && info "comitup выключен: Wi-Fi-резерв поднимает netguard, аварийный хотспот больше не мешает"
+    [ "$found" -eq 1 ] && info "comitup disabled: netguard brings up the Wi-Fi fallback, the emergency hotspot no longer interferes"
     return 0
 }
 
 install_netguard() {
     write_file /usr/local/bin/nas-netguard.sh <<'GUARD'
 #!/bin/bash
-# nas-wizard: один активный линк за раз + сторож сети.
-# Проводной eth0 — главный, Wi-Fi wlan0 — резерв. Пока eth0 реально рабочий
-# (есть carrier, адрес и отзывается шлюз) — Wi-Fi отключён. Как только провод
-# пропал или завис (у macb на Pi 5 бывает TX stall) — Wi-Fi возвращается.
+# nas-wizard: one active link at a time + network guard.
+# Wired eth0 is primary, Wi-Fi wlan0 is the fallback. While eth0 is really working
+# (has carrier, an address and the gateway answers) — Wi-Fi is off. As soon as the
+# wire is gone or stalls (macb on Pi 5 sometimes has a TX stall) — Wi-Fi comes back.
 set -u
 ETH="${NAS_ETH:-eth0}"
 WIFI="${NAS_WIFI:-wlan0}"
@@ -2783,7 +2783,7 @@ GWMISS_MAX="${NAS_NETGUARD_GWMISS_MAX:-3}"
 notify(){ [ -x /usr/local/bin/nas-notify.sh ] && /usr/local/bin/nas-notify.sh "$1" "$2" "${3:-0}" "${4:-}" "${5:-}" >/dev/null 2>&1 || true; }
 logj(){ logger -t nas-netguard -- "$*" 2>/dev/null || true; }
 
-# таймер и NM-dispatcher могут выстрелить одновременно
+# the timer and NM dispatcher can fire simultaneously
 exec 9>"$LOCK" 2>/dev/null || exit 0
 flock -n 9 || exit 0
 
@@ -2806,22 +2806,22 @@ eth_healthy(){
   local g n
   g="$(ip -4 route show default dev "$ETH" 2>/dev/null | awk '{print $3; exit}')"
   [ -n "$g" ] || { gw_miss_reset; return 1; }
-  # шлюз может не отвечать на ICMP — тогда пробуем достучаться на канальном уровне
+  # the gateway may not answer ICMP — then try reaching it at the link layer
   if ping -c1 -W2 -I "$ETH" "$g" >/dev/null 2>&1 || arping -c1 -w2 -I "$ETH" "$g" >/dev/null 2>&1; then
     gw_miss_reset; return 0
   fi
   n=$(( $(cat "$GWMISS" 2>/dev/null || echo 0) + 1 ))
   echo "$n" > "$GWMISS" 2>/dev/null || true
   if [ "$n" -ge "$GWMISS_MAX" ]; then
-    logj "шлюз $g молчит $n проверки подряд — считаю провод мёртвым"
+    logj "gateway $g silent for $n checks in a row — treating the wire as dead"
     return 1
   fi
-  logj "шлюз $g не ответил ($n/$GWMISS_MAX) — провод держим, ждём следующую проверку"
+  logj "gateway $g did not answer ($n/$GWMISS_MAX) — keeping the wire, waiting for the next check"
   return 0
 }
 
-# NM иногда снимает on-link маршрут подсети (ложный ACD-конфликт при двух
-# интерфейсах в одной сети). Без него ответы соседям уезжают через шлюз.
+# NM sometimes drops the subnet's on-link route (false ACD conflict with two
+# interfaces in the same network). Without it, replies to neighbours go via the gateway.
 fix_onlink(){
   local dev="$1" cidr net
   cidr="$(ip4 "$dev")"; [ -n "$cidr" ] || return 0
@@ -2829,7 +2829,7 @@ fix_onlink(){
   [ -n "$net" ] || return 0
   ip -4 route show "$net" dev "$dev" scope link 2>/dev/null | grep -q . && return 0
   ip -4 route add "$net" dev "$dev" proto kernel scope link src "${cidr%%/*}" 2>/dev/null \
-    && logj "восстановлен on-link маршрут $net dev $dev"
+    && logj "restored on-link route $net dev $dev"
 }
 
 # comitup (headless Wi-Fi provisioning) reacts to a lost home network by
@@ -2855,37 +2855,37 @@ wifi_rescue(){
   now="$(date +%s)"
   # after 5 straight failures retry every 5 min so the hotspot stays usable
   if [ "${FAILS:-0}" -ge 5 ] && [ $(( now - ${LAST:-0} )) -lt 300 ]; then return 0; fi
-  logj "$WIFI застрял в хотспоте $act — возвращаю «$home»"
+  logj "$WIFI stuck in hotspot $act — restoring '$home'"
   systemctl stop comitup >/dev/null 2>&1 || true
   if nmcli --wait 45 connection up "$home" >/dev/null 2>&1; then
     rm -f "$WSTATE" 2>/dev/null || true
-    logj "Wi-Fi восстановлен: $home"
-    notify "NAS: Wi-Fi восстановлен" "$WIFI вернулся в сеть «$home» из аварийного хотспота comitup"
+    logj "Wi-Fi restored: $home"
+    notify "NAS: Wi-Fi restored" "$WIFI returned to network '$home' from the comitup emergency hotspot"
   else
     mkdir -p "$(dirname "$WSTATE")" 2>/dev/null || true
     printf 'FAILS=%s\nLAST=%s\n' "$(( ${FAILS:-0} + 1 ))" "$now" > "$WSTATE"
-    logj "вернуть «$home» не вышло (попытка $(( ${FAILS:-0} + 1 )))"
+    logj "failed to restore '$home' (attempt $(( ${FAILS:-0} + 1 )))"
   fi
   systemctl start --no-block comitup >/dev/null 2>&1 || true
 }
 
-# Одного `nmcli device disconnect` мало: у домашнего Wi-Fi-профиля autoconnect=yes,
-# и NM поднимает его снова через пару минут — сторож гасит, NM поднимает... (реальный
-# случай: 63 «отключаю wlan0» за 12 часов). Каждый такой всплеск = второй адрес в ТОЙ ЖЕ
-# подсети на несколько секунд — ровно та беда, из-за которой HTTP виснет, а ping идёт.
-# Поэтому пока провод жив, autoconnect домашнего Wi-Fi выключаем совсем, и возвращаем
-# его, как только провод отвалился (сторож крутится каждые 30 с — фолбэк не теряется).
+# A single `nmcli device disconnect` is not enough: the home Wi-Fi profile has autoconnect=yes,
+# and NM brings it up again a couple of minutes later — the guard drops it, NM raises it... (real
+# case: 63 "disconnecting wlan0" in 12 hours). Every such spike = a second address in the SAME
+# subnet for a few seconds — exactly the trouble that makes HTTP hang while ping works.
+# So while the wire is alive we turn the home Wi-Fi's autoconnect off entirely, and restore
+# it as soon as the wire drops (the guard runs every 30 s — the fallback is not lost).
 wifi_autoconnect(){
   local want="$1" name type cur
   has_nm || return 0
   while IFS=: read -r name type; do
-    case "$name" in ''|comitup*) continue ;; esac        # хотспот comitup не трогаем
+    case "$name" in ''|comitup*) continue ;; esac        # do not touch the comitup hotspot
     [ "$type" = "802-11-wireless" ] || continue
     [ "$(nmcli -g 802-11-wireless.mode connection show "$name" 2>/dev/null)" = "ap" ] && continue
     cur="$(nmcli -g connection.autoconnect connection show "$name" 2>/dev/null)"
     [ "$cur" = "$want" ] && continue
     nmcli connection modify "$name" connection.autoconnect "$want" >/dev/null 2>&1 \
-      && logj "автоподключение Wi-Fi «$name» → $want"
+      && logj "Wi-Fi autoconnect '$name' -> $want"
   done < <(nmcli -t -f NAME,TYPE connection show 2>/dev/null)
 }
 
@@ -2893,14 +2893,14 @@ if eth_healthy; then
   ACTIVE="$ETH"
   wifi_autoconnect no
   if has_nm && [ "$(dev_state "$WIFI")" = "connected" ]; then
-    logj "провод рабочий — отключаю $WIFI"
+    logj "wire is working — disconnecting $WIFI"
     nmcli device disconnect "$WIFI" >/dev/null 2>&1 || true
   fi
 else
   ACTIVE="$WIFI"
-  wifi_autoconnect yes            # провода нет — Wi-Fi снова разрешён как запасной путь
+  wifi_autoconnect yes            # no wire — Wi-Fi is allowed again as the fallback path
   if has_nm && [ "$(dev_state "$WIFI")" != "connected" ]; then
-    logj "провода нет — поднимаю $WIFI"
+    logj "no wire — bringing up $WIFI"
     nmcli device connect "$WIFI" >/dev/null 2>&1 || true
     sleep 3
   fi
@@ -2943,11 +2943,11 @@ avail_track(){
   boot="$(( now - $(cut -d. -f1 /proc/uptime) ))"
   if [ -n "$beat" ] && [ $(( beat + 30 )) -lt "$now" ] \
      && { [ $(( now - beat )) -gt 90 ] || [ "$beat" -lt "$boot" ]; }; then
-    # Строка пишется ЗАДНИМ числом, а журнал читается как «интервал до следующей
-    # строки» — значит она не имеет права сесть РАНЬШЕ последней записи. Со стухшим
-    # beat (восстановленный /var/lib, клонированная карта) так и вышло: «off» с
-    # временем из прошлого проглотил три часа, про которые журнал говорил «up», и
-    # виджет показал два перекрывающихся простоя. Прижимаем к концу журнала.
+    # The line is written with a BACKDATED timestamp, and the journal is read as
+    # "interval until the next line" — so it must not land BEFORE the last record. With
+    # a stale beat (restored /var/lib, cloned card) that is exactly what happened: an "off"
+    # with a timestamp from the past swallowed three hours the journal called "up", and
+    # the widget showed two overlapping outages. Clamp it to the end of the journal.
     off_at=$(( beat + 30 ))
     last_ts="$(tail -n1 "$AVLOG" 2>/dev/null | awk '{print $1}')"
     case "$last_ts" in ''|*[!0-9]*) last_ts=0 ;; esac
@@ -2989,16 +2989,16 @@ web_selfheal(){
     local pid; pid="$(systemctl show -p MainPID --value nas-web 2>/dev/null)"
     case "$pid" in ''|0|*[!0-9]*) ;; *) kill -USR1 "$pid" 2>/dev/null || true; sleep 1 ;; esac
     systemctl --no-block try-restart nas-web 2>/dev/null || true
-    logj "панель не отвечает на localhost (HTTP $code) — перезапускаю nas-web"
-    notify "Панель зависла" "nas-web не отвечал на localhost (HTTP $code) — перезапущен автоматически" 1
+    logj "panel not answering on localhost (HTTP $code) — restarting nas-web"
+    notify "Panel hung" "nas-web did not answer on localhost (HTTP $code) — restarted automatically" 1
   else
     printf '%s' "$n" > "$st"
   fi
 }
 web_selfheal
 
-# смена интерфейса/адреса -> Pushover. Первый прогон только запоминает состояние,
-# чтобы установка и перезагрузка не сыпали уведомлениями.
+# interface/address change -> Pushover. The first run only records the state,
+# so that install and reboot don't spam notifications.
 CUR_IF="$ACTIVE"
 CUR_IP="$(ip4 "$ACTIVE")"; CUR_IP="${CUR_IP%%/*}"
 [ -n "$CUR_IP" ] || exit 0
@@ -3006,37 +3006,37 @@ OLD_IF=""; OLD_IP=""
 [ -r "$STATE" ] && . "$STATE"
 if [ "$OLD_IF" != "$CUR_IF" ] || [ "$OLD_IP" != "$CUR_IP" ]; then
   if [ -n "$OLD_IF" ] && [ "$OLD_IF" != "$CUR_IF" ]; then
-    notify "NAS: смена сети" "Активный интерфейс: $OLD_IF → $CUR_IF" 0 link_changed
+    notify "NAS: network change" "Active interface: $OLD_IF → $CUR_IF" 0 link_changed
   fi
   if [ -n "$OLD_IP" ] && [ "$OLD_IP" != "$CUR_IP" ]; then
-    notify "NAS: сменился IP" "Было $OLD_IP → стало $CUR_IP" 0 ip_changed
+    notify "NAS: IP changed" "Was $OLD_IP → now $CUR_IP" 0 ip_changed
   fi
   mkdir -p "$(dirname "$STATE")" 2>/dev/null || true
   printf 'OLD_IF=%s\nOLD_IP=%s\n' "$CUR_IF" "$CUR_IP" > "$STATE"
-  logj "активный линк $CUR_IF ($CUR_IP)"
+  logj "active link $CUR_IF ($CUR_IP)"
 fi
 GUARD
     run chmod +x /usr/local/bin/nas-netguard.sh
     run mkdir -p /var/lib/nas-wizard
 
-    # мгновенная реакция на смену линка. Звать nmcli прямо отсюда нельзя:
-    # NM ждёт завершения dispatcher-скрипта, а nmcli ждёт ответа NM -> дедлок.
-    run mkdir -p /etc/NetworkManager/dispatcher.d   # write_file родителя не создаёт
+    # instant reaction to a link change. Calling nmcli directly from here is not allowed:
+    # NM waits for the dispatcher script to finish, and nmcli waits for NM's reply -> deadlock.
+    run mkdir -p /etc/NetworkManager/dispatcher.d   # parent write_file doesn't create it
     write_file /etc/NetworkManager/dispatcher.d/50-nas-netguard <<'DISP'
 #!/bin/bash
-# nas-wizard: дёрнуть сторож сети при смене состояния линка (асинхронно!)
+# nas-wizard: poke the network guard on a link state change (asynchronously!)
 case "${2:-}" in up|down|carrier-up|carrier-down|dhcp4-change) ;; *) exit 0 ;; esac
 case "${1:-}" in eth0|wlan0) ;; *) exit 0 ;; esac
 systemctl start --no-block nas-netguard.service >/dev/null 2>&1 || true
 exit 0
 DISP
     run chmod 755 /etc/NetworkManager/dispatcher.d/50-nas-netguard
-    # та же ловушка: NM выполняет всё, что лежит в dispatcher.d
+    # same trap: NM runs everything placed in dispatcher.d
     run rm -f /etc/NetworkManager/dispatcher.d/50-nas-netguard.bak.*
 
     write_file /etc/systemd/system/nas-netguard.service <<'UNIT'
 [Unit]
-Description=NAS: один активный линк + сторож сети
+Description=NAS: single active link + network guard
 After=NetworkManager.service
 
 [Service]
@@ -3046,7 +3046,7 @@ UNIT
 
     write_file /etc/systemd/system/nas-netguard.timer <<'UNIT'
 [Unit]
-Description=NAS: периодическая проверка сети
+Description=NAS: periodic network check
 
 [Timer]
 OnBootSec=45s
@@ -3057,10 +3057,10 @@ AccuracySec=5s
 WantedBy=timers.target
 UNIT
 
-    # Страховка на окно, пока оба интерфейса подняты: каждый отвечает ARP только
-    # за свой адрес и представляется своим (иначе ARP-flux травит кэш соседей).
+    # Safety for the window while both interfaces are up: each answers ARP only
+    # for its own address and announces its own (otherwise ARP-flux poisons neighbours' cache).
     write_file /etc/sysctl.d/99-nas-arp.conf <<'SYSCTL'
-# nas-wizard: два интерфейса в одной подсети — без этого возможен ARP-flux
+# nas-wizard: two interfaces in one subnet — without this ARP-flux is possible
 net.ipv4.conf.all.arp_ignore = 1
 net.ipv4.conf.all.arp_announce = 2
 SYSCTL
@@ -3068,24 +3068,24 @@ SYSCTL
 
     run systemctl daemon-reload
     run systemctl enable --now nas-netguard.timer
-    info "сторож сети включён: eth0 главный, wlan0 резерв, уведомления о смене IP"
+    info "network guard enabled: eth0 primary, wlan0 backup, notifications on IP change"
     disable_comitup
-    # честно предупреждаем: если сейчас подняты оба линка, Wi-Fi будет отключён,
-    # и открытая по нему сессия (SSH/панель) оборвётся — надо зайти по адресу eth0
+    # warn honestly: if both links are up now, Wi-Fi will be disabled,
+    # and a session opened over it (SSH/panel) will drop — you must connect via the eth0 address
     if [ "$(cat /sys/class/net/eth0/carrier 2>/dev/null || echo 0)" = "1" ] \
        && nmcli -t -f DEVICE,STATE device 2>/dev/null | grep -q '^wlan0:connected$'; then
-        warn "кабель подключён — Wi-Fi будет отключён. Если вы зашли по Wi-Fi, сессия оборвётся; заходите заново по <хост>.local"
+        warn "cable connected — Wi-Fi will be disabled. If you connected over Wi-Fi, the session will drop; reconnect via <host>.local"
     fi
 }
 
 # ---------------------------------------------------------------------------
-# Приветствие при входе по SSH (MOTD).
-# sshd здесь с PrintMotd=no — текст рисует pam_motd из /etc/update-motd.d/,
-# поэтому свой блок кладём туда, а не правим /etc/motd (его гасим: юридическая
-# простыня Debian на NAS только мешает; бэкап делает write_file).
+# SSH login greeting (MOTD).
+# sshd here runs with PrintMotd=no — the text is drawn by pam_motd from /etc/update-motd.d/,
+# so we put our block there instead of editing /etc/motd (which we blank out: the Debian
+# legal wall of text just gets in the way on a NAS; write_file makes a backup).
 # ---------------------------------------------------------------------------
 install_motd() {
-    # пользовательский текст создаём только если его ещё нет — не затирать правки
+    # create the user text only if it doesn't exist yet — don't overwrite edits
     run mkdir -p /etc/nas-wizard
     if [ ! -f /etc/nas-wizard/motd.txt ]; then
         write_file /etc/nas-wizard/motd.txt <<'TXT'
@@ -3099,11 +3099,11 @@ NAS-OS - home NAS on Raspberry Pi 5
 TXT
     fi
     [ -f /etc/nas-wizard/motd.conf ] || write_file /etc/nas-wizard/motd.conf <<'CONF'
-# nas-wizard: что показывать при входе по SSH
+# nas-wizard: what to show on SSH login
 MOTD_LOGO=1
 MOTD_TEXT=1
 MOTD_INFO=1
-# чужие куски приветствия (применяет nas-web при старте и при сохранении):
+# third-party greeting pieces (applied by nas-web at startup and on save):
 MOTD_UNAME=1
 MOTD_COCKPIT=1
 MOTD_LASTLOG=1
@@ -3112,24 +3112,24 @@ CONF
     run mkdir -p /etc/update-motd.d
     write_file /etc/update-motd.d/20-nas-os <<'MOTD'
 #!/bin/bash
-# nas-wizard: приветствие при входе по SSH.
-# ВНИМАНИЕ: выполняется на КАЖДОМ логине. Только дешёвые команды; ничего, что
-# будит спящие диски (никаких smartctl/hdparm) и ничего, что лезет в сеть.
+# nas-wizard: SSH login greeting.
+# NOTE: runs on EVERY login. Only cheap commands; nothing that
+# wakes sleeping disks (no smartctl/hdparm) and nothing that touches the network.
 CONF=/etc/nas-wizard/motd.conf
 TXT=/etc/nas-wizard/motd.txt
 MOTD_TEXT=1; MOTD_INFO=1
 [ -r "$CONF" ] && . "$CONF"
 
-# NO_COLOR=1 — для предпросмотра в веб-панели
+# NO_COLOR=1 — for the preview in the web panel
 if [ -n "${NO_COLOR:-}" ]; then
   B=""; D=""; G=""; Y=""; R=""
 else
   B=$'\033[1;36m'; D=$'\033[2;37m'; G=$'\033[1;32m'; Y=$'\033[1;33m'; R=$'\033[0m'
 fi
-# метки латиницей: printf меряет байты, кириллица ломала бы выравнивание колонок
+# labels in latin: printf measures bytes, Cyrillic would break column alignment
 row(){ printf '  %s%-12s%s %s\n' "$D" "$1" "$R" "$2"; }
 
-# ---- значения. Считаем один раз: их используют и свой текст (через токены), и сводка.
+# ---- values. Computed once: used both by the custom text (via tokens) and the summary.
 V_HOST="$(hostname)"
 V_UPTIME="$(uptime -p 2>/dev/null | sed 's/^up //')"
 V_LOAD="$(awk '{printf "%s %s %s", $1, $2, $3}' /proc/loadavg 2>/dev/null)"
@@ -3145,8 +3145,8 @@ V_SYSTEM="$(usage /)"
 V_POOL=""
 findmnt -n /mnt/storage >/dev/null 2>&1 && V_POOL="$(usage /mnt/storage)"
 
-# route get только читает таблицу маршрутов, в сеть не ходит. Разбираем по ключам:
-# у маршрута может не быть "via", зато в хвосте бывает "uid 1000".
+# route get only reads the routing table, doesn't touch the network. Parse by keys:
+# a route may lack "via", but can have "uid 1000" at the tail.
 net="$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for(i=1;i<=NF;i++){if($i=="dev")d=$(i+1);if($i=="src")s=$(i+1)}}END{print s" "d}')"
 V_IP="${net%% *}"; V_IFACE="${net##* }"
 [ -n "$V_IP" ] && V_PANEL="http://$V_IP/" || V_PANEL=""
@@ -3176,8 +3176,8 @@ if [ "${MOTD_LOGO:-1}" = "1" ]; then
   printf '  %s╝╚╝╩ ╩╚═╝%s    %s╚═╝╚═╝%s\n' "$PIR" "$R" "$PIG" "$R"
 fi
 
-# ---- свой текст: подставляем токены. Никакого eval — только замена подстрок,
-# поэтому команды и переменные внутри текста не выполняются.
+# ---- custom text: substitute tokens. No eval — only substring replacement,
+# so commands and variables inside the text are not executed.
 if [ "${MOTD_TEXT:-1}" = "1" ] && [ -r "$TXT" ]; then
   txt="$(cat "$TXT")"
   txt="${txt//\{host\}/$V_HOST}"
@@ -3214,32 +3214,32 @@ fi
 printf '\n'
 MOTD
     run chmod +x /etc/update-motd.d/20-nas-os
-    # write_file делает бэкап через `cp -a`, сохраняя бит исполнения, а pam_motd
-    # запускает ВСЕ файлы каталога — старая копия печатала приветствие второй раз.
+    # write_file makes a backup via `cp -a`, keeping the exec bit, and pam_motd
+    # runs ALL files in the directory — the old copy printed the greeting a second time.
     run rm -f /etc/update-motd.d/20-nas-os.bak.*
 
-    # юридическая простыня Debian поверх нашего блока — только шум
+    # the Debian legal wall of text on top of our block is just noise
     write_file /etc/motd </dev/null
-    info "SSH-приветствие установлено (/etc/nas-wizard/motd.txt — свой текст)"
+    info "SSH greeting installed (/etc/nas-wizard/motd.txt — custom text)"
 }
 
-setup_snapraid_notify_noninteractive() { :; }   # уведомления настраиваются отдельно (api notify)
+setup_snapraid_notify_noninteractive() { :; }   # notifications are configured separately (api notify)
 
 # ---------------------------------------------------------------------------
-# Неинтерактивные apply-обёртки для API (переиспользуют проверенные функции)
+# Non-interactive apply wrappers for the API (reuse proven functions)
 # ---------------------------------------------------------------------------
 stage_system_apply() {
     export DEBIAN_FRONTEND=noninteractive
-    # первым делом — обновляем систему целиком (по просьбе: apt update && full-upgrade)
+    # first thing — update the whole system (as requested: apt update && full-upgrade)
     run apt-get update
     run apt-get full-upgrade -y
-    install_packages "NAS-стек"  "${STACK_PACKAGES[@]}"
-    install_smartd_guard   # smartmontools ставится тут же — сразу закрыть failed без дисков
-    install_screen         # локальный тач-экран: ставится, только если панель реально подключена
-    install_packages "утилиты"   "${UTIL_PACKAGES[@]}"
-    install_packages "Pi-пакеты" "${PI_PACKAGES[@]}"
-    ensure_docker_repo   # docker-ce + compose-plugin из официального репо Docker
-    ensure_gh            # GitHub CLI (для пуша кода панели с бокса)
+    install_packages "NAS stack"  "${STACK_PACKAGES[@]}"
+    install_smartd_guard   # smartmontools is installed here too — immediately clear 'failed' when there are no disks
+    install_screen         # local touchscreen: installed only if the panel is actually connected
+    install_packages "utilities"   "${UTIL_PACKAGES[@]}"
+    install_packages "Pi packages" "${PI_PACKAGES[@]}"
+    ensure_docker_repo   # docker-ce + compose-plugin from the official Docker repo
+    ensure_gh            # GitHub CLI (to push panel code from the box)
     local svc
     for svc in cockpit.socket docker; do enable_service "$svc"; done
     systemctl list-unit-files fstrim.timer >/dev/null 2>&1 && enable_service fstrim.timer
@@ -3263,7 +3263,7 @@ stage_system_apply() {
     fi
     [ -n "${NASW_TZ:-}" ]   && run timedatectl set-timezone "$NASW_TZ"
     [ -n "${NASW_HOST:-}" ] && run hostnamectl set-hostname "$NASW_HOST"
-    # Превью файлов: кэш + ночной прогрев (ffmpeg/pdftoppm ставятся выше в утилитах)
+    # File previews: cache + nightly warm-up (ffmpeg/pdftoppm installed above in utilities)
     run mkdir -p /var/cache/nas-thumbs
     write_file /etc/systemd/system/nas-thumbs.service <<UNIT
 [Unit]
@@ -3286,10 +3286,10 @@ WantedBy=timers.target
 UNIT
     run systemctl daemon-reload
     run systemctl enable --now nas-thumbs.timer
-    echo "система подготовлена"
+    echo "system prepared"
 }
-# Смонтировать съёмный носитель в базу автомонтирования (явное действие: формат/монтирование).
-# Монтирует напрямую, независимо от того, включён ли udev-автомаунт.
+# Mount a removable medium into the automount base (explicit action: format/mount).
+# Mounts directly, regardless of whether udev automount is enabled.
 automount_now() {
     local dev="$1" want="${2:-}" fs label base target opts uid gid i=1
     base="/media/nas"
@@ -3300,14 +3300,14 @@ automount_now() {
     fi
     label="${label:-$(basename "$dev")}"; label="${label//[^A-Za-z0-9._-]/_}"
     if [ -n "$want" ]; then
-        # пользователь указал свою точку монтирования — создаём её (mkdir -p), не подбираем _N
-        case "$want" in /*) ;; *) echo "точка монтирования должна быть абсолютным путём"; return 2 ;; esac
-        case "$want" in *..*) echo "недопустимый путь"; return 2 ;; esac
+        # user specified their own mount point — create it (mkdir -p), don't pick _N
+        case "$want" in /*) ;; *) echo "mount point must be an absolute path"; return 2 ;; esac
+        case "$want" in *..*) echo "invalid path"; return 2 ;; esac
         target="$want"
-        if findmnt -rn "$target" >/dev/null 2>&1; then echo "в $target уже что-то смонтировано"; return 2; fi
+        if findmnt -rn "$target" >/dev/null 2>&1; then echo "something is already mounted at $target"; return 2; fi
     else
         target="$base/$label"
-        # не затирать чужой каталог с данными
+        # don't overwrite someone else's directory with data
         while findmnt -rn "$target" >/dev/null 2>&1 || { [ -e "$target" ] && [ -n "$(ls -A "$target" 2>/dev/null)" ]; }; do
             target="$base/${label}_$i"; i=$((i+1)); done
     fi
@@ -3322,82 +3322,82 @@ automount_now() {
 
 api_format_disk() {
     local dev="${NASW_DEV:-}" role="${NASW_ROLE:-data}" fs="${NASW_FS:-ext4}" n mp label parent
-    [ -n "$dev" ] || { echo "не указан диск (NASW_DEV)"; return 2; }
-    [ -b "$dev" ] || { echo "ОТКАЗ: $dev не блочное устройство"; return 2; }
-    is_protected "$dev" && { echo "ОТКАЗ: $dev — системный диск"; return 2; }
-    # защитить и разделы системного диска: проверить родительское устройство
+    [ -n "$dev" ] || { echo "no disk specified (NASW_DEV)"; return 2; }
+    [ -b "$dev" ] || { echo "REJECTED: $dev is not a block device"; return 2; }
+    is_protected "$dev" && { echo "REJECTED: $dev is a system disk"; return 2; }
+    # protect the system disk's partitions too: check the parent device
     parent="$(lsblk -no PKNAME "$dev" 2>/dev/null | head -1)"
-    [ -n "$parent" ] && is_protected "/dev/$parent" && { echo "ОТКАЗ: $dev — раздел системного диска"; return 2; }
-    # НЕ переформатировать уже настроенный диск (мог временно отвалиться от mount из-за nofail).
-    # ВАЖНО: этот отказ — ДО размонтирования, иначе пуловый диск сначала отвалился бы от
-    # /mnt/diskN, а форматирование всё равно отменилось — оставили бы пул сломанным.
-    disk_already_configured "$dev" && { echo "ОТКАЗ: $dev уже настроен (его UUID есть в /etc/fstab) — форматирование отменено во избежание потери данных"; return 2; }
-    # Смонтирован? Раньше отказывали и просили отмонтировать руками — лишний шаг: диск
-    # всё равно будет затёрт. Системный и настроенные диски отсечены выше, так что здесь
-    # остаются только съёмные/чужие — их безопасно отмонтировать самим.
+    [ -n "$parent" ] && is_protected "/dev/$parent" && { echo "REJECTED: $dev is a partition of the system disk"; return 2; }
+    # Do NOT reformat an already-configured disk (it may have temporarily dropped from mount due to nofail).
+    # IMPORTANT: this rejection is BEFORE unmounting, otherwise a pool disk would first drop from
+    # /mnt/diskN, and the format would be cancelled anyway — leaving the pool broken.
+    disk_already_configured "$dev" && { echo "REJECTED: $dev is already configured (its UUID is in /etc/fstab) — format cancelled to avoid data loss"; return 2; }
+    # Mounted? We used to reject and ask to unmount by hand — an extra step: the disk
+    # is going to be wiped anyway. System and configured disks are cut off above, so here
+    # only removable/foreign ones remain — safe to unmount ourselves.
     if disk_in_use "$dev"; then
-        echo "отмонтирую $dev перед форматированием…"
+        echo "unmounting $dev before formatting…"
         unmount_dev "$dev" || {
-            echo "ОТКАЗ: $dev занят, отмонтировать не вышло. Держат: $(dev_holders "$dev")"
+            echo "REJECTED: $dev is busy, could not unmount. Held by: $(dev_holders "$dev")"
             return 2; }
     fi
     case "$role" in
         parity)
             n="$(next_parity_number)"; mp="/mnt/parity${n}"; label="${NASW_LABEL:-parity${n}}"
             format_and_mount "$dev" "$mp" "$fs" "$label" 2
-            echo "готово: $dev -> $mp" ;;
+            echo "done: $dev -> $mp" ;;
         removable|media|usb)
             label="${NASW_LABEL:-USB}"
             make_fs "$dev" "$fs" "$label"
             run partprobe "$dev" 2>/dev/null || true
             automount_now "$dev"
-            echo "готово: $dev отформатирован ($fs, метка «$label») и смонтирован" ;;
+            echo "done: $dev formatted ($fs, label «$label») and mounted" ;;
         *)
             n="$(next_disk_number)"; mp="/mnt/disk${n}"; label="${NASW_LABEL:-disk${n}}"
             format_and_mount "$dev" "$mp" "$fs" "$label" 2
             [ "$(mounted_data_disks | grep -c .)" -ge 2 ] && generate_mergerfs
-            echo "готово: $dev -> $mp" ;;
+            echo "done: $dev -> $mp" ;;
     esac
 }
-# Смонтировать произвольное устройство (флешку/раздел) в базу автомонтирования
+# Mount an arbitrary device (flash drive/partition) into the automount base
 api_mount_dev() {
     local dev="${NASW_DEV:-}"
-    [ -n "$dev" ] || { echo "не указан диск (NASW_DEV)"; return 2; }
-    is_protected "$dev" && { echo "ОТКАЗ: $dev — системный диск"; return 2; }
-    disk_in_use "$dev" && { echo "$dev уже смонтирован"; return 0; }
-    [ -n "$(blkid -s TYPE -o value "$dev" 2>/dev/null)" ] || { echo "на $dev нет файловой системы"; return 2; }
+    [ -n "$dev" ] || { echo "no disk specified (NASW_DEV)"; return 2; }
+    is_protected "$dev" && { echo "REJECTED: $dev is a system disk"; return 2; }
+    disk_in_use "$dev" && { echo "$dev is already mounted"; return 0; }
+    [ -n "$(blkid -s TYPE -o value "$dev" 2>/dev/null)" ] || { echo "no filesystem on $dev"; return 2; }
     automount_now "$dev" "${NASW_TARGET:-}" || return $?
-    echo "смонтирован $dev"
+    echo "mounted $dev"
 }
 api_label_disk() {
     local dev="${NASW_DEV:-}" label="${NASW_LABEL:-}" fs mp rc
-    [ -n "$dev" ] || { echo "не указан диск (NASW_DEV)"; return 2; }
-    [ -n "$label" ] || { echo "не указана метка (NASW_LABEL)"; return 2; }
-    is_protected "$dev" && { echo "ОТКАЗ: $dev — системный диск"; return 2; }
+    [ -n "$dev" ] || { echo "no disk specified (NASW_DEV)"; return 2; }
+    [ -n "$label" ] || { echo "no label specified (NASW_LABEL)"; return 2; }
+    is_protected "$dev" && { echo "REJECTED: $dev is a system disk"; return 2; }
     fs="$(blkid -s TYPE -o value "$dev" 2>/dev/null)"
-    [ -n "$fs" ] || { echo "на $dev нет файловой системы"; return 2; }
+    [ -n "$fs" ] || { echo "no filesystem on $dev"; return 2; }
     mp="$(findmnt -no TARGET "$dev" 2>/dev/null | head -1)"
     case "$fs" in
         ext2|ext3|ext4) run e2label "$dev" "$label"; rc=$? ;;
-        xfs)   [ -z "$mp" ] || { echo "xfs: сначала отмонтируйте раздел"; return 2; }
-               command -v xfs_admin >/dev/null || { echo "нет xfs_admin (установите xfsprogs)"; return 2; }
+        xfs)   [ -z "$mp" ] || { echo "xfs: unmount the partition first"; return 2; }
+               command -v xfs_admin >/dev/null || { echo "no xfs_admin (install xfsprogs)"; return 2; }
                run xfs_admin -L "$label" "$dev"; rc=$? ;;
         vfat)  run fatlabel "$dev" "$(printf '%s' "$label" | tr 'a-z' 'A-Z' | cut -c1-11)"; rc=$? ;;
         exfat) run exfatlabel "$dev" "$label"; rc=$? ;;
         ntfs)  run ntfslabel "$dev" "$label"; rc=$? ;;
         btrfs) run btrfs filesystem label "${mp:-$dev}" "$label"; rc=$? ;;
-        *)     echo "переименование не поддержано для ФС $fs"; return 2 ;;
+        *)     echo "renaming not supported for filesystem $fs"; return 2 ;;
     esac
-    [ "${rc:-1}" -eq 0 ] || { echo "не удалось переименовать $dev ($fs) — см. лог"; return 1; }
+    [ "${rc:-1}" -eq 0 ] || { echo "failed to rename $dev ($fs) — see the log"; return 1; }
     run udevadm trigger --settle "$dev" 2>/dev/null || true
-    echo "метка $dev -> «$label» ($fs)"
+    echo "label $dev -> «$label» ($fs)"
 }
-# Установить/обновить автомонтирование съёмных носителей (udev + systemd-run + helper)
+# Install/update automount for removable media (udev + systemd-run + helper)
 install_automount() {
     local user="${1:-$TARGET_USER}" base="${2:-/media/nas}"
     run mkdir -p /etc/nas-wizard "$base"
     write_file /etc/nas-wizard/automount.conf <<EOF
-# nas-wizard: автомонтирование съёмных носителей
+# nas-wizard: automount for removable media
 ENABLED=1
 BASE="$base"
 AM_USER="$user"
@@ -3405,32 +3405,32 @@ OPTS_NATIVE="rw,noatime,nofail"
 EOF
     write_file /usr/local/bin/nas-automount.sh <<'AM'
 #!/usr/bin/env bash
-# nas-wizard: авто-монтирование/размонтирование съёмных носителей (вызывается из udev через systemd-run)
+# nas-wizard: auto mount/unmount of removable media (called from udev via systemd-run)
 set -uo pipefail
 CONF=/etc/nas-wizard/automount.conf
 ENABLED=1; BASE=/media/nas; AM_USER=""; OPTS_NATIVE="rw,noatime,nofail"
 [ -f "$CONF" ] && . "$CONF"
 LOG=/var/log/nas-automount.log
 log(){ printf '%s %s\n' "$(date '+%F %T')" "$*" >>"$LOG" 2>/dev/null; }
-poke(){ touch /run/nas-web-refresh 2>/dev/null; }   # разбудить панель: диски изменились
+poke(){ touch /run/nas-web-refresh 2>/dev/null; }   # wake the panel: disks changed
 ACTION="${1:-}"; KDEV="${2:-}"
-[ "$ENABLED" = "1" ] || { log "выключено — пропуск"; exit 0; }
+[ "$ENABLED" = "1" ] || { log "disabled — skip"; exit 0; }
 [ -n "$KDEV" ] || exit 0
 DEV="/dev/$KDEV"
 
-clean_stale(){    # снять все монтирования под BASE, чей девайс исчез
+clean_stale(){    # unmount everything under BASE whose device has disappeared
   findmnt -rn -o TARGET,SOURCE 2>/dev/null | while read -r t s; do
     case "$t" in "$BASE"/*)
-      [ -b "$s" ] || { umount -l "$t" 2>>"$LOG" && rmdir "$t" 2>/dev/null; log "снято $t (девайс исчез)"; } ;;
+      [ -b "$s" ] || { umount -l "$t" 2>>"$LOG" && rmdir "$t" 2>/dev/null; log "removed $t (device gone)"; } ;;
     esac
   done
 }
 do_add(){
   local fs uuid label name target opts uid gid i=1
-  fs="$(blkid -s TYPE -o value "$DEV" 2>/dev/null)"; [ -n "$fs" ] || { log "нет ФС на $DEV"; exit 0; }
+  fs="$(blkid -s TYPE -o value "$DEV" 2>/dev/null)"; [ -n "$fs" ] || { log "no filesystem on $DEV"; exit 0; }
   uuid="$(blkid -s UUID -o value "$DEV" 2>/dev/null)"
-  grep -qsF "UUID=$uuid" /etc/fstab && { log "$DEV в fstab — пропуск"; exit 0; }
-  findmnt -rn -S "$DEV" >/dev/null 2>&1 && { log "$DEV уже смонтирован"; exit 0; }
+  grep -qsF "UUID=$uuid" /etc/fstab && { log "$DEV in fstab — skip"; exit 0; }
+  findmnt -rn -S "$DEV" >/dev/null 2>&1 && { log "$DEV already mounted"; exit 0; }
   label="$(blkid -s LABEL -o value "$DEV" 2>/dev/null)"
   name="${label:-$KDEV}"; name="${name//[^A-Za-z0-9._-]/_}"
   target="$BASE/$name"
@@ -3446,8 +3446,8 @@ do_add(){
     exfat|ntfs) opts="rw,noatime,nofail,uid=$uid,gid=$gid,umask=002" ;;
     *)          opts="$OPTS_NATIVE" ;;
   esac
-  if mount -o "$opts" "$DEV" "$target" 2>>"$LOG"; then log "смонтирован $DEV ($fs) -> $target"; poke
-  else mount "$DEV" "$target" 2>>"$LOG" && { log "смонтирован(деф.) $DEV -> $target"; poke; } || { rmdir "$target" 2>/dev/null; log "ОШИБКА монтирования $DEV"; }
+  if mount -o "$opts" "$DEV" "$target" 2>>"$LOG"; then log "mounted $DEV ($fs) -> $target"; poke
+  else mount "$DEV" "$target" 2>>"$LOG" && { log "mounted(default) $DEV -> $target"; poke; } || { rmdir "$target" 2>/dev/null; log "ERROR mounting $DEV"; }
   fi
 }
 case "$ACTION" in
@@ -3458,18 +3458,18 @@ esac
 AM
     run chmod +x /usr/local/bin/nas-automount.sh
     write_file /etc/udev/rules.d/99-nas-automount.rules <<'RULES'
-# nas-wizard: автомонтирование съёмных USB-носителей.
-# Матчим по ID_USB_DRIVER (usb-storage/uas), а НЕ по ID_BUS==usb: USB-SATA мосты
-# (UAS) отдают диск как ID_BUS=ata, и старое правило для них не срабатывало.
+# nas-wizard: automount for removable USB media.
+# Match by ID_USB_DRIVER (usb-storage/uas), NOT by ID_BUS==usb: USB-SATA bridges
+# (UAS) present the disk as ID_BUS=ata, and the old rule didn't fire for them.
 ACTION=="add",    SUBSYSTEM=="block", ENV{ID_FS_USAGE}=="filesystem", ENV{ID_USB_DRIVER}=="?*", RUN+="/usr/bin/systemd-run --no-block /usr/local/bin/nas-automount.sh add %k"
 ACTION=="remove", SUBSYSTEM=="block", ENV{ID_USB_DRIVER}=="?*", RUN+="/usr/bin/systemd-run --no-block /usr/local/bin/nas-automount.sh remove %k"
 
-# Таймаут SCSI-команды для USB-дисков: 30 с (по умолчанию) → 180 с.
-# 2.5" SMR-диск под сплошной записью уходит во внутреннюю перетасовку и может не отвечать
-# минуту. Ядро на 30-й секунде объявляет ошибку, error recovery не помогает, диск уходит
-# ОФЛАЙН, ext4 — в аварийный read-only ПОСРЕДИ бэкапа (реальный случай 2026-07-12: Ugreen
-# RTL9210 + ST4000LM024, команда висела 68 с; SMART при этом чистый — диск ошибок не видел).
-# %S/%p = путь sysfs самого блочного устройства; device/timeout — уже scsi-устройство за ним.
+# SCSI command timeout for USB disks: 30 s (default) → 180 s.
+# A 2.5" SMR disk under sustained writes goes into an internal shuffle and may not respond
+# for a minute. At 30 s the kernel declares an error, error recovery doesn't help, the disk goes
+# OFFLINE, ext4 into emergency read-only MID backup (real case 2026-07-12: Ugreen
+# RTL9210 + ST4000LM024, the command hung 68 s; SMART was clean meanwhile — the disk saw no errors).
+# %S/%p = sysfs path of the block device itself; device/timeout is the scsi device behind it.
 ACTION=="add|change", SUBSYSTEM=="block", KERNEL=="sd*", ENV{ID_USB_DRIVER}=="?*", RUN+="/bin/sh -c 'echo 180 > /sys/%p/device/timeout'"
 RULES
     run udevadm control --reload-rules
@@ -3481,11 +3481,11 @@ api_automount() {
         [ -f /etc/nas-wizard/automount.conf ] && run sed -i 's/^ENABLED=.*/ENABLED=0/' /etc/nas-wizard/automount.conf
         run rm -f /etc/udev/rules.d/99-nas-automount.rules
         run udevadm control --reload-rules
-        echo "автомонтирование выключено"
+        echo "automount disabled"
         return 0
     fi
     install_automount "$user" "$base"
-    echo "автомонтирование включено (USB-носители -> $base)"
+    echo "automount enabled (USB media -> $base)"
 }
 api_pi() {
     local cfg k; cfg="$(boot_config_path)"
@@ -3505,69 +3505,69 @@ api_shares() {
 }
 
 # ---------------------------------------------------------------------------
-# Модули: comitup / Tailscale / статический IP / Cockpit-GUI
+# Modules: comitup / Tailscale / static IP / Cockpit GUI
 # ---------------------------------------------------------------------------
 mod_comitup() {
-    if dpkg -s comitup >/dev/null 2>&1; then echo "comitup уже установлен"; return 0; fi
+    if dpkg -s comitup >/dev/null 2>&1; then echo "comitup already installed"; return 0; fi
     if [ "$DRY_RUN" -eq 1 ]; then
-        info "[DRY-RUN] подключить репозиторий davesteele + apt install comitup"
+        info "[DRY-RUN] add davesteele repository + apt install comitup"
         echo "comitup (dry-run)"; return 0
     fi
-    warn "comitup управляет сетью — на Wi-Fi возможен кратковременный обрыв связи"
+    warn "comitup manages the network — a brief connection drop over Wi-Fi is possible"
     run mkdir -p /usr/share/keyrings
     if curl -fsSL https://davesteele.github.io/key-366150CE.pub.txt 2>>"$LOG" | gpg --dearmor > /usr/share/keyrings/davesteele.gpg 2>>"$LOG"; then
         echo "deb [signed-by=/usr/share/keyrings/davesteele.gpg] https://davesteele.github.io/comitup/repo comitup main" > /etc/apt/sources.list.d/comitup.list
         run apt-get update
         run apt-get install -y comitup
         run systemctl enable comitup 2>/dev/null || true
-        echo "comitup установлен (Wi-Fi точка доступа + captive-портал)"
+        echo "comitup installed (Wi-Fi access point + captive portal)"
     else
-        warn "не удалось получить ключ davesteele — comitup пропущен"
+        warn "failed to fetch the davesteele key — comitup skipped"
     fi
 }
 mod_tailscale() {
-    if command -v tailscale >/dev/null 2>&1; then echo "tailscale уже установлен"
-    elif [ "$DRY_RUN" -eq 1 ]; then info "[DRY-RUN] установка tailscale (get.tailscale.com)"
-    else curl -fsSL https://tailscale.com/install.sh 2>>"$LOG" | sh >>"$LOG" 2>&1 || warn "не удалось установить tailscale"; fi
-    echo "Tailscale готов. Войдите: sudo tailscale up"
+    if command -v tailscale >/dev/null 2>&1; then echo "tailscale already installed"
+    elif [ "$DRY_RUN" -eq 1 ]; then info "[DRY-RUN] install tailscale (get.tailscale.com)"
+    else curl -fsSL https://tailscale.com/install.sh 2>>"$LOG" | sh >>"$LOG" 2>&1 || warn "failed to install tailscale"; fi
+    echo "Tailscale ready. Log in: sudo tailscale up"
 }
 mod_staticip() {
     local ip="${NASW_IP:-}" gw="${NASW_GW:-}" dns="${NASW_DNS:-1.1.1.1}" con
-    [ -n "$ip" ] || { echo "не указан IP (NASW_IP)"; return 2; }
+    [ -n "$ip" ] || { echo "no IP specified (NASW_IP)"; return 2; }
     con="$(nmcli -t -f NAME connection show --active 2>/dev/null | head -1)"
-    [ -n "$con" ] || { echo "активное подключение NetworkManager не найдено"; return 2; }
+    [ -n "$con" ] || { echo "no active NetworkManager connection found"; return 2; }
     run nmcli connection modify "$con" ipv4.addresses "$ip" ${gw:+ipv4.gateway "$gw"} ipv4.dns "$dns" ipv4.method manual
     run nmcli connection up "$con"
-    echo "статический IP $ip назначен ($con)"
+    echo "static IP $ip assigned ($con)"
 }
 mod_cockpit_gui() {
-    # cockpit-machines/podman есть в Debian; file-sharing/navigator — из 45drives,
-    # но их сборок под arm64/trixie нет (репо отдаёт 404). Поэтому 45drives только
-    # если пакеты реально появятся, и ОБЯЗАТЕЛЬНО проверяем, что source-файл валиден
-    # (их setup-скрипт писал HTML-404 в .list и ломал весь apt).
+    # cockpit-machines/podman are in Debian; file-sharing/navigator — from 45drives,
+    # but there are no arm64/trixie builds (the repo returns 404). So 45drives only
+    # if the packages actually show up, and we MUST verify the source file is valid
+    # (their setup script wrote an HTML-404 into the .list and broke all of apt).
     local L45=/etc/apt/sources.list.d/45drives-enterprise-trixie.list
     if [ "$DRY_RUN" -eq 0 ] && ! dpkg -s cockpit-navigator >/dev/null 2>&1; then
         curl -fsSL https://repo.45drives.com/setup 2>>"$LOG" | bash >>"$LOG" 2>&1 || true
-        # если .list не начинается с "deb " — он битый (HTML/404), сносим, чтобы не ломать apt
+        # if the .list doesn't start with "deb " it's broken (HTML/404), remove it so apt isn't broken
         if [ -f "$L45" ] && ! grep -qE '^\s*deb ' "$L45"; then
-            rm -f "$L45"; warn "45drives: сборок под эту платформу нет — репозиторий убран"
+            rm -f "$L45"; warn "45drives: no builds for this platform — repository removed"
         fi
         run apt-get update || true
     fi
-    # ставим только то, что реально доступно в репозиториях (install_packages пропускает недоступное)
+    # install only what's actually available in the repositories (install_packages skips unavailable ones)
     install_packages "cockpit-gui" cockpit-machines cockpit-podman cockpit-file-sharing cockpit-navigator
-    echo "Cockpit-модули: установлено доступное (storaged/networkmanager уже стоят)"
+    echo "Cockpit modules: available ones installed (storaged/networkmanager already present)"
 }
 
-# (passwordless Cockpit убран: pam_permit пропускает без реальной аутентификации,
-#  но Cockpit использует пароль для установки рабочей сессии — без него UI ломается
-#  «failed to fetch…». Рабочий путь — задать известный системный пароль пользователю.)
+# (passwordless Cockpit removed: pam_permit lets you in without real authentication,
+#  but Cockpit uses the password to establish the working session — without it the UI breaks
+#  with «failed to fetch…». The working path — set a known system password for the user.)
 
 # ---------------------------------------------------------------------------
-# API-режим (headless, для nas-web.py). Без whiptail; подтверждения — из браузера.
-# Параметры в NASW_* ; вывод — человекочитаемый лог в stdout, код возврата 0/≠0.
+# API mode (headless, for nas-web.py). No whiptail; confirmations come from the browser.
+# Parameters in NASW_* ; output is a human-readable log to stdout, return code 0/≠0.
 # ---------------------------------------------------------------------------
-api_compose_file() {           # $1=service -> печатает путь compose-файла
+api_compose_file() {           # $1=service -> prints the path of the compose file
     local svc="$1" f
     for f in docker-compose.yml docker-compose.yaml compose.yml compose.yaml; do
         [ -f "$SERVICES_SRC/$svc/$f" ] && { echo "$SERVICES_SRC/$svc/$f"; return 0; }
@@ -3576,44 +3576,44 @@ api_compose_file() {           # $1=service -> печатает путь compose
 }
 api_docker() {                 # $1=up|down|restart|pull
     local act="$1" svc="${NASW_SERVICE:-}" file DC
-    [ -n "$svc" ] || { echo "не указан сервис"; return 2; }
-    file="$(api_compose_file "$svc")" || { echo "compose-файл не найден: $svc"; return 2; }
-    DC="$(docker_compose_cmd)"; [ -n "$DC" ] || { echo "docker compose недоступен"; return 2; }
+    [ -n "$svc" ] || { echo "no service specified"; return 2; }
+    file="$(api_compose_file "$svc")" || { echo "compose file not found: $svc"; return 2; }
+    DC="$(docker_compose_cmd)"; [ -n "$DC" ] || { echo "docker compose unavailable"; return 2; }
     echo "== $act $svc =="
     case "$act" in
         up)      run_visible $DC -f "$file" up -d ;;
         down)    run_visible $DC -f "$file" down ;;
         restart) run_visible $DC -f "$file" restart ;;
         pull)    run_visible $DC -f "$file" pull ;;
-        *)       echo "неизвестное действие: $act"; return 2 ;;
+        *)       echo "unknown action: $act"; return 2 ;;
     esac
 }
-# Установить и запустить Dockge (менеджер стеков). Стеки живут в /opt/stacks.
+# Install and start Dockge (stack manager). Stacks live in /opt/stacks.
 api_dockge() {
     local dir="${NASW_STACKS_DIR:-/opt/stacks}" src DC
-    src="$(api_compose_file dockge)" || { echo "compose Dockge не найден"; return 2; }
+    src="$(api_compose_file dockge)" || { echo "Dockge compose not found"; return 2; }
     run mkdir -p "$dir/dockge" /opt/docker/dockge/data
     run cp -f "$src" "$dir/dockge/compose.yaml"
     info "Dockge → $dir/dockge/compose.yaml"
-    DC="$(docker_compose_cmd)"; [ -n "$DC" ] || { echo "docker compose недоступен — сначала этап «Система»"; return 2; }
+    DC="$(docker_compose_cmd)"; [ -n "$DC" ] || { echo "docker compose unavailable — run the «System» stage first"; return 2; }
     run_visible $DC -f "$dir/dockge/compose.yaml" up -d
-    echo "Dockge запущен → http://<pi>:5001 (управляет стеками в $dir)"
+    echo "Dockge started → http://<pi>:5001 (manages stacks in $dir)"
 }
-# Скопировать выбранные bundled-стеки (NASW_KEYS) в каталог Dockge. Не запускаем — старт в Dockge.
-# запустить набор функций по ключам из NASW_KEYS (через пробел)
-api_keys_run() {               # $1=prefix (pi|sec|...) ; вызывает <prefix>_<key>
+# Copy the selected bundled stacks (NASW_KEYS) into the Dockge directory. We don't start them — start from Dockge.
+# run a set of functions by keys from NASW_KEYS (space-separated)
+api_keys_run() {               # $1=prefix (pi|sec|...) ; calls <prefix>_<key>
     local prefix="$1" k
     for k in ${NASW_KEYS:-}; do
         if declare -F "${prefix}_${k}" >/dev/null; then "${prefix}_${k}"; fi
     done
 }
-api_notify() {                 # Pushover в /etc/nas-wizard/notify.conf
+api_notify() {                 # Pushover in /etc/nas-wizard/notify.conf
     notify_conf_set PUSHOVER_USER  "${NASW_PUSER:-}"
     notify_conf_set PUSHOVER_TOKEN "${NASW_PTOKEN:-}"
     install_notify_helper
-    echo "Pushover настроен"
+    echo "Pushover configured"
 }
-api_state() {                  # краткое состояние для мастера (JSON)
+api_state() {                  # brief state for the wizard (JSON)
     local host tz iface
     host="$(hostnamectl --static 2>/dev/null || hostname)"
     tz="$(timedatectl show -p Timezone --value 2>/dev/null)"
@@ -3636,7 +3636,7 @@ api_state() {                  # краткое состояние для мас
 
 run_api() {
     local action="$1"
-    # неинтерактивные заглушки UI: подтверждения уже сделаны в браузере
+    # non-interactive UI stubs: confirmations are already done in the browser
     ui_msg(){ :; }; ui_yesno(){ return 0; }; ui_input(){ echo "${3:-}"; }
     ui_password(){ echo "${NASW_PASSWORD:-}"; }; ui_checklist(){ echo ""; }
     case "$action" in
@@ -3653,7 +3653,7 @@ run_api() {
         automount)      api_automount ;;
         mergerfs)       generate_mergerfs ;;
         snapraid)       ensure_snapraid_conf && { setup_snapraid_notify_noninteractive; install_snapraid_wrapper; install_snapraid_timers; [ "${NASW_SYNC:-0}" = "1" ] && run_visible snapraid sync; } ;;
-        snapraid-sync)  if [ -x /usr/local/bin/nas-snapraid.sh ]; then run_visible /usr/local/bin/nas-snapraid.sh "${NASW_KIND:-sync}"; else echo "SnapRAID не настроен — сначала пройдите Мастер (этап SnapRAID)"; exit 2; fi ;;
+        snapraid-sync)  if [ -x /usr/local/bin/nas-snapraid.sh ]; then run_visible /usr/local/bin/nas-snapraid.sh "${NASW_KIND:-sync}"; else echo "SnapRAID not configured — run the Wizard first (SnapRAID stage)"; exit 2; fi ;;
         pi)             api_pi ;;
         security)       api_keys_run sec ;;
         shares)         api_shares ;;
@@ -3668,12 +3668,12 @@ run_api() {
         staticip)       mod_staticip ;;
         cockpit-gui)    mod_cockpit_gui ;;
         screen)         api_screen ;;
-        *)              echo "неизвестное api-действие: $action" >&2; return 2 ;;
+        *)              echo "unknown api action: $action" >&2; return 2 ;;
     esac
 }
 
 # ---------------------------------------------------------------------------
-# Точка входа
+# Entry point
 # ---------------------------------------------------------------------------
 main() {
     require_root "$@"
@@ -3685,7 +3685,7 @@ main() {
     ui_init
 
     if [ "$DRY_RUN" -eq 1 ]; then
-        echo "*** РЕЖИМ --dry-run: изменения не выполняются, только план действий ***"
+        echo "*** --dry-run MODE: no changes are applied, only the action plan ***"
     fi
 
     case "$FORCE_STAGE" in
@@ -3699,7 +3699,7 @@ main() {
         shares)   stage_shares ;;
         backup)   stage_backup ;;
         "")       main_menu ;;
-        *)        die "неизвестный этап: $FORCE_STAGE (system|disk|mergerfs|snapraid|docker|pi|security|shares|backup)" ;;
+        *)        die "unknown stage: $FORCE_STAGE (system|disk|mergerfs|snapraid|docker|pi|security|shares|backup)" ;;
     esac
 }
 

@@ -1,6 +1,6 @@
 {
   "name": "Dozzle",
-  "desc": "Логи всех контейнеров в реальном времени",
+  "desc": "Live logs of every container",
   "category": "monitor",
   "icon": "https://cdn.jsdelivr.net/gh/selfhst/icons@main/svg/dozzle.svg",
   "port": 8083

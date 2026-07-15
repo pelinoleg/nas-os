@@ -1,41 +1,41 @@
 # NAS-OS
 
-Лёгкая «операционная система для NAS» поверх Raspberry Pi OS Lite: браузерный рабочий стол
-(мониторинг, диски/SMART, docker-стеки, файловый менеджер с превью и плеером, терминал,
-уведомления Pushover) + пошаговый мастер настройки. Бэкенд — Python из стандартной библиотеки
-(без pip), движок — bash. Работает от root (SMART, docker, монтирование, питание, PTY).
+A lightweight "NAS operating system" on top of Raspberry Pi OS Lite: a browser-based desktop
+(monitoring, disks/SMART, docker stacks, file manager with previews and a player, terminal,
+Pushover notifications) + a step-by-step setup wizard. Backend — Python standard library
+(no pip), engine — bash. Runs as root (SMART, docker, mounting, power, PTY).
 
-## Установка с чистой системы — одна команда
+## Install on a clean system — one command
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/pelinoleg/nas-os/main/install.sh | sudo bash
 ```
 
-Скрипт:
-1. клонирует проект в `/opt/nas-os`;
-2. ставит глобальную базу (пакеты, docker, ffmpeg/poppler для превью, каталоги, кэш превью + ночной таймер) — это системный этап мастера;
-3. поднимает службу `nas-web` (порт 80, root) с автозапуском;
-4. печатает адрес.
+The script:
+1. clones the project into `/opt/nas-os`;
+2. installs the global base (packages, docker, ffmpeg/poppler for previews, directories, preview cache + nightly timer) — this is the wizard's system stage;
+3. brings up the `nas-web` service (port 80, root) with autostart;
+4. prints the address.
 
-Затем открой `http://<hostname>.local` и пройди **мастер**: Диски → Пул/Чётность → Приложения → Доступ → Безопасность → Тюнинг → Уведомления → Бэкапы (железо-зависимое и опциональное — не ставится автоматически).
+Then open `http://<hostname>.local` and go through the **wizard**: Disks → Pool/Parity → Apps → Access → Security → Tuning → Notifications → Backups (hardware-dependent and optional — not installed automatically).
 
-### Параметры установки (env)
-- `NASOS_DEST` — каталог (по умолчанию `/opt/nas-os`)
-- `NASOS_BRANCH` — ветка (по умолчанию `main`)
-- `NAS_WEB_PORT` — порт (по умолчанию `80`)
+### Install parameters (env)
+- `NASOS_DEST` — directory (default `/opt/nas-os`)
+- `NASOS_BRANCH` — branch (default `main`)
+- `NAS_WEB_PORT` — port (default `80`)
 
-## Что где лежит
-- Код: `/opt/nas-os/` (`nas-web.py`, `nas-wizard.sh`, `web/`, `services/`)
-- Конфиг/данные (per-user): `~/nas-config` (настройки стола, доступы, сниппеты, избранное)
-- Кэш превью: `/var/cache/nas-thumbs` · docker-стеки: `/opt/stacks`
+## What lives where
+- Code: `/opt/nas-os/` (`nas-web.py`, `nas-wizard.sh`, `web/`, `services/`)
+- Config/data (per-user): `~/nas-config` (desktop settings, access, snippets, favorites)
+- Preview cache: `/var/cache/nas-thumbs` · docker stacks: `/opt/stacks`
 
-## Обновление
-Повторный запуск `install.sh` подтянет свежую версию из git и перезапустит службу.
-Правки `web/*.html` подхватываются без перезапуска; правки `nas-web.py` — `sudo systemctl restart nas-web`.
+## Update
+Re-running `install.sh` pulls the latest version from git and restarts the service.
+Edits to `web/*.html` take effect without a restart; edits to `nas-web.py` need `sudo systemctl restart nas-web`.
 
-## Разработка
+## Development
 - `python3 -m py_compile nas-web.py` · `bash -n nas-wizard.sh` · `shellcheck nas-wizard.sh`
-- JS десктопа: `node --check` на вырезанном `<script>` (node — только для проверки, не зависимость).
+- Desktop JS: `node --check` on the extracted `<script>` (node is only for checking, not a dependency).
 
-> **Правило:** любое новое глобальное (пакет, systemd-юнит, каталог, файл, право) обязано
-> добавляться в `nas-wizard.sh` (system-этап) / `install.sh`, иначе установка с нуля сломается.
+> **Rule:** any new global change (package, systemd unit, directory, file, permission) must
+> be added to `nas-wizard.sh` (system stage) / `install.sh`, otherwise a from-scratch install breaks.

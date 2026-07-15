@@ -1,6 +1,6 @@
-# Zerobyte — автоматизация бэкапов (веб-GUI поверх Restic). http://<pi>:4096
-# Нужен /dev/fuse + SYS_ADMIN (restic-mount). БЕЗОПАСНОСТЬ: не пробрасывайте порт
-# 4096 в интернет без туннеля/авторизации — только LAN.
+# Zerobyte — backup automation (web GUI on top of Restic). http://<pi>:4096
+# Needs /dev/fuse + SYS_ADMIN (restic-mount). SECURITY: do not expose port
+# 4096 to the internet without a tunnel/auth — LAN only.
 services:
   zerobyte:
     image: ghcr.io/nicotsx/zerobyte:v0.40.0

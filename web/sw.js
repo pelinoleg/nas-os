@@ -1,6 +1,6 @@
-/* Минимальный service worker для NAS-OS.
-   Регистрируется только в secure context (HTTPS/localhost) — на LAN по http не активен.
-   Сеть-первично; при офлайне отдаём кэш оболочки. API и не-GET не кэшируем. */
+/* Minimal service worker for NAS-OS.
+   Registers only in a secure context (HTTPS/localhost) — inactive on plain-http LAN.
+   Network-first; when offline, serve the shell cache. API and non-GET are never cached. */
 const CACHE = "nasos-shell-v56";
 const SHELL = ["/", "/desktop.html", "/setup.html", "/icon.svg", "/icon-192.png", "/manifest.webmanifest"];
 
@@ -17,8 +17,8 @@ self.addEventListener("activate", (e) => {
 self.addEventListener("fetch", (e) => {
   const u = new URL(e.request.url);
   if (e.request.method !== "GET" || u.pathname.startsWith("/api/") || u.pathname.startsWith("/ws/")) return;
-  // HTML-навигация (оболочка) — всегда из сети, кэш только как офлайн-фолбэк.
-  // Иначе SW отдаёт старую страницу после правок.
+  // HTML navigation (shell) — always from the network, cache only as an offline fallback.
+  // Otherwise the SW would serve a stale page after edits.
   if (e.request.mode === "navigate" || u.pathname.endsWith(".html")) {
     e.respondWith(fetch(e.request).catch(() => caches.match("/desktop.html")));
     return;
