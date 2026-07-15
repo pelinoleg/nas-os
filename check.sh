@@ -105,70 +105,48 @@ if has js || has css; then
   if split_html web/desktop.html 2>"$TMP/css.err"; then ok "desktop.html: CSS balanced"
   else bad "desktop.html: $(cat "$TMP/css.err")"; fi
   has js && node_check "$TMP/inline.js" "desktop.html: inline JS"
-  has js && for f in web/i18n.js web/sw.js; do node_check "$f" "$f"; done
+  has js && node_check web/sw.js web/sw.js
 fi
 
 # --------------------------------------------------------------------- i18n --
 if has i18n; then
-  head "Translations"
+  head "Cyrillic (must be gone — the UI is English-only)"
   RUN=1
-python3 - <<'PY' && ok "all UI strings are translated" || bad "there are untranslated strings (see above)"
-import re, sys
-src = open("web/i18n.js", encoding="utf-8").read()
-# search for pairs anywhere: part of the dictionary in i18n.js has several pairs per line,
-# and a line-by-line parse would silently lose them (weekday names counted as untranslated)
-pairs = re.findall(r'"((?:[^"\\]|\\.)*)"\s*:\s*"((?:[^"\\]|\\.)*)"', src)
-m = {a.replace('\\"', '"'): b for a, b in pairs}
-keys = sorted([k for k in m if k], key=len, reverse=True)
-rx = re.compile(r"(?<![А-Яа-яЁё])(?:" + "|".join(re.escape(k) for k in keys) + r")(?![А-Яа-яЁё])")
-tr = lambda s: rx.sub(lambda mo: m.get(mo.group(0), mo.group(0)), s)
-
-h = open("web/desktop.html", encoding="utf-8").read()
-js = "\n".join(re.findall(r"<script[^>]*>(.*?)</script>", h, re.S))
-js = re.sub(r"/\*.*?\*/", "", js, flags=re.S)
-js = re.sub(r"(?m)(?<!:)//(?!\s*\w+\.\w).*$", "", js)
-lits = re.findall(r"`((?:[^`\\]|\\.)*)`|\"((?:[^\"\\\n]|\\.)*)\"|'((?:[^'\\\n]|\\.)*)'", js, re.S)
-CY = re.compile(r"[А-Яа-яЁё]+")
+python3 - <<'PY' && ok "no stray Cyrillic" || bad "stray Cyrillic found (see above)"
+import re, subprocess, sys
+CY = re.compile(r"[А-Яа-яЁё]")
+# Allowed to keep Cyrillic:
+#   CLAUDE.md                        — project doc, deliberately Russian
+#   web/tui-editor.js, web/tui-hl.js — vendored third-party, kept byte-for-byte
+#   nas-web.py                       — _TRANSLIT transliteration keys and the folder-name
+#                                      sanitizer regexes (the "А-Яа-яЁё" char-range that
+#                                      deliberately allows Russian in user file names)
+ALLOW_FILES = {"CLAUDE.md", "web/tui-editor.js", "web/tui-hl.js"}
+def line_ok(f, ln):
+    t = ln.replace("А-Яа-яЁё", "")            # the Cyrillic char-range literal itself
+                                              # (detector regexes here, sanitizer regexes in nas-web.py)
+    if f == "nas-web.py":
+        t = re.sub(r'"[А-Яа-яЁё]+"\s*:', "", t)   # _TRANSLIT keys: one Cyrillic letter -> Latin
+    return not CY.search(t)
 bad = []
-for t in lits:
-    lit = next((x for x in t if x), "")
-    if not CY.search(lit):
+for f in subprocess.check_output(["git", "ls-files"]).decode().split():
+    if f in ALLOW_FILES:
         continue
-    # tags are NOT stripped: nasTr translates the raw innerHTML string, and keys like
-    # "<name>.local" contain angle brackets. Only ${...} interpolations are removed.
-    s = re.sub(r"\$\{[^{}]*\}", "", lit)
-    left = CY.findall(tr(s))
-    if left:
-        bad.append((sorted(set(left))[:4], lit[:70].replace("\n", " ")))
-for words, ex in bad[:12]:
-    print("      left over %s  ⟵ %s" % (", ".join(words), ex), file=sys.stderr)
-if len(bad) > 12:
-    print("      … %d more" % (len(bad) - 12), file=sys.stderr)
-
-# server-side notification strings (fire/log_event/notify_event/push_notify) go to
-# Pushover through the server-side tr() and to the panel through the client-side one — both use
-# the same dictionary, so an untranslated fragment here means a Russian Pushover notification.
-import ast
-NOTIFY = {"fire", "log_event", "notify_event", "push_notify"}
-nstr = set()
-for node in ast.walk(ast.parse(open("nas-web.py", encoding="utf-8").read())):
-    if isinstance(node, ast.Call) and isinstance(node.func, (ast.Name, ast.Attribute)):
-        nm = node.func.id if isinstance(node.func, ast.Name) else node.func.attr
-        if nm in NOTIFY:
-            for a in node.args:
-                for sub in ast.walk(a):
-                    if isinstance(sub, ast.Constant) and isinstance(sub.value, str):
-                        nstr.add(sub.value)
-nbad = []
-for s in nstr:
-    if CY.search(s):
-        left = CY.findall(tr(re.sub(r"%[sd]|«|»", "", s)))
-        if [w for w in left if len(w) > 1]:
-            nbad.append((sorted(set(left))[:4], s[:60].replace("\n", " ")))
-for words, ex in nbad[:12]:
-    print("      [notification] left over %s  ⟵ %s" % (", ".join(words), ex), file=sys.stderr)
-
-sys.exit(1 if bad or nbad else 0)
+    try:
+        lines = open(f, encoding="utf-8").read().splitlines()
+    except (UnicodeDecodeError, IsADirectoryError, FileNotFoundError):
+        continue
+    for i, ln in enumerate(lines, 1):
+        if not CY.search(ln):
+            continue
+        if line_ok(f, ln):
+            continue
+        bad.append("%s:%d: %s" % (f, i, ln.strip()[:80]))
+for b in bad[:20]:
+    print("      " + b, file=sys.stderr)
+if len(bad) > 20:
+    print("      … %d more" % (len(bad) - 20), file=sys.stderr)
+sys.exit(1 if bad else 0)
 PY
 fi
 

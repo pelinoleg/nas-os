@@ -122,7 +122,6 @@
   <div class="brand"><img class="brand-ico" src="/icon-flat.svg" alt="Raspberry Pi" draggable="false">Setup Wizard</div>
   <span class="sub" id="hostlbl"></span>
   <span class="spacer"></span>
-  <button class="back" id="langBtn" style="cursor:pointer;border:none;background:transparent;font:inherit;color:inherit" title="Switch language">EN / RU</button>
   <label class="dry">Preview<button class="sw" id="dry" role="switch" aria-checked="false"></button></label>
   <a class="back" href="/">← Desktop</a>
 </div>
@@ -131,18 +130,13 @@
   <main class="panel" id="panel"></main>
 </div>
 <div class="scrim" id="scrim"></div>
-<script src="/i18n.js"></script>
+<script>window.nasTr=function(s){return s};window.NAS_LANG="en";</script>
 <script>
 // wizard language toggle: localStorage mirror + reload
 // the static wizard header doesn't go through innerHTML — translate its text nodes on startup
 addEventListener("DOMContentLoaded",()=>{document.querySelectorAll(".brand,.dry,.back,.sub").forEach(n=>{
  n.childNodes.forEach(c=>{if(c.nodeType===3)c.textContent=nasTr(c.textContent);});
  if(n.title)n.title=nasTr(n.title);});});
-document.getElementById("langBtn").onclick=()=>{try{
- const v=(localStorage.getItem("naslang")||"en")==="en"?"ru":"en";
- localStorage.setItem("naslang",v);
- fetch("/api/settings",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({settings:{lang:v}})}).catch(()=>{});
-}catch(e){}location.reload();};
 </script>
 <script>
 "use strict";
@@ -224,7 +218,7 @@ async function run(action,params,after){
  con.innerHTML="";
  const reader=resp.body.getReader(),dec=new TextDecoder();let buf="",code=null;
  const push=line=>{if(line.startsWith("__EXIT__")){code=parseInt(line.slice(8),10);return;}
-   const cls=/ОШИБКА|ОТКАЗ|ABORT|error/i.test(line)?"er":/✓|готов|success/i.test(line)?"ok":"";
+   const cls=/ERROR|ABORT|REJECT|FAIL/i.test(line)?"er":/✓|\bdone\b|complete|\bready\b|success/i.test(line)?"ok":"";
    con.appendChild(el(`<div class="${cls}">${line.replace(/</g,"&lt;")||"&nbsp;"}</div>`));con.scrollTop=con.scrollHeight;};
  for(;;){const {done,value}=await reader.read();if(done)break;buf+=dec.decode(value,{stream:true});
    const parts=buf.split("\n");buf=parts.pop();parts.forEach(push);}

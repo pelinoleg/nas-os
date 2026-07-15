@@ -1,4 +1,4 @@
-<!doctype html><html lang="ru"><head>
+<!doctype html><html lang="en"><head>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>NAS · desktop</title>
 <link rel="icon" href="/icon.svg" type="image/svg+xml">
@@ -2306,7 +2306,7 @@
 <div class="toast" id="toast"></div>
 <div class="ntoasts" id="ntoasts"></div>
 
-<script src="/i18n.js"></script>
+<script>window.nasTr=function(s){return s};window.NAS_LANG="en";</script>
 <script>
 (function(){
 "use strict";
@@ -7588,7 +7588,7 @@ function loadNotesLibs(){
  const css=h=>{const l=document.createElement("link");l.rel="stylesheet";l.href=h;document.head.appendChild(l);};
  const js=h=>new Promise((res,rej)=>{const sc=document.createElement("script");sc.src=h;sc.onload=res;sc.onerror=rej;document.head.appendChild(sc);});
  css("/tui-editor.css");css("/tui-editor-dark.css");css("/tui-hl.css");
- NT_LIBS=js("/tui-editor.js").then(()=>Promise.all([js("/tui-hl.js"),js("/tui-editor-ru.js")]));
+ NT_LIBS=js("/tui-editor.js").then(()=>Promise.all([js("/tui-hl.js")]));
  return NT_LIBS;
 }
 let NT_ED=null,NT_PATH=null,NT_SAVE_T=null,NT_DIRTY=false,NT_PIN=false,NT_TAGS=[],NT_MTIME=0;
@@ -8016,7 +8016,7 @@ function winNotes(){openWin("__notes","Notes",async body=>{
    customHTMLSanitizer:ntSanitize,
    toolbarItems:[],
    initialEditType:SET.ntMode||"wysiwyg",previewStyle:"tab",
-   language:(window.NAS_LANG||"en")==="en"?"en-US":"ru-RU",
+   language:"en-US",
    theme:dark?"dark":"light",
    initialValue:r.md,
    plugins,
@@ -8466,9 +8466,6 @@ function filesTab(tc){
 }
 function lsTheme(lb){lb.innerHTML=`
   <div class="set-card">
-   <div class="field"><label>Language</label><div class="seg" id="lang">
-    <button data-l="en" class="${(SET.lang||"en")==="en"?"on":""}">English</button>
-    <button data-l="ru" class="${SET.lang==="ru"?"on":""}">Russian</button></div></div>
    <div class="field"><label>Theme</label><div class="seg" id="th">
     <button data-t="auto" class="${SET.theme==="auto"?"on":""}">Auto</button>
     <button data-t="light" class="${SET.theme==="light"?"on":""}">Light</button>
@@ -8482,8 +8479,6 @@ function lsTheme(lb){lb.innerHTML=`
     <div class="set-sub" style="margin-top:4px">the hue for every widget, window and external screen; lightness adapts to the background on its own</div></div>
   </div>
   <div class="set-card">${pSlider("Secondary text contrast","textContrast",.6,1.4,.05,"pct","Brightness of labels and values (white in the dark theme, black in the light one, with transparency). Higher — crisper on busy wallpapers. Affects widgets and the top bar.")}</div>`;
- lb.querySelectorAll("#lang button").forEach(b=>b.onclick=()=>{SET.lang=b.dataset.l;saveSettings();
-   try{localStorage.setItem("naslang",SET.lang);}catch(e){}setTimeout(()=>location.reload(),300);});
  lb.querySelectorAll("#th button").forEach(b=>b.onclick=()=>{SET.theme=b.dataset.t;applySettings();saveSettings();lsTheme(lb);});
  const a0=(SET.accentHex||(ACCENTS[SET.accent]||ACCENTS.teal)[0]);
  Object.keys(ACCENTS).forEach(k=>{const c=ACCENTS[k];const d=el(`<div class="dot ${!SET.accentHex&&SET.accent===k?"sel":""}" style="background:linear-gradient(135deg,${c[0]},${c[1]})"></div>`);d.onclick=()=>{SET.accent=k;SET.accentHex="";applySettings();saveSettings();lsTheme(lb);};lb.querySelector("#ac").appendChild(d);});
@@ -9808,11 +9803,6 @@ function maybeOnboard(){let done=false;try{done=!!SET.onboarded||localStorage.ge
  try{const sv=await api("/api/settings");if(sv&&sv.settings&&Object.keys(sv.settings).length){
    SET=Object.assign(SET,sv.settings);CUR_THEME=null;applySettings();
    try{localStorage.setItem("nasdesk",JSON.stringify(SET));}catch(e){}}}catch(e){}
- // language: the server is the source of truth; localStorage is a fast cache before login (one reload on desync)
- try{const want=SET.lang||"en";
-  if(want!==window.NAS_LANG&&!sessionStorage.getItem("naslangflip")){
-   sessionStorage.setItem("naslangflip","1");localStorage.setItem("naslang",want);location.reload();return;}
-  sessionStorage.removeItem("naslangflip");}catch(e){}
  // window positions/sizes come from the server (they survive localStorage clearing and address changes pi5.local↔IP); local edits on top
  try{const wp=await api("/api/winpos");if(wp&&wp.winpos&&Object.keys(wp.winpos).length)WINPOS=Object.assign({},wp.winpos,WINPOS);}catch(e){}
  const tb=document.getElementById("themeBtn");if(tb)tb.onclick=cycleTheme;

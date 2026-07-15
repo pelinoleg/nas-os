@@ -3024,53 +3024,12 @@ def save_notify(user, token):
     return {"ok": True}
 
 # --------------------------------------------------------------------------- #
-#  Server-side translation with the same dictionary as the client (web/i18n.js).
-#  Needed for what goes AROUND the browser — above all Pushover: there strings are
-#  built on the server in Russian and the client nasTr is not applied to them. The
-#  porting rule is one-to-one: translate by "whole words" (boundaries — non-Cyrillic),
-#  longer keys first. The language comes from settings (desktop.json:lang), dictionary cached.
+#  tr() once translated server-built strings (Pushover, screen labels) through the
+#  web/i18n.js dictionary. The UI is English-only now, so this is an identity pass
+#  kept only so existing call sites stay valid.
 # --------------------------------------------------------------------------- #
-_I18N = None
-_I18N_RX = None
-_i18n_lock = threading.Lock()
-
-def _i18n_load():
-    global _I18N, _I18N_RX
-    if _I18N is not None:
-        return
-    d = {}
-    try:
-        src = _read(os.path.join(WEB_DIR, "i18n.js"))
-        for m in re.finditer(r'"((?:\\.|[^"\\])*)"\s*:\s*"((?:\\.|[^"\\])*)"', src):
-            try:
-                k = json.loads('"' + m.group(1) + '"')
-                v = json.loads('"' + m.group(2) + '"')
-            except ValueError:
-                continue
-            if k and re.search(r"[А-Яа-яЁё]", k):      # the key must be Russian (not noise from the IIFE)
-                d[k] = v
-    except Exception:
-        d = {}
-    if d:
-        alts = "|".join(re.escape(k) for k in sorted(d, key=len, reverse=True))
-        try:
-            _I18N_RX = re.compile(r"(?<![А-Яа-яЁё])(?:" + alts + r")(?![А-Яа-яЁё])")
-        except re.error:
-            _I18N_RX = None
-    _I18N = d
-
 def tr(text, lang=None):
-    if not isinstance(text, str) or not text:
-        return text
-    if lang is None:
-        lang = (load_settings().get("lang") or "en")
-    if lang != "en" or not re.search(r"[А-Яа-яЁё]", text):
-        return text
-    with _i18n_lock:
-        _i18n_load()
-    if not _I18N_RX:
-        return text
-    return _I18N_RX.sub(lambda m: _I18N.get(m.group(0), m.group(0)), text)
+    return text  # UI is English-only; runtime i18n layer removed. Identity pass for call-site compat.
 
 def push_notify(title, msg, priority=0):
     title = tr(title); msg = tr(msg)      # Pushover goes around the client — translate here
@@ -12075,9 +12034,8 @@ def _screen_usb_cfg():
 
 
 def screen_payload(lang="", p2=False):
-    # the screen language is set in screen.json, NOT by the kiosk browser: i18n.js by default
-    # sets NAS_LANG=en, and without this the server would send English labels under the Russian
-    # page markup — the screen ended up a jumble of two languages
+    # the screen language comes from screen.json, not the kiosk browser; the UI is
+    # English-only now, so lang is effectively always "en"
     cfg0 = load_screen()
     lang = lang or cfg0["lang"]
     en = (lang == "en")

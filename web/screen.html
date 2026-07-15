@@ -2,7 +2,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,user-scalable=no">
 <title>NAS</title>
-<script src="/i18n.js"></script>
+<script>window.nasTr=function(s){return s};window.NAS_LANG="en";</script>
 <style>
   /* Kiosk dashboard, local DSI panel 800x480. ALWAYS dark (it hangs on a wall) —
      the material comes from the panel's DARK theme profile even when the browser
@@ -398,14 +398,6 @@ function avColor(f){
 function upfmt(s){ if(!s) return "";
   const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);
   return d?`${d} d ${h} h`:(h?`${h} h ${m} min`:`${m} min`); }
-function trStatic(){            // markup from the file bypasses the innerHTML hook — translate by hand
-  if(trStatic._done||window.NAS_LANG!=="en") return;
-  trStatic._done=1;
-  const w=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT);
-  const out=[]; let n;
-  while((n=w.nextNode())) if(/[А-Яа-яЁё]/.test(n.nodeValue)) out.push(n);
-  out.forEach(n=>{ n.nodeValue=window.nasTr(n.nodeValue); });
-}
 function toast(m){ const t=$("#toast"); t.innerHTML=esc(m); t.classList.add("on");
   clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove("on"),2500); }
 
@@ -1022,7 +1014,6 @@ async function _poll(){
     if(!D.p2 && prev) D.p2=prev;      // a response without p2 must not blank out the second page
     window.NAS_LANG=D.lang||"en";
     NETBITS=D.netUnits!=="bytes";     // shared panel setting; bits by default
-    trStatic();
     applyLook(D.look); renderBar(D); renderFoot(D); renderAlarm(D);
     if(PAGE===0){ renderGauges(D); renderCards(D); renderRow2(D); }
     else if(PAGE===1){ renderP1(D); }
