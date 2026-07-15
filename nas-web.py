@@ -6764,8 +6764,14 @@ def settings_backup_list():
     except OSError:
         pass
     cfg = load_maintenance()
+    custom = bool((cfg.get("settings_backup_dir") or "").strip())
+    # эфемерно = лежит на системном диске (пул не смонтирован и путь не задан):
+    # такой бэкап затрётся при переустановке ОС — ради чего он и делается
+    ephemeral = (not custom) and d.startswith("/var/")
     return {"ok": True, "dir": d, "days": cfg.get("backup_days", 7),
-            "keep": cfg.get("backup_keep", BACKUP_KEEP), "list": out}
+            "keep": cfg.get("backup_keep", BACKUP_KEEP), "list": out,
+            "ephemeral": ephemeral, "custom": custom,
+            "pool": bool(storage_root())}
 
 def settings_backup_restore(path, sections=None):
     """Восстановить из архива. Проверяем каждого члена: только обычные файлы,

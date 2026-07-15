@@ -2758,6 +2758,8 @@ window.NAS_I18N = { en: {
 "Наблюдение за хостами": "Host watch",
 "Плата": "Board",
 "Цвета статусов": "Status colors",
+"Пул не подключён — бэкап сейчас лежит на системной карте (<b>": "The pool is not mounted — the backup currently sits on the system card (<b>",
+") и НЕ переживёт переустановку ОС. Задайте папку на внешнем диске или в пуле.": ") and will NOT survive an OS reinstall. Set a folder on an external disk or on the pool.",
 "Подключения": "Connections",
 "Откуда берём и куда кладём. Стороны независимы: любая может быть этим NAS или удалённым сервером.": "Where we take data from and where we put it. The two sides are independent: each can be this NAS or a remote server.",
 "Этот NAS": "This NAS",

@@ -7021,6 +7021,7 @@ function backupTab(tc){
     <div class="field" style="margin:0"><label>Хранить бэкапов, шт</label><input class="mono" id="bkKeep" style="max-width:110px"></div></div>
   <div class="field" style="margin:0 0 8px"><label>Папка бэкапа настроек${tipHTML("Куда складывать бэкап настроек. По умолчанию /mnt/storage/nas-settings-backup — на пуле, чтобы пережить переустановку ОС. Системные папки не рекомендуются: затрутся при переустановке.")}</label>
     <div class="nb-field-row"><input class="mono" id="bkDir" placeholder="/mnt/storage/nas-settings-backup" autocomplete="off"><button class="btn sm" id="bkDirB">${svg("folder",13)} Выбрать</button><button class="btn sm" id="bkDirSave">Сохранить</button></div></div>
+  <div class="nb-dwarn" id="bkEph" style="display:none;margin-bottom:8px"></div>
   <div class="srow" style="margin-bottom:8px"><div class="srow-l"><div class="srow-t">Скрывать эту папку в файловом менеджере${tipHTML("Папка бэкапа не будет мешать в файловом менеджере. Тумблер «скрытые» в окне ФМ её всё равно покажет.")}</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="bkHide"><span class="sl"></span></label></div></div>
   <div class="mon-note" id="bkNote">загрузка…</div>
   <div id="bkList"></div>`;
@@ -7043,6 +7044,10 @@ function backupTab(tc){
   const m=await api("/api/maintenance");const mm=(m&&m.maintenance)||{};
   if(document.activeElement!==dir)dir.value=mm.settings_backup_dir||"";
   hide.checked=!!mm.settings_backup_hide;
+  dir.placeholder=r.dir||"/mnt/storage/nas-settings-backup";   // показываем ФАКТИЧЕСКИЙ путь, а не мечту про пул
+  const eph=tc.querySelector("#bkEph");
+  if(r.ephemeral){eph.style.display="";eph.innerHTML=nasTr("Пул не подключён — бэкап сейчас лежит на системной карте (<b>"+esc(r.dir)+"</b>) и НЕ переживёт переустановку ОС. Задайте папку на внешнем диске или в пуле.");}
+  else eph.style.display="none";
   note.textContent=nasTr(`Папка: ${r.dir} · ${r.days?`автоматически раз в ${r.days} дн`:"автобэкап выключен"} · хранится ${r.keep} последних`);
   list.innerHTML=(r.list&&r.list.length)?"":`<div class="dempty">${svg("save",16)} Бэкапов ещё нет — нажмите «Создать»</div>`;
   (r.list||[]).forEach(b=>{
