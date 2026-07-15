@@ -2758,6 +2758,7 @@ window.NAS_I18N = { en: {
 "Наблюдение за хостами": "Host watch",
 "Плата": "Board",
 "Цвета статусов": "Status colors",
+"внешний диск": "external disk",
 "Основное хранилище": "Primary storage",
 "Куда система складывает данные по умолчанию: бэкап настроек, заметки, Time Machine, USB-импорт, папка {storage} в контейнерах. Обычно это пул, но без пула можно назначить внешний диск — тогда всё переживёт переустановку ОС.": "Where the system stores data by default: the settings backup, notes, Time Machine, USB import, the {storage} folder in containers. Usually the pool, but without a pool you can assign an external disk — then everything survives an OS reinstall.",
 "Сейчас активен пул": "The pool is active now",

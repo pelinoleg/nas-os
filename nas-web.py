@@ -12857,16 +12857,33 @@ class H(BaseHTTPRequestHandler):
                      os.path.splitext(full)[1], "application/octet-stream")
         with open(full, "rb") as f:
             data = f.read()
+        ext = os.path.splitext(full)[1]
+        # ETag из mtime+size: no-cache без валидатора мобильные браузеры трактовали
+        # как «можно взять из кэша» — так застревал старый i18n.js (весь UI по-русски
+        # при EN). С валидатором ревалидация РАБОТАЕТ: не менялось → 304, менялось →
+        # свежий файл. HTML остаётся no-store (там валидатору не доверяли вовсе).
+        try:
+            st_ = os.stat(full)
+            etag = '"%x-%x"' % (int(st_.st_mtime), st_.st_size)
+        except OSError:
+            etag = None
+        if etag and ext != ".html" and self.headers.get("If-None-Match") == etag:
+            self.send_response(304)
+            self.send_header("ETag", etag)
+            self.send_header("Cache-Control", "no-cache, must-revalidate")
+            self.end_headers()
+            return
         self.send_response(200)
         self.send_header("Content-Type", ctype)
         # HTML — НЕ кэшировать вовсе (мобильные браузеры при no-cache без валидатора
-        # всё равно показывали старую оболочку); JS/CSS ревалидировать.
-        ext = os.path.splitext(full)[1]
+        # всё равно показывали старую оболочку); JS/CSS ревалидировать по ETag.
         if ext == ".html":
             self.send_header("Cache-Control", "no-store, must-revalidate")
             self.send_header("Pragma", "no-cache")
         elif ext in (".js", ".css"):
             self.send_header("Cache-Control", "no-cache, must-revalidate")
+            if etag:
+                self.send_header("ETag", etag)
         elif ext == ".woff2":
             self.send_header("Cache-Control", "public, max-age=31536000, immutable")
         self.send_header("Content-Length", str(len(data)))

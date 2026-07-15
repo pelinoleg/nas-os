@@ -926,7 +926,7 @@
   .nb-arrow-row{display:flex;justify-content:center;color:var(--mut);margin:-6px 0 6px;transform:rotate(180deg)}
   .st-opt{display:flex;align-items:center;gap:11px;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r-lg);cursor:pointer;margin-bottom:6px}
   .st-opt.on{border-color:var(--accent);background:var(--accent-soft)}
-  .st-opt input{flex:none}
+  .st-opt input[type=radio]{flex:none;width:16px;height:16px;padding:0;margin:0;accent-color:var(--accent)}
   .st-ic{color:var(--accent-2);flex:none}
   .st-txt{display:flex;flex-direction:column;gap:2px;min-width:0}
   .st-txt b{font-size:12.5px}
@@ -3576,7 +3576,7 @@ async function storageDlg(after){
    const sel=c.path===cur||(st.pool&&c.pool);
    return `<label class="st-opt${sel?" on":""}"><input type="radio" name="stroot" value="${att(c.path)}" ${sel?"checked":""}>
      <span class="st-ic">${svg(c.removable?"usb":"hdd",16)}</span>
-     <span class="st-txt"><b>${esc(c.path)}</b><span class="st-sub">${esc(c.fs||"")}${c.size?` · ${fmtB(c.free||0)} своб из ${fmtB(c.size)}`:""}${c.removable?" · внешний":""}</span></span></label>`;}).join("");
+     <span class="st-txt"><b>${esc(c.path)}</b><span class="st-sub">${[esc(c.fs||""),c.size?fmtB(c.free||0)+" "+nasTr("свободно")+" / "+fmtB(c.size):"",c.removable?nasTr("внешний диск"):""].filter(Boolean).join(" · ")}</span></span></label>`;}).join("");
  box.innerHTML=(st&&st.pool?`<div class="mon-note" style="margin-bottom:10px">Сейчас активен пул <b>/mnt/storage</b> — он всегда в приоритете, пока смонтирован.</div>`:"")
    +(rows||`<div style="color:var(--mut);font-size:12px">Нет подключённых томов. Вставьте USB-диск — он появится здесь.</div>`)
    +(cur?`<label class="st-opt" style="margin-top:6px"><input type="radio" name="stroot" value=""><span class="st-ic">${svg("x",16)}</span><span class="st-txt"><b>Не выбирать</b><span class="st-sub">вернуться к системному диску по умолчанию</span></span></label>`:"");
