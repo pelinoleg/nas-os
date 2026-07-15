@@ -6302,8 +6302,11 @@ _BK_SECTIONS = (
     ("disks",     "Диски и пул",               False, ("nas-config/fstab.",)),
     ("webauth",   "Пароль панели",             True,  ("etc/nas-os/webauth.json",)),
     ("nasbackup", "Бэкап главного NAS",        True,  ("etc/nas-os/nas-backup.json", "nas-config/nas-backup-",
-                                                       # store.json / remotes.json содержат SSH-пароли
-                                                       "nas-config/store.json", "nas-config/remotes.json")),
+                                                       # store.json / remotes.json содержат SSH-пароли,
+                                                       # root/.ssh/nas-backup — ключ push-бэкапов на серверы
+                                                       "nas-config/store.json", "nas-config/remotes.json",
+                                                       "root/.ssh/nas-backup")),
+    ("network",   "Сеть (Wi-Fi, IP)",          True,  ("reference/etc/netplan/",)),   # пароль Wi-Fi → секрет; восстановление руками (reference)
     ("other",     "Прочее",                    False, ()),      # всё, что не подошло выше
 )
 
@@ -6390,10 +6393,20 @@ def _bk_sources():
                    (NB_CONF, "etc/nas-os/nas-backup.json"),
                    ("/etc/samba/smb.conf", "etc/samba/smb.conf"),
                    ("/var/lib/samba/private/passdb.tdb", "var/lib/samba/private/passdb.tdb"),
+                   # SSH-ключ приложения «Бэкап» (push на серверы по ключу): без него
+                   # после переустановки push-профили на ключе перестанут входить
+                   (NB_KEY, "root/.ssh/nas-backup"),
+                   (NB_KEY + ".pub", "root/.ssh/nas-backup.pub"),
                    ("/etc/fstab", "reference/etc/fstab"),
                    ("/etc/snapraid.conf", "reference/etc/snapraid.conf"),
                    ("/etc/exports", "reference/etc/exports")):
         out.append((p, arc))
+    # Сеть: netplan-профили (Wi-Fi с паролем/ключом, статический IP). В reference —
+    # восстановление руками: имена привязаны к железу/UUID, слепо накатывать поверх
+    # свежего образа нельзя, но иметь под рукой пароль Wi-Fi и настройки после
+    # переустановки бесценно (иначе NAS может остаться без сети).
+    for np in sorted(glob.glob("/etc/netplan/*.yaml")):
+        out.append((np, "reference/etc/netplan/" + os.path.basename(np)))
     if os.path.isdir(STACKS_DIR):            # compose/env стеков (не данные томов)
         for root, _, files in os.walk(STACKS_DIR):
             for fn in files:
