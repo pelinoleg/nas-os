@@ -2153,7 +2153,13 @@
   .bk-sec input{flex:none;width:17px;height:17px;margin:1px 0 0;accent-color:var(--accent)}
   .bk-sec b{display:block;font-size:13.5px;font-weight:600}
   .bk-sec .sub{display:block;font-size:12px;color:var(--dim);margin-top:2px}
-  .bk-sec.secret .sub{color:var(--warn)}
+  .bk-sec.secret .sub:first-of-type{color:var(--warn)}
+  /* успокаивающая плашка «данные не трогаются» */
+  .bk-safe{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--good);background:var(--good-soft,rgba(31,169,113,.12));border-radius:8px;padding:8px 11px;margin:0 0 12px;line-height:1.4}
+  .bk-safe svg{flex:none;color:var(--good)}
+  .bk-lock{font-size:10.5px;font-weight:600;color:var(--warn);display:inline-flex;align-items:center;gap:2px;vertical-align:middle}
+  .bk-lock svg{color:var(--warn)}
+  .bk-hint{font-size:11.5px;color:var(--mut);margin:-6px 0 12px}
   .toast{position:fixed;left:50%;bottom:96px;transform:translateX(-50%) translateY(14px);z-index:600;background:var(--glass-2);backdrop-filter:blur(20px) saturate(1.4);-webkit-backdrop-filter:blur(20px) saturate(1.4);
     border:1px solid var(--line-2);border-radius:var(--r-md);padding:12px 18px;font-size:13px;font-weight:500;box-shadow:var(--sh);opacity:0;pointer-events:none;transition:.26s cubic-bezier(.2,.8,.3,1)}
   .toast.show{opacity:1;transform:translateX(-50%)}
@@ -2880,12 +2886,16 @@ async function bkSectionsDlg(name, when, onOk){
  const r=await api("/api/settings-backup/inspect?name="+encodeURIComponent(name));
  if(!r||!r.ok||!(r.sections||[]).length){toast("Ошибка: "+((r&&r.log)||"в архиве нет настроек"));return;}
  const s=document.getElementById("scrim");
- s.innerHTML=`<div class="dialog"><h3>Восстановить настройки?</h3>
-   <p>Бэкап от ${esc(when)}. Отмеченные разделы перезапишут текущие настройки, снятые останутся нетронутыми. После восстановления страница перезагрузится.</p>
+ s.innerHTML=`<div class="dialog" style="max-width:560px"><h3>Восстановить настройки?</h3>
+   <p style="margin-bottom:6px">Бэкап от ${esc(when)}. Отмеченные разделы перезапишут ТЕКУЩИЕ настройки на сохранённые; снятые останутся как есть. Страница перезагрузится.</p>
+   <div class="bk-safe">${svg("shield",14)} Восстанавливаются только настройки. Ваши файлы, заметки и данные контейнеров НЕ затрагиваются.</div>
    <div class="bk-secs">${r.sections.map(x=>`<label class="bk-sec${x.secret?" secret":""}">
      <input type="checkbox" data-k="${att(x.key)}"${x.secret?"":" checked"}>
-     <span><b>${esc(x.title)}</b><span class="sub">${x.files} файлов · ${fmtB(x.bytes)}${x.secret?" · перезапишет секреты":""}</span></span></label>`).join("")}</div>
-   <div class="r"><button class="btn" id="dc">Отмена</button><button class="btn dng" id="do">Восстановить</button></div></div>`;
+     <span><b>${esc(x.title)}${x.secret?` <span class="bk-lock">${svg("keyf",11)} пароли</span>`:""}</b>
+     <span class="sub">${esc(x.desc||"")}</span>
+     <span class="sub" style="opacity:.6">${x.files} файлов · ${fmtB(x.bytes)}</span></span></label>`).join("")}</div>
+   <p class="bk-hint">Секретные разделы (пароли) сняты по умолчанию — включите вручную, если хотите вернуть и старые пароли.</p>
+   <div class="r"><button class="btn" id="dc">Отмена</button><button class="btn dng" id="do">Восстановить отмеченное</button></div></div>`;
  s.classList.add("show");
  s.querySelector("#dc").onclick=()=>s.classList.remove("show");
  s.querySelector("#do").onclick=()=>{

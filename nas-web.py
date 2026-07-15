@@ -6310,6 +6310,20 @@ _BK_SECTIONS = (
     ("other",     "Прочее",                    False, ()),      # всё, что не подошло выше
 )
 
+# короткое человеческое «что перезапишется» для каждого раздела (диалог восстановления)
+_BK_DESC = {
+    "desktop":   "тема, обои, расположение окон и ярлыков",
+    "notify":    "правила уведомлений и Pushover",
+    "maint":     "расписания обслуживания и авто-бэкапа",
+    "samba":     "список общих папок и пароли доступа к ним",
+    "stacks":    "compose и .env стеков (сами данные контейнеров НЕ трогаются)",
+    "disks":     "сохранённая конфигурация дисков (справочно)",
+    "webauth":   "пароль входа в веб-панель",
+    "nasbackup": "профили приложения «Бэкап», SSH-пароли и ключ",
+    "network":   "профили сети netplan: Wi-Fi и статический IP (кладётся рядом, применяется вручную)",
+    "other":     "токен внешнего экрана, выбор основного хранилища, история операций",
+}
+
 def _bk_section(nm):
     for key, _title, _secret, prefixes in _BK_SECTIONS:
         for p in prefixes:
@@ -6339,7 +6353,8 @@ def settings_backup_inspect(path):
     except (OSError, tarfile.TarError) as e:
         return {"ok": False, "log": "плохой архив: %s" % e}
     return {"ok": True, "sections": [
-        {"key": k, "title": t, "secret": s, "files": seen[k][0], "bytes": seen[k][1]}
+        {"key": k, "title": t, "secret": s, "files": seen[k][0], "bytes": seen[k][1],
+         "desc": _BK_DESC.get(k, "")}
         for k, t, s, _p in _BK_SECTIONS if k in seen]}
 
 def settings_backup_path():
