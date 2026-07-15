@@ -1686,9 +1686,6 @@ def glance_catalog():
                 cat.append(("nb:" + pr["id"], "Бэкап · " + nm, "Backup · " + nm))
     for s in _glance_scripts():
         cat.append((s["id"], s["name"], s["name"]))
-    for h in _safe(hostwatch_load, []) or []:
-        cat.append(("hw:" + h["id"], "Хост · " + h["name"], "Host · " + h["name"]))
-    cat.append(("bright", "Яркость", "Brightness"))   # рисует и крутит устройство
     # смонтированные тома: свободное место плиткой (вид «шкала» = заполнение)
     for d in (_safe(_screen_heavy, {}) or {}).get("disks") or []:
         mts = d.get("mounts") or []
@@ -1742,112 +1739,6 @@ def _glance_scripts():
     return _SC_CACHE["data"]
 
 # ---------------------------------------------------------------------------
-# Наблюдение за хостами: пинг/TCP-проверки доменов и локальных серверов с
-# историей доступности (те же RLE-журналы и полоски, что у собственного avail).
-# Каждый хост = glance-плитка "hw:<id>" → видна на ESP32-экранах и в конструкторе.
-HOSTWATCH_FILE = os.path.join(NAS_CONFIG, "hostwatch.json")
-HOSTWATCH_DIR = "/var/lib/nas-wizard/hostwatch"
-_HW = {"last": {}, "busy": False}       # id -> {"up","ms","ts"}
-_HW_ID_RE = re.compile(r"^[\w-]{1,40}$")
-
-
-def hostwatch_load():
-    d = _json_load_strict(HOSTWATCH_FILE, {})
-    out = []
-    for h in (d.get("hosts") or []):
-        hid = str(h.get("id") or "")
-        tgt = str(h.get("target") or "").strip()
-        if not _HW_ID_RE.match(hid) or not tgt or len(tgt) > 200:
-            continue
-        try:
-            port = max(1, min(65535, int(h.get("port") or 0)))
-        except (TypeError, ValueError):
-            port = 0
-        try:
-            iv = max(10, min(3600, int(h.get("interval") or 60)))
-        except (TypeError, ValueError):
-            iv = 60
-        out.append({"id": hid, "name": str(h.get("name") or tgt)[:60], "target": tgt,
-                    "type": "tcp" if h.get("type") == "tcp" else "ping",
-                    "port": port, "interval": iv})
-    return out
-
-
-def hostwatch_save(hosts):
-    cur, used = [], set()
-    for h in (hosts if isinstance(hosts, list) else [])[:24]:
-        if not isinstance(h, dict):
-            continue
-        hid = str(h.get("id") or "")
-        if not _HW_ID_RE.match(hid):
-            hid = re.sub(r"[^\w-]+", "-", str(h.get("target") or "h")).strip("-")[:24] or "h"
-        while hid in used:
-            hid += "x"
-        used.add(hid)
-        cur.append(dict(h, id=hid))
-    _json_save(HOSTWATCH_FILE, {"hosts": cur}, indent=2)
-    # удалённый хост не должен оставлять хвост: плитка исчезла — журнал тоже
-    keep = {h["id"] for h in hostwatch_load()}
-    for f in glob.glob(os.path.join(HOSTWATCH_DIR, "*.log")):
-        if os.path.splitext(os.path.basename(f))[0] not in keep:
-            _safe(lambda p=f: os.unlink(p))
-    return hostwatch_load()
-
-
-def _hw_check(h):
-    """One probe. Returns (up, ms). DNS failures count as down — a dead domain
-    IS the thing the user wants to see."""
-    t0 = time.time()
-    try:
-        if h["type"] == "tcp":
-            with socket.create_connection((h["target"], h["port"] or 22), timeout=3):
-                pass
-            return True, int((time.time() - t0) * 1000)
-        r = subprocess.run(["ping", "-c1", "-W2", h["target"]],
-                           capture_output=True, text=True, timeout=6)
-        if r.returncode != 0:
-            return False, None
-        m = re.search(r"time=([\d.]+)", r.stdout or "")
-        return True, (int(float(m.group(1))) if m else None)
-    except (OSError, subprocess.TimeoutExpired, ValueError):
-        return False, None
-
-
-def _hw_log(hid, up):
-    """RLE journal, same format as avail.log — parsed by the same avail_bars()."""
-    os.makedirs(HOSTWATCH_DIR, exist_ok=True)
-    p = os.path.join(HOSTWATCH_DIR, hid + ".log")
-    try:
-        with open(p) as f:
-            last = f.readlines()[-1].split()[1] if os.path.getsize(p) else ""
-    except (OSError, IndexError):
-        last = ""
-    state = "up" if up else "off"
-    if last != state:
-        with open(p, "a") as f:
-            f.write("%d %s\n" % (int(time.time()), state))
-
-
-def _hostwatch_tick():
-    if _HW["busy"]:
-        return
-    now = time.time()
-    due = [h for h in hostwatch_load()
-           if now - (_HW["last"].get(h["id"], {}).get("ts") or 0) >= h["interval"]]
-    if not due:
-        return
-    _HW["busy"] = True
-
-    def go():
-        try:
-            for h in due:
-                up, ms = _hw_check(h)
-                _HW["last"][h["id"]] = {"up": up, "ms": ms, "ts": time.time()}
-                _safe(lambda: _hw_log(h["id"], up))
-        finally:
-            _HW["busy"] = False
-    threading.Thread(target=go, daemon=True).start()
-
 def _nb_next_run(cfg):
     """Next scheduled run (epoch) for a backup profile, None if not scheduled."""
     s = (cfg or {}).get("schedule") or {}
@@ -1891,176 +1782,21 @@ def _gl_spark(field, points=48):
         out.append(int(v) if v >= 100 else round(v, 1))
     return out
 
-# tile style: positions use the 9-grid (matches TFT_eSPI datums); the unit can
-# also be glued to the value: "val" = right after it, "valb" = under it
-_GL_POS = {"tl", "tc", "tr", "cl", "c", "cr", "bl", "bc", "br", "hide", "val", "valb"}
-
-# colors are #RRGGBB or #RRGGBBAA — the device blends the alpha against the
-# tile background itself (TFT has no true transparency)
-_GL_COLOR = re.compile(r"^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$")
-
-def _gl_norm_style(st):
-    if not isinstance(st, dict):
-        return {}
-    out = {}
-    for k in ("lp", "vp", "up"):                      # label/value/unit position
-        if st.get(k) in _GL_POS:
-            out[k] = st[k]
-    for k in ("ls", "vs", "us"):                      # label/value/unit font px
-        try:
-            v = int(st.get(k))
-            if 6 <= v <= 120:
-                out[k] = v
-        except (TypeError, ValueError):
-            pass
-    for k in ("lc", "vc", "uc", "bc"):                # text/border colors
-        v = st.get(k)
-        if isinstance(v, str) and _GL_COLOR.match(v):
-            out[k] = v
-    if st.get("k") in ("value", "gauge", "bars", "spark"):
-        out["k"] = st["k"]                            # представление; нет = авто
-    if st.get("nd"):
-        out["nd"] = 1                                 # спрятать точку статуса
-    if st.get("np") in _GL_POS:
-        out["np"] = st["np"]                          # позиция подписи (note)
-    bg = st.get("bg")                                 # absent=default card
-    if bg == "none" or (isinstance(bg, str) and _GL_COLOR.match(bg)):
-        out["bg"] = bg
-    try:
-        bw = int(st.get("bw"))                        # border width, 0=none
-        if 0 <= bw <= 6:
-            out["bw"] = bw
-    except (TypeError, ValueError):
-        pass
-    return out
-
-def _gl_norm_tiles(lst):
-    """Normalize a tile list: id string (legacy) or
-    {id, size s|m|l, x/y/w/h (free mode, device px), st (style)}."""
-    out = []
-    for t in lst or []:
-        if isinstance(t, str):
-            out.append({"id": t, "size": "m"})
-            continue
-        if not (isinstance(t, dict) and t.get("id")):
-            continue
-        d = {"id": str(t["id"]),
-             "size": t.get("size") if t.get("size") in ("s", "m", "l") else "m"}
-        if t.get("label"):
-            d["label"] = str(t["label"])[:40]         # своё имя плитки; нет = каталог
-        for k in ("x", "y", "w", "h"):
-            try:
-                d[k] = max(0, min(4096, int(t[k])))
-            except (KeyError, TypeError, ValueError):
-                pass
-        st = _gl_norm_style(t.get("st"))
-        if st:
-            d["st"] = st
-        out.append(d)
-    return out
-
-# display size presets for the constructor canvas ("сколько поместится")
-GLANCE_PRESETS = [
-    ("320x170", "LilyGO T-Display-S3"),
-    ("640x180", "LilyGO T-Display-S3 Long"),
-    ("320x240", "TFT 2.4\" 320×240"),
-    ("480x320", "TFT 3.5\" 480×320"),
-    ("296x128", "e-ink 2.9\" 296×128"),
-]
-
-def _gl_norm_pages(pages):
-    return [{"name": str(p.get("name") or "Экран")[:24], "tiles": _gl_norm_tiles(p.get("tiles"))}
-            for p in (pages or []) if isinstance(p, dict)][:6]
 
 def load_glance():
+    """Открытый статус-фид для внешних экранов: просто токен доступа и период
+    опроса доступности. Раскладку/выбор плиток делает само устройство —
+    endpoint отдаёт ВЕСЬ набор метрик (см. glance_payload)."""
     d = _json_load_strict(GLANCE_FILE, {})
-    screens = d.get("screens")
-    if not isinstance(screens, list) or not screens:
-        # migrate: legacy flat pages/tiles -> a single screen
-        pages = d.get("pages")
-        if not isinstance(pages, list) or not pages:
-            flat = d.get("tiles") if isinstance(d.get("tiles"), list) else list(GLANCE_DEF_TILES)
-            pages = [{"name": "Главная", "tiles": flat}]
-        screens = [{"id": "main", "name": "Экран 1", "preset": "320x170", "pages": pages}]
-    out = []
-    for s in screens[:4]:
-        if not isinstance(s, dict):
-            continue
-        sid = re.sub(r"[^a-z0-9]", "", str(s.get("id") or ""))[:12] or "s%d" % (len(out) + 1)
-        preset = str(s.get("preset") or "320x170")
-        if not re.match(r"^\d{2,4}x\d{2,4}$", preset):
-            preset = "320x170"
-        try:
-            gap = max(0, min(24, int(s.get("gap"))))
-        except (TypeError, ValueError):
-            gap = 0
-        out.append({"id": sid, "name": str(s.get("name") or "Экран")[:24],
-                    "preset": preset, "gap": gap,
-                    "mode": "free" if s.get("mode") == "free" else "flow",
-                    "avail": s.get("avail") is not False,   # bottom 24h strip
-                    "defst": _gl_norm_style(s.get("defst")),  # style for new tiles
-                    "pages": _gl_norm_pages(s.get("pages"))})
-    def _hhmm(k, dflt):
-        v = str(d.get(k) or dflt)
-        return v if re.match(r"^\d{1,2}:\d{2}$", v) else dflt
-    def _bri():
-        try:
-            return max(8, min(255, int(d.get("bright", 255))))
-        except (TypeError, ValueError):
-            return 255
     return {"enabled": bool(d.get("enabled")),
             "token": d.get("token") or "",
-            "ping_interval": int(d.get("ping_interval") or 30),
-            "bright": _bri(),          # яркость ESP32-экранов из панели
-            # ночь для ESP32-экранов: payload несёт night=true, устройство гасит
-            # подсветку само (часов у него нет — время знает сервер)
-            "night": bool(d.get("night")),
-            "night_from": _hhmm("night_from", "23:00"),
-            "night_to": _hhmm("night_to", "07:00"),
-            "screens": out}
+            "ping_interval": int(d.get("ping_interval") or 30)}
+
 
 def save_glance(d):
     cur = load_glance()
     if "enabled" in d:
         cur["enabled"] = bool(d["enabled"])
-    if "night" in d:
-        cur["night"] = bool(d["night"])
-    if "bright" in d:
-        try:
-            cur["bright"] = max(8, min(255, int(d["bright"])))
-        except (TypeError, ValueError):
-            pass
-    for k in ("night_from", "night_to"):
-        if re.match(r"^\d{1,2}:\d{2}$", str(d.get(k) or "")):
-            cur[k] = str(d[k])
-    if isinstance(d.get("screens"), list):
-        ok_ids = {t[0] for t in glance_catalog()}
-        screens, seen = [], set()
-        for s in d["screens"][:4]:
-            if not isinstance(s, dict):
-                continue
-            sid = re.sub(r"[^a-z0-9]", "", str(s.get("id") or ""))[:12]
-            while not sid or sid in seen:
-                sid = secrets.token_hex(3)
-            seen.add(sid)
-            preset = str(s.get("preset") or "320x170")
-            if not re.match(r"^\d{2,4}x\d{2,4}$", preset):
-                preset = "320x170"
-            try:
-                gap = max(0, min(24, int(s.get("gap"))))
-            except (TypeError, ValueError):
-                gap = 0
-            pages = _gl_norm_pages(s.get("pages"))
-            for p in pages:
-                p["tiles"] = [t for t in p["tiles"] if t["id"] in ok_ids]
-            screens.append({"id": sid, "name": str(s.get("name") or "Экран")[:24],
-                            "preset": preset, "gap": gap,
-                            "mode": "free" if s.get("mode") == "free" else "flow",
-                            "avail": s.get("avail") is not False,
-                            "defst": _gl_norm_style(s.get("defst")),
-                            "pages": pages or [{"name": "Главная", "tiles": []}]})
-        if screens:
-            cur["screens"] = screens
     act = d.get("token_action")
     if act == "new":
         cur["token"] = secrets.token_hex(16)
@@ -2069,8 +1805,8 @@ def save_glance(d):
     pi = d.get("ping_interval")
     if pi in (15, 30, 60, 120):
         cur["ping_interval"] = pi
-        # availability probe period = netguard timer period; a systemd drop-in
-        # overrides the base 30 s without touching the wizard-managed unit
+        # период проверки доступности = период таймера netguard; drop-in меняет
+        # базовые 30 с, не трогая управляемый визардом юнит
         try:
             os.makedirs("/etc/systemd/system/nas-netguard.timer.d", exist_ok=True)
             with open("/etc/systemd/system/nas-netguard.timer.d/override.conf", "w") as f:
@@ -2328,27 +2064,6 @@ def _glance_tile(tid, en):
                 "state": st, "note": (d0.get("model") or d0.get("name") or ""),
                 "raw": {"pct": pct, "free": d0.get("free"), "used": d0.get("used"),
                         "size": d0.get("size"), "temp": d0.get("temp")}}
-    if tid.startswith("hw:"):
-        h = next((x for x in (_safe(hostwatch_load, []) or []) if x["id"] == tid[3:]), None)
-        if not h:
-            return None
-        last = _HW["last"].get(h["id"]) or {}
-        av = _safe(lambda: avail_bars(24, 48,
-                   path=os.path.join(HOSTWATCH_DIR, h["id"] + ".log")), {}) or {}
-        up = last.get("up")
-        if up is None:
-            return None                     # ещё ни одной проверки — плитки нет
-        if up:
-            val = ("%d" % last["ms"]) if last.get("ms") is not None else "OK"
-            unit = "ms" if last.get("ms") is not None else ""
-        else:
-            val, unit = "DOWN", ""
-        pct = av.get("pct")
-        st = "danger" if not up else ("warn" if (pct is not None and pct < 99) else "ok")
-        return {"value": val, "unit": unit, "state": st, "note": h["name"],
-                "raw": {"up": bool(up), "ms": last.get("ms"), "pct24": pct,
-                        "bars": av.get("bars") or [], "frac": av.get("frac") or [],
-                        "target": h["target"], "type": h["type"]}}
     if tid in ("avail", "avail30"):
         hours = 24 if tid == "avail" else 720
         av = avail_bars(hours, 48 if tid == "avail" else 30)
@@ -2560,62 +2275,42 @@ def _translit(s):
 
 
 def glance_payload(lang="ru", screen=""):
-    """Glance document for one screen profile; cached a few seconds,
-    seq bumps only on change. Cache/seq stream is per (lang, screen)."""
+    """Открытый статус-фид: ВСЕ доступные плитки одним плоским списком (метрика
+    может исчезнуть — тогда её просто нет), плюс доступность 24h/30d, цвета
+    статусов и общий вердикт. Раскладку делает устройство. Кэш пара секунд,
+    seq растёт только при изменении (экран не перерисовывается зря)."""
     en = (lang == "en")
     cfg = load_glance()
-    scr = next((s for s in cfg["screens"] if s["id"] == screen), cfg["screens"][0])
-    key = lang + "|" + scr["id"]
     with _GL_LOCK:
-        c = _GL_CACHE["langs"].get(key)
+        c = _GL_CACHE["langs"].get(lang)
         if c and time.time() - c["t"] < 3:
             return c["payload"]
     labels = {t[0]: (t[2] if en else t[1]) for t in glance_catalog()}
-    built, problems, seen_prob = {}, [], set()
-    def build(tid):
-        if tid in built:
-            return built[tid]
-        d = _glance_tile_cached(tid, en) if tid in labels else None
-        if d:
-            d = dict(d, id=tid, label=labels[tid])
-            if en:
-                # user-supplied names (backup profiles, hosts, scripts) can be
-                # Cyrillic — TFT fonts on the devices are Latin-only and render
-                # them as garbage; transliterate for the en stream
-                d["label"] = _translit(d["label"])
-                if d.get("note"):
-                    d["note"] = _translit(d["note"])
-                if d.get("value") and not str(d["value"]).isascii():
-                    d["value"] = _translit(str(d["value"]))
-            if tid in GLANCE_SPARKS:
-                sp = _safe(lambda: _gl_spark(GLANCE_SPARKS[tid]))
-                if sp:
-                    d["spark"] = sp
-        built[tid] = d
-        return d
-    pages = []
-    for pg in scr["pages"]:
-        tl = []
-        for t in pg["tiles"]:
-            d = build(t["id"])
-            if not d:
-                continue
-            extra = {k: t[k] for k in ("x", "y", "w", "h", "st") if k in t}
-            if t.get("label"):                        # своё имя вместо каталожного
-                extra["label"] = _translit(t["label"]) if en else t["label"]
-            tl.append(dict(d, size=t["size"], **extra))
-            if d["state"] != "ok" and d["id"] not in seen_prob:
-                seen_prob.add(d["id"])
-                problems.append("%s: %s %s" % (d["label"], d["value"], d.get("note") or d["unit"]))
-        pages.append({"name": pg["name"], "tiles": tl})
-    shown = [d for d in built.values() if d]
+    tiles, problems = [], []
+    for tid in labels:
+        d = _glance_tile_cached(tid, en)
+        if not d:
+            continue
+        d = dict(d, id=tid, label=_translit(labels[tid]) if en else labels[tid])
+        if en:
+            if d.get("note"):
+                d["note"] = _translit(d["note"])
+            if d.get("value") and not str(d["value"]).isascii():
+                d["value"] = _translit(str(d["value"]))
+        if tid in GLANCE_SPARKS:
+            sp = _safe(lambda t=tid: _gl_spark(GLANCE_SPARKS[t]))
+            if sp:
+                d["spark"] = sp
+        tiles.append(d)
+        if d["state"] != "ok":
+            problems.append("%s: %s %s" % (d["label"], d["value"], d.get("note") or d.get("unit") or ""))
     status = "ok"
-    if any(t["state"] == "danger" for t in shown):
+    if any(t["state"] == "danger" for t in tiles):
         status = "danger"
-    elif any(t["state"] == "warn" for t in shown):
+    elif any(t["state"] == "warn" for t in tiles):
         status = "warn"
     av = avail_bars(24, 96)
-    night = bool(cfg.get("night") and _in_night(cfg))
+    av30 = avail_bars(720, 30)
     ds0 = _safe(load_settings, {}) or {}
     dk0 = (ds0.get("themeProfiles") or {}).get("dark") or {}
     def _hue(k, dflt):
@@ -2623,19 +2318,15 @@ def glance_payload(lang="ru", screen=""):
         return v if isinstance(v, str) and re.match(r"^#[0-9a-fA-F]{6}$", v) else dflt
     colors = {"ok": _hue("goodHex", "#1FA971"), "warn": _hue("warnHex", "#CF881B"),
               "danger": _hue("dangerHex", "#DE4E48"), "accent": _hue("accentHex", "#12B0A6")}
-    payload = {"v": 2, "host": socket.gethostname(), "status": status, "night": night,
-               "colors": colors, "bright": cfg.get("bright", 255),
-               "screen": {"id": scr["id"], "name": scr["name"], "preset": scr["preset"],
-                          "mode": scr["mode"], "gap": scr["gap"], "avail": scr["avail"]},
-               "problems": problems[:4], "pages": pages,
-               # legacy flat list = first page (older sketches keep working)
-               "tiles": pages[0]["tiles"] if pages else [],
+    payload = {"v": 3, "host": socket.gethostname(), "status": status,
+               "problems": problems[:6], "tiles": tiles, "colors": colors,
                "avail": {"bars": av["bars"], "pct24": av["pct"]},
+               "avail30": {"bars": av30["bars"], "pct": av30["pct"]},
                "ts": int(time.time())}
-    sig = json.dumps([pages, problems, status, av["bars"], night, colors,
-                      cfg.get("bright", 255)], sort_keys=True, ensure_ascii=False)
+    sig = json.dumps([tiles, problems, status, av["bars"], av30["bars"], colors],
+                     sort_keys=True, ensure_ascii=False)
     with _GL_LOCK:
-        c = _GL_CACHE["langs"].setdefault(key, {"t": 0, "sig": "", "seq": 0, "payload": None})
+        c = _GL_CACHE["langs"].setdefault(lang, {"t": 0, "sig": "", "seq": 0, "payload": None})
         if sig != c["sig"]:
             c["seq"] += 1
             c["sig"] = sig
@@ -2643,6 +2334,7 @@ def glance_payload(lang="ru", screen=""):
         c["t"] = time.time()
         c["payload"] = payload
     return payload
+
 
 # --------------------------------------------------------------------------- #
 #  Notes: folders of plain .md files (default on the pool) with a tiny
@@ -6610,10 +6302,8 @@ _BK_SECTIONS = (
     ("disks",     "Диски и пул",               False, ("nas-config/fstab.",)),
     ("webauth",   "Пароль панели",             True,  ("etc/nas-os/webauth.json",)),
     ("nasbackup", "Бэкап главного NAS",        True,  ("etc/nas-os/nas-backup.json", "nas-config/nas-backup-",
-                                                       # store.json / remotes.json содержат SSH-пароли,
-                                                       # esp32.json — пароль Wi-Fi для автономных экранов
-                                                       "nas-config/store.json", "nas-config/remotes.json",
-                                                       "nas-config/esp32.json")),
+                                                       # store.json / remotes.json содержат SSH-пароли
+                                                       "nas-config/store.json", "nas-config/remotes.json")),
     ("other",     "Прочее",                    False, ()),      # всё, что не подошло выше
 )
 
@@ -12531,84 +12221,6 @@ def screen_action(b):
     return {"ok": False, "log": "неизвестное действие"}
 
 
-# ---------------------------------------------------------------------------
-# ESP32-экраны (glance): прошивка LilyGO-платы прямо из панели. Тулчейн
-# (arduino-cli + ядро esp32) ставит визард (api esp32tools) в /opt/arduino-cli;
-# конфиг (Wi-Fi, адрес NAS, токен) НЕ компилируется в прошивку, а дописывается
-# отдельным blob'ом в последние 4 КБ flash — скетч читает его на старте.
-ESP32_FILE = os.path.join(NAS_CONFIG, "esp32.json")
-ESP32_SKETCH = os.path.join(HERE, "services", "esp32-glance")
-ESP32_FQBN = "esp32:esp32:lilygo_t_display_s3"
-ESP32_CFG_ADDR = "0xFFF000"           # must match CFG_ADDR in the sketch
-_ESP32_ENV = {"ARDUINO_DIRECTORIES_DATA": "/opt/arduino-cli/data",
-              "ARDUINO_DIRECTORIES_DOWNLOADS": "/opt/arduino-cli/downloads",
-              "ARDUINO_DIRECTORIES_USER": "/opt/arduino-cli/user"}
-
-
-def esp32_ports():
-    out = []
-    for dev in sorted(glob.glob("/dev/ttyACM*") + glob.glob("/dev/ttyUSB*")):
-        p = {"dev": dev, "name": "", "vidpid": ""}
-        r = _run(["udevadm", "info", "-q", "property", "-n", dev], timeout=5)
-        if r["ok"]:
-            props = dict(ln.split("=", 1) for ln in r["log"].splitlines() if "=" in ln)
-            p["name"] = (props.get("ID_MODEL") or "").replace("_", " ")
-            p["vidpid"] = (props.get("ID_VENDOR_ID") or "") + ":" + (props.get("ID_MODEL_ID") or "")
-        out.append(p)
-    return out
-
-
-def esp32_ready():
-    return bool(shutil.which("arduino-cli")) \
-        and os.path.isdir("/opt/arduino-cli/data/packages/esp32")
-
-
-def esp32_wifi_hint():
-    """Prefill for the flash dialog: the box already knows the home Wi-Fi the
-    display should join (NM profile kept by netguard). Authed admins only."""
-    r = _run(["nmcli", "-t", "-f", "NAME,TYPE", "connection", "show"], timeout=10)
-    for line in (r.get("log") or "").splitlines():
-        name, _, typ = line.partition(":")
-        if typ.strip() != "802-11-wireless":
-            continue
-        g = _run(["nmcli", "-s", "-t", "-f",
-                  "802-11-wireless.ssid,802-11-wireless-security.psk",
-                  "connection", "show", name], timeout=10)
-        ssid = psk = ""
-        for ln in (g.get("log") or "").splitlines():
-            k, _, v = ln.partition(":")
-            if k.endswith(".ssid"):
-                ssid = v.strip()
-            elif k.endswith(".psk"):
-                psk = v.strip()
-        if ssid:
-            # netplan-профили хранят не пароль, а производный WPA-ключ (64 hex).
-            # Он валиден ТОЛЬКО для того же SSID: подставленный в прошивку с
-            # другой сетью (5 ГГц профиль → 2.4 ГГц сеть для ESP32) он тихо
-            # ломает подключение. Такое не подсказываем — пусть пустое поле
-            # честно попросит настоящий пароль (реальный случай 2026-07-14).
-            if re.match(r"^[0-9a-f]{64}$", psk):
-                psk = ""
-            return {"ssid": ssid, "psk": psk}
-    return {}
-
-
-def esp32_cfg_blob(b):
-    """4 KB config block for the sketch: magic + uint16 len + JSON, zero-padded."""
-    cfg = {"ssid": str(b.get("ssid") or ""), "pass": str(b.get("pass") or ""),
-           "host": str(b.get("host") or ""), "token": str(b.get("token") or ""),
-           "screen": str(b.get("screen") or "")}
-    try:
-        if int(b.get("poll") or 0) >= 1000:
-            cfg["poll"] = int(b["poll"])
-    except (TypeError, ValueError):
-        pass
-    js = json.dumps(cfg, ensure_ascii=False).encode()
-    if len(js) > 4090:
-        return None
-    return b"NASG" + len(js).to_bytes(2, "little") + js + b"\0" * (4096 - 6 - len(js))
-
-
 # Обои под локальный экран: исходник — под рабочий стол (2-4 МБ, 2560+ px), а панели
 # нужно 800x480. Хром на Pi 4 тащил полный кадр в память И мылил его blur(27px) —
 # это заметная работа на слабой GPU. Держим ужатую копию рядом с оригиналом и отдаём её
@@ -13317,30 +12929,7 @@ class H(BaseHTTPRequestHandler):
                 self._json({"config": load_screen(), "present": bool(_bl_dir()),
                             "unit": (u.get("log") or "").strip()})
             elif p == "/api/glance/config":
-                # nameEn — то, что реально нарисует устройство (оно ходит с lang=en):
-                # холст конструктора обязан показывать ЕГО, иначе имена расходятся
-                self._json({"config": load_glance(),
-                            "catalog": [{"id": t[0], "name": t[1], "nameEn": _translit(t[2])}
-                                        for t in glance_catalog()],
-                            "presets": [{"id": pi, "name": pn} for pi, pn in GLANCE_PRESETS]})
-            elif p == "/api/hostwatch":
-                hosts = []
-                for h in hostwatch_load():
-                    last = _HW["last"].get(h["id"]) or {}
-                    av = _safe(lambda hh=h: avail_bars(24, 48,
-                               path=os.path.join(HOSTWATCH_DIR, hh["id"] + ".log")), {}) or {}
-                    hosts.append(dict(h, up=last.get("up"), ms=last.get("ms"),
-                                      checked=int(last.get("ts") or 0), pct24=av.get("pct")))
-                self._json({"hosts": hosts})
-            elif p == "/api/esp32/state":
-                # saved.pass отдаётся как есть: это домашний NAS, диалог за auth,
-                # а NM-подсказка может быть лишь производным WPA-ключом (64 hex,
-                # netplan-профиль) — реальный пароль знает только сам пользователь
-                saved = _json_load_strict(ESP32_FILE, {})
-                self._json({"ports": esp32_ports(), "ready": esp32_ready(),
-                            "wifi": _safe(esp32_wifi_hint, {}) or {},
-                            "host": (_safe(stats, {}) or {}).get("ip") or "",
-                            "saved": saved})
+                self._json({"config": load_glance()})
             elif p == "/api/avail":
                 self._json(avail_bars(int((q.get("hours") or ["24"])[0]),
                                       int((q.get("slots") or ["96"])[0])))
@@ -13976,61 +13565,6 @@ class H(BaseHTTPRequestHandler):
                           "", "ok", kind="svc", desk=False)
                 self._stream_cmd(["bash", "-c", script],
                                  env=dict(_C_ENV, **env), timeout=86400)
-            elif p == "/api/hostwatch":
-                b = self._body()
-                out = hostwatch_save(b.get("hosts"))
-                _HW["last"] = {k: v for k, v in _HW["last"].items()
-                               if k in {h["id"] for h in out}}
-                with _GL_LOCK:
-                    _GL_CACHE["langs"].clear()   # каталог плиток изменился
-                self._json({"ok": True, "hosts": out})
-            elif p == "/api/esp32/flash":
-                # прошивка ESP32-экрана стримом: (тулчейн, если надо) → сборка →
-                # заливка приложения → конфиг-blob в хвост flash. Пароль Wi-Fi
-                # не светится в argv: blob уже лежит файлом в nas-config (root-only)
-                b = self._body()
-                port = str(b.get("port") or "")
-                if not re.match(r"^/dev/tty(ACM|USB)\d+$", port) or not os.path.exists(port):
-                    self._json({"ok": False, "log": "порт не найден"}); return
-                blob = esp32_cfg_blob(b)
-                if not blob or not b.get("ssid") or not b.get("token"):
-                    self._json({"ok": False, "log": "нужны Wi-Fi сеть и токен"}); return
-                # плата: classic (TFT_eSPI) или Long (AXS15231B через Arduino_GFX);
-                # у каждой свой кэш сборки — флаг компиляции меняет весь рендер
-                long_ = str(b.get("board") or "") == "s3long"
-                cfg_bin = os.path.join(NAS_CONFIG, "esp32-cfg.bin")
-                with open(cfg_bin, "wb") as f:
-                    f.write(blob)
-                os.chmod(cfg_bin, 0o600)
-                saved = {k: str(b.get(k) or "") for k in ("ssid", "pass", "host", "screen", "board")}
-                saved["ts"] = int(time.time())
-                _json_save(ESP32_FILE, saved, indent=2)   # маркер: переустановка вернёт тулчейн
-                env = dict(_C_ENV, **_ESP32_ENV)
-                build = "/opt/arduino-cli/build-esp32-glance" + ("-long" if long_ else "")
-                flags = "--build-property compiler.cpp.extra_flags=-DNAS_DISPLAY_LONG=1" if long_ else ""
-                script = """set -e
-if ! command -v arduino-cli >/dev/null || [ ! -d /opt/arduino-cli/data/packages/esp32 ]; then
-  echo '== первый запуск: ставлю тулчейн (~1.5 ГБ, 10-30 минут) =='
-  bash %(wiz)s api esp32tools
-fi
-echo '== сборка прошивки =='
-arduino-cli compile --fqbn %(fqbn)s --build-path %(build)s %(flags)s %(sketch)s
-echo '== заливка приложения =='
-arduino-cli upload -p %(port)s --fqbn %(fqbn)s --input-dir %(build)s %(sketch)s
-echo '== запись конфигурации (Wi-Fi, адрес NAS, токен) =='
-# esptool из ядра esp32: дебиановский пакет битый для S3 (нет stub_flasher json)
-ESPT=$(ls -d /opt/arduino-cli/data/packages/esp32/tools/esptool_py/*/esptool 2>/dev/null | head -1)
-[ -x "$ESPT" ] || ESPT=esptool
-"$ESPT" --chip esp32s3 --port %(port)s --after hard_reset write_flash %(addr)s %(cfg)s
-echo '== готово: экран перезагружается с новой прошивкой =='""" % {
-                    "wiz": shlex.quote(os.path.join(HERE, "nas-wizard.sh")),
-                    "fqbn": shlex.quote(ESP32_FQBN), "build": shlex.quote(build),
-                    "sketch": shlex.quote(ESP32_SKETCH), "port": shlex.quote(port),
-                    "addr": ESP32_CFG_ADDR, "cfg": shlex.quote(cfg_bin),
-                    "flags": flags}
-                log_event("action", "Прошивка ESP32-экрана", "порт " + port, "ok",
-                          kind="action", desk=True)
-                self._stream_cmd(["bash", "-c", script], env=env, timeout=3600)
             elif p == "/api/stack/stream":
                 # долгие compose-действия (up при установке, pull) — стримом
                 b = self._body()
@@ -14199,14 +13733,6 @@ def main():
     except Exception:
         pass
     threading.Thread(target=monitor_loop, daemon=True).start()
-
-    # host watch runs its own cadence: per-host intervals go down to 10 s,
-    # while monitor_loop wakes only once a minute
-    def _hostwatch_loop():
-        while True:
-            _safe(_hostwatch_tick)
-            time.sleep(5)
-    threading.Thread(target=_hostwatch_loop, daemon=True).start()
     srv = _Server(("0.0.0.0", PORT), H)
     ip = lan_ip()
     print(f"nas-web запущен:  http://{ip}:{PORT}   (http://{socket.gethostname()}.local:{PORT})")

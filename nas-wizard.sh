@@ -612,8 +612,6 @@ stage_system() {
     install_packages "NAS-стек"   "${STACK_PACKAGES[@]}"
     install_smartd_guard   # smartmontools ставится тут же — сразу закрыть failed без дисков
     install_screen         # локальный тач-экран: ставится, только если панель реально подключена
-    # ESP32-флешер тяжёлый — возвращается сам только там, где им уже пользовались
-    [ -f "$TARGET_HOME/nas-config/esp32.json" ] && install_esp32_tools
     install_packages "утилиты"    "${UTIL_PACKAGES[@]}"
     install_packages "Pi-пакеты"  "${PI_PACKAGES[@]}"
     ensure_docker_repo   # docker-ce + compose-plugin из официального репо Docker
@@ -1992,48 +1990,6 @@ api_screen() {
     install_screen
 }
 
-# Флешер автономных ESP32-экранов (glance, LilyGO T-Display-S3 и пр.):
-# arduino-cli + ядро esp32 + библиотеки. Тянет ~1.5 ГБ, поэтому ставится
-# НЕ при каждой установке, а (1) по запросу панели перед первой прошивкой и
-# (2) при переустановке, если маркер ~/nas-config/esp32.json приехал из
-# бэкапа настроек — тогда флешер снова готов без ручных шагов.
-# Тулчейн живёт в /opt/arduino-cli (не в $HOME): выживает при смене владельца
-# панели и виден любому вызову через ARDUINO_DIRECTORIES_*.
-ESP32_ARDUINO_DATA=/opt/arduino-cli
-install_esp32_tools() {
-    install_packages "esp32-флешер" esptool
-    if ! command -v arduino-cli >/dev/null 2>&1; then
-        info "ставлю arduino-cli"
-        run bash -c 'curl -fsSL https://downloads.arduino.cc/arduino-cli/arduino-cli_latest_Linux_ARM64.tar.gz | tar -xz -C /usr/local/bin arduino-cli'
-        run chmod +x /usr/local/bin/arduino-cli
-    fi
-    export ARDUINO_DIRECTORIES_DATA="$ESP32_ARDUINO_DATA/data"
-    export ARDUINO_DIRECTORIES_DOWNLOADS="$ESP32_ARDUINO_DATA/downloads"
-    export ARDUINO_DIRECTORIES_USER="$ESP32_ARDUINO_DATA/user"
-    run mkdir -p "$ESP32_ARDUINO_DATA"
-    local urls="https://espressif.github.io/arduino-esp32/package_esp32_index.json"
-    if ! arduino-cli core list 2>/dev/null | grep -q '^esp32:esp32'; then
-        info "ставлю ядро esp32 (долго: ~400 МБ скачивания)"
-        run arduino-cli core update-index --additional-urls "$urls"
-        run arduino-cli core install esp32:esp32 --additional-urls "$urls"
-    fi
-    arduino-cli lib list 2>/dev/null | grep -q '^TFT_eSPI'    || run arduino-cli lib install TFT_eSPI
-    arduino-cli lib list 2>/dev/null | grep -q '^ArduinoJson' || run arduino-cli lib install ArduinoJson
-    # T-Display-S3 Long (AXS15231B): TFT_eSPI не умеет — рендер через Arduino_GFX;
-    # U8g2 включает в нём шрифтовый движок (и даёт гладкие шрифты fub/helvR)
-    arduino-cli lib list 2>/dev/null | grep -q '^GFX Library' || run arduino-cli lib install "GFX Library for Arduino"
-    arduino-cli lib list 2>/dev/null | grep -q '^U8g2'        || run arduino-cli lib install U8g2
-    # TFT_eSPI надо нацелить на панель T-Display-S3: раскомментировать Setup206
-    # и погасить дефолтный User_Setup (штатный способ настройки этой библиотеки)
-    local sel="$ESP32_ARDUINO_DATA/user/libraries/TFT_eSPI/User_Setup_Select.h"
-    if [ -f "$sel" ] && ! grep -q '^#include <User_Setups/Setup206_LilyGo_T_Display_S3.h>' "$sel"; then
-        run sed -i \
-          -e 's|^#include <User_Setup.h>|//#include <User_Setup.h>|' \
-          -e 's|^//#include <User_Setups/Setup206_LilyGo_T_Display_S3.h>|#include <User_Setups/Setup206_LilyGo_T_Display_S3.h>|' \
-          "$sel"
-    fi
-    info "esp32-флешер готов (arduino-cli + esp32 core + TFT_eSPI/ArduinoJson)"
-}
 # Точное время: chrony вместо systemd-timesyncd
 pi_chrony() {
     install_packages "chrony" chrony
@@ -3280,8 +3236,6 @@ stage_system_apply() {
     install_packages "NAS-стек"  "${STACK_PACKAGES[@]}"
     install_smartd_guard   # smartmontools ставится тут же — сразу закрыть failed без дисков
     install_screen         # локальный тач-экран: ставится, только если панель реально подключена
-    # ESP32-флешер тяжёлый — возвращается сам только там, где им уже пользовались
-    [ -f "$TARGET_HOME/nas-config/esp32.json" ] && install_esp32_tools
     install_packages "утилиты"   "${UTIL_PACKAGES[@]}"
     install_packages "Pi-пакеты" "${PI_PACKAGES[@]}"
     ensure_docker_repo   # docker-ce + compose-plugin из официального репо Docker
@@ -3714,7 +3668,6 @@ run_api() {
         staticip)       mod_staticip ;;
         cockpit-gui)    mod_cockpit_gui ;;
         screen)         api_screen ;;
-        esp32tools)     install_esp32_tools ;;
         *)              echo "неизвестное api-действие: $action" >&2; return 2 ;;
     esac
 }
