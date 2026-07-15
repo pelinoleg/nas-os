@@ -924,6 +924,13 @@
   .nb-grid2 input{width:100%}
   /* стрелка между карточками сторон: откуда → куда, без лишних слов */
   .nb-arrow-row{display:flex;justify-content:center;color:var(--mut);margin:-6px 0 6px;transform:rotate(180deg)}
+  .st-opt{display:flex;align-items:center;gap:11px;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r-lg);cursor:pointer;margin-bottom:6px}
+  .st-opt.on{border-color:var(--accent);background:var(--accent-soft)}
+  .st-opt input{flex:none}
+  .st-ic{color:var(--accent-2);flex:none}
+  .st-txt{display:flex;flex-direction:column;gap:2px;min-width:0}
+  .st-txt b{font-size:12.5px}
+  .st-sub{font-size:11px;color:var(--mut)}
   .nb-dest .nb-field-row{display:flex;gap:8px;align-items:center}
   .nb-dest input{flex:1;min-width:0}
   .nb-dwarn{font-size:12px;line-height:1.45;border-radius:var(--r-sm);padding:8px 10px;margin-bottom:8px;color:var(--text);
@@ -3535,10 +3542,11 @@ function poolStrip(disks,am,reload,snap,pool){
    <div class="dp-cap"><div class="capbar" style="width:150px"><span class="used" style="width:${pct}%"></span></div>
     <div class="dp-lbl">${fmtB(free)} своб · ${fmtB(total)}</div></div>`;
  }else{
-  w.innerHTML=`<span class="dp-ic">${svg("layers",17)}</span>
+  w.innerHTML=`<span class="dp-ic">${svg("hdd",17)}</span>
    <div class="dp-txt"><div class="dp-t">Пул не собран</div>
-    <div class="dp-s">${cnt("free")} не в пуле · ${cnt("removable")} внешних — объедините диски данных в /mnt/storage</div></div>
-   <button class="btn sm pri" id="poolcta">${svg("wand",13)} Собрать</button>`;
+    <div class="dp-s">${cnt("free")} не в пуле · ${cnt("removable")} внешних. Можно объединить в пул или выбрать один том основным хранилищем.</div></div>
+   <button class="btn sm" id="stMain">${svg("star",13)} Основное хранилище</button>
+   <button class="btn sm pri" id="poolcta">${svg("wand",13)} Собрать пул</button>`;
  }
  const amb=el(`<button class="btn sm${am.enabled?" pri":""}" title="Автоподключение: вставленные USB-диски и флешки монтируются сами (в ${esc(am.base||"/media/nas")}) и появляются на рабочем столе. Сейчас ${am.enabled?"включено":"выключено"} — нажмите, чтобы настроить.">${svg("usb",13)} Автоподключение USB: ${am.enabled?"вкл":"выкл"}</button>`);
  amb.onclick=()=>automountDlg(am,reload);w.appendChild(amb);
@@ -3546,7 +3554,36 @@ function poolStrip(disks,am,reload,snap,pool){
  if(snap&&snap.configured){const sb=el(`<button class="btn sm" title="Пересчитать чётность SnapRAID под текущее содержимое дисков. Запусти после добавления диска в пул — иначе новый диск ещё не под защитой.">${svg("shield",13)} SnapRAID sync</button>`);
   sb.onclick=()=>snapraidDlg(reload);w.appendChild(sb);}
  const cta=w.querySelector("#poolcta");if(cta)cta.onclick=()=>location.href="/setup.html";
+ const stm=w.querySelector("#stMain");if(stm)stm.onclick=()=>storageDlg(reload);
  return w;
+}
+
+// Выбор ОСНОВНОГО хранилища, когда пула нет: любой смонтированный том (обычно
+// USB-диск) назначается корнем, и туда едут дефолты — бэкап настроек, заметки,
+// Time Machine, USB-импорт, {storage} в compose. Переживает переустановку, если
+// это внешний диск.
+async function storageDlg(after){
+ const s=document.getElementById("scrim");
+ s.innerHTML=`<div class="dialog" style="max-width:560px"><h3>${svg("star",16)} Основное хранилище</h3>
+   <p style="font-size:13px;color:var(--dim);line-height:1.5">Куда система складывает данные по умолчанию: бэкап настроек, заметки, Time Machine, USB-импорт, папка <span class="mono">{storage}</span> в контейнерах. Обычно это пул, но без пула можно назначить внешний диск — тогда всё переживёт переустановку ОС.</p>
+   <div id="stList" style="margin:12px 0"><div class="set-load">загрузка…</div></div>
+   <div class="r"><button class="btn" id="stX">Закрыть</button></div></div>`;
+ s.classList.add("show");
+ s.querySelector("#stX").onclick=()=>s.classList.remove("show");
+ const st=await api("/api/storage");const box=s.querySelector("#stList");
+ const cands=(st&&st.candidates)||[];const cur=(st&&st.chosen)||"";
+ const rows=cands.filter(c=>!c.pool).map(c=>{
+   const sel=c.path===cur||(st.pool&&c.pool);
+   return `<label class="st-opt${sel?" on":""}"><input type="radio" name="stroot" value="${att(c.path)}" ${sel?"checked":""}>
+     <span class="st-ic">${svg(c.removable?"usb":"hdd",16)}</span>
+     <span class="st-txt"><b>${esc(c.path)}</b><span class="st-sub">${esc(c.fs||"")}${c.size?` · ${fmtB(c.free||0)} своб из ${fmtB(c.size)}`:""}${c.removable?" · внешний":""}</span></span></label>`;}).join("");
+ box.innerHTML=(st&&st.pool?`<div class="mon-note" style="margin-bottom:10px">Сейчас активен пул <b>/mnt/storage</b> — он всегда в приоритете, пока смонтирован.</div>`:"")
+   +(rows||`<div style="color:var(--mut);font-size:12px">Нет подключённых томов. Вставьте USB-диск — он появится здесь.</div>`)
+   +(cur?`<label class="st-opt" style="margin-top:6px"><input type="radio" name="stroot" value=""><span class="st-ic">${svg("x",16)}</span><span class="st-txt"><b>Не выбирать</b><span class="st-sub">вернуться к системному диску по умолчанию</span></span></label>`:"");
+ box.querySelectorAll("input[name=stroot]").forEach(r=>r.onchange=async()=>{
+   const rr=await api("/api/storage",{method:"POST",body:JSON.stringify({root:r.value})});
+   if(rr&&rr.ok){toast(r.value?"Основное хранилище: "+r.value:"Сброшено");s.classList.remove("show");if(after)after();}
+   else toast((rr&&rr.log)||"не вышло");});
 }
 // диалог ручной синхронизации SnapRAID с живым логом
 function snapraidDlg(after){const s=document.getElementById("scrim");
@@ -7046,7 +7083,8 @@ function backupTab(tc){
   hide.checked=!!mm.settings_backup_hide;
   dir.placeholder=r.dir||"/mnt/storage/nas-settings-backup";   // показываем ФАКТИЧЕСКИЙ путь, а не мечту про пул
   const eph=tc.querySelector("#bkEph");
-  if(r.ephemeral){eph.style.display="";eph.innerHTML=nasTr("Пул не подключён — бэкап сейчас лежит на системной карте (<b>"+esc(r.dir)+"</b>) и НЕ переживёт переустановку ОС. Задайте папку на внешнем диске или в пуле.");}
+  if(r.ephemeral){eph.style.display="";eph.innerHTML=nasTr("Пул не подключён — бэкап сейчас лежит на системной карте (<b>"+esc(r.dir)+"</b>) и НЕ переживёт переустановку ОС. Назначьте внешний диск основным хранилищем — тогда бэкап и всё остальное поедет на него.")+` <button class="btn sm" id="bkStMain" style="margin-top:6px">${svg("star",13)} Выбрать хранилище</button>`;
+   const bs=eph.querySelector("#bkStMain");if(bs)bs.onclick=()=>storageDlg(load);}
   else eph.style.display="none";
   note.textContent=nasTr(`Папка: ${r.dir} · ${r.days?`автоматически раз в ${r.days} дн`:"автобэкап выключен"} · хранится ${r.keep} последних`);
   list.innerHTML=(r.list&&r.list.length)?"":`<div class="dempty">${svg("save",16)} Бэкапов ещё нет — нажмите «Создать»</div>`;

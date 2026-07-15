@@ -4589,7 +4589,7 @@ def _nb_defaults():
          "auth": "password", "provider": "",
          "dst2": {},          # приёмник-SSH у pull-профиля (режим SSH→SSH через мост)
          "remote_sudo": False,
-         "dest_mode": "single", "dest_base": "/mnt/storage/nas-backup",
+         "dest_mode": "single", "dest_base": (storage_sub("nas-backup") or "/mnt/storage/nas-backup"),
          "jobs": [],
          "excludes": [".DS_Store", "._*", "Thumbs.db", "desktop.ini", "@eaDir/", "#recycle/",
                       "@Recycle/", ".@__thumb/", "$RECYCLE.BIN/", "System Volume Information/",
@@ -6658,7 +6658,7 @@ def settings_backup_path():
     # бэкап настроек обязан существовать ВСЕГДА (им поднимают систему после
     # переустановки), поэтому без смонтированного хранилища — на системный диск
     return os.path.join(storage_root(), "nas-settings-backup") if storage_root() \
-        else "/var/backups/nas-os"
+        else "/var/backups/nas-os"        # storage_root() = пул ИЛИ выбранный USB
 
 def settings_backup_dir():
     d = settings_backup_path()
@@ -11559,6 +11559,7 @@ _USB_RULE = ('ACTION=="add", SUBSYSTEM=="block", ENV{ID_USB_DRIVER}=="?*", '
 
 def usb_import_load():
     cfg = dict(_USB_DEFAULT)
+    cfg["dest"] = storage_sub("imports") or _USB_DEFAULT["dest"]   # следует за хранилищем
     for l in _read(USB_IMPORT_CONF).splitlines():
         if "=" not in l:
             continue
@@ -13463,6 +13464,8 @@ class H(BaseHTTPRequestHandler):
                 self._json(fs_trash_list())
             elif p == "/api/fs/zip":
                 self._send_zip(q.get("item") or [], (q.get("name") or ["archive.zip"])[0])
+            elif p == "/api/storage":
+                self._json(storage_state())
             elif p == "/api/disks":
                 _scr = scrutiny_state()
                 self._json({"disks": disks(), "fs": fs_tools(), "snapraid": snapraid_status(),
@@ -13802,6 +13805,8 @@ class H(BaseHTTPRequestHandler):
                 b = self._body(); self._json(stack_delete(b.get("name", "")))
             elif p == "/api/container/action":
                 b = self._body(); self._json(container_action(b.get("id", ""), b.get("action", "")))
+            elif p == "/api/storage":
+                self._json(storage_save(self._body()))
             elif p == "/api/disk/mount":
                 b = self._body(); self._json(disk_mount(b.get("target", ""), b.get("unmount", False)))
             elif p == "/api/disk/smart-test":
