@@ -4355,48 +4355,47 @@ function dkAvailPane(tc,a,reload){
  const rowH=f=>`<div class="field"><label>${esc(f.label||f.key)}${f.hint?` <span style="color:var(--mut);font-weight:400">— ${esc(f.hint)}</span>`:""}</label><input data-k="${att(f.key)}"${f.secret?' type="password"':""} value="${att(f.secret?"":(f.default||""))}" placeholder="${att(f.secret&&f.has_value?"•••••• (set; empty = keep)":"")}" autocomplete="off" spellcheck="false"></div>`;
  const form=el(`<div style="max-width:560px">${main.map(rowH).join("")}${adv.length?`<details><summary style="cursor:pointer;color:var(--mut);font-size:13px;margin:6px 0">Advanced (${adv.length})</summary>${adv.map(rowH).join("")}</details>`:""}</div>`);
  if(flds.length)box.appendChild(form);
- else box.appendChild(el(`<div class="mon-note" style="margin:6px 0">${svg("cube",13)} No settings required — ready to bring up.</div>`));
- // review / edit the real compose + .env before bringing up — same CodeMirror
- // editor as "Edit stack", lazy-loaded from the recipe on first expand
- const lblCss="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);font-family:var(--mono);margin:8px 0 4px";
- const edBox=el(`<details style="margin-top:8px">
-   <summary style="cursor:pointer;color:var(--dim);font-size:13px">${svg("edit",13)} Show / edit compose &amp; .env</summary>
-   <div style="${lblCss};margin-top:8px">compose.yaml</div>
-   <div id="avC" class="ed-dark" style="height:260px;border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden"></div>
-   <div style="${lblCss}">.env${flds.length?" — overrides the fields above":""}</div>
-   <div id="avE" class="ed-dark" style="height:130px;min-height:70px;resize:vertical;border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden"></div>
-   </details>`);
- box.appendChild(edBox);
- let cmC=null,cmE=null,loaded=false;
+ // compose + .env — the same CodeMirror editor as "Edit stack", always shown
+ const lblCss="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);font-family:var(--mono);margin:10px 0 4px";
+ const eds=el(`<div style="margin-top:6px">
+   <div style="${lblCss}">compose.yaml</div>
+   <div id="avC" class="ed-dark" style="height:280px;border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden"></div>
+   <div style="${lblCss}">.env${flds.length?" — mirrors the fields above; edit to override":""}</div>
+   <div id="avE" class="ed-dark" style="height:130px;border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden"></div></div>`);
+ box.appendChild(eds);
+ let cmC=null,cmE=null,envDirty=false;
  const envFromFields=()=>{const v=[];form.querySelectorAll("input[data-k]").forEach(i=>{if(i.value.trim())v.push(i.dataset.k+"="+i.value.trim());});return v.length?v.join("\n")+"\n":"";};
- edBox.addEventListener("toggle",()=>{
-  if(!edBox.open)return;
-  if(loaded){if(cmC)cmC.refresh();if(cmE){if(!cmE.getValue().trim())cmE.setValue(envFromFields());cmE.refresh();}return;}
-  loaded=true;
-  ensureCM(async()=>{
-   cmC=CodeMirror(edBox.querySelector("#avC"),{value:"loading…",mode:"yaml",lineNumbers:true,tabSize:2,indentUnit:2,styleActiveLine:true,lineWrapping:false,matchBrackets:true});
-   cmE=CodeMirror(edBox.querySelector("#avE"),{value:envFromFields(),mode:"properties",lineNumbers:true,tabSize:2});
-   setTimeout(()=>{cmC.refresh();cmE.refresh();},30);
-   const r=await api("/api/store/recipe?id="+encodeURIComponent(a.id));
-   cmC.setValue((r&&r.compose)||"");
-   if(!cmE.getValue().trim())cmE.setValue(envFromFields()||((r&&r.env)||""));
-   setTimeout(()=>{cmC.refresh();cmE.refresh();},30);
-  });
+ // fields drive the .env editor until the user hand-edits it
+ form.querySelectorAll("input[data-k]").forEach(i=>i.addEventListener("input",()=>{if(cmE&&!envDirty)cmE.setValue(envFromFields());}));
+ ensureCM(async()=>{
+  cmC=CodeMirror(eds.querySelector("#avC"),{value:"loading…",mode:"yaml",lineNumbers:true,tabSize:2,indentUnit:2,styleActiveLine:true,lineWrapping:false,matchBrackets:true});
+  cmE=CodeMirror(eds.querySelector("#avE"),{value:envFromFields(),mode:"properties",lineNumbers:true,tabSize:2});
+  cmE.on("change",(_,ch)=>{if(ch.origin&&ch.origin!=="setValue")envDirty=true;});
+  setTimeout(()=>{cmC.refresh();cmE.refresh();},40);
+  const r=await api("/api/store/recipe?id="+encodeURIComponent(a.id));
+  cmC.setValue((r&&r.compose)||"");
+  if(!envDirty)cmE.setValue(envFromFields()||((r&&r.env)||""));
+  setTimeout(()=>{cmC.refresh();cmE.refresh();},40);
  });
- const acts=el(`<div class="dd-acts" style="border:none;padding-top:2px"></div>`);
+ const acts=el(`<div class="dd-acts" style="border:none;padding-top:6px"></div>`);
  const go=el(`<button class="btn pri">${svg("play",13)} Install & start</button>`);acts.appendChild(go);box.appendChild(acts);
- const con=el(`<div class="mcon" style="display:block;margin-top:10px"></div>`);box.appendChild(con);
+ const con=el(`<div class="mcon" style="display:block;margin-top:10px;min-height:34px;max-height:280px;overflow:auto"></div>`);box.appendChild(con);
+ const reset=()=>{go.disabled=false;go.innerHTML=`${svg("play",13)} Install & start`;};
  go.onclick=async()=>{
-  const body={id:a.id};
-  if(edBox.open&&cmC){body.compose=cmC.getValue();body.env=cmE?cmE.getValue():"";}   // edited raw text wins
-  else{const values={};form.querySelectorAll("input[data-k]").forEach(i=>values[i.dataset.k]=i.value.trim());body.values=values;}
+  if(go.disabled)return;
   go.disabled=true;go.innerHTML=`${svg("refresh",13)} installing…`;
-  const r=await api("/api/store/install",{method:"POST",body:JSON.stringify(body)});
-  if(!(r&&r.ok)){toast("Error: "+((r&&r.log)||"?"));go.disabled=false;go.innerHTML=`${svg("play",13)} Install & start`;return;}
-  streamPost("/api/stack/stream",con,code=>{
-   toast(code?`«${a.name}» finished with warnings — check the containers`:`«${a.name}» is up`);
-   DK_SEL="stack:"+a.id;reload();pollApps();   // land on the now-installed stack (never a stuck dialog)
-  },{name:a.id,action:"up"});};
+  try{
+   const body={id:a.id,compose:cmC?cmC.getValue():undefined};
+   if(envDirty&&cmE)body.env=cmE.getValue();        // hand-edited .env → verbatim
+   else{const values={};form.querySelectorAll("input[data-k]").forEach(i=>values[i.dataset.k]=i.value.trim());body.values=values;}   // fields → builds .env + creates path dirs
+   const r=await api("/api/store/install",{method:"POST",body:JSON.stringify(body)});
+   if(!(r&&r.ok)){toast("Error: "+((r&&r.log)||"?"));reset();return;}
+   streamPost("/api/stack/stream",con,code=>{
+    toast(code?`«${a.name}» finished with warnings — check the containers`:`«${a.name}» is up`);
+    DK_SEL="stack:"+a.id;reload();pollApps();   // land on the now-installed stack
+   },{name:a.id,action:"up"});
+  }catch(e){toast("Install error");reset();}
+ };
  tc.innerHTML="";tc.appendChild(box);
 }
 /* replica from another NAS: config + sync + version-pinned restore (Immich) */
