@@ -1983,9 +1983,20 @@ def _hwmon_disk_temps():
 # --------------------------------------------------------------------------- #
 _MAIN_TEMP = {"t": 0.0, "c": None, "dev": ""}
 _MAIN_TEMP_TTL = 120     # same cadence as the disktemp tile — don't wake/poll the disk more often
+_MAIN_DEVS = {"t": 0.0, "d": []}
+_DIO_CACHE = {}          # per device-set: (time, cumulative sectors r+w) for the throughput delta
 
 def _main_disk_devs():
-    """Whole-disk block devices backing storage_root(). Pool → all branches, plain → one."""
+    """Whole-disk block devices backing storage_root(). Pool → all branches, plain → one.
+    Cached 30 s — the primary volume rarely changes, and this runs on every stats() call."""
+    now = time.time()
+    if now - _MAIN_DEVS["t"] < 30:
+        return _MAIN_DEVS["d"]
+    out = _main_disk_devs_scan()
+    _MAIN_DEVS.update(t=now, d=out)
+    return out
+
+def _main_disk_devs_scan():
     root = storage_root()
     if not root:
         return []
@@ -2039,6 +2050,28 @@ def _main_disk_temp():
     c = max(temps) if temps else _MAIN_TEMP["c"]      # keep last known if this pass read nothing
     _MAIN_TEMP.update(t=now, c=c, dev=label)
     return c, label
+
+def disk_io_rate(devs):
+    """Read+write throughput (bytes/s) across the primary-storage disk(s), as a delta
+    since the last call (same idea as net_rate). Pool → summed over branches."""
+    if not devs:
+        return 0
+    key = ",".join(sorted(devs))
+    tot = 0
+    for d in devs:
+        p = _read("/sys/block/%s/stat" % os.path.basename(d)).split()
+        if len(p) >= 7:
+            try:
+                tot += int(p[2]) + int(p[6])          # sectors read + written (512 B each)
+            except ValueError:
+                pass
+    now = time.time()
+    prev = _DIO_CACHE.get(key)
+    _DIO_CACHE[key] = (now, tot)
+    if not prev:
+        return 0
+    dt = now - prev[0] or 1
+    return max(0, int((tot - prev[1]) * 512 / dt))
 
 def _nb_last_ok(pid):
     """Timestamp of the profile's last completed run (ok or warn), 0 if none."""
@@ -2887,6 +2920,7 @@ def stats():
         "disk_pool": disk_info(STORAGE) if os.path.ismount(STORAGE) else None,
         "disk_root": disk_info("/"),
         "net": net_rate(iface),
+        "dio": _safe(lambda: disk_io_rate(_main_disk_devs()), 0),   # primary-storage disk throughput B/s
         "iface": iface,
         "uptime": uptime_s(),
         "load": list(os.getloadavg()),
@@ -4056,7 +4090,8 @@ def history_sample():
           "mem": (s.get("mem") or {}).get("pct"),
           "rx": (s.get("net") or {}).get("rx"), "tx": (s.get("net") or {}).get("tx"),
           "pool": (s.get("disk_pool") or {}).get("pct"),
-          "dtemp": _safe(lambda: _main_disk_temp()[0])}   # main-storage disk temp (cached, backup-safe)
+          "dtemp": _safe(lambda: _main_disk_temp()[0]),   # main-storage disk temp (cached, backup-safe)
+          "dio": s.get("dio")}                            # main-storage disk throughput B/s
     snap_long = None
     with _hist_lock:
         h = _load_history()
@@ -4081,7 +4116,7 @@ def history_sample():
                 return max(vs) if vs else None
             hl.append({"t": pt["t"], "cpu": avg("cpu"), "temp": mx("temp"),
                        "mem": avg("mem"), "rx": avg("rx"), "tx": avg("tx"),
-                       "pool": pt.get("pool"), "dtemp": mx("dtemp")})
+                       "pool": pt.get("pool"), "dtemp": mx("dtemp"), "dio": avg("dio")})
             if len(hl) > HISTORY_LONG_CAP:
                 del hl[:len(hl) - HISTORY_LONG_CAP]
             snap_long = list(hl)
@@ -12315,7 +12350,8 @@ def _screen_page2():
                    "net": _safe(lambda: _gl_spark("net"), []) or [],
                    "mem": _safe(lambda: _gl_spark("mem"), []) or [],
                    "dtemp": _safe(lambda: _gl_spark("dtemp"), []) or [],
-                   "pool": _safe(lambda: _gl_spark("pool"), []) or []},
+                   "pool": _safe(lambda: _gl_spark("pool"), []) or [],
+                   "dio": _safe(lambda: _gl_spark("dio"), []) or []},
     }
     _SCR_P2["d"] = d
     _SCR_P2["t"] = now
@@ -12453,6 +12489,7 @@ def screen_payload(lang="", p2=False):
             "swap": (st.get("mem") or {}).get("swap_total"),
             "throttled": st.get("throttled"), "psu_ma": st.get("psu_ma"),
             "dtemp": _dt[0], "dtemp_dev": _dt[1],   # main-storage disk temperature (+ short label)
+            "dio": st.get("dio"),                   # main-storage disk throughput B/s (read+write)
             "asleep": bool(_SCR["sleep"]),
             # the backlight is currently off (sleep/night/idle): the first tap should
             # only wake, not press the tile under the finger — the client puts up a shield

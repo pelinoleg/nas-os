@@ -449,8 +449,9 @@ function renderGauges(d){
     gauge("CPU",Math.round(cpu),"%",cpu/100,lvlOf(cpu,70,90),"cpu")
   + gauge("CPU temp",Math.round(tc),"°",tc/90,lvlOf(tc,62,75),"temp")
   + gauge("Memory",Math.round(ram),"%",ram/100,lvlOf(ram,75,90),"ram")
-  + gauge(hasPool?"Pool":"Disk",Math.round(dp),"%",dp/100,lvlOf(dp,75,90),"disk")
-  + (dt!=null ? gauge("Disk temp",Math.round(dt),"°",dt/70,lvlOf(dt,55,65),"dtemp")
+  + (()=>{const io=d.dio||0,rt=iorate(io);   // disk activity of the main storage (read+write), not the static system-disk fill
+      return gauge("Disk I/O",rt[0],rt[1],io/(250*1048576),0,"disk");})()
+  + (dt!=null ? gauge("Disk temp",Math.round(dt),"°",dt/90,lvlOf(dt,55,65),"dtemp")
               : gauge("Disk temp","—","",0,0,"dtemp"));
 }
 
@@ -691,6 +692,10 @@ function chart(pts,color,h,fmt,unit,full,fixTop,ref){
 const netnow=d=>{ const [v,u]=rate(((d.net||{}).rx||0)+((d.net||{}).tx||0)); return v+" "+u; };
 const r0=v=>Math.round(v);
 const gbs=v=>{ const [a,b]=rate(v); return a+" "+b; };
+// disk throughput: always BYTES (MB/s) — the conventional disk unit, regardless of the net bit/byte setting
+const iorate=b=>{ b=+b||0; return b>=1073741824?[(b/1073741824).toFixed(1),"GB/s"]
+  :b>=1048576?[Math.round(b/1048576),"MB/s"]:b>=1024?[Math.round(b/1024),"KB/s"]:[Math.round(b),"B/s"]; };
+const iofmt=b=>{ const r=iorate(b); return r[0]+" "+r[1]; };
 
 function renderP1(d){
   const P=d.p2; if(!P) return;
@@ -762,8 +767,8 @@ const SHEETS={
   cpu:d=>["CPU · last 24 h", `<div class="shchart big">${chart(((d.p2||{}).graphs||{}).cpu,"var(--accent)",360,r0,"%",true,100)}</div>`, ""],
   temp:d=>["CPU temperature · last 24 h", `<div class="shchart big">${chart((((d.p2||{}).graphs||{}).temp||[]).filter(v=>v>0),"var(--warn)",360,r0,"°",true,90,80)}</div>`, ""],
   ram:d=>["Memory · last 24 h", `<div class="shchart big">${chart(((d.p2||{}).graphs||{}).mem,"var(--accent)",360,r0,"%",true,100)}</div>`, ""],
-  disk:d=>{const hasPool=!!(d.tiles.pool&&d.tiles.pool.raw);
-    return [(hasPool?"Pool":"Disk")+" fill · last 24 h", `<div class="shchart big">${chart(((d.p2||{}).graphs||{}).pool,"var(--good)",360,r0,"%",true,100)}</div>`, ""];},
+  disk:d=>["Disk activity · last 24 h", `<div class="shchart big">${chart(((d.p2||{}).graphs||{}).dio,"var(--good)",360,iofmt,"",true)}</div>`
+    +`<div class="run" style="color:var(--dim);text-align:center">read + write of the main storage (${esc(d.dtemp_dev||"main disk")}) · now ${iofmt(d.dio||0)}</div>`, ""],
   dtemp:d=>["Disk temperature · last 24 h", `<div class="shchart big">${chart((((d.p2||{}).graphs||{}).dtemp||[]).filter(v=>v>0),"var(--warn)",360,r0,"°",true,90,80)}</div>`
     +`<div class="run" style="color:var(--dim);text-align:center">${d.dtemp!=null?"now "+d.dtemp+" °C · "+(d.dtemp_dev||"main disk")+" — ":""}the graph fills over 24 h, starting from now</div>`, ""],
 
