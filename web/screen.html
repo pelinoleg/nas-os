@@ -250,6 +250,12 @@
   .dh-h b{font-weight:750} .dh-h .st2{font-size:16px} .dh-mod{color:var(--dim);font-size:16px;font-weight:500}
   .dh-blk .kv{padding:8px 0;font-size:17px}
   .dh-blk .kv span{font-size:15px}
+  /* Disk-health card: bigger, more legible rows (few disks, small 4.3" panel) */
+  #c_sm .prow{padding:9px 0}
+  #c_sm .prow .t{font-size:16px}
+  #c_sm .prow .t .ago{font-size:14px;color:var(--dim)}
+  #c_sm .prow .st2{font-size:15px;width:16px}
+  #c_sm .run{font-size:14px;margin-top:3px}
   .pwr2{display:grid;grid-template-columns:1fr 1fr;gap:14px;height:100%;min-height:330px}
   .pbtn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;
         border-radius:20px;background:rgba(255,255,255,.10);font-size:19px;font-weight:700;color:var(--ink)}
@@ -569,7 +575,7 @@ function renderP3(d){
     <div class="body">${dk.length?dk.map(x=>{
       const st=x.healthy===false?"bd":x.healthy===true?"ok":"no";
       const v=x.healthy===false?"SMART failing":x.healthy===true?"SMART ok":"SMART —";
-      const bits=[x.temp?x.temp+" °C":"",x.hours!=null?hrsFmt(x.hours):"",x.tran?x.tran.toUpperCase():"",v].filter(Boolean).join(" · ");
+      const bits=[v,x.temp?x.temp+" °C":"",x.hours!=null?hrsFmt(x.hours):"",x.tran?x.tran.toUpperCase():""].filter(Boolean).join(" · ");
       return `<div class="prow"><div class="t">
         <span class="st2 ${st}">●</span>
         <span class="nm">${esc(x.name)}${x.model?" · "+esc(x.model):""}</span>
@@ -1079,11 +1085,18 @@ function applyLook(L){
 async function poll(){ return _poll(); }
 let PAGE=0;
 const PAGES=4;
+function renderPage(){   // paint the current page from the data we ALREADY have (D)
+  if(PAGE===0){ renderGauges(D); renderCards(D); renderRow2(D); }
+  else if(PAGE===1){ renderP1(D); }
+  else if(PAGE===2){ renderP2(D); }
+  else { renderP3(D); }
+}
 function setPage(n){
   PAGE=Math.max(0,Math.min(PAGES-1,n));
   document.querySelectorAll(".page").forEach((p,i)=>p.classList.toggle("on",i===PAGE));
   document.querySelectorAll("#dots .d").forEach((p,i)=>p.classList.toggle("on",i===PAGE));
-  poll();
+  if(D&&D.ts) renderPage();   // instant: fill the new page from cached data, no waiting for the network
+  poll();                     // then refresh in the background
 }
 let sx=0;
 addEventListener("touchstart",e=>{sx=e.touches[0].clientX},{passive:true});
