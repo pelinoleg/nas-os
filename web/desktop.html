@@ -1695,6 +1695,8 @@
   .cmp-badge{margin-left:auto;display:flex;align-items:center;gap:9px;flex:none;font-size:12px;font-variant-numeric:tabular-nums}
   .cmp-new{color:var(--accent)} .cmp-chg{color:var(--warn)} .cmp-del{color:var(--danger)} .cmp-ok{color:var(--good);font-weight:600}
   .cmp-node[open]>summary .cmp-nm svg,.cmp-share[open]>summary .cmp-nm svg{color:var(--accent)}
+  .cmp-file .cmp-nm{font-weight:400;color:var(--dim)} .cmp-file .cmp-nm svg{color:var(--mut)}
+  .cmp-more{padding:4px 8px 4px 28px;font-size:12px;font-style:italic;color:var(--mut)}
   .nbmain{display:flex;flex:1;min-height:0}
   .nb-del-warn{font-size:12.5px;color:var(--mut);line-height:1.55;margin:0 0 10px}
   .nb-chk{display:flex;align-items:center;gap:9px;font-size:12.5px;color:var(--text);cursor:pointer;margin:2px 0 0}
@@ -6958,27 +6960,43 @@ function tabCompare(tc){
  const start=async deep=>{const r=await bp("/api/backup/compare",{deep});if(r&&r.ok===false){toast(r.log||"error");return;}toast(deep?"Deep verify started":"Compare started");tick();};
  const cancel=async()=>{await bp("/api/backup/compare/cancel");toast("Stopped");setTimeout(tick,300);};
  // one folder node (recursive). "" = hidden (identical hidden, or no match under filter)
+ // the actual differing FILES stored on a node (new/changed/removed) — so leaves aren't empty
+ const fileRows=(node,fl)=>{
+  const rows=(node.f||[]).filter(x=>!fl||x[0].toLowerCase().includes(fl)).map(x=>{
+    const nm=x[0],k=x[1],s=x[2]||0;
+    const b=k==="n"?`<b class="cmp-new">+ new${s?" · "+bytes(s):""}</b>`:k==="c"?`<b class="cmp-chg">✎ changed${s?" · "+bytes(s):""}</b>`:`<b class="cmp-del">✗ removed</b>`;
+    return `<div class="cmp-row cmp-file"><span class="cmp-nm">${svg("file",13)} ${esc(nm)}</span><span class="cmp-badge">${b}</span></div>`;}).join("");
+  return rows+(node.fo?`<div class="cmp-more">+ ${node.fo.toLocaleString()} more files…</div>`:"");
+ };
  const sub=(name,node,path)=>{
   const diff=(node.n||0)+(node.c||0)+(node.d||0);
   if(!showAll && !diff) return "";
+  const fl=filt.toLowerCase();
   const kids=node.ch?Object.keys(node.ch):[];
   const kidHtml=kids.sort((a,b)=>score(node.ch[b])-score(node.ch[a])||a.localeCompare(b))
     .map(k=>sub(k,node.ch[k],path+"/"+k)).filter(Boolean).join("");
-  const fl=filt.toLowerCase();
-  if(fl && !name.toLowerCase().includes(fl) && !kidHtml) return "";
-  const lab=`<span class="cmp-nm">${svg(kids.length?"folder":"file",13)} ${esc(name)}</span><span class="cmp-badge">${diff?badge(node):`<span class="cmp-ok">✓</span>`}</span>`;
-  if(kids.length&&kidHtml) return `<details class="cmp-node"${fl?" open":""}><summary>${lab}</summary><div class="cmp-kids">${kidHtml}</div></details>`;
+  const fileHtml=fileRows(node,fl);
+  if(fl && !name.toLowerCase().includes(fl) && !kidHtml && !fileHtml) return "";
+  const lab=`<span class="cmp-nm">${svg("folder",13)} ${esc(name)}</span><span class="cmp-badge">${diff?badge(node):`<span class="cmp-ok">✓</span>`}</span>`;
+  if(kidHtml||fileHtml) return `<details class="cmp-node"${fl?" open":""}><summary>${lab}</summary><div class="cmp-kids">${kidHtml}${fileHtml}</div></details>`;
   return `<div class="cmp-row">${lab}</div>`;
  };
  const buildTree=()=>{const st=LAST;if(!(st.shares&&st.shares.length))return "";
   const fl=filt.toLowerCase();
-  return st.shares.map(s=>{const t=s.tree||{},d=(t.n||0)+(t.c||0)+(t.d||0);
+  const rows=st.shares.map(s=>{const t=s.tree||{},d=(t.n||0)+(t.c||0)+(t.d||0);
+    if(!d){                                     // identical share — hidden unless "show identical" is on
+     if(!showAll) return "";
+     if(fl && !s.src.toLowerCase().includes(fl)) return "";
+     return `<div class="cmp-share cmp-flat"><span class="cmp-nm">${svg("folder",14)} ${esc(s.src)}</span><span class="cmp-badge"><span class="cmp-ok">✓ identical</span></span></div>`;
+    }
     const kids=t.ch?Object.keys(t.ch):[];
     const kidHtml=kids.sort((a,b)=>score(t.ch[b])-score(t.ch[a])||a.localeCompare(b)).map(k=>sub(k,t.ch[k],k)).filter(Boolean).join("");
-    if(!showAll && !d && !fl) return `<div class="cmp-share cmp-flat"><span class="cmp-nm">${svg("folder",14)} ${esc(s.src)}</span><span class="cmp-badge"><span class="cmp-ok">✓ identical</span></span></div>`;
-    if(fl && !kidHtml && !s.src.toLowerCase().includes(fl)) return "";
-    return `<details class="cmp-share"${(d||fl)?" open":""}><summary><span class="cmp-nm">${svg("folder",14)} ${esc(s.src)}</span><span class="cmp-badge">${d?badge(t):`<span class="cmp-ok">✓ identical</span>`}</span></summary><div class="cmp-kids">${kidHtml||`<div class="cmp-row set-sub">no differences</div>`}</div></details>`;
-  }).join("");};
+    const fileHtml=fileRows(t,fl);             // share-root files (e.g. a single new file in home/)
+    if(fl && !kidHtml && !fileHtml && !s.src.toLowerCase().includes(fl)) return "";
+    return `<details class="cmp-share" open><summary><span class="cmp-nm">${svg("folder",14)} ${esc(s.src)}</span><span class="cmp-badge">${badge(t)}</span></summary><div class="cmp-kids">${kidHtml}${fileHtml||(kidHtml?"":`<div class="cmp-row set-sub">differences are deeper than the shown levels</div>`)}</div></details>`;
+  }).filter(Boolean).join("");
+  return rows||`<div class="set-sub" style="padding:8px 2px">${showAll?"Nothing to show.":"No differences to show — turn on “show identical” to list every folder."}</div>`;
+ };
  const renderTree=()=>{const e=tc.querySelector(".cmp-tree");if(e)e.innerHTML=buildTree();};
  const render=()=>{if(!document.body.contains(tc)){stop();return;}
   const st=LAST,run=st.running,sum=st.summary||{},diffs=(sum.new||0)+(sum.changed||0)+(sum.deleted||0),good=!run&&(st.done||st.shares)&&diffs===0;

@@ -6058,27 +6058,39 @@ def nb_compare_cmd(cfg, job, deep, stage=None):
     return args, env
 
 _CMP_DEPTH = 7          # aggregate the folder tree down to this many levels (deeper rolls up)
+_CMP_FILES = 80         # sample changed files listed per folder node (rest → node "fo" overflow count)
 
 def _nb_compare_job(cfg, job, deep, on_scan, cancelled):
-    """Run one job's compare, return {summary, tree}. tree nodes: {n,c,d,nb,cb,ch}."""
+    """Run one job's compare, return {summary, tree}. tree nodes: {n,c,d,nb,cb,ch,f,fo}."""
     args, env = nb_compare_cmd(cfg, job, deep)
     tree = {"n": 0, "c": 0, "d": 0, "nb": 0, "cb": 0, "ch": {}}
     summ = {"new": 0, "changed": 0, "deleted": 0, "new_bytes": 0, "changed_bytes": 0,
             "identical": 0, "total": 0}
     def add(path, kind, size):
         parts = [p for p in path.rstrip("/").split("/") if p]
-        dirs = parts[:-1]                               # roll the file up into its ancestor folders
-        node = tree
+        if not parts:
+            return
+        dirs, fname = parts[:-1], parts[-1]             # roll counts up into ancestors, keep the file itself
         def bump(nd):
             nd[kind] = nd.get(kind, 0) + 1
             if kind == "n": nd["nb"] = nd.get("nb", 0) + size
             elif kind == "c": nd["cb"] = nd.get("cb", 0) + size
+        node = tree
         bump(node)
-        for i, part in enumerate(dirs):
-            if i >= _CMP_DEPTH:
+        used = 0
+        for part in dirs:
+            if used >= _CMP_DEPTH:
                 break
             node = node["ch"].setdefault(part, {"n": 0, "c": 0, "d": 0, "nb": 0, "cb": 0, "ch": {}})
             bump(node)
+            used += 1
+        # attach the file to its nearest folder node; files below the depth cap keep their tail path
+        label = fname if used == len(dirs) else "/".join(parts[used:])
+        fl = node.setdefault("f", [])
+        if len(fl) < _CMP_FILES:
+            fl.append([label, kind, size])
+        else:
+            node["fo"] = node.get("fo", 0) + 1
     reg_total = None
     try:
         p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
