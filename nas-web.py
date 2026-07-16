@@ -12425,7 +12425,18 @@ def screen_payload(lang="", p2=False):
     av = _safe(lambda: avail_bars(24, 24), {}) or {}    # 2=up 1=local 0=off -1=no data
     av30 = _safe(lambda: avail_bars(720, 30), {}) or {}
     hv = _safe(_screen_heavy, {}) or {}
-    _dt = _safe(_main_disk_temp, (None, "")) or (None, "")   # main-storage disk temp (cached)
+    _dt = _safe(_main_disk_temp, (None, "")) or (None, "")   # main-storage disk temp (cached fallback)
+    # Show the SAME temperature as the Disks card below — both from THIS _screen_heavy read — so the
+    # gauge and the card never disagree (they used to be two independent smartctl reads at different
+    # times). Fall back to the standalone reading only if the card has no temp for the main disk yet.
+    try:
+        _mbases = {os.path.basename(x) for x in (_main_disk_devs() or [])}
+        _ct = [d.get("temp") for d in (hv.get("disks") or [])
+               if d.get("name") in _mbases and isinstance(d.get("temp"), (int, float))]
+        if _ct:
+            _dt = (max(_ct), _dt[1] or (sorted(_mbases)[0] if _mbases else ""))
+    except Exception:
+        pass
     # the wallpaper and its processing are THE SAME as on the desktop: the screen reads desktop.json,
     # so changing wallpaper/dimming in the browser reaches the panel on its own (wpVer in URL)
     ds = _safe(load_settings, {}) or {}
