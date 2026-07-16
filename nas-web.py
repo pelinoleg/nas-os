@@ -5279,6 +5279,23 @@ def _dest_disk_absent(dest):
     its mountpoint isn't '/', the check passes. This keeps removable disks safe too."""
     return bool(re.match(r"^/(mnt|media|srv)/", dest or "")) and _mountpoint_of(dest) == "/"
 
+def _nb_owner_access(dest):
+    """Give the destination OWNER (the panel user) access to the backed-up folders.
+    Restrictive source perms (e.g. UGREEN/Synology d--------- guarded by ACLs) land on
+    ext4 as literal 000 dirs — root still reads them (restore works), but the user can't
+    browse the backup. Add owner rwx to dirs / rw to files; only touch items that LACK it
+    (idempotent, fast on later runs). Never loosens group/other."""
+    d = (dest or "").rstrip("/")
+    if not d or not os.path.isabs(d) or not os.path.isdir(d):
+        return
+    for typ, need, add in (("d", "-700", "u+rwx"), ("f", "-600", "u+rw")):
+        try:
+            subprocess.run(["find", d, "-xdev", "-type", typ, "!", "-perm", need,
+                            "-exec", "chmod", add, "{}", "+"],
+                           capture_output=True, timeout=1800)
+        except (OSError, subprocess.SubprocessError):
+            pass
+
 def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None, allow_delete=False):
     """Run all enabled jobs. writer(line) — output; cancel() — interruption.
     on_job(done, total) — after every finished job, so the UI can paint folder dots
@@ -5438,6 +5455,9 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None, allow_delete=Fal
         if not dry and not push_ssh:
             try: sz = _du_bytes(j["dest"])
             except Exception: sz = None
+            # local destination: make the copied folders accessible to the owner (see helper)
+            if ok and cfg.get("dest_owner_access", True):
+                _safe(lambda: _nb_owner_access(j["dest"]))
         res = {"src": j["src"], "dest": j["dest"], "ok": ok, "code": p.returncode, "size": sz,
                "files": stt.get("files", prevf.get(j["src"], 0)), "xfer": stt.get("xfer", 0),
                "xfer_bytes": stt.get("xfer_bytes", 0), "deleted": stt.get("deleted", 0)}
