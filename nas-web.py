@@ -12125,6 +12125,21 @@ def screen_payload(lang="", p2=False):
         for src_k, dst_k in (("scrFxDim", "fxDim"), ("scrFxBlur", "fxBlur"), ("scrFxNoise", "fxNoise")):
             if src_k in ds:
                 look[dst_k] = ds[src_k]
+    # Touchscreen may use one shared glass material for every surface (Appearance → Touchscreen →
+    # "Own material"). The wall panel has no separate top bar, so we drive BOTH the cards (wdg*)
+    # and the bar (mb*) from the same scr values; the color feeds the card fill (wdgDark) and the
+    # bar/elevation base (tintDark) so they match.
+    if ds.get("scrWdgOwn"):
+        col = ds.get("scrWdgColor")
+        if col:
+            look["wdgDark"] = col
+            look["tintDark"] = col
+        for src_k, dsts in (("scrWdgOp", ("wdgOp", "mbOp")),
+                            ("scrWdgBlur", ("wdgBlur", "mbBlur")),
+                            ("scrWdgSat", ("wdgSat", "mbSat"))):
+            if src_k in ds:
+                for dk in dsts:
+                    look[dk] = ds[src_k]
     cfg = load_screen()
     host = st.get("host") or socket.gethostname()
     return {"host": host, "mdns": host + ".local", "ip": st.get("ip") or "",

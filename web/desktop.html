@@ -2479,9 +2479,11 @@ let SET={accent:"coral",accentHex:"#405e6d",theme:"light",wpType:"url",wpUrl:WP_
  winBlur:60,winNoise:22,shadow:"lg",
  elevBaseLight:.3,elevBaseDark:.74,elevStep:.28,elevLight:.05,autoContrast:true,
  wallpaper:"midnight",lang:"en",
- /* Touchscreen wallpaper (global, not themed — the local panel is always its own thing).
-    scrWpOwn off → the screen reuses the desktop wallpaper, optimized to its panel size. */
+ /* Touchscreen appearance (global, not themed — the local panel is always its own thing).
+    *Own off → the screen inherits the desktop dark profile (wallpaper / glass), as before. */
  scrWpOwn:false,scrWpType:"url",scrWpUrl:"",scrWpVer:0,scrFxDim:44,scrFxBlur:27,scrFxNoise:100,
+ // one unified glass material for ALL touch surfaces (bar + cards) — no separate top bar
+ scrWdgOwn:false,scrWdgColor:"",scrWdgOp:14,scrWdgBlur:24,scrWdgSat:100,
  /* File manager (shared across both themes, not in themeProfiles) */
  fmStart:"/mnt/storage",fmClick:"single",fmHidden:false,fmFoldersFirst:true,
  fmSortKey:"name",fmSortDir:1,fmIconSize:"m",fmThumbs:true,fmThumbFit:"contain",fmDateFmt:"dmy_hm",fmUpPar:2,fmTabSize:2,
@@ -8515,23 +8517,8 @@ function lsWall(lb){lb.innerHTML=`
    ${fxSlider("Dimming","fxDim",0,80,"%","A dark layer over the wallpaper — makes windows and text more readable.")}
    ${fxSlider("Blur","fxBlur",0,100,"px","Blurs the background — puts the focus on the windows.")}
    ${fxSlider("Grain / noise","fxNoise",0,100,"%","Film grain — softens gradient banding.")}
-  </div>
-  <div class="set-card"><div class="set-grp">Touchscreen wallpaper</div>
-   ${pToggle("Separate wallpaper for the touchscreen","Off — the local touchscreen shows the desktop wallpaper above, scaled down to its panel. On — pick a different image and its own effects here; it is still delivered as a reduced copy sized for the panel.","scrWpOwn","own image and effects for the local screen")}
-   <div id="scrWpArea" style="${SET.scrWpOwn?"":"display:none"}">
-    <div class="wp-prev" id="scrWpPrev" style="margin-top:11px"></div>
-    <div class="seg" id="scrWpSrc" style="margin:11px 0 12px">
-     <button data-s="url" class="${SET.scrWpType!=="upload"?"on":""}">${svg("globe",14)} From URL</button>
-     <button data-s="upload" class="${SET.scrWpType==="upload"?"on":""}">${svg("upload",14)} From computer</button></div>
-    <div id="scrWpBody"></div>
-    <div class="set-grp" style="margin-top:14px">Effects — for the touchscreen only</div>
-    ${fxSlider("Dimming","scrFxDim",0,80,"%","A dark layer over the touchscreen wallpaper.")}
-    ${fxSlider("Blur","scrFxBlur",0,100,"px","Blurs the touchscreen background.")}
-    ${fxSlider("Grain / noise","scrFxNoise",0,100,"%","Film grain on the touchscreen — softens gradient banding.")}
-   </div>
   </div>`;
  paintWpPrev(lb.querySelector("#wpPrev"));
- scrWpRender(lb);
  const renderBody=()=>{const up=SET.wpType==="upload",wb=lb.querySelector("#wpBody");
   if(up){wb.innerHTML=`<button class="btn sm pri" id="wpFileBtn">${svg("upload",13)} Choose an image…</button><input type="file" id="wpFile" accept="image/*" style="display:none"><div class="mon-note">JPG / PNG / WebP / GIF, up to 30 MB. Stored on the server.</div>`;
     const fi=wb.querySelector("#wpFile");wb.querySelector("#wpFileBtn").onclick=()=>fi.click();fi.onchange=()=>uploadWallFile(fi.files[0]);
@@ -8541,9 +8528,7 @@ function lsWall(lb){lb.innerHTML=`
   }};
  renderBody();
  lb.querySelectorAll("#wpSrc button").forEach(b=>b.onclick=()=>{SET.wpType=b.dataset.s;lb.querySelectorAll("#wpSrc button").forEach(x=>x.classList.toggle("on",x.dataset.s===SET.wpType));renderBody();startSlideshow();});
- wireLook(lb);
- // touchscreen wallpaper: the "own" toggle shows/hides its block and re-renders (wireLook's generic handler only saves)
- const so=lb.querySelector('input[data-pt="scrWpOwn"]');if(so)so.onchange=()=>{SET.scrWpOwn=so.checked;saveSettings();lsWall(lb);};}
+ wireLook(lb);}
 // Touchscreen wallpaper block: source body (url/upload) + preview, wired like the desktop wallpaper but into scr* keys and the ?screen=1 copy.
 function scrWpRender(lb){
  const src=lb.querySelector("#scrWpSrc");if(!src)return;   // block hidden (scrWpOwn off)
@@ -8676,8 +8661,44 @@ function lsWindows(lb){const cl=/^#[0-9a-f]{6}$/i;lb.innerHTML=`
  lb.querySelectorAll("#shLvl button").forEach(b=>b.onclick=()=>{SET.shadow=b.dataset.v;applySettings();saveSettings();lb.querySelectorAll("#shLvl button").forEach(x=>x.classList.toggle("on",x===b));});
  lb.querySelector("#winReset").onclick=()=>{WINPOS={};saveWinPos();toast("Window positions reset");};
  wireLook(lb);}
-function lookTab(tc){const SUBS=[["theme","Theme","sun"],["wall","Wallpaper","image"],["bar","Bar","gauge"],["widgets","Widgets","grid"],["dock","Dock","cube"],["pop","Popovers","bell"],["win","Material","sidebar"],["icons","Icons","folder"],["misc","Other","cog"]];
- let sub=lookTab._sub||"theme";const FN={theme:lsTheme,wall:lsWall,bar:lsBar,widgets:lsWidgets,dock:lsDock,pop:lsPop,win:lsWindows,icons:lsIcons,misc:lsMisc};
+// Appearance → Touchscreen: everything about the local DSI panel's look in one place —
+// its wallpaper (own or inherited) and ONE shared glass material for every surface (bar + cards),
+// since the wall panel has no separate top bar to tune. All keys are global (scr*), not per-theme.
+function lsScreen(lb){lb.innerHTML=`
+  <div class="set-card"><div class="mon-note" style="margin:0">Look of the local touchscreen (the DSI panel on the box). It is always dark, independent of the browser theme. Off toggles = inherit the desktop dark look, as before.</div></div>
+  <div class="set-card"><div class="set-grp">Wallpaper</div>
+   ${pToggle("Separate wallpaper","Off — the touchscreen shows the desktop wallpaper, scaled to its panel. On — its own image and effects here, still delivered as a reduced copy sized for the panel.","scrWpOwn","own image and effects for the local screen")}
+   <div id="scrWpArea" style="${SET.scrWpOwn?"":"display:none"}">
+    <div class="wp-prev" id="scrWpPrev" style="margin-top:11px"></div>
+    <div class="seg" id="scrWpSrc" style="margin:11px 0 12px">
+     <button data-s="url" class="${SET.scrWpType!=="upload"?"on":""}">${svg("globe",14)} From URL</button>
+     <button data-s="upload" class="${SET.scrWpType==="upload"?"on":""}">${svg("upload",14)} From computer</button></div>
+    <div id="scrWpBody"></div>
+    <div class="set-grp" style="margin-top:14px">Effects — on top of the wallpaper</div>
+    ${fxSlider("Dimming","scrFxDim",0,80,"%","A dark layer over the touchscreen wallpaper.")}
+    ${fxSlider("Blur","scrFxBlur",0,100,"px","Blurs the touchscreen background.")}
+    ${fxSlider("Grain / noise","scrFxNoise",0,100,"%","Film grain — softens gradient banding.")}
+   </div>
+  </div>
+  <div class="set-card"><div class="set-grp">Glass — bar and cards together</div>
+   ${pToggle("Own material for the touchscreen","Off — inherit the desktop dark material. On — one shared glass for every surface on the screen (the top bar is not tuned separately here).","scrWdgOwn","one glass for the whole screen")}
+   <div id="scrWdgArea" style="${SET.scrWdgOwn?"":"display:none"}">
+    <div class="srow"><div class="srow-l"><div class="srow-t">Background color${tipHTML("Glass fill color for the touchscreen. Reset — derive it from the tint automatically.")}</div></div><div class="srow-c"><input type="color" id="scrWdgC" value="${/^#[0-9a-f]{6}$/i.test(SET.scrWdgColor||"")?SET.scrWdgColor:"#161e2a"}" class="ccell"><button class="btn sm" id="scrWdgCReset">Reset</button></div></div>
+    ${pSlider("Background opacity","scrWdgOp",0,100,1,"pctn","Density of the glass on the touchscreen. Lower — more see-through.")}
+    ${pSlider("Blur behind glass","scrWdgBlur",0,100,1,"px","Frosted blur of the wallpaper behind the cards and bar. 0 — no blur.")}
+    ${pSlider("Saturation","scrWdgSat",0,200,5,"pctn","Vibrancy of the background showing through: 100% — unchanged, lower — desaturates, higher — more vivid.")}
+   </div>
+  </div>`;
+ scrWpRender(lb);
+ const cc=lb.querySelector("#scrWdgC");if(cc){cc.oninput=()=>{SET.scrWdgColor=cc.value;};cc.onchange=()=>saveSettings();}
+ const cr=lb.querySelector("#scrWdgCReset");if(cr)cr.onclick=()=>{SET.scrWdgColor="";saveSettings();lsScreen(lb);};
+ wireLook(lb);
+ // the "own" toggles show/hide their block and re-render (wireLook's generic handler only saves)
+ const wp=lb.querySelector('input[data-pt="scrWpOwn"]');if(wp)wp.onchange=()=>{SET.scrWpOwn=wp.checked;saveSettings();lsScreen(lb);};
+ const wd=lb.querySelector('input[data-pt="scrWdgOwn"]');if(wd)wd.onchange=()=>{SET.scrWdgOwn=wd.checked;saveSettings();lsScreen(lb);};
+}
+function lookTab(tc){const SUBS=[["theme","Theme","sun"],["wall","Wallpaper","image"],["bar","Bar","gauge"],["widgets","Widgets","grid"],["dock","Dock","cube"],["pop","Popovers","bell"],["win","Material","sidebar"],["screen","Touchscreen","monitor"],["icons","Icons","folder"],["misc","Other","cog"]];
+ let sub=lookTab._sub||"theme";const FN={theme:lsTheme,wall:lsWall,bar:lsBar,widgets:lsWidgets,dock:lsDock,pop:lsPop,win:lsWindows,screen:lsScreen,icons:lsIcons,misc:lsMisc};
  const render=()=>{tc.innerHTML=`<div class="ls-tabs">${SUBS.map(([id,nm,ic])=>`<button data-ls="${id}" class="${sub===id?"on":""}">${svg(ic,14)}<span>${nm}</span></button>`).join("")}</div><div id="lb"></div>`;
   tc.querySelectorAll(".ls-tabs button").forEach(b=>b.onclick=()=>{sub=b.dataset.ls;lookTab._sub=sub;render();});
   (FN[sub]||lsTheme)(tc.querySelector("#lb"));};
