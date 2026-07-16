@@ -20,7 +20,7 @@ services:
       - "2283:2283"
     labels:
       - "web-desktop.name=Immich"
-      - "web-desktop.url=http://pi5.local:2283"
+      - "web-desktop.url=http://localhost:2283"
       - "web-desktop.icon=https://cdn.jsdelivr.net/gh/selfhst/icons@main/svg/immich.svg"
     depends_on:
       - redis

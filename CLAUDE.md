@@ -400,18 +400,24 @@ Toast UI (web/tui-editor*.js/css, MIT, офлайн — НЕ обновлять 
 `maintenance_daily`: срок корзины `maintenance.json:notes_trash_days`, сиротская
 `.history` (заметки нет нигде), несвязанные `_assets` (имени нет ни в одном .md,
 файл старше 7 дней).
-**Магазин приложений** (таб в docker-окне): каталог = `services/<id>/` в репо
-(compose + `meta.json`: name/desc/category/icon/port/fields; строки meta — русские,
-переводы руками в i18n.js, детектор json не сканирует). Установка: копия папки →
-`/opt/stacks/<id>/compose.yaml` + `.env` из полей диалога (`{storage}/{tz}/{host}/{rand}`
-подстановки, merge с существующим .env) → стрим `up` через POST `/api/stack/stream`
-(up/pull/update/rebuild). «Свои стеки» (не из каталога) — карточка/ярлык на стол без
-правки compose: `store.json:custom` вливается в `/api/desktop`. **Реплика** (рецепт
-`meta.json:replica`, пока Immich): SSH-дамп Postgres с источника + rsync медиатеки
-(`/api/store/replica/run`, дамп в `~/nas-config/replica/<id>/`), восстановление
-поднимает стек ТОЙ ЖЕ версией, что источник (тег из `docker inspect` при синке →
-`IMMICH_VERSION` в .env). `store.json` содержит пароль SSH → в секретной секции
-бэкапа настроек.
+**Приложения из каталога** (2026-07-16: отдельная вкладка-магазин УБРАНА — путала и
+дублировала управление стеками в overview). Каталог = `services/<id>/` в репо (compose +
+`meta.json`: name/desc/category/icon/port/fields; строки meta — русские, переводы руками в
+i18n.js, детектор json не сканирует; `stack_catalog()` → `/api/store`). Рецепты, которых
+ещё НЕТ в `/opt/stacks`, показываются **в сайдбаре окна Docker секцией «Available»**
+(приглушённые); клик → пейн `dkAvailPane` в детали (поля + «Install & start»), установка =
+копия папки → `/opt/stacks/<id>/compose.yaml` + `.env` из полей (`{storage}/{tz}/{host}/{rand}`,
+merge с сущест-м) → стрим `up` через `/api/stack/stream`; по завершении ВСЕГДА переходим на
+готовый стек (никаких залипших модалок — старый баг). `stack_install()`. Установленные —
+обычные стеки. **Свои карточки на стол УБРАНЫ** (`store.json:custom` больше не читается,
+ярлыки идут только из label'ов `web-desktop.*`). Хост в `web-desktop.url` панель
+переписывает на реальный LAN-адрес бокса (`_app_host_url`) — рецепты host-agnostic
+(`localhost`-плейсхолдер), старый хардкод `pi5.local` больше не ведёт в никуда.
+**Реплика** (рецепт `meta.json:replica`, пока Immich) — ОСТАЛАСЬ, кнопка «Replica…» в детали
+установленного стека (`stReplicaDlg`): SSH-дамп Postgres с источника + rsync медиатеки
+(`/api/store/replica/run`, дамп в `~/nas-config/replica/<id>/`), восстановление поднимает
+стек ТОЙ ЖЕ версией, что источник (тег из `docker inspect` при синке → `IMMICH_VERSION` в
+.env). `store.json` = только replica-конфиги (пароль SSH → секретная секция бэкапа настроек).
 Реплика: `auto="HH:MM"` в конфиге — ежедневный автосинк (`_replica_tick` в
 monitor_loop, лог в `~/nas-config/replica/<id>/sync.log`, провал → уведомление).
 **SSH-серверы в ФМ**: секция «Серверы» в сайдбаре — sshfs-маунты в `/mnt/remote/<id>`

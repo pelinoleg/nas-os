@@ -24,4 +24,4 @@ services:
     init: true
     labels:
       - "web-desktop.name=Cronmaster"
-      - "web-desktop.url=http://pi5.local:8123"
+      - "web-desktop.url=http://localhost:8123"

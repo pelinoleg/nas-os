@@ -8,7 +8,7 @@ services:
     restart: unless-stopped
     labels:
       - "web-desktop.name=qBittorrent"
-      - "web-desktop.url=http://pi5.local:8080"
+      - "web-desktop.url=http://localhost:8080"
       - "web-desktop.icon=https://cdn.jsdelivr.net/gh/selfhst/icons@main/svg/qbittorrent.svg"
     environment:
       - PUID=1000

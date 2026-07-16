@@ -8,7 +8,7 @@ services:
     restart: unless-stopped
     labels:
       - "web-desktop.name=NextExplorer"
-      - "web-desktop.url=http://pi5.local:3000"
+      - "web-desktop.url=http://localhost:3000"
       - "web-desktop.icon=https://cdn.jsdelivr.net/gh/selfhst/icons@main/svg/nextexplorer.svg"
     ports:
       - "3000:3000"
@@ -17,7 +17,7 @@ services:
       - PORT=3000
       - PUID=1000
       - PGID=1000
-      - PUBLIC_URL=http://raspberrypi.local:3000   # set the real address/host of the Pi, no trailing slash
+      - PUBLIC_URL=http://localhost:3000   # set the real address/host of the Pi, no trailing slash
       - SESSION_SECRET=CHANGE-ME-openssl-rand-hex-32
     volumes:
       - /opt/docker/nextexplorer/config:/config     # DB/settings (persistent)

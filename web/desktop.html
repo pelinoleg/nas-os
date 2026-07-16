@@ -976,18 +976,6 @@
   /* metrics history */
   .grow{flex:1;min-width:8px}
   .dk-tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-top:14px}
-  /* ---- app store ---- */
-  .st-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px;margin-bottom:4px}
-  .st-card{background:var(--card);border-radius:var(--r-lg);padding:12px;display:flex;flex-direction:column;gap:8px;box-shadow:var(--sh-sm)}
-  .st-top{display:flex;gap:10px;align-items:center;min-width:0}
-  .st-ic{width:34px;height:34px;border-radius:8px;object-fit:contain;flex:none}
-  .st-fb{width:34px;height:34px;border-radius:8px;background:var(--sel);color:var(--accent);font-weight:700;font-size:16px;align-items:center;justify-content:center;flex:none;display:none}
-  .st-tt{display:flex;flex-direction:column;min-width:0}
-  .st-tt b{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .st-status{display:flex;align-items:center;gap:5px;font-size:11.5px;color:var(--mut)}
-  .st-status .dot{width:7px;height:7px;border-radius:50%;flex:none}
-  .st-desc{font-size:12.5px;color:var(--dim);line-height:1.45;flex:1}
-  .st-acts{display:flex;gap:6px;flex-wrap:wrap}
   .dk-tile{background:var(--card);border:1px solid var(--line);border-radius:var(--r-md);padding:12px 13px;display:flex;flex-direction:column;gap:2px}
   .dk-tile b{font-size:19px;font-weight:750;line-height:1.15}
   .dk-tile span{font-size:11.5px;color:var(--dim)}
@@ -4210,15 +4198,20 @@ function winServices(initTab){openWin("__services","Docker",(body,win)=>{
  const root=el(`<div class="dmroot"><div class="dm2"><aside class="dm2-side" id="dkSide"></aside><section class="dm2-detail" id="dkDetail"></section></div></div>`);
  body.appendChild(root);
  const side=root.querySelector("#dkSide"),detail=root.querySelector("#dkDetail");
- let stacks=[],ok=true,sig="";
+ let stacks=[],catalog=[],ok=true,sig="";
  const load=async force=>{
   const d=await api("/api/stacks");if(!document.body.contains(body))return;
   ok=!!(d&&d.ok);stacks=(d&&d.stacks)||[];
+  // recipes from services/ — reread on force (open/reload); cheap but not every poll
+  if(force||!catalog.length){const cs=await api("/api/store");catalog=(cs&&cs.apps)||[];}
+  const byId={};catalog.forEach(a=>byId[a.id]=a);
+  stacks.forEach(s=>{const a=byId[s.name];if(a&&a.replica)s.recipe=a;});   // Replica button on the stack
   await refreshWud();      // map of image updates for dots in the sidebar/stacks
   // running first (has active containers), then alphabetically
   stacks.sort((a,b)=>((b.running>0)-(a.running>0))||(a.name||"").localeCompare(b.name||"",undefined,{sensitivity:"base",numeric:true}));
   if(DK_SEL.startsWith("stack:")&&!stacks.find(y=>"stack:"+y.name===DK_SEL))DK_SEL="overview";
-  const ns=JSON.stringify([ok,DK_SEL,stacks.map(s=>[s.name,s.running,s.total,s.note,(s.containers||[]).map(c=>[c.name,c.state,c.health])])]);
+  if(DK_SEL.startsWith("avail:")&&!catalog.find(a=>"avail:"+a.id===DK_SEL&&!a.installed))DK_SEL="overview";
+  const ns=JSON.stringify([ok,DK_SEL,catalog.map(a=>[a.id,a.installed]),stacks.map(s=>[s.name,s.running,s.total,s.note,(s.containers||[]).map(c=>[c.name,c.state,c.health])])]);
   if(force||ns!==sig){sig=ns;paintSide();paintDetail();}
   else if(DK_SEL.startsWith("stack:")){const sd=await api("/api/docker/stats");applyStats(detail,(sd&&sd.stats)||{});}
  };
@@ -4230,7 +4223,6 @@ function winServices(initTab){openWin("__services","Docker",(body,win)=>{
  function paintSide(){
   side.innerHTML="";
   side.appendChild(item("overview","gauge","Overview","statistics and cleanup"));
-  side.appendChild(item("store","bag","App Store","apps in 1 click"));
   const h=el(`<div class="dm2-side-h" style="display:flex;align-items:center;gap:6px">Stacks · ${stacks.length}<span class="grow"></span><button class="mbp-hb" title="New stack" style="padding:2px 4px">${svg("plus",13)}</button></div>`);
   h.querySelector("button").onclick=()=>editStack(null,reload);
   side.appendChild(h);
@@ -4238,13 +4230,24 @@ function winServices(initTab){openWin("__services","Docker",(body,win)=>{
    const full=s.total>0&&s.running===s.total,part=s.running>0&&!full;
    const dot=s.orphan?"var(--warn)":s.total?(full?"var(--good)":part?"var(--warn)":"var(--mut)"):"transparent";
    const it=item("stack:"+s.name,null,s.name,s.orphan?"folder deleted":s.total?`${s.running} of ${s.total} running`:"no containers",dot);
-   // app icon (web-desktop.icon label / catalog meta / custom card), cube as fallback
+   // app icon (web-desktop.icon label / recipe meta.json), cube as fallback
    const ico=el(`<span class="li-ico">${svg("cube",14)}${s.icon?`<img src="${att(iconSrc(s.icon))}" alt="" onload="this.previousElementSibling.style.display='none'" onerror="this.remove()">`:""}</span>`);
    it.querySelector(".dot").after(ico);
    const nu=(s.containers||[]).filter(c=>WUD[c.name]).length;   // "has update" dot on the stack
    if(nu){const lm=it.querySelector(".li-main");if(lm)lm.insertAdjacentHTML("beforeend",`<span class="cupd" title="${att(nu+" image updates in the stack")}">${svg("arrowup",10)} ${nu}</span>`);}
    side.appendChild(it);});
   if(!stacks.length&&ok)side.appendChild(el(`<div class="dm2-slots">${svg("cube",13)} Empty so far — click "+"</div>`));
+  // available recipes (services/ not yet installed) — bring up in one click
+  const avail=catalog.filter(a=>!a.installed&&!stacks.find(s=>s.name===a.id));
+  if(avail.length){
+   side.appendChild(el(`<div class="dm2-side-h">Available · ${avail.length}</div>`));
+   avail.forEach(a=>{
+    const it=item("avail:"+a.id,null,a.name,"not installed · tap to set up","transparent");
+    it.style.opacity=".62";
+    const ico=el(`<span class="li-ico">${svg("download",13)}${a.icon?`<img src="${att(iconSrc(a.icon))}" alt="" onload="this.previousElementSibling.style.display='none'" onerror="this.remove()">`:""}</span>`);
+    it.querySelector(".dot").after(ico);
+    side.appendChild(it);});
+  }
   side.appendChild(el(`<div class="dm2-side-h">Resources</div>`));
   side.appendChild(item("images","hdd","Images","image storage"));
   side.appendChild(item("volumes","disks","Volumes","container data"));
@@ -4253,9 +4256,9 @@ function winServices(initTab){openWin("__services","Docker",(body,win)=>{
   detail.innerHTML="";
   if(!ok){detail.innerHTML=`<div class="dempty">${svg("cube",16)} Docker is not installed or unavailable.<br>Complete the «System» stage in the Wizard.</div>`;return;}
   if(DK_SEL==="overview")dkOverview(detail,reload);
-  else if(DK_SEL==="store")storeTab(detail,reload);
   else if(DK_SEL==="images")imagesTab(detail);
   else if(DK_SEL==="volumes")volumesTab(detail);
+  else if(DK_SEL.startsWith("avail:")){const a=catalog.find(x=>"avail:"+x.id===DK_SEL);if(a)dkAvailPane(detail,a,reload);else detail.innerHTML="";}
   else{const s=stacks.find(y=>"stack:"+y.name===DK_SEL);
    if(s)dkStackPane(detail,s,reload);}
  }
@@ -4269,169 +4272,6 @@ function winServices(initTab){openWin("__services","Docker",(body,win)=>{
   load();},5000);
 },{w:840,h:640});}
 /* Docker dashboard: summary + cleanup */
-/* ---- App Store: the services/ directory of the repository + custom stacks ---- */
-const ST_CATS={media:"Media",files:"Files",monitor:"Monitoring",tools:"Tools",backup:"Backup"};
-async function storeTab(tc,reload){
- tc.innerHTML=`<div class="dd"><div class="dd-head">
-   <div class="dd-ic" style="background:linear-gradient(135deg,#34b27b,#1f9e6e)">${svg("bag",20)}</div>
-   <div class="dd-hmain"><div class="dd-name">App Store</div><div class="dd-sub">docker apps in one click · configs in /opt/stacks, data in the pool</div></div></div>
-  <div id="stBody"><div class="set-load">loading…</div></div></div>`;
- const r=await api("/api/store");if(!document.body.contains(tc))return;
- const box=tc.querySelector("#stBody");
- if(!(r&&r.ok)){box.innerHTML=`<div class="dempty">${svg("cube",16)} Docker unavailable</div>`;return;}
- box.innerHTML="";
- const apps=r.apps||[];
- const cats=[...new Set(apps.map(a=>a.category))].sort((a,b)=>(ST_CATS[a]||a).localeCompare(ST_CATS[b]||b));
- cats.forEach(cat=>{
-  box.appendChild(el(`<div class="dd-grp">${esc(nasTr(ST_CATS[cat]||cat))}</div>`));
-  const g=el(`<div class="st-grid"></div>`);
-  apps.filter(a=>a.category===cat).forEach(a=>g.appendChild(stCard(a,tc,reload)));
-  box.appendChild(g);});
- const own=r.own||[];
- if(own.length){
-  box.appendChild(el(`<div class="dd-grp">Your stacks</div>`));
-  box.appendChild(el(`<div class="mon-note">Any folder with a compose.yaml in /opt/stacks is already an app: the panel can start and build it (up/build, the Stacks tab). "Shortcut" puts it on the desktop with an icon and a link — the compose file is left untouched.</div>`));
-  const g=el(`<div class="st-grid"></div>`);
-  own.forEach(o=>g.appendChild(stOwnCard(o,tc,reload)));
-  box.appendChild(g);}
-}
-function stCard(a,tc,reload){
- // "folder in stacks exists, but containers were never created" = not installed yet:
- // the "Install" button leads to the settings dialog for the first launch
- const virgin=a.installed&&!a.total;
- const ready=a.installed&&!virgin;
- const dot=ready?(a.running?"var(--good)":"var(--mut)"):"transparent";
- const c=el(`<div class="st-card">
-   <div class="st-top"><img class="st-ic" src="${att(iconSrc(a.icon))}" alt=""><span class="st-fb">${esc((a.name||"?")[0])}</span>
-    <div class="st-tt"><b>${esc(a.name)}</b><span class="st-status"><i class="dot" style="background:${dot};${ready?"":"box-shadow:inset 0 0 0 1.5px var(--mut)"}"></i>${ready?(a.running?"running":"stopped"):"not installed"}</span></div></div>
-   <div class="st-desc"></div>
-   <div class="st-acts"></div></div>`);
- const im=c.querySelector(".st-ic");im.onerror=()=>{im.style.display="none";c.querySelector(".st-fb").style.display="flex";};
- c.querySelector(".st-desc").textContent=nasTr(a.desc||"");
- const acts=c.querySelector(".st-acts");
- const btn=(label,ic,cls,fn)=>{const b=el(`<button class="btn sm ${cls||""}">${ic?svg(ic,13)+" ":""}${label}</button>`);b.onclick=fn;acts.appendChild(b);return b;};
- if(!ready)btn("Install","download","pri",()=>stInstallDlg(a,tc,reload));
- else{
-  if(a.port&&a.running)btn("Open","expand","",()=>window.open(`http://${host()}:${a.port}`,"_blank"));
-  if(!a.running)btn("Start","play","pri",()=>stRunDlg(a.name+" — start",{name:a.id,action:"up"},tc,reload));
-  if((a.fields||[]).length)btn("Configure…","cog","",()=>stInstallDlg(a,tc,reload));
-  btn("Refresh","arrowup","",()=>stRunDlg(a.name+" — update (pull + up)",{name:a.id,action:"update"},tc,reload));
-  if(a.replica)btn("Replica…","sync","",()=>stReplicaDlg(a,tc,reload));}
- if(a.installed)btn("Delete","trash","dng",()=>confirmDlg("Delete "+a.name,"The stack will be stopped and the folder /opt/stacks/"+a.id+" removed. The app's data (volumes and pool folders) stays on disk.",async()=>{
-   const r2=await api("/api/stack/delete",{method:"POST",body:JSON.stringify({name:a.id})});
-   if(r2&&r2.ok){toast(a.name+" removed");storeTab(tc,reload);reload();pollApps();}else toast("Error: "+((r2&&r2.log)||"?"));},true));
- return c;
-}
-/* stream a long compose action in a small dialog with a console */
-function stRunDlg(title,body,tc,reload){
- const s=document.getElementById("scrim");
- s.innerHTML=`<div class="dialog" style="max-width:640px;width:92vw"><h3>${esc(title)}</h3>
-  <div class="mcon" id="stCon" style="display:block;min-height:120px"></div>
-  <div class="r"><button class="btn" id="stX" disabled>Close</button></div></div>`;
- s.classList.add("show");
- const x=s.querySelector("#stX");x.onclick=()=>s.classList.remove("show");
- streamPost("/api/stack/stream",s.querySelector("#stCon"),code=>{
-  x.disabled=false;
-  if(code===0){toast("Done");storeTab(tc,reload);reload();pollApps();}},body);
-}
-function stInstallDlg(a,tc,reload){
- const s=document.getElementById("scrim");
- const flds=a.fields||[],main=flds.filter(f=>!f.adv),adv=flds.filter(f=>f.adv);
- const row=f=>`<div class="field"><label>${esc(nasTr(f.label||f.key))}${f.hint?` <span style="color:var(--mut);font-weight:400">— ${esc(nasTr(f.hint))}</span>`:""}</label><input data-k="${att(f.key)}"${f.secret?' type="password"':""} value="${att(f.secret?"":(f.default||""))}" placeholder="${att(f.secret?(f.has_value?nasTr("•••••• (set; empty = keep)"):""):"")}" autocomplete="off" spellcheck="false"></div>`;
- s.innerHTML=`<div class="dialog" style="max-width:560px;width:92vw"><h3>${esc(a.name)} — ${a.installed?"setup":"install"}</h3>
-  ${main.map(row).join("")||`<p style="color:var(--mut);font-size:13px">No settings required — the app is ready to start.</p>`}
-  ${adv.length?`<details><summary style="cursor:pointer;color:var(--mut);font-size:13px;margin:6px 0">Advanced (${adv.length})</summary>${adv.map(row).join("")}</details>`:""}
-  <div class="r"><button class="btn" id="stX">Cancel</button><button class="btn pri" id="stGo">${svg("download",14)} ${a.installed?"Save and restart":"Install"}</button></div>
-  <div class="mcon" id="stCon"></div></div>`;
- s.classList.add("show");
- s.querySelector("#stX").onclick=()=>s.classList.remove("show");
- s.querySelector("#stGo").onclick=async()=>{
-  const values={};s.querySelectorAll("input[data-k]").forEach(i=>values[i.dataset.k]=i.value.trim());
-  const go=s.querySelector("#stGo");go.disabled=true;
-  const r=await api("/api/store/install",{method:"POST",body:JSON.stringify({id:a.id,values})});
-  if(!(r&&r.ok)){toast("Error: "+((r&&r.log)||"?"));go.disabled=false;return;}
-  streamPost("/api/stack/stream",s.querySelector("#stCon"),code=>{
-   if(code===0){toast(a.name+": installed");s.classList.remove("show");storeTab(tc,reload);reload();pollApps();}
-   else go.disabled=false;},{name:a.id,action:"up"});};
-}
-/* replica from another NAS: config + sync + restore */
-function stReplicaDlg(a,tc,reload){
- const rp=a.replica||{},cfg=rp.cfg||{},stt=rp.state||{};
- const s=document.getElementById("scrim");
- const last=stt.synced?new Date(stt.synced*1000).toLocaleString()+(stt.version?" · "+stt.version.split("/").pop():"")+(stt.dump_mb?" · dump "+stt.dump_mb+" MB":""):"not yet";
- s.innerHTML=`<div class="dialog" style="max-width:640px;width:92vw"><h3>${svg("sync",16)} Replica: ${esc(a.name)}</h3>
-  <p style="color:var(--mut);font-size:13px;margin:4px 0 10px">${esc(nasTr(rp.desc||""))}</p>
-  <div class="field"><label>Source (main NAS address)</label><input id="rpHost" value="${att(cfg.host||"")}" placeholder="192.168.1.95" autocomplete="off"></div>
-  <div class="field"><label>SSH user</label><input id="rpUser" value="${att(cfg.user||"")}" placeholder="root" autocomplete="off"></div>
-  <div class="field"><label>SSH password</label><input id="rpPass" type="password" placeholder="${rp.has_pass?"•••••• (set; empty = keep)":"empty = key-based login"}" autocomplete="new-password"></div>
-  <div class="field"><label>Media library on the source <span style="color:var(--mut);font-weight:400">— path on the main NAS</span></label><input id="rpSrc" value="${att(cfg.src_data||"")}" placeholder="/mnt/pool/immich/library" autocomplete="off"></div>
-  <div class="field"><label>Media library on this NAS</label><input id="rpDst" value="${att(cfg.dest_data||rp.dest_default||"")}" placeholder="${att(rp.dest_default||"/mnt/storage/immich")}" autocomplete="off"></div>
-  <div class="field"><label>Auto-sync <span style="color:var(--mut);font-weight:400">— daily at this time; empty = off</span></label><input id="rpAuto" type="time" value="${att(cfg.auto||"")}" style="max-width:140px"></div>
-  <div class="krow" style="margin:6px 0"><span>Last sync</span><b>${esc(last)}</b></div>
-  <div class="r" style="flex-wrap:wrap;gap:6px">
-   <button class="btn" id="rpX">Close</button><span style="flex:1"></span>
-   <button class="btn" id="rpSync">${svg("refresh",13)} Sync now</button>
-   <button class="btn pri" id="rpRestore">${svg("play",13)} Update replica</button></div>
-  <div class="mcon" id="rpCon"></div></div>`;
- s.classList.add("show");
- s.querySelector("#rpX").onclick=async()=>{await save();s.classList.remove("show");};   // closing also saves (e.g. a just-set auto-sync)
- const save=async()=>{const b={id:a.id,host:s.querySelector("#rpHost").value.trim(),user:s.querySelector("#rpUser").value.trim(),
-   src_data:s.querySelector("#rpSrc").value.trim(),dest_data:s.querySelector("#rpDst").value.trim(),auto:s.querySelector("#rpAuto").value.trim()};
-  const pw=s.querySelector("#rpPass").value;if(pw)b.pass=pw;
-  const r2=await api("/api/store/replica",{method:"POST",body:JSON.stringify(b)});
-  if(!(r2&&r2.ok)){toast("Error: "+((r2&&r2.log)||"?"));return false;}
-  return true;};
- const run=async mode=>{if(!await save())return;
-  streamPost("/api/store/replica/run",s.querySelector("#rpCon"),code=>{
-   if(code===0){toast(mode==="restore"?"Replica updated":"Sync finished");reload();}},{id:a.id,mode});};
- s.querySelector("#rpSync").onclick=()=>run("sync");
- s.querySelector("#rpRestore").onclick=()=>confirmDlg("Update replica","The database on this NAS will be overwritten with the dump from the source. The app will restart pinned to the source's version.",()=>run("restore"),true);
-}
-/* custom stack card: shortcut on the desktop without editing compose */
-function stOwnCard(o,tc,reload){
- const cu=o.custom||null,nm=(cu&&cu.name)||o.id;
- const c=el(`<div class="st-card">
-   <div class="st-top">${cu&&cu.icon?`<img class="st-ic" src="${att(iconSrc(cu.icon))}" alt="">`:""}<span class="st-fb" style="${cu&&cu.icon?"display:none":"display:flex"}">${esc(nm[0]||"?")}</span>
-    <div class="st-tt"><b>${esc(nm)}</b><span class="st-status"><i class="dot" style="background:${o.running?"var(--good)":"var(--mut)"}"></i>${o.running?"running":"stopped"} · ${esc(o.id)}</span></div></div>
-   <div class="st-acts"></div></div>`);
- const im=c.querySelector(".st-ic");if(im)im.onerror=()=>{im.style.display="none";c.querySelector(".st-fb").style.display="flex";};
- const acts=c.querySelector(".st-acts");
- if(cu&&cu.port&&o.running){const ob=el(`<button class="btn sm">${svg("expand",13)} Open</button>`);ob.onclick=()=>window.open(`http://${host()}:${cu.port}`,"_blank");acts.appendChild(ob);}
- if(!o.running){const rb=el(`<button class="btn sm pri">${svg("play",13)} Start</button>`);rb.onclick=()=>stRunDlg(nm+" — start",{name:o.id,action:"up"},tc,reload);acts.appendChild(rb);}
- else{const sb=el(`<button class="btn sm">${svg("stop",13)} Stop</button>`);sb.onclick=async()=>{const r2=await api("/api/stack/action",{method:"POST",body:JSON.stringify({name:o.id,action:"stop"})});
-  if(r2&&r2.ok){toast("Stopped");storeTab(tc,reload);reload();pollApps();}else toast("Error: "+((r2&&r2.log)||"?"));};acts.appendChild(sb);}
- const b=el(`<button class="btn sm">${svg("star",13)} ${cu?"Shortcut…":"Add to desktop…"}</button>`);
- b.onclick=()=>{
-  const s=document.getElementById("scrim");
-  const ports=o.ports||[];
-  s.innerHTML=`<div class="dialog" style="max-width:560px;width:92vw"><h3>Shortcut: ${esc(o.id)}</h3>
-   <div class="field"><label>Name</label><input id="cuN" value="${att((cu&&cu.name)||o.id)}"></div>
-   <div class="field"><label>Icon <span style="color:var(--mut);font-weight:400">— a URL or your own file</span></label>
-    <div style="display:flex;gap:6px;align-items:center"><input id="cuI" style="flex:1" value="${att((cu&&cu.icon)||"")}" placeholder="https://cdn.jsdelivr.net/gh/selfhst/icons@main/svg/….svg"><button class="btn sm" id="cuUp">${svg("upload",13)} File…</button></div></div>
-   <div class="field"><label>Web UI port</label><input id="cuP" value="${att((cu&&cu.port)||(ports.length===1?ports[0]:""))}" placeholder="8080">
-    ${ports.length?`<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;align-items:center"><span style="color:var(--mut);font-size:12px">the stack publishes:</span>${ports.map(pp=>`<button class="btn sm" data-pp="${pp}">${pp}</button>`).join("")}</div>`
-     :`<div style="color:var(--mut);font-size:12px;margin-top:4px">ports are visible while the stack is running — the panel will offer them here</div>`}</div>
-   <div class="r">${cu?`<button class="btn dng" id="cuDel">Remove shortcut</button>`:""}<span style="flex:1"></span><button class="btn" id="cuX">Cancel</button><button class="btn pri" id="cuOk">Save</button></div></div>`;
-  s.classList.add("show");
-  s.querySelectorAll("[data-pp]").forEach(pb=>pb.onclick=()=>{s.querySelector("#cuP").value=pb.dataset.pp;});
-  s.querySelector("#cuUp").onclick=()=>{
-   const fi=document.createElement("input");fi.type="file";fi.accept="image/*";
-   fi.onchange=()=>{const f=fi.files&&fi.files[0];if(!f)return;
-    const rd=new FileReader();
-    rd.onload=async()=>{const r=await api("/api/store/icon",{method:"POST",body:JSON.stringify({stack:o.id,data:rd.result})});
-     if(r&&r.ok){s.querySelector("#cuI").value=r.icon;toast("Icon uploaded");}
-     else toast("Error: "+((r&&r.log)||"?"));};
-    rd.readAsDataURL(f);};
-   fi.click();};
-  s.querySelector("#cuX").onclick=()=>s.classList.remove("show");
-  const fin=async body=>{const r2=await api("/api/store/custom",{method:"POST",body:JSON.stringify(body)});
-   s.classList.remove("show");
-   if(r2&&r2.ok){toast("Saved");storeTab(tc,reload);pollApps();}else toast("Error: "+((r2&&r2.log)||"?"));};
-  s.querySelector("#cuOk").onclick=()=>fin({stack:o.id,name:s.querySelector("#cuN").value.trim(),icon:s.querySelector("#cuI").value.trim(),port:s.querySelector("#cuP").value.trim()});
-  const del=s.querySelector("#cuDel");if(del)del.onclick=()=>fin({stack:o.id,name:""});};
- acts.appendChild(b);
- return c;
-}
 async function dkOverview(tc,reload){
  tc.innerHTML=`<div class="dd">
   <div class="dd-head"><div class="dd-ic" style="background:linear-gradient(135deg,#4C8DF6,#2563eb)">${svg("cube",20)}</div>
@@ -4506,6 +4346,63 @@ function portLinks(ports){const set=[...new Set([...String(ports||"").matchAll(/
  return set.map(p=>`<a href="http://${host()}:${p}" target="_blank" rel="noopener" class="portlink" onclick="event.stopPropagation()">:${p}↗</a>`).join(" ");}
 const STK_ACT_LABEL={up:"start",down:"stop",stop:"stop",start:"start",restart:"restart",pull:"pulling images",build:"build",rebuild:"rebuild",recreate:"recreate","rebuild-nocache":"rebuild without cache"};
 /* stack details in the right panel of the Docker window */
+/* available recipe: install + bring up, streamed inline (no stuck modal) */
+function dkAvailPane(tc,a,reload){
+ const box=el(`<div class="dd"></div>`);
+ box.appendChild(el(`<div class="dd-head"><div class="dd-ic" style="background:linear-gradient(135deg,#7183a0,#55647d)">${a.icon?`<img src="${att(iconSrc(a.icon))}" alt="" style="width:100%;height:100%;object-fit:contain;border-radius:8px" onerror="this.remove()">`:svg("download",19)}</div>
+   <div class="dd-hmain"><div class="dd-name">${esc(a.name)} <span class="stbadge dead">not installed</span></div><div class="dd-sub">${esc(a.desc||"")}</div></div></div>`));
+ const flds=(a.fields||[]),main=flds.filter(f=>!f.adv),adv=flds.filter(f=>f.adv);
+ const rowH=f=>`<div class="field"><label>${esc(f.label||f.key)}${f.hint?` <span style="color:var(--mut);font-weight:400">— ${esc(f.hint)}</span>`:""}</label><input data-k="${att(f.key)}"${f.secret?' type="password"':""} value="${att(f.secret?"":(f.default||""))}" placeholder="${att(f.secret&&f.has_value?"•••••• (set; empty = keep)":"")}" autocomplete="off" spellcheck="false"></div>`;
+ const form=el(`<div style="max-width:560px">${main.map(rowH).join("")}${adv.length?`<details><summary style="cursor:pointer;color:var(--mut);font-size:13px;margin:6px 0">Advanced (${adv.length})</summary>${adv.map(rowH).join("")}</details>`:""}</div>`);
+ if(flds.length)box.appendChild(form);
+ else box.appendChild(el(`<div class="mon-note" style="margin:6px 0">${svg("cube",13)} No settings required — ready to bring up.</div>`));
+ const acts=el(`<div class="dd-acts" style="border:none;padding-top:2px"></div>`);
+ const go=el(`<button class="btn pri">${svg("play",13)} Install & start</button>`);acts.appendChild(go);box.appendChild(acts);
+ const con=el(`<div class="mcon" style="display:block;margin-top:10px"></div>`);box.appendChild(con);
+ go.onclick=async()=>{
+  const values={};form.querySelectorAll("input[data-k]").forEach(i=>values[i.dataset.k]=i.value.trim());
+  go.disabled=true;go.innerHTML=`${svg("refresh",13)} installing…`;
+  const r=await api("/api/store/install",{method:"POST",body:JSON.stringify({id:a.id,values})});
+  if(!(r&&r.ok)){toast("Error: "+((r&&r.log)||"?"));go.disabled=false;go.innerHTML=`${svg("play",13)} Install & start`;return;}
+  streamPost("/api/stack/stream",con,code=>{
+   toast(code?`«${a.name}» finished with warnings — check the containers`:`«${a.name}» is up`);
+   DK_SEL="stack:"+a.id;reload();pollApps();   // land on the now-installed stack (never a stuck dialog)
+  },{name:a.id,action:"up"});};
+ tc.innerHTML="";tc.appendChild(box);
+}
+/* replica from another NAS: config + sync + version-pinned restore (Immich) */
+function stReplicaDlg(a,reload){
+ const rp=a.replica||{},cfg=rp.cfg||{},stt=rp.state||{};
+ const s=document.getElementById("scrim");
+ const last=stt.synced?new Date(stt.synced*1000).toLocaleString()+(stt.version?" · "+stt.version.split("/").pop():"")+(stt.dump_mb?" · dump "+stt.dump_mb+" MB":""):"not yet";
+ s.innerHTML=`<div class="dialog" style="max-width:640px;width:92vw"><h3>${svg("sync",16)} Replica: ${esc(a.name)}</h3>
+  <p style="color:var(--mut);font-size:13px;margin:4px 0 10px">${esc(rp.desc||"")}</p>
+  <div class="field"><label>Source (main NAS address)</label><input id="rpHost" value="${att(cfg.host||"")}" placeholder="192.168.1.95" autocomplete="off"></div>
+  <div class="field"><label>SSH user</label><input id="rpUser" value="${att(cfg.user||"")}" placeholder="root" autocomplete="off"></div>
+  <div class="field"><label>SSH password</label><input id="rpPass" type="password" placeholder="${rp.has_pass?"•••••• (set; empty = keep)":"empty = key-based login"}" autocomplete="new-password"></div>
+  <div class="field"><label>Media library on the source <span style="color:var(--mut);font-weight:400">— path on the main NAS</span></label><input id="rpSrc" value="${att(cfg.src_data||"")}" placeholder="/mnt/pool/immich/library" autocomplete="off"></div>
+  <div class="field"><label>Media library on this NAS</label><input id="rpDst" value="${att(cfg.dest_data||rp.dest_default||"")}" placeholder="${att(rp.dest_default||"/mnt/storage/immich")}" autocomplete="off"></div>
+  <div class="field"><label>Auto-sync <span style="color:var(--mut);font-weight:400">— daily at this time; empty = off</span></label><input id="rpAuto" type="time" value="${att(cfg.auto||"")}" style="max-width:140px"></div>
+  <div class="krow" style="margin:6px 0"><span>Last sync</span><b>${esc(last)}</b></div>
+  <div class="r" style="flex-wrap:wrap;gap:6px">
+   <button class="btn" id="rpX">Close</button><span style="flex:1"></span>
+   <button class="btn" id="rpSync">${svg("refresh",13)} Sync now</button>
+   <button class="btn pri" id="rpRestore">${svg("play",13)} Update replica</button></div>
+  <div class="mcon" id="rpCon"></div></div>`;
+ s.classList.add("show");
+ const save=async()=>{const b={id:a.id,host:s.querySelector("#rpHost").value.trim(),user:s.querySelector("#rpUser").value.trim(),
+   src_data:s.querySelector("#rpSrc").value.trim(),dest_data:s.querySelector("#rpDst").value.trim(),auto:s.querySelector("#rpAuto").value.trim()};
+  const pw=s.querySelector("#rpPass").value;if(pw)b.pass=pw;
+  const r2=await api("/api/store/replica",{method:"POST",body:JSON.stringify(b)});
+  if(!(r2&&r2.ok)){toast("Error: "+((r2&&r2.log)||"?"));return false;}
+  return true;};
+ s.querySelector("#rpX").onclick=async()=>{await save();s.classList.remove("show");};   // closing also saves (e.g. a just-set auto-sync)
+ const run=async mode=>{if(!await save())return;
+  streamPost("/api/store/replica/run",s.querySelector("#rpCon"),code=>{
+   if(code===0){toast(mode==="restore"?"Replica updated":"Sync finished");reload();}},{id:a.id,mode});};
+ s.querySelector("#rpSync").onclick=()=>run("sync");
+ s.querySelector("#rpRestore").onclick=()=>confirmDlg("Update replica","The database on this NAS will be overwritten with the dump from the source. The app will restart pinned to the source's version.",()=>run("restore"),true);
+}
 function dkStackPane(tc,s,reload){
  const running=s.running>0,partial=running&&s.running<s.total;
  const col=running?"linear-gradient(135deg,#46B98A,#2f9d70)":"linear-gradient(135deg,#7183a0,#55647d)";
@@ -4544,6 +4441,7 @@ function dkStackPane(tc,s,reload){
  mk("Logs","logs",()=>stackLogs(s.name));
  mk("Edit","edit",()=>editStack(s.name,reload));
  mk("Folder","folder",()=>winFiles(s.path||("/opt/stacks/"+s.name)));
+ if(s.recipe&&s.recipe.replica)mk("Replica…","sync",()=>stReplicaDlg(s.recipe,reload));
  acts.appendChild(el(`<span class="grow"></span>`));
  mk("Delete","trash",()=>confirmDlg("Delete stack?",`«${esc(s.name)}» will be stopped and removed from /opt/stacks.`,()=>stackDelete(s.name,reload),true),"dng");
  box.appendChild(acts);

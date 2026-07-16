@@ -22,5 +22,5 @@ services:
       - /opt/docker/myspeed/data:/myspeed/data
     labels:
       - "web-desktop.name=MySpeed"
-      - "web-desktop.url=http://pi5.local:5216"
+      - "web-desktop.url=http://localhost:5216"
       - "web-desktop.icon=https://cdn.jsdelivr.net/gh/selfhst/icons@main/png/myspeed.png"

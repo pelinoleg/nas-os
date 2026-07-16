@@ -12,11 +12,11 @@ services:
       - SYS_ADMIN
     labels:
       - "web-desktop.name=Zerobyte"
-      - "web-desktop.url=http://pi5.local:4096"
+      - "web-desktop.url=http://localhost:4096"
       - "web-desktop.icon=https://cdn.jsdelivr.net/gh/selfhst/icons@main/svg/zerobyte.svg"
     environment:
       - APP_SECRET=${APP_SECRET}
-      - BASE_URL=http://pi5.local:4096
+      - BASE_URL=http://localhost:4096
       - PORT=4096
     ports:
       - "4096:4096"

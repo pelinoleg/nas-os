@@ -6,7 +6,7 @@ services:
     restart: unless-stopped
     labels:
       - "web-desktop.name=Dockge"
-      - "web-desktop.url=http://pi5.local:5001"
+      - "web-desktop.url=http://localhost:5001"
       - "web-desktop.icon=https://cdn.jsdelivr.net/gh/selfhst/icons@main/svg/dockge.svg"
     ports:
       - "5001:5001"

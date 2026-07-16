@@ -7386,11 +7386,10 @@ def docker_stacks():
         cmap.setdefault(key, []).append({
             "name": c.get("Names", ""), "state": c.get("State", ""),
             "status": c.get("Status", ""), "ports": c.get("Ports", ""),
-            "image": c.get("Image", ""), "url": url.group(1) if url else "",
+            "image": c.get("Image", ""), "url": _app_host_url(url.group(1)) if url else "",
             "icon": ico.group(1) if ico else "",
             "health": _health_of(c.get("Status", ""))})
     notes = load_notes()
-    custom = _safe(lambda: _store_load().get("custom") or {}, {})
     out = []
     try:
         names = sorted(os.listdir(STACKS_DIR))
@@ -7403,10 +7402,9 @@ def docker_stacks():
         conts = cmap.get(nm, [])
         running = sum(1 for c in conts if c["state"] == "running")
         url = next((c["url"] for c in conts if c["url"]), "")
-        # stack icon: web-desktop.icon label → catalog meta.json → store.json custom card
+        # stack icon: web-desktop.icon label → catalog meta.json (services/<id>/meta.json)
         icon = (next((c["icon"] for c in conts if c["icon"]), "")
-                or _safe(lambda: _store_meta(nm).get("icon") or "", "")
-                or (custom.get(nm) or {}).get("icon", ""))
+                or _safe(lambda: _store_meta(nm).get("icon") or "", ""))
         out.append({"name": nm, "path": d, "has_compose": os.path.isfile(_compose_path(nm)),
                     "containers": conts, "running": running, "total": len(conts),
                     "url": url, "icon": icon, "note": notes.get(nm, "")})
@@ -7422,8 +7420,7 @@ def docker_stacks():
             continue
         running = sum(1 for c in conts if c["state"] == "running")
         icon = (next((c["icon"] for c in conts if c["icon"]), "")
-                or _safe(lambda: _store_meta(key).get("icon") or "", "")
-                or (custom.get(key) or {}).get("icon", ""))
+                or _safe(lambda: _store_meta(key).get("icon") or "", ""))
         out.append({"name": key, "path": wd or os.path.join(STACKS_DIR, key),
                     "has_compose": False, "orphan": True,
                     "containers": conts, "running": running, "total": len(conts),
@@ -7627,9 +7624,13 @@ def container_action(cid, action):
     return _run(["docker", *args], timeout=60)
 
 # --------------------------------------------------------------------------- #
-#  App store: services/ catalog (compose + meta.json) → /opt/stacks.
-#  Install = folder copy + .env from dialog fields + docker compose up (streamed).
-#  store.json: cards for "own" stacks (custom) and replica configs (replica).
+#  services/ recipes: curated compose + meta.json tuned for this box. The old
+#  standalone "App Shop" tab is gone — instead recipes that aren't installed yet
+#  show up in the Docker-window sidebar as "available" stacks the user can bring
+#  up in one click (install = folder copy + .env from dialog fields + compose up,
+#  streamed). Custom desktop-card shortcuts were dropped. Replica (Immich) stays:
+#  SSH DB dump + media rsync + version-pinned restore; store.json holds replica
+#  configs (SSH passwords → secret section of the settings backup).
 # --------------------------------------------------------------------------- #
 SERVICES_DIR = os.path.join(HERE, "services")
 STORE_FILE = os.path.join(NAS_CONFIG, "store.json")
@@ -7640,6 +7641,9 @@ def _store_load():
 def _store_save(d):
     _json_save(STORE_FILE, d, indent=2)
 
+def _store_meta(sid):
+    return _json_load_strict(os.path.join(SERVICES_DIR, sid, "meta.json"), {})
+
 def _store_compose_src(sid):
     d = os.path.join(SERVICES_DIR, sid)
     for fn in ("docker-compose.yml", "docker-compose.yaml", "compose.yaml", "compose.yml"):
@@ -7647,9 +7651,6 @@ def _store_compose_src(sid):
         if os.path.isfile(p):
             return p
     return None
-
-def _store_meta(sid):
-    return _json_load_strict(os.path.join(SERVICES_DIR, sid, "meta.json"), {})
 
 def _store_subst(val):
     """Placeholders in meta defaults: {storage} {tz} {host} {rand}."""
@@ -7662,6 +7663,16 @@ def _store_subst(val):
     # {storage} in stack compose is also the primary storage (on a box without a pool
     # that's the external volume, not the nonexistent /mnt/storage)
     return val.replace("{storage}", storage_base() or STORAGE).replace("{host}", lan_ip())
+
+def _stack_env(name):
+    """KEY=VALUE map from the installed stack's .env (empty if none)."""
+    out = {}
+    for line in _read(os.path.join(STACKS_DIR, name, ".env")).splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            k, _, v = line.partition("=")
+            out[k.strip()] = v.strip()
+    return out
 
 def _replica_dir(sid):
     return os.path.join(NAS_CONFIG, "replica", sid)
@@ -7676,8 +7687,15 @@ def _replica_state(sid):
     return {"version": ver, "synced": ts,
             "dump_mb": round(os.path.getsize(dump) / 1048576, 1) if ts else None}
 
-def store_catalog():
-    stacks = {s["name"]: s for s in docker_stacks().get("stacks", [])}
+def stack_catalog():
+    """Recipes in services/ surfaced to the sidebar. Each carries `installed`
+    (already in /opt/stacks → shown as a normal stack), install `fields`, and a
+    `replica` block when the recipe defines one (e.g. Immich). Not-installed
+    recipes appear as "available" entries the user can bring up in one click."""
+    try:
+        have = set(os.listdir(STACKS_DIR))
+    except OSError:
+        have = set()
     st = _store_load()
     out = []
     try:
@@ -7690,18 +7708,14 @@ def store_catalog():
         m = _store_meta(sid)
         if m.get("hidden"):
             continue
-        s = stacks.get(sid)
-        rep = m.get("replica")
+        installed = sid in have
         item = {"id": sid, "name": m.get("name") or sid, "desc": m.get("desc") or "",
                 "category": m.get("category") or "tools", "icon": m.get("icon") or "",
-                "port": m.get("port"),
+                "port": m.get("port"), "installed": installed,
                 "fields": [dict(f, default=_store_subst(f.get("default")))
-                           for f in (m.get("fields") or []) if f.get("key")],
-                "installed": bool(s), "running": bool(s and s["running"]),
-                "total": (s or {}).get("total", 0)}
-        if s and item["fields"]:
-            # «Configure…»: prefill the dialog with the live .env; secrets are
-            # never sent back — the field just reports whether a value is set
+                           for f in (m.get("fields") or []) if f.get("key")]}
+        if installed and item["fields"]:
+            # prefill fields from the live .env; secrets are never echoed back
             env = _stack_env(sid)
             for f in item["fields"]:
                 cur = env.get(f["key"])
@@ -7711,6 +7725,7 @@ def store_catalog():
                     f["has_value"] = bool(cur)
                 else:
                     f["default"] = cur
+        rep = m.get("replica")
         if rep:
             cfg = (st.get("replica") or {}).get(sid) or {}
             item["replica"] = {"desc": rep.get("desc") or "",
@@ -7719,31 +7734,11 @@ def store_catalog():
                                "dest_default": _stack_env(sid).get(rep.get("data_env") or "", ""),
                                "state": _replica_state(sid)}
         out.append(item)
-    # own stacks (not from the catalog) — candidates for a card/shortcut; published ports
-    # are pulled from live containers so the user doesn't have to open the compose editor
-    custom = st.get("custom") or {}
-    def _host_ports(s):
-        pts = set()
-        for c in s.get("containers") or []:
-            for mm in re.finditer(r":(\d+)->\d+/tcp", c.get("ports") or ""):
-                pts.add(int(mm.group(1)))
-        return sorted(pts)
-    others = [{"id": n, "installed": True, "running": bool(s["running"]),
-               "total": s["total"], "custom": custom.get(n), "ports": _host_ports(s)}
-              for n, s in sorted(stacks.items()) if not _store_compose_src(n)]
-    return {"ok": True, "apps": out, "own": others}
+    return {"ok": True, "apps": out}
 
-def _stack_env(name):
-    """KEY=VALUE map from the installed stack's .env (empty if none)."""
-    out = {}
-    for line in _read(os.path.join(STACKS_DIR, name, ".env")).splitlines():
-        line = line.strip()
-        if line and not line.startswith("#") and "=" in line:
-            k, _, v = line.partition("=")
-            out[k.strip()] = v.strip()
-    return out
-
-def store_install(sid, values):
+def stack_install(sid, values):
+    """Copy a recipe into /opt/stacks + write .env from dialog fields. The caller
+    then streams `compose up` via /api/stack/stream."""
     src = _store_compose_src(sid) if _STACK_RE.match(sid or "") else None
     if not src:
         return {"ok": False, "log": "no such app"}
@@ -7774,69 +7769,9 @@ def store_install(sid, values):
                 pass
     with open(os.path.join(dst, ".env"), "w") as fh:   # env_file: .env must exist
         fh.write("\n".join("%s=%s" % kv for kv in env.items()) + "\n")
-    log_event("action", "Store: install %s" % (m.get("name") or sid), "", "ok",
+    log_event("action", "Install %s" % (m.get("name") or sid), "", "ok",
               kind="svc", desk=False)
     return {"ok": True}
-
-def store_icon_upload(stack, data_url):
-    """User-supplied shortcut icon: store it in the same icon cache under a pseudo-URL
-    custom://<stack>#<ts> (the timestamp in the key means the browser cache won't serve
-    the old image after a replacement)."""
-    if not _STACK_RE.match(stack or ""):
-        return {"ok": False, "log": "name"}
-    m = re.match(r"^data:image/(png|jpeg|svg\+xml|webp|gif|x-icon|vnd\.microsoft\.icon);base64,(.+)$",
-                 data_url or "", re.S)
-    if not m:
-        return {"ok": False, "log": "image required: png / svg / jpeg / webp / gif / ico"}
-    try:
-        raw = base64.b64decode(m.group(2))
-    except (ValueError, TypeError):
-        return {"ok": False, "log": "corrupt data"}
-    if len(raw) > 1024 * 1024:
-        return {"ok": False, "log": "icon larger than 1 MB"}
-    ext = {"png": ".png", "jpeg": ".jpg", "svg+xml": ".svg", "webp": ".webp",
-           "gif": ".gif", "x-icon": ".ico", "vnd.microsoft.icon": ".ico"}[m.group(1)]
-    url = "custom://%s#%d" % (stack, int(time.time()))
-    os.makedirs(ICON_CACHE_DIR, exist_ok=True)
-    with open(os.path.join(ICON_CACHE_DIR,
-              hashlib.sha1(url.encode()).hexdigest() + ext), "wb") as f:
-        f.write(raw)
-    return {"ok": True, "icon": url}
-
-def store_custom_save(stack, name, icon, port):
-    if not _STACK_RE.match(stack or ""):
-        return {"ok": False, "log": "name"}
-    st = _store_load()
-    cust = st.setdefault("custom", {})
-    if not (name or "").strip():
-        cust.pop(stack, None)
-    else:
-        try:
-            port = int(port) if port else None
-        except (TypeError, ValueError):
-            port = None
-        cust[stack] = {"name": str(name).strip()[:40], "icon": str(icon or "").strip(),
-                       "port": port}
-    _store_save(st)
-    return {"ok": True}
-
-def _store_custom_forget(stacks):
-    """Forget cards of stacks that no longer exist (called from discover_desktop_apps).
-    Without this the desktop shortcut of a deleted stack lives on forever."""
-    st = _store_load()
-    cust = st.get("custom") or {}
-    gone = [s for s in stacks if s in cust]
-    if not gone:
-        return
-    for s in gone:
-        cust.pop(s, None)
-    st["custom"] = cust
-    _store_save(st)
-    # the stack name goes last: tr() substitutes literal Cyrillic fragments, so a
-    # %s in the middle of the phrase would break the dictionary match
-    log_event("user_action", "Shortcut removed from the desktop",
-              "stack deleted, the shortcut card is no longer needed: %s" % ", ".join(gone),
-              lvl="info", kind="docker", desk=False)
 
 # ---- app replica from another NAS (recipe in meta.json:replica) ----
 def store_replica_save(sid, cfg):
@@ -7881,7 +7816,7 @@ def store_replica_script(sid, mode):
             raise ValueError("replica not configured: source address and media library path")
         dest = cfg.get("dest_data") or _stack_env(sid).get(rep.get("data_env") or "", "")
         if not dest:
-            raise ValueError("no data folder set on this NAS (install the app or specify a path)")
+            raise ValueError("no data folder set on this NAS (bring the app up or specify a path)")
         os.makedirs(rd, exist_ok=True)
         ssh, env = _replica_ssh(cfg)
         rsync_e = ssh.rsplit(" ", 1)[0]     # the same command without host — for rsync -e
@@ -7906,7 +7841,7 @@ echo "== sync complete: source version $VER"
     # restore: bring up the replica with the same version the source had at dump time
     comp = _compose_path(sid)
     if not os.path.isfile(comp):
-        raise ValueError("the app is not installed on this NAS — run «Install» first")
+        raise ValueError("the app is not installed on this NAS — bring it up first")
     if not os.path.isfile(dump):
         raise ValueError("no dump — run «Sync» first")
     ver = _read(os.path.join(rd, "version"))
@@ -7947,9 +7882,7 @@ echo "== replica updated: version %(tag)s, dump from $(date -r %(dump)s '+%%F %%
 _REPLICA_RUN = set()          # sids syncing right now (manual runs don't set this)
 
 def _replica_tick():
-    """Kick the replica sync at the configured wall-clock minute, once a day.
-    Runs in a background thread; the log lands next to the dump, the outcome
-    goes to the event feed (failures also pop on the desktop)."""
+    """Kick the replica sync at the configured wall-clock minute, once a day."""
     reps = _safe(lambda: _store_load().get("replica") or {}, {})
     hhmm, today = time.strftime("%H:%M"), time.strftime("%Y-%m-%d")
     for sid, cfg in (reps or {}).items():
@@ -8329,6 +8262,27 @@ def _docker_ps():
     except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
         return []
 
+def _app_host_url(url):
+    """A web-desktop.url label bakes in whatever hostname the recipe author typed
+    (our recipes historically hardcoded a now-dead 'pi5.local'), so the shortcut
+    points at the wrong box. The app runs HERE — rewrite the host to this box's
+    LAN address, keeping scheme/port/path. Makes recipes host-agnostic and fixes
+    already-installed stacks without touching their compose."""
+    if not url:
+        return url
+    try:
+        u = urlparse(url)
+        ip = lan_ip()
+        if not u.hostname or not ip:
+            return url
+        port = ":%d" % u.port if u.port else ""
+        tail = u.path or ""
+        if u.query:
+            tail += "?" + u.query
+        return "%s://%s%s%s" % (u.scheme or "http", ip, port, tail)
+    except (ValueError, TypeError):
+        return url
+
 def discover_desktop_apps():
     """Desktop shortcuts from web-desktop.* docker labels on any containers.
     Labels: web-desktop.name / .url / .icon / .enable(=false → hide).
@@ -8368,50 +8322,12 @@ def discover_desktop_apps():
         apps.append({
             "container": name,
             "name": g("name") or name,
-            "url": g("url") or "",
+            "url": _app_host_url(g("url") or ""),
             "icon": g("icon") or "",
             "running": status == "running",
             "status": status,
             "_proj": labels.get("com.docker.compose.project") or "",
         })
-    # own stacks given a card in the store (store.json: custom) — a shortcut
-    # without editing someone else's compose; a stack with ready web-desktop labels isn't duplicated
-    cust = _safe(lambda: _store_load().get("custom") or {}, {})
-    if cust:
-        ps, stale = None, []
-        for stack, c in sorted(cust.items()):
-            hit = [a for a in apps if a.get("_proj") == stack]
-            if hit:
-                # a shortcut configured in the panel wins over compose web-desktop labels:
-                # the labels often come from another host with someone else's URL
-                for a in hit:
-                    if c.get("name"):
-                        a["name"] = c["name"]
-                    if c.get("icon"):
-                        a["icon"] = c["icon"]
-                    if c.get("port"):
-                        a["url"] = "http://%s:%d" % (lan_ip(), c["port"])
-                continue
-            if ps is None:
-                ps = _docker_ps()
-            conts = [x for x in ps
-                     if ("com.docker.compose.project=%s" % stack) in (x.get("Labels") or "")]
-            if not conts and not os.path.isdir(os.path.join(STACKS_DIR, stack)):
-                # The stack was removed (no containers, no folder in /opt/stacks) — a ghost card:
-                # the desktop shortcut lives forever until store.json is cleaned. Clean only
-                # if docker actually responded (ps non-empty), otherwise a dead daemon = empty ps
-                # and we'd wipe the cards of live stacks.
-                if ps:
-                    stale.append(stack)
-                continue
-            running = any(x.get("State") == "running" for x in conts)
-            port = c.get("port")
-            apps.append({"container": stack, "name": c.get("name") or stack,
-                         "url": ("http://%s:%d" % (lan_ip(), port)) if port else "",
-                         "icon": c.get("icon") or "", "running": running,
-                         "status": "running" if running else "exited"})
-        if stale:
-            _store_custom_forget(stale)
     for a in apps:
         a.pop("_proj", None)
     apps.sort(key=lambda a: a["name"].lower())
@@ -13633,7 +13549,7 @@ class H(BaseHTTPRequestHandler):
             elif p == "/api/stacks":
                 self._json(docker_stacks())
             elif p == "/api/store":
-                self._json(store_catalog())
+                self._json(stack_catalog())
             elif p == "/api/remotes":
                 self._json(remotes_list())
             elif p == "/api/stack":
@@ -14086,14 +14002,7 @@ class H(BaseHTTPRequestHandler):
                 self._json(remote_realpath(b.get("id", ""), b.get("path", "")))
             elif p == "/api/store/install":
                 b = self._body()
-                self._json(store_install(b.get("id", ""), b.get("values") or {}))
-            elif p == "/api/store/icon":
-                b = self._body()
-                self._json(store_icon_upload(b.get("stack", ""), b.get("data", "")))
-            elif p == "/api/store/custom":
-                b = self._body()
-                self._json(store_custom_save(b.get("stack", ""), b.get("name", ""),
-                                             b.get("icon", ""), b.get("port")))
+                self._json(stack_install(b.get("id", ""), b.get("values") or {}))
             elif p == "/api/store/replica":
                 b = self._body()
                 self._json(store_replica_save(b.get("id", ""), b))

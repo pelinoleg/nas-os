@@ -7,7 +7,7 @@ services:
     restart: unless-stopped
     labels:
       - "web-desktop.name=Dozzle"
-      - "web-desktop.url=http://pi5.local:8083"
+      - "web-desktop.url=http://localhost:8083"
       - "web-desktop.icon=https://cdn.jsdelivr.net/gh/selfhst/icons@main/svg/dozzle.svg"
     ports:
       - "8083:8080"
