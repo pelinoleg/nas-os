@@ -194,16 +194,16 @@
   .trcol+.trcol{border-left:1px solid rgba(255,255,255,.08);padding-left:14px}
   .trh{font-size:10.5px;letter-spacing:.5px;text-transform:uppercase;color:var(--dim);font-weight:650;margin-bottom:1px}
   /* Traffic detail (tap): two panels, a big TOTAL hero + coloured ↓/↑ */
-  .trsheet{display:flex;gap:22px;padding:4px 2px}
-  .trs-col{flex:1;min-width:0;display:flex;flex-direction:column;gap:12px}
-  .trs-col+.trs-col{border-left:1px solid rgba(255,255,255,.1);padding-left:22px}
-  .trs-h{font-size:14px;letter-spacing:.6px;text-transform:uppercase;color:var(--dim);font-weight:650}
-  .trs-total{font-size:50px;font-weight:800;line-height:.9;color:var(--ink);font-variant-numeric:tabular-nums}
-  .trs-total small{font-size:15px;font-weight:600;color:var(--dim);margin-left:8px;text-transform:uppercase;letter-spacing:.5px}
-  .trs-row{display:flex;align-items:baseline;justify-content:space-between;gap:12px;font-size:16px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.07)}
+  .trsheet{display:flex;gap:16px;padding:4px 2px}
+  .trs-col{flex:1;min-width:0;display:flex;flex-direction:column;gap:11px}
+  .trs-col+.trs-col{border-left:1px solid rgba(255,255,255,.1);padding-left:16px}
+  .trs-h{font-size:13px;letter-spacing:.5px;text-transform:uppercase;color:var(--dim);font-weight:650}
+  .trs-total{font-size:40px;font-weight:800;line-height:.9;color:var(--ink);font-variant-numeric:tabular-nums;white-space:nowrap}
+  .trs-total small{font-size:13px;font-weight:600;color:var(--dim);margin-left:6px;text-transform:uppercase;letter-spacing:.4px}
+  .trs-row{display:flex;flex-direction:column;gap:1px;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.07)}
   .trs-row:last-child{border-bottom:0}
-  .trs-row>span{color:var(--dim)}
-  .trs-row b{font-size:24px;font-weight:750;font-variant-numeric:tabular-nums}
+  .trs-row>span{color:var(--dim);font-size:13px}
+  .trs-row b{font-size:21px;font-weight:750;font-variant-numeric:tabular-nums}
   .trs-row.dn b{color:var(--good)} .trs-row.upl b{color:var(--accent)}
   .chart{position:relative}
   /* full-screen 24h graph shown when a top gauge is tapped */
@@ -956,7 +956,7 @@ const SHEETS={
         <div class="trs-row upl"><span>Upload</span><b>↑ ${fmtB(tx)}</b></div>
       </div>`;};
     return ["Traffic", tr.ok?
-      `<div class="trsheet">${panel("Today",tr.today||{})}${panel("This month",tr.month||{})}</div>`
+      `<div class="trsheet">${panel("Today",tr.today||{})}${panel("This month",tr.month||{})}${panel("All time",tr.total||{})}</div>`
       :`<div class="empty">vnstat is not installed</div>`, ""];},
   updates:d=>{const u=(d.p2||{}).updates||{}, cr=(d.p2||{}).cron||[];
     return ["Updates and tasks",

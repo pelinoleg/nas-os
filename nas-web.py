@@ -12336,7 +12336,7 @@ def _screen_page2():
                "quota_gb": tm.get("quota_gb")},
         # vnstat: no service -> ok:false, the tile is simply not drawn
         "traffic": {"ok": bool(vn.get("ok")), "today": vn.get("today") or {},
-                    "month": vn.get("month") or {}},
+                    "month": vn.get("month") or {}, "total": vn.get("total") or {}},
         "updates": {"apt": ap.get("count") or 0, "security": ap.get("security") or 0,
                     "packages": [p.get("name") for p in (ap.get("packages") or [])][:6],
                     "images": (wd.get("count") or 0) if wd.get("ok") else None,
