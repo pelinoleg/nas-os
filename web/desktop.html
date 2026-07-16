@@ -2479,6 +2479,9 @@ let SET={accent:"coral",accentHex:"#405e6d",theme:"light",wpType:"url",wpUrl:WP_
  winBlur:60,winNoise:22,shadow:"lg",
  elevBaseLight:.3,elevBaseDark:.74,elevStep:.28,elevLight:.05,autoContrast:true,
  wallpaper:"midnight",lang:"en",
+ /* Touchscreen wallpaper (global, not themed — the local panel is always its own thing).
+    scrWpOwn off → the screen reuses the desktop wallpaper, optimized to its panel size. */
+ scrWpOwn:false,scrWpType:"url",scrWpUrl:"",scrWpVer:0,scrFxDim:44,scrFxBlur:27,scrFxNoise:100,
  /* File manager (shared across both themes, not in themeProfiles) */
  fmStart:"/mnt/storage",fmClick:"single",fmHidden:false,fmFoldersFirst:true,
  fmSortKey:"name",fmSortDir:1,fmIconSize:"m",fmThumbs:true,fmThumbFit:"contain",fmDateFmt:"dmy_hm",fmUpPar:2,fmTabSize:2,
@@ -2746,6 +2749,11 @@ let wallTimer=null;
 function startSlideshow(){if(wallTimer){clearInterval(wallTimer);wallTimer=null;}
  if(SET.wpSlide&&SET.wpType==="url"&&SET.wpUrl){const min=clampf(SET.wpSlideMin,1,1440)||30;wallTimer=setInterval(()=>refreshWall(true),min*60000);}}
 async function uploadWallFile(f){if(!f)return;const rd=new FileReader();rd.onload=async()=>{toast("Loading wallpaper…");const r=await api("/api/wallpaper/upload",{method:"POST",body:JSON.stringify({data:rd.result})});if(r&&r.ok){SET.wpType="upload";SET.wpVer=Date.now();applySettings();saveSettings();sampleWallLum();toast("Wallpaper set");if(winSettings._render)winSettings._render();}else toast("Error: "+((r&&r.log)||"?"));};rd.readAsDataURL(f);}
+// Touchscreen wallpaper: same endpoints as the desktop but with screen:true → the server keeps a separate
+// source (wallpaper-scr.*) and rebuilds the reduced ?screen=1 copy from it. The screen picks up scrWpVer on its next poll.
+async function setScrWallUrl(refresh){if(!SET.scrWpUrl){toast("Enter a URL");return;}toast(refresh?"Refreshing…":"Loading wallpaper…");const r=await api("/api/wallpaper/fetch",{method:"POST",body:JSON.stringify({url:SET.scrWpUrl,screen:true})});if(r&&r.ok){SET.scrWpType="url";SET.scrWpVer=Date.now();saveSettings();toast(refresh?"Touchscreen wallpaper updated":"Touchscreen wallpaper set");}else toast("Error: "+((r&&r.log)||"?"));}
+async function uploadScrWallFile(f,lb){if(!f)return;const rd=new FileReader();rd.onload=async()=>{toast("Loading wallpaper…");const r=await api("/api/wallpaper/upload",{method:"POST",body:JSON.stringify({data:rd.result,screen:true})});if(r&&r.ok){SET.scrWpType="upload";SET.scrWpVer=Date.now();saveSettings();toast("Touchscreen wallpaper set");if(lb)paintScrWpPrev(lb.querySelector("#scrWpPrev"));}else toast("Error: "+((r&&r.log)||"?"));};rd.readAsDataURL(f);}
+function paintScrWpPrev(box){if(!box)return;if(SET.scrWpVer){box.style.backgroundImage=`url(/api/wallpaper/img?screen=1&v=${SET.scrWpVer})`;box.classList.remove("empty");box.textContent="";}else{box.style.backgroundImage="";box.classList.add("empty");box.textContent=nasTr("no wallpaper set — using the desktop one");}}
 function saveSettings(){themeSnapshot(CUR_THEME);
  try{localStorage.setItem("nasdesk",JSON.stringify(SET));}catch(e){}
  api("/api/settings",{method:"POST",body:JSON.stringify({settings:SET})});}
@@ -8507,8 +8515,23 @@ function lsWall(lb){lb.innerHTML=`
    ${fxSlider("Dimming","fxDim",0,80,"%","A dark layer over the wallpaper — makes windows and text more readable.")}
    ${fxSlider("Blur","fxBlur",0,100,"px","Blurs the background — puts the focus on the windows.")}
    ${fxSlider("Grain / noise","fxNoise",0,100,"%","Film grain — softens gradient banding.")}
+  </div>
+  <div class="set-card"><div class="set-grp">Touchscreen wallpaper</div>
+   ${pToggle("Separate wallpaper for the touchscreen","Off — the local touchscreen shows the desktop wallpaper above, scaled down to its panel. On — pick a different image and its own effects here; it is still delivered as a reduced copy sized for the panel.","scrWpOwn","own image and effects for the local screen")}
+   <div id="scrWpArea" style="${SET.scrWpOwn?"":"display:none"}">
+    <div class="wp-prev" id="scrWpPrev" style="margin-top:11px"></div>
+    <div class="seg" id="scrWpSrc" style="margin:11px 0 12px">
+     <button data-s="url" class="${SET.scrWpType!=="upload"?"on":""}">${svg("globe",14)} From URL</button>
+     <button data-s="upload" class="${SET.scrWpType==="upload"?"on":""}">${svg("upload",14)} From computer</button></div>
+    <div id="scrWpBody"></div>
+    <div class="set-grp" style="margin-top:14px">Effects — for the touchscreen only</div>
+    ${fxSlider("Dimming","scrFxDim",0,80,"%","A dark layer over the touchscreen wallpaper.")}
+    ${fxSlider("Blur","scrFxBlur",0,100,"px","Blurs the touchscreen background.")}
+    ${fxSlider("Grain / noise","scrFxNoise",0,100,"%","Film grain on the touchscreen — softens gradient banding.")}
+   </div>
   </div>`;
  paintWpPrev(lb.querySelector("#wpPrev"));
+ scrWpRender(lb);
  const renderBody=()=>{const up=SET.wpType==="upload",wb=lb.querySelector("#wpBody");
   if(up){wb.innerHTML=`<button class="btn sm pri" id="wpFileBtn">${svg("upload",13)} Choose an image…</button><input type="file" id="wpFile" accept="image/*" style="display:none"><div class="mon-note">JPG / PNG / WebP / GIF, up to 30 MB. Stored on the server.</div>`;
     const fi=wb.querySelector("#wpFile");wb.querySelector("#wpFileBtn").onclick=()=>fi.click();fi.onchange=()=>uploadWallFile(fi.files[0]);
@@ -8518,7 +8541,23 @@ function lsWall(lb){lb.innerHTML=`
   }};
  renderBody();
  lb.querySelectorAll("#wpSrc button").forEach(b=>b.onclick=()=>{SET.wpType=b.dataset.s;lb.querySelectorAll("#wpSrc button").forEach(x=>x.classList.toggle("on",x.dataset.s===SET.wpType));renderBody();startSlideshow();});
- wireLook(lb);}
+ wireLook(lb);
+ // touchscreen wallpaper: the "own" toggle shows/hides its block and re-renders (wireLook's generic handler only saves)
+ const so=lb.querySelector('input[data-pt="scrWpOwn"]');if(so)so.onchange=()=>{SET.scrWpOwn=so.checked;saveSettings();lsWall(lb);};}
+// Touchscreen wallpaper block: source body (url/upload) + preview, wired like the desktop wallpaper but into scr* keys and the ?screen=1 copy.
+function scrWpRender(lb){
+ const src=lb.querySelector("#scrWpSrc");if(!src)return;   // block hidden (scrWpOwn off)
+ paintScrWpPrev(lb.querySelector("#scrWpPrev"));
+ const body=()=>{const up=SET.scrWpType==="upload",wb=lb.querySelector("#scrWpBody");
+  if(up){wb.innerHTML=`<button class="btn sm pri" id="scrWpFileBtn">${svg("upload",13)} Choose an image…</button><input type="file" id="scrWpFile" accept="image/*" style="display:none"><div class="mon-note">JPG / PNG / WebP / GIF, up to 30 MB. Stored on the server and scaled to the panel.</div>`;
+   const fi=wb.querySelector("#scrWpFile");wb.querySelector("#scrWpFileBtn").onclick=()=>fi.click();fi.onchange=()=>uploadScrWallFile(fi.files[0],lb);
+  }else{wb.innerHTML=`<input class="mono" id="scrWpUrl" style="width:100%;margin-bottom:9px" value="${att(SET.scrWpUrl||"")}" placeholder="https://…"><div style="display:flex;gap:8px"><button class="btn sm pri" id="scrWpSet">Install</button><button class="btn sm" id="scrWpRef">${svg("refresh",13)} Refresh</button></div><div class="mon-note">A link to an image for the local touchscreen. Delivered as a reduced copy sized for the panel.</div>`;
+   wb.querySelector("#scrWpSet").onclick=async()=>{SET.scrWpUrl=wb.querySelector("#scrWpUrl").value.trim();await setScrWallUrl();paintScrWpPrev(lb.querySelector("#scrWpPrev"));};
+   wb.querySelector("#scrWpRef").onclick=async()=>{await setScrWallUrl(true);paintScrWpPrev(lb.querySelector("#scrWpPrev"));};
+  }};
+ body();
+ src.querySelectorAll("button").forEach(b=>b.onclick=()=>{SET.scrWpType=b.dataset.s;src.querySelectorAll("button").forEach(x=>x.classList.toggle("on",x.dataset.s===SET.scrWpType));saveSettings();body();});
+}
 function lsBar(lb){lb.innerHTML=`
   <div class="set-card">
    ${pSlider("Icon size","mbIcon",.8,1.5,.05,"pct","Scale of the icons in the top bar.")}

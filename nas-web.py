@@ -10820,32 +10820,39 @@ def _wallpaper_path():
     g = sorted(glob.glob(os.path.join(NAS_CONFIG, "wallpaper.*")))
     return g[0] if g else ""
 
+def _wallpaper_scr_path():
+    # the touchscreen's own source image (separate from the desktop wallpaper).
+    # "wallpaper-scr.*" never matches the "wallpaper.*" glob above (no "wallpaper." prefix).
+    g = sorted(glob.glob(os.path.join(NAS_CONFIG, "wallpaper-scr.*")))
+    return g[0] if g else ""
+
 def _wallpaper_screen_refresh():
     """Wallpaper changed — rebuild the screen-sized copy without waiting for the first request."""
     threading.Thread(target=lambda: _safe(_wallpaper_screen), daemon=True).start()
 
 
-def _wallpaper_save(data):
+def _wallpaper_save(data, screen=False):
     ext = _img_ext(data)
     if not ext:
         return {"ok": False, "log": "not an image (need jpg/png/webp/gif)"}
     if len(data) > 30 * 1024 * 1024:
         return {"ok": False, "log": "file too large (>30 MB)"}
     os.makedirs(NAS_CONFIG, exist_ok=True)
-    for old in glob.glob(os.path.join(NAS_CONFIG, "wallpaper.*")):
+    base = "wallpaper-scr" if screen else "wallpaper"   # screen keeps its own source
+    for old in glob.glob(os.path.join(NAS_CONFIG, base + ".*")):
         try:
             os.remove(old)
         except OSError:
             pass
     try:
-        with open(os.path.join(NAS_CONFIG, "wallpaper" + ext), "wb") as f:
+        with open(os.path.join(NAS_CONFIG, base + ext), "wb") as f:
             f.write(data)
     except OSError as e:
         return {"ok": False, "log": str(e)}
     _wallpaper_screen_refresh()      # prepare the small-screen copy right away
     return {"ok": True, "ext": ext}
 
-def wallpaper_fetch(url):
+def wallpaper_fetch(url, screen=False):
     if not re.match(r"^https?://", url or ""):
         return {"ok": False, "log": "need an http(s) URL"}
     try:
@@ -10854,14 +10861,14 @@ def wallpaper_fetch(url):
             data = r.read(30 * 1024 * 1024 + 1)
     except Exception as e:
         return {"ok": False, "log": "failed to download: " + str(e)}
-    return _wallpaper_save(data)
+    return _wallpaper_save(data, screen)
 
-def wallpaper_upload(b64):
+def wallpaper_upload(b64, screen=False):
     try:
         data = base64.b64decode((b64 or "").split(",")[-1])
     except Exception:
         return {"ok": False, "log": "bad image data"}
-    return _wallpaper_save(data)
+    return _wallpaper_save(data, screen)
 
 # --------------------------------------------------------------------------- #
 #  USB auto-import: on inserting a flash drive, copy its contents into a chosen folder
@@ -12110,6 +12117,14 @@ def screen_payload(lang="", p2=False):
             look[k] = dark[k]
         elif k in ds:
             look[k] = ds[k]
+    # Touchscreen may override the wallpaper and its effects (Appearance → Wallpaper →
+    # "Separate wallpaper for the touchscreen"). wpVer bumps → the client re-fetches ?screen=1,
+    # which _wallpaper_screen() now builds from the screen's own source.
+    if ds.get("scrWpOwn"):
+        look["wpVer"] = ds.get("scrWpVer") or ds.get("wpVer") or 0
+        for src_k, dst_k in (("scrFxDim", "fxDim"), ("scrFxBlur", "fxBlur"), ("scrFxNoise", "fxNoise")):
+            if src_k in ds:
+                look[dst_k] = ds[src_k]
     cfg = load_screen()
     host = st.get("host") or socket.gethostname()
     return {"host": host, "mdns": host + ".local", "ip": st.get("ip") or "",
@@ -12215,21 +12230,31 @@ _WALL_SCR_LOCK = threading.Lock()
 
 
 def _wallpaper_screen(w=800, h=480):
-    src = _wallpaper_path()
+    # source: the touchscreen's own image when the user enabled it AND uploaded one;
+    # otherwise the desktop wallpaper (reduced to the panel size, as before).
+    src = ""
+    try:
+        if (load_settings() or {}).get("scrWpOwn"):
+            src = _wallpaper_scr_path()
+    except Exception:
+        pass
+    if not src:
+        src = _wallpaper_path()
     if not src:
         return ""
     dst = os.path.join(NAS_CONFIG, "wallpaper-screen.webp")
+    marker = os.path.join(NAS_CONFIG, "wallpaper-screen.src")
+    # Cache key = source path + its mtime: a plain "dst newer than src" check is wrong here,
+    # because switching to an OLDER source (e.g. turning the separate wallpaper off) must rebuild.
     try:
-        if os.path.isfile(dst) and os.path.getmtime(dst) >= os.path.getmtime(src):
-            return dst
+        want = "%s:%d" % (src, int(os.path.getmtime(src)))
     except OSError:
-        pass
+        want = src
+    if os.path.isfile(dst) and _read(marker) == want:
+        return dst
     with _WALL_SCR_LOCK:
-        try:                                   # while we waited for the lock, someone may have built it
-            if os.path.isfile(dst) and os.path.getmtime(dst) >= os.path.getmtime(src):
-                return dst
-        except OSError:
-            pass
+        if os.path.isfile(dst) and _read(marker) == want:   # built while we waited for the lock
+            return dst
         tmp = dst + ".tmp.webp"
         vf = ("scale=%d:%d:force_original_aspect_ratio=increase,crop=%d:%d" % (w, h, w, h))
         try:
@@ -12239,6 +12264,11 @@ def _wallpaper_screen(w=800, h=480):
             if p.returncode != 0 or not os.path.isfile(tmp):
                 return src                     # failed — serve the original, don't crash
             os.replace(tmp, dst)
+            try:
+                with open(marker, "w") as f:   # remember which source this copy was built from
+                    f.write(want)
+            except OSError:
+                pass
         except (OSError, subprocess.SubprocessError):
             return src
     return dst
@@ -13295,9 +13325,11 @@ class H(BaseHTTPRequestHandler):
             elif p == "/api/ops/clear":
                 self._body(); self._json(ops_hist_clear())
             elif p == "/api/wallpaper/fetch":
-                self._json(wallpaper_fetch(self._body().get("url", "")))
+                b = self._body()
+                self._json(wallpaper_fetch(b.get("url", ""), bool(b.get("screen"))))
             elif p == "/api/wallpaper/upload":
-                self._json(wallpaper_upload(self._body().get("data", "")))
+                b = self._body()
+                self._json(wallpaper_upload(b.get("data", ""), bool(b.get("screen"))))
             elif p == "/api/snippets":
                 b = self._body(); save_snippets(b.get("snippets", []))
                 self._json({"ok": True})
