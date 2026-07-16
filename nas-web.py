@@ -5055,7 +5055,7 @@ def _nb_is_junk(name):
 
 _NB_ROOT_SKIP = {"proc", "sys", "dev", "run", "tmp", "boot", "lost+found"}
 
-def _nb_ls(cfg, spec, timeout=30):
+def _nb_ls(cfg, spec, timeout=30, side=None):
     """--list-only of a remote path (spec is appended to the transport prefix as-is).
     side — a specific side (source/destination); without it the profile's remote
     side is used, as before."""
