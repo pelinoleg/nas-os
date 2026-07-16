@@ -244,11 +244,12 @@
   .kv:last-child{border-bottom:0}
   .kv span{color:var(--dim)} .kv b{font-weight:650;text-align:right}
   /* disk health detail: a block per disk (header + KV rows) — scales from 1 to many disks */
-  .dh-blk{padding:10px 0 6px;border-bottom:1px solid rgba(255,255,255,.09)}
+  .dh-blk{padding:14px 0 8px;border-bottom:1px solid rgba(255,255,255,.1)}
   .dh-blk:last-child{border-bottom:0}
-  .dh-h{display:flex;align-items:center;gap:9px;font-size:19px;margin-bottom:7px}
-  .dh-h b{font-weight:750} .dh-mod{color:var(--dim);font-size:14px;font-weight:500}
-  .dh-blk .kv{padding:5px 0}
+  .dh-h{display:flex;align-items:center;gap:10px;font-size:23px;margin-bottom:9px}
+  .dh-h b{font-weight:750} .dh-h .st2{font-size:16px} .dh-mod{color:var(--dim);font-size:16px;font-weight:500}
+  .dh-blk .kv{padding:8px 0;font-size:17px}
+  .dh-blk .kv span{font-size:15px}
   .pwr2{display:grid;grid-template-columns:1fr 1fr;gap:14px;height:100%;min-height:330px}
   .pbtn{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;
         border-radius:20px;background:rgba(255,255,255,.10);font-size:19px;font-weight:700;color:var(--ink)}
@@ -560,21 +561,24 @@ function renderP3(d){
       <div class="r2"><span class="nm">${esc(x.name)}</span>
         <span class="ago">${fmtIn(x.next)} · ${tat(x.next)}</span></div>`).join("")
       :`<div class="empty">nothing scheduled</div>`}</div>`;
-  const dk=d.disks||[];
+  // only disks that actually report SMART (real drives) — skip the SD card / empty readers
+  const dk=(d.disks||[]).filter(hasSmart);
   $("#c_sm").innerHTML=`<h2>Disk health${dk.some(x=>x.healthy===false)
       ?`<span class="r" style="color:var(--danger)">failure</span>`
       :`<span class="r">${dk.length||"—"}</span>`}</h2>
     <div class="body">${dk.length?dk.map(x=>{
       const st=x.healthy===false?"bd":x.healthy===true?"ok":"no";
       const v=x.healthy===false?"SMART failing":x.healthy===true?"SMART ok":"SMART —";
-      const bits=[x.temp?x.temp+" °C":"",x.hours!=null?"⏱ "+hrsFmt(x.hours):"",x.tran?x.tran.toUpperCase():"",v].filter(Boolean).join(" · ");
+      const bits=[x.temp?x.temp+" °C":"",x.hours!=null?hrsFmt(x.hours):"",x.tran?x.tran.toUpperCase():"",v].filter(Boolean).join(" · ");
       return `<div class="prow"><div class="t">
         <span class="st2 ${st}">●</span>
         <span class="nm">${esc(x.name)}${x.model?" · "+esc(x.model):""}</span>
         <span class="ago">${esc(x.size||"")}</span></div>
         <div class="run" style="color:var(--dim)">${esc(bits)}</div></div>`;}).join("")
-      :`<div class="empty">no disks</div>`}</div>`;
+      :`<div class="empty">no SMART-capable disks</div>`}</div>`;
 }
+// a disk worth showing in "Disk health": SMART actually responded (temperature, power-on, or a failing verdict)
+const hasSmart=x=>x.temp!=null||x.hours!=null||x.healthy===false;
 
 /* ---------- idle clock ---------- */
 let LAST_ACT=Date.now();
@@ -850,7 +854,7 @@ const SHEETS={
       :`<div class="empty">nothing scheduled</div>`, ""];},
 
   /* Disk health: SMART verdict, temperature, power-on time */
-  smart:d=>{const dk=d.disks||[];
+  smart:d=>{const dk=(d.disks||[]).filter(hasSmart);
     return ["Disk health", dk.length?dk.map(x=>{
       const st=x.healthy===false?"bd":x.healthy===true?"ok":"no";
       const verdict=x.healthy===false?"failing":x.healthy===true?"healthy":"no data";
