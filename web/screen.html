@@ -94,7 +94,10 @@
   .gauge .v{position:absolute;top:30px;left:0;right:0;text-align:center;font-size:26px;font-weight:700;
             font-variant-numeric:tabular-nums;line-height:1}
   .gauge .v small{font-size:12px;font-weight:600;color:var(--dim)}
-  .gauge .cap{font-size:10px;letter-spacing:.6px;text-transform:uppercase;color:var(--dim);font-weight:650;margin-top:1px}
+  .gauge .v.sv{font-size:18px;top:34px}   /* long values (e.g. 128 MB/s): smaller + lower so they don't touch the arc */
+  .gauge .v.sv small{font-size:10px}
+  .gauge .cap{font-size:10px;letter-spacing:.6px;text-transform:uppercase;color:var(--dim);font-weight:650;margin-top:1px;text-align:center}
+  .gauge .cap .csub{display:block;font-size:8px;letter-spacing:.2px;text-transform:none;color:var(--mut);font-weight:600;margin-top:1px}
 
   /* row of cards: two tiles instead of three — "Backups" and "USB import" carry rows
      with name, size and date, and they didn't fit in a third of the screen (Docker
@@ -426,8 +429,9 @@ const COL={ok:"var(--good)",warn:"var(--warn)",danger:"var(--danger)"};
 
 /* ---------- semicircular gauge ---------- */
 const AR=Math.PI*52;   // arc length, radius 52
-function gauge(cap,val,unit,pct,lvl,sheet){
+function gauge(cap,val,unit,pct,lvl,sheet,sub){
   const off=AR*(1-clampf(pct,0,1));
+  const long=(String(val).length+(unit?unit.length:0))>4;   // e.g. "128MB/s" — shrink so it stays inside the arc
   return `<div class="gauge g" data-sheet="${sheet}">
     <svg viewBox="0 0 132 74">
       <path d="M14,66 A52,52 0 0 1 118,66" fill="none" stroke="var(--track)" stroke-width="9" stroke-linecap="round"/>
@@ -435,8 +439,8 @@ function gauge(cap,val,unit,pct,lvl,sheet){
             stroke-dasharray="${AR.toFixed(1)}" stroke-dashoffset="${off.toFixed(1)}"
             style="transition:stroke-dashoffset .5s ease,stroke .3s"/>
     </svg>
-    <div class="v">${esc(val)}${unit?`<small>${esc(unit)}</small>`:""}</div>
-    <div class="cap">${esc(cap)}</div>
+    <div class="v${long?' sv':''}">${esc(val)}${unit?`<small>${esc(unit)}</small>`:""}</div>
+    <div class="cap">${esc(cap)}${sub?`<span class="csub">${esc(sub)}</span>`:""}</div>
   </div>`;
 }
 function renderGauges(d){
@@ -445,14 +449,15 @@ function renderGauges(d){
   const hasPool=!!(T.pool&&T.pool.raw), dk=hasPool?raw("pool"):raw("rootfs");
   const dp=dk.pct!=null?dk.pct:0, la=raw("load").load1||0, nc=raw("load").ncpu||4;
   const dt=d.dtemp;   // main-storage disk temperature (follows the "main volume" choice)
+  const sname=d.storage_name||d.dtemp_dev||"storage";   // volume label under the disk gauges → clearly the storage, not the system disk
   $("#gs").innerHTML=
     gauge("CPU",Math.round(cpu),"%",cpu/100,lvlOf(cpu,70,90),"cpu")
   + gauge("CPU temp",Math.round(tc),"°",tc/90,lvlOf(tc,62,75),"temp")
   + gauge("Memory",Math.round(ram),"%",ram/100,lvlOf(ram,75,90),"ram")
   + (()=>{const io=d.dio||0,rt=iorate(io);   // disk activity of the main storage (read+write), not the static system-disk fill
-      return gauge("Disk I/O",rt[0],rt[1],io/(250*1048576),0,"disk");})()
-  + (dt!=null ? gauge("Disk temp",Math.round(dt),"°",dt/90,lvlOf(dt,55,65),"dtemp")
-              : gauge("Disk temp","—","",0,0,"dtemp"));
+      return gauge("Disk I/O",rt[0],rt[1],io/(250*1048576),0,"disk",sname);})()
+  + (dt!=null ? gauge("Disk temp",Math.round(dt),"°",dt/90,lvlOf(dt,55,65),"dtemp",sname)
+              : gauge("Disk temp","—","",0,0,"dtemp",sname));
 }
 
 /* ---------- cards ---------- */
@@ -768,7 +773,7 @@ const SHEETS={
   temp:d=>["CPU temperature · last 24 h", `<div class="shchart big">${chart((((d.p2||{}).graphs||{}).temp||[]).filter(v=>v>0),"var(--warn)",360,r0,"°",true,90,80)}</div>`, ""],
   ram:d=>["Memory · last 24 h", `<div class="shchart big">${chart(((d.p2||{}).graphs||{}).mem,"var(--accent)",360,r0,"%",true,100)}</div>`, ""],
   disk:d=>["Disk activity · last 24 h", `<div class="shchart big">${chart(((d.p2||{}).graphs||{}).dio,"var(--good)",360,iofmt,"",true)}</div>`
-    +`<div class="run" style="color:var(--dim);text-align:center">read + write of the main storage (${esc(d.dtemp_dev||"main disk")}) · now ${iofmt(d.dio||0)}</div>`, ""],
+    +`<div class="run" style="color:var(--dim);text-align:center">read + write of ${esc(d.storage_name||d.dtemp_dev||"the main storage")} (not the system disk) · now ${iofmt(d.dio||0)}${d.fsw_scan?" · integrity scan running":""}</div>`, ""],
   dtemp:d=>["Disk temperature · last 24 h", `<div class="shchart big">${chart((((d.p2||{}).graphs||{}).dtemp||[]).filter(v=>v>0),"var(--warn)",360,r0,"°",true,90,80)}</div>`
     +`<div class="run" style="color:var(--dim);text-align:center">${d.dtemp!=null?"now "+d.dtemp+" °C · "+(d.dtemp_dev||"main disk")+" — ":""}the graph fills over 24 h, starting from now</div>`, ""],
 

@@ -12490,6 +12490,8 @@ def screen_payload(lang="", p2=False):
             "throttled": st.get("throttled"), "psu_ma": st.get("psu_ma"),
             "dtemp": _dt[0], "dtemp_dev": _dt[1],   # main-storage disk temperature (+ short label)
             "dio": st.get("dio"),                   # main-storage disk throughput B/s (read+write)
+            "storage_name": _safe(lambda: storage_conf().get("label") or _dt[1] or "storage"),
+            "fsw_scan": _safe(lambda: (fsw_status().get("progress") or {}).get("status", "idle") != "idle"),
             "asleep": bool(_SCR["sleep"]),
             # the backlight is currently off (sleep/night/idle): the first tap should
             # only wake, not press the tile under the finger — the client puts up a shield
