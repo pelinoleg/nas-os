@@ -9581,7 +9581,7 @@ def _fsw_human(n):
 def fsw_load():
     d = {"enabled": True, "roots": [], "exclude": list(FSW_DEF_EXCLUDE),
          "exclude_re": [], "time": "02:30", "verify_days": 30,
-         "verify_minutes": 20, "guard_pct": 25}
+         "verify_minutes": 20, "guard_pct": 25, "interval_days": 1}
     try:
         with open(FSW_CFG) as f:
             u = json.load(f)
@@ -9623,7 +9623,7 @@ def fsw_save(patch):
     if "time" in patch and re.match(r"^\d\d:\d\d$", str(patch.get("time") or "")):
         cur["time"] = patch["time"]
     for k, lo, hi in (("verify_days", 1, 365), ("verify_minutes", 1, 240),
-                      ("guard_pct", 0, 100)):
+                      ("guard_pct", 0, 100), ("interval_days", 1, 90)):
         if k in patch:
             try:
                 cur[k] = max(lo, min(hi, int(patch[k])))
@@ -10216,6 +10216,7 @@ def _fsw_tick():
     day = time.strftime("%Y-%m-%d")
     if _fsw_auto_day == day or time.strftime("%H:%M") < cfg.get("time", "02:30"):
         return
+    _fsw_auto_day = day
     try:
         db = _fsw_db()
         try:
@@ -10224,9 +10225,11 @@ def _fsw_tick():
             db.close()
     except Exception:
         last = None
-    _fsw_auto_day = day
-    if last and time.strftime("%Y-%m-%d", time.localtime(last.get("ts", 0))) == day:
-        return                                    # already scanned today (manual)
+    # only scan every N days (user-configurable), not necessarily nightly — saves SD writes
+    interval = max(1, int(cfg.get("interval_days", 1) or 1))
+    last_ts = (last or {}).get("ts", 0)
+    if last_ts and time.time() - last_ts < interval * 86400 - 3600:   # not due yet (1 h slack)
+        return
     fsw_start(manual=False)
 
 def fs_grep(path, query, limit=200):

@@ -7524,12 +7524,14 @@ function winFsHistory(){openWin("__fsw","File history",(body,win)=>{
   const c=(ST&&ST.config)||{};
   pane.innerHTML=`
    <div class="set-title" style="margin:0">Schedule & protection</div>
-   <div class="mon-row"><span>Scan every night</span><label class="tgl"><input type="checkbox" id="fwEn"${c.enabled?" checked":""}><span class="sl"></span></label></div>
+   <div class="mon-row"><span>Automatic scan</span><label class="tgl"><input type="checkbox" id="fwEn"${c.enabled?" checked":""}><span class="sl"></span></label></div>
    <div style="display:flex;gap:10px;flex-wrap:wrap">
+    <div class="field" style="flex:1;min-width:120px"><label>Scan every, days</label><input class="mono" id="fwInt" value="${att(c.interval_days||1)}"></div>
     <div class="field" style="flex:1;min-width:120px"><label>Scan time</label><input class="mono" id="fwTime" value="${att(c.time||"02:30")}"></div>
     <div class="field" style="flex:1;min-width:120px"><label>Re-read cycle, days</label><input class="mono" id="fwVd" value="${att(c.verify_days)}"></div>
     <div class="field" style="flex:1;min-width:120px"><label>Re-read per night, minutes</label><input class="mono" id="fwVm" value="${att(c.verify_minutes)}"></div>
     <div class="field" style="flex:1;min-width:120px"><label>Deletion guard, %</label><input class="mono" id="fwGp" value="${att(c.guard_pct)}"></div></div>
+   <div class="set-sub">Scan frequency: 1 = every night, 7 = weekly, 14 = every two weeks. Less often means fewer writes to the SD card — pick what fits how often your files change.</div>
    <div class="set-sub">Guard: if more than this percentage of files (and at least 20) vanish in one scan, the deletions are NOT recorded and a red banner appears — protection against a dropped-off disk and against mass “deleted itself”. A threshold of 0 disables the guard.</div>
    <div class="set-sub">Push alerts (bitrot, mass disappearance, unavailable folder, many deletions) are configured in “Settings → Notifications”, the “Data protection” group.</div>
    <div class="set-savebar"><span class="sb-left" id="fwStat2"></span><button class="btn sm pri" id="fwSave2">${svg("save",13)} Save</button></div>
@@ -7541,7 +7543,7 @@ function winFsHistory(){openWin("__fsw","File history",(body,win)=>{
    <div class="set-sub">Clearing the journal erases only the history. Resetting the index also erases the hashes: the next scan will re-index everything (without “added” events) and start a new integrity cycle.</div>`;
   g("#fwSave2").onclick=async()=>{
    const r=await api("/api/fsw/config",{method:"POST",body:JSON.stringify({
-    enabled:g("#fwEn").checked,time:g("#fwTime").value.trim(),
+    enabled:g("#fwEn").checked,time:g("#fwTime").value.trim(),interval_days:g("#fwInt").value,
     verify_days:g("#fwVd").value,verify_minutes:g("#fwVm").value,guard_pct:g("#fwGp").value})});
    const st=g("#fwStat2");
    if(r&&r.ok){st.style.color="var(--good)";st.textContent=nasTr("✓ saved");ST=null;refreshPane(true);}
