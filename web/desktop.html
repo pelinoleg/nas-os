@@ -3644,6 +3644,7 @@ function diskDetail(x,reload){
      b.onclick=async()=>{paintSpd(true);
        const r=await api("/api/disk/speedtest",{method:"POST",body:JSON.stringify({dev:x.path})});
        if(LIVE&&r&&r.ok){cur={read:r.read_mbps,write:r.write_mbps,t:r.t};}
+       else if(r&&r.busy)toast(r.log);   // disk busy with a backup — not an error, old value kept
        else toast(LIVE?("Error: "+((r&&r.log)||"")):"Demo");
        paintSpd(false);};
      sp.appendChild(b);};

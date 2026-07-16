@@ -824,6 +824,12 @@ def disk_speedtest(dev):
     r = _run(["dd", "if=" + dev, "of=/dev/null", "bs=4M", "count=256", "iflag=direct"], timeout=120)
     read_mbps = _dd_mbps(r.get("log", ""))
     if read_mbps is None:
+        # a running backup keeps the disk busy — the read stalls and times out.
+        # say so plainly (a cryptic dd error reads as "the test is broken"); the
+        # previous measurement stays on the card because we don't overwrite it.
+        if nb_any_active():
+            return {"ok": False, "busy": True,
+                    "log": "disk busy — a backup is running; measure again once it finishes"}
         return {"ok": False, "log": "measurement failed: " + (r.get("log", "")[-120:])}
     # write: to a mounted rw point with spare space; for the system disk
     # (no "own" points besides / and /boot) write to the temp dir /var/tmp
