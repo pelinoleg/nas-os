@@ -12274,7 +12274,8 @@ def _screen_heavy():
                    "used": (d.get("usage") or {}).get("used"),
                    "dev": d.get("path") or "",
                    "removable": bool(d.get("removable")) or d.get("tran") == "usb",
-                   "hours": sm.get("power_on_hours")})
+                   "serial": d.get("serial") or "",
+                   "hours": sm.get("hours") or sm.get("power_on_hours")})
     # system — always first: the screen fits 4 rows, and it must not
     # scroll out of them because of alphabetical order
     dk.sort(key=lambda x: (0 if (x["role"] == "system" or "/" in x["mounts"]) else 1,
