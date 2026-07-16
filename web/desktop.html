@@ -2300,7 +2300,7 @@
 
 <div class="mb-grad"></div>
 <div class="menubar">
-  <div class="mb-brand"><img class="mb-logo" src="/icon-flat.svg" alt="Raspberry Pi" draggable="false"><span id="brandName">pi5.local</span></div>
+  <div class="mb-brand"><img class="mb-logo" src="/icon-flat.svg" alt="Raspberry Pi" draggable="false"><span id="brandName">nas.local</span></div>
   <span class="mb-sep"></span>
   <button class="mb-theme" id="lpBtn" title="All apps"></button>
   <div class="winbar" id="winbar"></div>
@@ -2786,36 +2786,36 @@ function saveSettings(){themeSnapshot(CUR_THEME);
 
 /* api with mock */
 const MOCK={
- sysconf:{system:{hostname:"pi5",timezone:"Europe/Madrid",time_synced:true,chrony:{installed:false,active:false},fstrim:{installed:true,active:true,enabled:true},unattended:false,journald_max:""},
-   network:{iface:"wlan0",ip:"192.168.1.48",prefix:"24",gw:"192.168.1.1",dns:"192.168.1.1",method:"auto",wifi:true,wifi_ps_off:true,avahi:{installed:true,active:true,enabled:true}},
+ sysconf:{system:{hostname:"nas",timezone:"Etc/UTC",time_synced:true,chrony:{installed:false,active:false},fstrim:{installed:true,active:true,enabled:true},unattended:false,journald_max:""},
+   network:{iface:"wlan0",ip:"192.168.1.10",prefix:"24",gw:"192.168.1.1",dns:"192.168.1.1",method:"auto",wifi:true,wifi_ps_off:true,avahi:{installed:true,active:true,enabled:true}},
    security:{ufw:{installed:false,active:false,ports:[]},fail2ban:{installed:false,active:false},log2ram:{installed:false,active:false}},
    pi:{model:"Raspberry Pi 5 Model B Rev 1.0",firmware:"2026/05/26",eeprom:"2026/05/26",temp:52.4,throttled:{raw:"0x0",now:[],ever:[]},usbpower:false,pcie3:false,cgroup:false,watchdog:false,zram:{installed:false,active:false},governor:{current:"ondemand",available:["conservative","ondemand","userspace","powersave","performance","schedutil"],adaptive:{installed:false,active:false}}}},
- stats:{host:"pi5",ip:"192.168.1.48",cpu:6.4,temp:55.1,throttled:{raw:"0x0",ok:true},psu_ma:5000,mem:{total:8455000000,used:760000000,pct:9},
+ stats:{host:"nas",ip:"192.168.1.10",cpu:6.4,temp:55.1,throttled:{raw:"0x0",ok:true},psu_ma:5000,mem:{total:8455000000,used:760000000,pct:9},
    disk_pool:{path:"/mnt/storage",total:1000000000000,used:3200000000,pct:0.3},net:{rx:184000,tx:42000},iface:"wlan0",uptime:19218},
  desktop:{apps:[
-   {container:"dockge",name:"Dockge",url:"http://pi5.local:5001",icon:"",running:true},
-   {container:"cronmaster",name:"Cronmaster",url:"http://pi5.local:8123",icon:"",running:true},
-   {container:"jellyfin",name:"Jellyfin",url:"http://pi5.local:8096",icon:"",running:true},
-   {container:"vaultwarden",name:"Vaultwarden",url:"http://pi5.local:8200",icon:"",running:false}]},
+   {container:"dockge",name:"Dockge",url:"http://nas.local:5001",icon:"",running:true},
+   {container:"cronmaster",name:"Cronmaster",url:"http://nas.local:8123",icon:"",running:true},
+   {container:"jellyfin",name:"Jellyfin",url:"http://nas.local:8096",icon:"",running:true},
+   {container:"vaultwarden",name:"Vaultwarden",url:"http://nas.local:8200",icon:"",running:false}]},
  cron:{ok:true,jobs:[
    {id:"root-0",schedule:"0 3 * * *",command:"/usr/local/bin/nas-snapraid.sh sync",comment:"SnapRAID sync",user:"root",isPaused:false},
    {id:"root-1",schedule:"0 5 * * 0",command:"snapraid scrub -p 12",comment:"SnapRAID scrub (Sun)",user:"root",isPaused:false},
    {id:"root-2",schedule:"*/15 * * * *",command:"/usr/local/bin/nas-health.sh",comment:"Health check",user:"root",isPaused:true}],
    stats:{uptime:"5 days",cpu:{usage:7,cores:4},memory:{usage:9,total:"8 GB"}}},
- fs:{ok:true,path:"/home/oleg",parent:"/home",entries:[
-   {name:"services",path:"/home/oleg/services",type:"dir",size:0},
-   {name:"web",path:"/home/oleg/web",type:"dir",size:0},
-   {name:"nas-web.py",path:"/home/oleg/nas-web.py",type:"file",size:52000},
-   {name:"nas-wizard.sh",path:"/home/oleg/nas-wizard.sh",type:"file",size:99000}]},
+ fs:{ok:true,path:"/home/nas",parent:"/home",entries:[
+   {name:"services",path:"/home/nas/services",type:"dir",size:0},
+   {name:"web",path:"/home/nas/web",type:"dir",size:0},
+   {name:"nas-web.py",path:"/home/nas/nas-web.py",type:"file",size:52000},
+   {name:"nas-wizard.sh",path:"/home/nas/nas-wizard.sh",type:"file",size:99000}]},
  disks:{disks:[
    {name:"nvme0n1",path:"/dev/nvme0n1",size:"931.5G",model:"Samsung SSD 970 EVO Plus 1TB",tran:"nvme",role:"data",mount:"/mnt/disk1",usage:{pct:0.3,total:1000000000000,used:3200000000},smart:{temp:41,healthy:true,hours:120}},
    {name:"sda",path:"/dev/sda",size:"3.6T",model:"WD Elements 4TB",tran:"usb",role:"parity",mount:"/mnt/parity1",usage:{pct:0.1,total:4000000000000,used:4000000000},smart:{temp:38,healthy:true,hours:60}},
    {name:"mmcblk0",path:"/dev/mmcblk0",size:"59.6G",model:"SD",tran:"mmc",role:"system",mount:"/boot/firmware",usage:{pct:15,total:59000000000,used:8800000000},smart:null}]},
- creds:{creds:[{service:"Cockpit",url:"https://pi5.local:9090",login:"oleg",pass:"·system·"},
-   {service:"Syncthing",url:"http://pi5.local:8384",login:"admin",pass:"sync-9f2a"},
-   {service:"NextExplorer",url:"http://pi5.local:3000",login:"oleg@pel.in",pass:"NX-secret-01"}]},
+ creds:{creds:[{service:"Cockpit",url:"https://nas.local:9090",login:"admin",pass:"·system·"},
+   {service:"Syncthing",url:"http://nas.local:8384",login:"admin",pass:"sync-9f2a"},
+   {service:"NextExplorer",url:"http://nas.local:3000",login:"admin@example.com",pass:"NX-secret-01"}]},
  settings:{settings:{}},files:{files:[]},disk:{ok:false,log:"SMART available as root (demo mode)"},
- processes:{ncpu:4,count:166,processes:[{pid:3173,name:"claude",cmd:"claude",user:"oleg",cpu:11.8,mem:7.1,rss:600000000},{pid:9176,name:"python3",cmd:"nas-web.py",user:"oleg",cpu:7.8,mem:0.3,rss:26000000},{pid:512,name:"dockerd",cmd:"/usr/bin/dockerd",user:"root",cpu:1.2,mem:2.1,rss:180000000},{pid:640,name:"cockpit-ws",cmd:"cockpit-ws",user:"root",cpu:0.4,mem:1.1,rss:42000000},{pid:1,name:"systemd",cmd:"/sbin/init",user:"root",cpu:0,mem:0.2,rss:12000000}]},
+ processes:{ncpu:4,count:166,processes:[{pid:3173,name:"claude",cmd:"claude",user:"nas",cpu:11.8,mem:7.1,rss:600000000},{pid:9176,name:"python3",cmd:"nas-web.py",user:"nas",cpu:7.8,mem:0.3,rss:26000000},{pid:512,name:"dockerd",cmd:"/usr/bin/dockerd",user:"root",cpu:1.2,mem:2.1,rss:180000000},{pid:640,name:"cockpit-ws",cmd:"cockpit-ws",user:"root",cpu:0.4,mem:1.1,rss:42000000},{pid:1,name:"systemd",cmd:"/sbin/init",user:"root",cpu:0,mem:0.2,rss:12000000}]},
  systemd:{units:[{unit:"docker.service",load:"loaded",active:"active",sub:"running",desc:"Docker Application Container Engine"},{unit:"cockpit.socket",load:"loaded",active:"active",sub:"listening",desc:"Cockpit Web Service Socket"},{unit:"smartd.service",load:"loaded",active:"active",sub:"running",desc:"SMART Daemon"},{unit:"ssh.service",load:"loaded",active:"active",sub:"running",desc:"OpenBSD Secure Shell server"},{unit:"snapraid-sync.timer",load:"loaded",active:"active",sub:"waiting",desc:"Daily SnapRAID sync"}]},
 };
 let LIVE=false;
@@ -4007,7 +4007,7 @@ function winTerminal(initCmd,execC){openWin("__term","Terminal",(body,win)=>{
  function termPrev(){const th=termTheme(),tw=+SET.termWeight||400,lh=+SET.termLh||1.15;
    const c=k=>th[k];
    return `<div class="tcfg-prev" style="background:${th.background};color:${th.foreground};font-family:${termFont()};font-weight:${tw};line-height:${lh}">`+
-     `<span style="color:${c("green")}">oleg@pi5</span><span style="color:${c("brightBlack")}">:</span><span style="color:${c("blue")}">~/nas-os</span>$ ls -l<br>`+
+     `<span style="color:${c("green")}">admin@nas</span><span style="color:${c("brightBlack")}">:</span><span style="color:${c("blue")}">~/nas-os</span>$ ls -l<br>`+
      `<span style="color:${c("blue")}">web/</span>  <span style="color:${c("cyan")}">config/</span>  nas-web.py  <span style="color:${c("yellow")}">setup.sh</span>  <span style="color:${c("red")}">error.log</span>`+
      `</div>`;}
  function applyTbg(){const t=termTheme();body.style.setProperty("--tbg",t.background);body.style.setProperty("--tcur",t.cursor+"88");}applyTbg();
@@ -4708,7 +4708,7 @@ function winVault(){openWin("__vault","Credentials vault",body=>{
  const addForm=()=>{const s=document.getElementById("scrim");
   s.innerHTML=`<div class="dialog"><h3>New credential</h3><p>Service login and password. Stored locally and protected from unauthorized access.</p>
    <div class="field"><label>Service</label><input id="av-s" placeholder="Immich"></div>
-   <div class="field"><label>Address</label><input id="av-u" class="mono" placeholder="http://pi5.local:2283"></div>
+   <div class="field"><label>Address</label><input id="av-u" class="mono" placeholder="http://nas.local:2283"></div>
    <div class="field"><label>Login</label><input id="av-l"></div>
    <div class="field"><label>Password</label><input id="av-p"></div>
    <div class="r"><button class="btn" id="av-c">Cancel</button><button class="btn pri" id="av-ok">Add</button></div></div>`;
@@ -8931,7 +8931,7 @@ function systemTab(tc){withSysc(tc,()=>{const s=SYSC.system||{};
  tc.innerHTML=`${rebootBan()}
   <h3 class="set-title">System</h3><p class="set-sub">Server identity, time and maintenance.</p>
   <div class="srow"><div class="srow-l"><div class="srow-t">Hostname${tipHTML("Network name of the NAS. The server is visible as <name>.local (mDNS) and in Samba. Changes /etc/hostname.")}</div><div class="srow-d">now: ${esc(s.hostname||"?")}</div></div><div class="srow-c"><input class="mono" id="stHost" value="${att(s.hostname||"")}"><button class="btn sm" id="stHostA">Apply</button></div></div>
-  <div class="srow"><div class="srow-l"><div class="srow-t">Time zone${tipHTML("Local time in logs, cron and timers. Area/City format, e.g. Europe/Madrid.")}</div><div class="srow-d">now: ${esc(s.timezone||"?")}</div></div><div class="srow-c"><input class="mono" id="stTz" value="${att(s.timezone||"")}" placeholder="Europe/Madrid"><button class="btn sm" id="stTzA">Apply</button></div></div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Time zone${tipHTML("Local time in logs, cron and timers. Area/City format, e.g. Europe/London.")}</div><div class="srow-d">now: ${esc(s.timezone||"?")}</div></div><div class="srow-c"><input class="mono" id="stTz" value="${att(s.timezone||"")}" placeholder="Europe/London"><button class="btn sm" id="stTzA">Apply</button></div></div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Pool alias${tipHTML("An extra name for the /mnt/storage pool in the system root — a symlink, both paths work at once. Handy if the pool on another NAS is called /volume2: scripts and paths will match. Empty field — alias disabled.")}</div><div class="srow-d" id="stAliasCur">…</div></div><div class="srow-c"><input class="mono" id="stAlias" placeholder="/volume2 (empty = off)"><button class="btn sm" id="stAliasA">Apply</button></div></div>
   ${svcRow("Time synchronization (chrony)","Keeps the Pi clock accurate via the internet; replaces systemd-timesyncd. Important for backup timestamps, logs and TLS.","chrony",s.chrony,"accurate-time NTP client"+(s.time_synced?" · synchronized":""))}
   ${tglRow("Scheduled TRIM","Weekly frees unused SSD/NVMe blocks — maintains write speed and lifespan. For SSD/NVMe, not for HDD.","fstrim",s.fstrim&&s.fstrim.active,"fstrim.timer, weekly TRIM")}
@@ -8961,7 +8961,7 @@ function systemTab(tc){withSysc(tc,()=>{const s=SYSC.system||{};
  tc.querySelector("#mWeb").onclick=()=>confirmDlg("Restart","Restart the web panel? The connection will drop briefly.",()=>sconf("restart_web",1));
 });}
 /* --- settings: Network --- */
-function networkTab(tc){withSysc(tc,()=>{const n=SYSC.network||{};const manual=n.method==="manual";const host=(SYSC.system&&SYSC.system.hostname)||location.hostname.split(".")[0]||"pi5";
+function networkTab(tc){withSysc(tc,()=>{const n=SYSC.network||{};const manual=n.method==="manual";const host=(SYSC.system&&SYSC.system.hostname)||location.hostname.split(".")[0]||"nas";
  tc.innerHTML=`${rebootBan()}
   <h3 class="set-title">Network</h3><p class="set-sub">Connected via <b>${esc(n.iface||"?")}</b> · ${esc(n.ip||"?")} · gateway ${esc(n.gw||"?")}</p>
   <div class="set-grp">IP address</div>
@@ -9198,7 +9198,7 @@ function motdTab(tc){
   <div class="srow"><div class="srow-l"><div class="srow-t">Logo</div><div class="srow-d">NAS-OS banner in Raspberry Pi colours</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="moG"><span class="sl"></span></label></div></div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Custom text</div><div class="srow-d">free-form header shown above the summary</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="moT"><span class="sl"></span></label></div></div>
   <div class="srow"><div class="srow-l"><div class="srow-t">System summary</div><div class="srow-d">uptime, temperature, memory, pool, address, containers</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="moI"><span class="sl"></span></label></div></div>
-  <div class="srow"><div class="srow-l"><div class="srow-t">Kernel line${tipHTML("The first line «Linux pi5 6.18… aarch64». Printed by /etc/update-motd.d/10-uname — we clear its execute bit, the file stays in place.")}</div><div class="srow-d">Linux pi5 … aarch64</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="moU"><span class="sl"></span></label></div></div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Kernel line${tipHTML("The first line «Linux nas 6.18… aarch64». Printed by /etc/update-motd.d/10-uname — we clear its execute bit, the file stays in place.")}</div><div class="srow-d">Linux nas … aarch64</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="moU"><span class="sl"></span></label></div></div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Cockpit banner${tipHTML("The «Web console: https://…:9090/» line. Added by the /etc/motd.d/cockpit symlink — we remove the link, Cockpit itself keeps running.")}</div><div class="srow-d">Web console: https://…:9090/</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="moC"><span class="sl"></span></label></div></div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Last login${tipHTML("The «Last login: …» line is printed by sshd itself, not by the login message. Disabled with PrintLastLog no in /etc/ssh/sshd_config.d/; the config is validated before the service is reloaded.")}</div><div class="srow-d">Last login: … from …</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="moL"><span class="sl"></span></label></div></div>
   <textarea id="moTx" class="motd-ta" spellcheck="false" placeholder="Login message — Latin characters only"></textarea>
@@ -9873,7 +9873,7 @@ function syncUsbOps(jobs){
   }});}
 
 async function poll(){const s=await api("/api/stats");LAST=s;pushHist(s);paintTray(s);paintSys(s);
- const bn=document.getElementById("brandName");if(bn)bn.textContent=(s.host||location.hostname.split(".")[0]||"pi5")+".local";
+ const bn=document.getElementById("brandName");if(bn)bn.textContent=(s.host||location.hostname.split(".")[0]||"nas")+".local";
  const nr=!!(s&&s.nb_running);if(nr!==NB_RUNNING){NB_RUNNING=nr;renderDock();}
  syncUsbOps(s&&s.usb_import);
  if(OPEN.__sys&&OPEN.__sys._sub)OPEN.__sys._sub(s);}
@@ -9906,11 +9906,11 @@ function maybeOnboard(){let done=false;try{done=!!SET.onboarded||localStorage.ge
  try{const l=localStorage.getItem("nasdesk");if(l)SET=Object.assign(SET,JSON.parse(l));}catch(e){}
  applySettings();
  // the server is the source of truth; we cache in THIS origin's localStorage so that the next
- // load (including via a different address pi5.local↔IP) doesn't start from the default theme
+ // load (including via a different address nas.local↔IP) doesn't start from the default theme
  try{const sv=await api("/api/settings");if(sv&&sv.settings&&Object.keys(sv.settings).length){
    SET=Object.assign(SET,sv.settings);CUR_THEME=null;applySettings();
    try{localStorage.setItem("nasdesk",JSON.stringify(SET));}catch(e){}}}catch(e){}
- // window positions/sizes come from the server (they survive localStorage clearing and address changes pi5.local↔IP); local edits on top
+ // window positions/sizes come from the server (they survive localStorage clearing and address changes nas.local↔IP); local edits on top
  try{const wp=await api("/api/winpos");if(wp&&wp.winpos&&Object.keys(wp.winpos).length)WINPOS=Object.assign({},wp.winpos,WINPOS);}catch(e){}
  const tb=document.getElementById("themeBtn");if(tb)tb.onclick=cycleTheme;
  const pb=document.getElementById("powerBtn");
