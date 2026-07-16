@@ -4164,7 +4164,7 @@ function svcJournal(unit){openWin("jr:"+unit,"Journal · "+unit.replace(".servic
 },{w:780,h:540});}
 
 /* ===== Creating/editing systemd unit files ===== */
-const UNIT_TEMPLATE="[Unit]\nDescription=My service\nAfter=network.target\n\n[Service]\nType=simple\nExecStart=/usr/local/bin/myscript.sh\nRestart=on-failure\nUser=oleg\n\n[Install]\nWantedBy=multi-user.target\n";
+const unitTemplate=()=>"[Unit]\nDescription=My service\nAfter=network.target\n\n[Service]\nType=simple\nExecStart=/usr/local/bin/myscript.sh\nRestart=on-failure\nUser="+(USER_NAME||"root")+"\n\n[Install]\nWantedBy=multi-user.target\n";
 function newUnitDlg(after){const s=document.getElementById("scrim");
  s.innerHTML=`<div class="dialog"><h3>New service (unit)</h3>
    <div class="field"><label>Name (suffix optional → .service)</label><input id="nuN" placeholder="my-app.service"></div>
@@ -4173,7 +4173,7 @@ function newUnitDlg(after){const s=document.getElementById("scrim");
  s.classList.add("show");s.querySelector("#nuN").focus();s.querySelector("#nuX").onclick=()=>s.classList.remove("show");
  s.querySelector("#nuO").onclick=async()=>{let name=s.querySelector("#nuN").value.trim();if(name&&!/\.(service|timer|socket|mount|path|target)$/.test(name))name+=".service";
    if(!/^[\w@.\-]+\.(service|timer|socket|mount|path|target)$/.test(name)){toast("A name like my-app.service");return;}
-   const r=await api("/api/unit/create",{method:"POST",body:JSON.stringify({name,content:UNIT_TEMPLATE})});
+   const r=await api("/api/unit/create",{method:"POST",body:JSON.stringify({name,content:unitTemplate()})});
    if(r&&r.ok){s.classList.remove("show");after&&after();editUnit(name,after);}else toast(LIVE?"Error: "+((r&&r.log)||""):"Demo");};}
 function editUnit(name,after){openWin("unit:"+name,"Unit · "+name,body=>{
  body.style.display="flex";body.style.flexDirection="column";body.style.padding="0";let cm=null;
@@ -5065,6 +5065,7 @@ function fmIcon(name,type,size){const k=fmKind(name,type);
  if(k==="folder")return `<svg class="fmico" viewBox="0 0 24 24" width="${size}" height="${size}"><path fill="#E0A63C" d="M2.8 6.4c0-1 .8-1.8 1.8-1.8h4.1c.5 0 1 .2 1.35.58L11.3 6.5h8.1c1 0 1.8.8 1.8 1.8v1.1H2.8z"/><path fill="#F5C24C" d="M2.2 9.4c0-.9.72-1.6 1.6-1.6h16.4c.9 0 1.6.72 1.6 1.6l-.66 8.1c-.075.92-.84 1.62-1.76 1.62H4.62c-.92 0-1.685-.7-1.76-1.62z"/></svg>`;
  const c=FM_ICO_C[k]||FM_ICO_C.file;
  return `<svg class="fmico" viewBox="0 0 24 24" width="${size}" height="${size}"><path fill="${c[0]}" d="M6 2.6h7L19 8.6V19a2.4 2.4 0 0 1-2.4 2.4H6A2.4 2.4 0 0 1 3.6 19V5A2.4 2.4 0 0 1 6 2.6z"/><path fill="${c[1]}" d="M13 2.6l6 6h-4.5A1.5 1.5 0 0 1 13 7.1z"/>${FM_GLYPH[k]||""}</svg>`;}
+let USER_NAME="root";  // box user (from /api/desktop)
 let HOME_DIR="/root";   // real home dir of the box's user — filled from /api/desktop (pollApps)
 const fmChips=()=>[["Home",HOME_DIR],["Storage","/mnt/storage"],["Stacks","/opt/stacks"],["Configs","/etc"],["Logs","/var/log"],["Root","/"]];
 /* Ballast from other OSes and NAS firmware: NEVER shown, even with "show hidden".
@@ -6198,7 +6199,7 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
    <div class="nb-help" id="cHelp"><b>${esc(mh.t)}</b><span>${esc(mh.d)}</span></div>
    ${ssh?`<div class="srow"><div class="srow-l"><div class="srow-t">Server type</div><div class="srow-d">${rnet?"rsync.net: paths are relative to your home folder (no leading /), and the deleted-files archive needs no pruning — the account keeps ZFS snapshots itself":"a standard server with SSH and rsync (another NAS, a VPS, a relative's machine)"}</div></div><div class="srow-c"><div class="seg" id="cProv"><button data-v="" class="${rnet?"":"on"}">Standard</button><button data-v="rsyncnet" class="${rnet?"on":""}">rsync.net</button></div></div></div>
    <div class="srow"><div class="srow-l"><div class="srow-t">Server address</div></div><div class="srow-c"><input class="mono" id="cHost" value="${att(c.host||"")}" placeholder="${rnet?"usw-s001.rsync.net":"192.168.1.50"}"></div></div>
-   <div class="srow"><div class="srow-l"><div class="srow-t">User</div></div><div class="srow-c"><input class="mono" id="cUser" value="${att(c.user||"")}" placeholder="${rnet?"de1234":"oleg"}"></div></div>
+   <div class="srow"><div class="srow-l"><div class="srow-t">User</div></div><div class="srow-c"><input class="mono" id="cUser" value="${att(c.user||"")}" placeholder="${rnet?"de1234":"root"}"></div></div>
    <div class="srow"><div class="srow-l"><div class="srow-t">Sign-in method</div><div class="srow-d">${key?"the panel's key — safer for automation, no password stored":"the password is stored in the config (in the secret section of the settings backup)"}</div></div><div class="srow-c"><div class="seg" id="cAuth"><button data-v="password" class="${key?"":"on"}">Password</button><button data-v="key" class="${key?"on":""}">Key</button></div></div></div>
    <div class="srow"><div class="srow-l"><div class="srow-t">Password</div><div class="srow-d">${key?"needed once — to install the key on the server":"empty = sign in with an existing key"}</div></div><div class="srow-c"><input type="password" class="mono" id="cPw" placeholder="${c.has_password?"•••••• (set)":"password"}"></div></div>
    ${key?`<div class="nb-field" style="margin-top:6px"><label>This NAS's key${tipHTML("ed25519 key created by the panel (/root/.ssh/nas-backup). Its public part must be placed on the destination: the \"Install on the server\" button does this via password, or copy the string and add it to authorized_keys / in your rsync.net account.")}</label>
@@ -6273,7 +6274,7 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
     <div class="seg sm" id="k_${w}">${kinds.map(([v,l])=>`<button data-v="${v}" class="${S.kind===v?"on":""}">${l}</button>`).join("")}</div></div>
    ${rem?`<div class="nb-grid2">
     <label>Address<input class="mono" id="h_${w}" value="${att(S.host||"")}" placeholder="${w==="dst"&&rnet?"usw-s001.rsync.net":"192.168.1.50"}"></label>
-    <label>User<input class="mono" id="u_${w}" value="${att(S.user||"")}" placeholder="${w==="dst"&&rnet?"de1234":"oleg"}"></label>
+    <label>User<input class="mono" id="u_${w}" value="${att(S.user||"")}" placeholder="${w==="dst"&&rnet?"de1234":"root"}"></label>
     ${S.kind==="ssh"?`<label>Port<input class="mono" id="p_${w}" value="${S.port||22}"></label>`:""}
     <label>Password<input type="password" class="mono" id="w_${w}" placeholder="${S.has_password?"•••••• (set)":"password"}"></label>
    </div>
@@ -9878,7 +9879,7 @@ async function poll(){const s=await api("/api/stats");LAST=s;pushHist(s);paintTr
  const nr=!!(s&&s.nb_running);if(nr!==NB_RUNNING){NB_RUNNING=nr;renderDock();}
  syncUsbOps(s&&s.usb_import);
  if(OPEN.__sys&&OPEN.__sys._sub)OPEN.__sys._sub(s);}
-async function pollApps(){const d=await api("/api/desktop");APPS=(d&&d.apps)||[];VOLS=(d&&d.volumes)||[];if(d&&d.home)HOME_DIR=d.home;APPS_LOADED=true;renderApps();paintVols();
+async function pollApps(){const d=await api("/api/desktop");APPS=(d&&d.apps)||[];VOLS=(d&&d.volumes)||[];if(d&&d.home)HOME_DIR=d.home;if(d&&d.user)USER_NAME=d.user;APPS_LOADED=true;renderApps();paintVols();
  if(OPEN.__files&&OPEN.__files._vols)OPEN.__files._vols();}
 async function pollDisks(){const d=await api("/api/disks");paintDiskWidget(d.disks||[]);}
 

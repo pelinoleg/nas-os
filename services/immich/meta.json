@@ -21,7 +21,7 @@
     "dump_cmd": "docker exec immich_postgres sh -c 'pg_dumpall --clean --if-exists --username=$POSTGRES_USER' | gzip",
     "db_container": "immich_postgres",
     "db_service": "database",
-    "psql_cmd": "sh -c 'psql --username=$POSTGRES_USER --dbname=postgres'",
+    "psql_cmd": "sh -c 'psql --username=$POSTGRES_USER --dbname=postgres -v ON_ERROR_STOP=1'",
     "version_env": "IMMICH_VERSION",
     "data_env": "UPLOAD_LOCATION",
     "wait_db_cmd": "sh -c 'until pg_isready --username=$POSTGRES_USER >/dev/null 2>&1; do sleep 2; done'"

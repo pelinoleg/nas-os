@@ -463,7 +463,7 @@ def throttled():
 def lan_ip():
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("192.168.1.1", 1)); ip = s.getsockname()[0]; s.close()
+        s.connect(("8.8.8.8", 1)); ip = s.getsockname()[0]; s.close()
         return ip
     except OSError:
         return "127.0.0.1"
@@ -5660,8 +5660,12 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None, allow_delete=Fal
             res_limit = max(1, int(pf * pctv / 100.0)) if (pf and pctv) else 0
             stt.setdefault("guard_limit", res_limit)
             stt.setdefault("guard_pct", pctv)
-            writer("⚠ STOPPED BY THE GUARD: rsync tried to delete too many files "
-                   "(> %d%%). Nothing was deleted. Check the source." % int(cfg.get("max_delete_pct", 20) or 0))
+            writer("⚠ STOPPED BY THE GUARD: too many files would be deleted (> %d%%). "
+                   "Deletions were capped at the %d-file guard limit and FURTHER deletions "
+                   "skipped%s. Check the source before the next run."
+                   % (int(cfg.get("max_delete_pct", 20) or 0), int(res_limit or 0),
+                      "" if cfg.get("delete_mode", "archive") == "archive"
+                      else " — mirror mode has no _deleted archive, so the capped deletions are permanent"))
         sz = None
         if not dry and not push_ssh:
             try: sz = _du_bytes(j["dest"])
@@ -6698,8 +6702,10 @@ _BK_SECTIONS = (
     ("webauth",   "Panel password",            True,  ("etc/nas-os/webauth.json",)),
     ("nasbackup", "Main NAS backup",           True,  ("etc/nas-os/nas-backup.json", "nas-config/nas-backup-",
                                                        # store.json / remotes.json contain SSH passwords,
-                                                       # root/.ssh/nas-backup — the key for push backups to servers
+                                                       # root/.ssh/nas-backup — the key for push backups to servers,
+                                                       # credentials.json — the per-service login/password store
                                                        "nas-config/store.json", "nas-config/remotes.json",
+                                                       "nas-config/credentials.json",
                                                        "root/.ssh/nas-backup")),
     ("network",   "Network (Wi-Fi, IP)",       True,  ("reference/etc/netplan/",)),   # Wi-Fi password → secret; restore by hand (reference)
     ("other",     "Other",                     False, ()),      # everything not matched above
@@ -6940,7 +6946,7 @@ def settings_backup_restore(path, sections=None):
                     shutil.copyfileobj(src, f)
                 # secrets: the panel password, Pushover keys, the main NAS password
                 if any(x in dest for x in ("webauth", "notify.conf", "nas-backup.json",
-                                           "store.json", "remotes.json")):
+                                           "store.json", "remotes.json", "credentials.json")):
                     os.chmod(dest, 0o600)
                 # push-backup SSH key: private key 0600, its dir 0700 (else ssh refuses it)
                 if dest.startswith("/root/.ssh/"):
@@ -7929,6 +7935,11 @@ VER=$(%(ssh)s %(vcmd)s); echo "$VER"
 printf '%%s' "$VER" > %(vfile)s
 echo "== database dump on the source (pg_dumpall | gzip)"
 %(ssh)s %(dcmd)s > %(dump)s.part
+# the dump pipe (pg_dumpall | gzip) runs on the REMOTE shell, so a pg_dumpall failure
+# is masked by gzip and ssh still exits 0. Validate the gzip before promoting it —
+# else a truncated/empty dump is silently accepted and the replica is empty on restore.
+gzip -t %(dump)s.part
+test -s %(dump)s.part
 mv %(dump)s.part %(dump)s
 ls -lh %(dump)s
 echo "== rsync of the media library (the first run may take a while)"
@@ -7957,6 +7968,7 @@ echo "== sync complete: source version $VER"
         raise ValueError("unexpected version tag from the source: %r" % tag[:40])
     q = shlex.quote
     script = """set -e
+set -o pipefail   # else a failed `gunzip -c dump | psql` still reports the restore as success
 cd %(dir)s
 echo "== bringing up the replica with the source version: %(tag)s"
 if grep -q '^%(vkey)s=' .env 2>/dev/null; then
@@ -9673,7 +9685,7 @@ def fsw_save(patch):
     _json_save(FSW_CFG, cur)
     return {"ok": True, "config": cur}
 
-def _fsw_db():
+def _fsw_db_open():
     db = sqlite3.connect(FSW_DB, timeout=30)
     db.execute("PRAGMA journal_mode=WAL")
     db.execute("PRAGMA synchronous=NORMAL")
@@ -9685,6 +9697,23 @@ def _fsw_db():
       CREATE INDEX IF NOT EXISTS ev_kind ON events(kind, id);
       CREATE TABLE IF NOT EXISTS meta(k TEXT PRIMARY KEY, v TEXT);""")
     return db
+
+def _fsw_db():
+    try:
+        return _fsw_db_open()
+    except sqlite3.DatabaseError:
+        # a malformed index (realistic on SD power-loss) would otherwise wedge the
+        # scanner forever with no recovery path — every open re-raises. Move it aside
+        # and start a fresh baseline; the actual files are untouched, only the bitrot
+        # index is reset (a full re-hash happens on the next scan).
+        _safe(lambda: os.replace(FSW_DB, FSW_DB + ".corrupt"))
+        for suf in ("-wal", "-shm"):
+            _safe(lambda s=suf: os.remove(FSW_DB + s) if os.path.exists(FSW_DB + s) else None)
+        _safe(lambda: log_event("fsw", "File-history index was corrupt — rebuilt",
+                                "The integrity DB was unreadable and has been reset; "
+                                "a fresh baseline is taken on the next scan.",
+                                "warn", kind="svc", desk=True))
+        return _fsw_db_open()
 
 def _fsw_meta(db, k, v=None):
     if v is None:
@@ -13563,7 +13592,7 @@ class H(BaseHTTPRequestHandler):
                 self._json(health_report())
             elif p == "/api/desktop":
                 self._json({"apps": discover_desktop_apps(), "volumes": external_volumes(),
-                            "home": HOME})
+                            "home": HOME, "user": TARGET_USER})
             elif p == "/api/icon":
                 self._send_icon((q.get("u") or [""])[0])
             elif p == "/api/cron/jobs":

@@ -3,5 +3,8 @@
   "desc": "Scheduled internet speed tests with history",
   "category": "monitor",
   "icon": "https://cdn.jsdelivr.net/gh/selfhst/icons@main/png/myspeed.png",
-  "port": 5216
+  "port": 5216,
+  "fields": [
+    {"key": "TZ", "label": "Timezone", "default": "{tz}", "adv": true}
+  ]
 }

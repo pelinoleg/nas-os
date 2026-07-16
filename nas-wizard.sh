@@ -1954,6 +1954,10 @@ PYCUR
 
     run mkdir -p /var/lib/nas-screen
     run chown "$TARGET_USER:$TARGET_USER" /var/lib/nas-screen
+    # the kiosk loads the panel on whatever port nas-web actually binds (default 80)
+    local SCR_PORT
+    SCR_PORT="$(sed -n 's/^Environment=NAS_WEB_PORT=//p' /etc/systemd/system/nas-web.service 2>/dev/null | tail -n1)"
+    SCR_PORT="${SCR_PORT:-80}"
     write_file /etc/systemd/system/nas-screen.service <<EOF
 [Unit]
 Description=NAS local screen — cage + chromium kiosk on the DSI panel
@@ -1988,7 +1992,7 @@ ExecStart=/usr/bin/cage -d -- /usr/bin/chromium \\
   --disable-session-crashed-bubble --hide-crash-restore-bubble --disable-pinch \\
   --overscroll-history-navigation=0 --password-store=basic \\
   --check-for-update-interval=31536000 --disable-component-update \\
-  http://127.0.0.1/screen
+  http://127.0.0.1:${SCR_PORT}/screen
 Restart=always
 RestartSec=3
 
@@ -3004,8 +3008,9 @@ avail_track
 # rebooting would not fix it and would kill SSH sessions mid-repair.
 web_selfheal(){
   systemctl is-active --quiet nas-web 2>/dev/null || return 0
-  local st=/run/nas-web.fail code n
-  code="$(curl -s -o /dev/null -m 5 -w '%{http_code}' http://127.0.0.1/ 2>/dev/null)" || code=000
+  local st=/run/nas-web.fail code n port
+  port="$(sed -n 's/^Environment=NAS_WEB_PORT=//p' /etc/systemd/system/nas-web.service 2>/dev/null | tail -n1)"
+  code="$(curl -s -o /dev/null -m 5 -w '%{http_code}' "http://127.0.0.1:${port:-80}/" 2>/dev/null)" || code=000
   case "$code" in
     ''|000|5*) ;;
     *) rm -f "$st" 2>/dev/null; return 0 ;;
