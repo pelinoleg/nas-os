@@ -96,7 +96,7 @@
   .gauge .v small{font-size:12px;font-weight:600;color:var(--dim)}
   .gauge .v.sv{font-size:18px;top:34px}   /* long values (e.g. 128 MB/s): smaller + lower so they don't touch the arc */
   .gauge .v.sv small{font-size:10px}
-  .gauge .cap{font-size:10px;letter-spacing:.6px;text-transform:uppercase;color:var(--dim);font-weight:650;margin-top:1px;text-align:center}
+  .gauge .cap{font-size:11px;letter-spacing:.6px;text-transform:uppercase;color:var(--dim);font-weight:650;margin-top:1px;text-align:center}
   .gauge .cap .csub{display:block;font-size:8px;letter-spacing:.2px;text-transform:none;color:var(--mut);font-weight:600;margin-top:1px}
 
   /* row of cards: two tiles instead of three — "Backups" and "USB import" carry rows
@@ -118,24 +118,24 @@
   #cstats .ok{color:var(--good)} #cstats .wn{color:var(--warn)}
   #shield{position:fixed;inset:0;z-index:20;display:none;background:transparent}
   #shield.on{display:block}
-  #r3 .r2{padding:4px 0;font-size:12.5px}
+  #r3 .r2{padding:4px 0;font-size:14px}
   #row2{flex:.95;display:grid;grid-template-columns:1.35fr 1fr;gap:7px;min-height:0}
-  #row2 .r2{padding:3px 0;font-size:12.5px}
+  #row2 .r2{padding:3px 0;font-size:14px}
   #row2 .prow{padding:3px 0}
   .body{overflow:hidden}
   .card{padding:9px 12px;display:flex;flex-direction:column;min-height:0;overflow:hidden}
-  .card h2{font-size:10.5px;letter-spacing:.7px;text-transform:uppercase;color:var(--dim);font-weight:650;
+  .card h2{font-size:12px;letter-spacing:.7px;text-transform:uppercase;color:var(--dim);font-weight:650;
            flex:none;display:flex;align-items:center;gap:6px;margin-bottom:5px}
   .card h2 .r{margin-left:auto;font-weight:600;letter-spacing:0;text-transform:none;color:var(--ink);font-size:12px}
   .body{flex:1;overflow:hidden;min-height:0}
-  .r2{display:flex;align-items:center;gap:7px;padding:5px 0;font-size:13px;
+  .r2{display:flex;align-items:center;gap:7px;padding:5px 0;font-size:15px;
       border-bottom:1px solid rgba(255,255,255,.07)}
   .r2:last-child{border-bottom:0}
   .r2 .nm{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .r2 .ago{color:var(--mut);font-size:11.5px;white-space:nowrap}
+  .r2 .ago{color:var(--mut);font-size:13px;white-space:nowrap}
   .st2{width:14px;text-align:center;font-weight:700}
   .ok{color:var(--good)} .wn{color:var(--warn)} .bd{color:var(--danger)} .no{color:var(--mut)}
-  .empty{color:var(--mut);font-size:12.5px;padding-top:4px}
+  .empty{color:var(--mut);font-size:14px;padding-top:4px}
   /* state warning (not an event): "no destination — nowhere to write" */
   .wrn{font-size:12px;color:var(--warn);background:rgba(245,179,66,.13);
        border-radius:7px;padding:4px 7px;margin-bottom:4px;
@@ -150,10 +150,10 @@
   .bar>i.pg{background:var(--accent)}
   .prow{display:flex;flex-direction:column;gap:0;padding:5px 0;border-bottom:1px solid rgba(255,255,255,.07)}
   .prow:last-child{border-bottom:0}
-  .prow .t{display:flex;gap:7px;align-items:center;font-size:13px}
+  .prow .t{display:flex;gap:7px;align-items:center;font-size:15px}
   .prow .t .nm{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .prow .t .ago{color:var(--mut);font-size:11.5px;white-space:nowrap}
-  .run{font-size:11.5px;color:var(--accent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .run{font-size:13px;color:var(--accent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   /* Updates card: image list + apt/images update buttons + in-place progress */
   .updbody{display:flex;flex-direction:column;gap:4px}
   .upd-img{display:flex;align-items:baseline;gap:8px;font-size:12.5px;padding:2px 0}
@@ -199,7 +199,7 @@
   #dots{display:flex;gap:7px;flex:none;padding-left:6px}
   .d{width:8px;height:8px;border-radius:50%;background:rgba(255,255,255,.25)}
   .d.on{background:var(--accent)}
-  #r2a{flex:none;height:120px;display:grid;grid-template-columns:1.75fr 1fr;gap:7px}
+  #r2a{flex:none;height:134px;display:grid;grid-template-columns:1.75fr 1fr;gap:7px}
   #r2b{flex:1;display:grid;grid-template-columns:2.2fr 1fr;gap:7px;min-height:0}
   .big{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.15}
   .big small{font-size:11px;color:var(--dim);font-weight:600;margin-left:3px}
@@ -266,7 +266,7 @@
                  font-size:19px;font-weight:600;color:var(--ink)}
   #sheetIn h3 .x:active{background:rgba(255,255,255,.26)}
   #sheetB{overflow-y:auto;min-height:0}
-  .kv{display:flex;justify-content:space-between;gap:14px;font-size:14px;padding:7px 0;
+  .kv{display:flex;justify-content:space-between;gap:14px;font-size:16px;padding:7px 0;
       border-bottom:1px solid rgba(255,255,255,.07)}
   .kv:last-child{border-bottom:0}
   .kv span{color:var(--dim)} .kv b{font-weight:650;text-align:right}
