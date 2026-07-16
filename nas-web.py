@@ -931,6 +931,17 @@ def _health_report_build():
     add("Disk health (SMART)",
         ("failure: " + ", ".join(bad)) if bad else ("overheat: " + ", ".join(hot)) if hot else "all healthy",
         "bad" if bad else "warn" if hot else "ok")
+    # a data disk gone read-only = emergency remount after an I/O error — data at risk
+    ro = []
+    for line in _read("/proc/mounts").splitlines():
+        p = line.split()
+        if len(p) >= 4 and p[2] in ("ext4", "ext3", "btrfs", "xfs") \
+                and (p[1].startswith("/mnt/") or p[1].startswith("/media/")) \
+                and re.search(r"(^|,)ro(,|$)", p[3]):
+            ro.append(p[1])
+    if ro:
+        add("Filesystem read-only", ", ".join(ro), "bad",
+            "A disk went read-only after an I/O error — unmount and run e2fsck")
     # SnapRAID data protection
     sn = snapraid_status()
     if sn.get("configured"):

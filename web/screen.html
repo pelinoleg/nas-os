@@ -295,12 +295,19 @@
   .warnbtn{background:rgba(255,93,104,.9);color:#fff}
 
   /* alarm */
-  #alarm{position:fixed;inset:0;background:rgba(52,10,14,.94);display:none;flex-direction:column;
-         align-items:center;justify-content:center;gap:8px;padding:30px;text-align:center;z-index:9}
+  #alarm{position:fixed;inset:0;background:rgba(52,10,14,.96);display:none;flex-direction:column;
+         align-items:center;justify-content:center;gap:6px;padding:26px;text-align:center;z-index:9;
+         box-shadow:inset 0 0 0 4px rgba(255,93,104,.9);animation:alrpulse 1.6s ease-in-out infinite}
+  @keyframes alrpulse{0%,100%{box-shadow:inset 0 0 0 4px rgba(255,93,104,.9)}50%{box-shadow:inset 0 0 0 4px rgba(255,93,104,.35)}}
   #alarm.on{display:flex}
-  #alarm .big{font-size:29px;font-weight:750;color:#ff9aa0}
-  #alarm .li{font-size:16px;color:#ffd9db;line-height:1.6}
-  #alarm .hint{font-size:12px;color:#e0a7ab;margin-top:8px}
+  #alarm .big{font-size:38px;font-weight:800;color:#ff6b74;letter-spacing:-.01em;margin-bottom:6px}
+  #alarm .li{width:100%;max-width:640px}
+  #alarm .alr-p{margin-top:14px;padding-bottom:14px;border-bottom:1px solid rgba(255,120,128,.25)}
+  #alarm .alr-p:last-child{border-bottom:0}
+  #alarm .alr-n{font-size:22px;font-weight:750;color:#fff}
+  #alarm .alr-v{font-size:18px;color:#ffd9db;margin-top:2px}
+  #alarm .alr-h{font-size:14px;color:#e6acb0;margin-top:3px}
+  #alarm .hint{font-size:13px;color:#e0a7ab;margin-top:16px}
   #toast{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);background:rgba(18,24,34,.96);
          border-radius:12px;padding:9px 16px;font-size:14px;display:none;z-index:10}
   #toast.on{display:block}
@@ -845,11 +852,15 @@ function renderP1(d){
 
 function renderAlarm(d){
   const bad=(d.problems||[]).filter(p=>p.lvl==="bad"), a=$("#alarm");
-  if(bad.length && !a._hid){
-    a.querySelector(".big").textContent="Something is broken";
-    a.querySelector(".li").innerHTML=bad.map(p=>`${esc(p.name)}: <b>${esc(p.value)}</b>`).join("<br>");
-    a.classList.add("on");
-  }else if(!bad.length){ a._hid=false; a.classList.remove("on"); }
+  if(bad.length){
+    const sig=bad.map(p=>p.name+"="+p.value).join("|");
+    if(sig!==a._sig){ a._hid=false; a._sig=sig; }   // a NEW or changed problem re-raises a dismissed alarm
+    if(!a._hid){
+      a.querySelector(".big").textContent=bad.length>1?(bad.length+" problems need attention"):"Needs attention";
+      a.querySelector(".li").innerHTML=bad.map(p=>`<div class="alr-p"><div class="alr-n">${esc(p.name)}</div><div class="alr-v">${esc(p.value)}</div>${p.hint?`<div class="alr-h">${esc(p.hint)}</div>`:""}</div>`).join("");
+      a.classList.add("on");
+    }
+  }else{ a._hid=false; a._sig=""; a.classList.remove("on"); }
 }
 $("#alarm").onclick=()=>{ $("#alarm")._hid=true; $("#alarm").classList.remove("on"); };
 
