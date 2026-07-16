@@ -4408,6 +4408,7 @@ async function dkOverview(tc,reload){
  const d=await api("/api/docker/overview");
  if(!document.body.contains(tc))return;
  const tiles=tc.querySelector("#dkTiles"),ver=tc.querySelector("#dkVer");
+ if(!tiles)return;   // tab re-rendered (another sub-tab wrote tc.innerHTML) while the overview request was in flight — skeleton is gone
  if(!d||!d.ok){tiles.innerHTML=`<div class="dempty">${svg("cube",16)} ${esc((d&&d.log)||"Docker unavailable")}</div>`;if(ver)ver.textContent="—";return;}
  if(ver)ver.textContent=nasTr("version ")+(d.version||"?");
  const c=d.containers||{},df=d.df||{},im=df.images||{},vo=df.volumes||{},ca=df.cache||{};
