@@ -23,7 +23,12 @@ HERE        = os.path.dirname(os.path.realpath(__file__))
 WEB_DIR     = os.path.join(HERE, "web")
 SERVICES    = os.path.join(HERE, "services")
 ENGINE      = os.path.join(HERE, "nas-wizard.sh")
-TARGET_USER = os.environ.get("SUDO_USER") or os.environ.get("USER") or "oleg"
+def _uid1000_name():
+    try:
+        return pwd.getpwuid(1000).pw_name    # the box's primary user (install.sh provisions uid 1000)
+    except KeyError:
+        return "root"
+TARGET_USER = os.environ.get("SUDO_USER") or os.environ.get("USER") or _uid1000_name()
 HOME        = os.path.expanduser("~" + TARGET_USER)
 NAS_CONFIG  = os.path.join(HOME, "nas-config")
 CREDS_FILE  = os.path.join(NAS_CONFIG, "credentials.json")
@@ -673,7 +678,7 @@ def disks():
             "mounted": bool(mounts),
             "usage": disk_info(primary) if primary else None,
             "smart": smart_info(d.get("path")),
-            "spindown": spin.get(d.get("path")),
+            "spindown": spin.get((d.get("serial") or "").strip() or "\0") or spin.get(d.get("path")),
             "speedtest": spd.get((d.get("serial") or "").strip() or "\0") or spd.get(d.get("path")),
             "scrutiny": scr.get((d.get("serial") or "").strip()),   # None if no Scrutiny/no data
         })
@@ -986,12 +991,14 @@ def _health_report_build():
             add("Backup errors", ", ".join(bkerr[:4]), "warn", "The last backup run reported errors")
     except Exception:
         pass
-    # mass file deletion caught by the integrity scanner (fswatch)
-    fl = _safe(lambda: (fsw_status().get("last") or {}), {}) or {}
-    rem = fl.get("removed") or 0
-    if rem >= 2000:
-        add("Mass file deletion", "{:,} files removed".format(rem), "warn",
-            "Many files disappeared from storage — verify it was intentional")
+    # mass file deletion HELD by the integrity scanner awaiting confirmation.
+    # Key on `pending` (the unconfirmed guard trip), NOT last.removed: an accepted
+    # deletion or a routine cleanup under guard_pct must not keep the health page
+    # yellow for up to interval_days — pending clears the moment the user confirms.
+    pend = _safe(lambda: (fsw_status().get("pending") or {}), {}) or {}
+    if pend.get("count", 0) >= 20:
+        add("Mass file deletion", "{:,} files removed — confirm it".format(pend["count"]), "warn",
+            "Many files disappeared from storage — confirm it was intentional in “File history”")
     # SnapRAID data protection
     sn = snapraid_status()
     if sn.get("configured"):
@@ -1047,7 +1054,8 @@ def disk_spindown(dev, minutes):
         return {"ok": False, "log": "invalid value"}
     r = _run(["hdparm", "-S", str(_hdparm_s_value(minutes)), dev], timeout=20)
     cfg = _load_spindown()
-    cfg[dev] = minutes
+    cfg.pop(dev, None)                      # drop any legacy dev-path entry for this disk
+    cfg[_speedtest_key(dev)] = minutes      # key by serial: sdX isn't stable across re-plug
     try:
         _json_save(SPINDOWN_FILE, cfg)
     except OSError:
@@ -1057,8 +1065,19 @@ def disk_spindown(dev, minutes):
     return {"ok": True, "log": ("disk sleeps after %d min idle" % minutes) if minutes else "sleep disabled (disk always active)"}
 
 def apply_spindown_all():
-    for dev, minutes in _load_spindown().items():
-        if os.path.exists(dev):
+    cfg = _load_spindown()
+    if not cfg:
+        return
+    # entries are keyed by serial (new) or a /dev path (legacy). Resolve serials to the
+    # CURRENT device, since sdX ordering isn't stable across reboots/re-plugs.
+    ser2dev = {}
+    for ln in (_run(["lsblk", "-dpno", "NAME,SERIAL"], timeout=8).get("log") or "").splitlines():
+        parts = ln.split()
+        if len(parts) >= 2:
+            ser2dev[parts[-1]] = parts[0]
+    for key, minutes in cfg.items():
+        dev = key if key.startswith("/dev/") else ser2dev.get(key)
+        if dev and os.path.exists(dev):
             try:
                 _run(["hdparm", "-S", str(_hdparm_s_value(int(minutes))), dev], timeout=20)
             except Exception:
@@ -4930,14 +4949,18 @@ def _nb_remote_env(cfg):
     return _nb_side_env(side)
 
 def _nb_ssh_run(cfg, remote_cmd, timeout=30):
-    """Run a command on the remote side of a push-ssh profile (mkdir/archive cleanup)."""
-    port = int(cfg.get("ssh_port", 22) or 22)
-    opts, env, use_pw = _nb_ssh_auth(cfg)
+    """Run a command on the DESTINATION side (mkdir / remote-archive cleanup).
+    Uses the resolved dest side: that is the top-level cfg for a push profile, but
+    cfg['dst2'] for an SSH->SSH pull — so mkdir and the retention `rm -rf` never
+    land on the SOURCE server (they used to, via cfg.host/user/ssh_port)."""
+    side = _nb_dst_side(cfg)
+    port = int(side.get("port", 22) or 22)
+    opts, env, use_pw = _nb_ssh_auth(side)
     argv = ["ssh", "-p", str(port), "-o", "StrictHostKeyChecking=accept-new",
             "-o", "ConnectTimeout=10"] + opts
     if use_pw:
         argv = ["sshpass", "-e"] + argv
-    tgt = "%s@%s" % (cfg.get("user", ""), cfg.get("host", ""))
+    tgt = "%s@%s" % (side.get("user", ""), side.get("host", ""))
     return _run(argv + [tgt, remote_cmd], timeout=timeout, env=env)
 
 def _nb_err(raw):
@@ -5308,6 +5331,7 @@ def _nb_stage_mount(cfg, pid, writer):
     argv = ["systemd-run", "--unit", unit, "--collect",
             "--property=Restart=on-failure",
             "--property=ExecStopPost=/bin/umount -l " + shlex.quote(mp)]
+    penv = None
     if src.get("auth") == "key" and nb_key_info()["exists"]:
         opts.append("IdentityFile=" + NB_KEY)
     else:
@@ -5315,14 +5339,16 @@ def _nb_stage_mount(cfg, pid, writer):
         if not pw:
             return None, "the source needs a password or a key"
         # password — via the unit's environment (only root reads it), NOT in argv:
-        # /proc/<pid>/cmdline is visible to everyone
-        argv.append("--setenv=SSHFS_PW=" + pw)
+        # /proc/<pid>/cmdline is visible to everyone. --setenv=NAME (no value) makes
+        # systemd-run import it from OUR env, so the value never touches any argv.
+        argv.append("--setenv=SSHFS_PW")
         opts.append("password_stdin")
+        penv = dict(_C_ENV, SSHFS_PW=pw)
     tgt = "%s@%s:%s" % (src.get("user", ""), src.get("host", ""), "/")
     cmd = "sshfs -f -o " + ",".join(opts) + " " + shlex.quote(tgt) + " " + shlex.quote(mp)
     if "password_stdin" in opts:
         cmd = "printf '%s\n' \"$SSHFS_PW\" | " + cmd
-    r = _run(argv + ["/bin/bash", "-c", cmd], timeout=40)
+    r = _run(argv + ["/bin/bash", "-c", cmd], timeout=40, env=penv)
     if not r["ok"]:
         return None, (r.get("log") or "").strip()[-200:]
     for _ in range(30):                       # wait until the mount actually appears
@@ -6847,13 +6873,18 @@ def settings_backup_restore(path, sections=None):
                    ("etc/nas-os/nas-backup.json", "/etc/nas-os/nas-backup.json"),
                    ("etc/samba/smb.conf", "/etc/samba/smb.conf"),
                    ("var/lib/samba/private/passdb.tdb", "/var/lib/samba/private/passdb.tdb"),
-                   ("opt/stacks/", STACKS_DIR)]
+                   ("opt/stacks/", STACKS_DIR),
+                   ("root/.ssh/nas-backup", "/root/.ssh/nas-backup"),
+                   ("root/.ssh/nas-backup.pub", "/root/.ssh/nas-backup.pub")]
     restored, skipped, deselected = [], [], 0
     try:
         with tarfile.open(path, "r:gz") as tar:
             for m in tar:
                 nm = m.name.lstrip("./")
-                if not m.isreg() or ".." in nm.split("/") or nm.startswith("/"):
+                parts = nm.split("/")
+                # reject non-files, path escapes, and any .git member (an old archive
+                # could otherwise spill a foreign git tree into ~/nas-config)
+                if not m.isreg() or ".." in parts or nm.startswith("/") or ".git" in parts:
                     continue
                 # an unchecked section is not an error but a deliberate choice: not in skipped
                 if sel is not None and _bk_restorable(m, nm) and _bk_section(nm) not in sel:
@@ -6882,6 +6913,11 @@ def settings_backup_restore(path, sections=None):
                 # secrets: the panel password, Pushover keys, the main NAS password
                 if any(x in dest for x in ("webauth", "notify.conf", "nas-backup.json")):
                     os.chmod(dest, 0o600)
+                # push-backup SSH key: private key 0600, its dir 0700 (else ssh refuses it)
+                if dest.startswith("/root/.ssh/"):
+                    _safe(lambda: os.chmod(os.path.dirname(dest), 0o700))
+                    if not dest.endswith(".pub"):
+                        _safe(lambda: os.chmod(dest, 0o600))
                 restored.append(nm)
     except (OSError, tarfile.TarError) as e:
         return {"ok": False, "log": "bad archive: %s" % e}
@@ -7304,15 +7340,22 @@ def _poke_watcher():
 def monitor_loop():
     _safe(_therm_recover)      # release containers orphaned by thermal guard before a crash/reboot
     threading.Thread(target=_poke_watcher, daemon=True).start()
+    last_full = 0.0
     while True:
         poked = _mon_wake.wait(60); _mon_wake.clear()
         # on poke (disk insert/eject) run only the change-related checks — fast and
         # lean: history/schedules/self-tests are left alone, they run on their own cadence.
-        funcs = ((monitor_tick, _automount_tick, usb_ops_sync) if poked else
-                 (history_sample, monitor_tick, maintenance_daily, _smart_selftest_tick,
+        # BUT a flapping USB bridge pokes every second and would keep starving the full
+        # tick (thermal guard, history) — exactly when hardware misbehaves. So force the
+        # full set if ~60s elapsed since it last ran, no matter how often we're poked.
+        now = time.monotonic()
+        full = (not poked) or (now - last_full >= 55)
+        if full:
+            last_full = now
+        funcs = ((history_sample, monitor_tick, maintenance_daily, _smart_selftest_tick,
                   _nb_sched_tick, _automount_tick, _summary_tick, _thermal_tick, usb_ops_sync,
-                  _fsw_tick, _replica_tick, _remotes_tick,
-                 _screen_tick))
+                  _fsw_tick, _replica_tick, _remotes_tick, _screen_tick) if full else
+                 (monitor_tick, _automount_tick, usb_ops_sync))
         for fn in funcs:
             try:
                 fn()
@@ -7805,7 +7848,12 @@ def store_replica_save(sid, cfg):
     cur = st.setdefault("replica", {}).setdefault(sid, {})
     for k in ("host", "user", "src_data", "dest_data"):
         if k in cfg:
-            cur[k] = str(cfg.get(k) or "").strip()
+            v = str(cfg.get(k) or "").strip()
+            # host/user go UNQUOTED into a root ssh command — restrict the charset
+            # (paths are shlex.quoted in the script, so they stay free-form)
+            if k in ("host", "user") and v and not re.match(r"^[A-Za-z0-9._-]+$", v):
+                return {"ok": False, "log": "invalid %s: only letters, digits, . _ -" % k}
+            cur[k] = v
     if "auto" in cfg:                       # "HH:MM" = daily auto-sync, "" = off
         a = str(cfg.get("auto") or "").strip()
         cur["auto"] = a if re.match(r"^([01]\d|2[0-3]):[0-5]\d$", a) else ""
@@ -7872,6 +7920,11 @@ echo "== sync complete: source version $VER"
     tag = ver.rsplit(":", 1)[-1] if ":" in ver else ""
     if not tag:
         raise ValueError("could not determine the source version — repeat the sync")
+    # tag comes from the source NAS and is interpolated into sed/echo inside the
+    # root restore script — a quote in it would be command injection. Docker image
+    # tags are [A-Za-z0-9][\w.-]*, so anything else is hostile: refuse it.
+    if not re.match(r"^[A-Za-z0-9][\w.-]*$", tag):
+        raise ValueError("unexpected version tag from the source: %r" % tag[:40])
     q = shlex.quote
     script = """set -e
 cd %(dir)s
@@ -8074,16 +8127,19 @@ def remote_mount(rid):
     cmd = ["systemd-run", "--unit", unit, "--collect",
            "--property=Restart=on-failure", "--property=RestartSec=5",
            "--property=ExecStopPost=/bin/umount -l %s" % mp]
+    penv = None
     if r.get("pass"):
         # The password goes through the unit's environment, never argv — argv is readable
         # by anyone via /proc, the environment only by root. systemd re-applies it on every
         # restart, so a reconnect is fed the password as well. (StandardInputText would be
         # the obvious way, but systemd-run refuses it on a transient unit.)
+        # --setenv=NAME (no value) imports it from OUR env, so it never lands in any argv.
         inner = 'printf %s "$NAS_SSHFS_PW" | ' + inner
-        cmd += ["--setenv=NAS_SSHFS_PW=%s" % r["pass"]]
+        cmd += ["--setenv=NAS_SSHFS_PW"]
+        penv = dict(os.environ, NAS_SSHFS_PW=r["pass"])
     cmd += ["/bin/sh", "-c", inner]
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=penv)
     except subprocess.TimeoutExpired:
         return {"ok": False, "log": "the server did not respond within 30s"}
     except OSError as e:
@@ -13349,8 +13405,11 @@ class H(BaseHTTPRequestHandler):
             # a session cookie; the panel preview still works via the session
             cfg = load_glance()
             tok = (q.get("token") or [""])[0]
+            # compare as bytes: compare_digest on a non-ASCII str raises TypeError,
+            # which on this pre-auth path would 500 instead of a clean 401
             tok_ok = bool(cfg["enabled"] and cfg["token"]
-                          and hmac.compare_digest(tok, cfg["token"]))
+                          and hmac.compare_digest(tok.encode("utf-8", "ignore"),
+                                                  str(cfg["token"]).encode("utf-8")))
             if not (tok_ok or self._authed()):
                 self._json({"error": "auth"}, 401); return
             lang = (q.get("lang") or ["ru"])[0]
