@@ -972,11 +972,17 @@ function applyLook(L){
     if(px>0)p.push(`blur(${px}px)`); if(sat!==100)p.push(`saturate(${(sat/100).toFixed(2)})`);
     return p.length?p.join(" "):"none"; };
   const wOp=(S.wdgOp==null||S.wdgOp==="")?lvlA(1):clampf(+S.wdgOp/100,0,1);
-  root.style.setProperty("--glass", isHex(S.wdgDark)?`rgba(${hexRgb(S.wdgDark)},${wOp.toFixed(3)})`
-                                                    :`rgba(${lvlRgb(1)},${wOp.toFixed(3)})`);
-  root.style.setProperty("--wdg-bf", bf("wdgBlur","wdgSat"));
-  root.style.setProperty("--mb-bg", `rgba(${lvlRgb(1)},${elA("mbOp").toFixed(3)})`);
-  root.style.setProperty("--mb-bf", bf("mbBlur","mbSat"));
+  const glass=isHex(S.wdgDark)?`rgba(${hexRgb(S.wdgDark)},${wOp.toFixed(3)})`:`rgba(${lvlRgb(1)},${wOp.toFixed(3)})`;
+  const wdgbf=bf("wdgBlur","wdgSat");
+  root.style.setProperty("--glass", glass);
+  root.style.setProperty("--wdg-bf", wdgbf);
+  // S.uni (touchscreen "own material"): the top bar shares the EXACT card glass — no separate
+  // top bar on the wall panel. Otherwise the bar keeps its own mb* material (inherited profile).
+  if(S.uni){ root.style.setProperty("--mb-bg", glass); root.style.setProperty("--mb-bf", wdgbf); }
+  else{
+    root.style.setProperty("--mb-bg", `rgba(${lvlRgb(1)},${elA("mbOp").toFixed(3)})`);
+    root.style.setProperty("--mb-bf", bf("mbBlur","mbSat"));
+  }
   root.style.setProperty("--accent", isHex(S.accentHex)?S.accentHex:"#2dd4bf");
   root.style.setProperty("--r-lg",(16*clampf(S.radius??1,.2,2)).toFixed(0)+"px");
   // top gradient scrim: the same keys as the panel's menubar
