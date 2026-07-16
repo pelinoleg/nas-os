@@ -408,7 +408,12 @@ i18n.js, детектор json не сканирует; `stack_catalog()` → `/
 (приглушённые); клик → пейн `dkAvailPane` в детали (поля + «Install & start»), установка =
 копия папки → `/opt/stacks/<id>/compose.yaml` + `.env` из полей (`{storage}/{tz}/{host}/{rand}`,
 merge с сущест-м) → стрим `up` через `/api/stack/stream`; по завершении ВСЕГДА переходим на
-готовый стек (никаких залипших модалок — старый баг). `stack_install()`. Установленные —
+готовый стек (никаких залипших модалок — старый баг). `stack_install()`. В пейне есть
+раскрывашка «Show / edit compose & .env» (`GET /api/store/recipe` → сырой compose рецепта +
+.env-превью с подстановками; ленивая загрузка): правки в textarea'ах переопределяют
+копию рецепта и .env из полей (`stack_install(sid, values, compose, env)`). Рецепт в
+`services/` — только чтение (git); удаление стека (`stack_delete`) сносит `/opt/stacks/<id>`
+целиком, но volume с данными остаются (`down` без `-v`), и приложение снова видно в «Available». Установленные —
 обычные стеки. **Свои карточки на стол УБРАНЫ** (`store.json:custom` больше не читается,
 ярлыки идут только из label'ов `web-desktop.*`). Хост в `web-desktop.url` панель
 переписывает на реальный LAN-адрес бокса (`_app_host_url`) — рецепты host-agnostic

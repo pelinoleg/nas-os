@@ -7736,9 +7736,26 @@ def stack_catalog():
         out.append(item)
     return {"ok": True, "apps": out}
 
-def stack_install(sid, values):
-    """Copy a recipe into /opt/stacks + write .env from dialog fields. The caller
-    then streams `compose up` via /api/stack/stream."""
+def stack_recipe(sid):
+    """Raw recipe compose + an .env preview (field defaults, substituted) so the
+    install pane can show/let-the-user-edit them before bringing the stack up."""
+    src = _store_compose_src(sid) if _STACK_RE.match(sid or "") else None
+    if not src:
+        return {"ok": False, "log": "no such app"}
+    m = _store_meta(sid)
+    env = []
+    for f in (m.get("fields") or []):
+        k = f.get("key")
+        if k:
+            env.append("%s=%s" % (k, _store_subst(f.get("default") or "")))
+    return {"ok": True, "compose": _read_file(src),
+            "env": ("\n".join(env) + "\n") if env else ""}
+
+def stack_install(sid, values, compose=None, env_text=None):
+    """Copy a recipe into /opt/stacks + write .env, then the caller streams
+    `compose up` via /api/stack/stream. `compose`/`env_text` (if given) are the
+    user's edited versions from the install pane — they win over the recipe copy
+    and the field-built .env respectively."""
     src = _store_compose_src(sid) if _STACK_RE.match(sid or "") else None
     if not src:
         return {"ok": False, "log": "no such app"}
@@ -7750,25 +7767,32 @@ def stack_install(sid, values):
         if f == "meta.json" or f.endswith(".example") or not os.path.isfile(sp):
             continue
         shutil.copy2(sp, os.path.join(dst, "compose.yaml" if sp == src else f))
-    # .env: dialog values win, empty ones fall back to meta defaults; merge over
-    # an existing .env so reinstall keeps manual edits it doesn't know about
-    env = _stack_env(sid)
-    for f in (m.get("fields") or []):
-        k = f.get("key")
-        if not k:
-            continue
-        v = (values or {}).get(k)
-        if v in (None, ""):
-            v = env.get(k) or _store_subst(f.get("default") or "")
-        env[k] = str(v).replace("\n", " ")
-        if f.get("type") == "path" and str(v).startswith("/"):
-            try:
-                os.makedirs(v, exist_ok=True)
-                _chown_user(v)
-            except OSError:
-                pass
-    with open(os.path.join(dst, ".env"), "w") as fh:   # env_file: .env must exist
-        fh.write("\n".join("%s=%s" % kv for kv in env.items()) + "\n")
+    if compose is not None and str(compose).strip():   # user edited the compose in the pane
+        with open(os.path.join(dst, "compose.yaml"), "w") as fh:
+            fh.write(compose if compose.endswith("\n") else compose + "\n")
+    if env_text is not None:                # user edited raw .env — write verbatim
+        with open(os.path.join(dst, ".env"), "w") as fh:
+            fh.write(env_text if env_text.endswith("\n") else env_text + "\n")
+    else:
+        # .env: dialog values win, empty ones fall back to meta defaults; merge over
+        # an existing .env so reinstall keeps manual edits it doesn't know about
+        env = _stack_env(sid)
+        for f in (m.get("fields") or []):
+            k = f.get("key")
+            if not k:
+                continue
+            v = (values or {}).get(k)
+            if v in (None, ""):
+                v = env.get(k) or _store_subst(f.get("default") or "")
+            env[k] = str(v).replace("\n", " ")
+            if f.get("type") == "path" and str(v).startswith("/"):
+                try:
+                    os.makedirs(v, exist_ok=True)
+                    _chown_user(v)
+                except OSError:
+                    pass
+        with open(os.path.join(dst, ".env"), "w") as fh:   # env_file: .env must exist
+            fh.write("\n".join("%s=%s" % kv for kv in env.items()) + "\n")
     log_event("action", "Install %s" % (m.get("name") or sid), "", "ok",
               kind="svc", desk=False)
     return {"ok": True}
@@ -13550,6 +13574,8 @@ class H(BaseHTTPRequestHandler):
                 self._json(docker_stacks())
             elif p == "/api/store":
                 self._json(stack_catalog())
+            elif p == "/api/store/recipe":
+                self._json(stack_recipe((q.get("id") or [""])[0]))
             elif p == "/api/remotes":
                 self._json(remotes_list())
             elif p == "/api/stack":
@@ -14002,7 +14028,8 @@ class H(BaseHTTPRequestHandler):
                 self._json(remote_realpath(b.get("id", ""), b.get("path", "")))
             elif p == "/api/store/install":
                 b = self._body()
-                self._json(stack_install(b.get("id", ""), b.get("values") or {}))
+                self._json(stack_install(b.get("id", ""), b.get("values") or {},
+                                         b.get("compose"), b.get("env")))
             elif p == "/api/store/replica":
                 b = self._body()
                 self._json(store_replica_save(b.get("id", ""), b))

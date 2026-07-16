@@ -4356,13 +4356,37 @@ function dkAvailPane(tc,a,reload){
  const form=el(`<div style="max-width:560px">${main.map(rowH).join("")}${adv.length?`<details><summary style="cursor:pointer;color:var(--mut);font-size:13px;margin:6px 0">Advanced (${adv.length})</summary>${adv.map(rowH).join("")}</details>`:""}</div>`);
  if(flds.length)box.appendChild(form);
  else box.appendChild(el(`<div class="mon-note" style="margin:6px 0">${svg("cube",13)} No settings required — ready to bring up.</div>`));
+ // review / edit the real compose + .env before bringing up (lazy-loaded from the recipe)
+ const taCss="width:100%;box-sizing:border-box;background:var(--card);color:var(--fg,var(--ink));border:1px solid var(--line);border-radius:var(--r-md);padding:8px 10px;font-family:var(--mono);font-size:12px;line-height:1.5;resize:vertical";
+ const lblCss="font-size:11px;color:var(--mut);font-family:var(--mono);text-transform:uppercase;letter-spacing:.04em;margin:8px 0 4px";
+ const edBox=el(`<details style="margin-top:8px">
+   <summary style="cursor:pointer;color:var(--dim);font-size:13px">${svg("edit",13)} Show / edit compose &amp; .env</summary>
+   <div style="${lblCss};margin-top:8px">compose.yaml</div>
+   <textarea id="avCompose" spellcheck="false" style="${taCss};height:230px" placeholder="loading…"></textarea>
+   <div style="${lblCss}">.env${flds.length?" — overrides the fields above":""}</div>
+   <textarea id="avEnv" spellcheck="false" style="${taCss};height:110px"></textarea></details>`);
+ box.appendChild(edBox);
+ let loaded=false;
+ edBox.addEventListener("toggle",async()=>{
+  if(!edBox.open)return;
+  const te=edBox.querySelector("#avEnv");
+  // .env: refill from the current field inputs each time it opens (fields win until you edit here)
+  const vals=[];form.querySelectorAll("input[data-k]").forEach(i=>{if(i.value.trim())vals.push(i.dataset.k+"="+i.value.trim());});
+  const ta=edBox.querySelector("#avCompose");
+  if(!loaded){loaded=true;ta.value="loading…";
+   const r=await api("/api/store/recipe?id="+encodeURIComponent(a.id));
+   ta.value=(r&&r.compose)||"";te.value=vals.length?vals.join("\n")+"\n":((r&&r.env)||"");}
+  else if(!te.value.trim())te.value=vals.length?vals.join("\n")+"\n":"";
+ });
  const acts=el(`<div class="dd-acts" style="border:none;padding-top:2px"></div>`);
  const go=el(`<button class="btn pri">${svg("play",13)} Install & start</button>`);acts.appendChild(go);box.appendChild(acts);
  const con=el(`<div class="mcon" style="display:block;margin-top:10px"></div>`);box.appendChild(con);
  go.onclick=async()=>{
-  const values={};form.querySelectorAll("input[data-k]").forEach(i=>values[i.dataset.k]=i.value.trim());
+  const body={id:a.id};
+  if(edBox.open){body.compose=edBox.querySelector("#avCompose").value;body.env=edBox.querySelector("#avEnv").value;}   // edited raw text wins
+  else{const values={};form.querySelectorAll("input[data-k]").forEach(i=>values[i.dataset.k]=i.value.trim());body.values=values;}
   go.disabled=true;go.innerHTML=`${svg("refresh",13)} installing…`;
-  const r=await api("/api/store/install",{method:"POST",body:JSON.stringify({id:a.id,values})});
+  const r=await api("/api/store/install",{method:"POST",body:JSON.stringify(body)});
   if(!(r&&r.ok)){toast("Error: "+((r&&r.log)||"?"));go.disabled=false;go.innerHTML=`${svg("play",13)} Install & start`;return;}
   streamPost("/api/stack/stream",con,code=>{
    toast(code?`«${a.name}» finished with warnings — check the containers`:`«${a.name}» is up`);
