@@ -1661,6 +1661,40 @@
   .nbtab-add{flex:0 0 auto;display:grid;place-items:center;width:28px;height:28px;border-radius:50%;
     border:1px dashed var(--win-line,var(--line-2));background:transparent;color:var(--win-dim,var(--dim));cursor:pointer}
   .nbtab-add:hover{background:var(--card-2);color:var(--win-accent,var(--accent))}
+  /* Backup → Compare tab */
+  .cmp-wrap{display:flex;flex-direction:column;gap:11px}
+  .cmp-run{display:flex;align-items:center;gap:11px;background:var(--card);border:1px solid var(--line);border-radius:var(--r-md);padding:12px 14px}
+  .cmp-spin{display:inline-flex;color:var(--accent);animation:nbspin 1.1s linear infinite}
+  @keyframes nbspin{to{transform:rotate(360deg)}}
+  .cmp-verdict{display:flex;align-items:center;gap:12px;border-radius:var(--r-md);padding:13px 15px;border:1px solid}
+  .cmp-verdict.good{background:color-mix(in srgb,var(--good) 12%,transparent);border-color:color-mix(in srgb,var(--good) 40%,transparent);color:var(--good)}
+  .cmp-verdict.good b{color:var(--text)} .cmp-verdict.warn b{color:var(--text)}
+  .cmp-verdict.warn{background:color-mix(in srgb,var(--warn) 12%,transparent);border-color:color-mix(in srgb,var(--warn) 40%,transparent);color:var(--warn)}
+  .cmp-verdict .set-sub{color:var(--mut)}
+  .cmp-chips{display:flex;flex-wrap:wrap;gap:7px}
+  .cmp-chip{font-size:12px;font-weight:600;padding:4px 10px;border-radius:999px;background:var(--card);border:1px solid var(--line);color:var(--dim)}
+  .cmp-chip.ok{color:var(--good)} .cmp-chip.new{color:var(--accent)} .cmp-chip.chg{color:var(--warn)} .cmp-chip.del{color:var(--danger)}
+  .cmp-ctl{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+  .cmp-filters{display:flex;align-items:center;gap:10px;margin-left:auto}
+  .cmp-tgl{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--dim);cursor:pointer;white-space:nowrap}
+  #cmpFind{width:150px;padding:6px 10px;font-size:12.5px;background:var(--glass);border:1px solid var(--line);border-radius:8px;color:var(--text)}
+  .cmp-tree{display:flex;flex-direction:column;gap:2px}
+  .cmp-share{border:1px solid var(--line);border-radius:var(--r-sm);background:var(--card);overflow:hidden}
+  .cmp-share>summary,.cmp-share.cmp-flat{display:flex;align-items:center;gap:10px;padding:9px 12px;cursor:pointer;list-style:none;font-weight:600}
+  .cmp-share.cmp-flat{cursor:default}
+  .cmp-share>summary::-webkit-details-marker{display:none}
+  .cmp-share>summary:hover{background:var(--card-2)}
+  .cmp-node{margin:0}
+  .cmp-node>summary{display:flex;align-items:center;gap:8px;padding:5px 8px;cursor:pointer;list-style:none;border-radius:6px}
+  .cmp-node>summary::-webkit-details-marker{display:none}
+  .cmp-node>summary:hover{background:var(--glass)}
+  .cmp-kids{padding-left:15px;border-left:1px solid var(--line);margin-left:11px}
+  .cmp-row{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px}
+  .cmp-nm{display:flex;align-items:center;gap:7px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);font-weight:500}
+  .cmp-nm svg{flex:none;color:var(--dim)}
+  .cmp-badge{margin-left:auto;display:flex;align-items:center;gap:9px;flex:none;font-size:12px;font-variant-numeric:tabular-nums}
+  .cmp-new{color:var(--accent)} .cmp-chg{color:var(--warn)} .cmp-del{color:var(--danger)} .cmp-ok{color:var(--good);font-weight:600}
+  .cmp-node[open]>summary .cmp-nm svg,.cmp-share[open]>summary .cmp-nm svg{color:var(--accent)}
   .nbmain{display:flex;flex:1;min-height:0}
   .nb-del-warn{font-size:12.5px;color:var(--mut);line-height:1.55;margin:0 0 10px}
   .nb-chk{display:flex;align-items:center;gap:9px;font-size:12.5px;color:var(--text);cursor:pointer;margin:2px 0 0}
@@ -6207,6 +6241,7 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
   {id:"sources",name:"What to copy",ic:"folder"},
   {id:"deleted",name:"Deleted files",ic:"trash",sec:1},
   {id:"sched",name:"Schedule",ic:"clock",sec:1},
+  {id:"compare",name:"Compare",ic:"shield",sec:1},
   {id:"history",name:"History",ic:"activity",sec:1},
  ];
  if(SET.nbTab&&CATS.some(c=>c.id===SET.nbTab))tab=SET.nbTab;   // remember the last opened tab
@@ -6814,7 +6849,7 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
     });};
    const cb=tc.querySelector("#hClear");if(cb)cb.onclick=()=>confirmDlg("Clear history?","All history entries for this profile will be removed. The backups themselves are untouched.",async()=>{const r=await nbP("/api/backup/history-del",{all:true});draw((r&&r.history)||[]);},true);
    nbG("/api/backup/history").then(r=>draw((r&&r.history)||[]));}
- const TABS={overview:tabOverview,conn:tabConn,sources:tabSources,deleted:tabDeleted,sched:tabSched,history:tabHistory};
+ const TABS={overview:tabOverview,conn:tabConn,sources:tabSources,deleted:tabDeleted,sched:tabSched,compare:tabCompare,history:tabHistory};
  /* ── profiles: tab bar ── */
  const curProf=()=>PROFS.find(x=>x.id===NB_PID)||PROFS[0]||{};
  const switchTo=id=>{if(id===NB_PID)return;NB_PID=id;tab="overview";nbCursor=0;nbStarted=null;render();};
@@ -6907,6 +6942,69 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
  render();body._reload=render;
 },{w:820,h:600});}
 
+// Backup → Compare tab: on-demand rsync dry-run (server-side, as root) that answers
+// "is the backup identical to the source?" — runs in the background, groups differences
+// by folder so it's readable, filters out identical/noise. Top-level so it's hoisted into
+// winBackup's TABS; it only needs NB_PID (global) + shared helpers.
+function tabCompare(tc){
+ let showAll=false, filt="", timer=null, findT=null, LAST={};
+ const bp=(path,b)=>api(path,{method:"POST",body:JSON.stringify(Object.assign({p:NB_PID},b||{}))});
+ const stop=()=>{if(timer){clearTimeout(timer);timer=null;}};
+ const bytes=n=>fmtB(n||0);
+ const ago=from=>{const s=Math.max(0,Math.floor(Date.now()/1000-(from||0))),m=Math.floor(s/60);return m?`${m} min ${s%60} s`:`${s} s`;};
+ const score=n=>(n.nb||0)+(n.cb||0)+(n.n+n.c+n.d);
+ const badge=n=>[n.n?`<b class="cmp-new">+${n.n}${n.nb?" · "+bytes(n.nb):""}</b>`:"",
+   n.c?`<b class="cmp-chg">✎ ${n.c}</b>`:"",n.d?`<b class="cmp-del">✗ ${n.d}</b>`:""].filter(Boolean).join(" ");
+ const start=async deep=>{const r=await bp("/api/backup/compare",{deep});if(r&&r.ok===false){toast(r.log||"error");return;}toast(deep?"Deep verify started":"Compare started");tick();};
+ const cancel=async()=>{await bp("/api/backup/compare/cancel");toast("Stopped");setTimeout(tick,300);};
+ // one folder node (recursive). "" = hidden (identical hidden, or no match under filter)
+ const sub=(name,node,path)=>{
+  const diff=(node.n||0)+(node.c||0)+(node.d||0);
+  if(!showAll && !diff) return "";
+  const kids=node.ch?Object.keys(node.ch):[];
+  const kidHtml=kids.sort((a,b)=>score(node.ch[b])-score(node.ch[a])||a.localeCompare(b))
+    .map(k=>sub(k,node.ch[k],path+"/"+k)).filter(Boolean).join("");
+  const fl=filt.toLowerCase();
+  if(fl && !name.toLowerCase().includes(fl) && !kidHtml) return "";
+  const lab=`<span class="cmp-nm">${svg(kids.length?"folder":"file",13)} ${esc(name)}</span><span class="cmp-badge">${diff?badge(node):`<span class="cmp-ok">✓</span>`}</span>`;
+  if(kids.length&&kidHtml) return `<details class="cmp-node"${fl?" open":""}><summary>${lab}</summary><div class="cmp-kids">${kidHtml}</div></details>`;
+  return `<div class="cmp-row">${lab}</div>`;
+ };
+ const buildTree=()=>{const st=LAST;if(!(st.shares&&st.shares.length))return "";
+  const fl=filt.toLowerCase();
+  return st.shares.map(s=>{const t=s.tree||{},d=(t.n||0)+(t.c||0)+(t.d||0);
+    const kids=t.ch?Object.keys(t.ch):[];
+    const kidHtml=kids.sort((a,b)=>score(t.ch[b])-score(t.ch[a])||a.localeCompare(b)).map(k=>sub(k,t.ch[k],k)).filter(Boolean).join("");
+    if(!showAll && !d && !fl) return `<div class="cmp-share cmp-flat"><span class="cmp-nm">${svg("folder",14)} ${esc(s.src)}</span><span class="cmp-badge"><span class="cmp-ok">✓ identical</span></span></div>`;
+    if(fl && !kidHtml && !s.src.toLowerCase().includes(fl)) return "";
+    return `<details class="cmp-share"${(d||fl)?" open":""}><summary><span class="cmp-nm">${svg("folder",14)} ${esc(s.src)}</span><span class="cmp-badge">${d?badge(t):`<span class="cmp-ok">✓ identical</span>`}</span></summary><div class="cmp-kids">${kidHtml||`<div class="cmp-row set-sub">no differences</div>`}</div></details>`;
+  }).join("");};
+ const renderTree=()=>{const e=tc.querySelector(".cmp-tree");if(e)e.innerHTML=buildTree();};
+ const render=()=>{if(!document.body.contains(tc)){stop();return;}
+  const st=LAST,run=st.running,sum=st.summary||{},diffs=(sum.new||0)+(sum.changed||0)+(sum.deleted||0),good=!run&&(st.done||st.shares)&&diffs===0;
+  let head="";
+  if(run) head=`<div class="cmp-run"><span class="cmp-spin">${svg("sync",16)}</span><div><b>Comparing…</b>${st.cur?" · "+esc(st.cur):""}<div class="set-sub" style="margin:1px 0 0">${st.deep?"deep (checksums)":"quick (size + date)"} · ${ago(st.started)}${st.scanned?" · "+st.scanned.toLocaleString()+" differences so far":""}</div></div><button class="btn sm dng" id="cmpCancel" style="margin-left:auto">Stop</button></div>`;
+  else if(st.done||st.shares) head=`<div class="cmp-verdict ${good?"good":"warn"}">${svg(good?"check":"shield",20)}<div><b>${good?"Backup matches the server":`${diffs.toLocaleString()} differences · ${bytes((sum.new_bytes||0)+(sum.changed_bytes||0))} to copy`}</b><div class="set-sub">${st.done?"Last compared: "+fmDate(st.done*1000):""}${st.deep?" · deep":" · quick"}${st.stopped?" · stopped early":""}</div></div></div>`
+    +`<div class="cmp-chips"><span class="cmp-chip ok">✓ identical ${(sum.identical||0).toLocaleString()}</span><span class="cmp-chip new">＋ new ${(sum.new||0).toLocaleString()}${sum.new_bytes?" · "+bytes(sum.new_bytes):""}</span><span class="cmp-chip chg">✎ changed ${(sum.changed||0).toLocaleString()}</span><span class="cmp-chip del">✗ extra ${(sum.deleted||0).toLocaleString()}</span></div>`;
+  else head=`<div class="set-sub" style="margin:0 0 4px">Check that the backup is identical to the server. Runs in the background — you can close this window and come back; it remembers when it last ran.</div>`;
+  const filters=(st.shares&&st.shares.length)?`<span class="cmp-filters"><label class="cmp-tgl"><input type="checkbox" id="cmpAll"${showAll?" checked":""}> show identical</label><input class="mono" id="cmpFind" placeholder="filter folders…" value="${att(filt)}"></span>`:"";
+  tc.innerHTML=`<div class="cmp-wrap"><h3 class="set-title" style="margin:0 0 3px">Compare with the server</h3>${head}
+    <div class="cmp-ctl"><button class="btn sm pri" id="cmpQuick"${run?" disabled":""}>${svg("shield",14)} Compare (quick)</button><button class="btn sm" id="cmpDeep"${run?" disabled":""} title="Re-reads every file and compares checksums — proves the copies are byte-for-byte identical. Slow.">${svg("check",14)} Deep verify</button>${filters}</div>
+    <div class="cmp-tree">${buildTree()}</div></div>`;
+  const g=s=>tc.querySelector(s);
+  if(g("#cmpQuick"))g("#cmpQuick").onclick=()=>start(false);
+  if(g("#cmpDeep"))g("#cmpDeep").onclick=()=>start(true);
+  if(g("#cmpCancel"))g("#cmpCancel").onclick=cancel;
+  if(g("#cmpAll"))g("#cmpAll").onchange=e=>{showAll=e.target.checked;renderTree();};
+  if(g("#cmpFind"))g("#cmpFind").oninput=e=>{filt=e.target.value;clearTimeout(findT);findT=setTimeout(renderTree,200);};
+ };
+ const tick=async()=>{if(!document.body.contains(tc)){stop();return;}
+  let st=null;try{st=await api("/api/backup/compare?p="+encodeURIComponent(NB_PID));}catch(e){}
+  if(!document.body.contains(tc)){stop();return;}
+  LAST=st||{};render();
+  if(LAST.running){stop();timer=setTimeout(tick,1500);}};
+ render();tick();
+}
 function winTrash(){openWin("__trash","Trash",body=>{
  body.style.padding="0";
  const draw=async()=>{const r=await api("/api/fs/trash"),items=(r&&r.items)||[];

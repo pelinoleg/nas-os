@@ -6001,6 +6001,194 @@ def nb_run_cli(pid=None, dry=False, allow_delete=False):
             try: logf.close()
             except OSError: pass
 
+# --------------------------------------------------------------------------- #
+#  Compare with the source: an on-demand rsync dry-run (--itemize) that answers
+#  "is the backup identical to the server?" without copying anything. Runs in its
+#  OWN transient unit (as root, like the backup) so it survives closing the window
+#  and reads restrictively-permissioned folders the panel user can't. Two modes:
+#  quick (size+time, seconds-minutes) and deep (--checksum, proves byte-identity).
+# --------------------------------------------------------------------------- #
+def nb_compare_state_file(pid): return _nb_f(pid, "compare", "json")
+def nb_compare_cancel(pid):     return _nb_f(pid, "compare", "cancel")
+def nb_compare_unit(pid):       return "nas-backup-cmp" + ("" if pid == NB_MAIN else "-" + pid)
+
+def _systemd_active(unit):
+    try:
+        r = subprocess.run(["systemctl", "is-active", unit], capture_output=True, text=True, timeout=8)
+        return r.stdout.strip() == "active"
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+def nb_compare_cmd(cfg, job, deep, stage=None):
+    """rsync dry-run that only REPORTS differences (never writes). %i|%l|%n =
+    itemize flags | length | name — enough to classify new/changed/deleted + size."""
+    env, rsh = _nb_cmd_ctx(cfg, stage)
+    args = ["rsync", "-n", "-rltD", "--no-owner", "--no-group", "--no-perms",
+            "--delete", "--stats", "--out-format=%i|%l|%n"] + rsh
+    if deep:
+        args.append("--checksum")                       # re-read every file → byte-identity proof
+    args.append("--exclude=/" + nb_deleted_top(cfg))    # our own _deleted archive isn't a "difference"
+    for ex in cfg.get("excludes", []):
+        args.append("--exclude=" + ex)
+    for ex in job.get("excludes", []):
+        args.append("--exclude=" + str(ex))
+    if cfg.get("transport") == "ssh" and cfg.get("remote_sudo"):
+        args.append("--rsync-path=sudo rsync")
+    args += _nb_src_dst(cfg, job, stage)
+    return args, env
+
+_CMP_DEPTH = 7          # aggregate the folder tree down to this many levels (deeper rolls up)
+
+def _nb_compare_job(cfg, job, deep, on_scan, cancelled):
+    """Run one job's compare, return {summary, tree}. tree nodes: {n,c,d,nb,cb,ch}."""
+    args, env = nb_compare_cmd(cfg, job, deep)
+    tree = {"n": 0, "c": 0, "d": 0, "nb": 0, "cb": 0, "ch": {}}
+    summ = {"new": 0, "changed": 0, "deleted": 0, "new_bytes": 0, "changed_bytes": 0,
+            "identical": 0, "total": 0}
+    def add(path, kind, size):
+        parts = [p for p in path.rstrip("/").split("/") if p]
+        dirs = parts[:-1]                               # roll the file up into its ancestor folders
+        node = tree
+        def bump(nd):
+            nd[kind] = nd.get(kind, 0) + 1
+            if kind == "n": nd["nb"] = nd.get("nb", 0) + size
+            elif kind == "c": nd["cb"] = nd.get("cb", 0) + size
+        bump(node)
+        for i, part in enumerate(dirs):
+            if i >= _CMP_DEPTH:
+                break
+            node = node["ch"].setdefault(part, {"n": 0, "c": 0, "d": 0, "nb": 0, "cb": 0, "ch": {}})
+            bump(node)
+    reg_total = None
+    try:
+        p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                             env=env, text=True, bufsize=1)
+    except (OSError, subprocess.SubprocessError) as e:
+        return {"summary": summ, "tree": tree, "error": str(e)}
+    scanned = 0
+    for line in p.stdout:
+        if cancelled():
+            try: p.terminate()
+            except OSError: pass
+            break
+        line = line.rstrip("\n")
+        if not line:
+            continue
+        if "|" in line and line[0] in ">c.*":
+            flags, _, rest = line.partition("|")
+            length, _, name = rest.partition("|")
+            if not name:
+                continue
+            if flags.startswith("*deleting"):
+                add(name, "d", 0); summ["deleted"] += 1
+            elif len(flags) >= 2 and flags[0] in ">c" and flags[1] != "d":
+                try: size = int(length or 0)
+                except ValueError: size = 0
+                if flags[2:] and flags[2:].strip("+") == "":     # all '+' → brand new
+                    add(name, "n", size); summ["new"] += 1; summ["new_bytes"] += size
+                else:                                            # size/time/checksum differs
+                    add(name, "c", size); summ["changed"] += 1; summ["changed_bytes"] += size
+            scanned += 1
+            if scanned % 400 == 0:
+                on_scan(scanned)
+        elif line.startswith("Number of files:"):
+            m = re.search(r"reg:\s*([\d,]+)", line)
+            if m:
+                reg_total = int(m.group(1).replace(",", ""))
+    try: p.wait(timeout=10)
+    except (OSError, subprocess.SubprocessError): pass
+    if reg_total is not None:
+        summ["total"] = reg_total
+        summ["identical"] = max(0, reg_total - summ["new"] - summ["changed"])
+    return {"summary": summ, "tree": tree}
+
+def nb_compare_run(pid=None, deep=False):
+    """Compare driver (runs in the transient unit, as root)."""
+    cfg = nb_load(pid); pid = cfg["id"]
+    state = {"running": True, "deep": bool(deep), "started": int(time.time()),
+             "cur": "", "scanned": 0, "shares": [], "done": None, "ts": int(time.time())}
+    last = [0.0]
+    def flush(force=False):
+        now = time.time()
+        if force or now - last[0] >= 2:
+            last[0] = now; state["ts"] = int(now)
+            _json_save(nb_compare_state_file(pid), state, indent=None)
+    flush(True)
+    def cancelled():
+        return os.path.exists(nb_compare_cancel(pid))
+    def on_scan(n):
+        state["scanned"] = n; flush()
+    try:
+        for job in [j for j in cfg.get("jobs", []) if j.get("enabled", True)]:
+            if cancelled():
+                break
+            state["cur"] = str(job.get("src") or job.get("dest")); flush(True)
+            res = _nb_compare_job(cfg, job, deep, on_scan, cancelled)
+            res["src"] = str(job.get("src") or job.get("dest"))
+            state["shares"].append(res); flush(True)
+    except Exception as e:
+        state["error"] = str(e)
+    finally:
+        ov = {"new": 0, "changed": 0, "deleted": 0, "new_bytes": 0, "changed_bytes": 0,
+              "identical": 0, "total": 0}
+        for s in state["shares"]:
+            for k in ov:
+                ov[k] += (s.get("summary", {}) or {}).get(k, 0)
+        state["summary"] = ov
+        state["running"] = False; state["cur"] = ""; state["done"] = int(time.time())
+        state["stopped"] = cancelled()
+        _json_save(nb_compare_state_file(pid), state, indent=None)
+        try:
+            if os.path.exists(nb_compare_cancel(pid)): os.remove(nb_compare_cancel(pid))
+        except OSError: pass
+
+def nb_compare_state(pid=None):
+    cfg = nb_load(pid); pid = cfg["id"]
+    st = _json_load_strict(nb_compare_state_file(pid), {})
+    if st.get("running") and time.time() - (st.get("started") or 0) > 15 \
+            and not _systemd_active(nb_compare_unit(pid)):
+        st["running"] = False; st["done"] = st.get("done") or int(time.time())   # orphaned (crash/reboot)
+    return st
+
+def nb_compare_bg(pid=None, deep=False):
+    cfg = nb_load(pid); pid = cfg["id"]
+    if nb_compare_state(pid).get("running"):
+        return {"ok": False, "log": "compare already running"}
+    try:
+        if os.path.exists(nb_compare_cancel(pid)): os.remove(nb_compare_cancel(pid))
+    except OSError:
+        pass
+    _json_save(nb_compare_state_file(pid), {"running": True, "deep": bool(deep),
+               "started": int(time.time()), "cur": "", "scanned": 0, "shares": []}, indent=None)
+    cmd = ["systemd-run", "--collect", "--quiet", "--unit", nb_compare_unit(pid),
+           "--setenv=SUDO_USER=" + TARGET_USER, "--setenv=HOME=" + HOME,
+           sys.executable, os.path.join(HERE, "nas-web.py"), "backup-compare", pid] \
+        + (["deep"] if deep else [])
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError) as e:
+        _json_save(nb_compare_state_file(pid), {"running": False, "error": str(e)}, indent=None)
+        return {"ok": False, "log": str(e)}
+    if r.returncode != 0:
+        _json_save(nb_compare_state_file(pid), {"running": False, "error": r.stderr[:200]}, indent=None)
+        return {"ok": False, "log": (r.stderr or "failed to start")[:200]}
+    return {"ok": True, "log": "started"}
+
+def nb_compare_cancel_req(pid=None):
+    cfg = nb_load(pid); pid = cfg["id"]
+    try:
+        with open(nb_compare_cancel(pid), "w") as f: f.write("1")
+    except OSError:
+        pass
+    try:
+        subprocess.run(["systemctl", "stop", nb_compare_unit(pid)], capture_output=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    st = _json_load_strict(nb_compare_state_file(pid), {})
+    st["running"] = False; st["stopped"] = True; st["done"] = int(time.time())
+    _json_save(nb_compare_state_file(pid), st, indent=None)
+    return {"ok": True}
+
 def nb_schedule_due(cfg, nowt):
     """Whether it's time to run on schedule (called once a minute from monitor_loop)."""
     s = cfg.get("schedule", {})
@@ -13202,6 +13390,8 @@ class H(BaseHTTPRequestHandler):
                 self._json(nb_log_tail((q.get("since") or ["0"])[0], _nb_qpid(q)))
             elif p == "/api/backup/history":
                 self._json({"history": nb_history(_nb_qpid(q))})
+            elif p == "/api/backup/compare":
+                self._json(nb_compare_state(_nb_qpid(q)))
             elif p == "/api/timemachine":
                 self._json(tm_status())
             elif p == "/api/winpos":
@@ -13663,6 +13853,11 @@ class H(BaseHTTPRequestHandler):
                 b = self._body()
                 self._json(nb_run_bg(_nb_bpid(b), dry=bool(b.get("dry", False)),
                                      allow_delete=bool(b.get("allow_delete", False))))
+            elif p == "/api/backup/compare":
+                b = self._body()
+                self._json(nb_compare_bg(_nb_bpid(b), deep=bool(b.get("deep", False))))
+            elif p == "/api/backup/compare/cancel":
+                self._json(nb_compare_cancel_req(_nb_bpid(self._body())))
             elif p == "/api/backup/cancel":
                 b = self._body()
                 pid = nb_load(_nb_bpid(b))["id"]
@@ -13794,5 +13989,9 @@ if __name__ == "__main__":
         _args = sys.argv[2:]
         _pid = next((a for a in _args if a not in ("dry", "allow-delete")), NB_MAIN)
         nb_run_cli(_pid, dry=("dry" in _args), allow_delete=("allow-delete" in _args))
+    elif len(sys.argv) > 1 and sys.argv[1] == "backup-compare":
+        _args = sys.argv[2:]
+        _pid = next((a for a in _args if a != "deep"), NB_MAIN)
+        nb_compare_run(_pid, deep=("deep" in _args))
     else:
         main()
