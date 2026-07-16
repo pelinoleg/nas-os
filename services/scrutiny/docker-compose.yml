@@ -24,12 +24,13 @@ services:
       - /opt/docker/scrutiny/influxdb:/opt/scrutiny/influxdb
     # We pass through char CONTROLLERS (/dev/nvmeN), not the namespace (/dev/nvmeNn1):
     # smartctl --scan finds exactly the controllers, so Scrutiny discovers disks
-    # itself, without a manual collector.yaml. List — match your disks (Docker
-    # requires the device to exist at startup; remove extra lines).
-    devices:
-      - "/dev/nvme0"         # Crucial CT500P3P (pool disk2)
-      - "/dev/nvme1"         # Samsung 970 EVO Plus 1TB (pool disk1)
-      - "/dev/nvme2"         # Kioxia 256G (system disk)
-      # USB/SATA disks (char device = the disk itself): uncomment as needed
-      # - "/dev/sda"
-      # - "/dev/sdb"
+    # itself, without a manual collector.yaml.
+    # IMPORTANT: Docker requires every listed device to EXIST at startup, or the
+    # container won't come up — so nothing is listed by default. UNCOMMENT the
+    # lines that match THIS box's disks (check `ls /dev/nvme* /dev/sd?`).
+    # devices:
+    #   - "/dev/nvme0"       # first NVMe controller
+    #   - "/dev/nvme1"
+    #   - "/dev/nvme2"
+    #   - "/dev/sda"         # a USB/SATA disk (char device = the disk itself)
+    #   - "/dev/sdb"

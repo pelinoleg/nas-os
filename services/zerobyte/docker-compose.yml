@@ -15,8 +15,8 @@ services:
       - "web-desktop.url=http://localhost:4096"
       - "web-desktop.icon=https://cdn.jsdelivr.net/gh/selfhst/icons@main/svg/zerobyte.svg"
     environment:
-      - APP_SECRET=${APP_SECRET}
-      - BASE_URL=http://localhost:4096
+      - APP_SECRET=${APP_SECRET}           # random per install (from the dialog)
+      - BASE_URL=${BASE_URL}               # this NAS's real address
       - PORT=4096
     ports:
       - "4096:4096"

@@ -1,6 +1,6 @@
 # NextExplorer — web file manager (https://github.com/nxzai/NextExplorer). http://<pi>:3000
-# MUST replace SESSION_SECRET with a random string >=32 characters:
-#   openssl rand -hex 32
+# SESSION_SECRET / PUBLIC_URL / STORAGE come from the install dialog (.env):
+# a random secret is generated per install, PUBLIC_URL defaults to this NAS's LAN address.
 services:
   nextexplorer:
     image: nxzai/explorer:v2.2.4
@@ -17,9 +17,9 @@ services:
       - PORT=3000
       - PUID=1000
       - PGID=1000
-      - PUBLIC_URL=http://localhost:3000   # set the real address/host of the Pi, no trailing slash
-      - SESSION_SECRET=CHANGE-ME-openssl-rand-hex-32
+      - PUBLIC_URL=${PUBLIC_URL}           # this NAS's real address (share links); set in the install dialog
+      - SESSION_SECRET=${SESSION_SECRET}   # random per install (do NOT commit a fixed secret)
     volumes:
       - /opt/docker/nextexplorer/config:/config     # DB/settings (persistent)
       - /opt/docker/nextexplorer/cache:/cache       # thumbnails/indexes
-      - /mnt/storage:/mnt/Storage                    # each /mnt/<Label> = a volume in the UI
+      - ${STORAGE:-/mnt/storage}:/mnt/Storage        # each /mnt/<Label> = a volume in the UI

@@ -3,5 +3,9 @@
   "desc": "Torrent client with a web UI",
   "category": "files",
   "icon": "https://cdn.jsdelivr.net/gh/selfhst/icons@main/svg/qbittorrent.svg",
-  "port": 8080
+  "port": 8080,
+  "fields": [
+    {"key": "TZ", "label": "Timezone", "default": "{tz}", "adv": true},
+    {"key": "DOWNLOADS", "label": "Downloads folder", "type": "path", "default": "{storage}/downloads", "adv": true}
+  ]
 }

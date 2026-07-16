@@ -12,10 +12,10 @@ services:
     environment:
       - PUID=1000
       - PGID=1000
-      - TZ=Europe/Madrid
+      - TZ=${TZ:-Europe/Madrid}
     volumes:
       - /opt/docker/syncthing/config:/config
-      - /mnt/storage:/data                 # mergerfs pool
+      - ${STORAGE:-/mnt/storage}:/data      # shared folder (pool by default)
     ports:
       - "8384:8384"          # web UI
       - "22000:22000/tcp"    # sync

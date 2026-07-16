@@ -3,5 +3,10 @@
   "desc": "Web file manager with previews and sharing",
   "category": "files",
   "icon": "https://cdn.jsdelivr.net/gh/selfhst/icons@main/svg/nextexplorer.svg",
-  "port": 3000
+  "port": 3000,
+  "fields": [
+    {"key": "SESSION_SECRET", "label": "Session secret", "secret": true, "default": "{rand}"},
+    {"key": "PUBLIC_URL", "label": "Public URL of this NAS", "default": "http://{host}:3000", "adv": true},
+    {"key": "STORAGE", "label": "Shared storage", "type": "path", "default": "{storage}", "adv": true}
+  ]
 }

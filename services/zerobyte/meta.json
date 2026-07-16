@@ -3,5 +3,9 @@
   "desc": "Off-site backups: restic snapshots to a cloud/another disk, web UI",
   "category": "backup",
   "icon": "https://cdn.jsdelivr.net/gh/selfhst/icons@main/svg/zerobyte.svg",
-  "port": 4096
+  "port": 4096,
+  "fields": [
+    {"key": "APP_SECRET", "label": "App secret", "secret": true, "default": "{rand}"},
+    {"key": "BASE_URL", "label": "Base URL of this NAS", "default": "http://{host}:4096", "adv": true}
+  ]
 }

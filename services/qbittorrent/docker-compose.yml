@@ -13,12 +13,12 @@ services:
     environment:
       - PUID=1000
       - PGID=1000
-      - TZ=Europe/Madrid
+      - TZ=${TZ:-Europe/Madrid}
       - WEBUI_PORT=8080
       - TORRENTING_PORT=6881
     volumes:
       - /opt/docker/qbittorrent/config:/config
-      - /mnt/storage/downloads:/downloads
+      - ${DOWNLOADS:-/mnt/storage/downloads}:/downloads
     ports:
       - "8080:8080"
       - "6881:6881"
