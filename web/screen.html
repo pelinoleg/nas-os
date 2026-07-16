@@ -74,7 +74,7 @@
   #dot{width:9px;height:9px;border-radius:50%;background:var(--good);color:var(--good);
        box-shadow:0 0 9px currentColor;flex:none}
   #dot.warn{background:var(--warn);color:var(--warn)} #dot.bad{background:var(--danger);color:var(--danger)}
-  #who{font-weight:650} #addr{color:var(--dim);font-size:12.5px}
+  #who{font-weight:650;font-size:15px} #addr{color:var(--ink);font-size:16px;font-weight:650}
   #up{color:var(--good);font-size:14px;font-weight:650;margin-left:4px}
   #net{margin-left:auto;display:flex;gap:12px;font-size:13px;font-variant-numeric:tabular-nums}
   #net b{font-weight:650}
@@ -300,6 +300,20 @@
          box-shadow:inset 0 0 0 4px rgba(255,93,104,.9);animation:alrpulse 1.6s ease-in-out infinite}
   @keyframes alrpulse{0%,100%{box-shadow:inset 0 0 0 4px rgba(255,93,104,.9)}50%{box-shadow:inset 0 0 0 4px rgba(255,93,104,.35)}}
   #alarm.on{display:flex}
+  /* amber warn strip (non-critical problems) — visible on every page, tap for the full list */
+  #warns{flex:none;display:none;align-items:center;gap:8px;padding:6px 12px;margin:0 8px;
+    background:rgba(245,179,66,.15);border:1px solid rgba(245,179,66,.34);border-radius:9px;
+    color:#f5c869;font-size:13.5px;font-weight:600}
+  #warns.on{display:flex}
+  #warns svg{flex:none;color:#f5c869}
+  #warns .wn-t{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* problems sheet (tap the strip): each problem colour-coded by severity */
+  .prob-p{padding:12px 0;border-bottom:1px solid rgba(255,255,255,.09)}
+  .prob-p:last-child{border-bottom:0}
+  .prob-n{font-size:20px;font-weight:750}
+  .prob-p.bad .prob-n{color:#ff6b74} .prob-p.warn .prob-n{color:#f5c869}
+  .prob-v{font-size:17px;color:var(--ink);margin-top:2px}
+  .prob-h{font-size:14px;color:var(--dim);margin-top:3px}
   #alarm .big{font-size:38px;font-weight:800;color:#ff6b74;letter-spacing:-.01em;margin-bottom:6px}
   #alarm .li{width:100%;max-width:640px}
   #alarm .alr-p{margin-top:14px;padding-bottom:14px;border-bottom:1px solid rgba(255,120,128,.25)}
@@ -331,6 +345,8 @@
       <path d="M15.5 7.5a3.5 3.5 0 1 1-4-4 3 3 0 0 0 4 4z" fill="currentColor" stroke="none"/>
     </svg></span>
 </div>
+
+<div id="warns" data-sheet="problems"></div>
 
 <div id="pages">
   <div class="page on" id="p0">
@@ -613,8 +629,9 @@ function renderP3(d){
       return `<div class="prow"><div class="t">
         <span class="st2 ${st}">●</span>
         <span class="nm">${esc(x.name)}${x.model?" · "+esc(x.model):""}</span>
-        <span class="ago">${esc(x.size||"")}</span></div>
-        <div class="run" style="color:var(--dim)">${esc(bits)}</div></div>`;}).join("")
+        <span class="ago">${esc(x.size||"")}${x.used_pct!=null?" · "+Math.round(x.used_pct)+"%":""}</span></div>
+        ${x.used_pct!=null?bar(x.used_pct):""}
+        <div class="run" style="color:var(--dim)">${esc(bits)}${x.free!=null?" · "+fmtB(x.free)+" free":""}</div></div>`;}).join("")
       :`<div class="empty">no SMART-capable disks</div>`}</div>`;
 }
 // a disk worth showing in "Disk health": SMART actually responded (temperature, power-on, or a failing verdict)
@@ -863,10 +880,25 @@ function renderAlarm(d){
   }else{ a._hid=false; a._sig=""; a.classList.remove("on"); }
 }
 $("#alarm").onclick=()=>{ $("#alarm")._hid=true; $("#alarm").classList.remove("on"); };
+// amber strip for warn-level problems (not critical enough for the full-screen alarm)
+let WARN_HID="";   // dismissed-warning signature — the strip stays hidden until the set of warnings changes
+function renderWarns(d){
+  const w=(d.problems||[]).filter(p=>p.lvl==="warn"), e=$("#warns");
+  const sig=w.map(p=>p.name+"="+p.value).join("|");
+  if(!w.length || sig===WARN_HID){ e.classList.remove("on"); return; }
+  const tri=`<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>`;
+  e.innerHTML=`${tri}<span class="wn-t">${w.length>1?w.length+" warnings — ":""}${w.map(p=>esc(p.name)).join(" · ")}</span>`;
+  e.classList.add("on");
+}
 
 /* ---------- details: open on a tap on ANY tile ---------- */
 const KV=(k,v)=>v==null||v===""?"":`<div class="kv"><span>${esc(k)}</span><b>${esc(v)}</b></div>`;
 const SHEETS={
+  // the amber strip / attention list — problems sorted worst-first, colour-coded
+  problems:d=>{const ps=(d.problems||[]).slice().sort((a,b)=>((b.lvl==="bad")-(a.lvl==="bad")));
+    const warns=ps.some(p=>p.lvl==="warn");
+    return ["Attention", (ps.length?ps.map(p=>`<div class="prob-p ${esc(p.lvl)}"><div class="prob-n">${esc(p.name)}</div><div class="prob-v">${esc(p.value)}</div>${p.hint?`<div class="prob-h">${esc(p.hint)}</div>`:""}</div>`).join(""):`<div class="empty">all good — no problems</div>`)
+      +(warns?`<div style="margin-top:18px;text-align:center"><span class="sbtn" data-warndismiss="1">Dismiss warnings</span></div>`:""), ""];},
   // gauge taps → a full-screen 24 h graph for that metric (data in d.p2.graphs).
   // Fixed 0..100 scale so the LEVEL is obvious; a CPU spike over 100% extends the top (chart's fixTop).
   cpu:d=>["CPU · last 24 h", `<div class="shchart big">${chart(((d.p2||{}).graphs||{}).cpu,"var(--accent)",360,r0,"%",true,100)}</div>`, ""],
@@ -1065,6 +1097,9 @@ document.addEventListener("click",e=>{
     BKSTOP=0; toast("Stopping backup…");
     act({a:"backup_stop",p:pid}).then(x=>{ toast(x.ok?"Backup stopping…":(x.log||"failed")); poll(); });
     return; }
+  const wd=e.target.closest("[data-warndismiss]");
+  if(wd){ WARN_HID=(D.problems||[]).filter(p=>p.lvl==="warn").map(p=>p.name+"="+p.value).join("|");
+    closeSheet(); renderWarns(D); toast("Warnings dismissed"); return; }
   const ub=e.target.closest("[data-upd]");
   if(ub&&!ub.disabled){ const op=ub.dataset.upd;
     if(UPD.op!==op||Date.now()-UPD.t>=5000){ UPD={op:op,t:Date.now()}; renderPage(); return; }   // first tap — arm
@@ -1174,7 +1209,7 @@ async function _poll(){
     if(!D.p2 && prev) D.p2=prev;      // a response without p2 must not blank out the second page
     window.NAS_LANG=D.lang||"en";
     NETBITS=D.netUnits!=="bytes";     // shared panel setting; bits by default
-    applyLook(D.look); renderBar(D); renderFoot(D); renderAlarm(D);
+    applyLook(D.look); renderBar(D); renderFoot(D); renderAlarm(D); renderWarns(D);
     if(PAGE===0){ renderGauges(D); renderCards(D); renderRow2(D); }
     else if(PAGE===1){ renderP1(D); }
     else if(PAGE===2){ renderP2(D); }

@@ -942,6 +942,50 @@ def _health_report_build():
     if ro:
         add("Filesystem read-only", ", ".join(ro), "bad",
             "A disk went read-only after an I/O error — unmount and run e2fsck")
+    # critical disk temperature (≥65 screams; 60-64 is a quiet warn)
+    dtc = [d["name"] for d in ds if isinstance((d.get("smart") or {}).get("temp"), int) and d["smart"]["temp"] >= 65]
+    dth = [d["name"] for d in ds if isinstance((d.get("smart") or {}).get("temp"), int) and 60 <= d["smart"]["temp"] < 65]
+    if dtc or dth:
+        add("Disk temperature", ("critical: " + ", ".join(dtc)) if dtc else ("hot: " + ", ".join(dth)),
+            "bad" if dtc else "warn", "A disk is running hot — check airflow/cooling")
+    # a mounted USB disk that stopped responding (stale mount / device dropped mid-operation)
+    usboff = []
+    for d in ds:
+        if d.get("tran") == "usb" and d.get("role") != "system":
+            for mp in (d.get("mounts") or []):
+                try:
+                    os.statvfs(mp)
+                except OSError:
+                    usboff.append(d.get("name")); break
+    if usboff:
+        add("USB disk offline", ", ".join(usboff[:4]), "bad",
+            "A mounted USB disk stopped responding — reconnect it, then e2fsck")
+    # no internet (cheap cached probe)
+    if not _safe(_inet_ok, True):
+        add("Internet", "no connection", "warn", "Cable/router down or DNS unreachable")
+    # backup problems: last run had errors, or the destination disk is unplugged
+    try:
+        bkerr, bkoff = [], []
+        for pr in (nb_profiles() or []):
+            pc = _safe(lambda x=pr: nb_load(x["id"]), {}) or {}
+            pbase = pc.get("dest_base") or ""
+            if pbase and _dest_disk_absent(pbase):
+                bkoff.append(pr["name"])
+            elif (nb_history(pr["id"]) or [{}])[0].get("result") == "warn":
+                bkerr.append(pr["name"])
+        if bkoff:
+            add("Backup destination", "disk unplugged: " + ", ".join(bkoff[:4]), "warn",
+                "The backup target disk is not connected")
+        if bkerr:
+            add("Backup errors", ", ".join(bkerr[:4]), "warn", "The last backup run reported errors")
+    except Exception:
+        pass
+    # mass file deletion caught by the integrity scanner (fswatch)
+    fl = _safe(lambda: (fsw_status().get("last") or {}), {}) or {}
+    rem = fl.get("removed") or 0
+    if rem >= 2000:
+        add("Mass file deletion", "{:,} files removed".format(rem), "warn",
+            "Many files disappeared from storage — verify it was intentional")
     # SnapRAID data protection
     sn = snapraid_status()
     if sn.get("configured"):
