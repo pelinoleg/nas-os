@@ -87,7 +87,8 @@
   .page.on{display:flex}      /* by class, not id: there are three pages now */
 
   /* gauges */
-  #gs{flex:none;display:grid;grid-template-columns:repeat(4,1fr);gap:7px;height:100px}
+  #gs{flex:none;display:grid;grid-template-columns:repeat(5,1fr);gap:6px;height:100px}
+  #gs .gauge svg{width:98px}   /* 5 across: a touch narrower so they don't crowd */
   .gauge{padding:4px 4px 5px;display:flex;flex-direction:column;align-items:center;position:relative}
   .gauge svg{width:106px;height:60px}
   .gauge .v{position:absolute;top:30px;left:0;right:0;text-align:center;font-size:26px;font-weight:700;
@@ -169,6 +170,10 @@
   .big{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.15}
   .big small{font-size:11px;color:var(--dim);font-weight:600;margin-left:3px}
   .chart{position:relative}
+  /* full-screen 24h graph shown when a top gauge is tapped */
+  .shchart{margin:2px 0 14px}
+  .shchart .chart .ymax,.shchart .chart .ymin,.shchart .chart .pk{font-size:12px}
+  .shchart .chart .pk{font-weight:650;color:var(--dim)}
   .chart .grid{stroke:rgba(255,255,255,.08);stroke-width:1;vector-effect:non-scaling-stroke}
   .chart .ymax,.chart .ymin,.chart .pk{position:absolute;font-size:9.5px;color:var(--mut);
     font-variant-numeric:tabular-nums;pointer-events:none}
@@ -437,11 +442,14 @@ function renderGauges(d){
   const cpu=raw("cpu").pct||0, tc=raw("cputemp").c||0, ram=raw("ram").pct||0;
   const hasPool=!!(T.pool&&T.pool.raw), dk=hasPool?raw("pool"):raw("rootfs");
   const dp=dk.pct!=null?dk.pct:0, la=raw("load").load1||0, nc=raw("load").ncpu||4;
+  const dt=d.dtemp;   // main-storage disk temperature (follows the "main volume" choice)
   $("#gs").innerHTML=
     gauge("CPU",Math.round(cpu),"%",cpu/100,lvlOf(cpu,70,90),"cpu")
-  + gauge("Temperature",Math.round(tc),"°",tc/90,lvlOf(tc,62,75),"temp")
+  + gauge("CPU temp",Math.round(tc),"°",tc/90,lvlOf(tc,62,75),"temp")
   + gauge("Memory",Math.round(ram),"%",ram/100,lvlOf(ram,75,90),"ram")
-  + gauge(hasPool?"Pool":"Disk",Math.round(dp),"%",dp/100,lvlOf(dp,75,90),"disk");
+  + gauge(hasPool?"Pool":"Disk",Math.round(dp),"%",dp/100,lvlOf(dp,75,90),"disk")
+  + (dt!=null ? gauge("Disk temp",Math.round(dt),"°",dt/70,lvlOf(dt,55,65),"dtemp")
+              : gauge("Disk temp","—","",0,0,"dtemp"));
 }
 
 /* ---------- cards ---------- */
@@ -739,19 +747,28 @@ $("#alarm").onclick=()=>{ $("#alarm")._hid=true; $("#alarm").classList.remove("o
 /* ---------- details: open on a tap on ANY tile ---------- */
 const KV=(k,v)=>v==null||v===""?"":`<div class="kv"><span>${esc(k)}</span><b>${esc(v)}</b></div>`;
 const SHEETS={
-  cpu:d=>{const r=(d.tiles.load||{}).raw||{}, c=(d.tiles.cpu||{}).raw||{};
-    return ["CPU", KV("Usage",Math.round(c.pct||0)+" %")
-      +KV("Load average",(d.load||[]).map(x=>x.toFixed(2)).join(" · "))
-      +KV("Cores",r.ncpu)+KV("Temperature",Math.round(((d.tiles.cputemp||{}).raw||{}).c||0)+" °C")
-      +KV("Uptime",upfmt(d.uptime)), ""];},
-  temp:d=>{const t=((d.tiles.cputemp||{}).raw)||{};
-    return ["Temperature", KV("CPU",Math.round(t.c||0)+" °C")+KV("Throttling",t.throttle?"yes":"no")
-      +KV("Undervoltage",(d.throttled&&d.throttled.undervolt)?"yes":"no")
-      +(d.disks||[]).map(x=>KV(x.name,x.temp?x.temp+" °C":"—")).join(""), ""];},
-  ram:d=>{const m=d.mem||{};
-    return ["Memory", KV("Used",gb(m.used||0)+" of "+gb(m.total||0))+KV("Percent",Math.round(m.pct||0)+" %")
+  // gauge taps → a full-screen 24 h graph for that metric (data in d.p2.graphs) + key stats below
+  cpu:d=>{const g=(d.p2||{}).graphs||{}, r=(d.tiles.load||{}).raw||{}, c=(d.tiles.cpu||{}).raw||{};
+    return ["CPU · last 24 h", `<div class="shchart">${chart(g.cpu,"var(--accent)",250,r0,"%",true)}</div>`
+      +KV("Now",Math.round(c.pct||0)+" %")+KV("Load average",(d.load||[]).map(x=>x.toFixed(2)).join(" · "))
+      +KV("Cores",r.ncpu)+KV("Uptime",upfmt(d.uptime)), ""];},
+  temp:d=>{const g=(d.p2||{}).graphs||{}, t=((d.tiles.cputemp||{}).raw)||{};
+    return ["CPU temperature · last 24 h", `<div class="shchart">${chart(g.temp,"var(--warn)",250,r0,"°",true)}</div>`
+      +KV("Now",Math.round(t.c||0)+" °C")+KV("Throttling",t.throttle?"yes":"no")
+      +KV("Undervoltage",(d.throttled&&d.throttled.undervolt)?"yes":"no"), ""];},
+  ram:d=>{const g=(d.p2||{}).graphs||{}, m=d.mem||{};
+    return ["Memory · last 24 h", `<div class="shchart">${chart(g.mem,"var(--accent)",250,r0,"%",true)}</div>`
+      +KV("Now",Math.round(m.pct||0)+" %")+KV("Used",gb(m.used||0)+" of "+gb(m.total||0))
       +KV("Swap",m.swap_total?gb(m.swap_total-(m.swap_free||0))+" of "+gb(m.swap_total):"none"), ""];},
-  disk:d=>SHEETS.disks(d),
+  disk:d=>{const g=(d.p2||{}).graphs||{}, hasPool=!!(d.tiles.pool&&d.tiles.pool.raw),
+    dk=hasPool?((d.tiles.pool||{}).raw||{}):((d.tiles.rootfs||{}).raw||{}), pl=d.pool||{};
+    return [(hasPool?"Pool":"Disk")+" fill · last 24 h", `<div class="shchart">${chart(g.pool,"var(--good)",250,r0,"%",true)}</div>`
+      +KV("Now",Math.round(dk.pct||0)+" %")+(pl.free!=null?KV("Free",gb(pl.free)):"")+(pl.size!=null?KV("Size",gb(pl.size)):""), ""];},
+  dtemp:d=>{const g=(d.p2||{}).graphs||{};
+    return ["Disk temperature · last 24 h", `<div class="shchart">${chart(g.dtemp,"var(--warn)",250,r0,"°",true)}</div>`
+      +KV("Now",d.dtemp!=null?d.dtemp+" °C":"no sensor")+KV("Main disk",d.dtemp_dev||"—")
+      +`<div class="run" style="margin-top:6px;color:var(--dim)">The graph fills over 24 h — it starts from now.</div>`
+      +(d.disks||[]).map(x=>KV(x.name+(x.model?" · "+x.model:""),x.temp?x.temp+" °C":"—")).join(""), ""];},
 
   /* Disks: EVERYTHING the system sees, including external ones; each gets a fill bar.
      A mounted removable disk gets "Eject" — a double tap, so a stray tap doesn't

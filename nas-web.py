@@ -1975,6 +1975,71 @@ def _hwmon_disk_temps():
         out.append((dev or name, t))
     return out
 
+# --------------------------------------------------------------------------- #
+#  Temperature of the PRIMARY-STORAGE disk (the one the "main storage" choice
+#  points at — pool or a picked USB disk). Follows storage.json automatically:
+#  change the main volume and this tracks the new disk. Cached + backup-aware so
+#  we never hammer a USB bridge with smartctl mid-rsync (see the emergency_ro grabli).
+# --------------------------------------------------------------------------- #
+_MAIN_TEMP = {"t": 0.0, "c": None, "dev": ""}
+_MAIN_TEMP_TTL = 120     # same cadence as the disktemp tile — don't wake/poll the disk more often
+
+def _main_disk_devs():
+    """Whole-disk block devices backing storage_root(). Pool → all branches, plain → one."""
+    root = storage_root()
+    if not root:
+        return []
+    def src_of(path):
+        try:
+            return subprocess.run(["findmnt", "-nro", "SOURCE", "--target", path],
+                                  capture_output=True, text=True, timeout=8).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return ""
+    raw = []
+    if _safe(lambda: storage_state().get("pool")) and root == STORAGE:
+        for b in sorted(glob.glob("/mnt/disk*")):     # mergerfs branches
+            s = src_of(b)
+            if s.startswith("/dev/"):
+                raw.append(s)
+    if not raw:
+        s = src_of(root)
+        if s.startswith("/dev/"):
+            raw.append(s)
+    out = []
+    for d in raw:                                     # sdc3 → sdc, nvme0n1p2 → nvme0n1
+        m = re.match(r"^(/dev/(?:sd[a-z]+|nvme\d+n\d+|mmcblk\d+))(?:p?\d+)?$", d)
+        base = m.group(1) if m else d
+        if base not in out:
+            out.append(base)
+    return out
+
+def _main_disk_temp():
+    """(°C or None, short label). Cached; prefers hwmon (no disk wake); smartctl only
+    when no backup is running. Pool → the hottest branch."""
+    now = time.time()
+    if now - _MAIN_TEMP["t"] < _MAIN_TEMP_TTL:
+        return _MAIN_TEMP["c"], _MAIN_TEMP["dev"]
+    devs = _main_disk_devs()
+    if not devs:
+        _MAIN_TEMP.update(t=now, c=None, dev="")
+        return None, ""
+    label = os.path.basename(devs[0]) if len(devs) == 1 else "pool"
+    hw = {dv: t for dv, t in _hwmon_disk_temps()}
+    temps = [hw[os.path.basename(d)] for d in devs if os.path.basename(d) in hw]
+    if len(temps) < len(devs) and not nb_any_active():
+        for d in devs:
+            if os.path.basename(d) in hw:
+                continue
+            try:
+                c = (_smartctl_json(["-n", "standby", "-A"], d, timeout=8).get("temperature") or {}).get("current")
+                if isinstance(c, (int, float)) and c > 0:
+                    temps.append(int(c))
+            except Exception:
+                pass
+    c = max(temps) if temps else _MAIN_TEMP["c"]      # keep last known if this pass read nothing
+    _MAIN_TEMP.update(t=now, c=c, dev=label)
+    return c, label
+
 def _nb_last_ok(pid):
     """Timestamp of the profile's last completed run (ok or warn), 0 if none."""
     for h in nb_history(pid):
@@ -3990,7 +4055,8 @@ def history_sample():
     pt = {"t": int(time.time()), "cpu": s.get("cpu"), "temp": s.get("temp"),
           "mem": (s.get("mem") or {}).get("pct"),
           "rx": (s.get("net") or {}).get("rx"), "tx": (s.get("net") or {}).get("tx"),
-          "pool": (s.get("disk_pool") or {}).get("pct")}
+          "pool": (s.get("disk_pool") or {}).get("pct"),
+          "dtemp": _safe(lambda: _main_disk_temp()[0])}   # main-storage disk temp (cached, backup-safe)
     snap_long = None
     with _hist_lock:
         h = _load_history()
@@ -4015,7 +4081,7 @@ def history_sample():
                 return max(vs) if vs else None
             hl.append({"t": pt["t"], "cpu": avg("cpu"), "temp": mx("temp"),
                        "mem": avg("mem"), "rx": avg("rx"), "tx": avg("tx"),
-                       "pool": pt.get("pool")})
+                       "pool": pt.get("pool"), "dtemp": mx("dtemp")})
             if len(hl) > HISTORY_LONG_CAP:
                 del hl[:len(hl) - HISTORY_LONG_CAP]
             snap_long = list(hl)
@@ -12246,7 +12312,10 @@ def _screen_page2():
         "nbhist": hist[:8],
         "graphs": {"cpu": _safe(lambda: _gl_spark("cpu"), []) or [],
                    "temp": _safe(lambda: _gl_spark("temp"), []) or [],
-                   "net": _safe(lambda: _gl_spark("net"), []) or []},
+                   "net": _safe(lambda: _gl_spark("net"), []) or [],
+                   "mem": _safe(lambda: _gl_spark("mem"), []) or [],
+                   "dtemp": _safe(lambda: _gl_spark("dtemp"), []) or [],
+                   "pool": _safe(lambda: _gl_spark("pool"), []) or []},
     }
     _SCR_P2["d"] = d
     _SCR_P2["t"] = now
@@ -12320,6 +12389,7 @@ def screen_payload(lang="", p2=False):
     av = _safe(lambda: avail_bars(24, 24), {}) or {}    # 2=up 1=local 0=off -1=no data
     av30 = _safe(lambda: avail_bars(720, 30), {}) or {}
     hv = _safe(_screen_heavy, {}) or {}
+    _dt = _safe(_main_disk_temp, (None, "")) or (None, "")   # main-storage disk temp (cached)
     # the wallpaper and its processing are THE SAME as on the desktop: the screen reads desktop.json,
     # so changing wallpaper/dimming in the browser reaches the panel on its own (wpVer in URL)
     ds = _safe(load_settings, {}) or {}
@@ -12382,6 +12452,7 @@ def screen_payload(lang="", p2=False):
             "usbcfg": _safe(_screen_usb_cfg, {}) or {},
             "swap": (st.get("mem") or {}).get("swap_total"),
             "throttled": st.get("throttled"), "psu_ma": st.get("psu_ma"),
+            "dtemp": _dt[0], "dtemp_dev": _dt[1],   # main-storage disk temperature (+ short label)
             "asleep": bool(_SCR["sleep"]),
             # the backlight is currently off (sleep/night/idle): the first tap should
             # only wake, not press the tile under the finger — the client puts up a shield
