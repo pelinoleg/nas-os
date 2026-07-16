@@ -188,6 +188,11 @@
   #r2b{flex:1;display:grid;grid-template-columns:2.2fr 1fr;gap:7px;min-height:0}
   .big{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.15}
   .big small{font-size:11px;color:var(--dim);font-weight:600;margin-left:3px}
+  /* Traffic: two panels side by side — today (left) / this month (right) */
+  .trcols{display:flex;gap:14px;height:100%}
+  .trcol{flex:1;min-width:0;display:flex;flex-direction:column;gap:6px;justify-content:center}
+  .trcol+.trcol{border-left:1px solid rgba(255,255,255,.08);padding-left:14px}
+  .trh{font-size:10.5px;letter-spacing:.5px;text-transform:uppercase;color:var(--dim);font-weight:650;margin-bottom:1px}
   .chart{position:relative}
   /* full-screen 24h graph shown when a top gauge is tapped */
   .shchart{margin:2px 0 14px}
@@ -748,9 +753,18 @@ function renderP1(d){
   const tr=P.traffic||{}, t=tr.today||{}, mo=tr.month||{};
   $("#c_tr").innerHTML=`<h2>Traffic</h2>
     <div class="body">${tr.ok?`
-      <div class="big"><span class="dn">↓ ${gb(t.rx||0)}</span></div>
-      <div class="big"><span class="upl">↑ ${gb(t.tx||0)}</span></div>
-      <div class="r2"><span class="nm">This month</span><span class="ago">${gb((mo.rx||0)+(mo.tx||0))}</span></div>`
+      <div class="trcols">
+        <div class="trcol">
+          <div class="trh">Today</div>
+          <div class="big dn">↓ ${fmtB(t.rx||0)}</div>
+          <div class="big upl">↑ ${fmtB(t.tx||0)}</div>
+        </div>
+        <div class="trcol">
+          <div class="trh">This month</div>
+          <div class="big dn">↓ ${fmtB(mo.rx||0)}</div>
+          <div class="big upl">↑ ${fmtB(mo.tx||0)}</div>
+        </div>
+      </div>`
       :`<div class="empty">vnstat is not installed</div>`}</div>`;
 
   // Last-24h charts — with numbers
@@ -900,8 +914,8 @@ const SHEETS={
       :`<div class="empty">Time Machine is not configured</div>`, ""];},
   traffic:d=>{const t=(d.p2||{}).traffic||{};
     return ["Traffic", t.ok?
-      KV("Today ↓",gb((t.today||{}).rx||0))+KV("Today ↑",gb((t.today||{}).tx||0))
-      +KV("This month ↓",gb((t.month||{}).rx||0))+KV("This month ↑",gb((t.month||{}).tx||0))
+      KV("Today ↓",fmtB((t.today||{}).rx||0))+KV("Today ↑",fmtB((t.today||{}).tx||0))
+      +KV("This month ↓",fmtB((t.month||{}).rx||0))+KV("This month ↑",fmtB((t.month||{}).tx||0))
       :`<div class="empty">vnstat is not installed</div>`, ""];},
   updates:d=>{const u=(d.p2||{}).updates||{}, cr=(d.p2||{}).cron||[];
     return ["Updates and tasks",
