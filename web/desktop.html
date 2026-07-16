@@ -4189,7 +4189,7 @@ function editUnit(name,after){openWin("unit:"+name,"Unit · "+name,body=>{
    ensureCM(()=>{cm=CodeMirror(host,{value:(r&&r.content)||"",mode:"properties",lineNumbers:true,tabSize:2,styleActiveLine:true});setTimeout(()=>cm.refresh(),40);if(window.ResizeObserver)new ResizeObserver(()=>cm&&cm.refresh()).observe(host);});})();
 },{w:720,h:600});}
 /* ===== Docker stack manager (create/edit/manage in GUI) ===== */
-const STACK_SKELETON="services:\n  app:\n    image: \n    container_name: app\n    restart: unless-stopped\n    ports:\n      - \"8080:80\"\n    labels:\n      - \"web-desktop.name=App\"\n      - \"web-desktop.url=http://pi5.local:8080\"\n      # shortcut icon: replace app with the app slug from selfhst.st (or drop this line)\n      - \"web-desktop.icon=https://cdn.jsdelivr.net/gh/selfhst/icons@main/svg/app.svg\"\n";
+const STACK_SKELETON="services:\n  app:\n    image: \n    container_name: app\n    restart: unless-stopped\n    ports:\n      - \"8080:80\"\n    labels:\n      - \"web-desktop.name=App\"\n      - \"web-desktop.url=http://localhost:8080\"\n      # shortcut icon: replace app with the app slug from selfhst.st (or drop this line)\n      - \"web-desktop.icon=https://cdn.jsdelivr.net/gh/selfhst/icons@main/svg/app.svg\"\n";
 let DK_SEL="overview";   // selected item: overview | stack:<name> | images | volumes
 function winServices(initTab){openWin("__services","Docker",(body,win)=>{
  body.style.padding="0";
@@ -8961,7 +8961,7 @@ function systemTab(tc){withSysc(tc,()=>{const s=SYSC.system||{};
  tc.querySelector("#mWeb").onclick=()=>confirmDlg("Restart","Restart the web panel? The connection will drop briefly.",()=>sconf("restart_web",1));
 });}
 /* --- settings: Network --- */
-function networkTab(tc){withSysc(tc,()=>{const n=SYSC.network||{};const manual=n.method==="manual";const host=(SYSC.system&&SYSC.system.hostname)||"pi5";
+function networkTab(tc){withSysc(tc,()=>{const n=SYSC.network||{};const manual=n.method==="manual";const host=(SYSC.system&&SYSC.system.hostname)||location.hostname.split(".")[0]||"pi5";
  tc.innerHTML=`${rebootBan()}
   <h3 class="set-title">Network</h3><p class="set-sub">Connected via <b>${esc(n.iface||"?")}</b> · ${esc(n.ip||"?")} · gateway ${esc(n.gw||"?")}</p>
   <div class="set-grp">IP address</div>

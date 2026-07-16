@@ -1900,6 +1900,26 @@ def save_glance(d):
         _GL_CACHE["langs"].clear()
     return cur
 
+def apply_glance_timer():
+    """Re-assert the availability-poll cadence from glance.json at startup. The panel
+    writes the systemd timer drop-in in save_glance, but a reinstall restores glance.json
+    (via the settings backup) WITHOUT that global /etc override — so the interval would
+    silently revert to the wizard's 30 s until the user re-saved. Idempotent."""
+    try:
+        pi = int(load_glance().get("ping_interval") or 30)
+    except (ValueError, TypeError):
+        return
+    ov = "/etc/systemd/system/nas-netguard.timer.d/override.conf"
+    try:
+        if pi in (15, 60, 120) and not os.path.isfile(ov):
+            os.makedirs(os.path.dirname(ov), exist_ok=True)
+            with open(ov, "w") as f:
+                f.write("[Timer]\nOnUnitActiveSec=\nOnUnitActiveSec=%ds\n" % pi)
+            subprocess.run(["systemctl", "daemon-reload"], timeout=15)
+            subprocess.run(["systemctl", "restart", "nas-netguard.timer"], timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        pass
+
 def _avail_segments(path=None):
     """RLE journal: "state changed to X at moment T". Lines are read as intervals
     "until the next line", so ORDER MATTERS.
@@ -14255,6 +14275,10 @@ def main():
     ensure_web_assets()
     try:
         apply_spindown_all()          # restore disk sleep settings after start/reboot
+    except Exception:
+        pass
+    try:
+        apply_glance_timer()          # re-assert availability-poll cadence from glance.json
     except Exception:
         pass
     try:

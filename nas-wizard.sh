@@ -78,7 +78,7 @@ DOCKER_ROOT="/opt/docker"          # container configs: /opt/docker/<service>/
 # The user we set things up for (not root)
 TARGET_USER="${SUDO_USER:-$(logname 2>/dev/null || echo "")}"
 if [ -z "$TARGET_USER" ] || [ "$TARGET_USER" = "root" ]; then
-    TARGET_USER="$(id -un 1000 2>/dev/null || echo "oleg")"
+    TARGET_USER="$(id -un 1000 2>/dev/null || echo "root")"
 fi
 TARGET_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
 [ -z "$TARGET_HOME" ] && TARGET_HOME="/home/$TARGET_USER"
@@ -695,12 +695,13 @@ stage_system() {
         newhost="$(ui_input "Hostname" "New host name:" "$cur_host")" && \
             [ -n "$newhost" ] && [ "$newhost" != "$cur_host" ] && run hostnamectl set-hostname "$newhost"
     fi
-    if [ "$cur_tz" != "Europe/Madrid" ]; then
-        if ui_yesno "Timezone" "Current timezone: ${cur_tz:-not set}\n\nSet Europe/Madrid?"; then
-            run timedatectl set-timezone "Europe/Madrid"
-        fi
+    # only nudge when the timezone is unset/UTC; let the user type any zone (no baked-in city)
+    if [ -z "$cur_tz" ] || [ "$cur_tz" = "Etc/UTC" ] || [ "$cur_tz" = "UTC" ]; then
+        local newtz
+        newtz="$(ui_input "Timezone" "Timezone (e.g. Europe/Madrid, America/New_York):" "${cur_tz:-UTC}")" && \
+            [ -n "$newtz" ] && [ "$newtz" != "$cur_tz" ] && run timedatectl set-timezone "$newtz"
     else
-        info "timezone already Europe/Madrid"
+        info "timezone: $cur_tz"
     fi
 
     # summary
@@ -3091,7 +3092,7 @@ install_motd() {
         write_file /etc/nas-wizard/motd.txt <<'TXT'
 NAS-OS - home NAS on Raspberry Pi 5
 
-  Panel        http://pi5.local/
+  Panel        {panel}
   Data pool    /mnt/storage          Stacks  ~/services
   Panel logs   journalctl -u nas-web -f
 
@@ -3273,7 +3274,7 @@ Type=oneshot
 Nice=15
 IOSchedulingClass=idle
 CPUQuota=200%
-ExecStart=/usr/bin/python3 $SCRIPT_DIR/nas-web.py thumbs-sweep $STORAGE_MNT /home/$TARGET_USER
+ExecStart=/usr/bin/python3 $SCRIPT_DIR/nas-web.py thumbs-sweep $STORAGE_MNT $TARGET_HOME
 UNIT
     write_file /etc/systemd/system/nas-thumbs.timer <<'UNIT'
 [Unit]
