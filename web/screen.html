@@ -154,6 +154,22 @@
   .prow .t .nm{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .prow .t .ago{color:var(--mut);font-size:11.5px;white-space:nowrap}
   .run{font-size:11.5px;color:var(--accent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* backup running: the Backups card just shows fuller, bigger info IN ITS OWN CELL (others stay) */
+  .bkbig{display:flex;flex-direction:column;gap:7px;height:100%}
+  .bkbig .bk-top{display:flex;align-items:center;gap:14px}
+  .bkbig .bk-pct{font-size:34px;font-weight:800;line-height:.9;color:var(--ink);font-variant-numeric:tabular-nums;flex:none}
+  .bkbig .bk-pct small{font-size:15px;font-weight:700;color:var(--dim)}
+  .bkbig .bk-side{display:flex;flex-direction:column;gap:2px;flex:1;min-width:0}
+  .bkbig .bk-kv{display:flex;align-items:baseline;gap:7px;font-size:13.5px}
+  .bkbig .bk-kv span{color:var(--dim);font-size:10px;min-width:42px;text-transform:uppercase;letter-spacing:.3px}
+  .bkbig .bk-kv b{color:var(--ink);font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .bkbig .bar{height:7px;border-radius:4px;margin:1px 0}
+  .bkbig .bk-foot{display:flex;align-items:center;gap:8px;margin-top:auto}
+  .bkbig .bk-cur{flex:1;min-width:0;font-size:12.5px;color:var(--accent);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .bkbig .bk-stop{flex:none;padding:6px 13px;border-radius:9px;font-size:12.5px;font-weight:700;
+    background:rgba(255,93,104,.15);color:#ff9aa0;border:1px solid rgba(255,93,104,.35)}
+  .bkbig .bk-stop:active{background:rgba(255,93,104,.32)}
+  .bkbig .bk-stop.armed{background:rgba(255,93,104,.9);color:#fff;border-color:transparent}
   .ic{width:16px;height:16px;border-radius:4px;flex:none;object-fit:contain}
   .sbtn{padding:12px 18px;border-radius:11px;background:rgba(255,255,255,.13);font-size:14px;font-weight:650;
         min-width:104px;text-align:center}
@@ -587,16 +603,23 @@ function renderCards(d){
   // --- Backups: a run in progress -> progress; idle -> history (profile + date + dot)
   const bk=d.backups||[], act=bk.find(b=>b.running);
   if(act){
-    const L=act.live||{};
+    const L=act.live||{}, armed=Date.now()-BKSTOP<5000;   // fuller info in the card's own cell (other cards stay)
     $("#c_bk").innerHTML=`<h2>Backup running<span class="r">${esc(act.name)}</span></h2>
-      <div class="body">
-        <div class="prow" style="border:0">
-          <div class="t"><span class="nm">${L.pct!=null?L.pct+"%":"starting…"}</span>
-            <span class="ago">${esc(L.speed||"")}</span></div>
-          ${bar(L.pct||0,"pg")}
-          <div class="run">${esc(L.cur||"")}</div>
-          <div class="run">${L.total?`job ${(L.done||0)+1} of ${L.total}`:""}${L.eta?" · "+esc(L.eta)+" left":""}</div>
-        </div></div>`;
+      <div class="body bkbig">
+        <div class="bk-top">
+          <div class="bk-pct">${L.pct!=null?L.pct:"—"}<small>%</small></div>
+          <div class="bk-side">
+            <div class="bk-kv"><span>Speed</span><b>${esc(L.speed||"—")}</b></div>
+            <div class="bk-kv"><span>Job</span><b>${L.total?((L.done||0)+1)+" / "+L.total:"—"}</b></div>
+            <div class="bk-kv"><span>Left</span><b>${esc(L.eta||"—")}</b></div>
+          </div>
+        </div>
+        ${bar(L.pct||0,"pg")}
+        <div class="bk-foot">
+          <div class="bk-cur">${esc(L.cur||"starting…")}</div>
+          <button class="bk-stop${armed?" armed":""}" data-bkstop="${esc(act.id)}">${L.stopping?"Stopping…":armed?"Really?":"Stop"}</button>
+        </div>
+      </div>`;
   } else {
     // destination unplugged — the run won't happen; the wall must show this AT ONCE,
     // not have it discovered from a failed job later
@@ -913,7 +936,7 @@ const SHEETS={
     +KV("Green","panel was answering")+KV("Amber","box alive, no network")+KV("Red","box was down"),
     `<div class="go warnbtn" data-act="poweroff">Power off NAS</div>`],
 };
-let CUR_SHEET=null, EJ={dev:"",t:0};
+let CUR_SHEET=null, EJ={dev:"",t:0}, BKSTOP=0;   // BKSTOP: timestamp the Stop button was armed (double-tap confirm)
 function sheet(name,keepScroll){
   const f=SHEETS[name]; if(!f) return;
   CUR_SHEET=name;
@@ -948,6 +971,12 @@ document.addEventListener("click",e=>{
   }
   if(r){ closeSheet();
     act({a:"backup",p:r.dataset.run}).then(x=>{toast(x.ok?"Backup started":(x.log||"failed")); poll();}); return; }
+  const bs=e.target.closest("[data-bkstop]");
+  if(bs){ const pid=bs.dataset.bkstop;
+    if(Date.now()-BKSTOP>=5000){ BKSTOP=Date.now(); renderCards(D); return; }   // first tap — arm the confirm
+    BKSTOP=0; toast("Stopping backup…");
+    act({a:"backup_stop",p:pid}).then(x=>{ toast(x.ok?"Backup stopping…":(x.log||"failed")); poll(); });
+    return; }
   const ej=e.target.closest("[data-eject]");
   if(ej){ const dev=ej.dataset.eject;
     if(EJ.dev!==dev||Date.now()-EJ.t>=5000){                  // first tap — arm it

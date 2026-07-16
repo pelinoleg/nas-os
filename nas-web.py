@@ -12537,6 +12537,15 @@ def screen_action(b):
         return {"ok": False, "log": "actions from the screen are disabled"}
     if a == "backup":
         return nb_run_bg(_nb_bpid(b))
+    if a == "backup_stop":
+        pid = _nb_bpid(b) or next((pr["id"] for pr in (_safe(nb_profiles, []) or [])
+                                   if _safe(lambda x=pr: nb_run_active(x["id"]))), NB_MAIN)
+        _safe(lambda: _nb_queue_remove(pid))
+        try:
+            open(nb_run_cancel(pid), "w").close()   # the driver checks this file and stops gracefully
+        except OSError:
+            pass
+        return {"ok": True}
     if a == "eject":
         # disk_eject sam refuses system/pool disks; the screen only offers the
         # button for mounted USB drives, but the server must not trust that
