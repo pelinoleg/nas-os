@@ -7525,6 +7525,7 @@ function winFsHistory(){openWin("__fsw","File history",(body,win)=>{
   pane.innerHTML=`
    <div class="set-title" style="margin:0">Schedule & protection</div>
    <div class="mon-row"><span>Automatic scan</span><label class="tgl"><input type="checkbox" id="fwEn"${c.enabled?" checked":""}><span class="sl"></span></label></div>
+   <div class="set-sub" style="margin-top:-2px">On — the watched folders are scanned on their own on the schedule below (every N days, at the set time): the change log and bitrot check keep updating by themselves. Off — no background scans at all; nothing runs until you press a scan button by hand.</div>
    <div style="display:flex;gap:10px;flex-wrap:wrap">
     <div class="field" style="flex:1;min-width:120px"><label>Scan every, days</label><input class="mono" id="fwInt" value="${att(c.interval_days||1)}"></div>
     <div class="field" style="flex:1;min-width:120px"><label>Scan time</label><input class="mono" id="fwTime" value="${att(c.time||"02:30")}"></div>
