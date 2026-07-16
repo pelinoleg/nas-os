@@ -12445,6 +12445,19 @@ class H(BaseHTTPRequestHandler):
         rel = path.lstrip("/")
         full = os.path.realpath(os.path.join(WEB_DIR, rel))
         root = os.path.realpath(WEB_DIR)
+        # Graceful stub for the removed runtime i18n. Devices with a pre-english-only
+        # shell cached (SW/PWA) still request /i18n.js; a 404 leaves nasTr undefined and
+        # every tapped handler throws (button shows :active, does nothing). Serve a no-op
+        # identity so those stale shells keep working until they reload the new shell.
+        if rel == "i18n.js" and not os.path.isfile(full):
+            body = b'window.nasTr=function(s){return s};window.NAS_LANG="en";'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/javascript")
+            self.send_header("Cache-Control", "no-cache, must-revalidate")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if (full != root and not full.startswith(root + os.sep)) or not os.path.isfile(full):
             self.send_error(404); return
         ctype = {".html": "text/html; charset=utf-8", ".css": "text/css",
