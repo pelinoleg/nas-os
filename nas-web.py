@@ -12716,6 +12716,8 @@ def screen_action(b):
         return screen_op_bg("apt")
     if a == "img_update":
         return screen_op_bg("images")
+    if a == "fsw_accept":       # "I deleted those on purpose" — accept the deletions as the new normal
+        return _safe(fsw_accept, {"ok": False}) or {"ok": False}
     if a in ("reboot", "poweroff"):
         log_event("screen_power", "From the screen: " + ("reboot" if a == "reboot" else "shutdown"),
                   "requested by a button on the local screen", "warn", "system")

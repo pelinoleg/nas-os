@@ -1098,8 +1098,10 @@ document.addEventListener("click",e=>{
     act({a:"backup_stop",p:pid}).then(x=>{ toast(x.ok?"Backup stopping…":(x.log||"failed")); poll(); });
     return; }
   const wd=e.target.closest("[data-warndismiss]");
-  if(wd){ WARN_HID=(D.problems||[]).filter(p=>p.lvl==="warn").map(p=>p.name+"="+p.value).join("|");
-    closeSheet(); renderWarns(D); toast("Warnings dismissed"); return; }
+  if(wd){ const warns=(D.problems||[]).filter(p=>p.lvl==="warn");
+    WARN_HID=warns.map(p=>p.name+"="+p.value).join("|");
+    if(warns.some(p=>/deletion/i.test(p.name))) act({a:"fsw_accept"}).then(()=>setTimeout(poll,800));   // accept the deletions as the new normal (won't come back)
+    closeSheet(); renderWarns(D); toast("Dismissed — marked as normal"); return; }
   const ub=e.target.closest("[data-upd]");
   if(ub&&!ub.disabled){ const op=ub.dataset.upd;
     if(UPD.op!==op||Date.now()-UPD.t>=5000){ UPD={op:op,t:Date.now()}; renderPage(); return; }   // first tap — arm
