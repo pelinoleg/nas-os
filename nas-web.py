@@ -12340,7 +12340,8 @@ def _screen_page2():
         "updates": {"apt": ap.get("count") or 0, "security": ap.get("security") or 0,
                     "packages": [p.get("name") for p in (ap.get("packages") or [])][:6],
                     "images": (wd.get("count") or 0) if wd.get("ok") else None,
-                    "image_list": [u.get("name") for u in (wd.get("updates") or [])][:5]},
+                    "image_list": [{"n": u.get("name"), "c": u.get("current"), "l": u.get("latest")}
+                                   for u in (wd.get("updates") or [])][:6]},
         "cron": [{"name": j.get("name") or j.get("id") or "?", "next": j.get("next") or 0,
                   "last": j.get("last") or 0, "ok": j.get("ok")}
                  for j in (cr.get("jobs") or [])][:6],
@@ -12512,8 +12513,87 @@ def screen_payload(lang="", p2=False):
             "actions": cfg["actions"], "lang": cfg["lang"], "poll": cfg["poll"],
             "clock": cfg["clock_min"],
             "p2": (_safe(_screen_page2, {}) or {}) if p2 else None,
+            "op": _safe(screen_op_state, {}) or {},   # background system-update progress (apt / images)
             "ts": int(time.time())}
 
+
+SCREEN_OP_FILE = os.path.join(NAS_CONFIG, "screen-op.json")
+
+def screen_op_state():
+    st = _json_load_strict(SCREEN_OP_FILE, {})
+    if st.get("running") and time.time() - (st.get("started") or 0) > 20 \
+            and not _systemd_active("nas-screen-op"):     # crashed/killed → don't spin forever
+        st["running"] = False
+        st["done"] = st.get("done") or int(time.time())
+    return st
+
+def screen_op_bg(op):
+    """Start a system update from the touchscreen (apt / docker images) in the background.
+    Blocked while a backup runs (don't fight for disk/network); one at a time."""
+    if nb_any_active():
+        return {"ok": False, "log": "a backup is running — try again after it finishes"}
+    if screen_op_state().get("running"):
+        return {"ok": False, "log": "an update is already running"}
+    _json_save(SCREEN_OP_FILE, {"running": True, "op": op, "started": int(time.time()),
+                                "line": "starting…", "ok": None, "done": None}, indent=None)
+    cmd = ["systemd-run", "--collect", "--quiet", "--unit", "nas-screen-op",
+           "--setenv=SUDO_USER=" + TARGET_USER, "--setenv=HOME=" + HOME,
+           sys.executable, os.path.join(HERE, "nas-web.py"), "screen-op", op]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError) as e:
+        _json_save(SCREEN_OP_FILE, {"running": False, "ok": False, "line": str(e)}, indent=None)
+        return {"ok": False, "log": str(e)}
+    if r.returncode != 0:
+        _json_save(SCREEN_OP_FILE, {"running": False, "ok": False, "line": (r.stderr or "failed")[:120]}, indent=None)
+        return {"ok": False, "log": (r.stderr or "failed to start")[:120]}
+    return {"ok": True}
+
+def screen_op_run(op):
+    """Driver in the transient unit. Writes progress to screen-op.json for the screen to poll."""
+    st = {"running": True, "op": op, "started": int(time.time()), "line": "starting…",
+          "ok": None, "done": None}
+    def w(line, **kw):
+        st["line"] = line; st["ts"] = int(time.time()); st.update(kw)
+        _json_save(SCREEN_OP_FILE, st, indent=None)
+    ok = True
+    try:
+        if op == "apt":
+            w("checking for updates…")
+            _run(["apt-get", "update"], timeout=300)
+            w("installing package updates…")
+            env = dict(_C_ENV, DEBIAN_FRONTEND="noninteractive")
+            r = _run(["apt-get", "-y", "-o", "Dpkg::Options::=--force-confold",
+                      "-o", "Dpkg::Options::=--force-confdef", "upgrade"], timeout=3600, env=env)
+            ok = bool(r.get("ok"))
+            try: log_event("action", "System update from the screen", "", "ok" if ok else "warn", kind="action", desk=True)
+            except Exception: pass
+        elif op == "images":
+            try:
+                names = [n for n in sorted(os.listdir(STACKS_DIR))
+                         if os.path.isfile(os.path.join(STACKS_DIR, n, "compose.yaml"))
+                         or os.path.isfile(os.path.join(STACKS_DIR, n, "docker-compose.yml"))]
+            except OSError:
+                names = []
+            n = len(names)
+            if not n:
+                w("no docker stacks")
+            for i, name in enumerate(names):
+                w("%s — pulling images (%d/%d)…" % (name, i + 1, n))
+                _dc(name, "pull", timeout=900)
+                w("%s — recreating (%d/%d)…" % (name, i + 1, n))
+                if not _dc(name, "up", "-d", timeout=300).get("ok"):
+                    ok = False
+            _safe(wud_invalidate)
+            try: log_event("action", "Docker images updated from the screen", "", "ok" if ok else "warn", kind="action", desk=True)
+            except Exception: pass
+        else:
+            ok = False; st["line"] = "unknown update"
+    except Exception as e:
+        ok = False; st["line"] = "error: %s" % e
+    st.update(running=False, ok=ok, done=int(time.time()),
+              line="done" if ok else "finished with errors")
+    _json_save(SCREEN_OP_FILE, st, indent=None)
 
 def screen_action(b):
     """Actions from the local screen. 'touch' is not an action — it is the wake
@@ -12577,6 +12657,10 @@ def screen_action(b):
         if op not in ("up", "down", "restart", "stop", "start"):
             return {"ok": False, "log": "unknown operation"}
         return stack_action(str(b.get("name") or ""), op)
+    if a == "apt_update":
+        return screen_op_bg("apt")
+    if a == "img_update":
+        return screen_op_bg("images")
     if a in ("reboot", "poweroff"):
         log_event("screen_power", "From the screen: " + ("reboot" if a == "reboot" else "shutdown"),
                   "requested by a button on the local screen", "warn", "system")
@@ -14156,5 +14240,7 @@ if __name__ == "__main__":
         _args = sys.argv[2:]
         _pid = next((a for a in _args if a != "deep"), NB_MAIN)
         nb_compare_run(_pid, deep=("deep" in _args))
+    elif len(sys.argv) > 2 and sys.argv[1] == "screen-op":
+        screen_op_run(sys.argv[2])
     else:
         main()
