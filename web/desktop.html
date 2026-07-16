@@ -4356,34 +4356,39 @@ function dkAvailPane(tc,a,reload){
  const form=el(`<div style="max-width:560px">${main.map(rowH).join("")}${adv.length?`<details><summary style="cursor:pointer;color:var(--mut);font-size:13px;margin:6px 0">Advanced (${adv.length})</summary>${adv.map(rowH).join("")}</details>`:""}</div>`);
  if(flds.length)box.appendChild(form);
  else box.appendChild(el(`<div class="mon-note" style="margin:6px 0">${svg("cube",13)} No settings required — ready to bring up.</div>`));
- // review / edit the real compose + .env before bringing up (lazy-loaded from the recipe)
- const taCss="width:100%;box-sizing:border-box;background:var(--card);color:var(--fg,var(--ink));border:1px solid var(--line);border-radius:var(--r-md);padding:8px 10px;font-family:var(--mono);font-size:12px;line-height:1.5;resize:vertical";
- const lblCss="font-size:11px;color:var(--mut);font-family:var(--mono);text-transform:uppercase;letter-spacing:.04em;margin:8px 0 4px";
+ // review / edit the real compose + .env before bringing up — same CodeMirror
+ // editor as "Edit stack", lazy-loaded from the recipe on first expand
+ const lblCss="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);font-family:var(--mono);margin:8px 0 4px";
  const edBox=el(`<details style="margin-top:8px">
    <summary style="cursor:pointer;color:var(--dim);font-size:13px">${svg("edit",13)} Show / edit compose &amp; .env</summary>
    <div style="${lblCss};margin-top:8px">compose.yaml</div>
-   <textarea id="avCompose" spellcheck="false" style="${taCss};height:230px" placeholder="loading…"></textarea>
+   <div id="avC" class="ed-dark" style="height:260px;border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden"></div>
    <div style="${lblCss}">.env${flds.length?" — overrides the fields above":""}</div>
-   <textarea id="avEnv" spellcheck="false" style="${taCss};height:110px"></textarea></details>`);
+   <div id="avE" class="ed-dark" style="height:130px;min-height:70px;resize:vertical;border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden"></div>
+   </details>`);
  box.appendChild(edBox);
- let loaded=false;
- edBox.addEventListener("toggle",async()=>{
+ let cmC=null,cmE=null,loaded=false;
+ const envFromFields=()=>{const v=[];form.querySelectorAll("input[data-k]").forEach(i=>{if(i.value.trim())v.push(i.dataset.k+"="+i.value.trim());});return v.length?v.join("\n")+"\n":"";};
+ edBox.addEventListener("toggle",()=>{
   if(!edBox.open)return;
-  const te=edBox.querySelector("#avEnv");
-  // .env: refill from the current field inputs each time it opens (fields win until you edit here)
-  const vals=[];form.querySelectorAll("input[data-k]").forEach(i=>{if(i.value.trim())vals.push(i.dataset.k+"="+i.value.trim());});
-  const ta=edBox.querySelector("#avCompose");
-  if(!loaded){loaded=true;ta.value="loading…";
+  if(loaded){if(cmC)cmC.refresh();if(cmE){if(!cmE.getValue().trim())cmE.setValue(envFromFields());cmE.refresh();}return;}
+  loaded=true;
+  ensureCM(async()=>{
+   cmC=CodeMirror(edBox.querySelector("#avC"),{value:"loading…",mode:"yaml",lineNumbers:true,tabSize:2,indentUnit:2,styleActiveLine:true,lineWrapping:false,matchBrackets:true});
+   cmE=CodeMirror(edBox.querySelector("#avE"),{value:envFromFields(),mode:"properties",lineNumbers:true,tabSize:2});
+   setTimeout(()=>{cmC.refresh();cmE.refresh();},30);
    const r=await api("/api/store/recipe?id="+encodeURIComponent(a.id));
-   ta.value=(r&&r.compose)||"";te.value=vals.length?vals.join("\n")+"\n":((r&&r.env)||"");}
-  else if(!te.value.trim())te.value=vals.length?vals.join("\n")+"\n":"";
+   cmC.setValue((r&&r.compose)||"");
+   if(!cmE.getValue().trim())cmE.setValue(envFromFields()||((r&&r.env)||""));
+   setTimeout(()=>{cmC.refresh();cmE.refresh();},30);
+  });
  });
  const acts=el(`<div class="dd-acts" style="border:none;padding-top:2px"></div>`);
  const go=el(`<button class="btn pri">${svg("play",13)} Install & start</button>`);acts.appendChild(go);box.appendChild(acts);
  const con=el(`<div class="mcon" style="display:block;margin-top:10px"></div>`);box.appendChild(con);
  go.onclick=async()=>{
   const body={id:a.id};
-  if(edBox.open){body.compose=edBox.querySelector("#avCompose").value;body.env=edBox.querySelector("#avEnv").value;}   // edited raw text wins
+  if(edBox.open&&cmC){body.compose=cmC.getValue();body.env=cmE?cmE.getValue():"";}   // edited raw text wins
   else{const values={};form.querySelectorAll("input[data-k]").forEach(i=>values[i.dataset.k]=i.value.trim());body.values=values;}
   go.disabled=true;go.innerHTML=`${svg("refresh",13)} installing…`;
   const r=await api("/api/store/install",{method:"POST",body:JSON.stringify(body)});
