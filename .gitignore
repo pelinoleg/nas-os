@@ -26,3 +26,6 @@ web/.nas-trash/
 __pycache__/
 *.pyc
 .DS_Store
+
+# per-stack env is generated from meta.json fields at install (never commit secrets)
+services/*/.env

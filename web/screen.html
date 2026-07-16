@@ -539,9 +539,9 @@ function renderGauges(d){
   + gauge("CPU temp",Math.round(tc),"°",tc/90,lvlOf(tc,62,75),"temp")
   + gauge("Memory",Math.round(ram),"%",ram/100,lvlOf(ram,75,90),"ram")
   + (()=>{const io=d.dio||0,rt=iorate(io);   // disk activity of the main storage (read+write), not the static system-disk fill
-      return gauge("Disk I/O",rt[0],rt[1],io/(250*1048576),0,"disk",sname);})()
+      return gauge("Disk I/O",rt[0],rt[1],io/(250*1048576),"ok","disk",sname);})()
   + (dt!=null ? gauge("Disk temp",Math.round(dt),"°",dt/90,lvlOf(dt,55,65),"dtemp",sname)
-              : gauge("Disk temp","—","",0,0,"dtemp",sname));
+              : gauge("Disk temp","—","",0,"ok","dtemp",sname));
 }
 
 /* ---------- cards ---------- */

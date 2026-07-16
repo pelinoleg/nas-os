@@ -664,7 +664,10 @@ def disks():
         if label is None and parts:
             label = parts[0].get("label")
         fstab = _read("/etc/fstab")
-        in_fstab = bool(primary and primary in fstab)
+        # match the mountpoint as a whole fstab field, not a substring — else
+        # /mnt/disk1 falsely matches an /mnt/disk10 line
+        in_fstab = bool(primary and re.search(
+            r"(?m)^\s*\S+\s+" + re.escape(primary) + r"\s", fstab))
         size = d.get("size")
         # empty card-reader slot / no inserted media → lsblk returns size 0B
         no_media = (str(size).strip() in ("", "0", "0B", "None")) and not parts and not fstype
@@ -942,14 +945,10 @@ def _health_report_build():
     add("Disk health (SMART)",
         ("failure: " + ", ".join(bad)) if bad else ("overheat: " + ", ".join(hot)) if hot else "all healthy",
         "bad" if bad else "warn" if hot else "ok")
-    # a data disk gone read-only = emergency remount after an I/O error — data at risk
-    ro = []
-    for line in _read("/proc/mounts").splitlines():
-        p = line.split()
-        if len(p) >= 4 and p[2] in ("ext4", "ext3", "btrfs", "xfs") \
-                and (p[1].startswith("/mnt/") or p[1].startswith("/media/")) \
-                and re.search(r"(^|,)ro(,|$)", p[3]):
-            ro.append(p[1])
+    # a data disk gone read-only = emergency remount after an I/O error — data at risk.
+    # Reuse _readonly_mounts(): it excludes removable media (a dirty flash drive brought
+    # up ro by automount is routine, not a NAS failure) — the inline check here didn't.
+    ro = _safe(_readonly_mounts, [])
     if ro:
         add("Filesystem read-only", ", ".join(ro), "bad",
             "A disk went read-only after an I/O error — unmount and run e2fsck")
@@ -4591,7 +4590,11 @@ def _nb_dest_for(cfg, src):
     base = (cfg.get("dest_base") or "").rstrip("/")
     rel = str(src).lstrip("/")
     if _nb_push(cfg):
-        rel = re.sub(r"^mnt/storage/", "", rel)
+        # mirror the folder tree relative to the ACTUAL storage root, not a literal
+        # /mnt/storage (on a pool-less box the root is the mounted USB path)
+        root = (storage_base() or STORAGE).strip("/")
+        if root and (rel == root or rel.startswith(root + "/")):
+            rel = rel[len(root):].lstrip("/")
     return os.path.normpath(base + "/" + rel)
 
 def nb_save(patch, pid=None):
@@ -6251,7 +6254,12 @@ def nb_compare_cmd(cfg, job, deep, stage=None):
     """rsync dry-run that only REPORTS differences (never writes). %i|%l|%n =
     itemize flags | length | name — enough to classify new/changed/deleted + size."""
     env, rsh = _nb_cmd_ctx(cfg, stage)
-    args = ["rsync", "-n", "-rltD", "--no-owner", "--no-group", "--no-perms",
+    # mirror the real run's fs-aware flags: on FAT/exFAT/NTFS the run uses -rt with
+    # --modify-window=1 and drops -l/-D — without matching that, compare flags routine
+    # 2s-rounded times and skipped symlinks/specials as differences (false non-identical)
+    limited = nb_dest_fs(cfg, job.get("dest")) in NB_FS_LIMITED
+    args = ["rsync", "-n"] + (["-rt", "--modify-window=1"] if limited else ["-rltD"]) + \
+           ["--no-owner", "--no-group", "--no-perms",
             "--delete", "--stats", "--out-format=%i|%l|%n"] + rsh
     if deep:
         args.append("--checksum")                       # re-read every file → byte-identity proof
@@ -6765,7 +6773,7 @@ def settings_backup_dir():
 
 def _bk_add_file(tar, src, arc):
     try:
-        if os.path.isfile(src) and os.path.getsize(src) <= 8 * 1024 * 1024:
+        if os.path.isfile(src) and os.path.getsize(src) <= 32 * 1024 * 1024:  # covers a 30 MB wallpaper
             tar.add(src, arcname=arc, recursive=False)
             return arc
     except OSError:
@@ -6931,7 +6939,8 @@ def settings_backup_restore(path, sections=None):
                 with open(dest, "wb") as f:
                     shutil.copyfileobj(src, f)
                 # secrets: the panel password, Pushover keys, the main NAS password
-                if any(x in dest for x in ("webauth", "notify.conf", "nas-backup.json")):
+                if any(x in dest for x in ("webauth", "notify.conf", "nas-backup.json",
+                                           "store.json", "remotes.json")):
                     os.chmod(dest, 0o600)
                 # push-backup SSH key: private key 0600, its dir 0700 (else ssh refuses it)
                 if dest.startswith("/root/.ssh/"):
@@ -7703,6 +7712,7 @@ def _store_load():
 
 def _store_save(d):
     _json_save(STORE_FILE, d, indent=2)
+    _safe(lambda: os.chmod(STORE_FILE, 0o600))   # holds the replica SSH password
 
 def _store_meta(sid):
     return _json_load_strict(os.path.join(SERVICES_DIR, sid, "meta.json"), {})
@@ -8031,6 +8041,7 @@ def _remotes_load():
 
 def _remotes_save(lst):
     _json_save(REMOTES_FILE, {"remotes": lst}, indent=2)
+    _safe(lambda: os.chmod(REMOTES_FILE, 0o600))   # holds sshfs passwords
 
 def _remote_mp(rid):
     return os.path.join(REMOTE_MNT, rid)
@@ -9097,7 +9108,10 @@ def fs_delete(path):
     return {"ok": True}
 
 def fs_upload(path, name, data_b64):
-    full = _child(path, name)
+    parent, err = _fs_guard(path, into=True)   # open('wb') truncates — guard protected trees / the engine dir
+    if err:
+        return {"ok": False, "log": err}
+    full = _child(parent, name)
     if not os.path.basename(full):
         return {"ok": False, "log": "no file name"}
     try:
@@ -9109,7 +9123,10 @@ def fs_upload(path, name, data_b64):
     return {"ok": True, "path": full, "size": len(raw)}
 
 def fs_newfile(path, name):
-    full = _child(path, name)
+    parent, err = _fs_guard(path, into=True)
+    if err:
+        return {"ok": False, "log": err}
+    full = _child(parent, name)
     if not os.path.basename(full):
         return {"ok": False, "log": "empty name"}
     if os.path.exists(full):
@@ -9747,8 +9764,10 @@ def _fsw_run(deep=False, manual=False):
     cfg = fsw_load()
     now = int(time.time())
     t0 = time.time()
-    db = _fsw_db()
+    db = None
     try:
+        db = _fsw_db()          # a malformed DB (power-loss) raises here — keep it inside the
+                                # try so status becomes 'error', not a permanent 'scan' wedge
         skip_entry, excluded_path = _fsw_matcher(cfg["exclude"], cfg.get("exclude_re") or ())
         man = {}
         for path, size, mtime, hsh, ver in db.execute("SELECT * FROM files"):
@@ -9959,14 +9978,16 @@ def _fsw_run(deep=False, manual=False):
         with _fsw_lock:
             _fsw.update({"status": "idle", "cancel": False})
     except _FswCancel:
-        db.commit()
+        if db:
+            db.commit()
         with _fsw_lock:
             _fsw.update({"status": "idle", "cancel": False})
     except Exception as e:
         with _fsw_lock:
             _fsw.update({"status": "error", "error": str(e)[:200], "cancel": False})
     finally:
-        db.close()
+        if db:
+            db.close()
 
 def fsw_start(deep=False, manual=True):
     with _fsw_lock:
@@ -13541,7 +13562,8 @@ class H(BaseHTTPRequestHandler):
             elif p == "/api/health":
                 self._json(health_report())
             elif p == "/api/desktop":
-                self._json({"apps": discover_desktop_apps(), "volumes": external_volumes()})
+                self._json({"apps": discover_desktop_apps(), "volumes": external_volumes(),
+                            "home": HOME})
             elif p == "/api/icon":
                 self._send_icon((q.get("u") or [""])[0])
             elif p == "/api/cron/jobs":

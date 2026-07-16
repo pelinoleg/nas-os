@@ -1834,6 +1834,24 @@ RULES
     run udevadm control --reload-rules
     uas_seed_cmdline
 }
+
+install_usb_timeout() {
+    # SCSI command timeout for USB disks: 30 s (default) → 180 s. A safety-critical rule
+    # that must exist on EVERY box independently of automount (it used to live inside the
+    # automount rules file, so a default install — or toggling automount off — lost it).
+    # A 2.5" SMR disk under sustained writes goes into an internal shuffle and may not
+    # respond for a minute; at 30 s the kernel declares an error, error recovery doesn't
+    # help, the disk goes OFFLINE and ext4 flips to emergency read-only MID backup
+    # (real case 2026-07-12: Ugreen RTL9210 + ST4000LM024, the command hung 68 s while
+    # SMART stayed clean). %p = sysfs path of the block device; device/timeout is the scsi
+    # device behind it.
+    write_file /etc/udev/rules.d/99-nas-usbtimeout.rules <<'RULES'
+# nas-wizard: raise the SCSI command timeout for USB disks to 180 s (see install_usb_timeout).
+ACTION=="add|change", SUBSYSTEM=="block", KERNEL=="sd*", ENV{ID_USB_DRIVER}=="?*", RUN+="/bin/sh -c 'echo 180 > /sys/%p/device/timeout'"
+RULES
+    run udevadm control --reload-rules
+    run udevadm trigger --subsystem-match=block --action=change 2>/dev/null || true
+}
 # ---------------------------------------------------------------------------
 # Local touch screen (DSI panel) — kiosk dashboard on the box itself
 # ---------------------------------------------------------------------------
@@ -2769,8 +2787,20 @@ install_netguard() {
 # (has carrier, an address and the gateway answers) — Wi-Fi is off. As soon as the
 # wire is gone or stalls (macb on Pi 5 sometimes has a TX stall) — Wi-Fi comes back.
 set -u
-ETH="${NAS_ETH:-eth0}"
-WIFI="${NAS_WIFI:-wlan0}"
+# never hardcode the NIC name: it's eth0 on older Pi but end0 on Pi5/Bookworm, and
+# varies by board/kernel. Detect at runtime — first physical non-wireless non-virtual
+# iface = wired; first with a wireless/ dir = Wi-Fi. NAS_ETH/NAS_WIFI override.
+_ng_eth() {
+    for d in /sys/class/net/*; do
+        n=${d##*/}
+        [ -e "$d/wireless" ] && continue
+        case "$n" in lo|docker*|veth*|br-*|virbr*|tap*|tun*|wg*|bond*) continue ;; esac
+        { [ -e "$d/device" ] || [ -L "$d/device" ]; } && { echo "$n"; return; }
+    done
+}
+_ng_wifi() { for d in /sys/class/net/*/wireless; do n=${d%/wireless}; echo "${n##*/}"; return; done; }
+ETH="${NAS_ETH:-$(_ng_eth)}"; ETH="${ETH:-eth0}"
+WIFI="${NAS_WIFI:-$(_ng_wifi)}"; WIFI="${WIFI:-wlan0}"
 STATE="${NAS_NETGUARD_STATE:-/var/lib/nas-wizard/netguard.state}"
 WSTATE="${NAS_NETGUARD_WIFI_STATE:-/var/lib/nas-wizard/netguard.wifi}"
 AVLOG="${NAS_NETGUARD_AVAIL:-/var/lib/nas-wizard/avail.log}"
@@ -3027,7 +3057,8 @@ GUARD
 #!/bin/bash
 # nas-wizard: poke the network guard on a link state change (asynchronously!)
 case "${2:-}" in up|down|carrier-up|carrier-down|dhcp4-change) ;; *) exit 0 ;; esac
-case "${1:-}" in eth0|wlan0) ;; *) exit 0 ;; esac
+# poke for any real NIC (eth0/end0/wlan0/…); ignore only virtual interfaces
+case "${1:-}" in lo|docker*|veth*|br-*|virbr*|tap*|tun*|wg*) exit 0 ;; esac
 systemctl start --no-block nas-netguard.service >/dev/null 2>&1 || true
 exit 0
 DISP
@@ -3069,12 +3100,15 @@ SYSCTL
 
     run systemctl daemon-reload
     run systemctl enable --now nas-netguard.timer
-    info "network guard enabled: eth0 primary, wlan0 backup, notifications on IP change"
+    info "network guard enabled: wired primary, Wi-Fi backup, notifications on IP change"
     disable_comitup
     # warn honestly: if both links are up now, Wi-Fi will be disabled,
-    # and a session opened over it (SSH/panel) will drop — you must connect via the eth0 address
-    if [ "$(cat /sys/class/net/eth0/carrier 2>/dev/null || echo 0)" = "1" ] \
-       && nmcli -t -f DEVICE,STATE device 2>/dev/null | grep -q '^wlan0:connected$'; then
+    # and a session opened over it (SSH/panel) will drop — reconnect via the wired address
+    local _eth _wifi
+    _eth="$(for d in /sys/class/net/*; do n=${d##*/}; [ -e "$d/wireless" ] && continue; case "$n" in lo|docker*|veth*|br-*|virbr*|tap*|tun*|wg*) continue;; esac; { [ -e "$d/device" ] || [ -L "$d/device" ]; } && { echo "$n"; break; }; done)"; _eth="${_eth:-eth0}"
+    _wifi="$(for d in /sys/class/net/*/wireless; do n=${d%/wireless}; echo "${n##*/}"; break; done)"; _wifi="${_wifi:-wlan0}"
+    if [ "$(cat /sys/class/net/$_eth/carrier 2>/dev/null || echo 0)" = "1" ] \
+       && nmcli -t -f DEVICE,STATE device 2>/dev/null | grep -q "^$_wifi:connected$"; then
         warn "cable connected — Wi-Fi will be disabled. If you connected over Wi-Fi, the session will drop; reconnect via <host>.local"
     fi
 }
@@ -3251,6 +3285,7 @@ stage_system_apply() {
     # USB-SATA bridges always go through usb-storage, never UAS. Not a toggle: UAS error
     # recovery resets the whole device and takes a running backup down with it. See install_uas_off().
     install_uas_off
+    install_usb_timeout      # 180s USB SCSI timeout — always on, independent of automount
     # Time Machine target: rebuild the SMB share + Avahi advert if it was configured
     # before (settings backup restores /etc/nas-wizard/timemachine.conf).
     tm_reapply_if_configured
@@ -3465,13 +3500,6 @@ AM
 ACTION=="add",    SUBSYSTEM=="block", ENV{ID_FS_USAGE}=="filesystem", ENV{ID_USB_DRIVER}=="?*", RUN+="/usr/bin/systemd-run --no-block /usr/local/bin/nas-automount.sh add %k"
 ACTION=="remove", SUBSYSTEM=="block", ENV{ID_USB_DRIVER}=="?*", RUN+="/usr/bin/systemd-run --no-block /usr/local/bin/nas-automount.sh remove %k"
 
-# SCSI command timeout for USB disks: 30 s (default) → 180 s.
-# A 2.5" SMR disk under sustained writes goes into an internal shuffle and may not respond
-# for a minute. At 30 s the kernel declares an error, error recovery doesn't help, the disk goes
-# OFFLINE, ext4 into emergency read-only MID backup (real case 2026-07-12: Ugreen
-# RTL9210 + ST4000LM024, the command hung 68 s; SMART was clean meanwhile — the disk saw no errors).
-# %S/%p = sysfs path of the block device itself; device/timeout is the scsi device behind it.
-ACTION=="add|change", SUBSYSTEM=="block", KERNEL=="sd*", ENV{ID_USB_DRIVER}=="?*", RUN+="/bin/sh -c 'echo 180 > /sys/%p/device/timeout'"
 RULES
     run udevadm control --reload-rules
     run udevadm trigger --subsystem-match=block --action=add 2>/dev/null || true
