@@ -183,6 +183,12 @@
   /* the current folder is the line you read from across the room — keep it big */
   .bkbig .bk-cur{flex:1;min-width:0;font-size:17px;font-weight:650;line-height:1.2;color:var(--accent);
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* mini loader: the element is exactly "..." , so clipping it in 3 steps shows 1, 2, 3 dots.
+     Clipping (not width/content) keeps it font-agnostic and reserves the space, so the folder
+     name never shifts. The card is rebuilt on every poll — the render pins animation-delay to
+     the wall clock so the restarted animation resumes mid-cycle instead of jumping to one dot. */
+  .bkbig .bkdots{display:inline-block;animation:bkdots 1.2s steps(3,jump-none) infinite}
+  @keyframes bkdots{from{clip-path:inset(0 66.67% 0 0)}to{clip-path:inset(0 0 0 0)}}
   .bkbig .bk-stop{flex:none;padding:6px 13px;border-radius:9px;font-size:12.5px;font-weight:700;
     background:rgba(255,93,104,.15);color:#ff9aa0;border:1px solid rgba(255,93,104,.35)}
   .bkbig .bk-stop:active{background:rgba(255,93,104,.32)}
@@ -693,7 +699,7 @@ function renderCards(d){
         </div>
         ${bar(L.pct||0,"pg")}
         <div class="bk-foot">
-          <div class="bk-cur">${esc(L.cur||"starting…")}</div>
+          <div class="bk-cur">${esc(L.cur||"starting")}<i class="bkdots" style="animation-delay:${-(Date.now()%1200)}ms">...</i></div>
           <button class="bk-stop${armed?" armed":""}" data-bkstop="${esc(act.id)}">${L.stopping?"Stopping…":armed?"Really?":"Stop"}</button>
         </div>
       </div>`;
