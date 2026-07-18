@@ -5793,10 +5793,13 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
 function winDiskUsage(initRoot){const existed=!!OPEN["__duscan"];const w=openWin("__duscan","Disk usage",(body,win)=>{
  body.style.padding="0";
  const norm=p=>((p||"").replace(/\/+$/,"")||"/");
+ // the /mnt/storage pool tab is shown only when the pool is actually mounted (learned below);
+ // on a pool-less box a phantom "Storage" tab would just scan the empty mountpoint / system disk
+ let poolMounted=true;
  // The roots are always the same VOLUMES (unified names + disk icons): Storage, USB…, System
  function rootList(){const out=[],seen=new Set();
    const add=(p,l,ic)=>{p=norm(p);if(seen.has(p))return;seen.add(p);out.push({p,l,ic});};
-   add("/mnt/storage","Storage","disks");
+   if(poolMounted)add("/mnt/storage","Storage","disks");
    (VOLS||[]).forEach(v=>{if(v.mounted&&v.mount)add(v.mount,v.label||v.dev,"usb");});
    add("/","System","cpu");
    return out;}
@@ -5927,6 +5930,12 @@ function winDiskUsage(initRoot){const existed=!!OPEN["__duscan"];const w=openWin
  // navigate to a specific path (for reopening the FM when the window is already open)
  win._duGo=p=>{p=norm(p);root=volFor(p).p;cur=(p===root||p.startsWith(root==="/"?"/":root+"/"))?p:root;cache={};paintRoots();refresh();};
  paintRoots();refresh();
+ // learn whether the pool is really mounted; if not, drop the empty Storage tab and re-home to the real storage root
+ api("/api/storage").then(ss=>{if(!ss||ss.pool!==false)return;poolMounted=false;const rl=rootList();
+   if(!rl.some(r=>r.p===root)){                       // the chosen root was the (now hidden) pool → fall back to real storage / first volume / System
+     const realp=ss.root?norm(ss.root):"";
+     root=(realp&&rl.some(r=>r.p===realp))?realp:((rl[0]&&rl[0].p)||"/");cur=root;cache={};}
+   paintRoots();refresh();}).catch(()=>{});
 },{w:900,h:640});
  if(existed&&initRoot&&w&&w._duGo)w._duGo(initRoot);
  return w;}
