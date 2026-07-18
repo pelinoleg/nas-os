@@ -5842,26 +5842,37 @@ function winDiskUsage(initRoot){const existed=!!OPEN["__duscan"];const w=openWin
    const c=mainEl.querySelector("#duCancel");if(c)c.onclick=async()=>{await api("/api/fs/duscan/cancel",{method:"POST",body:JSON.stringify({root})});setTimeout(refresh,500);};}
  function pollScan(){clearInterval(win._pi);win._pi=setInterval(async()=>{const st=await api("/api/fs/duscan/status?root="+encodeURIComponent(root));
    if(!st)return;if(st.status==="scanning"){const pe=mainEl.querySelector("#duProg");if(pe)pe.textContent=nasTr(`${st.scanned||0} folders · ${fmtB(st.bytes||0)}`);}else{clearInterval(win._pi);refresh();}},1200);}
+ // Hard-hidden entries (lost+found, .Trashes, @eaDir, AppleDouble…) — the file manager's
+ // fmNever() level that NO setting can reveal. Strip them from the analyzer too: neither shown
+ // nor counted (subtract from the parent size so the ring center matches the visible slices).
+ // Idempotent — safe to run again on a cached node.
+ function duStrip(n){const kids=n.ch||n.c;if(!kids)return n;let cut=0;
+   const keep=kids.filter(k=>{if(fmNever(k.n)){cut+=k.s||0;return false;}duStrip(k);return true;});
+   if(n.ch)n.ch=keep;else n.c=keep;if(cut)n.s=Math.max(0,(n.s||0)-cut);return n;}
+ // a file that lives INSIDE a hard-hidden tree (any path segment is fmNever) — hide it in the flat lists too
+ const duHidPath=p=>(p||"").split("/").some(seg=>seg&&fmNever(seg));
  async function drill(path){let d=cache[path];
    if(!d){d=await api("/api/fs/duscan/node?root="+encodeURIComponent(root)+"&path="+encodeURIComponent(path)+"&depth=2");if(d&&d.ok)cache[path]=d;}
    if(!d||!d.ok){if(norm(path)!==root){drill(root);return;}toast((d&&d.log)||"no data");return;}
-   cur=path;node=d;duView="chart";setViewBtns();renderView();}
+   duStrip(d);cur=path;node=d;duView="chart";setViewBtns();renderView();}
  function setViewBtns(){const b=body.querySelector("#duBig"),d=body.querySelector("#duDup");if(b)b.classList.toggle("pri",duView==="big");if(d)d.classList.toggle("pri",duView==="dups");}
  async function trashFile(p,rowEl){const r=await api("/api/fs/trash",{method:"POST",body:JSON.stringify({path:p})});
    if(r&&r.ok){if(rowEl)rowEl.remove();toast("Moved to trash. Sizes update after a rescan.");}else toast("Error: "+((r&&r.log)||"?"));}
  async function renderBig(){setViewBtns();mainEl.innerHTML=`<div class="du-crumb"><b>Largest files</b> · volume ${esc(root)}</div><div id="duBigL" class="du-big">Uploading…</div>`;
    const r=await api("/api/fs/duscan/bigfiles?root="+encodeURIComponent(root));const box=mainEl.querySelector("#duBigL");if(!box)return;
    if(!r||!r.ok){box.innerHTML=`<div class="du-empty2">${esc((r&&r.log)||"no data — scan the volume")}</div>`;return;}
-   const files=(r.files||[]);if(!files.length){box.innerHTML=`<div class="du-empty2">No files found</div>`;return;}
+   const files=(r.files||[]).filter(f=>!duHidPath(f.p));if(!files.length){box.innerHTML=`<div class="du-empty2">No files found</div>`;return;}
    box.innerHTML="";files.forEach(f=>{const nm=f.p.replace(/^.*\//,""),dir=f.p.replace(/\/[^/]+$/,"")||"/";
      const row=el(`<div class="du-frow"><span class="du-ico">${fmIcon(nm,"file",20)}</span><span class="du-fnm"><span class="du-fn" title="${att(f.p)}">${esc(nm)}</span><span class="du-fp" title="${att(dir)}">${esc(dir)}</span></span><span class="du-sz">${fmtB(f.s)}</span><button class="iconbtn" data-a="open" title="Show in Files">${svg("folder",14)}</button><button class="du-x" title="To trash">${svg("trash",13)}</button></div>`);
      row.querySelector('[data-a="open"]').onclick=()=>winFiles(dir);row.querySelector(".du-x").onclick=()=>trashFile(f.p,row);box.appendChild(row);});}
  async function renderDups(){setViewBtns();mainEl.innerHTML=`<div class="du-crumb"><b>Duplicates</b> · volume ${esc(root)}</div><div id="duDupL" class="du-big">Searching for duplicates — comparing file fingerprints…</div>`;
    const r=await api("/api/fs/duscan/dups?root="+encodeURIComponent(root));const box=mainEl.querySelector("#duDupL");if(!box)return;
    if(!r||!r.ok){box.innerHTML=`<div class="du-empty2">${esc((r&&r.log)||"no data — scan the volume")}</div>`;return;}
-   const groups=(r.groups||[]);if(!groups.length){box.innerHTML=`<div class="du-empty2">No duplicates found</div>`;return;}
+   // drop copies living inside hard-hidden trees; a group needs ≥2 real copies to still be a duplicate
+   const groups=(r.groups||[]).map(g=>({...g,paths:(g.paths||[]).filter(p=>!duHidPath(p))})).filter(g=>(g.paths||[]).length>=2);
+   if(!groups.length){box.innerHTML=`<div class="du-empty2">No duplicates found</div>`;return;}
    box.innerHTML=`<div class="du-dupsum">Groups: ${groups.length} · can free ~<b>${fmtB(r.waste)}</b>${r.truncated?" · not all shown (many candidates)":""}</div>`;
-   groups.forEach(g=>{const gd=el(`<div class="du-dgrp"><div class="du-dgh">${g.n} copies · ${fmtB(g.s)} each · wasted ${fmtB(g.waste)}</div></div>`);
+   groups.forEach(g=>{const gd=el(`<div class="du-dgrp"><div class="du-dgh">${g.paths.length} copies · ${fmtB(g.s)} each · wasted ${fmtB(g.s*(g.paths.length-1))}</div></div>`);
      g.paths.forEach((p,i)=>{const nm=p.replace(/^.*\//,""),dir=p.replace(/\/[^/]+$/,"")||"/";
        const row=el(`<div class="du-frow"><span class="du-ico">${fmIcon(nm,"file",18)}</span><span class="du-fnm"><span class="du-fn" title="${att(p)}">${esc(nm)}</span><span class="du-fp" title="${att(dir)}">${esc(dir)}</span></span><button class="iconbtn" data-a="open" title="Show in Files">${svg("folder",13)}</button>${i>0?`<button class="du-x" title="To trash (keep one copy)">${svg("trash",13)}</button>`:`<span class="du-keep">keep</span>`}</div>`);
        row.querySelector('[data-a="open"]').onclick=()=>winFiles(dir);const x=row.querySelector(".du-x");if(x)x.onclick=()=>trashFile(p,row);gd.appendChild(row);});
