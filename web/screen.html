@@ -420,8 +420,9 @@ let D={}, WPV=null;
    Kiosk (loopback) stays exactly 1:1. */
 const KIOSK=["127.0.0.1","localhost","[::1]"].includes(location.hostname);
 if(!KIOSK) document.documentElement.classList.add("remote");
+let BASE_H=480;   // logical scene height; grows while the amber warn strip is shown so nothing below it clips
 function fit(){
-  const s=Math.min(innerWidth/800,innerHeight/480)||1, b=document.body;
+  const s=Math.min(innerWidth/800,innerHeight/BASE_H)||1, b=document.body;
   b.style.transform=Math.abs(s-1)<.002?"":`scale(${s})`;
   b.style.width=Math.round(innerWidth/s)+"px";
   b.style.height=Math.round(innerHeight/s)+"px";
@@ -891,12 +892,19 @@ $("#alarm").onclick=()=>{ $("#alarm")._hid=true; $("#alarm").classList.remove("o
 // amber strip for warn-level problems (not critical enough for the full-screen alarm)
 let WARN_HID="";   // dismissed-warning signature — the strip stays hidden until the set of warnings changes
 function renderWarns(d){
-  const w=(d.problems||[]).filter(p=>p.lvl==="warn"), e=$("#warns");
+  let w=(d.problems||[]).filter(p=>p.lvl==="warn");
+  // ?warn=1 forces a demo strip (layout testing) when there are no real warnings
+  if(/[?&]warn=1/.test(location.search) && !w.length) w=[{name:"Test warning — layout check",value:"",lvl:"warn"}];
+  const e=$("#warns");
   const sig=w.map(p=>p.name+"="+p.value).join("|");
-  if(!w.length || sig===WARN_HID){ e.classList.remove("on"); return; }
+  if(!w.length || sig===WARN_HID){ e.classList.remove("on"); if(BASE_H!==480){BASE_H=480; fit();} return; }
   const tri=`<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>`;
   e.innerHTML=`${tri}<span class="wn-t">${w.length>1?w.length+" warnings — ":""}${w.map(p=>esc(p.name)).join(" · ")}</span>`;
   e.classList.add("on");
+  // grow the logical scene by the strip's own height (+one flex gap); fit() rescales the whole
+  // dashboard down a touch so the strip fits and the rows below never clip
+  const nh=480 + e.offsetHeight + 7;
+  if(Math.abs(nh-BASE_H)>1){ BASE_H=nh; fit(); }
 }
 
 /* ---------- details: open on a tap on ANY tile ---------- */
@@ -1208,11 +1216,12 @@ addEventListener("touchend",e=>{
   if(Math.abs(dx)>60) setPage(PAGE+(dx<0?1:-1));
 },{passive:true});
 
+let FIRST_POLL=true, CACHE_T=0;
 async function _poll(){
   try{
-    // always request p2: the server caches it for 30s, so the second page
-    // opens with data already there instead of empty
-    const r=await fetch("/api/screen/data?p2=1",{cache:"no-store"});
+    // First poll: page-0 data only (lighter → faster first paint). p2 (the heavier second
+    // page) is fetched from the 2nd poll on; the server caches it 30s so page 2 stays warm.
+    const r=await fetch(FIRST_POLL?"/api/screen/data":"/api/screen/data?p2=1",{cache:"no-store"});
     if(!r.ok) throw 0;
     const prev=D.p2;
     D=await r.json();
@@ -1229,9 +1238,17 @@ async function _poll(){
     if(KIOSK) $("#shield").classList.toggle("on", !!D.dark && Date.now()>SHIELD_OK);
     if(CUR_SHEET) sheet(CUR_SHEET,true);   // live data inside an open sheet
     $("#dot").style.opacity=1;
+    FIRST_POLL=false;
+    // stash the last payload so the NEXT open paints instantly from cache (throttled — not every poll)
+    const now=Date.now();
+    if(now-CACHE_T>4000){ CACHE_T=now; try{ localStorage.setItem("nas_screen", JSON.stringify(D)); }catch(e){} }
   }catch(e){ $("#dot").style.opacity=.25;
     $("#up").textContent="ERR: "+String((e&&e.message)||e).slice(0,80); }
 }
+// instant first paint: draw the last-known dashboard from cache before the network answers
+try{ const c=JSON.parse(localStorage.getItem("nas_screen")||"null");
+  if(c && c.ts){ D=c; window.NAS_LANG=D.lang||"en"; NETBITS=D.netUnits!=="bytes";
+    applyLook(D.look); renderBar(D); renderFoot(D); renderAlarm(D); renderWarns(D); renderPage(); } }catch(e){}
 poll().then(()=>{
   const pg=location.search.match(/page=(\d)/); if(pg) setPage(+pg[1]);   // ?page=1 — go straight to page 2
   const m=location.search.match(/sheet=(\w+)/); if(m) sheet(m[1]);
