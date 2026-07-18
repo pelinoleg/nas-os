@@ -10452,7 +10452,17 @@ def _trash_rm(store):
         else:
             os.remove(store)
 
-def fs_trash(path):
+def _dir_size(p):
+    total = 0
+    if not p or not os.path.isdir(p) or os.path.islink(p):
+        return 0
+    for root, _, files in os.walk(p):
+        for f in files:
+            try: total += os.path.getsize(os.path.join(root, f))
+            except OSError: pass
+    return total
+
+def fs_trash(path, size=None):
     path, err = _fs_guard(path)
     if err:
         return {"ok": False, "log": err}
@@ -10473,8 +10483,10 @@ def fs_trash(path):
     isdir = os.path.isdir(path) and not os.path.islink(path)
     size = 0
     try:
-        size = 0 if isdir else os.path.getsize(path)
-    except OSError:
+        # a dir's size is NOT walked here (that would negate the instant rename); the caller
+        # (space analyzer) may pass a known size, otherwise it is filled in lazily on first listing
+        size = (int(size) if size else 0) if isdir else os.path.getsize(path)
+    except (OSError, ValueError, TypeError):
         pass
     try:
         shutil.move(path, dest)
@@ -10487,8 +10499,14 @@ def fs_trash(path):
     return {"ok": True, "id": tid}
 
 def fs_trash_list():
-    items = []
     indexed = _trash_load()
+    changed = False
+    for it in indexed:      # fill in folder sizes lazily (a walk when the window is opened, then cached)
+        if it.get("isdir") and not it.get("size") and os.path.lexists(it.get("store", "")):
+            it["size"] = _dir_size(it.get("store")); changed = True
+    if changed:
+        _trash_save(indexed)
+    items = []
     for it in indexed:
         it = dict(it)
         it["exists"] = os.path.lexists(it.get("store", ""))
@@ -10500,6 +10518,14 @@ def fs_trash_list():
         items.append(orp)
     items.sort(key=lambda x: x.get("deleted", 0), reverse=True)
     return {"ok": True, "items": items}
+
+def fs_trash_stat():
+    """Cheap trash summary for the dock icon: count + total of KNOWN sizes (reads the index only,
+    never walks — folder sizes land here once the trash window has been opened, or via the size the
+    space analyzer passes on delete)."""
+    items = _trash_load()
+    return {"ok": True, "count": len(items),
+            "bytes": sum(int(i.get("size") or 0) for i in items)}
 
 def fs_trash_restore(tid, dest_dir=""):
     """Restore from trash. dest_dir empty → to the original folder (orig); set →
@@ -13737,6 +13763,8 @@ class H(BaseHTTPRequestHandler):
                 self._json(fs_grep((q.get("path") or ["/"])[0], (q.get("q") or [""])[0]))
             elif p == "/api/fs/trash":
                 self._json(fs_trash_list())
+            elif p == "/api/fs/trash/stat":
+                self._json(fs_trash_stat())
             elif p == "/api/fs/zip":
                 self._send_zip(q.get("item") or [], (q.get("name") or ["archive.zip"])[0])
             elif p == "/api/storage":
@@ -14190,7 +14218,7 @@ class H(BaseHTTPRequestHandler):
             elif p == "/api/fs/archive":
                 b = self._body(); self._json(fs_archive(b.get("items", []), b.get("dest", ""), b.get("name", "")))
             elif p == "/api/fs/trash":
-                b = self._body(); self._json(fs_trash(b.get("path", "")))
+                b = self._body(); self._json(fs_trash(b.get("path", ""), b.get("size")))
             elif p == "/api/fs/trash/restore":
                 b = self._body(); self._json(fs_trash_restore(b.get("id", ""), b.get("dest", "")))
             elif p == "/api/fs/trash/delete":

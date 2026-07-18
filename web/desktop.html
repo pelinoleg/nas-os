@@ -516,7 +516,11 @@
   /* running-app indicator — bottom center, readable on any dock background */
   .dock .run{position:absolute;left:50%;bottom:-3px;transform:translateX(-50%);width:5px;height:5px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 1.5px var(--dock-bg,var(--glass-2))}
   .dock.pos-left .run,.dock.pos-right .run{left:auto;bottom:auto;top:50%;right:-3px;transform:translateY(-50%)}
-  /* running-backup indicator: round spinner badge in the icon corner (noticeable and neat) */
+  /* trash fill: dim the icon when empty, a corner dot when it holds something (amber when a lot) */
+  .dock .di-trash-empty{opacity:.42}
+  .dock .di-trashdot{position:absolute;right:-3px;top:-3px;width:8px;height:8px;border-radius:50%;
+    background:var(--dim);box-shadow:0 0 0 2px var(--dock-bg,var(--glass-2));pointer-events:none;z-index:2}
+  .dock .di-trashdot.big{background:var(--warn);width:9px;height:9px}
   .dock .di-spin{position:absolute;right:-5px;bottom:-5px;width:15px;height:15px;border-radius:50%;
     background:var(--good);box-shadow:0 1px 3px rgba(0,0,0,.35),0 0 0 2px var(--dock-bg,var(--glass-2));
     display:grid;place-items:center;pointer-events:none;z-index:2}
@@ -3085,6 +3089,13 @@ addEventListener("resize",()=>{for(const id in OPEN){const w=OPEN[id];if(!w||w.c
 let APPS=[],APPS_LOADED=false;   // shortcuts from docker labels web-desktop.* (/api/desktop)
 let VOLS=[];   // volumes outside the pool (USB/free disks) — shortcuts on the desktop + FM sidebar
 let NB_RUNNING=false;   // whether the main NAS backup is running (indicator on the dock icon)
+// trash fill for the dock icon: empty / a little / a lot — so you can tell at a glance whether it's
+// worth opening (don't open it for one small text file). bytes = KNOWN sizes (see fs_trash_stat).
+let TRASH_STAT={count:0,bytes:0};
+const TRASH_BIG=200*1024*1024;   // ≥200 MB → the "a lot" state
+function trashLevel(){return TRASH_STAT.count===0?"empty":(TRASH_STAT.bytes>=TRASH_BIG?"full":"some");}
+async function refreshTrashStat(){try{const r=await api("/api/fs/trash/stat");
+  if(r&&r.ok){TRASH_STAT={count:r.count||0,bytes:r.bytes||0};renderDock();}}catch(e){}}
 const INTERNAL=[
  {id:"__sys",name:"System",color:"linear-gradient(135deg,#34C6BE,#2C9C9C)",ic:"sys",bare:1,fn:()=>winSystem()},
  {id:"__disks",name:"Disks",color:"linear-gradient(135deg,#e5544e,#c2403a)",ic:"disks",bare:1,fn:()=>winDisks()},
@@ -3188,7 +3199,13 @@ function dockDragAfter(d,x,y){const vert=(SET.dockPos==="left"||SET.dockPos==="r
  return best;}
 function renderDock(){
  const d=document.getElementById("dock");if(!d)return;d.innerHTML="";
- dockItems().filter(a=>!(SET.dockHidden||[]).includes(a.id)).forEach(a=>{const busy=a.id==="__nasbak"&&NB_RUNNING;const b=el(`<button title="${esc(a.name)}${busy?" — backup running":""}" draggable="true" data-did="${a.id}"><span class="di${busy?" di-busy":""}${a.bare?" di-bare":""}"${a.bare?"":` style="background:${a.color}"`}>${appIcon(a.ic)}${OPEN[a.id]?'<span class="run"></span>':''}${busy?'<span class="di-spin"></span>':''}</span><span class="dl">${esc(a.name)}</span></button>`);
+ dockItems().filter(a=>!(SET.dockHidden||[]).includes(a.id)).forEach(a=>{const busy=a.id==="__nasbak"&&NB_RUNNING;
+  // trash icon reflects how full it is: empty → dim, some → neutral dot, a lot → amber dot
+  const tl=a.id==="__trash"?trashLevel():"";
+  const tCls=tl==="empty"?" di-trash-empty":"";
+  const tBadge=tl==="some"?'<span class="di-trashdot"></span>':tl==="full"?'<span class="di-trashdot big"></span>':'';
+  const tTitle=a.id==="__trash"&&TRASH_STAT.count?` — ${TRASH_STAT.count} ${TRASH_STAT.bytes?"· "+fmtB(TRASH_STAT.bytes):""}`:"";
+  const b=el(`<button title="${esc(a.name)}${busy?" — backup running":""}${esc(tTitle)}" draggable="true" data-did="${a.id}"><span class="di${busy?" di-busy":""}${tCls}${a.bare?" di-bare":""}"${a.bare?"":` style="background:${a.color}"`}>${appIcon(a.ic)}${OPEN[a.id]?'<span class="run"></span>':''}${busy?'<span class="di-spin"></span>':''}${tBadge}</span><span class="dl">${esc(a.name)}</span></button>`);
   b.onclick=a.fn;
   if(a.id==="__nasbak")b.oncontextmenu=e=>{e.preventDefault();nbDockMenu(e.clientX,e.clientY);};
   else b.oncontextmenu=e=>{e.preventDefault();dockCtxMenu(a,e.clientX,e.clientY);};
@@ -3205,6 +3222,12 @@ function dockCtxMenu(a,x,y){
  if(w){const min=w.style.display==="none";
   items.push({label:min?"Show":"Bring to front",ic:svg(min?"eye":"grid",16),act:()=>{if(min)w.style.display="flex";focus(w);}});
   items.push({label:"Close window",ic:svg("x",16),act:()=>closeW(a.id)});
+  items.push({sep:1});}
+ if(a.id==="__trash"&&TRASH_STAT.count){   // quick empty straight from the dock
+  items.push({label:"Empty trash",ic:svg("trash",16),dng:1,act:()=>confirmDlg("Empty the trash?",
+    `${TRASH_STAT.count} items${TRASH_STAT.bytes?" · "+fmtB(TRASH_STAT.bytes):""} will be permanently deleted.`,
+    async()=>{const r=await api("/api/fs/trash/empty",{method:"POST",body:JSON.stringify({})});
+      toast(LIVE?`Emptied: ${(r&&r.count)||0}`:"Demo");refreshTrashStat();if(OPEN["__trash"])closeW("__trash");},true)});
   items.push({sep:1});}
  items.push({label:"Remove from Dock",ic:svg("eject",16),act:()=>{
   SET.dockHidden=[...(SET.dockHidden||[]),a.id];saveSettings();renderDock();
@@ -5569,7 +5592,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    toast(LIVE?`Moved: ${ok}`:"Demo");load(cwd);}
  async function doDelete(paths){if(!paths.length)return;
    const ok=await runBatch("To trash",paths,async p=>{const r=await api("/api/fs/trash",{method:"POST",body:JSON.stringify({path:p})});if(r&&r.log&&!(r&&r.ok))toast("Error: "+r.log);return {ok:!!(r&&r.ok),log:r&&r.log};});
-   toast(LIVE?`To trash: ${ok}`:"Demo");load(cwd);}
+   toast(LIVE?`To trash: ${ok}`:"Demo");load(cwd);refreshTrashStat();}
  function doDeleteForever(paths){if(!paths.length)return;
    confirmDlg("Delete permanently?",(paths.length>1?`${paths.length} items`:esc(paths[0]))+" — bypassing the trash",async()=>{
      const ok=await runBatch("Deleting…",paths,async p=>{const r=await api("/api/fs/delete",{method:"POST",body:JSON.stringify({path:p})});return r&&r.ok;});
@@ -5859,7 +5882,7 @@ function winDiskUsage(initRoot){const existed=!!OPEN["__duscan"];const w=openWin
  function setViewBtns(){const b=body.querySelector("#duBig"),d=body.querySelector("#duDup");if(b)b.classList.toggle("pri",duView==="big");if(d)d.classList.toggle("pri",duView==="dups");}
  async function trashFile(p,rowEl){   // runBatch → the same top-bar operation indicator the file manager uses
    const ok=await runBatch("To trash",[p],async q=>await api("/api/fs/trash",{method:"POST",body:JSON.stringify({path:q})}));
-   if(ok){if(rowEl)rowEl.remove();toast("Moved to trash. Sizes update after a rescan.");}}
+   if(ok){if(rowEl)rowEl.remove();refreshTrashStat();toast("Moved to trash. Sizes update after a rescan.");}}
  async function renderBig(){setViewBtns();mainEl.innerHTML=`<div class="du-crumb"><b>Largest files</b> · volume ${esc(root)}</div><div id="duBigL" class="du-big">Uploading…</div>`;
    const r=await api("/api/fs/duscan/bigfiles?root="+encodeURIComponent(root));const box=mainEl.querySelector("#duBigL");if(!box)return;
    if(!r||!r.ok){box.innerHTML=`<div class="du-empty2">${esc((r&&r.log)||"no data — scan the volume")}</div>`;return;}
@@ -5934,8 +5957,8 @@ function winDiskUsage(initRoot){const existed=!!OPEN["__duscan"];const w=openWin
      const x=row.querySelector(".du-x");if(x)x.onclick=ev=>{ev.stopPropagation();trashItem(c);};
      box.appendChild(row);});}
  function trashItem(c){confirmDlg("To trash?",esc(c.n),async()=>{   // runBatch → top-bar op indicator (same as the file manager), so a slow delete no longer looks frozen
-   const ok=await runBatch("To trash",[c.p],async p=>await api("/api/fs/trash",{method:"POST",body:JSON.stringify({path:p})}));
-   if(ok){node.ch=node.ch.filter(x=>x!==c);renderView();toast("Moved to trash. Sizes update after a rescan.");}});}
+   const ok=await runBatch("To trash",[c.p],async p=>await api("/api/fs/trash",{method:"POST",body:JSON.stringify({path:p,size:c.s})}));   // pass the known size so the trash shows it without a walk
+   if(ok){node.ch=node.ch.filter(x=>x!==c);renderView();refreshTrashStat();toast("Moved to trash. Sizes update after a rescan.");}});}
  body.querySelector("#duRescan").onclick=startScan;
  body.querySelector("#duBig").onclick=()=>{duView="big";renderBig();};
  body.querySelector("#duDup").onclick=()=>{duView="dups";renderDups();};
@@ -6978,6 +7001,7 @@ function tabCompare(tc){
 function winTrash(){openWin("__trash","Trash",body=>{
  body.style.padding="0";
  const draw=async()=>{const r=await api("/api/fs/trash"),items=(r&&r.items)||[];
+   TRASH_STAT={count:items.length,bytes:items.reduce((s,i)=>s+(i.size||0),0)};renderDock();   // fresh list → update the dock icon (folder sizes are computed here)
    const mr=await api("/api/maintenance"),md=(mr&&mr.maintenance)||{trash_days:30};
    const dopts=[[0,"never"],[7,"7 days"],[14,"14 days"],[30,"30 days"],[90,"90 days"]];
    body.innerHTML=`<div class="trwrap">
@@ -6994,7 +7018,7 @@ function winTrash(){openWin("__trash","Trash",body=>{
        <span class="tc-n"><span class="fi">${svg(it.isdir?"folder":fileIcon(it.name),16)}</span><span class="tn">${esc(it.name)}</span></span>
        <span class="tc-s mono${it.orig?"":" tr-unk"}">${it.orig?esc(dir):"path unknown"}</span>
        <span class="tc-w">${fmDate(it.deleted)}</span>
-       <span class="tc-z">${it.isdir?"—":fmtB(it.size)}</span>
+       <span class="tc-z">${it.size?fmtB(it.size):"—"}</span>
        <span class="tc-a">
          ${it.orig?`<button class="iconbtn" data-a="restore" title="Restore to the original folder">${svg("arrowup",14)}</button>`:""}
          <button class="iconbtn" data-a="restoreTo" title="Restore to a chosen folder…">${svg("folder",14)}</button>
@@ -9976,12 +10000,12 @@ function maybeOnboard(){let done=false;try{done=!!SET.onboarded||localStorage.ge
  if(NOTES_SOLO){document.body.classList.add("nt-solo");winNotes();}
  opsLoad().catch(()=>paintOps(true));      // the operations icon is needed in any case
  poll();pollApps();pollDisks();maybeOnboard();
- refreshFmHideBk();
+ refreshFmHideBk();refreshTrashStat();
  pollStacks();pollTop();pollNet();
  eventLoop();setTimeout(pollHealth,2500);   // events use long-poll (instant), not 15-s polling
  setInterval(poll,3000);setInterval(pollApps,8000);setInterval(pollDisks,15000);setInterval(tickClock,10000);setInterval(pollAvail,60000);
  setInterval(pollStacks,15000);setInterval(pollTop,10000);setInterval(pollNet,15000);setInterval(pollMySpeed,60000);setInterval(pollVnstat,60000);
- setInterval(pollHealth,120000);
+ setInterval(pollHealth,120000);setInterval(refreshTrashStat,300000);
  if("serviceWorker" in navigator){
    if(window.isSecureContext)navigator.serviceWorker.register("/sw.js").catch(()=>{});
    else navigator.serviceWorker.getRegistrations().then(rs=>{  // over http the SW isn't needed: remove the stuck one,
