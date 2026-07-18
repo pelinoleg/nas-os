@@ -3,7 +3,7 @@
 # a random secret is generated per install, PUBLIC_URL defaults to this NAS's LAN address.
 services:
   nextexplorer:
-    image: nxzai/explorer:v2.2.4
+    image: nxzai/explorer:latest
     container_name: nextexplorer
     restart: unless-stopped
     labels:

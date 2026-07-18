@@ -2,7 +2,7 @@
 # Dozzle and Scrutiny both default to port 8080 — Dozzle moved to 8083.
 services:
   dozzle:
-    image: amir20/dozzle:v10.6.7
+    image: amir20/dozzle:latest
     container_name: dozzle
     restart: unless-stopped
     labels:

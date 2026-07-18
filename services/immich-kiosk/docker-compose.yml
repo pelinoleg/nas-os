@@ -5,7 +5,7 @@ name: immich-kiosk
 
 services:
   immich-kiosk:
-    image: ghcr.io/damongolding/immich-kiosk:0.41.0
+    image: ghcr.io/damongolding/immich-kiosk:latest
     container_name: immich-kiosk
     environment:
       TZ: ${TZ:-Europe/Madrid}

@@ -1,7 +1,7 @@
 # Dockge — docker-compose stack manager (web UI). http://<pi>:5001
 services:
   dockge:
-    image: louislam/dockge:1.5.0
+    image: louislam/dockge:latest
     container_name: dockge
     restart: unless-stopped
     labels:

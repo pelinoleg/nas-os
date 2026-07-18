@@ -11,7 +11,7 @@
 # Data (sqlite) — bind-mount, so it lives alongside the other stacks.
 services:
   myspeed:
-    image: germannewsmaker/myspeed:1.0.9
+    image: germannewsmaker/myspeed:latest
     container_name: myspeed
     restart: unless-stopped
     ports:
