@@ -10364,34 +10364,85 @@ def _trash_save(items):
     # "emptied", while files in files/ were left orphaned and silently piled up gigabytes.
     _json_save(os.path.join(TRASH, "index.json"), items)
 
+def _mount_of(path):
+    """Mount point of the filesystem that holds `path` (walk up until st_dev changes)."""
+    path = os.path.realpath(path)
+    try:
+        dev = os.stat(path).st_dev
+    except OSError:
+        return "/"
+    while path != "/":
+        parent = os.path.dirname(path)
+        try:
+            if os.stat(parent).st_dev != dev:
+                return path
+        except OSError:
+            return path
+        path = parent
+    return "/"
+
+def _vol_trash_dir(path):
+    """The trash 'files' dir on the SAME filesystem as `path` — so moving to the trash is an
+    instant rename, not a cross-device copy. Deleting a big folder on a USB/data disk used to
+    copy every byte onto the system SD card (slow, SD wear, and it failed outright when the item
+    was bigger than the free space on /). Items already on the system disk keep the central trash
+    (same fs → the move is a rename there too). Falls back to central when a per-volume dir can't
+    be created (read-only mount, no permission)."""
+    central = os.path.join(TRASH, "files")
+    try:
+        pdev = os.stat(path).st_dev
+        if pdev == os.stat(HOME).st_dev:
+            return central
+        cand = os.path.join(_mount_of(path), ".nas-trash", "files")
+        os.makedirs(cand, exist_ok=True)
+        if os.stat(cand).st_dev == pdev:      # confirm the rename really stays on one device
+            return cand
+    except OSError:
+        pass
+    return central
+
+def _trash_store_dirs():
+    """Every 'files' dir the trash may use: the central one plus any per-volume
+    .nas-trash on a mounted data volume (for orphan sweeps and emptying)."""
+    out = [os.path.join(TRASH, "files")]
+    for pat in ("/media/*/.nas-trash/files", "/media/*/*/.nas-trash/files",
+                "/mnt/*/.nas-trash/files", "/srv/*/.nas-trash/files"):
+        out += glob.glob(pat)
+    seen, uniq = set(), []
+    for d in out:
+        rp = os.path.realpath(d)
+        if rp not in seen:
+            seen.add(rp); uniq.append(d)
+    return uniq
+
 def _trash_orphans(known_ids):
-    """Directories in files/ that are not in the index (the index was
+    """Directories in any files/ dir that are not in the index (the index was
     corrupted/reset but the files remain). Return them as trash entries — otherwise the space can't be reclaimed."""
     out = []
-    store_dir = os.path.join(TRASH, "files")
-    try:
-        entries = os.listdir(store_dir)
-    except OSError:
-        return out
-    for nm in entries:
-        tid = nm.split("__", 1)[0]
-        if tid in known_ids:
-            continue
-        p = os.path.join(store_dir, nm)
-        sz = 0
+    for store_dir in _trash_store_dirs():
         try:
-            if os.path.isdir(p) and not os.path.islink(p):
-                for root, _, files in os.walk(p):
-                    for f in files:
-                        try: sz += os.path.getsize(os.path.join(root, f))
-                        except OSError: pass
-            else:
-                sz = os.path.getsize(p)
+            entries = os.listdir(store_dir)
         except OSError:
-            pass
-        out.append({"id": tid, "orig": "", "name": nm.split("__", 1)[-1],
-                    "deleted": int(os.path.getmtime(p)) if os.path.exists(p) else 0,
-                    "isdir": os.path.isdir(p), "size": sz, "store": p, "orphan": True})
+            continue
+        for nm in entries:
+            tid = nm.split("__", 1)[0]
+            if tid in known_ids:
+                continue
+            p = os.path.join(store_dir, nm)
+            sz = 0
+            try:
+                if os.path.isdir(p) and not os.path.islink(p):
+                    for root, _, files in os.walk(p):
+                        for f in files:
+                            try: sz += os.path.getsize(os.path.join(root, f))
+                            except OSError: pass
+                else:
+                    sz = os.path.getsize(p)
+            except OSError:
+                pass
+            out.append({"id": tid, "orig": "", "name": nm.split("__", 1)[-1],
+                        "deleted": int(os.path.getmtime(p)) if os.path.exists(p) else 0,
+                        "isdir": os.path.isdir(p), "size": sz, "store": p, "orphan": True})
     return out
 
 def _trash_rm(store):
@@ -10410,7 +10461,9 @@ def fs_trash(path):
         return {"ok": False, "log": "already deleted or moved"}
     if path == TRASH or path.startswith(TRASH + os.sep):
         return {"ok": False, "log": "already in trash"}
-    store_dir = os.path.join(TRASH, "files")
+    if os.path.basename(path) == ".nas-trash":
+        return {"ok": False, "log": "already in trash"}
+    store_dir = _vol_trash_dir(path)      # same-fs → move is an instant rename, no cross-device copy
     try:
         os.makedirs(store_dir, exist_ok=True)
     except OSError as e:
@@ -10505,16 +10558,21 @@ def fs_trash_empty():
     # Clean the WHOLE files/ folder, not just the index: otherwise orphans (index
     # was corrupted/reset) would stay on disk and an "empty" trash would pile up gigabytes.
     items = _trash_load()
-    store_dir = os.path.join(TRASH, "files")
     removed = 0
-    try:
-        for nm in os.listdir(store_dir):
-            try:
-                _trash_rm(os.path.join(store_dir, nm)); removed += 1
-            except OSError:
-                pass
-    except OSError:
-        pass
+    for it in items:                       # indexed items live wherever their store points (per-volume or central)
+        try:
+            _trash_rm(it.get("store")); removed += 1
+        except OSError:
+            pass
+    for store_dir in _trash_store_dirs():  # then sweep every files/ dir for orphans
+        try:
+            for nm in os.listdir(store_dir):
+                try:
+                    _trash_rm(os.path.join(store_dir, nm)); removed += 1
+                except OSError:
+                    pass
+        except OSError:
+            pass
     _trash_save([])
     return {"ok": True, "count": max(removed, len(items))}
 

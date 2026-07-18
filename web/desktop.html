@@ -5074,6 +5074,7 @@ const fmChips=()=>[["Home",HOME_DIR],["Storage","/mnt/storage"],["Stacks","/opt/
    the resource fork and extended attributes, so it stores them in a companion file alongside. */
 const FM_NEVER_LC=new Set([
   "lost+found",                                   // ext4: debris left after fsck
+  ".nas-trash",                                   // our own per-volume trash store — never a user file
   // macOS
   ".ds_store",".spotlight-v100",".spotlight-v200",".fseventsd",".trashes",".trash",
   ".temporaryitems","temporary items",".documentrevisions-v100",".apdisk",".volumeicon.icns",
