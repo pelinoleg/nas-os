@@ -5857,8 +5857,9 @@ function winDiskUsage(initRoot){const existed=!!OPEN["__duscan"];const w=openWin
    if(!d||!d.ok){if(norm(path)!==root){drill(root);return;}toast((d&&d.log)||"no data");return;}
    duStrip(d);cur=path;node=d;duView="chart";setViewBtns();renderView();}
  function setViewBtns(){const b=body.querySelector("#duBig"),d=body.querySelector("#duDup");if(b)b.classList.toggle("pri",duView==="big");if(d)d.classList.toggle("pri",duView==="dups");}
- async function trashFile(p,rowEl){const r=await api("/api/fs/trash",{method:"POST",body:JSON.stringify({path:p})});
-   if(r&&r.ok){if(rowEl)rowEl.remove();toast("Moved to trash. Sizes update after a rescan.");}else toast("Error: "+((r&&r.log)||"?"));}
+ async function trashFile(p,rowEl){   // runBatch → the same top-bar operation indicator the file manager uses
+   const ok=await runBatch("To trash",[p],async q=>await api("/api/fs/trash",{method:"POST",body:JSON.stringify({path:q})}));
+   if(ok){if(rowEl)rowEl.remove();toast("Moved to trash. Sizes update after a rescan.");}}
  async function renderBig(){setViewBtns();mainEl.innerHTML=`<div class="du-crumb"><b>Largest files</b> · volume ${esc(root)}</div><div id="duBigL" class="du-big">Uploading…</div>`;
    const r=await api("/api/fs/duscan/bigfiles?root="+encodeURIComponent(root));const box=mainEl.querySelector("#duBigL");if(!box)return;
    if(!r||!r.ok){box.innerHTML=`<div class="du-empty2">${esc((r&&r.log)||"no data — scan the volume")}</div>`;return;}
@@ -5932,8 +5933,9 @@ function winDiskUsage(initRoot){const existed=!!OPEN["__duscan"];const w=openWin
      row.onmouseenter=()=>duHi(i,true);row.onmouseleave=()=>duHi(i,false);
      const x=row.querySelector(".du-x");if(x)x.onclick=ev=>{ev.stopPropagation();trashItem(c);};
      box.appendChild(row);});}
- function trashItem(c){confirmDlg("To trash?",esc(c.n),async()=>{const r=await api("/api/fs/trash",{method:"POST",body:JSON.stringify({path:c.p})});
-   if(r&&r.ok){node.ch=node.ch.filter(x=>x!==c);renderView();toast("Moved to trash. Sizes update after a rescan.");}else toast("Error: "+((r&&r.log)||"?"));});}
+ function trashItem(c){confirmDlg("To trash?",esc(c.n),async()=>{   // runBatch → top-bar op indicator (same as the file manager), so a slow delete no longer looks frozen
+   const ok=await runBatch("To trash",[c.p],async p=>await api("/api/fs/trash",{method:"POST",body:JSON.stringify({path:p})}));
+   if(ok){node.ch=node.ch.filter(x=>x!==c);renderView();toast("Moved to trash. Sizes update after a rescan.");}});}
  body.querySelector("#duRescan").onclick=startScan;
  body.querySelector("#duBig").onclick=()=>{duView="big";renderBig();};
  body.querySelector("#duDup").onclick=()=>{duView="dups";renderDups();};
