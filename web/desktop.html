@@ -516,11 +516,6 @@
   /* running-app indicator — bottom center, readable on any dock background */
   .dock .run{position:absolute;left:50%;bottom:-3px;transform:translateX(-50%);width:5px;height:5px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 1.5px var(--dock-bg,var(--glass-2))}
   .dock.pos-left .run,.dock.pos-right .run{left:auto;bottom:auto;top:50%;right:-3px;transform:translateY(-50%)}
-  /* trash fill: dim the icon when empty, a corner dot when it holds something (amber when a lot) */
-  .dock .di-trash-empty{opacity:.42}
-  .dock .di-trashdot{position:absolute;right:-3px;top:-3px;width:8px;height:8px;border-radius:50%;
-    background:var(--dim);box-shadow:0 0 0 2px var(--dock-bg,var(--glass-2));pointer-events:none;z-index:2}
-  .dock .di-trashdot.big{background:var(--warn);width:9px;height:9px}
   .dock .di-spin{position:absolute;right:-5px;bottom:-5px;width:15px;height:15px;border-radius:50%;
     background:var(--good);box-shadow:0 1px 3px rgba(0,0,0,.35),0 0 0 2px var(--dock-bg,var(--glass-2));
     display:grid;place-items:center;pointer-events:none;z-index:2}
@@ -1077,11 +1072,13 @@
   .tr-row{display:flex;align-items:center;gap:10px;padding:8px 8px;border-radius:var(--r-sm);font-size:12.5px;transition:.1s}
   .tr-row:hover{background:var(--sel)}
   .tr-row.lost{opacity:.5}
-  .tc-n{flex:1;min-width:0;display:flex;align-items:center;gap:9px;overflow:hidden}
+  .tc-n{flex:1 1 0;min-width:64px;display:flex;align-items:center;gap:9px;overflow:hidden}
   .tc-n .fi{flex:none;color:var(--dim);display:grid;place-items:center;width:20px;height:20px}
   .tr-row.dir .fi{color:var(--accent-2)}
   .tc-n .tn{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .tc-s{width:150px;flex:none;font-size:10.5px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tc-s{flex:2 1 0;min-width:0;font-size:10.5px;color:var(--mut);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* the "from" path grows with the window and truncates on the LEFT so the last (most specific) folder stays visible */
+  .tr-row .tc-s:not(.tr-unk){direction:rtl;text-align:left}
   .tc-w{width:92px;flex:none;font-size:11px;color:var(--mut);font-family:var(--mono)}
   .tc-z{width:66px;flex:none;text-align:right;font-family:var(--mono);font-size:11px;color:var(--dim)}
   .tc-a{width:60px;flex:none;display:flex;gap:2px;justify-content:flex-end;visibility:hidden}
@@ -2452,6 +2449,8 @@ const AP={
  backup:'<g transform="translate(-.08 .47) scale(.949)"><path fill="#3EAE80" d="M6.9 20.2a5.4 5.4 0 0 1-1.06-10.7 6.5 6.5 0 0 1 12.06-2.06A5.35 5.35 0 0 1 17.6 20.2Z"/><circle cx="12.24" cy="10.64" r="6.2" fill="#4CBE8D"/></g><path fill="none" stroke="#fff" stroke-width="1.9" d="M8.52 12.37A3.6 3.6 0 0 1 15.48 12.37"/><path fill="#fff" d="M15.96 14.16 12.93 11.77 17.38 10.58z"/><path fill="none" stroke="#BCE8D3" stroke-width="1.9" d="M15.48 14.23A3.6 3.6 0 0 1 8.52 14.23"/><path fill="#BCE8D3" d="M8.04 12.44 11.07 14.83 6.62 16.02z"/>',
  keyf:'<path fill-rule="evenodd" fill="#E8A33C" d="M8.6 2.4a6.1 6.1 0 1 1 0 12.2 6.1 6.1 0 0 1 0-12.2Zm0 3.4a2.7 2.7 0 1 0 0 5.4 2.7 2.7 0 0 0 0-5.4Z"/><path fill="#D98E1F" d="m12.6 11 2.1-2.1 7.5 7.5a1.4 1.4 0 0 1 0 2l-.8.8a1.4 1.4 0 0 1-2 0l-.8-.8-1.7 1.7-2.1-2.1 1.7-1.7-1.4-1.4-1.6 1.6-2.1-2.1 1.6-1.6-.4-.4Z"/>',
  trashf:'<path fill="#6F7B8D" d="M9.4 2.3h5.2A1.6 1.6 0 0 1 16.2 3.9v.6H20a1.3 1.3 0 0 1 0 2.6H4a1.3 1.3 0 0 1 0-2.6h3.8v-.6a1.6 1.6 0 0 1 1.6-1.6Z"/><path fill="#94A0B0" d="M5.2 8.6h13.6l-.9 11.1A2.5 2.5 0 0 1 15.4 22H8.6a2.5 2.5 0 0 1-2.5-2.3L5.2 8.6Z"/><g fill="#7C8798" opacity=".55"><rect x="8.9" y="11" width="1.5" height="7.6" rx=".75"/><rect x="11.25" y="11" width="1.5" height="7.6" rx=".75"/><rect x="13.6" y="11" width="1.5" height="7.6" rx=".75"/></g>',
+ trashf1:'<path fill="#94A0B0" d="M5.5 8.4h13l-.88 10.8A2.5 2.5 0 0 1 15.15 21.5H8.85A2.5 2.5 0 0 1 6.38 19.2Z"/><g fill="#7C8798" opacity=".5"><rect x="8.8" y="11" width="1.4" height="7.2" rx=".7"/><rect x="11.3" y="11" width="1.4" height="7.2" rx=".7"/><rect x="13.8" y="11" width="1.4" height="7.2" rx=".7"/></g><ellipse cx="12" cy="8.4" rx="6.5" ry="1.7" fill="#6F7B8D"/><path fill="#EDEFF4" d="M10.7 8.2l.55-3.8 3.1.75-.7 3.35z"/><path fill="#D7DCE6" d="M11.25 4.4l3.1.75-.14.95-3.1-.75z"/>',
+ trashf2:'<path fill="#E4E8F0" d="M1.8 20.6l3-.7.55 2.05-3 .7z"/><path fill="#E4E8F0" d="M18.7 21.6l2.9.75-.5 1.95-2.9-.75z"/><path fill="#94A0B0" d="M5.5 9h13l-.88 10.5A2.5 2.5 0 0 1 15.15 21.7H8.85A2.5 2.5 0 0 1 6.38 19.5Z"/><g fill="#7C8798" opacity=".5"><rect x="8.8" y="11.5" width="1.4" height="6.8" rx=".7"/><rect x="11.3" y="11.5" width="1.4" height="6.8" rx=".7"/><rect x="13.8" y="11.5" width="1.4" height="6.8" rx=".7"/></g><ellipse cx="12" cy="9" rx="6.5" ry="1.7" fill="#6F7B8D"/><path fill="#EDEFF4" d="M7.9 8.9l.3-3 2.5.45-.35 2.85z"/><path fill="#F3C878" d="M10.6 8.8l.6-4.3 3.1.8-.72 3.75z"/><path fill="#EDEFF4" d="M13.5 9l1.15-2.6 2.3 1.05-.95 2z"/>',
  gearf:'<path opacity="0.5" fill-rule="evenodd" clip-rule="evenodd" fill="#8A97AC" d="M14.2788 2.15224C13.9085 2 13.439 2 12.5 2C11.561 2 11.0915 2 10.7212 2.15224C10.2274 2.35523 9.83509 2.74458 9.63056 3.23463C9.53719 3.45834 9.50065 3.7185 9.48635 4.09799C9.46534 4.65568 9.17716 5.17189 8.69017 5.45093C8.20318 5.72996 7.60864 5.71954 7.11149 5.45876C6.77318 5.2813 6.52789 5.18262 6.28599 5.15102C5.75609 5.08178 5.22018 5.22429 4.79616 5.5472C4.47814 5.78938 4.24339 6.1929 3.7739 6.99993C3.30441 7.80697 3.06967 8.21048 3.01735 8.60491C2.94758 9.1308 3.09118 9.66266 3.41655 10.0835C3.56506 10.2756 3.77377 10.437 4.0977 10.639C4.57391 10.936 4.88032 11.4419 4.88029 12C4.88026 12.5581 4.57386 13.0639 4.0977 13.3608C3.77372 13.5629 3.56497 13.7244 3.41645 13.9165C3.09108 14.3373 2.94749 14.8691 3.01725 15.395C3.06957 15.7894 3.30432 16.193 3.7738 17C4.24329 17.807 4.47804 18.2106 4.79606 18.4527C5.22008 18.7756 5.75599 18.9181 6.28589 18.8489C6.52778 18.8173 6.77305 18.7186 7.11133 18.5412C7.60852 18.2804 8.2031 18.27 8.69012 18.549C9.17714 18.8281 9.46533 19.3443 9.48635 19.9021C9.50065 20.2815 9.53719 20.5417 9.63056 20.7654C9.83509 21.2554 10.2274 21.6448 10.7212 21.8478C11.0915 22 11.561 22 12.5 22C13.439 22 13.9085 22 14.2788 21.8478C14.7726 21.6448 15.1649 21.2554 15.3694 20.7654C15.4628 20.5417 15.4994 20.2815 15.5137 19.902C15.5347 19.3443 15.8228 18.8281 16.3098 18.549C16.7968 18.2699 17.3914 18.2804 17.8886 18.5412C18.2269 18.7186 18.4721 18.8172 18.714 18.8488C19.2439 18.9181 19.7798 18.7756 20.2038 18.4527C20.5219 18.2105 20.7566 17.807 21.2261 16.9999C21.6956 16.1929 21.9303 15.7894 21.9827 15.395C22.0524 14.8691 21.9088 14.3372 21.5835 13.9164C21.4349 13.7243 21.2262 13.5628 20.9022 13.3608C20.4261 13.0639 20.1197 12.558 20.1197 11.9999C20.1197 11.4418 20.4261 10.9361 20.9022 10.6392C21.2263 10.4371 21.435 10.2757 21.5836 10.0835C21.9089 9.66273 22.0525 9.13087 21.9828 8.60497C21.9304 8.21055 21.6957 7.80703 21.2262 7C20.7567 6.19297 20.522 5.78945 20.2039 5.54727C19.7799 5.22436 19.244 5.08185 18.7141 5.15109C18.4722 5.18269 18.2269 5.28136 17.8887 5.4588C17.3915 5.71959 16.7969 5.73002 16.3099 5.45096C15.8229 5.17191 15.5347 4.65566 15.5136 4.09794C15.4993 3.71848 15.4628 3.45833 15.3694 3.23463C15.1649 2.74458 14.7726 2.35523 14.2788 2.15224Z"/><path fill="#8A97AC" d="M15.5227 12C15.5227 13.6569 14.1694 15 12.4999 15C10.8304 15 9.47705 13.6569 9.47705 12C9.47705 10.3431 10.8304 9 12.4999 9C14.1694 9 15.5227 10.3431 15.5227 12Z"/>',
  wandf:'<path fill="#7A6CF0" d="M4.4 21.2a1.95 1.95 0 0 1 0-2.76L13.9 8.9a1.95 1.95 0 0 1 2.76 2.76L7.16 21.2a1.95 1.95 0 0 1-2.76 0Z"/><path fill="#9C90F7" d="M13.9 8.9a1.95 1.95 0 0 1 2.76 2.76l-1.2 1.2-2.76-2.76 1.2-1.2Z"/><path fill="#FFC24B" d="M18.4 1.7000000000000002C18.4 4.15 19.45 5.2 21.9 5.2C19.45 5.2 18.4 6.25 18.4 8.7C18.4 6.25 17.349999999999998 5.2 14.899999999999999 5.2C17.349999999999998 5.2 18.4 4.15 18.4 1.7000000000000002Z"/><path fill="#FFD98A" d="M12.4 1.1999999999999997C12.4 2.67 13.030000000000001 3.3 14.5 3.3C13.030000000000001 3.3 12.4 3.9299999999999997 12.4 5.4C12.4 3.9299999999999997 11.77 3.3 10.3 3.3C11.77 3.3 12.4 2.67 12.4 1.1999999999999997Z"/><path fill="#FFD98A" d="M21.0 10.0C21.0 11.4 21.6 12.0 23.0 12.0C21.6 12.0 21.0 12.6 21.0 14.0C21.0 12.6 20.4 12.0 19.0 12.0C20.4 12.0 21.0 11.4 21.0 10.0Z"/>',
  dash:'<rect x="2.6" y="2.6" width="8.6" height="8.6" rx="2.4" fill="#4B7BEC"/><rect x="12.8" y="12.8" width="8.6" height="8.6" rx="2.4" fill="#4B7BEC"/><rect x="12.8" y="2.6" width="8.6" height="8.6" rx="2.4" fill="#86A9F5"/><rect x="2.6" y="12.8" width="8.6" height="8.6" rx="2.4" fill="#86A9F5"/>',
@@ -3200,12 +3199,11 @@ function dockDragAfter(d,x,y){const vert=(SET.dockPos==="left"||SET.dockPos==="r
 function renderDock(){
  const d=document.getElementById("dock");if(!d)return;d.innerHTML="";
  dockItems().filter(a=>!(SET.dockHidden||[]).includes(a.id)).forEach(a=>{const busy=a.id==="__nasbak"&&NB_RUNNING;
-  // trash icon reflects how full it is: empty → dim, some → neutral dot, a lot → amber dot
-  const tl=a.id==="__trash"?trashLevel():"";
-  const tCls=tl==="empty"?" di-trash-empty":"";
-  const tBadge=tl==="some"?'<span class="di-trashdot"></span>':tl==="full"?'<span class="di-trashdot big"></span>':'';
-  const tTitle=a.id==="__trash"&&TRASH_STAT.count?` — ${TRASH_STAT.count} ${TRASH_STAT.bytes?"· "+fmtB(TRASH_STAT.bytes):""}`:"";
-  const b=el(`<button title="${esc(a.name)}${busy?" — backup running":""}${esc(tTitle)}" draggable="true" data-did="${a.id}"><span class="di${busy?" di-busy":""}${tCls}${a.bare?" di-bare":""}"${a.bare?"":` style="background:${a.color}"`}>${appIcon(a.ic)}${OPEN[a.id]?'<span class="run"></span>':''}${busy?'<span class="di-spin"></span>':''}${tBadge}</span><span class="dl">${esc(a.name)}</span></button>`);
+  // trash icon shows how full it is: empty can (lid on) → one paper poking out → papers overflowing + spilled
+  let icName=a.ic;
+  if(a.id==="__trash"){const tl=trashLevel();icName=tl==="full"?"trashf2":tl==="some"?"trashf1":"trashf";}
+  const tTitle=a.id==="__trash"&&TRASH_STAT.count?` — ${TRASH_STAT.count}${TRASH_STAT.bytes?" · "+fmtB(TRASH_STAT.bytes):""}`:"";
+  const b=el(`<button title="${esc(a.name)}${busy?" — backup running":""}${esc(tTitle)}" draggable="true" data-did="${a.id}"><span class="di${busy?" di-busy":""}${a.bare?" di-bare":""}"${a.bare?"":` style="background:${a.color}"`}>${appIcon(icName)}${OPEN[a.id]?'<span class="run"></span>':''}${busy?'<span class="di-spin"></span>':''}</span><span class="dl">${esc(a.name)}</span></button>`);
   b.onclick=a.fn;
   if(a.id==="__nasbak")b.oncontextmenu=e=>{e.preventDefault();nbDockMenu(e.clientX,e.clientY);};
   else b.oncontextmenu=e=>{e.preventDefault();dockCtxMenu(a,e.clientX,e.clientY);};
@@ -7016,7 +7014,7 @@ function winTrash(){openWin("__trash","Trash",body=>{
      const restore=async(dest)=>{const w=await api("/api/fs/trash/restore",{method:"POST",body:JSON.stringify(dest?{id:it.id,dest}:{id:it.id})});toast(LIVE?(w&&w.ok?"Restored to "+(w.path||dest||dir):("Error: "+((w&&w.log)||""))):"Demo");draw();};
      const row=el(`<div class="tr-row ${it.isdir?"dir":""}${it.exists?"":" lost"}" title="${att(it.orig||"path unknown — the index was corrupted")}">
        <span class="tc-n"><span class="fi">${svg(it.isdir?"folder":fileIcon(it.name),16)}</span><span class="tn">${esc(it.name)}</span></span>
-       <span class="tc-s mono${it.orig?"":" tr-unk"}">${it.orig?esc(dir):"path unknown"}</span>
+       <span class="tc-s mono${it.orig?"":" tr-unk"}">${it.orig?"‎"+esc(dir):"path unknown"}</span>
        <span class="tc-w">${fmDate(it.deleted)}</span>
        <span class="tc-z">${it.size?fmtB(it.size):"—"}</span>
        <span class="tc-a">
