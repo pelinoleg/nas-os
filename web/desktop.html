@@ -2013,6 +2013,22 @@
   .nt-langs button:hover,.nt-langs button.sel{background:var(--veil)}
   .nt-langs button.on{background:var(--accent-soft);color:var(--accent)}
   .nt-langs button.on::before{content:"✓"}
+  /* HTML notes: CodeMirror source pane + origin-isolated preview iframe.
+     The preview is a real rendered page, so a plain page background is honest
+     here (not a card surface); the source pane uses the shared editor bg. */
+  .nt-root .nt-ed.nt-html{flex-direction:row;gap:var(--sp-2);padding:0 var(--sp-6) var(--sp-4);min-height:0}
+  .nt-root .nt-ed.nt-html .nt-html-src,.nt-root .nt-ed.nt-html .nt-html-prev{flex:1 1 0;min-width:0;height:100%;border-radius:var(--radius-lg);overflow:hidden;box-shadow:var(--shadow-1)}
+  .nt-root .nt-ed.nt-html .nt-html-src{background:var(--code-bg)}
+  .nt-root .nt-ed.nt-html .nt-html-src .CodeMirror{height:100%;font-size:var(--nt-font,13px);border-radius:var(--radius-lg)}
+  .nt-root .nt-ed.nt-html .nt-html-prev{background:#fff}
+  .nt-root .nt-ed.nt-html .nt-html-prev iframe{display:block;width:100%;height:100%;border:0;background:#fff}
+  .nt-root .nt-ed.nt-hv-code .nt-html-prev{display:none}
+  .nt-root .nt-ed.nt-hv-prev .nt-html-src{display:none}
+  .nt-hseg{margin-left:auto}
+  /* HTML tag on note cards / tree rows */
+  .nt-badge{display:inline-block;font-family:var(--font-mono);font-size:9px;font-weight:700;letter-spacing:.05em;
+   line-height:1;padding:2px 4px;border-radius:var(--radius-sm);background:var(--accent-soft);color:var(--accent);vertical-align:1px}
+  .nt-dnote .nt-badge{margin-left:4px;font-size:8px;padding:1px 3px}
   /* ===== Part A polish: every content block, tokens only (2026-07-11) ===== */
   /* 1) block rhythm: sp-4 between top-level blocks, sp-5 before / sp-2 after headings */
   .nt-root .nt-ed .toastui-editor-contents>*{margin-top:0;margin-bottom:0}
@@ -7696,19 +7712,29 @@ function loadNotesLibs(){
  return NT_LIBS;
 }
 let NT_ED=null,NT_PATH=null,NT_SAVE_T=null,NT_DIRTY=false,NT_PIN=false,NT_TAGS=[],NT_MTIME=0;
+/* A note is either markdown (Toast UI, NT_ED) or full HTML (CodeMirror source in
+   NT_CM + a sandboxed preview iframe). NT_KIND says which; the content accessors
+   below hide the difference from the save/flush paths so they stay editor-agnostic. */
+let NT_KIND="md",NT_CM=null,NT_PREV=null,NT_PVT=null;
+function ntHasEditor(){return NT_KIND==="html"?!!NT_CM:!!NT_ED;}
+function ntGetContent(){return NT_KIND==="html"?(NT_CM?NT_CM.getValue():""):(NT_ED?NT_ED.getMarkdown():"");}
+/* Preview document: the note's HTML verbatim in an origin-isolated iframe.
+   sandbox="allow-scripts" (no allow-same-origin) runs the note's scripts but
+   walls them off from the panel's session/cookies/API. */
+function ntHtmlPreview(){if(NT_PREV&&NT_CM)NT_PREV.srcdoc=NT_CM.getValue();}
 /* flush unsaved edits when the page goes away (tab close, PWA switch): the
    1.2s autosave debounce would otherwise drop the last keystrokes. keepalive
    lets the request outlive the page; conflict_copy=true because nobody is
    left to answer a conflict dialog — the server parks the text in a sibling
    file instead of clobbering a newer version from another device. */
 function ntFlushPage(){
- if(!NT_DIRTY||!NT_PATH||!NT_ED)return;
+ if(!NT_DIRTY||!NT_PATH||!ntHasEditor())return;
  NT_DIRTY=false;clearTimeout(NT_SAVE_T);
  try{
   const t=document.getElementById("ntTitle");
   fetch("/api/notes/save",{method:"POST",keepalive:true,headers:{"Content-Type":"application/json"},
    body:JSON.stringify({path:NT_PATH,title:t?t.value.trim():"",tags:NT_TAGS.slice(),pinned:NT_PIN,
-    md:NT_ED.getMarkdown(),base_mtime:NT_MTIME,conflict_copy:true})})
+    md:ntGetContent(),base_mtime:NT_MTIME,conflict_copy:true})})
    .then(x=>x.json()).then(r=>{if(r&&r.ok&&r.mtime)NT_MTIME=r.mtime;   // page survived (tab switch) — stay in sync
     if(r&&r.conflict_copy)toast("Version conflict: the text was saved as a copy «"+r.conflict_copy+"»");})
    .catch(()=>{NT_DIRTY=true;});
@@ -7923,7 +7949,7 @@ function winNotes(){openWin("__notes","Notes",async body=>{
    if(open){
     sub.forEach(k=>h+=row(k,depth+1));
     TREE.notes.filter(n=>n.folder===d).forEach(n=>h+=
-     `<div class="nt-dnote${NT_PATH===n.path?" on":""}" data-p="${att(encodeURIComponent(n.path))}" style="padding-left:${34+depth*14}px">${svg("note",12)} <span class="nm"></span></div>`);}
+     `<div class="nt-dnote${NT_PATH===n.path?" on":""}" data-p="${att(encodeURIComponent(n.path))}" style="padding-left:${34+depth*14}px">${svg("note",12)} <span class="nm"></span>${n.kind==="html"?`<span class="nt-badge">HTML</span>`:""}</div>`);}
    return h;};
   dirs.innerHTML=`<div class="nt-dir${fold===""&&!tag?" on":""}" data-d=""><i class="nt-tw empty"></i>${svg("home",13)} <span class="nm">All notes</span><b class="nt-cnt">${TREE.notes.length}</b></div>`
    +kids("").map(d=>row(d,0)).join("");
@@ -7935,7 +7961,7 @@ function winNotes(){openWin("__notes","Notes",async body=>{
      Names are filled via textContent for the same reason. */
   dirs.querySelectorAll(".nt-dnote").forEach(el2=>{
    const p2=decodeURIComponent(el2.dataset.p),n2=TREE.notes.find(n=>n.path===p2);
-   el2.querySelector(".nm").textContent=n2?n2.title:p2.split("/").pop().replace(/\.md$/,"");
+   el2.querySelector(".nm").textContent=n2?n2.title:p2.split("/").pop().replace(/\.(md|html)$/i,"");
    el2.onclick=()=>openNote(p2);
    el2.oncontextmenu=e=>{e.preventDefault();e.stopPropagation();noteCtx(e,p2);};});
   dirs.querySelectorAll(".nt-dir").forEach(el2=>{
@@ -7944,9 +7970,8 @@ function winNotes(){openWin("__notes","Notes",async body=>{
    if(el2.dataset.d)el2.oncontextmenu=e=>{e.preventDefault();e.stopPropagation();
     const d=decodeURIComponent(el2.dataset.d);
     showMenu(e.clientX,e.clientY,[
-     {label:"New note here",ic:svg("plus",15),act:async()=>{
-      const r=await api("/api/notes/new",{method:"POST",body:JSON.stringify({folder:d,title:nasTr("New note")})});
-      if(r&&r.ok){fold=d;tag=null;EXP.add(d);await refresh();openNote(r.path);const t=q("#ntTitle");if(t){t.focus();t.select();}}}},
+     {label:"New note here",ic:svg("note",15),act:()=>ntCreate(d,"md")},
+     {label:"New HTML note",ic:svg("code",15),act:()=>ntCreate(d,"html")},
      {label:"New subfolder",ic:svg("folder",15),act:()=>newDirDlg(d)},
      {sep:1},
      {label:"Rename",ic:svg("edit",15),act:()=>renameDir(d)},
@@ -7977,7 +8002,7 @@ function winNotes(){openWin("__notes","Notes",async body=>{
   const l=q("#ntList");
   l.innerHTML=`<div class="nt-lhead"><span class="w"></span><span>${items.length}</span></div>`
    +(items.length?items.map(n=>`<div class="nt-item${NT_PATH===n.path?" on":""}" data-p="${att(encodeURIComponent(n.path))}" draggable="true">
-    <b>${n.pinned?svg("star",11)+" ":""}<span class="t"></span></b>
+    <b>${n.pinned?svg("star",11)+" ":""}<span class="t"></span>${n.kind==="html"?` <span class="nt-badge">HTML</span>`:""}</b>
     ${(n.snip||n.prev)?`<span class="nt-snip"></span>`:""}
     <span class="nt-meta">${n.tags.slice(0,3).map(()=>`<i></i>`).join("")}<span>${fmtD(n.mtime)}</span></span>
    </div>`).join(""):`<div class="nt-mut" style="padding:18px">empty</div>`);
@@ -8017,11 +8042,11 @@ function winNotes(){openWin("__notes","Notes",async body=>{
     refresh();},true)}]);};
  let ntConflict=false;
  const saveNow=async force=>{
-  if(!NT_PATH||!NT_ED||ntConflict)return;
+  if(!NT_PATH||!ntHasEditor()||ntConflict)return;
   NT_DIRTY=false;clearTimeout(NT_SAVE_T);
   const title=q("#ntTitle")?q("#ntTitle").value.trim():"";
   const tags=NT_TAGS.slice();
-  const r=await api("/api/notes/save",{method:"POST",body:JSON.stringify({path:NT_PATH,title,tags,pinned:NT_PIN,md:NT_ED.getMarkdown(),base_mtime:NT_MTIME,force:!!force})});
+  const r=await api("/api/notes/save",{method:"POST",body:JSON.stringify({path:NT_PATH,title,tags,pinned:NT_PIN,md:ntGetContent(),base_mtime:NT_MTIME,force:!!force})});
   if(r&&r.conflict){   // somebody saved this note from another window/device meanwhile
    NT_DIRTY=true;ntConflict=true;
    const s=document.getElementById("scrim"),pth=NT_PATH;
@@ -8042,7 +8067,7 @@ function winNotes(){openWin("__notes","Notes",async body=>{
   const r=await api("/api/notes/get?path="+encodeURIComponent(p));
   if(!r||!r.path){toast("Cannot open: "+((r&&r.error)||"no answer from the server"));return;}
   r.tags=r.tags||[];r.md=r.md||"";r.title=r.title||"";
-  NT_PATH=p;NT_MTIME=r.mtime||0;
+  NT_PATH=p;NT_MTIME=r.mtime||0;NT_KIND=r.kind||"md";NT_CM=null;NT_PREV=null;
   if(SET.notesLast!==p){SET.notesLast=p;saveSettings();}   // server-side (desktop.json): same last note in every browser
   // selection in the tree and the list follows the open note; expand the folder
   // chain so the sidebar highlight is actually visible (it used to go stale
@@ -8097,7 +8122,10 @@ function winNotes(){openWin("__notes","Notes",async body=>{
    const b64=await new Promise(res=>{const fr=new FileReader();fr.onload=()=>res(fr.result);fr.readAsDataURL(f);});
    const rr=await api("/api/notes/upload",{method:"POST",body:JSON.stringify({folder,name:f.name,data:b64})});
    if(!(rr&&rr.ok))return toast("Upload failed: "+((rr&&rr.error)||"?"));
-   if(/^image\//.test(f.type))NT_ED.exec("addImage",{imageUrl:rr.url,altText:""});
+   const isImg=/^image\//.test(f.type);
+   if(NT_KIND==="html"){   // insert real HTML tags at the CodeMirror cursor
+    if(NT_CM){NT_CM.replaceSelection(isImg?`<img src="${rr.url}" alt="">`:`<a href="${rr.url}">${f.name}</a>`);NT_CM.focus();}
+   }else if(isImg)NT_ED.exec("addImage",{imageUrl:rr.url,altText:""});
    else NT_ED.insertText("["+f.name+"]("+rr.url+")");
    schedSave();};
   ed.querySelector("#ntAtt").onclick=()=>{
@@ -8113,6 +8141,35 @@ function winNotes(){openWin("__notes","Notes",async body=>{
   const dark=ntDark();
   const box=ed.querySelector("#ntEd");
   box.style.setProperty("--nt-font",(SET.ntFont||15)+"px");
+  if(NT_KIND==="html"){
+   /* HTML note: raw source (CodeMirror, xml/htmlMode) + a live, origin-isolated
+      preview. The markdown toolbar/image-layout/wikilink machinery below is
+      markdown-only and deliberately skipped here. */
+   const tb=ed.querySelector("#ntTb");
+   box.classList.add("nt-html");
+   if(dark)box.classList.add("ed-dark");
+   const view=SET.ntHtmlView||"split";
+   box.classList.add("nt-hv-"+view);
+   box.innerHTML=`<div class="nt-html-src"></div><div class="nt-html-prev"><iframe sandbox="allow-scripts" title="preview"></iframe></div>`;
+   NT_PREV=box.querySelector(".nt-html-prev iframe");
+   if(tb){tb.innerHTML=`<div class="seg nt-hseg">
+     <button data-m="code">Code</button><button data-m="split">Split</button><button data-m="prev">Preview</button></div>`;
+    const seg=tb.querySelector(".nt-hseg");
+    const mark=()=>seg.querySelectorAll("button").forEach(b=>b.classList.toggle("on",b.dataset.m===(SET.ntHtmlView||"split")));
+    seg.querySelectorAll("button").forEach(b=>b.onclick=()=>{
+     const m=b.dataset.m;box.classList.remove("nt-hv-code","nt-hv-split","nt-hv-prev");box.classList.add("nt-hv-"+m);
+     SET.ntHtmlView=m;saveSettings();mark();if(NT_CM)setTimeout(()=>NT_CM.refresh(),20);ntHtmlPreview();});
+    mark();}
+   const host=box.querySelector(".nt-html-src");
+   ensureCM(()=>{
+    NT_CM=CodeMirror(host,{value:r.md||"",mode:{name:"xml",htmlMode:true},lineNumbers:true,
+     tabSize:2,indentUnit:2,lineWrapping:true,styleActiveLine:true,matchBrackets:true});
+    NT_CM.on("change",()=>{schedSave();clearTimeout(NT_PVT);NT_PVT=setTimeout(ntHtmlPreview,220);});
+    setTimeout(()=>{NT_CM.refresh();ntHtmlPreview();},40);
+    if(window.ResizeObserver)new ResizeObserver(()=>NT_CM&&NT_CM.refresh()).observe(host);
+   });
+   paintList();return;
+  }
   const plugins=(window.toastui&&toastui.Editor.plugin&&toastui.Editor.plugin.codeSyntaxHighlight)?[toastui.Editor.plugin.codeSyntaxHighlight]:[];
   try{
   NT_ED=new toastui.Editor({
@@ -8146,7 +8203,7 @@ function winNotes(){openWin("__notes","Notes",async body=>{
    const m=txt.match(/\[\[([^\[\]]{1,80})\]\]/);
    if(!m||e.target.closest("img"))return;
    const name=m[1].trim();
-   const hit=TREE.notes.find(n2=>n2.title===name)||TREE.notes.find(n2=>n2.path.endsWith("/"+name+".md")||n2.path===name+".md");
+   const hit=TREE.notes.find(n2=>n2.title===name)||TREE.notes.find(n2=>n2.path.endsWith("/"+name+".md")||n2.path===name+".md"||n2.path.endsWith("/"+name+".html")||n2.path===name+".html");
    if(hit){openNote(hit.path);return;}
    confirmDlg("Create note?","Notes «"+name+"» does not exist yet — create it?",async()=>{
     const rr=await api("/api/notes/new",{method:"POST",body:JSON.stringify({folder:fold,title:name})});
@@ -8224,9 +8281,15 @@ function winNotes(){openWin("__notes","Notes",async body=>{
      window.addEventListener("pointermove",mv);window.addEventListener("pointerup",up);};}
    place();},true);
   box.addEventListener("scroll",place,true);};
- q("#ntNew").onclick=async()=>{
-  const r=await api("/api/notes/new",{method:"POST",body:JSON.stringify({folder:fold,title:nasTr("New note")})});
-  if(r&&r.ok){await refresh();openNote(r.path);const t=q("#ntTitle");if(t){t.focus();t.select();}}};
+ /* create a note of the chosen kind in folder f, then open + focus its title */
+ const ntCreate=async(f,kind)=>{
+  const r=await api("/api/notes/new",{method:"POST",body:JSON.stringify({folder:f,title:nasTr("New note"),kind})});
+  if(r&&r.ok){if(f){fold=f;tag=null;EXP.add(f);}await refresh();openNote(r.path);const t=q("#ntTitle");if(t){t.focus();t.select();}}
+  else toast("Error: "+((r&&r.error)||"?"));};
+ q("#ntNew").onclick=e=>{const b=e.currentTarget.getBoundingClientRect();
+  showMenu(b.left,b.bottom+4,[
+   {label:nasTr("Markdown note"),ic:svg("note",15),act:()=>ntCreate(fold,"md")},
+   {label:nasTr("HTML note"),ic:svg("code",15),act:()=>ntCreate(fold,"html")}]);};
  const newDirDlg=target=>{
   const s=document.getElementById("scrim");
   s.innerHTML=`<div class="dialog"><h3>New folder</h3><input id="ntFN" placeholder="Name" style="width:100%"><div class="r"><button class="btn" id="ntFX">Cancel</button><button class="btn pri" id="ntFOk">Create</button></div></div>`;

@@ -2564,10 +2564,17 @@ def _notes_abs(rel):
     return p
 
 _NOTE_FM = re.compile(r"^---\n(.*?)\n---\n?", re.S)
+# HTML notes can't carry a bare "---" front-matter (it would render as text when
+# the file is opened directly as a page), so their metadata lives in a leading
+# HTML comment. Both forms parse to the same title/tags/updated/pinned dict.
+_NOTE_FM_HTML = re.compile(r"^<!--nas-note\n(.*?)\n-->\n?", re.S)
+
+def _note_kind(rel):
+    return "html" if str(rel or "").lower().endswith(".html") else "md"
 
 def _note_parse(text):
     meta, body = {}, text
-    m = _NOTE_FM.match(text)
+    m = _NOTE_FM.match(text) or _NOTE_FM_HTML.match(text)
     if m:
         body = text[m.end():]
         for line in m.group(1).splitlines():
@@ -2576,11 +2583,14 @@ def _note_parse(text):
     tags = [t.strip().lstrip("#") for t in (meta.get("tags") or "").split(",") if t.strip()]
     return meta.get("title") or "", tags, body
 
-def _note_dump(title, tags, body, pinned=False):
-    return "---\ntitle: %s\ntags: %s\nupdated: %s%s\n---\n%s" % (
+def _note_dump(title, tags, body, pinned=False, kind="md"):
+    head = "title: %s\ntags: %s\nupdated: %s%s" % (
         str(title).replace("\n", " "), ", ".join(tags),
         time.strftime("%Y-%m-%d %H:%M"),
-        "\npinned: 1" if pinned else "", body)
+        "\npinned: 1" if pinned else "")
+    if kind == "html":
+        return "<!--nas-note\n%s\n-->\n%s" % (head, body)
+    return "---\n%s\n---\n%s" % (head, body)
 
 def notes_tree():
     root = notes_root()
@@ -2613,7 +2623,8 @@ def notes_tree():
             except OSError:
                 continue
             stats["size"] += st.st_size
-            if not f.lower().endswith(".md"):
+            lf = f.lower()
+            if not (lf.endswith(".md") or lf.endswith(".html")):
                 continue
             try:
                 with open(fp, encoding="utf-8", errors="replace") as fh:
@@ -2630,13 +2641,14 @@ def notes_tree():
             prev = " ".join(prev.split())[:150]
             stats["notes"] += 1
             notes.append({"path": (rel + "/" if rel else "") + f, "folder": rel,
-                          "title": title or f[:-3], "tags": tags, "prev": prev,
+                          "title": title or os.path.splitext(f)[0], "tags": tags, "prev": prev,
+                          "kind": "html" if lf.endswith(".html") else "md",
                           "pinned": _note_meta(head).get("pinned") == "1",
                           "mtime": int(st.st_mtime), "size": st.st_size})
     return {"root": root, "dirs": dirs, "notes": notes, "stats": stats}
 
 def _note_meta(text):
-    m = _NOTE_FM.match(text)
+    m = _NOTE_FM.match(text) or _NOTE_FM_HTML.match(text)
     meta = {}
     if m:
         for line in m.group(1).splitlines():
@@ -2768,7 +2780,8 @@ def notes_gc():
     keep_s = max(days, 30) * 86400
     for dp, dn, fn in os.walk(hist, topdown=False):
         rel = os.path.relpath(dp, hist).replace(os.sep, "/")
-        if not rel.lower().endswith(".md") or os.path.isfile(os.path.join(root, rel)):
+        rl = rel.lower()
+        if not (rl.endswith(".md") or rl.endswith(".html")) or os.path.isfile(os.path.join(root, rel)):
             continue
         try:
             newest = max(os.path.getmtime(os.path.join(dp, f)) for f in fn) if fn else 0
@@ -2786,7 +2799,8 @@ def notes_gc():
             dn[:] = []
             continue
         for f in fn:
-            if f.lower().endswith(".md"):
+            lf = f.lower()
+            if lf.endswith(".md") or lf.endswith(".html"):
                 try:
                     with open(os.path.join(dp, f), encoding="utf-8", errors="replace") as fh:
                         corpus.append(fh.read())
@@ -2814,6 +2828,7 @@ def note_get(rel):
         text = f.read()
     title, tags, body = _note_parse(text)
     return {"path": rel.strip("/"), "title": title, "tags": tags, "md": body,
+            "kind": _note_kind(rel),
             "pinned": _note_meta(text).get("pinned") == "1",
             "mtime": int(os.stat(p).st_mtime)}
 
@@ -2823,8 +2838,10 @@ def _note_slug(name):
 
 def note_save(rel, title, tags, md, pinned=False, base_mtime=0, force=False, conflict_copy=False):
     p = _notes_abs(rel)
-    if not p.lower().endswith(".md"):
-        raise ValueError("not .md")
+    lp = p.lower()
+    if not (lp.endswith(".md") or lp.endswith(".html")):
+        raise ValueError("not a note file")
+    kind = _note_kind(rel)
     out = {"ok": True}
     # optimistic lock: the file changed on disk after this client opened it
     # (another device or tab) — never clobber the other text silently
@@ -2839,11 +2856,12 @@ def note_save(rel, title, tags, md, pinned=False, base_mtime=0, force=False, con
         # unload-flush can't ask the user — park this client's text in a sibling;
         # the file name is a disk artifact, so it follows the UI language
         word = "conflict" if (load_settings().get("lang") or "en") == "ru" else "conflict"
-        stem = p[:-3] + " (" + word + time.strftime(" %Y-%m-%d %H-%M") + ")"
-        cp, i = stem + ".md", 1
+        root, ext = os.path.splitext(p)          # keep the note's own extension (.md/.html)
+        stem = root + " (" + word + time.strftime(" %Y-%m-%d %H-%M") + ")"
+        cp, i = stem + ext, 1
         while os.path.exists(cp):
             i += 1
-            cp = "%s %d.md" % (stem, i)
+            cp = "%s %d%s" % (stem, i, ext)
         out["conflict_copy"] = os.path.basename(cp)
         rel, p = None, cp
     if rel:
@@ -2852,23 +2870,24 @@ def note_save(rel, title, tags, md, pinned=False, base_mtime=0, force=False, con
     tags = [_note_slug(t) for t in (tags or []) if str(t).strip()][:20]
     tmp = p + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
-        f.write(_note_dump(title or "", tags, str(md or ""), pinned))
+        f.write(_note_dump(title or "", tags, str(md or ""), pinned, kind))
     os.replace(tmp, p)
     _chown_user(p)
     out["mtime"] = int(os.stat(p).st_mtime)
     return out
 
-def note_new(folder, title):
+def note_new(folder, title, kind="md"):
+    ext = ".html" if kind == "html" else ".md"
     lang = load_settings().get("lang") or "en"
     base = _note_slug(title or ("New note" if lang == "ru" else "New note"))
     d = _notes_abs(folder)
     os.makedirs(d, exist_ok=True)
     _chown_user(d)
     name, i = base, 1
-    while os.path.exists(os.path.join(d, name + ".md")):
+    while os.path.exists(os.path.join(d, name + ext)):
         i += 1
         name = "%s %d" % (base, i)
-    rel = ((folder.strip("/") + "/") if (folder or "").strip("/") else "") + name + ".md"
+    rel = ((folder.strip("/") + "/") if (folder or "").strip("/") else "") + name + ext
     # title = deduped file name ("New note 2"), so duplicates are tellable apart
     note_save(rel, name, [], "")
     return {"ok": True, "path": rel}
@@ -2945,6 +2964,9 @@ def notes_search(q):
                 text = f.read(200000)
         except (OSError, ValueError):
             continue
+        if n.get("kind") == "html":     # search/snippet on rendered text, not the tags
+            text = _htmllib.unescape(re.sub(r"<[^>]*>", " ", text))
+            text = " ".join(text.split())
         low = text.lower()
         if q in low or q in n["title"].lower() or any(q in t.lower() for t in n["tags"]):
             i = low.find(q)
@@ -13948,7 +13970,8 @@ class H(BaseHTTPRequestHandler):
                 self._json(notes_trash_clear())
             elif p == "/api/notes/new":
                 b = self._body()
-                self._json(note_new(b.get("folder", ""), b.get("title", "")))
+                self._json(note_new(b.get("folder", ""), b.get("title", ""),
+                                    b.get("kind") or "md"))
             elif p == "/api/notes/mkdir":
                 b = self._body()
                 self._json(note_mkdir(b.get("folder", ""), b.get("name", "")))
