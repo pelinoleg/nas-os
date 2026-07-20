@@ -78,6 +78,16 @@
   .wall-refresh:hover{color:var(--mb-accent,var(--accent));transform:translateY(-2px)}
   .wall-refresh.spin svg{animation:wspin 1s linear infinite}
   @keyframes wspin{to{transform:rotate(360deg)}}
+  /* "Base packages missing" badge (bottom-right, same material as the top bar).
+     Deliberately has NO close button: it must keep nagging until the packages are
+     actually installed — it hides itself once dpkg sees them (stats.missing_pkgs). */
+  .basepkgs{position:fixed;right:18px;bottom:18px;z-index:200;display:flex;align-items:center;gap:8px;
+    padding:9px 14px;border-radius:999px;border:1px solid var(--mb-line,var(--line));
+    background:var(--mb-bg,var(--glass));backdrop-filter:var(--mb-bf,blur(16px));-webkit-backdrop-filter:var(--mb-bf,blur(16px));
+    color:var(--mb-warn,var(--warn));box-shadow:var(--sh-sm);cursor:pointer;font-size:13px;font-weight:600;transition:.15s}
+  .basepkgs:hover{transform:translateY(-2px)}
+  .basepkgs svg{flex:none}
+  @media (max-width:1024px){.basepkgs{right:12px;bottom:calc(72px + env(safe-area-inset-bottom))}}
   .mb-theme{display:flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:9px;border:none;background:transparent;color:var(--dim);cursor:pointer;transition:.13s;flex:none;opacity:var(--mb-icon-op,1)}
   .mb-theme:hover{background:var(--sel);color:var(--text)}
   /* taskbar of open windows in the top panel */
@@ -2333,6 +2343,7 @@
 <div class="wall-fx" id="wallDim"></div>
 <div class="wall-fx" id="wallNoise"></div>
 <button class="wall-refresh" id="wallRefresh" title="Refresh wallpaper" style="display:none"></button>
+<div class="basepkgs" id="basePkgs" style="display:none"></div>
 
 <div class="mb-grad"></div>
 <div class="menubar">
@@ -2948,6 +2959,28 @@ function confirmDlg(title,msg,onOk,danger){
  s.classList.add("show");
  s.querySelector("#dc").onclick=()=>s.classList.remove("show");
  s.querySelector("#do").onclick=()=>{s.classList.remove("show");onOk();};
+}
+/* Base-install packages the wizard had to skip (renamed in a newer Debian, repo
+   gone) — features are silently missing until they're installed, so the badge is
+   non-dismissable and only goes away when dpkg actually sees every package. */
+function paintBasePkgs(s){
+ const el=document.getElementById("basePkgs");if(!el)return;
+ const miss=(s&&s.missing_pkgs)||[];
+ if(!miss.length){el.style.display="none";return;}
+ el.style.display="flex";
+ el.innerHTML=svg("warn",15)+"<span>"+miss.length+" base package"+(miss.length>1?"s":"")+" missing</span>";
+ el.onclick=()=>{
+  const sc=document.getElementById("scrim");
+  sc.innerHTML=`<div class="dialog" style="max-width:520px"><h3>Base packages missing</h3>
+    <p>The installer could not find these packages in the OS repositories (names may have changed in this release). The features they provide are unavailable until they are installed:</p>
+    <p style="margin:8px 0"><b>${miss.map(esc).join(", ")}</b></p>
+    <p>Install them manually, e.g. over SSH:</p>
+    <pre style="user-select:all;white-space:pre-wrap;word-break:break-all;background:var(--code-bg,#16181d);color:var(--code-fg,#e8eaf0);padding:8px 10px;border-radius:8px;font-size:12px">sudo apt install ${miss.map(esc).join(" ")}</pre>
+    <p style="opacity:.7;font-size:12px">This notice hides itself once the packages are installed (re-checked every few minutes).</p>
+    <div class="r"><button class="btn" id="dc">Close</button></div></div>`;
+  sc.classList.add("show");
+  sc.querySelector("#dc").onclick=()=>sc.classList.remove("show");
+ };
 }
 /* Restoring the settings backup by section. Secret ones (panel password, main NAS
    password) arrive cleared: restoring an old archive must not silently
@@ -10074,7 +10107,7 @@ function syncUsbOps(jobs){
    delete USB_OPS[j.dev];
   }});}
 
-async function poll(){const s=await api("/api/stats");LAST=s;pushHist(s);paintTray(s);paintSys(s);
+async function poll(){const s=await api("/api/stats");LAST=s;pushHist(s);paintTray(s);paintSys(s);paintBasePkgs(s);
  const bn=document.getElementById("brandName");if(bn)bn.textContent=(s.host||location.hostname.split(".")[0]||"nas")+".local";
  const nr=!!(s&&s.nb_running);if(nr!==NB_RUNNING){NB_RUNNING=nr;renderDock();}
  syncUsbOps(s&&s.usb_import);

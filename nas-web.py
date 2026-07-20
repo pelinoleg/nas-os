@@ -2993,6 +2993,27 @@ def load_winpos():
 def save_winpos(d):
     _json_save(WINPOS_FILE, d, indent=2)
 
+# Base packages the installer had to skip (renamed in a newer Debian release,
+# repo unavailable) — recorded by nas-wizard.sh report_skipped_packages().
+# Re-checked against dpkg with a TTL, so the desktop badge disappears on its own
+# as soon as the user installs them by hand. "Pi packages" skips are expected on
+# non-Pi hardware and never surface here.
+_MISS_PKGS = {"t": 0.0, "v": []}
+def missing_base_packages():
+    now = time.time()
+    if now - _MISS_PKGS["t"] < 300:
+        return _MISS_PKGS["v"]
+    out = []
+    for line in _read("/var/lib/nas-wizard/skipped-packages", "").splitlines():
+        line = line.strip()
+        if not line or line.startswith("Pi packages:"):
+            continue
+        pkg = line.split(": ", 1)[-1].strip()
+        if pkg and subprocess.run(["dpkg", "-s", pkg], capture_output=True).returncode != 0:
+            out.append(pkg)
+    _MISS_PKGS.update(t=now, v=out)
+    return out
+
 def stats():
     iface = default_iface()
     return {
@@ -3002,6 +3023,7 @@ def stats():
         "temp": temp_c(),
         "throttled": throttled(),
         "psu_ma": PSU_MA,
+        "missing_pkgs": _safe(missing_base_packages, []),
         "mem": mem_info(),
         # no pool means no pool stats either (it used to silently substitute the
         # system card, and "pool usage" showed nonsense)
