@@ -6732,14 +6732,14 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
    else rr.innerHTML=`<div class="nb-err">✗ ${esc((t&&t.log)||"no connection")}</div>`;};
  }
 
- /* ── Destination: a separate prominent block at the top of "What to copy". Push has tabs
-    "Local | SSH server" (the same transport as on the "Destination" tab), while pull's
-    destination can only be local, so instead of tabs there's an explanation. ── */
+ /* ── Destination card, shown under "Where the copies land" on the What-to-copy tab
+    (AFTER the folder list: the tab reads in data-flow order). Push has tabs
+    "Local | SSH server", while pull's destination can only be local. ── */
  const destCard=()=>{const c=CFG,D=c.dst||{kind:"local"},ssh=D.kind==="ssh",rnet=D.provider==="rsyncnet";
   const who=ssh?`${esc(D.user||"?")}@${esc(D.host||"not set")}${rnet?" · rsync.net":""}`:"a folder on THIS NAS";
   const ph=ssh?(rnet?host()+"-backup":"/mnt/backup/"+host()):"/media/usb-disk/backup";
   return `<div class="nb-dest">
-   <div class="nb-dest-h"><span class="nb-dest-t">${svg(ssh&&push?"net":"folder",15)} Destination — copies land here</span>
+   <div class="nb-dest-h"><span class="nb-dest-t">${svg(ssh&&push?"net":"folder",15)} Destination</span>
     <span class="nb-dest-w mono">${who}</span>
     <div class="seg sm" id="dTr"><button data-v="local" class="${ssh?"":"on"}">This NAS</button><button data-v="ssh" class="${ssh?"on":""}">SSH server</button></div></div>
    <div class="nb-field-row"><input class="mono" id="sBase" value="${att(c.dest_base||"")}" placeholder="${esc(ph)}"><button class="btn sm" id="sBaseB">${svg("folder",13)} Choose</button>
@@ -6750,12 +6750,15 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
 
  /* ── What to copy ── */
  function tabSources(tc){const c=CFG,push=isPush(),per=!isPushSsh()&&c.dest_mode==="per";
-  tc.innerHTML=`<h3 class="set-title">What to copy</h3><p class="set-sub">${push?"Which folders of this NAS to send out. The destination below is where the copies land.":"Which folders to take from the source (the other NAS). The destination below is the folder on THIS NAS where the copies land."}</p>
+  // order = data flow: first WHAT we copy, then WHERE it lands. The tab used to
+  // open with the destination and repeat "What to copy" twice — nobody could tell
+  // which side was which.
+  tc.innerHTML=`<h3 class="set-title">What to copy</h3><p class="set-sub">${push?"Step 1 — pick which folders of this NAS to send. Step 2 below — check where the copies land.":"Step 1 — pick which folders to take from the source (the other NAS). Step 2 below — check where the copies land on THIS NAS."}</p>
+   <div style="display:flex;justify-content:space-between;align-items:center;margin:4px 0 6px"><span class="set-h" style="margin:0;padding:0;border:none">Folders</span><button class="btn sm pri" id="sAdd">${svg("plus",13)} ${push?"Choose folders":"Pick from NAS"}</button></div>
+   <div id="sJobs"></div>
+   <div class="set-h">Where the copies land</div>
    ${destCard()}
    ${isPushSsh()?"":`<div class="srow"><div class="srow-l"><div class="srow-t">Destination mode${tipHTML("Single folder — everything into one folder, as subfolders. Separate per source — each source gets its own folder-destination.")}</div><div class="srow-d">${per?"each source gets its own folder":"everything into one folder, as subfolders"}</div></div><div class="srow-c"><div class="seg" id="sDm"><button data-v="single" class="${!per?"on":""}">Single folder</button><button data-v="per" class="${per?"on":""}">Separate</button></div></div></div>`}
-   <div style="display:flex;justify-content:space-between;align-items:center;margin:16px 0 6px"><span class="set-h" style="margin:0;padding:0;border:none">What to copy</span><button class="btn sm pri" id="sAdd">${svg("plus",13)} ${push?"Choose folders":"Pick from NAS"}</button></div>
-   <div id="sJobs"></div>
-
    <details class="nb-det"><summary class="nb-sum">Exclusions${tipHTML("rsync patterns (one per line): what not to copy — junk, caches, service files.")}</summary>
      <textarea id="sExcl" class="nb-excl" spellcheck="false">${esc((c.excludes||[]).join("\n"))}</textarea>
      <div style="display:flex;gap:8px;margin-top:6px"><button class="btn sm" id="sExDev">${svg("code",13)} Add development patterns</button><button class="btn sm" id="sExReset">Reset to defaults</button></div>
