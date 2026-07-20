@@ -6686,7 +6686,7 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
   const key=S.auth==="key",rnet=S.provider==="rsyncnet",kinfo=c.key||{};
   return `<div class="nb-dest" data-side="${w}">
    <div class="nb-dest-h"><span class="nb-dest-t">${svg(rem?"net":"folder",15)} ${ttl}</span>
-    <span class="nb-dest-w mono">${rem?esc((S.user||"?")+"@"+(S.host||"not set")):(w==="src"?"folders on this NAS":"a folder on this NAS")}</span>
+    <span class="nb-dest-w mono">${rem?((S.user||S.host)?esc((S.user||"…")+"@"+(S.host||"…")):"not set yet"):(w==="src"?"folders on this NAS":"a folder on this NAS")}</span>
     <div class="seg sm" id="k_${w}">${kinds.map(([v,l])=>`<button data-v="${v}" class="${S.kind===v?"on":""}">${l}</button>`).join("")}</div></div>
    ${rem?`<div class="nb-kindhint">${S.kind==="rsyncd"
      ?`<b>rsync daemon</b> — the NAS "rsync service" (Synology/UGREEN/QNAP modules): faster on a LAN, unencrypted; signs in with a module name + its password, the folder field takes the module name.`
@@ -7423,19 +7423,21 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
   renderTabs();
   const tc=body.querySelector("#tc");
   if(cur==="done")renderWizDone(tc);else WPANE[cur](tc);
-  body.querySelector("#wzBack").onclick=()=>{if(wizStep){wizStep--;render();}};
+  const setPos=()=>{(win._wizPos=win._wizPos||{})[NB_PID]=wizStep;};
+  body.querySelector("#wzBack").onclick=()=>{if(wizStep){wizStep--;setPos();render();}};
   body.querySelector("#wzSkip").onclick=async()=>{wizOn=false;await saveCfg({setup_done:true});render();};
   body.querySelector("#wzNext").onclick=async()=>{
    if(cur==="conn"&&!connOk()){toast("Set up the connection first — or press «Set up later»");return;}
    if(cur==="folders"&&!JOBS.length){toast("Choose at least one folder to copy");return;}
    if(cur==="dest"&&isPush()&&!CFG.dest_base){toast("Choose the destination folder first");return;}
    if(cur==="done"){wizOn=false;await saveCfg({setup_done:true});tab="overview";SET.nbTab=tab;saveSettings();render();return;}
-   wizStep++;render();};}
+   wizStep++;setPos();render();};}
  const render=async()=>{const r=await nbG("/api/backup/config");
   CFG=(r&&r.config)||{};JOBS=(CFG.jobs||[]).slice();
   PROFS=(r&&r.profiles)||[];NB_PID=(r&&r.profile)||NB_PID;
-  // any profile change (switch, add, delete) re-decides the wizard for THAT profile
-  if(win._nbPid!==NB_PID){win._nbPid=NB_PID;wizOn=null;wizStep=0;}
+  // any profile change (switch, add, delete) re-decides the wizard for THAT profile;
+  // an unfinished wizard resumes at the step it was left on (WIZPOS, per session)
+  if(win._nbPid!==NB_PID){win._nbPid=NB_PID;wizOn=null;wizStep=(win._wizPos||{})[NB_PID]||0;}
   if(autoPick){autoPick=false;
    const act=PROFS.find(p=>p.running)||PROFS.find(p=>p.queued);
    const touched=p=>Math.max(p.saved||0,p.last_run||0);
@@ -7443,14 +7445,17 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
    const want=((act||last)||{}).id;
    if(want&&want!==NB_PID){NB_PID=want;tab="overview";nbCursor=0;nbStarted=null;return render();}}
   if(nbFootMo){nbFootMo.disconnect();nbFootMo=null;}
-  // The wizard decision is STICKY for the session (wizOn), decided once per
-  // profile: a fresh profile enters the wizard and STAYS in it until Finish or
-  // "Set up later" — completing a step must not silently eject to the tabs
-  // (it did: Next re-evaluated "is it configured now?" and bailed out).
-  if(wizOn===null)wizOn=!CFG.setup_done&&!(connOk()&&JOBS.length);
+  // A profile counts as configured ONLY after Finish (or "Set up later") — not
+  // "as soon as connection+folders happen to be filled in": the user peeked at
+  // another profile mid-wizard, came back and the wizard was gone. setup_started
+  // is persisted with the profile, so even a page reload resumes the wizard.
+  if(wizOn===null){
+   if(CFG.setup_done)wizOn=false;
+   else if(CFG.setup_started)wizOn=true;
+   else if(connOk()&&JOBS.length){wizOn=false;CFG.setup_done=true;saveCfg({setup_done:true});}  // pre-wizard profiles
+   else{wizOn=true;CFG.setup_started=true;saveCfg({setup_started:true});}
+  }
   if(wizOn){renderWizard();return;}
-  // pre-wizard profiles are already configured — mark them so the flag settles
-  if(!CFG.setup_done&&connOk()&&JOBS.length)saveCfg({setup_done:true});
   // "Delete profile" deliberately NOT in the nav: destructive actions live in the
   // profile tab's context menu, not next to everyday navigation
   body.innerHTML=`<div class="nbtabs" id="nbTabs"></div>
