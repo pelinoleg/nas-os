@@ -2832,20 +2832,31 @@ NOTIFY
 # fallback does not need comitup — the home profile lives in NM and netguard brings it up itself.
 disable_comitup() {
     local units u c found=0
-    # unit names differ across images (comitup / comitup-watch / comitup-web) — disable whichever exist
+    # comitup is purged from this OS. If the package isn't installed, there's
+    # nothing to neutralise — just clear any stale mask symlinks a previous run
+    # left behind (otherwise `reset-failed` on a masked-but-gone unit returns 1
+    # and gets logged as an error on every netguard/backup run).
+    if ! dpkg -s comitup >/dev/null 2>&1; then
+        if ls /etc/systemd/system/comitup*.service >/dev/null 2>&1; then
+            rm -f /etc/systemd/system/comitup*.service
+            systemctl daemon-reload 2>/dev/null || true
+        fi
+        return 0
+    fi
+    # comitup IS installed (a foreign image) — disable + mask its units, quietly.
+    # unit names differ across images (comitup / comitup-watch / comitup-web).
+    # NOT via run(): these best-effort calls fail harmlessly on masked/absent
+    # units and must not surface as errors.
     units="$(systemctl list-unit-files --no-legend 2>/dev/null | awk '$1 ~ /^comitup/ {print $1}')"
     [ -n "$units" ] || return 0
     for u in $units; do
-        run systemctl disable --now "$u" || true
-        run systemctl mask "$u" || true
-        # comitup dies by SIGKILL on stop -> unit lingers as "failed" and the
-        # panel screams about a broken service that is masked and gone forever
-        run systemctl reset-failed "$u" || true
+        systemctl disable --now "$u" >/dev/null 2>&1 || true
+        systemctl mask "$u"          >/dev/null 2>&1 || true
+        systemctl reset-failed "$u"  >/dev/null 2>&1 || true
         found=1
     done
-    # without the daemon the hotspot profiles are dead anyway, but keep them out of the network list
     for c in $(nmcli -t -f NAME connection show 2>/dev/null | grep '^comitup-' || true); do
-        run nmcli connection delete "$c" || true
+        nmcli connection delete "$c" >/dev/null 2>&1 || true
     done
     [ "$found" -eq 1 ] && info "comitup disabled: netguard brings up the Wi-Fi fallback, the emergency hotspot no longer interferes"
     return 0
