@@ -11642,11 +11642,14 @@ def smb_get_shares():
 def _smb_block(s):
     out = ["[%s]" % s["name"], "   path = %s" % s["path"], "   browseable = yes"]
     if s.get("guest"):
-        out += ["   guest ok = yes", "   guest only = yes",
-                "   force user = " + (s.get("force_user") or _smb_primary_user())]
+        out += ["   guest ok = yes", "   guest only = yes"]
     else:
-        users = " ".join(u for u in (s.get("users") or []) if _SMB_NAME.match(u))
-        out.append("   valid users = " + users)
+        out.append("   valid users = " + " ".join(u for u in (s.get("users") or []) if _SMB_NAME.match(u)))
+    # Operate on disk AS ROOT: the share can then read/write/DELETE any file
+    # regardless of who owns it — root-owned USB imports, files another user made,
+    # anything. One uniform rule that works for every folder without ever chowning
+    # it. Samba confines this to the share's own path (no escape above it).
+    out += ["   force user = root", "   force group = root"]
     out.append("   read only = " + ("yes" if s.get("readonly") else "no"))
     if not s.get("readonly"):
         out += ["   create mask = 0664", "   directory mask = 0775"]
@@ -11763,17 +11766,6 @@ def smb_share_set(b):
             os.makedirs(path, exist_ok=True)
         except OSError as e:
             return {"ok": False, "log": "cannot create folder: " + str(e)}
-    # a read-write share must be writable by whoever owns the writes, else a
-    # root-owned folder silently rejects them. Chown the top dir only (never
-    # recursive — don't rewrite existing files' ownership). Guest → the force
-    # user; a single-user private share → that user.
-    if not bool(b.get("readonly")):
-        writer = _smb_primary_user() if guest else (users[0] if len(users) == 1 else None)
-        if writer:
-            try:
-                shutil.chown(path, user=writer)
-            except (OSError, LookupError):
-                pass
     shares = [s for s in smb_get_shares() if s["name"] != name and (not old or s["name"] != old)]
     shares.append({"name": name, "path": path, "guest": guest, "users": users,
                    "readonly": bool(b.get("readonly"))})
