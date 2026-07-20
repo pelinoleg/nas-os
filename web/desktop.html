@@ -1132,6 +1132,9 @@
   .ed-dark .cm-comment{color:#8b95ab;font-style:italic}.ed-dark .cm-property{color:#74c0ff}
   .ed-dark .cm-variable-2,.ed-dark .cm-def,.ed-dark .cm-variable{color:#e8c583}
   .ed-dark .cm-tag,.ed-dark .cm-meta,.ed-dark .cm-attribute{color:#63cddb}
+  /* extra tokens for htmlmixed's embedded CSS/JS (selectors, pseudo, operators) */
+  .ed-dark .cm-qualifier{color:#83c9c0}.ed-dark .cm-builtin{color:#74c0ff}
+  .ed-dark .cm-operator{color:#c8b8e0}.ed-dark .cm-variable-3,.ed-dark .cm-type{color:#63cddb}
   /* highlight problematic YAML lines (tabs/indentation + docker compose error) */
   .ed-err-line{background:rgba(255,95,95,.16)!important}
   .CodeMirror .ed-lint-mk{color:#ff6b6b;font-weight:800;padding-left:3px}
@@ -4784,6 +4787,8 @@ function ensureCM(cb){
  // on defineSimpleMode from the simple-mode addon (otherwise TypeError at load)
  (window.CodeMirror?Promise.resolve():load("/codemirror.js")).then(()=>load("cm-simple.js")).then(()=>Promise.all(
    ["cm-yaml.js","cm-shell.js","cm-javascript.js","cm-python.js","cm-xml.js","cm-css.js","cm-properties.js","cm-dockerfile.js"].map(load)))
+ // htmlmixed builds on xml+javascript+css (highlights <style>/<script> in HTML notes) — load it after them
+ .then(()=>load("cm-htmlmixed.js"))
  .then(()=>{CM_READY=true;cb();});
 }
 function cmMode(name){const e=(name.split(".").pop()||"").toLowerCase();
@@ -8166,7 +8171,7 @@ function winNotes(){openWin("__notes","Notes",async body=>{
     mark();}
    const host=box.querySelector(".nt-html-src");
    ensureCM(()=>{
-    NT_CM=CodeMirror(host,{value:r.md||"",mode:{name:"xml",htmlMode:true},lineNumbers:true,
+    NT_CM=CodeMirror(host,{value:r.md||"",mode:"htmlmixed",lineNumbers:true,
      tabSize:2,indentUnit:2,lineWrapping:true,styleActiveLine:true,matchBrackets:true});
     NT_CM.on("change",()=>{schedSave();clearTimeout(NT_PVT);NT_PVT=setTimeout(ntHtmlPreview,220);});
     setTimeout(()=>{NT_CM.refresh();ntHtmlPreview();},40);
