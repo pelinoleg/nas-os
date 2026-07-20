@@ -2674,7 +2674,7 @@ if command -v vcgencmd >/dev/null 2>&1; then
 fi
 if [ "$alert" -eq 1 ]; then
     echo "$(date '+%F %T') HEALTH ALERT:$msg" >> "$LOG"
-    [ -x /usr/local/bin/nas-notify.sh ] && /usr/local/bin/nas-notify.sh "NAS: attention" "Threshold exceeded:$msg" 1 || true
+    [ -x /usr/local/bin/nas-notify.sh ] && /usr/local/bin/nas-notify.sh "NAS: attention" "Threshold exceeded:$msg" 1 health "health:thr" || true
 fi
 HEALTH
     run chmod +x /usr/local/bin/nas-health-check.sh
@@ -2974,7 +2974,7 @@ wifi_rescue(){
   if nmcli --wait 45 connection up "$home" >/dev/null 2>&1; then
     rm -f "$WSTATE" 2>/dev/null || true
     logj "Wi-Fi restored: $home"
-    notify "NAS: Wi-Fi restored" "$WIFI returned to network '$home' from the comitup emergency hotspot"
+    notify "NAS: Wi-Fi restored" "$WIFI returned to network '$home'" 0 link_changed "net:wifi"
   else
     mkdir -p "$(dirname "$WSTATE")" 2>/dev/null || true
     printf 'FAILS=%s\nLAST=%s\n' "$(( ${FAILS:-0} + 1 ))" "$now" > "$WSTATE"
@@ -3105,7 +3105,7 @@ web_selfheal(){
     case "$pid" in ''|0|*[!0-9]*) ;; *) kill -USR1 "$pid" 2>/dev/null || true; sleep 1 ;; esac
     systemctl --no-block try-restart nas-web 2>/dev/null || true
     logj "panel not answering on localhost (HTTP $code) — restarting nas-web"
-    notify "Panel hung" "nas-web did not answer on localhost (HTTP $code) — restarted automatically" 1
+    notify "Panel hung" "nas-web did not answer on localhost (HTTP $code) — restarted automatically" 1 panel_fail "panel:hang"
   else
     printf '%s' "$n" > "$st"
   fi

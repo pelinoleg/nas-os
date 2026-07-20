@@ -3082,6 +3082,7 @@ def _def_monitor():
         "fan_stall":   {"on": True,  "priority": 1},
         "cron_failed": {"on": True,  "priority": 0},
         "time_drift":  {"on": True,  "priority": 0},
+        "health":      {"on": True,  "priority": 1},   # hourly health-check thresholds (agent: nas-health-check.sh)
         "updates":     {"on": False, "priority": -1},
         "sec_updates": {"on": False, "priority": -1},
         "weekly":      {"on": False, "priority": -1},
@@ -7055,19 +7056,23 @@ def agent_notify(b):
         sent = notify_event(name, key, title, msg,
                             cooldown=cfg.get("cooldown", 1800))
         return {"ok": True, "sent": bool(sent)}
-    # agent-only alert (wifi rescue, usb-import, …): push regardless of the
-    # monitor toggle — these were always-on before; journal unless the agent
-    # already has its own journal feed (usb-import log is parsed by the monitor)
+    # agent alert whose event isn't in the monitor catalog. STRICT channel rule:
+    # respect the master "Send Pushover" switch (nothing fires when it's off), and
+    # never toast the desktop for an uncategorised event — there is no per-event
+    # Desktop checkbox for it, so showing one would be an unrequested channel.
+    # For per-event control the agent must send a catalog event name (the callers
+    # of nas-notify.sh do this for everything that has a checkbox).
     now = time.time()
     if now - _MON_LAST.get(key, 0) < 90:       # guard against tight agent loops
         return {"ok": True, "sent": False}
     _MON_LAST[key] = now
     if b.get("journal", 1) not in (0, "0", False):
         try:
-            log_event(name or "agent", title, msg)
+            log_event(name or "agent", title, msg, desk=False)
         except Exception:
             pass
-    return {"ok": True, "sent": bool(push_notify(title, msg, priority))}
+    sent = push_notify(title, msg, priority) if cfg.get("enabled") else False
+    return {"ok": True, "sent": bool(sent)}
 
 # ---- reliability: auto-remount of a dropped disk ----
 _MOUNT_TRY = {}   # mp -> time of the last attempt (at most once every 5 min)
