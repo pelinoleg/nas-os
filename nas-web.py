@@ -4874,8 +4874,10 @@ def nb_profile_delete(pid, confirm=""):
     p = next((x for x in profs if x["id"] == pid), None)
     if not p:
         return {"ok": False, "log": "no such profile"}
-    if p.get("jobs"):
-        return {"ok": False, "log": "remove all sources first (%d left)" % len(p["jobs"])}
+    # the sources guard protects CONFIGURED backups; a profile whose first-run
+    # wizard was never finished is a test/abandoned one — deletable as-is
+    if p.get("jobs") and p.get("setup_done"):
+        return {"ok": False, "log": "remove all folders first (%d left)" % len(p["jobs"])}
     if nb_run_active(pid):
         return {"ok": False, "log": "a run is in progress — stop it first"}
     if str(confirm or "").strip() != p["name"]:

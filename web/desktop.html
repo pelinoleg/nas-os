@@ -6592,7 +6592,9 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
   {id:"history",name:"History",ic:"activity",sec:1},
  ];
  if(SET.nbTab&&CATS.some(c=>c.id===SET.nbTab))tab=SET.nbTab;   // remember the last opened tab
- const saveCfg=async patch=>{const r=await nbP("/api/backup/config",{config:patch});CFG=(r&&r.config)||CFG;JOBS=(CFG.jobs||[]).slice();return CFG;};
+ // the POST response carries a fresh profile summary — keep PROFS in sync, otherwise
+ // e.g. the delete guard counts sources the user already removed
+ const saveCfg=async patch=>{const r=await nbP("/api/backup/config",{config:patch});CFG=(r&&r.config)||CFG;JOBS=(CFG.jobs||[]).slice();if(r&&r.profiles)PROFS=r.profiles;return CFG;};
  const wireSeg=(tc,id,cb)=>{const seg=tc.querySelector(id);if(!seg)return;seg.querySelectorAll("button").forEach(b=>b.onclick=()=>{seg.querySelectorAll("button").forEach(x=>x.classList.toggle("on",x===b));cb(b.dataset.v);});};
  // single folder mode: recreate the WHOLE source tree under the base (Cloud/Desktop →
  // base/Cloud/Desktop), not just the last folder — otherwise structure is lost and names clash.
@@ -7340,9 +7342,12 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
  // Copied data in the destination is never touched.
  const delDlg=()=>{const s=document.getElementById("scrim"),cur=curProf();
   if(PROFS.length<2){toast("You cannot delete the last profile");return;}
-  const busy=cur.jobs>0;
+  // live count for the current profile (the PROFS summary can lag one render behind);
+  // a profile that never finished the wizard is deletable even with folders picked
+  const nJobs=cur.id===NB_PID?JOBS.length:(cur.jobs||0);
+  const busy=nJobs>0&&(cur.id===NB_PID?!!CFG.setup_done:true);
   s.innerHTML=`<div class="dialog"><h3>Delete «${esc(cur.name||"")}»?</h3>
-    ${busy?`<div class="reboot-ban">${svg("power",16)} First remove every source on the «Sources» tab — there are still ${cur.jobs}. This guards against deleting a configured backup by accident.</div>`
+    ${busy?`<div class="reboot-ban">${svg("power",16)} First remove every folder on the «What to copy» tab — there are still ${nJobs}. This guards against deleting a configured backup by accident.</div>`
           :`<p class="nb-del-warn">Only this profile's settings, history and logs disappear. <b>Files already copied to the destination folder stay on disk</b> — delete them by hand if you no longer need them.</p>
             <div class="field"><label>Type the profile name to confirm</label><input id="ndName" class="mono" placeholder="${att(cur.name||"")}" autocomplete="off"></div>`}
     <div class="r"><button class="btn" id="ndX">Cancel</button>${busy?"":`<button class="btn dng" id="ndOk" disabled>Delete profile</button>`}</div></div>`;
