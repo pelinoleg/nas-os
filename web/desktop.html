@@ -1404,7 +1404,12 @@
   .fm-ck{width:15px;height:15px;flex:none;accent-color:var(--accent);cursor:pointer}
   .fm-row .fsz{width:60px;text-align:right;flex:none;display:inline-block!important}
   .fm-row .fdate{font-family:var(--mono);font-size:10px;color:var(--mut);width:92px;text-align:right;flex:none}
-  .fm-list.drop{outline:2px dashed var(--accent);outline-offset:-4px;background:var(--accent-soft)}
+  .fm-list{position:relative}
+  /* external-file drag: translucent overlay with an explicit target — folder rows
+     underneath stay visible (their own .dragover highlight shows through) */
+  .fm-list.drop::after{content:attr(data-drop);position:absolute;inset:6px;border:2px dashed var(--accent);
+    border-radius:12px;background:var(--accent-soft);display:flex;align-items:flex-end;justify-content:center;
+    padding-bottom:22px;font-size:13px;font-weight:650;color:var(--accent);pointer-events:none;z-index:5}
   /* inside an SSH mount folders are blue-teal, to avoid confusing them with local ones */
   .fm-list.fm-remote .fmico path[fill="#E0A63C"]{fill:#2E86AB}
   .fm-list.fm-remote .fmico path[fill="#F5C24C"]{fill:#4FA8CF}
@@ -1418,9 +1423,29 @@
   /* favorites sidebar */
   .fm-fav{width:190px;flex:none;display:flex;flex-direction:column;border-right:1px solid var(--line);margin-right:12px;padding-right:10px}
   .fm-filters{display:flex;gap:6px;align-items:center;padding:2px 0 6px;flex-wrap:wrap}
-  /* the global input/select rule is width:100% — compact chips here, not full-width bars */
-  .fm-filters select{width:auto!important;background:var(--card);color:var(--text);border:1px solid var(--line);border-radius:999px;padding:3px 8px!important;font-size:11.5px;font-family:inherit}
   .fm-filters .btn{padding:3px 10px}
+  /* filter chips follow the design system (a native <select> looks alien on glass) */
+  .fm-chip{display:inline-flex;align-items:center;gap:4px;background:var(--card);color:var(--dim);border:1px solid var(--line);
+    border-radius:999px;padding:3px 9px;font-size:11.5px;font-family:inherit;cursor:pointer;transition:.12s}
+  .fm-chip:hover{color:var(--text);border-color:var(--accent-line,var(--accent))}
+  .fm-chip.on{background:var(--sel);color:var(--accent);box-shadow:var(--sh-sm);border-color:transparent;font-weight:600}
+  .fm-badge{margin-left:auto;font-size:10px;color:var(--mut);font-family:var(--mono);flex:none;padding-right:2px}
+  .fm-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;
+    min-height:180px;height:60%;color:var(--mut);font-size:12.5px;text-align:center}
+  .fm-empty svg{opacity:.4}
+  .fm-empty small{font-size:11px;opacity:.75}
+  .fm-vs{display:inline-flex;align-items:center;gap:6px}
+  .fm-vsb{width:52px;height:4px;border-radius:2px;background:var(--track,rgba(128,128,128,.28));overflow:hidden;display:inline-block;flex:none}
+  .fm-vsb b{display:block;height:100%;border-radius:2px}
+  .fm-tile .ti{position:relative}
+  .vdur{position:absolute;right:3px;bottom:2px;background:rgba(0,0,0,.72);color:#fff;font-size:9px;line-height:1.5;
+    padding:0 4px;border-radius:4px;font-family:var(--mono);pointer-events:none;z-index:2}
+  .vdur:empty{display:none}
+  .ql-nav{position:absolute;top:50%;transform:translateY(-50%);z-index:2;background:rgba(0,0,0,.35);border:none;color:#e6edf7;
+    width:36px;height:58px;border-radius:11px;display:flex;align-items:center;justify-content:center;cursor:pointer;opacity:.55;transition:.15s}
+  .ql-nav:hover{opacity:1;background:rgba(0,0,0,.55)}
+  .ql-nav.prev{left:10px}.ql-nav.prev svg{transform:rotate(180deg)}.ql-nav.next{right:10px}
+  .fm-crumb a.cur{color:var(--text);font-weight:650}
   .fm.fav-hidden .fm-fav{display:none}
   .fm-fav-h{display:flex;align-items:center;justify-content:space-between;font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--mut);font-family:var(--mono);margin-bottom:6px;padding:2px 4px}
   .fm-fav-h .iconbtn{padding:1px 7px;font-size:15px;line-height:1}
@@ -2561,7 +2586,7 @@ let SET={accent:"coral",accentHex:"#405e6d",theme:"light",wpType:"url",wpUrl:WP_
  scrWdgOwn:false,scrWdgColor:"",scrWdgOp:14,scrWdgBlur:24,scrWdgSat:100,
  /* File manager (shared across both themes, not in themeProfiles) */
  fmStart:"/mnt/storage",fmClick:"single",fmHidden:false,fmFoldersFirst:true,
- fmSortKey:"name",fmSortDir:1,fmIconSize:"m",fmThumbs:true,fmThumbFit:"contain",fmDateFmt:"dmy_hm",fmUpPar:2,fmTabSize:2,
+ fmSortKey:"name",fmSortDir:1,fmIconSize:"m",fmThumbs:true,fmThumbFit:"contain",fmDateFmt:"rel",fmUpPar:2,fmTabSize:2,
  themeProfiles:{
   light:{accent:"coral",accentHex:"#405e6d",radius:.65,shadow:"lg",winShadow:true,dockShadow:false,tileShadow:true,textContrast:1.35,elevStep:.28,elevLight:.05,mbOp:0,dockOp:3,wdgOp:15,mbBlur:0,dockBlur:0,wdgBlur:1,winBlur:60,mbSat:100,dockSat:100,wdgSat:90,winSat:100,winNoise:22,deskLc:"",deskShadow:false,autoContrast:true,dockTiles:true,dockLabels:true,fxDim:34,fxBlur:30,fxNoise:100,deskGlass:true,deskTileOp:85,deskTileBlur:2,mbGrad:false,mbGradH:80,mbGradInt:40,mbGradOp:100},
   dark:{accent:"green",accentHex:"#00fbff",radius:.65,shadow:"lg",winShadow:true,dockShadow:false,tileShadow:true,textContrast:1.4,elevStep:.06,elevLight:.06,mbOp:0,dockOp:16,wdgOp:11,mbBlur:0,dockBlur:39,wdgBlur:0,winBlur:60,mbSat:85,dockSat:90,wdgSat:90,winSat:100,winNoise:22,deskLc:"",deskShadow:false,autoContrast:true,dockTiles:true,dockLabels:true,fxDim:44,fxBlur:27,fxNoise:100,deskGlass:true,deskTileOp:58,deskTileBlur:8,mbGrad:false,mbGradH:110,mbGradInt:60,mbGradOp:100}
@@ -5153,10 +5178,43 @@ const FM_GLYPH={
  book:'<path fill="#fff" d="M12 12.7c-1.05-.72-2.5-.95-3.9-.75v5.9c1.4-.2 2.85 .03 3.9 .75z"/><path fill="#fff" opacity=".82" d="M12 12.7c1.05-.72 2.5-.95 3.9-.75v5.9c-1.4-.2-2.85 .03-3.9 .75z"/>',
  torrent:'<path fill="#fff" d="M11.1 11.7h1.8v3.3h2.05l-2.95 3.3-2.95-3.3h2.05z"/>',
  file:''};
+/* Recognizable folders get a glyph inside the yellow folder (Finder-style):
+   the eye finds "Downloads" or "Music" by shape before reading the name. */
+const FM_DIR_ALIAS={downloads:"down",download:"down",photos:"img",photo:"img",pictures:"img",images:"img",
+ music:"mus",audio:"mus",movies:"vid",movie:"vid",videos:"vid",video:"vid",films:"vid",
+ documents:"doc",docs:"doc",backups:"bak",backup:"bak",docker:"box",stacks:"box",containers:"box",
+ notes:"note",desktop:"scr",screenshots:"scr",public:"pub",shared:"pub",share:"pub"};
+const FM_DIR_GLYPH={
+ down:'<path d="M11.2 11.3h1.6v3h1.9L12 17.2l-2.7-2.9h1.9z"/><rect x="9" y="17.9" width="6" height="1.1" rx=".55"/>',
+ img:'<circle cx="9.4" cy="12.9" r="1.05"/><path d="M7.4 17.6l2.4-2.9 1.5 1.8 1.9-2.5 2.6 3.6z"/>',
+ mus:'<path d="M15.2 11.2l-4.3 1.1v4.3a1.6 1.35 0 1 0 .9 1.2v-4.05l2.5-.63v2.68a1.6 1.35 0 1 0 .9 1.2z"/>',
+ vid:'<path d="M10 11.9l5.2 2.9-5.2 2.9z"/>',
+ doc:'<path d="M8.2 12h7.6v1.15H8.2zM8.2 14.2h7.6v1.15H8.2zM8.2 16.4h4.8v1.15H8.2z"/>',
+ bak:'<path fill="none" stroke="#C9962A" stroke-width="1.25" stroke-linecap="round" d="M12 11.6a3.3 3.3 0 1 1-3.3 3.3"/><path d="M8.9 12.4l-.35 2.5 2.4-.85z"/><path fill="none" stroke="#C9962A" stroke-width="1.15" stroke-linecap="round" d="M12 13.6v1.5l1.15.75"/>',
+ box:'<path d="M12 11.2l3.6 1.8v3.6L12 18.4l-3.6-1.8v-3.6z" fill="none" stroke="#C9962A" stroke-width="1.2" stroke-linejoin="round"/><path fill="none" stroke="#C9962A" stroke-width="1.1" d="M8.4 13l3.6 1.8 3.6-1.8M12 14.8v3.4"/>',
+ note:'<path d="M9 17.9l.55-2.2 5.1-5.1 1.65 1.65-5.1 5.1z"/><path d="M8.6 18.9l2.05-.5-1.55-1.55z"/>',
+ scr:'<rect x="8" y="12" width="8" height="4.9" rx=".9" fill="none" stroke="#C9962A" stroke-width="1.2"/><path d="M10.3 18h3.4v1h-3.4z"/>',
+ pub:'<circle cx="10.2" cy="13.4" r="1.35"/><path d="M7.9 17.9c0-1.3 1.03-2.2 2.3-2.2s2.3.9 2.3 2.2z"/><circle cx="14.2" cy="13.1" r="1.1"/><path d="M13.3 17.9c.1-1.05.9-1.9 2-1.9 1 0 1.85.75 1.95 1.9z"/>'};
 function fmIcon(name,type,size){const k=fmKind(name,type);
- if(k==="folder")return `<svg class="fmico" viewBox="0 0 24 24" width="${size}" height="${size}"><path fill="#E0A63C" d="M2.8 6.4c0-1 .8-1.8 1.8-1.8h4.1c.5 0 1 .2 1.35.58L11.3 6.5h8.1c1 0 1.8.8 1.8 1.8v1.1H2.8z"/><path fill="#F5C24C" d="M2.2 9.4c0-.9.72-1.6 1.6-1.6h16.4c.9 0 1.6.72 1.6 1.6l-.66 8.1c-.075.92-.84 1.62-1.76 1.62H4.62c-.92 0-1.685-.7-1.76-1.62z"/></svg>`;
+ if(k==="folder"){const g=FM_DIR_GLYPH[FM_DIR_ALIAS[(name||"").toLowerCase()]||""];
+   return `<svg class="fmico" viewBox="0 0 24 24" width="${size}" height="${size}"><path fill="#E0A63C" d="M2.8 6.4c0-1 .8-1.8 1.8-1.8h4.1c.5 0 1 .2 1.35.58L11.3 6.5h8.1c1 0 1.8.8 1.8 1.8v1.1H2.8z"/><path fill="#F5C24C" d="M2.2 9.4c0-.9.72-1.6 1.6-1.6h16.4c.9 0 1.6.72 1.6 1.6l-.66 8.1c-.075.92-.84 1.62-1.76 1.62H4.62c-.92 0-1.685-.7-1.76-1.62z"/>${g?`<g fill="#C9962A">${g}</g>`:""}</svg>`;}
  const c=FM_ICO_C[k]||FM_ICO_C.file;
  return `<svg class="fmico" viewBox="0 0 24 24" width="${size}" height="${size}"><path fill="${c[0]}" d="M6 2.6h7L19 8.6V19a2.4 2.4 0 0 1-2.4 2.4H6A2.4 2.4 0 0 1 3.6 19V5A2.4 2.4 0 0 1 6 2.6z"/><path fill="${c[1]}" d="M13 2.6l6 6h-4.5A1.5 1.5 0 0 1 13 7.1z"/>${FM_GLYPH[k]||""}</svg>`;}
+/* Video duration badges on grid thumbnails: lazily via /api/fs/vmeta (server caches
+   ffprobe by mtime), 2 in flight, session cache — a folder of 50 videos costs one
+   slow first pass, then it's free. */
+const VDUR_CACHE=new Map();const vdQ=[];let vdActive=0;
+const fmtDur=s=>{s=Math.round(s);const h=Math.floor(s/3600),m=Math.floor(s%3600/60),x=s%60;
+ return h?`${h}:${String(m).padStart(2,"0")}:${String(x).padStart(2,"0")}`:`${m}:${String(x).padStart(2,"0")}`;};
+function vdurEnqueue(el,e){const key=e.path+"|"+e.mtime,c=VDUR_CACHE.get(key);
+ if(c!==undefined){if(c)el.textContent=c;return;}
+ vdQ.push({el,e,key});vdPump();}
+function vdPump(){while(vdActive<2&&vdQ.length){const it=vdQ.shift();
+ if(!it.el.isConnected)continue;vdActive++;
+ api("/api/fs/vmeta?path="+encodeURIComponent(it.e.path)).then(r=>{
+   const d=(r&&r.ok&&r.duration)?fmtDur(r.duration):"";
+   VDUR_CACHE.set(it.key,d);if(d&&it.el.isConnected)it.el.textContent=d;
+ }).catch(()=>{}).finally(()=>{vdActive--;vdPump();});}}
 let USER_NAME="root";  // box user (from /api/desktop)
 let HOME_DIR="/root";   // real home dir of the box's user — filled from /api/desktop (pollApps)
 const fmChips=()=>[["Home",HOME_DIR],["Storage","/mnt/storage"],["Stacks","/opt/stacks"],["Configs","/etc"],["Logs","/var/log"],["Root","/"]];
@@ -5197,17 +5255,23 @@ const fmDate=ts=>{if(!ts)return"";const d=new Date(ts*1000),p=n=>String(n).padSt
  const date=`${p(d.getDate())}.${p(d.getMonth()+1)}.${String(d.getFullYear()).slice(2)}`;
  if(fmt==="dmy")return date;
  return `${date} ${p(d.getHours())}:${p(d.getMinutes())}`;};
+// absolute date for tooltips — relative "2 d ago" answers "when roughly", the hover answers exactly
+const fmDateAbs=ts=>{if(!ts)return"";const d=new Date(ts*1000),p=n=>String(n).padStart(2,"0");
+ return `${p(d.getDate())}.${p(d.getMonth()+1)}.${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;};
 function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focus(ex);ex._nav(initPath);return;}
  openWin("__files","Files",(body,win)=>{
  body.style.padding="4px 16px 12px";   // the file manager has no use for a large top padding
  let cwd=initPath||SET.fmStart||"/mnt/storage",entries=[],searchRes=null;
  let tabs=[cwd],tabI=0;
- const sel=new Set();let clip=null,showHidden=SET.fmHidden===true,filt="",sortKey=SET.fmSortKey||"name",sortDir=SET.fmSortDir===-1?-1:1,lastIdx=-1,favs=[],dragPaths=null,favDragI=null,searchMode="name",volFree=null,undoOp=null;
+ const sel=new Set();let clip=null,showHidden=SET.fmHidden===true,filt="",sortKey=SET.fmSortKey||"name",sortDir=SET.fmSortDir===-1?-1:1,lastIdx=-1,favs=[],dragPaths=null,favDragI=null,searchMode="name",volFree=null,volTotal=null,undoOp=null,filtKind="",filtSize=0,filtDays=0;
  let viewMode="list";try{viewMode=SET.fmView||localStorage.getItem("fmview")||"list";}catch(e){}
  let dblDir=(SET.fmClickDir||SET.fmClick||"single")==="double";    // folders: double click?
  let dblFile=(SET.fmClickFile||SET.fmClick||"single")==="double"; // files: double click?
  body.innerHTML=`<div class="fm fm-sz-${(SET.fmIconSize||"m").replace(/[^slm]/g,"")||"m"}"><div class="fm-fav">
-   <div style="flex:none;margin-bottom:4px"><div class="fm-fav-i" id="fRecent" title="Files modified in the last 7 days under the current folder"><span class="fi">${svg("clock",15)}</span><span class="fn">Recent</span></div></div>
+   <div class="fm-fav-h"><span>Places</span></div>
+   <div style="flex:none;margin-bottom:8px">
+     <div class="fm-fav-i" id="fRecent" title="Files modified in the last 7 days under the current folder"><span class="fi">${svg("clock",15)}</span><span class="fn">Recent</span></div>
+     <div class="fm-fav-i" id="fTrashP" title="Trash"><span class="fi">${svg("trash",15)}</span><span class="fn">Trash</span><span class="fm-badge" id="fTrashN"></span></div></div>
    <div class="fm-fav-h"><span>Favorites</span><button class="iconbtn" id="fFavAdd" title="Add the current folder to favorites">+</button></div>
    <div class="fm-fav-list" id="fFav"></div>
    <div id="fVolsWrap" style="display:none;flex:none"><div class="fm-fav-h"><span>Disks</span></div>
@@ -5227,22 +5291,16 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
        <button class="iconbtn" id="fSMode" title="Search in file contents" style="display:none">${svg("logs",15)}</button>
        <button class="iconbtn" id="fFind" title="Search">${svg("search",15)}</button>
        <span class="fm-sep"></span>
-       <button class="iconbtn" id="fView" title="List / grid">${svg("grid",15)}</button>
-       <button class="iconbtn du-sizebtn" id="fSize" title="Icon size (S/M/L)">M</button>
-       <button class="iconbtn" id="fHid" title="Hidden files">${svg("eye",15)}</button>
-       <button class="iconbtn" id="fDU" title="Disk usage">${svg("chartpie",15)}</button>
-       <span class="fm-sep"></span>
-       <button class="iconbtn" id="fNewF" title="New file">${svg("file-plus",15)}</button>
-       <button class="iconbtn" id="fNewD" title="New folder">${svg("folder-plus",15)}</button>
-       <button class="iconbtn" id="fUpl" title="Upload files or a folder from your computer">${svg("upload",15)}</button>
-       <button class="iconbtn" id="fUrl" title="Download from link (URL)">${svg("globe",15)}</button>
+       <button class="iconbtn" id="fView" title="View options">${svg("grid",15)}</button>
+       <button class="iconbtn" id="fNew" title="New…">${svg("plus",15)}</button>
+       <button class="iconbtn" id="fUpl" title="Upload…">${svg("upload",15)}</button>
        <button class="btn sm" id="fPaste" style="display:none"></button>
        <input type="file" id="fInp" multiple style="display:none">
        <input type="file" id="fInpDir" webkitdirectory directory multiple style="display:none"></div>
      <div class="fm-filters" id="fFilt" style="display:none">
-       <select id="ffType"><option value="">Any type</option><option value="dir">Folders</option><option value="image">Images</option><option value="video">Video</option><option value="audio">Audio</option><option value="doc">Documents</option><option value="archive">Archives</option></select>
-       <select id="ffSize"><option value="0">Any size</option><option value="10485760">&gt; 10 MB</option><option value="104857600">&gt; 100 MB</option><option value="1073741824">&gt; 1 GB</option></select>
-       <select id="ffDays"><option value="0">Any date</option><option value="1">Last 24 h</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option></select>
+       <button class="fm-chip" id="ffType">Type: Any</button>
+       <button class="fm-chip" id="ffSize">Size: Any</button>
+       <button class="fm-chip" id="ffDays">Date: Any</button>
        <button class="btn sm" id="ffGo">${svg("search",13)} Find</button></div>
      <div class="fm-selbar" id="fSel" style="display:none"></div></div>
    <div class="fm-cols" id="fCols"><span style="width:15px;flex:none"></span><span class="c-n on" data-k="name">Name</span><span class="c-s" data-k="size">Size</span><span class="c-d" data-k="mtime">Modified</span></div>
@@ -5252,7 +5310,10 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
  function renderStatus(){const st=body.querySelector("#fStatus");if(!st)return;
    const tot=curArr.filter(e=>e.type==="file").reduce((s,e)=>s+(e.size||0),0);
    let t=`<span><b>${curArr.length}</b> items</span><span>${fmtB(tot)}</span>`;
-   if(volFree!=null)t+=`<span title="Free space on this volume">${fmtB(volFree)} free</span>`;
+   if(volFree!=null&&volTotal){const pct=Math.min(100,Math.round((1-volFree/volTotal)*100));
+     const col=pct>=90?"var(--danger)":pct>=75?"var(--warn)":"var(--good)";
+     t+=`<span class="fm-vs" title="${pct}% used · ${fmtB(volFree)} free of ${fmtB(volTotal)}"><i class="fm-vsb"><b style="width:${pct}%;background:${col}"></b></i>${fmtB(volFree)} free</span>`;}
+   else if(volFree!=null)t+=`<span title="Free space on this volume">${fmtB(volFree)} free</span>`;
    if(sel.size){const ss=curArr.filter(e=>sel.has(e.path)&&e.type==="file").reduce((s,e)=>s+(e.size||0),0);t+=`<span style="color:var(--accent)"><b>${sel.size}</b> selected · ${fmtB(ss)}</span>`;}
    st.innerHTML=t;}
  const selOr=e=>(sel.has(e.path)&&sel.size>1)?[...sel]:[e.path];
@@ -5283,6 +5344,8 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    rest.split("/").filter(Boolean).forEach(p=>{acc+="/"+p;const path=acc;
      c.appendChild(el(`<span class="sepc">/</span>`));
      const a=el(`<a title="${att(path)}">${esc(p)}</a>`);a.onclick=()=>load(path);c.appendChild(a);});
+   // current segment reads first: the last link is where you ARE, the rest is the way there
+   {const links=c.querySelectorAll("a");const last=links[links.length-1];if(last)last.classList.add("cur");}
    c.scrollLeft=c.scrollWidth;   // long path: show the tail, not the start
    // ✎ — edit the path; clicking an empty spot in the breadcrumbs also opens the input
    const edb=el(`<button class="fm-crumb-edit" title="Edit / copy path">${svg("edit",13)}</button>`);edb.onclick=e=>{e.stopPropagation();editPath();};c.appendChild(edb);
@@ -5454,8 +5517,8 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    const cols=body.querySelector("#fCols");if(cols)cols.style.display=grid?"none":"flex";
    curArr=arr;if(cursor>=arr.length)cursor=arr.length-1;
    listBox.innerHTML="";
-   if(!arr.length){const msg=searchRes?"Nothing found":(filt?"No matches in this folder. Press Enter to search subfolders.":"Empty");
-     listBox.innerHTML=`<div style="color:var(--mut);font-size:12px;padding:10px">${msg}</div>`;renderStatus();return;}
+   if(!arr.length){const msg=searchRes?"Nothing found":(filt?"No matches in this folder. Press Enter to search subfolders.":"This folder is empty");
+     listBox.innerHTML=`<div class="fm-empty">${svg("folder",36)}<div>${msg}</div>${(!searchRes&&!filt)?`<small>Drag files here, paste with Ctrl+V or use Upload</small>`:""}</div>`;renderStatus();return;}
    const toggleSel=(e,i,shift)=>{if(shift&&lastIdx>=0){const a=Math.min(lastIdx,i),b=Math.max(lastIdx,i);for(let k=a;k<=b;k++)sel.add(arr[k].path);}else{if(sel.has(e.path))sel.delete(e.path);else sel.add(e.path);}lastIdx=i;renderList();selUpdate();};
    arr.forEach((e,i)=>{
      const isSel=sel.has(e.path),baseIco=fmIcon(e.name,e.type,isz);
@@ -5465,12 +5528,14 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
        ficon=baseIco+`<img class="thumb" data-th="${att(thumbSrc(e))}" alt="" loading="lazy">`;}
      else ficon=baseIco;
      let node;
-     if(grid){node=el(`<div class="fm-tile ${e.type}${isSel?" sel":""}${i===cursor?" fm-cur":""}${isHid?" fm-hid":""}"><input type="checkbox" class="fm-ck"${isSel?" checked":""}><div class="ti">${ficon}</div><div class="tn" title="${att(searchRes?e.path:e.name)}">${nameHTML(e.name,"tn",e.type==="dir")}</div></div>`);}
+     if(grid){const vd=(e.type==="file"&&thumbsOn&&isVidName(e.name))?`<span class="vdur" data-vd="1"></span>`:"";
+       node=el(`<div class="fm-tile ${e.type}${isSel?" sel":""}${i===cursor?" fm-cur":""}${isHid?" fm-hid":""}"><input type="checkbox" class="fm-ck"${isSel?" checked":""}><div class="ti">${ficon}${vd}</div><div class="tn" title="${att(searchRes?e.path:e.name)}">${nameHTML(e.name,"tn",e.type==="dir")}</div></div>`);
+       const vdEl=node.querySelector(".vdur");if(vdEl)vdurEnqueue(vdEl,e);}
      else{let nmH=nameHTML(e.name,"fn",e.type==="dir"||!!e.match)+(e.match?` <small style="color:var(--mut);font-weight:400">— ${esc(e.match.slice(0,90))}${e.line?" :"+e.line:""}</small>`:"");
        let relDir="";
        if(searchRes){const par=e.path.replace(/\/[^/]+$/,"");relDir=(par.slice(cwd==="/"?0:cwd.length)||"/");
          nmH+=`<span class="fpath" title="${att(par)}">${svg("folder",11)} ${esc(relDir)}</span>`;}
-       node=el(`<div class="fm-row ${e.type}${searchRes?" srch":""}${isSel?" sel":""}${i===cursor?" fm-cur":""}${isHid?" fm-hid":""}"><input type="checkbox" class="fm-ck"${isSel?" checked":""}><span class="fi">${ficon}</span><span class="fn" title="${att(searchRes?e.path:e.name)}">${nmH}</span><span class="fsz">${e.type==="dir"?"":fmtB(e.size)}</span><span class="fdate">${fmDate(e.mtime)}</span></div>`);
+       node=el(`<div class="fm-row ${e.type}${searchRes?" srch":""}${isSel?" sel":""}${i===cursor?" fm-cur":""}${isHid?" fm-hid":""}"><input type="checkbox" class="fm-ck"${isSel?" checked":""}><span class="fi">${ficon}</span><span class="fn" title="${att(searchRes?e.path:e.name)}">${nmH}</span><span class="fsz">${e.type==="dir"?"":fmtB(e.size)}</span><span class="fdate" title="${att(fmDateAbs(e.mtime))}">${fmDate(e.mtime)}</span></div>`);
        const pl=node.querySelector(".fpath");if(pl)pl.onclick=ev=>{ev.stopPropagation();load(e.path.replace(/\/[^/]+$/,"")||"/");};}
      node.querySelector(".fm-ck").onclick=ev=>{ev.stopPropagation();toggleSel(e,i,ev.shiftKey);};
      // click anywhere on the row/tile (except the checkbox), not just the name/icon — otherwise a click
@@ -5515,7 +5580,10 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    // sshfs mounts report the REMOTE fs via statvfs and often lie (rsync.net quotas,
    // allow_other) — free space there is noise, hide it
    const remFree=r.path==="/mnt/remote"||r.path.startsWith("/mnt/remote/");
-   cwd=r.path;tabs[tabI]=r.path;entries=r.entries||[];searchRes=null;sel.clear();filt="";lastIdx=-1;volFree=(r.free!=null&&!remFree)?r.free:null;
+   cwd=r.path;tabs[tabI]=r.path;entries=r.entries||[];searchRes=null;sel.clear();filt="";lastIdx=-1;
+   volFree=(r.free!=null&&!remFree)?r.free:null;volTotal=(r.vtotal!=null&&!remFree)?r.vtotal:null;
+   listBox.dataset.drop="Drop to upload into "+(cwd.split("/").filter(Boolean).pop()||"/");
+   updPlaces();
    lastSig=dirSig(entries);
    const si=body.querySelector("#fSearch");if(si)si.value="";
    cursor=-1;renderTabs();renderCrumb();renderFav();renderVols();renderRemotes(false);
@@ -5541,7 +5609,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    const sig=dirSig(r.entries);
    if(sig===lastSig)return;
    lastSig=sig;entries=r.entries||[];
-   if(r.free!=null&&!(cwd==="/mnt/remote"||cwd.startsWith("/mnt/remote/")))volFree=r.free;
+   if(r.free!=null&&!(cwd==="/mnt/remote"||cwd.startsWith("/mnt/remote/"))){volFree=r.free;volTotal=r.vtotal!=null?r.vtotal:volTotal;}
    const top=listBox.scrollTop;
    [...sel].forEach(p=>{if(!entries.some(e=>e.path===p))sel.delete(p);});  // drop deleted items from the selection
    renderList();selUpdate();listBox.scrollTop=top;}
@@ -5569,8 +5637,11 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
      else{const r=await api("/api/fs/read?path="+encodeURIComponent(e.path));
        if(r&&r.ok&&!r.binary)inner=`<pre>${esc((r.content||"").slice(0,5000))}</pre>`;
        else inner=`<div class="ql-meta">${fmIcon(e.name,e.type,46)}<br>${esc(e.name)}<br>${fmtB(e.size)} · ${fmDate(e.mtime)}</div>`;}
-     ov.innerHTML=`<div class="ql-bar"><span class="ql-t">${esc(e.name)}</span><span class="ql-i">${e.type==="dir"?"":fmtB(e.size)}</span><button id="qlOpen">Open</button><button id="qlX">✕ Esc</button></div><div class="ql-body">${inner}</div>`;
-     ov.querySelector("#qlX").onclick=close;ov.querySelector("#qlOpen").onclick=()=>{const e2=curArr[i];close();if(e2)openEntry(e2);};}
+     const many=curArr.filter(x=>x.type==="file").length>1;
+     ov.innerHTML=`<div class="ql-bar"><span class="ql-t">${esc(e.name)}</span><span class="ql-i">${e.type==="dir"?"":fmtB(e.size)}${e.mtime?` · ${fmDate(e.mtime)}`:""}</span><button class="btn sm" id="qlOpen">${svg("expand",13)} Open</button><button class="iconbtn" id="qlX" title="Close (Esc)">${svg("x",16)}</button></div>${many?`<button class="ql-nav prev" id="qlPrev" title="Previous (←)">${svg("chev",20)}</button><button class="ql-nav next" id="qlNext" title="Next (→)">${svg("chev",20)}</button>`:""}<div class="ql-body">${inner}</div>`;
+     ov.querySelector("#qlX").onclick=close;ov.querySelector("#qlOpen").onclick=()=>{const e2=curArr[i];close();if(e2)openEntry(e2);};
+     const pv=ov.querySelector("#qlPrev"),nx=ov.querySelector("#qlNext");
+     if(pv)pv.onclick=ev=>{ev.stopPropagation();step(-1);};if(nx)nx.onclick=ev=>{ev.stopPropagation();step(1);};}
    win.appendChild(ov);document.addEventListener("keydown",onkey,true);draw();}
  function scrollCur(){const n=listBox.children[cursor];if(n&&n.scrollIntoView)n.scrollIntoView({block:"nearest"});}
  function moveCur(delta,range){if(!curArr.length)return;cursor=cursor<0?0:Math.max(0,Math.min(curArr.length-1,cursor+delta));
@@ -5654,8 +5725,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
      const ok=await runBatch("Renaming…",plan,async r=>{const w=await api("/api/fs/rename",{method:"POST",body:JSON.stringify({path:r.path,name:r.name})});if(w&&w.log&&!(w&&w.ok))toast("Error: "+w.log);return w&&w.ok;});
      undoOp={type:"bulkrename",pairs:plan.map(p=>({now:p.path.replace(/\/[^/]+$/,"")+"/"+p.name,old:p.old}))};
      toast(LIVE?`Renamed: ${ok}/${plan.length} — Ctrl+Z to undo`:"Demo");load(cwd);};}
- const searchFilters=()=>{const g=id=>body.querySelector(id);
-   return {kind:(g("#ffType")||{}).value||"",minsize:+((g("#ffSize")||{}).value||0),days:+((g("#ffDays")||{}).value||0)};};
+ const searchFilters=()=>({kind:filtKind,minsize:filtSize,days:filtDays});
  async function doSearch(q){const f=searchFilters();
    if(!q&&!f.kind&&!f.minsize&&!f.days){searchRes=null;renderList();return;}
    const r=await api("/api/fs/search?path="+encodeURIComponent(cwd)+"&q="+encodeURIComponent(q)
@@ -5888,19 +5958,33 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
   ft.onclick=()=>{hid=!hid;SET.fmFavHidden=hid;apply();saveSettings();};}
  body.querySelector("#fUp").onclick=()=>load(cwd==="/"?"/":(cwd.replace(/\/[^/]+$/,"")||"/"));
  body.querySelector("#fRef").onclick=()=>load(cwd);
- {const hb=body.querySelector("#fHid");hb.classList.toggle("pri",showHidden);
-  hb.onclick=function(){showHidden=!showHidden;SET.fmHidden=showHidden;saveSettings();this.classList.toggle("pri",showHidden);renderList();};}
  body.querySelector("#fFavAdd").onclick=addFav;
- const vbtn=body.querySelector("#fView");vbtn.classList.toggle("pri",viewMode==="grid");
- vbtn.onclick=function(){viewMode=viewMode==="grid"?"list":"grid";SET.fmView=viewMode;saveSettings();this.classList.toggle("pri",viewMode==="grid");renderList();};
- body.querySelector("#fDU").onclick=()=>winDiskUsage(cwd);
- body.querySelector("#fNewF").onclick=doNewFile;
- body.querySelector("#fNewD").onclick=doMkdir;
- body.querySelector("#fUpl").onclick=ev=>showMenu(ev.clientX,ev.clientY,[
+ // toolbar declutter: 4 view buttons → one popover, 2 "new" buttons → one "+",
+ // upload/URL → one menu. State lives in SET; syncSettings repaints from it.
+ {const vb=body.querySelector("#fView");
+  vb.onclick=()=>{const r=vb.getBoundingClientRect(),chk=on=>on?"&nbsp;&nbsp;✓":"";
+   const SZO=["s","m","l"],cs=SET.fmIconSize||"m";
+   showMenu(r.left,r.bottom+6,[
+    {label:"List"+chk(viewMode==="list"),ic:svg("list",16),act:()=>{SET.fmView="list";saveSettings();syncSettings();}},
+    {label:"Grid"+chk(viewMode==="grid"),ic:svg("grid",16),act:()=>{SET.fmView="grid";saveSettings();syncSettings();}},
+    {sep:1},
+    {label:"Icon size: "+cs.toUpperCase(),ic:svg("expand",16),act:()=>{SET.fmIconSize=SZO[(SZO.indexOf(cs)+1)%3]||"m";saveSettings();syncSettings();}},
+    {label:(showHidden?"Hide":"Show")+" hidden files",ic:svg("eye",16),act:()=>{SET.fmHidden=!showHidden;saveSettings();syncSettings();}},
+    {sep:1},
+    {label:"Analyze space",ic:svg("chartpie",16),act:()=>winDiskUsage(cwd)}]);};}
+ {const nb=body.querySelector("#fNew");
+  nb.onclick=()=>{const r=nb.getBoundingClientRect();showMenu(r.left,r.bottom+6,[
+   {label:"New file",ic:svg("file",16),act:doNewFile},
+   {label:"New folder",ic:svg("folder",16),act:doMkdir}]);};}
+ {const ub=body.querySelector("#fUpl");
+  ub.onclick=()=>{const r=ub.getBoundingClientRect();showMenu(r.left,r.bottom+6,[
    {label:"Upload files…",ic:svg("upload",16),act:()=>inp.click()},
-   {label:"Upload folder…",ic:svg("folder",16),act:()=>inpDir.click()}]);
- body.querySelector("#fUrl").onclick=doFetchUrl;
+   {label:"Upload folder…",ic:svg("folder",16),act:()=>inpDir.click()},
+   {label:"Download from link (URL)…",ic:svg("globe",16),act:doFetchUrl}]);};}
  body.querySelector("#fPaste").onclick=doPaste;
+ function updPlaces(){const b=body.querySelector("#fTrashN");if(b)b.textContent=TRASH_STAT.count?String(TRASH_STAT.count):"";}
+ body.querySelector("#fTrashP").onclick=()=>winTrash();
+ refreshTrashStat().then(()=>{if(body.isConnected)updPlaces();});
  inp.onchange=()=>{const files=[...inp.files];inp.value="";if(files.length)doUpload(files);};
  const inpDir=body.querySelector("#fInpDir");
  // webkitRelativePath = "folder/subfolder/file" -> rel is everything except the file name
@@ -5913,7 +5997,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    crumbEl.style.display=open?"none":"";si.style.display=open?"":"none";smBtn.style.display=open?"":"none";
    filtRow.style.display=(open&&searchMode==="name")?"flex":"none";   // filters make no sense for content grep
    if(open)si.focus();else{si.value="";filt="";if(searchRes)searchRes=null;
-     filtRow.querySelectorAll("select").forEach(s=>s.selectedIndex=0);renderList();}}
+     filtKind="";filtSize=0;filtDays=0;if(win._paintChips)win._paintChips();renderList();}}
  findBtn.onclick=()=>toggleFind(!searchOpen);
  si.oninput=e=>{filt=e.target.value.toLowerCase();if(searchRes)searchRes=null;renderList();};
  si.onkeydown=e=>{if(e.key==="Enter"){e.preventDefault();const v=e.target.value.trim();searchMode==="text"?doGrep(v):doSearch(v);}
@@ -5923,6 +6007,21 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    si.placeholder=searchMode==="text"?"in file contents…  (Enter)":"filter…  (Enter — search subfolders)";
    filtRow.style.display=(searchOpen&&searchMode==="name")?"flex":"none";
    searchRes=null;renderList();si.focus();};
+ // filter chips: value pickers via the standard menu; a non-default chip turns
+ // into the "white selection" state per the design system
+ {const KOPT=[["","Any"],["dir","Folders"],["image","Images"],["video","Video"],["audio","Audio"],["doc","Documents"],["archive","Archives"]],
+   SOPT=[[0,"Any"],[10485760,"> 10 MB"],[104857600,"> 100 MB"],[1073741824,"> 1 GB"]],
+   DOPT=[[0,"Any"],[1,"Last 24 h"],[7,"Last 7 days"],[30,"Last 30 days"]];
+  const chips=[["#ffType","Type",KOPT,v=>filtKind=v,()=>filtKind],
+               ["#ffSize","Size",SOPT,v=>filtSize=v,()=>filtSize],
+               ["#ffDays","Date",DOPT,v=>filtDays=v,()=>filtDays]];
+  const paintChips=()=>chips.forEach(([id,cap,opts,_s,get])=>{const b=body.querySelector(id);if(!b)return;
+    const o=opts.find(x=>String(x[0])===String(get()))||opts[0];
+    b.textContent=cap+": "+o[1];b.classList.toggle("on",String(get())!==String(opts[0][0]));});
+  chips.forEach(([id,cap,opts,set,get])=>{const b=body.querySelector(id);if(!b)return;
+    b.onclick=()=>{const r=b.getBoundingClientRect();
+      showMenu(r.left,r.bottom+6,opts.map(([v,l])=>({label:l+(String(get())===String(v)?"&nbsp;&nbsp;✓":""),act:()=>{set(v);paintChips();doSearch(si.value.trim());}})));};});
+  win._paintChips=paintChips;paintChips();}
  body.querySelector("#ffGo").onclick=()=>doSearch(si.value.trim());
  body.querySelector("#fRecent").onclick=loadRecent;
  // Ctrl+V with files (e.g. a screenshot) in the OS clipboard = upload into the current
@@ -5933,8 +6032,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    if(!fs.length)return;ev.preventDefault();
    const stamp=new Date().toISOString().slice(0,19).replace(/[T:]/g,"-");
    doUpload(fs.map((f,i)=>({file:(f.name&&f.name!=="image.png")?f:new File([f],`pasted-${stamp}${fs.length>1?"-"+(i+1):""}.png`,{type:f.type}),rel:""})),cwd);});
- {const SZO=["s","m","l"],fsz=body.querySelector("#fSize");const paintSz=()=>{fsz.textContent=(SET.fmIconSize||"m").toUpperCase();};paintSz();
-  fsz.onclick=()=>{const c=SET.fmIconSize||"m";SET.fmIconSize=SZO[(SZO.indexOf(c)+1)%3]||"m";saveSettings();paintSz();syncSettings();};}
+ // (icon-size button folded into the view popover below)
  body.querySelectorAll("#fCols [data-k]").forEach(h=>h.onclick=()=>{const k=h.dataset.k;
    if(sortKey===k)sortDir=-sortDir;else{sortKey=k;sortDir=1;}
    SET.fmSortKey=sortKey;SET.fmSortDir=sortDir;saveSettings();

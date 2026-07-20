@@ -8810,11 +8810,22 @@ def prewarm_thumbs(path):
             gen_thumb(full)
     threading.Thread(target=work, daemon=True).start()
 
+# ffprobe is ~100-300 ms per call on a Pi — the FM asks for every video in a folder
+# (duration badges), so answers are cached by (path, mtime) for the process lifetime
+_VMETA_CACHE = {}
+
 def video_meta(path):
     """Duration + codecs + list of audio tracks and subtitles (for the player/transcode)."""
     path = os.path.realpath(path)
     if not os.path.isfile(path) or not shutil.which("ffprobe"):
         return {"ok": False}
+    try:
+        vkey = (path, os.stat(path).st_mtime_ns)
+    except OSError:
+        return {"ok": False}
+    hit = _VMETA_CACHE.get(vkey)
+    if hit is not None:
+        return hit
     dur, vc, ac = 0.0, "", ""
     audios, subs = [], []
     try:
@@ -8845,8 +8856,12 @@ def video_meta(path):
                 si += 1
     except Exception:
         pass
-    return {"ok": True, "duration": dur, "vcodec": vc, "acodec": ac,
-            "audios": audios, "subs": subs}
+    res = {"ok": True, "duration": dur, "vcodec": vc, "acodec": ac,
+           "audios": audios, "subs": subs}
+    if len(_VMETA_CACHE) > 500:
+        _VMETA_CACHE.clear()
+    _VMETA_CACHE[vkey] = res
+    return res
 
 def thumbs_sweep(dirs):
     """Recursive prewarming of the preview cache (for the nightly timer)."""
