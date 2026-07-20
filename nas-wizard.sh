@@ -3696,11 +3696,15 @@ api_notify() {                 # Pushover in /etc/nas-wizard/notify.conf
     echo "Pushover configured"
 }
 api_state() {                  # brief state for the wizard (JSON)
-    local host tz iface
+    local host tz iface cfg cl
     host="$(hostnamectl --static 2>/dev/null || hostname)"
     tz="$(timedatectl show -p Timezone --value 2>/dev/null)"
     iface="$(ip route show default 2>/dev/null | awk '/default/{print $5; exit}')"
-    printf '{"host":"%s","tz":"%s","iface":"%s","docker":%s,"data_disks":%s,"parity_disks":%s,"pool":%s,"snapraid":%s,"samba":%s,"nfs":%s,"fail2ban":%s,"ufw":%s,"smartd":%s,"unattended":%s}\n' \
+    cfg=/boot/firmware/config.txt;  [ -f "$cfg" ] || cfg=/boot/config.txt
+    cl=/boot/firmware/cmdline.txt;  [ -f "$cl" ]  || cl=/boot/cmdline.txt
+    # tuning items: report the ACTUAL on-disk/live state so the wizard's checkboxes
+    # reflect reality instead of static defaults (t_* fields below)
+    printf '{"host":"%s","tz":"%s","iface":"%s","docker":%s,"data_disks":%s,"parity_disks":%s,"pool":%s,"snapraid":%s,"samba":%s,"nfs":%s,"fail2ban":%s,"ufw":%s,"smartd":%s,"unattended":%s,"t_usbpower":%s,"t_pcie3":%s,"t_cgroup":%s,"t_sysctl":%s,"t_zram":%s,"t_chrony":%s,"t_governor":%s}\n' \
         "$host" "$tz" "$iface" \
         "$(command -v docker >/dev/null 2>&1 && echo true || echo false)" \
         "$(mounted_data_disks | grep -c . )" \
@@ -3712,7 +3716,14 @@ api_state() {                  # brief state for the wizard (JSON)
         "$(systemctl is-active fail2ban >/dev/null 2>&1 && echo true || echo false)" \
         "$(ufw status 2>/dev/null | grep -q 'Status: active' && echo true || echo false)" \
         "$(systemctl is-active smartmontools >/dev/null 2>&1 && echo true || echo false)" \
-        "$([ -f /etc/apt/apt.conf.d/20auto-upgrades ] && echo true || echo false)"
+        "$([ -f /etc/apt/apt.conf.d/20auto-upgrades ] && echo true || echo false)" \
+        "$(grep -qs 'usb_max_current_enable=1' "$cfg" && echo true || echo false)" \
+        "$(grep -qs 'pciex1_gen=3' "$cfg" && echo true || echo false)" \
+        "$(grep -qs 'cgroup_enable=memory' "$cl" && echo true || echo false)" \
+        "$([ -f /etc/sysctl.d/99-nas.conf ] && echo true || echo false)" \
+        "$(swapon --show 2>/dev/null | grep -q zram && echo true || echo false)" \
+        "$(systemctl is-active chrony >/dev/null 2>&1 && echo true || echo false)" \
+        "$([ -f /usr/local/bin/nas-governor.sh ] && echo true || echo false)"
 }
 
 run_api() {

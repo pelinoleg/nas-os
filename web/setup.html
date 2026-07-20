@@ -228,7 +228,17 @@ function keys(box){return [...box.querySelectorAll("[data-k]:checked")].map(x=>x
 
 const R={
  system(p){p.innerHTML=head("System","System preparation","Updates and installation of Docker, mergerfs, SnapRAID and utilities. Anything already installed is skipped.")+
-  `<div class="card"><div class="opt on"><span class="ic">${svg("cpu",16)}</span><span class="m"><span class="t">NAS stack + utilities + Pi packages</span><span class="d">docker · mergerfs · snapraid · smartmontools · nvme-cli · htop · git · …</span></span></div></div>
+  `<div class="card"><div class="opt on" style="align-items:flex-start"><span class="ic">${svg("cpu",16)}</span><span class="m"><span class="t">Packages (skips whatever's already installed)</span>
+    <span class="d" style="line-height:1.75">
+      <b>Core:</b> docker + compose · gh · mergerfs · snapraid · smartmontools<br>
+      <b>Sharing &amp; network:</b> samba · avahi + libnss-mdns · vnstat · sshfs · sshpass · openssh-client · rsync<br>
+      <b>Disk &amp; filesystem:</b> parted · gdisk · nvme-cli · hdparm · e2fsprogs · xfsprogs · btrfs-progs · exfatprogs · ntfs-3g · dosfstools · udisks2<br>
+      <b>Media &amp; previews:</b> ffmpeg · heif-convert (libheif) · poppler-utils<br>
+      <b>Utilities:</b> git · curl · wget · vim · nano · htop · iotop · tmux · screen · tree · ncdu · jq · zip/unzip · p7zip · lsof · nmap · net-tools · dnsutils · dialog · eject · sysstat · bash-completion<br>
+      <b>Auto-updates:</b> unattended-upgrades · apt-listchanges<br>
+      <b>Raspberry Pi:</b> libraspberrypi-bin · raspi-config · rpi-eeprom
+    </span></span></div>
+   <div class="opt"><span class="ic">${svg("sliders",16)}</span><span class="m"><span class="t">Also set up</span><span class="d">hardware watchdog · USB-power/UAS fixes · thumbnail cache · avahi discovery · Samba (no shares yet) · drivetemp (disk temperatures) · netguard (network resilience)</span></span></div></div>
    <div class="actions"><button class="btn pri" id="go">Install</button></div><div class="console" id="con"></div>`;
   p.querySelector("#go").onclick=()=>run("system");},
  disks(p){p.innerHTML=head("Storage","Disks","Choose a free disk, its role and filesystem. Formatting requires typing the device path manually. The system disk is excluded.")+`<div id="dl"></div><div class="console" id="con"></div>`;
@@ -271,7 +281,7 @@ const R={
   p.querySelector("#go").onclick=()=>run("security",{keys:keys(p.querySelector("#box"))});
   p.querySelectorAll("[data-a]").forEach(b=>b.onclick=()=>run(b.dataset.a));},
  tuning(p){p.innerHTML=head("Hardware","Raspberry Pi tuning","Optional hardware tweaks — enable only what fits your setup (hint under each). config.txt changes need a reboot. TRIM and the hardware watchdog are already on by default.")+
-  `<div class="card" id="box">${chk("usbpower","USB power (Pi 5)","enable if you run USB SSD/HDD — needs the 27 W PSU",true,"plug")}${chk("pcie3","PCIe Gen3 for NVMe","faster NVMe, slightly out of spec — turn off if the drive glitches",false,"cpu")}${chk("cgroup","Docker memory limits","only if you cap container RAM",false,"cpu")}${chk("sysctl","Sysctl tuning","safe: less swapping + steadier network under load",false,"sliders")}${chk("zram","zram swap","compressed swap in RAM — good on low-RAM or SD-card boxes",false,"cpu")}${chk("chrony","Accurate time (chrony)","usually skip; enable only if precise time matters",false,"cpu")}${chk("governor","Thermal CPU governor","slows the CPU when hot (≥80°C) — for passive cooling",false,"sliders")}</div>
+  `<div class="card" id="box">${chk("usbpower","USB power (Pi 5)","recommended with USB SSD/HDD — needs the 27 W PSU",STATE.t_usbpower,"plug")}${chk("pcie3","PCIe Gen3 for NVMe","faster NVMe, slightly out of spec — turn off if the drive glitches",STATE.t_pcie3,"cpu")}${chk("cgroup","Docker memory limits","only if you cap container RAM",STATE.t_cgroup,"cpu")}${chk("sysctl","Sysctl tuning","recommended — less swapping + steadier network under load",STATE.t_sysctl,"sliders")}${chk("zram","zram swap","compressed swap in RAM — recommended on low-RAM or SD-card boxes",STATE.t_zram,"cpu")}${chk("chrony","Accurate time (chrony)","usually skip; enable only if precise time matters",STATE.t_chrony,"cpu")}${chk("governor","Thermal CPU governor","slows the CPU when hot (≥80 °C) — for passive cooling",STATE.t_governor,"sliders")}</div>
    <div class="actions"><button class="btn pri" id="go">Apply</button></div><div class="console" id="con"></div>`;
   p.querySelector("#go").onclick=()=>run("pi",{keys:keys(p.querySelector("#box"))});},
  alerts(p){p.innerHTML=head("Monitoring","Alerts","Watch disk health (SMART) and space/temperature, and get pinged on your phone via Pushover when something's wrong. File backups are separate — set those up in the Backup app inside the panel.")+
@@ -324,6 +334,7 @@ try{applyDeskTheme(JSON.parse(localStorage.getItem("nasdesk")||"{}"));}catch(e){
    DONE.snapraid=!!STATE.snapraid;
    DONE.shares=!!(STATE.samba||STATE.nfs);
    DONE.security=!!(STATE.ufw||STATE.fail2ban);
-   DONE.alerts=!!STATE.smartd;}
+   DONE.alerts=!!STATE.smartd;
+   DONE.tuning=!!(STATE.t_usbpower||STATE.t_pcie3||STATE.t_cgroup||STATE.t_sysctl||STATE.t_zram||STATE.t_chrony||STATE.t_governor);}
  else document.getElementById("hostlbl").textContent="demo (no backend)";renderRail();renderPanel();})();
 </script></body></html>
