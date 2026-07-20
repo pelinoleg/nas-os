@@ -292,7 +292,6 @@ const R={
   p.querySelector("#go").onclick=()=>run("backup",{keys:keys(p.querySelector("#box"))});},
  modules(p){p.innerHTML=head("Step 11","Additional modules","Networking and remote access. Installed individually.")+
   `<div class="card">
-   <div class="opt"><span class="ic">${svg("net",16)}</span><span class="m"><span class="t">comitup</span><span class="d">Wi-Fi access point for entering network details on a fresh system</span></span><button class="btn sm" data-a="comitup">Install</button></div>
    <div class="opt"><span class="ic">${svg("shield",16)}</span><span class="m"><span class="t">Tailscale</span><span class="d">secure remote access without port forwarding</span></span><button class="btn sm" data-a="tailscale">Install</button></div>
    </div><div class="console" id="con"></div>`;
   p.querySelectorAll("[data-a]").forEach(b=>b.onclick=()=>run(b.dataset.a));},

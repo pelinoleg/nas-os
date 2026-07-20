@@ -3367,6 +3367,11 @@ EOF
     # Shell-agent notifications (panel API → Pushover fallback) + the SSH login greeting.
     install_notify_helper
     install_motd
+    # Network resilience — the layer that keeps the box reachable: one active link at
+    # a time (cable primary, no eth0+wlan0-same-subnet RST storms), Wi-Fi failover,
+    # panel self-heal, availability log. Also masks comitup (incompatible: it fights
+    # over wlan0). Core reliability → base, so a fresh box is protected from boot one.
+    install_netguard
     id -nG "$TARGET_USER" 2>/dev/null | tr ' ' '\n' | grep -qx docker || run usermod -aG docker "$TARGET_USER"
     run mkdir -p "$STORAGE_MNT" "$DOCKER_ROOT" "$SERVICES_SRC"
     if [ ! -d "$NAS_CONFIG" ]; then run mkdir -p "$NAS_CONFIG/scripts"; run chown -R "$TARGET_USER:$TARGET_USER" "$NAS_CONFIG"; fi
@@ -3612,26 +3617,10 @@ api_shares() {
 }
 
 # ---------------------------------------------------------------------------
-# Modules: comitup / Tailscale / static IP
+# Modules: Tailscale / static IP
+# (comitup intentionally NOT offered: it hijacks wlan0 and fights netguard — see
+#  disable_comitup(). netguard already handles the Wi-Fi fallback this OS needs.)
 # ---------------------------------------------------------------------------
-mod_comitup() {
-    if dpkg -s comitup >/dev/null 2>&1; then echo "comitup already installed"; return 0; fi
-    if [ "$DRY_RUN" -eq 1 ]; then
-        info "[DRY-RUN] add davesteele repository + apt install comitup"
-        echo "comitup (dry-run)"; return 0
-    fi
-    warn "comitup manages the network — a brief connection drop over Wi-Fi is possible"
-    run mkdir -p /usr/share/keyrings
-    if curl -fsSL https://davesteele.github.io/key-366150CE.pub.txt 2>>"$LOG" | gpg --dearmor > /usr/share/keyrings/davesteele.gpg 2>>"$LOG"; then
-        echo "deb [signed-by=/usr/share/keyrings/davesteele.gpg] https://davesteele.github.io/comitup/repo comitup main" > /etc/apt/sources.list.d/comitup.list
-        run apt-get update
-        run apt-get install -y comitup
-        run systemctl enable comitup 2>/dev/null || true
-        echo "comitup installed (Wi-Fi access point + captive portal)"
-    else
-        warn "failed to fetch the davesteele key — comitup skipped"
-    fi
-}
 mod_tailscale() {
     if command -v tailscale >/dev/null 2>&1; then echo "tailscale already installed"
     elif [ "$DRY_RUN" -eq 1 ]; then info "[DRY-RUN] install tailscale (get.tailscale.com)"
@@ -3702,7 +3691,7 @@ api_state() {                  # brief state for the wizard (JSON)
     host="$(hostnamectl --static 2>/dev/null || hostname)"
     tz="$(timedatectl show -p Timezone --value 2>/dev/null)"
     iface="$(ip route show default 2>/dev/null | awk '/default/{print $5; exit}')"
-    printf '{"host":"%s","tz":"%s","iface":"%s","docker":%s,"data_disks":%s,"parity_disks":%s,"pool":%s,"snapraid":%s,"samba":%s,"nfs":%s,"fail2ban":%s,"ufw":%s,"comitup":%s,"unattended":%s}\n' \
+    printf '{"host":"%s","tz":"%s","iface":"%s","docker":%s,"data_disks":%s,"parity_disks":%s,"pool":%s,"snapraid":%s,"samba":%s,"nfs":%s,"fail2ban":%s,"ufw":%s,"unattended":%s}\n' \
         "$host" "$tz" "$iface" \
         "$(command -v docker >/dev/null 2>&1 && echo true || echo false)" \
         "$(mounted_data_disks | grep -c . )" \
@@ -3713,7 +3702,6 @@ api_state() {                  # brief state for the wizard (JSON)
         "$(systemctl is-active nfs-kernel-server >/dev/null 2>&1 && echo true || echo false)" \
         "$(systemctl is-active fail2ban >/dev/null 2>&1 && echo true || echo false)" \
         "$(ufw status 2>/dev/null | grep -q 'Status: active' && echo true || echo false)" \
-        "$(systemctl is-active comitup >/dev/null 2>&1 && echo true || echo false)" \
         "$([ -f /etc/apt/apt.conf.d/20auto-upgrades ] && echo true || echo false)"
 }
 
@@ -3746,7 +3734,6 @@ run_api() {
         notify)         api_notify ;;
         netguard)       install_netguard ;;
         motd)           install_motd ;;
-        comitup)        mod_comitup ;;
         tailscale)      mod_tailscale ;;
         staticip)       mod_staticip ;;
         screen)         api_screen ;;

@@ -4167,7 +4167,7 @@ function reniceDlg(p,after){const s=document.getElementById("scrim");
    <div class="r"><button class="btn" id="nx">Cancel</button><button class="btn pri" id="no">Apply</button></div></div>`;
   s.classList.add("show");s.querySelector("#nx").onclick=()=>s.classList.remove("show");
   s.querySelector("#no").onclick=async()=>{const r=await api("/api/process/renice",{method:"POST",body:JSON.stringify({pid:p.pid,nice:+s.querySelector("#nice").value})});toast(LIVE?(r&&r.ok?"Priority changed":"Error: "+((r&&r.log)||"")):"Demo");s.classList.remove("show");after&&after();};}
-const svcIsMine=u=>/^(nas-|docker|containerd|smartd|snapraid|comitup|tailscale|avahi|samba|smbd|nmbd|nfs)/.test(u);
+const svcIsMine=u=>/^(nas-|docker|containerd|smartd|snapraid|tailscale|avahi|samba|smbd|nmbd|nfs)/.test(u);
 function svcTab(tc,win){
  let mode="active",flt="";
  let created=new Set();
@@ -9111,23 +9111,10 @@ function networkTab(tc){withSysc(tc,()=>{const n=SYSC.network||{};const manual=n
   <div class="set-grp">Wireless network</div>
   ${n.wifi?tglRow("Disable Wi-Fi power saving","RECOMMENDED. When idle, the Pi's Wi-Fi chip sleeps between beacons → periodic SSH/web drops. Disabling removes the drops at the cost of ~0.1 W. This is exactly what fixed the connection drops.","wifi_ps_off",n.wifi_ps_off,"removes periodic connection drops"):`<div class="srow"><div class="srow-l"><div class="srow-d">Wired connection (${esc(n.iface||"")}) — Wi-Fi power saving is not applicable.</div></div></div>`}
   <div class="set-grp">Network discovery</div>
-  ${svcRow("mDNS / .local (Avahi)","Lets you reach the server by the name <host>.local without memorizing the IP. Handy for access from phones and Macs.","avahi",n.avahi,"access by the name "+host+".local")}
-   <div id="comitupBox"></div>`;
+  ${svcRow("mDNS / .local (Avahi)","Lets you reach the server by the name <host>.local without memorizing the IP. Handy for access from phones and Macs.","avahi",n.avahi,"access by the name "+host+".local")}`;
  wireSc(tc);
  tc.querySelectorAll("#nUnits button").forEach(b=>b.onclick=()=>{SET.netUnits=b.dataset.u;saveSettings();
   tc.querySelectorAll("#nUnits button").forEach(x=>x.classList.toggle("on",x===b));poll();});
- // comitup: access point for initial setup without a monitor (loaded separately)
- api("/api/comitup").then(c=>{const box=tc.querySelector("#comitupBox");if(!box||!c||!c.installed)return;
-  const modeTxt={HOTSPOT:"access-point mode",CONNECTING:"connecting",CONNECTED:"connected to Wi-Fi"}[c.mode]||c.mode||"—";
-  box.innerHTML=`<div class="set-grp">Access point (comitup)</div>
-   <p class="set-sub">If the NAS can't join Wi-Fi, comitup raises its own access point and a setup portal — so the first-time network setup works without a monitor. Currently: <b>${esc(modeTxt)}</b>${c.ssid&&c.mode==="CONNECTED"?" ("+esc(c.ssid)+")":""}.</p>
-   <div class="mon-grid" style="grid-template-columns:1fr 1fr">
-    <div class="f2"><label>Access-point name${tipHTML("SSID of the comitup access point shown when the NAS isn't connected to Wi-Fi. «<nnn>» is replaced by a unique number, «<hostname>» by the host name.")}</label><input class="mono" id="cuName" value="${att(c.ap_name||"")}" placeholder="comitup-<nnn>"></div>
-    <div class="f2"><label>Access-point password${tipHTML("8–63 characters — a password-protected access point (WPA). Empty — an open network. Applies after restarting comitup or a reboot.")}</label><input class="mono" id="cuPass" value="${att(c.ap_password||"")}" placeholder="empty = open"></div>
-   </div>
-   <button class="btn sm pri" id="cuSave">Save access point</button>`;
-  box.querySelector("#cuSave").onclick=async()=>{const r=await api("/api/comitup/save",{method:"POST",body:JSON.stringify({ap_name:box.querySelector("#cuName").value.trim(),ap_password:box.querySelector("#cuPass").value.trim()})});toast(LIVE?((r&&r.ok)?r.log:("Error: "+((r&&r.log)||""))):"Demo");};
- });
  tc.querySelectorAll("#nMethod button").forEach(b=>b.onclick=()=>{const m=b.dataset.m;if(m==="manual"){tc.querySelector("#nManual").style.display="";tc.querySelectorAll("#nMethod button").forEach(x=>x.classList.toggle("on",x.dataset.m==="manual"));}else{confirmDlg("DHCP","Switch to automatic IP (DHCP)?",async()=>{await sconf("net_method","auto");refreshSysc(rerSet);});}});
  const ap=tc.querySelector("#nApply");if(ap)ap.onclick=()=>confirmDlg("Static IP","Apply the static address? The server will change its IP and this page may stop responding — reopen it at the new address.",async()=>{await sconf("net_method","manual",{ip:tc.querySelector("#nIp").value.trim(),prefix:tc.querySelector("#nPfx").value.trim()||"24",gw:tc.querySelector("#nGw").value.trim(),dns:tc.querySelector("#nDns").value.trim()});},true);
 });}

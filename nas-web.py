@@ -478,59 +478,6 @@ def _lsblk():
         return []
 
 AUTOMOUNT_CONF = "/etc/nas-wizard/automount.conf"
-COMITUP_CONF = "/etc/comitup.conf"
-
-def comitup_state():
-    """comitup — Wi-Fi access point + captive portal for headless first-time setup.
-    Status is read from the log (comitup's D-Bus hangs), settings from the conf.
-    Not installed → {installed:false}."""
-    out = {"installed": bool(shutil.which("comitup")), "mode": None, "ssid": None,
-           "ap_name": "comitup-<nnn>", "ap_password": ""}
-    if not out["installed"]:
-        return out
-    # settings: uncommented ap_name/ap_password
-    for l in _read(COMITUP_CONF).splitlines():
-        l = l.strip()
-        if l.startswith("ap_name:"):
-            out["ap_name"] = l.split(":", 1)[1].strip()
-        elif l.startswith("ap_password:"):
-            out["ap_password"] = l.split(":", 1)[1].strip()
-    # mode/SSID from the last lines of the comitup log
-    log = _read("/var/log/comitup.log")
-    for l in reversed(log.splitlines()[-80:]):
-        if "Setting state to" in l and out["mode"] is None:
-            out["mode"] = l.rsplit("Setting state to", 1)[1].strip()
-        if "Attempting connection to" in l and out["ssid"] is None:
-            out["ssid"] = l.rsplit("Attempting connection to", 1)[1].strip()
-        if out["mode"] and out["ssid"]:
-            break
-    return out
-
-def comitup_save(ap_name, ap_password):
-    """Write the comitup access point name/password. Empty field → the line is
-    removed (back to default). Password 8–63 chars (WPA requirement) or empty (open)."""
-    if not shutil.which("comitup"):
-        return {"ok": False, "log": "comitup is not installed"}
-    ap_name = (ap_name or "").strip()
-    ap_password = (ap_password or "").strip()
-    if ap_password and not (8 <= len(ap_password) <= 63):
-        return {"ok": False, "log": "access point password: 8–63 chars (or empty)"}
-    try:
-        lines = _read(COMITUP_CONF).splitlines()
-    except Exception:
-        lines = []
-    # drop the previous (including commented-active) settings lines
-    keep = [l for l in lines if not re.match(r"^\s*(ap_name|ap_password)\s*:", l)]
-    if ap_name:
-        keep.append("ap_name: " + ap_name)
-    if ap_password:
-        keep.append("ap_password: " + ap_password)
-    try:
-        with open(COMITUP_CONF, "w") as f:
-            f.write("\n".join(keep).rstrip("\n") + "\n")
-    except OSError as e:
-        return {"ok": False, "log": str(e)}
-    return {"ok": True, "log": "saved — applies after a comitup restart or reboot"}
 
 def automount_state():
     """Automount state: whether enabled, base, user."""
@@ -14133,8 +14080,6 @@ class H(BaseHTTPRequestHandler):
                 self._json(docker_volumes())
             elif p == "/api/automount":
                 self._json(automount_state())
-            elif p == "/api/comitup":
-                self._json(comitup_state())
             elif p == "/api/sysconf":
                 self._json(sysconf())
             elif p == "/api/usb-import":
@@ -14497,9 +14442,6 @@ class H(BaseHTTPRequestHandler):
                     if target:
                         params["target"] = target
                     self._json(engine("mount-dev", params))
-            elif p == "/api/comitup/save":
-                b = self._body()
-                self._json(comitup_save(b.get("ap_name", ""), b.get("ap_password", "")))
             elif p == "/api/security/fail2ban":
                 b = self._body()
                 self._json(fail2ban_save(b.get("maxretry", 5), b.get("bantime", "1h")))
