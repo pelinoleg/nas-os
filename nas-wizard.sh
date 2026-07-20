@@ -1691,6 +1691,15 @@ zram-size = min(ram / 2, 4096)
 compression-algorithm = zstd
 EOF
             fi
+            # Switching the swap mechanism restarts dev-zram0.swap in a burst →
+            # start-limit-hit: a transient "failed" that self-heals but trips the
+            # panel's failed-unit monitor. Disable the rate limiter for this
+            # generated unit so the live switch is quiet.
+            run mkdir -p /etc/systemd/system/dev-zram0.swap.d
+            cat > /etc/systemd/system/dev-zram0.swap.d/nas-startlimit.conf <<'EOF'
+[Unit]
+StartLimitIntervalSec=0
+EOF
             run systemctl daemon-reload 2>/dev/null || true
             # apply live (best-effort; fully from the next boot).
             # reset-failed — otherwise a quick .swap restart hits start-limit and
