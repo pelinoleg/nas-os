@@ -325,6 +325,7 @@
     .set-nav{width:auto;flex:none;flex-direction:row;overflow-x:auto;overflow-y:hidden;
       border-right:none;border-bottom:1px solid var(--line);padding:8px 10px;gap:6px;-webkit-overflow-scrolling:touch}
     .set-nav button{flex:0 0 auto;width:auto;white-space:nowrap}
+    .set-nav .nav-sep{width:1px;height:22px;margin:auto 5px;flex:none}   /* horizontal bar: vertical divider */
     .set-pane{padding:16px 16px}
     /* Disks/Docker lists — compact horizontal strip on top (details get the whole screen) */
     .dm2{flex-direction:column}
@@ -381,6 +382,7 @@
       border-right:none;border-bottom:1px solid var(--line);padding:8px 10px;gap:6px;-webkit-overflow-scrolling:touch}
     .set-nav::-webkit-scrollbar{height:0}
     .set-nav button{flex:0 0 auto;width:auto;white-space:nowrap;padding:8px 13px;border-radius:999px;background:var(--sel)}
+    .set-nav .nav-sep{width:1px;height:22px;margin:auto 5px;flex:none}   /* horizontal bar: vertical divider */
     .set-nav button.on{box-shadow:inset 0 0 0 1px var(--accent-line)}
   }
   /* touch screens (tablet+phone): larger tap targets, more comfortable to press */
@@ -8468,28 +8470,35 @@ function winSettings(initTab){openWin("__set","Settings",body=>{
  body.style.display="flex";body.style.padding="0";
  let tab=initTab||"look";
  const CATS=[
+  // 1 — personalize (touched most often)
   {id:"look",name:"Appearance",ic:"cog"},
   {id:"files",name:"Files",ic:"folder"},
-  {id:"notify",name:"Notifications",ic:"bell"},
-  {id:"glance",name:"Display",ic:"monitor"},
-  {id:"tscr",name:"Touch screen",ic:"monitor"},
   {id:"nts",name:"Notes",ic:"note"},
-  {id:"system",name:"System",ic:"activity"},
-  {id:"motd",name:"SSH login message",ic:"term"},
-  {id:"maint",name:"Maintenance",ic:"heart"},
-  {id:"network",name:"Network",ic:"net"},
-  {id:"security",name:"Security",ic:"shield"},
-  {id:"usb",name:"USB import",ic:"usb"},
-  {id:"backup",name:"Settings backup",ic:"save"},
-  {id:"pi",name:"Raspberry Pi",ic:"cpu"},
+  {id:"notify",name:"Notifications",ic:"bell"},
+  {sep:1},
+  // 2 — sharing & network (the NAS's job)
   {id:"sharing",name:"Sharing (SMB)",ic:"folder"},
   {id:"timemachine",name:"Time Machine",ic:"timemachine"},
+  {id:"network",name:"Network",ic:"net"},
+  {id:"security",name:"Security",ic:"shield"},
+  {sep:1},
+  // 3 — system & hardware
+  {id:"system",name:"System",ic:"activity"},
+  {id:"pi",name:"Raspberry Pi",ic:"cpu"},
+  {id:"maint",name:"Maintenance",ic:"heart"},
+  {id:"usb",name:"USB import",ic:"usb"},
+  {id:"tscr",name:"Touch screen",ic:"monitor"},
+  {id:"glance",name:"Display",ic:"gauge"},
+  {id:"motd",name:"SSH login message",ic:"term"},
+  {sep:1},
+  // 4 — data
+  {id:"backup",name:"Settings backup",ic:"save"},
  ];
  const FN={look:lookTab,files:filesTab,notify:notifyTab,glance:glanceTab,tscr:screenTab,nts:notesTab,timemachine:timemachineTab,system:systemTab,motd:motdTab,maint:maintTab,network:networkTab,sharing:sharingTab,security:securityTab,usb:usbTab,backup:backupTab,pi:piTab};
  let footMo=null;
  const render=()=>{
   if(footMo){footMo.disconnect();footMo=null;}
-  body.innerHTML=`<div class="set-nav">${CATS.map(c=>`<button data-t="${c.id}" class="${tab===c.id?"on":""}">${svg(c.ic,17)}<span>${c.name}</span></button>`).join("")}</div>`
+  body.innerHTML=`<div class="set-nav">${CATS.map(c=>c.sep?`<div class="nav-sep"></div>`:`<button data-t="${c.id}" class="${tab===c.id?"on":""}">${svg(c.ic,17)}<span>${c.name}</span></button>`).join("")}</div>`
    +`<div class="set-main"><div class="set-pane" id="tc"></div><div class="set-foot" id="tf"></div></div>`;
   body.querySelectorAll(".set-nav button").forEach(b=>b.onclick=()=>{tab=b.dataset.t;render();});
   winSettings._render=render;
