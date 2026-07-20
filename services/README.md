@@ -10,6 +10,12 @@ Each service is a separate subfolder with a `docker-compose.yml` file
 ## Conventions (by spec)
 
 - **Pinned image tags**, NOT `latest` — to avoid catching surprise updates.
+  Tag policy (2026-07-20, all recipes converted): prefer the upstream **rolling
+  major** (`dockge:1`, `dozzle:v10`, `wud:8`) — fixes arrive, breaking majors
+  don't; when upstream publishes no rolling tag (LSIO images, myspeed,
+  nextexplorer, immich-kiosk) — pin the **exact version**; for 0.x projects pin
+  the **minor** (`zerobyte:v0.28`). WUD flags newer versions either way; refresh
+  the pins when testing recipes on each new Debian stable.
 - `restart: unless-stopped` for every service.
 - Container configs → `/opt/docker/<service>/...`
 - Large data (media, documents) → `/mnt/storage/<service>/...` (mergerfs pool).

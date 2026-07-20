@@ -253,7 +253,11 @@ docker_compose_cmd() {
     fi
 }
 
-# install_packages <label> pkg...  — idempotent; skips already installed and repo-unavailable ones
+# install_packages <label> pkg...  — idempotent; skips already installed and repo-unavailable ones.
+# Every skip is also collected into NASW_SKIPPED: a warn scrolling by in a wall of
+# apt output is as good as no warn, so stage_system_apply prints a final summary
+# (a package renamed in a future Debian release must not vanish silently).
+NASW_SKIPPED=()
 install_packages() {
     local label="$1"; shift
     local to_install=() pkg
@@ -263,6 +267,7 @@ install_packages() {
             to_install+=("$pkg")
         else
             warn "$label: package not available in the repository, skipping: $pkg"
+            NASW_SKIPPED+=("$label: $pkg")
         fi
     done
     if [ "${#to_install[@]}" -eq 0 ]; then
@@ -271,6 +276,33 @@ install_packages() {
     fi
     info "$label: installing (${#to_install[@]}): ${to_install[*]}"
     run apt-get install -y "${to_install[@]}"
+}
+
+# report_skipped_packages — one loud block at the very end of the base install,
+# where the eye lands anyway. "Pi packages" missing on non-Pi hardware is expected
+# and only mentioned in passing; anything else skipped means a feature is silently
+# absent (renamed package in a new Debian, missing repo) and deserves attention.
+# The list is persisted so the panel can surface it later if needed.
+report_skipped_packages() {
+    run mkdir -p /var/lib/nas-wizard
+    if [ "${#NASW_SKIPPED[@]}" -eq 0 ]; then
+        [ "$DRY_RUN" -eq 0 ] && : > /var/lib/nas-wizard/skipped-packages
+        return 0
+    fi
+    [ "$DRY_RUN" -eq 0 ] && printf '%s\n' "${NASW_SKIPPED[@]}" > /var/lib/nas-wizard/skipped-packages
+    local s expected=() unexpected=()
+    for s in "${NASW_SKIPPED[@]}"; do
+        case "$s" in "Pi packages: "*) expected+=("${s#*: }") ;; *) unexpected+=("$s") ;; esac
+    done
+    [ "${#expected[@]}" -gt 0 ] && info "Pi-only packages skipped (fine on non-Pi hardware): ${expected[*]}"
+    if [ "${#unexpected[@]}" -gt 0 ]; then
+        warn "==================================================================="
+        warn "${#unexpected[@]} package(s) were NOT available and were SKIPPED:"
+        for s in "${unexpected[@]}"; do warn "    $s"; done
+        warn "The features they provide are missing. Package names may have"
+        warn "changed in this OS release — check and install them manually."
+        warn "==================================================================="
+    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -3440,6 +3472,7 @@ WantedBy=timers.target
 UNIT
     run systemctl daemon-reload
     run systemctl enable --now nas-thumbs.timer
+    report_skipped_packages
     echo "system prepared"
 }
 # Mount a removable medium into the automount base (explicit action: format/mount).

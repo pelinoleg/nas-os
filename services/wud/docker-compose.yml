@@ -3,7 +3,7 @@
 # The panel finds WUD by container name and actual port — the port can be changed.
 services:
   wud:
-    image: ghcr.io/getwud/wud:latest
+    image: ghcr.io/getwud/wud:8    # rolling major: fixes arrive, breaking 9.x doesn't
     container_name: wud
     restart: unless-stopped
     labels:

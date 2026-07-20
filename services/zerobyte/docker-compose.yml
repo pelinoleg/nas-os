@@ -3,7 +3,7 @@
 # 4096 to the internet without a tunnel/auth — LAN only.
 services:
   zerobyte:
-    image: ghcr.io/nicotsx/zerobyte:latest
+    image: ghcr.io/nicotsx/zerobyte:v0.28    # 0.x project: minor may break, so pin the minor (patches arrive)
     container_name: zerobyte
     restart: unless-stopped
     devices:

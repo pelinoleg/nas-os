@@ -1,7 +1,7 @@
 # Syncthing — file sync between devices. http://<pi>:8384
 services:
   syncthing:
-    image: lscr.io/linuxserver/syncthing:latest
+    image: lscr.io/linuxserver/syncthing:2.1.2    # LSIO has no rolling major tag — exact pin, WUD flags newer
     container_name: syncthing
     hostname: syncthing
     restart: unless-stopped
@@ -27,7 +27,7 @@ services:
   # Theme = vellum-light (pick it once). Doesn't affect Syncthing's operation:
   # no hard-depends — if the clone fails, Syncthing still comes up.
   syncthing-vellum:
-    image: alpine/git:latest
+    image: alpine/git:v2.54.0    # one-shot clone helper; exact pin (no rolling tag upstream)
     container_name: syncthing-vellum
     restart: "no"
     entrypoint: /bin/sh

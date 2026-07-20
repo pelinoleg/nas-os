@@ -4,7 +4,7 @@
 # Data/scripts/snippets live next to the stack (./data ./scripts ./snippets in the Dockge folder).
 services:
   cronmaster:
-    image: ghcr.io/fccview/cronmaster:latest   # check/pin the tag after installing
+    image: ghcr.io/fccview/cronmaster:1.5.1   # exact pin: upstream's rolling "1.5" tag has a broken manifest
     container_name: cronmaster
     user: "root"
     restart: unless-stopped

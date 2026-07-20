@@ -1,7 +1,7 @@
 # Dockge — docker-compose stack manager (web UI). http://<pi>:5001
 services:
   dockge:
-    image: louislam/dockge:latest
+    image: louislam/dockge:1    # rolling major: fixes arrive, breaking 2.x doesn't
     container_name: dockge
     restart: unless-stopped
     labels:

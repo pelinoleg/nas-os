@@ -3,7 +3,7 @@
 # (docker logs qbittorrent) — change it in Settings → Web UI.
 services:
   qbittorrent:
-    image: lscr.io/linuxserver/qbittorrent:latest
+    image: lscr.io/linuxserver/qbittorrent:5.2.3    # LSIO has no rolling major tag — exact pin, WUD flags newer
     container_name: qbittorrent
     restart: unless-stopped
     labels:
