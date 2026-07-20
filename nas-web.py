@@ -385,29 +385,49 @@ def net_info():
     return info
 
 def net_speedtest():
-    """Mini download+upload speedtest via Cloudflare. Runs ~8-10 s for accuracy."""
+    """Download + upload speedtest. Download uses SEVERAL PARALLEL streams across
+    diverse servers and sums the throughput — a single stream to a single server
+    is capped by that route's bandwidth-delay product and a slow/distant test
+    server, badly underestimating the line (e.g. 3.8 vs the real ~73 Mbit/s).
+    Runs ~10 s. Cloudflare/Hetzner are avoided (often blocked in Spain — LaLiga)."""
     out = {"ok": False}
-    # --- DOWNLOAD: pull for up to ~10 s; count by what was actually downloaded (even if
-    #     the stream broke — Cloudflare may close the connection after part of the volume) ---
-    n = 0.0; t0 = time.time()
-    try:
-        # OVH (Europe) — Cloudflare in Spain is often blocked (LaLiga)
-        req = urllib.request.Request("https://proof.ovh.net/files/1Gb.dat",
-                                     headers={"User-Agent": "nas-os"})
-        with urllib.request.urlopen(req, timeout=40) as r:
-            while time.time() - t0 < 10:
-                chunk = r.read(262144)
-                if not chunk:
-                    break
-                n += len(chunk)
-    except Exception as e:
-        if n < 1000000:
-            out["log"] = ("no internet?" if "URLError" in str(type(e)) else str(e)[:100])
+    # --- DOWNLOAD: 2 streams each to 3 unblocked servers, for ~10 s, summed.
+    #     Diverse servers so one slow/dead one doesn't sink the result. ---
+    dl_urls = [
+        "http://ipv4.download.thinkbroadband.com/1GB.zip",
+        "http://ipv4.download.thinkbroadband.com/1GB.zip",
+        "https://proof.ovh.net/files/1Gb.dat",
+        "https://proof.ovh.net/files/1Gb.dat",
+        "http://speedtest.tele2.net/1000MB.zip",
+        "http://speedtest.tele2.net/1000MB.zip",
+    ]
+    counts = [0] * len(dl_urls)
+    t0 = time.time()
+    def _pull(i, url):
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "nas-os"})
+            with urllib.request.urlopen(req, timeout=8) as r:   # bound a stalled server
+                while time.time() - t0 < 10:
+                    chunk = r.read(262144)
+                    if not chunk:
+                        break
+                    counts[i] += len(chunk)     # own index — no cross-thread race
+        except Exception:
+            pass
+    ths = [threading.Thread(target=_pull, args=(i, u), daemon=True)
+           for i, u in enumerate(dl_urls)]
+    for th in ths:
+        th.start()
+    for th in ths:
+        th.join(timeout=13)
     dt = max(0.1, time.time() - t0)
+    n = sum(counts)
     if n >= 1000000:
         out["ok"] = True
         out["down_MBs"] = round(n / dt / 1048576, 1)
         out["down_mbps"] = round(n * 8 / dt / 1e6, 1)
+    else:
+        out["log"] = "download failed (no reachable test server?)"
     # --- UPLOAD: send a fixed volume, measure the time ---
     try:
         total = 60 * 1024 * 1024   # 60 MB
