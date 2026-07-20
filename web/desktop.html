@@ -2191,7 +2191,7 @@
   .smb-pd{display:flex;align-items:center;gap:8px;padding:8px 10px;border:0;background:transparent;color:var(--text);border-radius:var(--r-sm);text-align:left;font-size:13px;cursor:pointer;width:100%}
   .smb-pd:hover{background:var(--sel)}.smb-pd svg{color:var(--accent);flex:none}
   .smb-uck{display:flex;align-items:center;gap:8px;padding:6px 0;font-size:13px;color:var(--text);cursor:pointer}
-  .smb-uck input{flex:none}
+  .smb-uck input{flex:none;width:16px;height:16px;margin:0;padding:0;accent-color:var(--accent)}
   .smb-tag{font-size:10px;font-weight:700;letter-spacing:.03em;color:var(--warn);background:var(--warn-soft);padding:1px 6px;border-radius:999px;vertical-align:1px}
   .smb-pw{font-family:var(--mono);font-size:12px;color:var(--dim);letter-spacing:.02em}
   .smb-eye{border:0;background:transparent;color:var(--mut);cursor:pointer;vertical-align:-2px;padding:0 2px}
@@ -8482,11 +8482,11 @@ function winSettings(initTab){openWin("__set","Settings",body=>{
   {id:"motd",name:"SSH login message",ic:"term"},
   {id:"maint",name:"Maintenance",ic:"heart"},
   {id:"network",name:"Network",ic:"net"},
-  {id:"sharing",name:"Sharing (SMB)",ic:"folder"},
   {id:"security",name:"Security",ic:"shield"},
   {id:"usb",name:"USB import",ic:"usb"},
   {id:"backup",name:"Settings backup",ic:"save"},
   {id:"pi",name:"Raspberry Pi",ic:"cpu"},
+  {id:"sharing",name:"Sharing (SMB)",ic:"folder"},
   {id:"timemachine",name:"Time Machine",ic:"timemachine"},
  ];
  const FN={look:lookTab,files:filesTab,notify:notifyTab,glance:glanceTab,tscr:screenTab,nts:notesTab,timemachine:timemachineTab,system:systemTab,motd:motdTab,maint:maintTab,network:networkTab,sharing:sharingTab,security:securityTab,usb:usbTab,backup:backupTab,pi:piTab};
@@ -9329,6 +9329,7 @@ function screenTab(tc){
 function sharingTab(tc){
  tc.innerHTML=`<h3 class="set-title">Sharing (SMB)</h3><p class="set-sub">Shared folders for Windows, macOS and phones. Pick a folder, give it a name — done. Open shares need no user; private shares use the users below.</p><div id="smbBody"><div class="set-load">loading…</div></div>`;
  const B=()=>tc.querySelector("#smbBody"), scrim=()=>document.getElementById("scrim");
+ let primary="oleg";     // the box's human account — used as the example user name
  const load=async()=>{const d=await api("/api/smb");render(d||{});};
  /* folder picker — directories only, /api/smb/browse */
  const pickFolder=(cur,cb)=>{const s=scrim();let path=cur||"/mnt/storage";
@@ -9372,7 +9373,7 @@ function sharingTab(tc){
  const rndpw=()=>{const a="abcdefghijkmnpqrstuvwxyz23456789";let x="";for(let i=0;i<10;i++)x+=a[Math.floor(Math.random()*a.length)];return x.slice(0,4)+"-"+x.slice(4,7)+"-"+x.slice(7);};
  const userDlg=u=>{const s=scrim(),ed=!!u;
   s.innerHTML=`<div class="dialog" style="max-width:400px"><h3>${ed?"Change password":"New user"}</h3>
-   <label class="smb-l">User name</label><input id="un" ${ed?"disabled":""} placeholder="e.g. kolya">
+   <label class="smb-l">User name</label><input id="un" ${ed?"disabled":""} placeholder="e.g. ${esc(primary)}">
    <label class="smb-l">Password</label><div class="smb-pathrow"><input id="up" type="text"><button class="btn sm" id="ugen">${svg("refresh",13)} New</button></div>
    <div class="r"><button class="btn" id="ux">Cancel</button><button class="btn pri" id="uok">${ed?"Save":"Create"}</button></div></div>`;
   if(ed)s.querySelector("#un").value=u.name;
@@ -9385,6 +9386,7 @@ function sharingTab(tc){
    if(r&&r.ok){s.classList.remove("show");load();}else toast("Error: "+((r&&r.log)||"?"));};
   s.classList.add("show");};
  const render=d=>{
+  primary=d.primary||primary;
   if(!d.installed){B().innerHTML=`<div class="nt-mut" style="padding:16px 0">Samba isn't installed. Run the wizard's «Shares → Samba» step, then reopen this tab.</div>`;return;}
   const host=d.host||"nas",shares=d.shares||[],users=d.users||[];
   B().innerHTML=`<div class="set-grp">Shared folders</div><div id="shList"></div>

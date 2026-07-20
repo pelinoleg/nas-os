@@ -11550,7 +11550,12 @@ SMB_GLOBAL = (
     "   fruit:veto_appledouble = no\n"
     "   fruit:nfs_aces = no\n"
     "   fruit:wipe_intentionally_left_blank_rfork = yes\n"
-    "   fruit:delete_empty_adfiles = yes\n")
+    "   fruit:delete_empty_adfiles = yes\n"
+    # keep the browse list clean: no printer shares, no ad-hoc usershares
+    "   load printers = no\n"
+    "   printing = bsd\n"
+    "   disable spoolss = yes\n"
+    "   usershare max shares = 0\n")
 _SMB_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _.-]{0,31}$")
 _SMB_DEFAULTS = ("homes", "printers", "print$")   # Debian's own sections — never ours
 
@@ -11648,9 +11653,33 @@ def smb_write_avahi():
         "  <service>\n    <type>_smb._tcp</type>\n    <port>445</port>\n  </service>\n"
         + dev + "</service-group>\n")
 
+def _smb_disable_defaults():
+    """Comment out the Debian default shares ([homes]/[printers]/[print$]) so the
+    panel presents a clean slate: otherwise a Mac browsing the NAS shows 'nobody'
+    (the [homes] section under `map to guest = bad user`) and the printer shares,
+    even when the user has created nothing. Reversible (';' comments), idempotent."""
+    lines = _read(SMB_CONF_F).splitlines()
+    out, skip, changed = [], False, False
+    for ln in lines:
+        s = ln.strip()
+        if s.startswith("[") and s.endswith("]"):     # an ACTIVE section header
+            skip = s[1:-1].strip().lower() in ("homes", "printers", "print$")
+            if skip:
+                out.append(";" + ln); changed = True
+            else:
+                out.append(ln)
+            continue
+        if skip and s and not s.startswith(";"):
+            out.append(";" + ln); changed = True
+        else:
+            out.append(ln)                             # already-commented headers land here → left as-is
+    if changed:
+        _smb_atomic(SMB_CONF_F, "\n".join(out) + "\n")
+
 def smb_ensure():
     """Idempotent: make sure the include exists at the END of smb.conf, the
-    managed file exists, and the avahi service is in place. Safe to call anytime."""
+    managed file exists, the Debian default shares are hidden, and the avahi
+    service is in place. Safe to call anytime."""
     if not os.path.isfile(SMB_INC):
         smb_write_shares(smb_get_shares())
     conf = _read(SMB_CONF_F)
@@ -11658,6 +11687,7 @@ def smb_ensure():
         # drop any stray earlier include of our file, then append at the very end
         keep = [l for l in conf.splitlines() if l.strip() != SMB_INC_LINE]
         _smb_atomic(SMB_CONF_F, "\n".join(keep).rstrip("\n") + "\n\n" + SMB_INC_LINE + "\n")
+    _smb_disable_defaults()
     smb_write_avahi()
 
 def smb_reload():
@@ -11669,30 +11699,6 @@ def smb_reload():
         _run(["systemctl", "enable", "--now", "smbd"], timeout=30)
         _run(["systemctl", "enable", "--now", "nmbd"], timeout=20)
     return {"ok": True}
-
-def smb_migrate_storage():
-    """One-time: pull a wizard-created [storage] share out of smb.conf into the
-    managed file, so the panel can manage it. Backed up + testparm-verified;
-    reverts smb.conf if the result doesn't validate."""
-    conf = _read(SMB_CONF_F)
-    m = re.search(r"(?ms)^[ \t]*\[storage\][^\[]*", conf)
-    if not m:
-        return
-    parsed = _smb_parse(m.group(0))
-    shares = smb_get_shares()
-    if parsed and not any(s["name"].lower() == "storage" for s in shares):
-        shares.append(parsed[0])
-    bak = SMB_CONF_F + ".nas-premigrate"
-    try:
-        shutil.copy2(SMB_CONF_F, bak)
-    except OSError:
-        pass
-    smb_write_shares(shares)
-    _smb_atomic(SMB_CONF_F, conf[:m.start()] + conf[m.end():])
-    smb_ensure()
-    t = _run(["testparm", "-s"], timeout=20)
-    if "Loaded services file OK" not in t.get("log", "") and os.path.isfile(bak):
-        shutil.copy2(bak, SMB_CONF_F)          # revert — leave the box as it was
 
 def smb_users():
     pw = smb_load_pw()
@@ -11707,13 +11713,14 @@ def smb_users():
 
 def smb_overview():
     if not _smb_installed():
-        return {"ok": True, "installed": False, "shares": [], "users": [], "host": socket.gethostname()}
+        return {"ok": True, "installed": False, "shares": [], "users": [],
+                "host": socket.gethostname(), "primary": _smb_primary_user()}
     try:
         smb_ensure()
-        smb_migrate_storage()
     except OSError:
         pass
     return {"ok": True, "installed": True, "host": socket.gethostname(),
+            "primary": _smb_primary_user(),
             "running": _run(["systemctl", "is-active", "smbd"], timeout=6).get("code") == 0,
             "shares": smb_get_shares(), "users": smb_users()}
 

@@ -2259,41 +2259,14 @@ Check:
 # STAGE 7: Network shares (Samba / NFS / Avahi) to /mnt/storage
 # ---------------------------------------------------------------------------
 shares_samba() {
+    # Samba + macOS globals + Finder-icon avahi + the panel-managed include, and
+    # nothing else: shares and users are created from the panel (Settings →
+    # Sharing), so a fresh box starts with a clean, empty share list.
     install_packages "samba" samba
-    install_smb_shares          # macOS globals + Finder-icon avahi + panel-managed include
-    local user pass1 pass2 share="/mnt/storage"
-    findmnt -no TARGET "$share" >/dev/null 2>&1 || warn "$share not mounted yet (mergerfs pool) — the share will serve a local folder"
-    if ! grep -qs '^\[storage\]' /etc/samba/smb.conf; then
-        backup_file /etc/samba/smb.conf
-        user="$(ui_input "Samba" "User for share access:" "$TARGET_USER")" || return 0
-        [ -z "$user" ] && user="$TARGET_USER"
-        {
-            echo ""
-            echo "[storage]"
-            echo "   path = $share"
-            echo "   browseable = yes"
-            echo "   read only = no"
-            echo "   valid users = $user"
-            echo "   create mask = 0664"
-            echo "   directory mask = 0775"
-        } >> /etc/samba/smb.conf 2>/dev/null
-        [ "$DRY_RUN" -eq 1 ] && info "[DRY-RUN] add [storage] to /etc/samba/smb.conf for $user"
-        # Samba password
-        if [ "$DRY_RUN" -eq 0 ]; then
-            pass1="$(ui_password "Samba password" "Samba password for $user:")" || pass1=""
-            pass2="$(ui_password "Samba password" "Repeat password:")" || pass2=""
-            if [ -n "$pass1" ] && [ "$pass1" = "$pass2" ]; then
-                printf '%s\n%s\n' "$pass1" "$pass1" | smbpasswd -a -s "$user" >>"$LOG" 2>&1 && info "Samba password set for $user"
-            else
-                warn "passwords did not match / empty — set manually: sudo smbpasswd -a $user"
-            fi
-        fi
-    else
-        info "[storage] already present in smb.conf"
-    fi
+    install_smb_shares
     enable_service smbd
     systemctl list-unit-files nmbd.service >/dev/null 2>&1 && enable_service nmbd
-    info "Samba: //$(hostname)/storage"
+    info "Samba ready — create shares in the panel: Settings → Sharing (SMB)"
 }
 shares_nfs() {
     install_packages "nfs" nfs-kernel-server
@@ -2339,6 +2312,10 @@ install_smb_shares() {
    fruit:nfs_aces = no
    fruit:wipe_intentionally_left_blank_rfork = yes
    fruit:delete_empty_adfiles = yes
+   load printers = no
+   printing = bsd
+   disable spoolss = yes
+   usershare max shares = 0
 EOF
     fi
     # include at the END of smb.conf (never inside [global]; see tm_ensure_include)
@@ -2355,6 +2332,16 @@ EOF
             printf '\ninclude = %s\n' "$SMB_SHARES_INC" >> "$SMB_CONF.tmp"
             mv "$SMB_CONF.tmp" "$SMB_CONF"
         fi
+    fi
+    # hide Debian's default shares ([homes]/[printers]/[print$]) so the browse
+    # list is clean — otherwise a Mac sees 'nobody' and printer shares (reversible ';')
+    if [ "$DRY_RUN" -eq 0 ] && grep -qE '^\[(homes|printers|print\$)\]' "$SMB_CONF" 2>/dev/null; then
+        awk '
+            /^\[(homes|printers|print\$)\]/{sec=1; print ";" $0; next}
+            /^\[/{sec=0}
+            sec && $0!~/^;/ && $0!~/^[[:space:]]*$/{print ";" $0; next}
+            {print}
+        ' "$SMB_CONF" > "$SMB_CONF.tmp" && mv "$SMB_CONF.tmp" "$SMB_CONF"
     fi
     # Finder → Network icon: advertise SMB + a device model over mDNS
     write_file "$SMB_SHARES_AVAHI" <<'EOF'
