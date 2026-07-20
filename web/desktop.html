@@ -1789,7 +1789,7 @@
   .nbmain{display:flex;flex:1;min-height:0}
   .nb-del-warn{font-size:12.5px;color:var(--mut);line-height:1.55;margin:0 0 10px}
   .nb-chk{display:flex;align-items:center;gap:9px;font-size:12.5px;color:var(--text);cursor:pointer;margin:2px 0 0}
-  .nb-chk input{width:auto;margin:0}
+  .nb-chk input{width:15px!important;height:15px;flex:none;margin:0;accent-color:var(--accent)}
   /* Save bar lives in a footer OUTSIDE the scroll area, so it is always on screen.
      Tabs render it inside the pane; setFootAdopt() relocates it into .set-foot. */
   .set-main{flex:1;min-width:0;display:flex;flex-direction:column}
@@ -6560,7 +6560,7 @@ function nbPickSource(preselected,preExcl,onPick,opts){const s=document.getEleme
    refresh();})();}
 function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
  body.style.display="flex";body.style.flexDirection="column";body.style.padding="0";
- let tab="overview",CFG={},JOBS=[],PROFS=[],nbFootMo=null,wizStep=0;
+ let tab="overview",CFG={},JOBS=[],PROFS=[],nbFootMo=null,wizStep=0,wizOn=null;
  // window opened → show the profile that matters now: a running run (or one waiting
  // in the queue), otherwise the one edited/run most recently. After that the choice is the user's
  let autoPick=true;
@@ -6693,23 +6693,26 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
    :`<div class="srow-d">${w==="src"?"We copy folders from the NAS itself (pick them on the 'What to copy' tab).":"The copy lands in a folder on this NAS, usually on an external USB disk. Disk not connected means the run is safely skipped."}</div>`}
   </div>`;}
 
- function tabConn(tc){const c=CFG;
-  const both=c.both_remote;
+ /* part="sides" (wizard): only the two side cards + Check — verify and the speed
+    limit move to the wizard's late "Options" step so the first screen stays small. */
+ function tabConn(tc,part){const c=CFG;
+  const again=()=>tabConn(tc,part);
+  const both=c.both_remote,sides=part==="sides";
   tc.innerHTML=`<h3 class="set-title">Connections</h3><p class="set-sub">Where we take data from and where we put it. The two sides are independent: each can be this NAS or a remote server.</p>
    ${sideCard("src")}
    <div class="nb-arrow-row">${svg("arrowup",16)}</div>
    ${sideCard("dst")}
    ${both?`<div class="nb-dwarn">Both sides are remote. rsync cannot do that directly, so the source is mounted on this NAS (sshfs) and the data flows THROUGH it: speed is limited by its link and the traffic is counted twice.</div>`:""}
-   ${verifyRow(c)}
-   <div class="srow"><div class="srow-l"><div class="srow-t">Speed limit${tipHTML("Transfer speed limit in KB/s (rsync --bwlimit). 0 — no limit.")}</div></div><div class="srow-c"><input class="mono" id="cBw" style="max-width:90px" value="${c.bwlimit||0}"><span style="color:var(--mut);font-size:12px">KB/s</span></div></div>
+   ${sides?"":verifyRow(c)}
+   ${sides?"":`<div class="srow"><div class="srow-l"><div class="srow-t">Speed limit${tipHTML("Transfer speed limit in KB/s (rsync --bwlimit). 0 — no limit.")}</div></div><div class="srow-c"><input class="mono" id="cBw" style="max-width:90px" value="${c.bwlimit||0}"><span style="color:var(--mut);font-size:12px">KB/s</span></div></div>`}
    <div class="set-savebar"><span class="sb-left nb-saved" id="cSaved"></span><button class="btn sm" id="cTest">${svg("refresh",13)} Check</button></div>
    <div class="nb-testr" id="cTestR"></div>`;
   const g=q=>tc.querySelector(q);
   ["src","dst"].forEach(w=>{
    const S=(w==="src"?CFG.src:CFG.dst)||{};
-   wireSeg(tc,"#k_"+w,v=>saveCfg({[w]:{kind:v}}).then(()=>tabConn(tc)));
-   wireSeg(tc,"#a_"+w,v=>saveCfg({[w]:{auth:v}}).then(()=>tabConn(tc)));
-   wireSeg(tc,"#v_"+w,v=>saveCfg({[w]:{provider:v}}).then(()=>tabConn(tc)));
+   wireSeg(tc,"#k_"+w,v=>saveCfg({[w]:{kind:v}}).then(again));
+   wireSeg(tc,"#a_"+w,v=>saveCfg({[w]:{auth:v}}).then(again));
+   wireSeg(tc,"#v_"+w,v=>saveCfg({[w]:{provider:v}}).then(again));
    const h=g("#h_"+w);if(h)h.onchange=()=>saveCfg({[w]:{host:h.value.trim()}});
    const u=g("#u_"+w);if(u)u.onchange=()=>saveCfg({[w]:{user:u.value.trim()}});
    const pt=g("#p_"+w);if(pt)pt.onchange=()=>saveCfg({[w]:{port:+pt.value||22}});
@@ -6717,7 +6720,7 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
    const kg=g("#kg_"+w);if(kg)kg.onclick=async()=>{
     if((CFG.key||{}).exists&&!confirm("Recreate the key? The old one will stop working for the servers where it's already installed."))return;
     const r=await nbP("/api/backup/key",{action:"gen",force:true});
-    if(r&&r.ok){CFG.key=r;toast("Key created");tabConn(tc);}else toast((r&&r.log)||"failed");};
+    if(r&&r.ok){CFG.key=r;toast("Key created");again();}else toast((r&&r.log)||"failed");};
    const kc=g("#kc_"+w);if(kc)kc.onclick=()=>{const t=g("#pub_"+w);if(navigator.clipboard)navigator.clipboard.writeText(t.value);toast("Copied");};
    const kp=g("#kp_"+w);if(kp)kp.onclick=async()=>{toast("Installing the key on the server…");
     const r=await nbP("/api/backup/key",{action:"install",side:w});
@@ -7281,7 +7284,7 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
  const TABS={overview:tabOverview,conn:tabConn,sources:tabSources,deleted:tabDeleted,sched:tabSched,compare:tabCompare,history:tabHistory};
  /* ── profiles: tab bar ── */
  const curProf=()=>PROFS.find(x=>x.id===NB_PID)||PROFS[0]||{};
- const switchTo=id=>{if(id===NB_PID)return;NB_PID=id;tab="overview";nbCursor=0;nbStarted=null;wizStep=0;render();};
+ const switchTo=id=>{if(id===NB_PID)return;NB_PID=id;tab="overview";nbCursor=0;nbStarted=null;wizStep=0;wizOn=null;render();};
 
  const addDlg=()=>{const s=document.getElementById("scrim"),src=curProf();
   s.innerHTML=`<div class="dialog"><h3>New backup</h3>
@@ -7363,10 +7366,17 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
  const WSTEPS=()=>{const a=[{id:"conn",n:"Connection"}];
   if(isPush())a.push({id:"dest",n:"Where to"},{id:"folders",n:"What to copy"});
   else a.push({id:"folders",n:"What to copy"},{id:"dest",n:"Where to"});
-  a.push({id:"excl",n:"Exclusions"},{id:"deleted",n:"Deleted files"},{id:"sched",n:"Schedule"},{id:"done",n:"Finish"});
+  a.push({id:"excl",n:"Exclusions"},{id:"deleted",n:"Deleted files"},{id:"sched",n:"Schedule"},{id:"opts",n:"Options"},{id:"done",n:"Finish"});
   return a;};
- const WPANE={conn:tc=>TABS.conn(tc),folders:tc=>tabSources(tc,"folders"),dest:tc=>tabSources(tc,"dest"),
-  excl:tc=>tabSources(tc,"excl"),deleted:tc=>TABS.deleted(tc),sched:tc=>TABS.sched(tc)};
+ // verify + speed limit: late, optional fine-tuning — not on the connection screen
+ const wizOpts=tc=>{const c=CFG;
+  tc.innerHTML=`<h3 class="set-title">Options</h3><p class="set-sub">Both are optional — safe to leave as they are (changeable later on the Connection tab).</p>
+   ${verifyRow(c)}
+   <div class="srow"><div class="srow-l"><div class="srow-t">Speed limit${tipHTML("Transfer speed limit in KB/s (rsync --bwlimit) so the backup doesn't hog the network and disk. 0 — no limit.")}</div><div class="srow-d">so it doesn't hog the network/disk</div></div><div class="srow-c"><input class="mono" id="cBw" style="max-width:90px" value="${c.bwlimit||0}"><span style="color:var(--mut);font-size:12px">KB/s</span></div></div>`;
+  wireVerify(tc);
+  const bw=tc.querySelector("#cBw");if(bw)bw.onchange=()=>saveCfg({bwlimit:+bw.value||0});};
+ const WPANE={conn:tc=>tabConn(tc,"sides"),folders:tc=>tabSources(tc,"folders"),dest:tc=>tabSources(tc,"dest"),
+  excl:tc=>tabSources(tc,"excl"),deleted:tc=>TABS.deleted(tc),sched:tc=>TABS.sched(tc),opts:wizOpts};
  function renderWizDone(tc){const c=CFG,push=isPush();
   const ep=push?(isPushSsh()?(c.host?c.user+"@"+c.host+":"+(c.dest_base||"?"):"not set"):(c.dest_base||"not selected"))
               :(c.host?c.user+"@"+c.host:"not set");
@@ -7393,16 +7403,18 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
   const tc=body.querySelector("#tc");
   if(cur==="done")renderWizDone(tc);else WPANE[cur](tc);
   body.querySelector("#wzBack").onclick=()=>{if(wizStep){wizStep--;render();}};
-  body.querySelector("#wzSkip").onclick=async()=>{await saveCfg({setup_done:true});render();};
+  body.querySelector("#wzSkip").onclick=async()=>{wizOn=false;await saveCfg({setup_done:true});render();};
   body.querySelector("#wzNext").onclick=async()=>{
    if(cur==="conn"&&!connOk()){toast("Set up the connection first — or press «Set up later»");return;}
    if(cur==="folders"&&!JOBS.length){toast("Choose at least one folder to copy");return;}
    if(cur==="dest"&&isPush()&&!CFG.dest_base){toast("Choose the destination folder first");return;}
-   if(cur==="done"){await saveCfg({setup_done:true});tab="overview";SET.nbTab=tab;saveSettings();render();return;}
+   if(cur==="done"){wizOn=false;await saveCfg({setup_done:true});tab="overview";SET.nbTab=tab;saveSettings();render();return;}
    wizStep++;render();};}
  const render=async()=>{const r=await nbG("/api/backup/config");
   CFG=(r&&r.config)||{};JOBS=(CFG.jobs||[]).slice();
   PROFS=(r&&r.profiles)||[];NB_PID=(r&&r.profile)||NB_PID;
+  // any profile change (switch, add, delete) re-decides the wizard for THAT profile
+  if(win._nbPid!==NB_PID){win._nbPid=NB_PID;wizOn=null;wizStep=0;}
   if(autoPick){autoPick=false;
    const act=PROFS.find(p=>p.running)||PROFS.find(p=>p.queued);
    const touched=p=>Math.max(p.saved||0,p.last_run||0);
@@ -7410,9 +7422,14 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
    const want=((act||last)||{}).id;
    if(want&&want!==NB_PID){NB_PID=want;tab="overview";nbCursor=0;nbStarted=null;return render();}}
   if(nbFootMo){nbFootMo.disconnect();nbFootMo=null;}
-  // a profile that has neither a connection nor folders and never finished the
-  // wizard gets the wizard instead of the tabs
-  if(!CFG.setup_done&&!(connOk()&&JOBS.length)){renderWizard();return;}
+  // The wizard decision is STICKY for the session (wizOn), decided once per
+  // profile: a fresh profile enters the wizard and STAYS in it until Finish or
+  // "Set up later" — completing a step must not silently eject to the tabs
+  // (it did: Next re-evaluated "is it configured now?" and bailed out).
+  if(wizOn===null)wizOn=!CFG.setup_done&&!(connOk()&&JOBS.length);
+  if(wizOn){renderWizard();return;}
+  // pre-wizard profiles are already configured — mark them so the flag settles
+  if(!CFG.setup_done&&connOk()&&JOBS.length)saveCfg({setup_done:true});
   // "Delete profile" deliberately NOT in the nav: destructive actions live in the
   // profile tab's context menu, not next to everyday navigation
   body.innerHTML=`<div class="nbtabs" id="nbTabs"></div>
