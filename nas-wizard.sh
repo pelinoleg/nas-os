@@ -55,7 +55,8 @@ UTIL_PACKAGES=(
   eject              # soft media ejection after USB import (power-off kills the whole reader)
   iputils-arping     # nas-netguard: fallback gateway check when it stays silent on ICMP
   curl wget ca-certificates gnupg
-  git rsync sshpass
+  git rsync sshpass openssh-client
+  avahi-daemon libnss-mdns   # <host>.local resolution + SMB/Time Machine advertisement (RaspiOS ships it, plain Debian doesn't)
   vim nano
   htop iotop
   tmux screen
@@ -3351,6 +3352,21 @@ stage_system_apply() {
     # Time Machine target: rebuild the SMB share + Avahi advert if it was configured
     # before (settings backup restores /etc/nas-wizard/timemachine.conf).
     tm_reapply_if_configured
+    # Discovery + file sharing ready out of the box: avahi (so <host>.local resolves
+    # and the NAS shows up in Finder → Network) + Samba with macOS-friendly globals.
+    # Zero shares are created — the user adds them in the panel (Settings → Sharing).
+    enable_service avahi-daemon
+    install_smb_shares
+    # SATA / USB-SATA drive temperatures come from the drivetemp hwmon module (NVMe
+    # reports temp without it); load it now and on every boot.
+    write_file /etc/modules-load.d/nas-drivetemp.conf <<'EOF'
+# NAS-OS: expose SATA/USB-SATA drive temperatures via hwmon
+drivetemp
+EOF
+    modprobe drivetemp 2>/dev/null || true
+    # Shell-agent notifications (panel API → Pushover fallback) + the SSH login greeting.
+    install_notify_helper
+    install_motd
     id -nG "$TARGET_USER" 2>/dev/null | tr ' ' '\n' | grep -qx docker || run usermod -aG docker "$TARGET_USER"
     run mkdir -p "$STORAGE_MNT" "$DOCKER_ROOT" "$SERVICES_SRC"
     if [ ! -d "$NAS_CONFIG" ]; then run mkdir -p "$NAS_CONFIG/scripts"; run chown -R "$TARGET_USER:$TARGET_USER" "$NAS_CONFIG"; fi
