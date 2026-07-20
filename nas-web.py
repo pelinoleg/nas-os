@@ -11584,6 +11584,22 @@ def _smb_primary_user():
         pass
     return "root"
 
+def _smb_start_dir():
+    """Where the folder picker opens by default. Works pool or no-pool: the actual
+    storage root (mergerfs pool OR the chosen external disk via storage_root()),
+    else the box's home dir — never a hardcoded /mnt/storage that may not exist."""
+    r = storage_root()
+    if r and os.path.isdir(r):
+        return r
+    try:
+        import pwd
+        d = pwd.getpwnam(_smb_primary_user()).pw_dir
+        if d and os.path.isdir(d):
+            return d
+    except Exception:
+        pass
+    return "/root" if os.path.isdir("/root") else "/"
+
 def smb_load_pw():
     return _json_load_strict(SMB_PW, {})
 
@@ -11714,13 +11730,14 @@ def smb_users():
 def smb_overview():
     if not _smb_installed():
         return {"ok": True, "installed": False, "shares": [], "users": [],
-                "host": socket.gethostname(), "primary": _smb_primary_user()}
+                "host": socket.gethostname(), "primary": _smb_primary_user(),
+                "start": _smb_start_dir()}
     try:
         smb_ensure()
     except OSError:
         pass
     return {"ok": True, "installed": True, "host": socket.gethostname(),
-            "primary": _smb_primary_user(),
+            "primary": _smb_primary_user(), "start": _smb_start_dir(),
             "running": _run(["systemctl", "is-active", "smbd"], timeout=6).get("code") == 0,
             "shares": smb_get_shares(), "users": smb_users()}
 
@@ -11812,22 +11829,6 @@ def smb_user_del(name):
     if changed:
         smb_write_shares(shares); smb_reload()
     return {"ok": True, "users": smb_users(), "shares": smb_get_shares()}
-
-def smb_browse(path):
-    """Directory-only listing for the share folder picker (path='' → root)."""
-    path = "/" + str(path or "").strip().lstrip("/")
-    if ".." in path:
-        return {"ok": False, "log": "bad path"}
-    try:
-        ents = []
-        for nm in sorted(os.listdir(path)):
-            fp = os.path.join(path, nm)
-            if nm.startswith(".") or not os.path.isdir(fp):
-                continue
-            ents.append({"name": nm, "path": fp.rstrip("/")})
-    except OSError as e:
-        return {"ok": False, "log": str(e)}
-    return {"ok": True, "path": path.rstrip("/") or "/", "dirs": ents}
 
 USB_IMPORT_CONF = "/etc/nas-wizard/usb-import.conf"
 USB_IMPORT_SH   = "/usr/local/bin/nas-usb-import.sh"
@@ -14138,8 +14139,6 @@ class H(BaseHTTPRequestHandler):
                 self._json({"config": motd_load(), "preview": motd_preview()})
             elif p == "/api/smb":
                 self._json(smb_overview())
-            elif p == "/api/smb/browse":
-                self._json(smb_browse((q.get("path") or [""])[0]))
             elif p == "/api/usb-import/progress":
                 self._json(usb_import_progress())
             elif p == "/api/ops":

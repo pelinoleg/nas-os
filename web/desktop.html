@@ -2186,10 +2186,6 @@
   .smb-l+input,.smb-pathrow input{width:100%}
   .smb-pathrow{display:flex;gap:8px}.smb-pathrow input{flex:1;min-width:0}
   .smb-pathrow .btn{flex:none}
-  .smb-crumb{font-family:var(--mono);font-size:12px;background:var(--code-bg);color:var(--code-fg);padding:8px 10px;border-radius:var(--r-sm);margin-bottom:8px;overflow:auto;white-space:nowrap}
-  .smb-picklist{max-height:240px;overflow:auto;display:flex;flex-direction:column;gap:2px;margin-bottom:12px}
-  .smb-pd{display:flex;align-items:center;gap:8px;padding:8px 10px;border:0;background:transparent;color:var(--text);border-radius:var(--r-sm);text-align:left;font-size:13px;cursor:pointer;width:100%}
-  .smb-pd:hover{background:var(--sel)}.smb-pd svg{color:var(--accent);flex:none}
   .smb-uck{display:flex;align-items:center;gap:8px;padding:6px 0;font-size:13px;color:var(--text);cursor:pointer}
   .smb-uck input{flex:none;width:16px;height:16px;margin:0;padding:0;accent-color:var(--accent)}
   .smb-tag{font-size:10px;font-weight:700;letter-spacing:.03em;color:var(--warn);background:var(--warn-soft);padding:1px 6px;border-radius:999px;vertical-align:1px}
@@ -9330,20 +9326,8 @@ function sharingTab(tc){
  tc.innerHTML=`<h3 class="set-title">Sharing (SMB)</h3><p class="set-sub">Shared folders for Windows, macOS and phones. Pick a folder, give it a name — done. Open shares need no user; private shares use the users below.</p><div id="smbBody"><div class="set-load">loading…</div></div>`;
  const B=()=>tc.querySelector("#smbBody"), scrim=()=>document.getElementById("scrim");
  let primary="oleg";     // the box's human account — used as the example user name
+ let start="";           // default picker folder: storage root (pool OR external disk) else home
  const load=async()=>{const d=await api("/api/smb");render(d||{});};
- /* folder picker — directories only, /api/smb/browse */
- const pickFolder=(cur,cb)=>{const s=scrim();let path=cur||"/mnt/storage";
-  const draw=async()=>{const r=await api("/api/smb/browse?path="+encodeURIComponent(path));
-   const dirs=(r&&r.dirs)||[],at=(r&&r.path)||"/";path=at;
-   s.innerHTML=`<div class="dialog" style="max-width:460px"><h3>Pick a folder</h3><div class="smb-crumb"></div>
-    <div class="smb-picklist">${at!=="/"?`<button class="smb-pd" data-p="${att(at.replace(/\/[^/]*$/,"")||"/")}">${svg("folder",15)} ..</button>`:""}${dirs.map(x=>`<button class="smb-pd" data-p="${att(x.path)}">${svg("folder",15)} <span></span></button>`).join("")||`<div class="nt-mut" style="padding:10px">no subfolders here</div>`}</div>
-    <div class="r"><button class="btn" id="pkx">Cancel</button><button class="btn pri" id="pkok">Use this folder</button></div></div>`;
-   s.querySelector(".smb-crumb").textContent=at;
-   const named=[...s.querySelectorAll(".smb-pd span")];named.forEach((el,i)=>el.textContent=dirs[i].name);
-   s.querySelectorAll(".smb-pd").forEach(b=>b.onclick=()=>{path=b.dataset.p;draw();});
-   s.querySelector("#pkx").onclick=()=>s.classList.remove("show");
-   s.querySelector("#pkok").onclick=()=>{s.classList.remove("show");cb(at);};};
-  s.classList.add("show");draw();};
  /* share add/edit */
  const shareDlg=(sh,users)=>{const s=scrim(),ed=!!sh;sh=sh||{name:"",path:"",guest:false,users:[],readonly:false};
   let path=sh.path,guest=!!sh.guest,sel=new Set(sh.users||[]),ro=!!sh.readonly;
@@ -9359,7 +9343,7 @@ function sharingTab(tc){
    if(!ed)s.querySelector("#shn").value="";else s.querySelector("#shn").value=sh.name;
    s.querySelector("#shp").value=path;
    s.querySelectorAll("#shusers .smb-uck").forEach((lab,i)=>{const u=users[i];lab.querySelector("span").textContent=u.name;const c=lab.querySelector("input");c.checked=sel.has(u.name);c.onchange=()=>{c.checked?sel.add(u.name):sel.delete(u.name);};});
-   s.querySelector("#shpick").onclick=()=>pickFolder(path,p=>{path=p;s.querySelector("#shp").value=p;});
+   s.querySelector("#shpick").onclick=()=>pickFolder({title:"Share folder",start:path||start||HOME_DIR,onPick:p=>{path=p;s.querySelector("#shp").value=p;}});
    s.querySelectorAll("#shacc button").forEach(b=>b.onclick=()=>{guest=b.dataset.g==="1";draw();});
    s.querySelector("#shro").onchange=e=>ro=e.target.checked;
    s.querySelector("#shx").onclick=()=>s.classList.remove("show");
@@ -9386,7 +9370,7 @@ function sharingTab(tc){
    if(r&&r.ok){s.classList.remove("show");load();}else toast("Error: "+((r&&r.log)||"?"));};
   s.classList.add("show");};
  const render=d=>{
-  primary=d.primary||primary;
+  primary=d.primary||primary;start=d.start||start;
   if(!d.installed){B().innerHTML=`<div class="nt-mut" style="padding:16px 0">Samba isn't installed. Run the wizard's «Shares → Samba» step, then reopen this tab.</div>`;return;}
   const host=d.host||"nas",shares=d.shares||[],users=d.users||[];
   B().innerHTML=`<div class="set-grp">Shared folders</div><div id="shList"></div>
