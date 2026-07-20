@@ -1417,8 +1417,10 @@
   .iconbtn.pri{color:var(--accent);background:var(--accent-soft)}
   /* favorites sidebar */
   .fm-fav{width:190px;flex:none;display:flex;flex-direction:column;border-right:1px solid var(--line);margin-right:12px;padding-right:10px}
-  .fm-filters{display:flex;gap:8px;align-items:center;padding:2px 0 6px;flex-wrap:wrap}
-  .fm-filters select{background:var(--card);color:var(--text);border:1px solid var(--line);border-radius:var(--r-sm);padding:4px 8px;font-size:12px;font-family:inherit}
+  .fm-filters{display:flex;gap:6px;align-items:center;padding:2px 0 6px;flex-wrap:wrap}
+  /* the global input/select rule is width:100% — compact chips here, not full-width bars */
+  .fm-filters select{width:auto!important;background:var(--card);color:var(--text);border:1px solid var(--line);border-radius:999px;padding:3px 8px!important;font-size:11.5px;font-family:inherit}
+  .fm-filters .btn{padding:3px 10px}
   .fm.fav-hidden .fm-fav{display:none}
   .fm-fav-h{display:flex;align-items:center;justify-content:space-between;font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--mut);font-family:var(--mono);margin-bottom:6px;padding:2px 4px}
   .fm-fav-h .iconbtn{padding:1px 7px;font-size:15px;line-height:1}
@@ -5510,7 +5512,10 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
  let lastSig="";
  async function load(d){const r=await api("/api/fs/list?path="+encodeURIComponent(d));
    if(!r||!r.ok){toast((r&&r.log)||"access denied");return;}
-   cwd=r.path;tabs[tabI]=r.path;entries=r.entries||[];searchRes=null;sel.clear();filt="";lastIdx=-1;volFree=(r.free!=null)?r.free:null;
+   // sshfs mounts report the REMOTE fs via statvfs and often lie (rsync.net quotas,
+   // allow_other) — free space there is noise, hide it
+   const remFree=r.path==="/mnt/remote"||r.path.startsWith("/mnt/remote/");
+   cwd=r.path;tabs[tabI]=r.path;entries=r.entries||[];searchRes=null;sel.clear();filt="";lastIdx=-1;volFree=(r.free!=null&&!remFree)?r.free:null;
    lastSig=dirSig(entries);
    const si=body.querySelector("#fSearch");if(si)si.value="";
    cursor=-1;renderTabs();renderCrumb();renderFav();renderVols();renderRemotes(false);
@@ -5535,7 +5540,8 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    if(!r||!r.ok||cwd!==dir)return;                          // managed to move to another folder
    const sig=dirSig(r.entries);
    if(sig===lastSig)return;
-   lastSig=sig;entries=r.entries||[];if(r.free!=null)volFree=r.free;
+   lastSig=sig;entries=r.entries||[];
+   if(r.free!=null&&!(cwd==="/mnt/remote"||cwd.startsWith("/mnt/remote/")))volFree=r.free;
    const top=listBox.scrollTop;
    [...sel].forEach(p=>{if(!entries.some(e=>e.path===p))sel.delete(p);});  // drop deleted items from the selection
    renderList();selUpdate();listBox.scrollTop=top;}
