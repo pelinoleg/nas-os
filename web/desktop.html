@@ -907,6 +907,8 @@
   .nb-trow>svg{flex:none;color:var(--accent-2)}
   .nb-job{position:relative;display:flex;align-items:center;gap:8px;padding:7px 0;border-top:1px solid var(--line);font-size:12px}
   .nb-job:first-child{border-top:none}
+  .nb-job .nb-jgo{flex:none;opacity:.4;padding:2px 5px}
+  .nb-job:hover .nb-jgo{opacity:1}
   /* fill bar right in the folder row while it's copying */
   .nb-job>.nb-rowbar{position:absolute;left:0;bottom:0;height:2px;background:var(--accent);opacity:.6;border-radius:999px;transition:width .5s}
   .nb-src{flex:none;max-width:38%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--accent)}
@@ -7108,7 +7110,12 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
     else{dot="var(--mut)";tip="This folder has never been copied — run the backup.";}
     const vb=r&&(r.verify_err?`<span class="nb-warn wrn" title="The checksum verification could not finish — see the log.">verification failed</span>`:r.verify_bad?`<span class="nb-warn dng" title="Contents of ${r.verify_bad} file(s) differ from the source — see the run log.">≠ ${r.verify_bad}</span>`:"")||"";
     const srcT=(push?"/":"")+j.src;
-    jn.appendChild(el(`<div class="nb-job" data-src="${att(j.src)}"><span class="ovh-dot" style="background:${dot};flex:none" title="${att(tip)}"></span><span class="nb-src mono" title="${att(srcT)}">${esc(srcT)}</span><span class="nb-arr">→</span><span class="nb-dst mono" title="${att(j.dest)}">${esc(j.dest)}</span>${badge}${vb}${r&&r.size&&!gone?`<span class="nb-sz mono">${fmtB(r.size)}</span>`:""}</div>`));});
+    // "open and see for yourself": the local end of the pipe — pull/push-to-disk
+    // opens the destination, push-over-ssh opens the local source
+    const localPath=push?(isPushSsh()?"/"+j.src:j.dest):j.dest;
+    const row=el(`<div class="nb-job" data-src="${att(j.src)}"><span class="ovh-dot" style="background:${dot};flex:none" title="${att(tip)}"></span><span class="nb-src mono" title="${att(srcT)}">${esc(srcT)}</span><span class="nb-arr">→</span><span class="nb-dst mono" title="${att(j.dest)}">${esc(j.dest)}</span><button class="iconbtn nb-jgo" title="${att("Open in Files: "+localPath)}">${svg("folder",13)}</button>${badge}${vb}${r&&r.size&&!gone?`<span class="nb-sz mono">${fmtB(r.size)}</span>`:""}</div>`);
+    row.querySelector(".nb-jgo").onclick=()=>winFiles(localPath);
+    jn.appendChild(row);});
    // destination warning + "Destination" line in the summary
    const rd=g("#oRecvDot"),rv=g("#oRecvV"),dw=g("#oDwarn");
    const notMnt=ds&&ds.base_mounted===false;
