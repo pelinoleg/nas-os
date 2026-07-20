@@ -230,8 +230,8 @@ function chk(id,t,d,on,ic){return `<label class="opt ${on?"on":""}"><span class=
 function keys(box){return [...box.querySelectorAll("[data-k]:checked")].map(x=>x.dataset.k).join(" ");}
 
 const R={
- system(p){p.innerHTML=head("Step 1","System preparation","Updates and installation of Cockpit, Docker, mergerfs, SnapRAID and utilities. Anything already installed is skipped.")+
-  `<div class="card"><div class="opt on"><span class="ic">${svg("cpu",16)}</span><span class="m"><span class="t">NAS stack + utilities + Pi packages</span><span class="d">cockpit · docker · mergerfs · snapraid · smartmontools · nvme-cli · htop · git · …</span></span></div></div>
+ system(p){p.innerHTML=head("Step 1","System preparation","Updates and installation of Docker, mergerfs, SnapRAID and utilities. Anything already installed is skipped.")+
+  `<div class="card"><div class="opt on"><span class="ic">${svg("cpu",16)}</span><span class="m"><span class="t">NAS stack + utilities + Pi packages</span><span class="d">docker · mergerfs · snapraid · smartmontools · nvme-cli · htop · git · …</span></span></div></div>
    <div class="actions"><button class="btn pri" id="go">Install</button></div><div class="console" id="con"></div>`;
   p.querySelector("#go").onclick=()=>run("system");},
  disks(p){p.innerHTML=head("Step 2","Disks","Choose a free disk, its role and filesystem. Formatting requires typing the device path manually. The system disk is excluded.")+`<div id="dl"></div><div class="console" id="con"></div>`;
@@ -272,8 +272,8 @@ const R={
   `<div class="card" id="box">${chk("samba","Samba (SMB)","Windows, Mac, phone",true,"share")}${chk("nfs","NFS","Linux clients",false,"share")}${chk("avahi","Avahi/mDNS","<host>.local",true,"net")}</div>
    <div class="actions"><button class="btn pri" id="go">Apply</button></div><div class="console" id="con"></div>`;
   p.querySelector("#go").onclick=()=>run("shares",{keys:keys(p.querySelector("#box"))});},
- security(p){p.innerHTML=head("Step 7","Security","Sensible defaults. The firewall opens SSH and Cockpit before enabling; key-only login only if keys exist.")+
-  `<div class="card" id="box">${chk("unattended","Automatic security updates","unattended-upgrades",true,"shield")}${chk("ufw","Firewall ufw","SSH, Cockpit, shares",false,"shield")}${chk("fail2ban","fail2ban","SSH protection",false,"shield")}${chk("journald","200M journal limit","less SD wear",true,"save")}${chk("log2ram","log2ram","logs in RAM",false,"save")}</div>
+ security(p){p.innerHTML=head("Step 7","Security","Sensible defaults. The firewall opens SSH before enabling; key-only login only if keys exist.")+
+  `<div class="card" id="box">${chk("unattended","Automatic security updates","unattended-upgrades",true,"shield")}${chk("ufw","Firewall ufw","SSH, shares",false,"shield")}${chk("fail2ban","fail2ban","SSH protection",false,"shield")}${chk("journald","200M journal limit","less SD wear",true,"save")}${chk("log2ram","log2ram","logs in RAM",false,"save")}</div>
    <div class="actions"><button class="btn pri" id="go">Apply</button></div><div class="console" id="con"></div>`;
   p.querySelector("#go").onclick=()=>run("security",{keys:keys(p.querySelector("#box"))});},
  tuning(p){p.innerHTML=head("Step 8","Raspberry Pi tuning","Hardware tweaks. config.txt changes take effect after a reboot.")+
@@ -294,7 +294,6 @@ const R={
   `<div class="card">
    <div class="opt"><span class="ic">${svg("net",16)}</span><span class="m"><span class="t">comitup</span><span class="d">Wi-Fi access point for entering network details on a fresh system</span></span><button class="btn sm" data-a="comitup">Install</button></div>
    <div class="opt"><span class="ic">${svg("shield",16)}</span><span class="m"><span class="t">Tailscale</span><span class="d">secure remote access without port forwarding</span></span><button class="btn sm" data-a="tailscale">Install</button></div>
-   <div class="opt"><span class="ic">${svg("cube",16)}</span><span class="m"><span class="t">Cockpit GUI modules</span><span class="d">manage shares and files with the mouse</span></span><button class="btn sm" data-a="cockpit-gui">Install</button></div>
    </div><div class="console" id="con"></div>`;
   p.querySelectorAll("[data-a]").forEach(b=>b.onclick=()=>run(b.dataset.a));},
 };
@@ -334,7 +333,7 @@ try{applyDeskTheme(JSON.parse(localStorage.getItem("nasdesk")||"{}"));}catch(e){
  try{st=raw&&typeof raw.log==="string"?JSON.parse(raw.log):raw;}catch(e){st=null;}
  if(st&&st.host){STATE=st;document.getElementById("hostlbl").textContent=st.host+" · "+(st.iface||"");
    // show what's already installed/configured as done (checkmarks in the step list)
-   DONE.system=!!(STATE.docker&&STATE.cockpit);
+   DONE.system=!!STATE.docker;
    DONE.disks=(STATE.data_disks||0)>0;
    DONE.mergerfs=!!STATE.pool;
    DONE.snapraid=!!STATE.snapraid;

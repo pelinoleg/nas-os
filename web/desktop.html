@@ -2477,8 +2477,6 @@ const AP={
 const appIcon=(n,s=22)=>AP[n]?`<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="currentColor" stroke="none">${AP[n]}</svg>`:svg(n,s);
 
 /* catalog */
-/* Cockpit — the only system service with a fixed port (not a docker container) */
-const cockpitURL=()=>`https://${host()}:9090`;
 /* tile color for a label shortcut: deterministic by name */
 const TILECOLORS=["#34C6BE","#4C8DF6","#8A7DFF","#46B98A","#E0913C","#E5544E","#3b9ff2","#E05AB4"];
 const tileColor=n=>{let h=0;for(let i=0;i<(n||"").length;i++)h=(h*31+n.charCodeAt(i))>>>0;return TILECOLORS[h%TILECOLORS.length];};
@@ -2833,12 +2831,12 @@ const MOCK={
    {name:"nvme0n1",path:"/dev/nvme0n1",size:"931.5G",model:"Samsung SSD 970 EVO Plus 1TB",tran:"nvme",role:"data",mount:"/mnt/disk1",usage:{pct:0.3,total:1000000000000,used:3200000000},smart:{temp:41,healthy:true,hours:120}},
    {name:"sda",path:"/dev/sda",size:"3.6T",model:"WD Elements 4TB",tran:"usb",role:"parity",mount:"/mnt/parity1",usage:{pct:0.1,total:4000000000000,used:4000000000},smart:{temp:38,healthy:true,hours:60}},
    {name:"mmcblk0",path:"/dev/mmcblk0",size:"59.6G",model:"SD",tran:"mmc",role:"system",mount:"/boot/firmware",usage:{pct:15,total:59000000000,used:8800000000},smart:null}]},
- creds:{creds:[{service:"Cockpit",url:"https://nas.local:9090",login:"admin",pass:"·system·"},
+ creds:{creds:[
    {service:"Syncthing",url:"http://nas.local:8384",login:"admin",pass:"sync-9f2a"},
    {service:"NextExplorer",url:"http://nas.local:3000",login:"admin@example.com",pass:"NX-secret-01"}]},
  settings:{settings:{}},files:{files:[]},disk:{ok:false,log:"SMART available as root (demo mode)"},
- processes:{ncpu:4,count:166,processes:[{pid:3173,name:"claude",cmd:"claude",user:"nas",cpu:11.8,mem:7.1,rss:600000000},{pid:9176,name:"python3",cmd:"nas-web.py",user:"nas",cpu:7.8,mem:0.3,rss:26000000},{pid:512,name:"dockerd",cmd:"/usr/bin/dockerd",user:"root",cpu:1.2,mem:2.1,rss:180000000},{pid:640,name:"cockpit-ws",cmd:"cockpit-ws",user:"root",cpu:0.4,mem:1.1,rss:42000000},{pid:1,name:"systemd",cmd:"/sbin/init",user:"root",cpu:0,mem:0.2,rss:12000000}]},
- systemd:{units:[{unit:"docker.service",load:"loaded",active:"active",sub:"running",desc:"Docker Application Container Engine"},{unit:"cockpit.socket",load:"loaded",active:"active",sub:"listening",desc:"Cockpit Web Service Socket"},{unit:"smartd.service",load:"loaded",active:"active",sub:"running",desc:"SMART Daemon"},{unit:"ssh.service",load:"loaded",active:"active",sub:"running",desc:"OpenBSD Secure Shell server"},{unit:"snapraid-sync.timer",load:"loaded",active:"active",sub:"waiting",desc:"Daily SnapRAID sync"}]},
+ processes:{ncpu:4,count:166,processes:[{pid:3173,name:"claude",cmd:"claude",user:"nas",cpu:11.8,mem:7.1,rss:600000000},{pid:9176,name:"python3",cmd:"nas-web.py",user:"nas",cpu:7.8,mem:0.3,rss:26000000},{pid:512,name:"dockerd",cmd:"/usr/bin/dockerd",user:"root",cpu:1.2,mem:2.1,rss:180000000},{pid:1,name:"systemd",cmd:"/sbin/init",user:"root",cpu:0,mem:0.2,rss:12000000}]},
+ systemd:{units:[{unit:"docker.service",load:"loaded",active:"active",sub:"running",desc:"Docker Application Container Engine"},{unit:"smartd.service",load:"loaded",active:"active",sub:"running",desc:"SMART Daemon"},{unit:"ssh.service",load:"loaded",active:"active",sub:"running",desc:"OpenBSD Secure Shell server"},{unit:"snapraid-sync.timer",load:"loaded",active:"active",sub:"waiting",desc:"Daily SnapRAID sync"}]},
 };
 let LIVE=false;
 async function api(path,opts){
@@ -3053,7 +3051,7 @@ function focus(w){for(const k in OPEN)OPEN[k].classList.toggle("wfocus",OPEN[k]=
 function focusTop(){let top=null,tz=-1;for(const k in OPEN){const el=OPEN[k];if(el.style.display==="none")continue;const z=+el.style.zIndex||0;if(z>tz){tz=z;top=el;}}if(top)top.classList.add("wfocus");renderWinbar();}
 function closeW(id){const w=OPEN[id];if(w){persistWin(w);try{w._term&&w._term.dispose&&w._term.dispose();}catch(e){}try{w._term&&w._term.ws&&w._term.ws.close();}catch(e){}try{clearInterval(w._pi);}catch(e){}w.remove();delete OPEN[id];focusTop();renderDock();renderWinbar();renderPhoneNav();}}
 /* taskbar of open windows (top panel) + Exposé */
-function winMeta(){const m={};INTERNAL.forEach(a=>m[a.id]={ic:a.ic,name:a.name});m["__cockpit"]={ic:"grid",name:"Cockpit"};return m;}
+function winMeta(){const m={};INTERNAL.forEach(a=>m[a.id]={ic:a.ic,name:a.name});return m;}
 function closeOthers(keepId){Object.keys(OPEN).forEach(id=>{if(id!==keepId)closeW(id);});}
 function winCtxMenu(id,x,y){const w=OPEN[id];if(!w)return;const min=w.style.display==="none";
  const others=Object.keys(OPEN).length>1;
@@ -3203,7 +3201,6 @@ async function nbDockMenu(x,y){
  showMenu(x,y,it);}
 function dockItems(){
  const base=INTERNAL.map(a=>({id:a.id,ic:a.ic,color:a.color,name:a.name,fn:a.fn,bare:a.bare}));
- base.push({id:"__cockpit",ic:"dash",bare:1,color:"linear-gradient(135deg,#4b7bec,#3a63c9)",name:"Cockpit",fn:()=>window.open(cockpitURL(),"_blank")});
  const byId={};base.forEach(b=>byId[b.id]=b);
  const order=(SET.dockOrder&&SET.dockOrder.length)?SET.dockOrder:base.map(b=>b.id);
  const out=[];order.forEach(id=>{if(byId[id]){out.push(byId[id]);delete byId[id];}});
@@ -4082,7 +4079,7 @@ function winTerminal(initCmd,execC){openWin("__term","Terminal",(body,win)=>{
  document.addEventListener("fullscreenchange",fsHandler);
  if(window.ResizeObserver){const ro=new ResizeObserver(()=>refit(cur()));ro.observe(stack);}
  loadXterm(err=>{
-  if(err||!window.Terminal){body.innerHTML=`<div style="padding:22px;color:var(--dim);font-size:13px;line-height:1.6">Could not load xterm.js (it will be fetched on the next server start).<br><button class="btn sm" style="margin-top:8px" onclick="window.open('https://${host()}:9090/system/terminal','_blank')">Open Cockpit terminal ↗</button></div>`;return;}
+  if(err||!window.Terminal){body.innerHTML=`<div style="padding:22px;color:var(--dim);font-size:13px;line-height:1.6">Could not load xterm.js (it will be fetched on the next server start).</div>`;return;}
   applySide();
   renderSnips(body.querySelector("#side"),cmd=>{const s=cur();if(!s)return;snipPlaceholders(cmd,r=>snipGuard(r,f=>{if(s.ws&&s.ws.readyState===1){s.ws.send(pasteMode?f:f+"\n");s.term.focus();}}));});
   newSession(initCmd,execC);
@@ -4157,7 +4154,7 @@ function reniceDlg(p,after){const s=document.getElementById("scrim");
    <div class="r"><button class="btn" id="nx">Cancel</button><button class="btn pri" id="no">Apply</button></div></div>`;
   s.classList.add("show");s.querySelector("#nx").onclick=()=>s.classList.remove("show");
   s.querySelector("#no").onclick=async()=>{const r=await api("/api/process/renice",{method:"POST",body:JSON.stringify({pid:p.pid,nice:+s.querySelector("#nice").value})});toast(LIVE?(r&&r.ok?"Priority changed":"Error: "+((r&&r.log)||"")):"Demo");s.classList.remove("show");after&&after();};}
-const svcIsMine=u=>/^(nas-|docker|containerd|cockpit|smartd|snapraid|comitup|tailscale|avahi|samba|smbd|nmbd|nfs)/.test(u);
+const svcIsMine=u=>/^(nas-|docker|containerd|smartd|snapraid|comitup|tailscale|avahi|samba|smbd|nmbd|nfs)/.test(u);
 function svcTab(tc,win){
  let mode="active",flt="";
  let created=new Set();
@@ -4177,7 +4174,7 @@ function svcTab(tc,win){
      if(x.active==="active")lbl={running:"running",waiting:"waiting",listening:"listening",mounted:"mounted",exited:"active"}[x.sub]||x.sub;
      else if(x.active==="failed"){lbl="failure";tip="the service exited with an error";}
      else if(x.trigger==="timer"){lbl="scheduled";tip="started by a timer on schedule; idle between runs (this is normal)";}
-     else if(x.trigger==="socket"){lbl="on demand";tip="starts when its socket is accessed (e.g. you opened Cockpit); idle until then (this is normal)";}
+     else if(x.trigger==="socket"){lbl="on demand";tip="starts when its socket is accessed; idle until then (this is normal)";}
      else lbl={dead:"stopped",exited:"completed"}[x.sub]||x.sub;
      const r=el(`<div class="row2" style="padding:9px 12px;margin-bottom:6px"><div class="m"><div class="t ${mine?"svc-mine":""}" style="font-size:13px">${esc(x.unit.replace(".service",""))}</div><div class="s">${esc((x.desc||"").slice(0,50))}</div></div><span class="stbadge ${st}"${tip?` title="${att(tip)}"`:""}>${esc(lbl)}</span></div>`);
      const a=el(`<div style="display:flex;gap:4px;margin-left:8px"></div>`);
@@ -9125,7 +9122,7 @@ function securityTab(tc){withSysc(tc,()=>{const s=SYSC.security||{};const u=s.uf
  tc.innerHTML=`${rebootBan()}
   <h3 class="set-title">Security</h3><p class="set-sub">Firewall, brute-force protection, logs.</p>
   <div class="set-h">Firewall</div>
-  <div class="srow"><div class="srow-l"><div class="srow-t">Firewall (UFW)${tipHTML("Closes all incoming ports except the allowed ones (SSH, Cockpit 9090, shares). Enabling opens SSH first so you don't get locked out. Note: docker publishes ports bypassing UFW.")}</div><div class="srow-d">${u.active?"active · ports: "+((u.ports||[]).join(", ")||"—"):"disabled"}</div></div><div class="srow-c">${u.active?'<span class="sbadge ok">active</span>':(u.installed?'<span class="sbadge off">off</span>':'<span class="sbadge na">not installed</span>')}<label class="tgl"><input type="checkbox" data-sc="ufw"${u.active?" checked":""}><span class="sl"></span></label></div></div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Firewall (UFW)${tipHTML("Closes all incoming ports except the allowed ones (SSH, shares). Enabling opens SSH first so you don't get locked out. Note: docker publishes ports bypassing UFW.")}</div><div class="srow-d">${u.active?"active · ports: "+((u.ports||[]).join(", ")||"—"):"disabled"}</div></div><div class="srow-c">${u.active?'<span class="sbadge ok">active</span>':(u.installed?'<span class="sbadge off">off</span>':'<span class="sbadge na">not installed</span>')}<label class="tgl"><input type="checkbox" data-sc="ufw"${u.active?" checked":""}><span class="sl"></span></label></div></div>
   ${u.active?`<div id="ufwPorts" style="margin:6px 0 4px"></div>`:""}
   <div class="set-h">Protection against password brute-forcing</div>
   ${svcRow("Brute-force protection (fail2ban)","Bans an IP after several failed SSH logins. Basic brute-force protection, especially if the server is reachable from outside.","fail2ban",s.fail2ban,"bans IPs after failed SSH logins")}
@@ -9138,7 +9135,7 @@ function securityTab(tc){withSysc(tc,()=>{const s=SYSC.security||{};const u=s.uf
  const up=tc.querySelector("#ufwPorts");
  if(up){const rows=u.rows||(u.ports||[]).map(p=>({port:p,label:"",auto:false}));
   const rowH=r=>`<tr><td class="mono">${esc(r.port)}</td><td>${r.label?esc(r.label):'<span style="color:var(--mut)">custom rule</span>'}</td><td style="text-align:right">${r.auto?'<span class="sbadge ok" style="font-size:9px">auto</span>':`<button class="iconbtn dng" data-del="${att(r.port)}" title="Close port">${svg("trash",13)}</button>`}</td></tr>`;
-  up.innerHTML=`<div class="srow-d" style="margin-bottom:6px">Open ports. «Auto» are kept automatically: panel, SSH, Cockpit and all docker ports (a changed port / new container is picked up). You can close your own rules.</div>
+  up.innerHTML=`<div class="srow-d" style="margin-bottom:6px">Open ports. «Auto» are kept automatically: panel, SSH and all docker ports (a changed port / new container is picked up). You can close your own rules.</div>
    <table class="ufw-tbl"><thead><tr><th>Port</th><th>Purpose</th><th></th></tr></thead><tbody>${rows.map(rowH).join("")}</tbody></table>
    <div class="nb-field-row" style="margin-top:8px"><input class="mono" id="ufwNew" placeholder="e.g. 8096 or 8096/tcp" style="max-width:220px"><button class="btn sm" id="ufwAdd">Open port</button></div>`;
   const doPort=(action,port)=>api("/api/security/ufw-port",{method:"POST",body:JSON.stringify({action,port})}).then(r=>{toast(LIVE?((r&&r.ok)?"Done":"Error: "+((r&&r.log)||"")):"Demo");refreshSysc(rerSet);});
@@ -9312,26 +9309,25 @@ function screenTab(tc){
  };
 }
 function motdTab(tc){
- tc.innerHTML=`<h3 class="set-title">SSH login message</h3><p class="set-sub">What you see in the terminal when you log in. It is assembled from several sources: our block, the kernel line, the Cockpit banner and «Last login» from sshd.</p>
+ tc.innerHTML=`<h3 class="set-title">SSH login message</h3><p class="set-sub">What you see in the terminal when you log in. It is assembled from several sources: our block, the kernel line and «Last login» from sshd.</p>
   <div class="set-grp">What to show${tipHTML("What you see in the terminal when logging in over SSH. Rendered by pam_motd via /etc/update-motd.d/20-nas-os.")}</div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Logo</div><div class="srow-d">NAS-OS banner in Raspberry Pi colours</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="moG"><span class="sl"></span></label></div></div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Custom text</div><div class="srow-d">free-form header shown above the summary</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="moT"><span class="sl"></span></label></div></div>
   <div class="srow"><div class="srow-l"><div class="srow-t">System summary</div><div class="srow-d">uptime, temperature, memory, pool, address, containers</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="moI"><span class="sl"></span></label></div></div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Kernel line${tipHTML("The first line «Linux nas 6.18… aarch64». Printed by /etc/update-motd.d/10-uname — we clear its execute bit, the file stays in place.")}</div><div class="srow-d">Linux nas … aarch64</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="moU"><span class="sl"></span></label></div></div>
-  <div class="srow"><div class="srow-l"><div class="srow-t">Cockpit banner${tipHTML("The «Web console: https://…:9090/» line. Added by the /etc/motd.d/cockpit symlink — we remove the link, Cockpit itself keeps running.")}</div><div class="srow-d">Web console: https://…:9090/</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="moC"><span class="sl"></span></label></div></div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Last login${tipHTML("The «Last login: …» line is printed by sshd itself, not by the login message. Disabled with PrintLastLog no in /etc/ssh/sshd_config.d/; the config is validated before the service is reloaded.")}</div><div class="srow-d">Last login: … from …</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="moL"><span class="sl"></span></label></div></div>
   <textarea id="moTx" class="motd-ta" spellcheck="false" placeholder="Login message — Latin characters only"></textarea>
   <div class="mon-note">${svg("info",13)} The text is printed verbatim: commands and variables inside it are not executed. Use Latin characters — terminals do not always render Cyrillic.</div>
   <div class="usb-chips" style="margin-top:8px"><span class="usb-lbl">Placeholders:</span>${
     ["{host}","{uptime}","{load}","{temp}","{memory}","{system}","{pool}","{ip}","{iface}","{panel}","{containers}","{date}","{time}"]
       .map(t=>`<button class="usb-tok" data-mo="${att(t)}">${esc(t)}</button>`).join("")}</div>
-  <div class="set-grp">Preview${tipHTML("Only our block is shown. The kernel line, the Cockpit banner and «Last login» come from other components — you only see them on a real SSH login.")}</div>
+  <div class="set-grp">Preview${tipHTML("Only our block is shown. The kernel line and «Last login» come from other components — you only see them on a real SSH login.")}</div>
   <pre class="motd-pv" id="moPv"></pre>
   <div class="set-savebar"><span class="sb-left">SSH login message</span><button class="btn sm pri" id="moSave">${svg("save",13)} Save</button></div>`;
  // Preview. We set the preview via textContent: in innerHTML i18n would
  // intercept it and start translating the terminal output.
  {const tx=tc.querySelector("#moTx"),cbT=tc.querySelector("#moT"),cbI=tc.querySelector("#moI"),
-   cbU=tc.querySelector("#moU"),cbC=tc.querySelector("#moC"),cbL=tc.querySelector("#moL"),
+   cbU=tc.querySelector("#moU"),cbL=tc.querySelector("#moL"),
    cbG=tc.querySelector("#moG"),
    pv=tc.querySelector("#moPv"),sv=tc.querySelector("#moSave");
   pv.textContent="…";
@@ -9343,17 +9339,16 @@ function motdTab(tc){
   const fill=r=>{const c=(r&&r.config)||{};tx.value=c.text||"";cbT.checked=c.show_text!==false;
     cbG.checked=c.show_logo!==false;
     cbI.checked=c.show_info!==false;cbU.checked=c.show_uname!==false;
-    cbC.checked=c.show_cockpit!==false;cbL.checked=c.show_lastlog!==false;
-    // these rows are printed by third-party components: nothing to show — nothing to turn off
+    cbL.checked=c.show_lastlog!==false;
+    // this row is printed by a third-party component: nothing to show — nothing to turn off
     cbU.closest(".srow").style.display=c.has_uname===false?"none":"";
-    cbC.closest(".srow").style.display=c.has_cockpit===false?"none":"";
     pv.textContent=(r&&r.preview)||"";
     sv.disabled=c.installed===false;};
   api("/api/motd").then(fill);
   sv.onclick=async()=>{
     const rr=await api("/api/motd",{method:"POST",body:JSON.stringify(
       {text:tx.value,show_logo:cbG.checked,show_text:cbT.checked,show_info:cbI.checked,
-       show_uname:cbU.checked,show_cockpit:cbC.checked,show_lastlog:cbL.checked})});
+       show_uname:cbU.checked,show_lastlog:cbL.checked})});
     if(rr&&rr.ok&&rr.preview!=null)pv.textContent=rr.preview;
     if(rr&&rr.ok)flashSaved(sv);
     toast(LIVE?(rr&&rr.ok?"Saved ✓":"Error: "+((rr&&rr.log)||"?")):"Demo");};}
@@ -9941,7 +9936,7 @@ function opsPop(){const b=document.getElementById("opsBtn");if(!b)return;
 document.querySelector(".desk").addEventListener("contextmenu",e=>{e.preventDefault();
  showMenu(e.clientX,e.clientY,[
   {label:"Refresh shortcuts",ic:svg("refresh",17),act:()=>{pollApps();toast("Shortcuts refreshed");}},
-  {label:"Refresh all",ic:svg("refresh",17),act:()=>{poll();pollApps();pollDisks();}},{label:"Open Cockpit",ic:svg("grid",17),act:()=>window.open(cockpitURL(),"_blank")},{sep:1},
+  {label:"Refresh all",ic:svg("refresh",17),act:()=>{poll();pollApps();pollDisks();}},{sep:1},
   {label:"Log out of the panel",ic:svg("key",17),act:logout},{sep:1},
   {label:"Reboot",ic:svg("power",17),act:reboot,dng:1},{label:"Power off",ic:svg("power",17),act:poweroff,dng:1}]);});
 
@@ -10036,8 +10031,7 @@ function maybeOnboard(){let done=false;try{done=!!SET.onboarded||localStorage.ge
  if(pb){pb.innerHTML=svg("power",17);pb.onclick=()=>{const r=pb.getBoundingClientRect();
   showMenu(Math.round(r.right),Math.round(r.bottom+8),[
    {label:"Settings",ic:svg("cog",17),act:()=>winSettings()},
-   {label:"Setup Wizard",ic:svg("wand",17),act:()=>location.href="/setup.html"},
-   {label:"Open Cockpit",ic:svg("grid",17),act:()=>window.open(cockpitURL(),"_blank")},{sep:1},
+   {label:"Setup Wizard",ic:svg("wand",17),act:()=>location.href="/setup.html"},{sep:1},
    {label:"Log out of the panel",ic:svg("key",17),act:logout},{sep:1},
    {label:"Reboot",ic:svg("power",17),act:reboot,dng:1},
    {label:"Power off",ic:svg("power",17),act:poweroff,dng:1}]);};}

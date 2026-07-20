@@ -3,7 +3,7 @@
 # nas-wizard.sh — NAS setup wizard for Raspberry Pi 5
 #
 # Implemented stages (per spec):
-#   1.  System preparation (NAS stack + utilities + Pi packages, cockpit, docker,
+#   1.  System preparation (NAS stack + utilities + Pi packages, docker,
 #       groups, fstrim, directories, hostname/tz)
 #   2.  Disk handling (format -> fstab -> mount), data OR parity
 #   2b. mergerfs — pool of >=2 data disks (auto when a 2nd disk is added)
@@ -45,7 +45,7 @@ SERVICES_SRC="$SCRIPT_DIR/services"
 # NAS stack
 # docker-ce/compose-plugin are installed separately from the official Docker repo (see ensure_docker_repo) —
 # they aren't in the Debian/RPi OS repos. Here only packages available in the stock repositories.
-STACK_PACKAGES=(cockpit cockpit-storaged cockpit-networkmanager mergerfs snapraid smartmontools)
+STACK_PACKAGES=(mergerfs snapraid smartmontools)
 # General-purpose utilities — what a server/NAS almost always needs
 UTIL_PACKAGES=(
   vnstat              # per-interface traffic counter («Traffic» widget in the panel)
@@ -619,7 +619,7 @@ stage_system() {
 
     # 0.3 enable/start services (idempotent)
     local svc
-    for svc in cockpit.socket docker; do
+    for svc in docker; do
         if systemctl is-enabled "$svc" >/dev/null 2>&1; then
             info "service already enabled: $svc"
         else
@@ -714,11 +714,10 @@ stage_system_summary() {
     msg="Stage 0 complete.
 
 Check:
-  systemctl status cockpit.socket docker
+  systemctl status docker
   df -h
   ls -la $NAS_CONFIG
 
-Cockpit:  https://$(hostname -I 2>/dev/null | awk '{print $1}'):9090
 Remaining: attach disks (stage 2).
 
 NOTE: docker group membership applies after $TARGET_USER relogs in."
@@ -2186,13 +2185,12 @@ sec_ufw() {
     # access to the panel it was enabled from. Port from the unit, default 80.
     local WEBPORT="${NAS_WEB_PORT:-80}"
     run ufw allow "${WEBPORT}/tcp"
-    run ufw allow 9090/tcp    # Cockpit
     run ufw allow 5353/udp    # mDNS (avahi) — otherwise <host>.local won't resolve
     # Open share ports if they are installed
     if dpkg -s samba >/dev/null 2>&1; then run ufw allow Samba 2>/dev/null || run ufw allow 445/tcp; fi
     if dpkg -s nfs-kernel-server >/dev/null 2>&1; then run ufw allow 2049/tcp; run ufw allow 111/tcp; fi
     run ufw --force enable
-    info "ufw enabled (panel :${WEBPORT}, SSH, Cockpit 9090, shares — if present)"
+    info "ufw enabled (panel :${WEBPORT}, SSH, shares — if present)"
     warn "docker publishes ports bypassing ufw (iptables) — keep that in mind"
 }
 sec_fail2ban() {
@@ -2234,7 +2232,7 @@ stage_security() {
         "unattended" "Auto security updates (unattended-upgrades)" ON \
         "journald"   "journald 200M limit (less SD wear)" ON \
         "log2ram"    "log2ram: logs in RAM (external repository)" OFF \
-        "ufw"        "ufw firewall (SSH, Cockpit, shares)" OFF \
+        "ufw"        "ufw firewall (SSH, shares)" OFF \
         "fail2ban"   "fail2ban for SSH" OFF \
         "sshkeys"    "SSH: disable password (keys required!)" OFF)" || { info "cancelled"; return 0; }
 
@@ -2665,7 +2663,7 @@ main_menu() {
         local choice
         choice="$(ui_menu "NAS Wizard (Raspberry Pi 5)$([ "$DRY_RUN" -eq 1 ] && echo '  [DRY-RUN]')" \
             "Choose a stage. Log: $LOG" \
-            "system"   "Stage 1: system preparation (packages, cockpit, docker, directories)" \
+            "system"   "Stage 1: system preparation (packages, docker, directories)" \
             "disk"     "Stage 2: attach a disk (format -> fstab -> mount)" \
             "mergerfs" "Stage 2b: build/update the mergerfs pool (>=2 disks)" \
             "snapraid" "Stage 3: SnapRAID (conf, sync, timers, notifications)" \
@@ -3145,7 +3143,6 @@ MOTD_TEXT=1
 MOTD_INFO=1
 # third-party greeting pieces (applied by nas-web at startup and on save):
 MOTD_UNAME=1
-MOTD_COCKPIT=1
 MOTD_LASTLOG=1
 CONF
 
@@ -3281,7 +3278,7 @@ stage_system_apply() {
     ensure_docker_repo   # docker-ce + compose-plugin from the official Docker repo
     ensure_gh            # GitHub CLI (to push panel code from the box)
     local svc
-    for svc in cockpit.socket docker; do enable_service "$svc"; done
+    for svc in docker; do enable_service "$svc"; done
     systemctl list-unit-files fstrim.timer >/dev/null 2>&1 && enable_service fstrim.timer
     # Hardware watchdog: if the kernel hangs, the Pi auto-reboots instead of sitting
     # dead until someone hits the power button. Applied by default for reliability
@@ -3539,7 +3536,7 @@ api_shares() {
 }
 
 # ---------------------------------------------------------------------------
-# Modules: comitup / Tailscale / static IP / Cockpit GUI
+# Modules: comitup / Tailscale / static IP
 # ---------------------------------------------------------------------------
 mod_comitup() {
     if dpkg -s comitup >/dev/null 2>&1; then echo "comitup already installed"; return 0; fi
@@ -3574,29 +3571,6 @@ mod_staticip() {
     run nmcli connection up "$con"
     echo "static IP $ip assigned ($con)"
 }
-mod_cockpit_gui() {
-    # cockpit-machines/podman are in Debian; file-sharing/navigator — from 45drives,
-    # but there are no arm64/trixie builds (the repo returns 404). So 45drives only
-    # if the packages actually show up, and we MUST verify the source file is valid
-    # (their setup script wrote an HTML-404 into the .list and broke all of apt).
-    local L45=/etc/apt/sources.list.d/45drives-enterprise-trixie.list
-    if [ "$DRY_RUN" -eq 0 ] && ! dpkg -s cockpit-navigator >/dev/null 2>&1; then
-        curl -fsSL https://repo.45drives.com/setup 2>>"$LOG" | bash >>"$LOG" 2>&1 || true
-        # if the .list doesn't start with "deb " it's broken (HTML/404), remove it so apt isn't broken
-        if [ -f "$L45" ] && ! grep -qE '^\s*deb ' "$L45"; then
-            rm -f "$L45"; warn "45drives: no builds for this platform — repository removed"
-        fi
-        run apt-get update || true
-    fi
-    # install only what's actually available in the repositories (install_packages skips unavailable ones)
-    install_packages "cockpit-gui" cockpit-machines cockpit-podman cockpit-file-sharing cockpit-navigator
-    echo "Cockpit modules: available ones installed (storaged/networkmanager already present)"
-}
-
-# (passwordless Cockpit removed: pam_permit lets you in without real authentication,
-#  but Cockpit uses the password to establish the working session — without it the UI breaks
-#  with «failed to fetch…». The working path — set a known system password for the user.)
-
 # ---------------------------------------------------------------------------
 # API mode (headless, for nas-web.py). No whiptail; confirmations come from the browser.
 # Parameters in NASW_* ; output is a human-readable log to stdout, return code 0/≠0.
@@ -3652,10 +3626,9 @@ api_state() {                  # brief state for the wizard (JSON)
     host="$(hostnamectl --static 2>/dev/null || hostname)"
     tz="$(timedatectl show -p Timezone --value 2>/dev/null)"
     iface="$(ip route show default 2>/dev/null | awk '/default/{print $5; exit}')"
-    printf '{"host":"%s","tz":"%s","iface":"%s","docker":%s,"cockpit":%s,"data_disks":%s,"parity_disks":%s,"pool":%s,"snapraid":%s,"samba":%s,"nfs":%s,"fail2ban":%s,"ufw":%s,"comitup":%s,"unattended":%s}\n' \
+    printf '{"host":"%s","tz":"%s","iface":"%s","docker":%s,"data_disks":%s,"parity_disks":%s,"pool":%s,"snapraid":%s,"samba":%s,"nfs":%s,"fail2ban":%s,"ufw":%s,"comitup":%s,"unattended":%s}\n' \
         "$host" "$tz" "$iface" \
         "$(command -v docker >/dev/null 2>&1 && echo true || echo false)" \
-        "$(systemctl is-active cockpit.socket >/dev/null 2>&1 && echo true || echo false)" \
         "$(mounted_data_disks | grep -c . )" \
         "$(mounted_parity_disks | grep -c . )" \
         "$(findmnt -no TARGET "$STORAGE_MNT" >/dev/null 2>&1 && echo true || echo false)" \
@@ -3700,7 +3673,6 @@ run_api() {
         comitup)        mod_comitup ;;
         tailscale)      mod_tailscale ;;
         staticip)       mod_staticip ;;
-        cockpit-gui)    mod_cockpit_gui ;;
         screen)         api_screen ;;
         *)              echo "unknown api action: $action" >&2; return 2 ;;
     esac

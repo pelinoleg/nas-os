@@ -3927,7 +3927,7 @@ def monitor_tick():
     # --- auto-refresh of the space analyzer (self-throttles to once per 15 min) ---
     _safe(lambda: _duscan_auto(load_maintenance().get("duscan_hours", 0)))
     # --- firewall auto-sync: keep the needed ports open (panel/SSH/
-    #     Cockpit/shares + docker), so a new container/port change isn't left behind UFW ---
+    #     shares + docker), so a new container/port change isn't left behind UFW ---
     _safe(ufw_autosync)
 
     # --- filesystem in "read-only" mode (data risk) ---
@@ -10664,7 +10664,6 @@ def fs_unzip(path, dest=None):
     return {"ok": True, "path": dest}
 
 HP_CATALOG = [
-    ("Cockpit",      9090, True,  "cockpit",    "Server control panel"),
     ("Dockge",       5001, False, "dockge",     "Docker stack manager"),
     ("Dozzle",       8083, False, "dozzle",     "Container logs"),
     ("Scrutiny",     8084, False, "scrutiny",   "SMART disk health"),
@@ -11025,7 +11024,7 @@ def _net_state():
 
 def _ufw_managed_ports():
     """Ports the firewall must keep open, with "what for" labels.
-    System ones (panel/SSH/Cockpit/shares) + all published docker ports —
+    System ones (panel/SSH/shares) + all published docker ports —
     the latter are picked up automatically on a port change or a new container."""
     ports = {}
     def add(p, label):
@@ -11033,8 +11032,6 @@ def _ufw_managed_ports():
     add("%d/tcp" % PORT, "NAS web panel")
     add("22/tcp", "SSH")
     add("5353/udp", "Discovery (mDNS / .local)")   # otherwise UFW cuts avahi → pi5.local drops off
-    if os.path.exists("/lib/systemd/system/cockpit.socket") or shutil.which("cockpit-bridge"):
-        add("9090/tcp", "Cockpit")
     if shutil.which("smbd") or os.path.exists("/etc/samba/smb.conf"):
         add("445/tcp", "Files (Samba)")
     if os.path.exists("/etc/exports") and os.path.getsize("/etc/exports") > 0:
@@ -11441,16 +11438,13 @@ MOTD_CONF   = "/etc/nas-wizard/motd.conf"
 # pam_motd runs EVERYTHING in update-motd.d and prints files from /etc/motd.d,
 # while "Last login" is added by sshd itself. Give a toggle for each.
 MOTD_UNAME_SH   = "/etc/update-motd.d/10-uname"
-MOTD_COCKPIT_LN = "/etc/motd.d/cockpit"
-MOTD_COCKPIT_TARGET = "../../run/cockpit/issue"
 MOTD_SSHD_CONF  = "/etc/ssh/sshd_config.d/99-nas-motd.conf"
 MOTD_TXT    = "/etc/nas-wizard/motd.txt"
 MOTD_SCRIPT = "/etc/update-motd.d/20-nas-os"
 MOTD_MAX    = 4000
 
 _MOTD_FLAGS = {"MOTD_LOGO": "show_logo", "MOTD_TEXT": "show_text", "MOTD_INFO": "show_info",
-               "MOTD_UNAME": "show_uname", "MOTD_COCKPIT": "show_cockpit",
-               "MOTD_LASTLOG": "show_lastlog"}
+               "MOTD_UNAME": "show_uname", "MOTD_LASTLOG": "show_lastlog"}
 
 def motd_load():
     cfg = {"text": _read(MOTD_TXT), "installed": os.path.isfile(MOTD_SCRIPT)}
@@ -11466,7 +11460,6 @@ def motd_load():
             cfg[_MOTD_FLAGS[k]] = v.strip().strip('"').strip("'") == "1"
     # on-disk state beats what was recorded: someone else may have changed the files
     cfg["has_uname"] = os.path.isfile(MOTD_UNAME_SH)
-    cfg["has_cockpit"] = os.path.isdir(os.path.dirname(MOTD_COCKPIT_LN))
     return cfg
 
 def _motd_extras_apply(cfg):
@@ -11478,17 +11471,7 @@ def _motd_extras_apply(cfg):
             os.chmod(MOTD_UNAME_SH, 0o755 if cfg.get("show_uname", True) else 0o644)
         except OSError:
             pass
-    # 2) Cockpit banner: a symlink in /etc/motd.d
-    try:
-        d = os.path.dirname(MOTD_COCKPIT_LN)
-        if cfg.get("show_cockpit", True):
-            if os.path.isdir(d) and not os.path.lexists(MOTD_COCKPIT_LN):
-                os.symlink(MOTD_COCKPIT_TARGET, MOTD_COCKPIT_LN)
-        elif os.path.lexists(MOTD_COCKPIT_LN):
-            os.remove(MOTD_COCKPIT_LN)
-    except OSError:
-        pass
-    # 3) "Last login" is printed by sshd, not pam_motd
+    # 2) "Last login" is printed by sshd, not pam_motd
     try:
         want = not cfg.get("show_lastlog", True)
         have = os.path.isfile(MOTD_SSHD_CONF)
