@@ -198,7 +198,7 @@ const STEPS=[
  {id:"security",nm:"Security",ic:"shield"},
  {id:"tuning",nm:"Pi Tuning",ic:"sliders"},
  {id:"notify",nm:"Notifications",ic:"bell"},
- {id:"backup",nm:"Backups",ic:"save"},
+ {id:"backup",nm:"Monitoring",ic:"save"},
  {id:"modules",nm:"Modules",ic:"plug"},
 ];
 let cur="system";const DONE={};
@@ -273,11 +273,11 @@ const R={
    <div class="actions"><button class="btn pri" id="go">Apply</button></div><div class="console" id="con"></div>`;
   p.querySelector("#go").onclick=()=>run("shares",{keys:keys(p.querySelector("#box"))});},
  security(p){p.innerHTML=head("Step 7","Security","Sensible defaults. The firewall opens SSH before enabling; key-only login only if keys exist.")+
-  `<div class="card" id="box">${chk("unattended","Automatic security updates","unattended-upgrades",true,"shield")}${chk("ufw","Firewall ufw","SSH, shares",false,"shield")}${chk("fail2ban","fail2ban","SSH protection",false,"shield")}${chk("journald","200M journal limit","less SD wear",true,"save")}${chk("log2ram","log2ram","logs in RAM",false,"save")}</div>
+  `<div class="card" id="box">${chk("unattended","Automatic security updates","recommended — keep on",true,"shield")}${chk("ufw","Firewall (ufw)","enable if the NAS is exposed to the internet",false,"shield")}${chk("fail2ban","fail2ban","bans SSH brute-force — if SSH is reachable from outside",false,"shield")}${chk("journald","Journal size limit (200 MB)","less SD-card wear — keep on",true,"save")}${chk("log2ram","log2ram (logs in RAM)","big SD-card lifesaver; optional on SSD/NVMe",false,"save")}</div>
    <div class="actions"><button class="btn pri" id="go">Apply</button></div><div class="console" id="con"></div>`;
   p.querySelector("#go").onclick=()=>run("security",{keys:keys(p.querySelector("#box"))});},
- tuning(p){p.innerHTML=head("Step 8","Raspberry Pi tuning","Hardware tweaks. config.txt changes take effect after a reboot.")+
-  `<div class="card" id="box">${chk("usbpower","USB power","critical for USB SSDs on the Pi 5",true,"plug")}${chk("trim","fstrim (TRIM)","SSD/NVMe speed",true,"disks")}${chk("pcie3","PCIe Gen3 for NVMe","faster, out of spec",false,"cpu")}${chk("cgroup","Memory cgroup","container memory limits",false,"cpu")}${chk("sysctl","Sysctl tuning","swappiness, network",false,"sliders")}${chk("zram","zram swap","compressed swap in RAM",false,"cpu")}${chk("chrony","chrony instead of timesyncd","accurate time synchronization",false,"cpu")}${chk("governor","Adaptive CPU governor","lowers frequency when overheating",false,"sliders")}${chk("watchdog","Watchdog","auto-reboot on hang",false,"cpu")}</div>
+ tuning(p){p.innerHTML=head("Step 8","Raspberry Pi tuning","Optional hardware tweaks — enable only what fits your setup (hint under each). config.txt changes need a reboot. TRIM and the hardware watchdog are already on by default.")+
+  `<div class="card" id="box">${chk("usbpower","USB power (Pi 5)","enable if you run USB SSD/HDD — needs the 27 W PSU",true,"plug")}${chk("pcie3","PCIe Gen3 for NVMe","faster NVMe, slightly out of spec — turn off if the drive glitches",false,"cpu")}${chk("cgroup","Docker memory limits","only if you cap container RAM",false,"cpu")}${chk("sysctl","Sysctl tuning","safe: less swapping + steadier network under load",false,"sliders")}${chk("zram","zram swap","compressed swap in RAM — good on low-RAM or SD-card boxes",false,"cpu")}${chk("chrony","Accurate time (chrony)","usually skip; enable only if precise time matters",false,"cpu")}${chk("governor","Thermal CPU governor","slows the CPU when hot (≥80°C) — for passive cooling",false,"sliders")}</div>
    <div class="actions"><button class="btn pri" id="go">Apply</button></div><div class="console" id="con"></div>`;
   p.querySelector("#go").onclick=()=>run("pi",{keys:keys(p.querySelector("#box"))});},
  notify(p){p.innerHTML=head("Step 9","Notifications · Pushover","SnapRAID status, SMART problems and overheating — delivered to the Pushover app on your phone.")+
@@ -286,8 +286,8 @@ const R={
    <div class="actions"><button class="btn pri" id="go">Save</button><button class="btn" id="test">Test</button></div><div class="console" id="con"></div>`;
   p.querySelector("#go").onclick=()=>run("notify",{puser:p.querySelector("#pu").value,ptoken:p.querySelector("#pt").value});
   p.querySelector("#test").onclick=()=>run("notify",{puser:p.querySelector("#pu").value,ptoken:p.querySelector("#pt").value});},
- backup(p){p.innerHTML=head("Step 10","Backups and monitoring","Monitors disk health and space/temperature thresholds (alerts via Pushover).")+
-  `<div class="card" id="box">${chk("smartd","SMART monitoring","continuous monitoring + alerts",true,"save")}${chk("spacetemp","Space and temperature","hourly check",true,"sliders")}</div>
+ backup(p){p.innerHTML=head("Step 10","Monitoring & alerts","Disk-health (SMART) and space/temperature checks that ping you via Pushover. This is NOT file backup — real backups live in the Backup app inside the panel (pull from another NAS / push to a disk or server).")+
+  `<div class="card" id="box">${chk("smartd","SMART disk-health monitor","warns before a disk dies — bad sectors, wear, read errors",true,"save")}${chk("spacetemp","Space & temperature","hourly — alerts if a disk fills up or overheats",true,"sliders")}</div>
    <div class="actions"><button class="btn pri" id="go">Apply</button></div><div class="console" id="con"></div>`;
   p.querySelector("#go").onclick=()=>run("backup",{keys:keys(p.querySelector("#box"))});},
  modules(p){p.innerHTML=head("Step 11","Additional modules","Networking and remote access. Installed individually.")+
