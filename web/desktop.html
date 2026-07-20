@@ -2018,7 +2018,7 @@
      here (not a card surface); the source pane uses the shared editor bg. */
   .nt-root .nt-ed.nt-html{flex-direction:row;gap:var(--sp-2);padding:0 var(--sp-6) var(--sp-4);min-height:0}
   .nt-root .nt-ed.nt-html .nt-html-src,.nt-root .nt-ed.nt-html .nt-html-prev{flex:1 1 0;min-width:0;height:100%;border-radius:var(--radius-lg);overflow:hidden;box-shadow:var(--shadow-1)}
-  .nt-root .nt-ed.nt-html .nt-html-src{background:var(--code-bg)}
+  .nt-root .nt-ed.nt-html .nt-html-src{background:#1b1f27}   /* match .ed-dark; NOT --code-bg (notes theme pollutes it) */
   .nt-root .nt-ed.nt-html .nt-html-src .CodeMirror{height:100%;font-size:var(--nt-font,13px);border-radius:var(--radius-lg)}
   .nt-root .nt-ed.nt-html .nt-html-prev{background:#fff}
   .nt-root .nt-ed.nt-html .nt-html-prev iframe{display:block;width:100%;height:100%;border:0;background:#fff}
@@ -8147,7 +8147,11 @@ function winNotes(){openWin("__notes","Notes",async body=>{
       markdown-only and deliberately skipped here. */
    const tb=ed.querySelector("#ntTb");
    box.classList.add("nt-html");
-   if(dark)box.classList.add("ed-dark");
+   /* Always the dark code-editor look (like the file manager), NOT the notes
+      theme: the notes light theme repurposes --code-fg as a dark on-paper ink
+      (#1C1B1A), which on the editor's dark --code-bg is invisible. ed-dark pins
+      a readable editor fg + token colours regardless of the notes theme. */
+   box.classList.add("ed-dark");
    const view=SET.ntHtmlView||"split";
    box.classList.add("nt-hv-"+view);
    box.innerHTML=`<div class="nt-html-src"></div><div class="nt-html-prev"><iframe sandbox="allow-scripts" title="preview"></iframe></div>`;
