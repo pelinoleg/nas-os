@@ -11678,17 +11678,20 @@ def _smb_disable_defaults():
     out, skip, changed = [], False, False
     for ln in lines:
         s = ln.strip()
+        indented = ln[:1] in (" ", "\t")
         if s.startswith("[") and s.endswith("]"):     # an ACTIVE section header
             skip = s[1:-1].strip().lower() in ("homes", "printers", "print$")
-            if skip:
-                out.append(";" + ln); changed = True
-            else:
-                out.append(ln)
-            continue
-        if skip and s and not s.startswith(";"):
-            out.append(";" + ln); changed = True
+            out.append((";" + ln) if skip else ln)
+            changed = changed or skip
+        elif skip and s and not indented and not s.startswith(";"):
+            # a top-level directive (e.g. `include = …`) is NOT part of the section
+            # body — stop hiding here so we never comment out our own include line
+            skip = False
+            out.append(ln)
+        elif skip and s and indented and not s.startswith(";"):
+            out.append(";" + ln); changed = True       # indented section-body param → hide
         else:
-            out.append(ln)                             # already-commented headers land here → left as-is
+            out.append(ln)                             # blanks / already-commented lines pass through
     if changed:
         _smb_atomic(SMB_CONF_F, "\n".join(out) + "\n")
 
@@ -11760,6 +11763,17 @@ def smb_share_set(b):
             os.makedirs(path, exist_ok=True)
         except OSError as e:
             return {"ok": False, "log": "cannot create folder: " + str(e)}
+    # a read-write share must be writable by whoever owns the writes, else a
+    # root-owned folder silently rejects them. Chown the top dir only (never
+    # recursive — don't rewrite existing files' ownership). Guest → the force
+    # user; a single-user private share → that user.
+    if not bool(b.get("readonly")):
+        writer = _smb_primary_user() if guest else (users[0] if len(users) == 1 else None)
+        if writer:
+            try:
+                shutil.chown(path, user=writer)
+            except (OSError, LookupError):
+                pass
     shares = [s for s in smb_get_shares() if s["name"] != name and (not old or s["name"] != old)]
     shares.append({"name": name, "path": path, "guest": guest, "users": users,
                    "readonly": bool(b.get("readonly"))})

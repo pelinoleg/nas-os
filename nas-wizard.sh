@@ -2338,8 +2338,9 @@ EOF
     if [ "$DRY_RUN" -eq 0 ] && grep -qE '^\[(homes|printers|print\$)\]' "$SMB_CONF" 2>/dev/null; then
         awk '
             /^\[(homes|printers|print\$)\]/{sec=1; print ";" $0; next}
-            /^\[/{sec=0}
-            sec && $0!~/^;/ && $0!~/^[[:space:]]*$/{print ";" $0; next}
+            /^\[/{sec=0; print; next}
+            sec && /^[[:space:]]+[^[:space:];]/{print ";" $0; next}
+            sec && /^[^[:space:]]/{sec=0}
             {print}
         ' "$SMB_CONF" > "$SMB_CONF.tmp" && mv "$SMB_CONF.tmp" "$SMB_CONF"
     fi
