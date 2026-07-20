@@ -1783,8 +1783,9 @@
   .ev-row .set-h:first-child{margin-top:0}
   #nfEvents .set-h{margin:16px 0 8px}#nfEvents .set-h:first-child{margin-top:6px}
   /* --- settings window: sidebar nav + rows + tooltips --- */
-  .set-nav{width:186px;flex:none;background:none;border-right:1px solid var(--line);padding:16px 10px 16px 14px;display:flex;flex-direction:column;gap:3px;overflow-y:auto}
-  .set-nav button{display:flex;align-items:center;gap:10px;width:100%;border:none;background:none;color:var(--dim);padding:8px 10px;border-radius:var(--r-sm);font-size:12.5px;font-weight:550;text-align:left;transition:.12s}
+  .set-nav{width:216px;flex:none;background:none;border-right:1px solid var(--line);padding:16px 10px 16px 14px;display:flex;flex-direction:column;gap:3px;overflow-y:auto}
+  .set-nav button{display:flex;align-items:center;gap:10px;width:100%;border:none;background:none;color:var(--dim);padding:8px 10px;border-radius:var(--r-sm);font-size:12.5px;font-weight:550;text-align:left;white-space:nowrap;transition:.12s}
+  .set-nav button span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
   .set-nav button svg{flex:none;opacity:.85;color:var(--accent-2)}
   .set-nav button:hover:not(.on){background:var(--sel);color:var(--text)}
   .set-nav button.on{background:var(--sel);color:var(--text);font-weight:650}
