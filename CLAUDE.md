@@ -17,6 +17,12 @@
 - `web/sw.js` — service worker (network-first; HTML — только из сети).
 - `install.sh` — `curl -fsSL .../install.sh | sudo bash` → `git clone/reset --hard origin/main`
   в `/opt/nas-os`, ставит службу `nas-web` оттуда. **Переустановка воспроизводит текущий код 1:1.**
+  Запускает `nas-wizard.sh api system` = `stage_system_apply` (авто-база, headless). Что база
+  ставит из коробки (2026-07-20 расширена): пакеты (STACK/UTIL/PI + docker + gh), watchdog,
+  uas-off, usb-timeout, smartd-guard, thumbs-таймер, **avahi+libnss-mdns** (`.local`),
+  **Samba** (`install_smb_shares` — вкладка Sharing живая, шар ноль), **drivetemp** (темп. SATA),
+  notify-helper, motd и **netguard** (сетевая устойчивость — теперь в базе, не в стадии backup).
+  Дальше — диски/пул/шары/стеки/тюнинг в панели/веб-мастере (железо у всех разное).
 
 ## Рабочий цикл разработки
 1. Правишь файл.
@@ -226,8 +232,12 @@ HTML отдаётся `Cache-Control: no-store` (мобильные при `no-c
   переговоры PD дают max_current = 5000, `throttled=0x0`.** Значение видно в виджете
   «Система» (строка «Питание», `stats().psu_ma`); < 5000 → жёлтое «нужно 5 A» = снова
   слабый БП или кабель.
-- **comitup ворует wlan0 навсегда. ВЫКЛЮЧЕН 2026-07-12** (`disable_comitup()` в визарде: disable+mask
-  всех юнитов `comitup*` + удаление профилей `comitup-*`). Пока он жил: NAS на проводе → netguard
+- **comitup ворует wlan0 навсегда. УДАЛЁН СОВСЕМ 2026-07-20** (раньше только выключался
+  `disable_comitup()`; теперь из визарда убраны все пути установки — `mod_comitup`, api-case,
+  плитка в setup.html; из панели — comitup-UI вкладки «Сеть» и роуты `/api/comitup*`; с бокса
+  `apt purge`). `disable_comitup()` + `wifi_rescue()` в `nas-netguard.sh` ОСТАВЛЕНЫ — обезвреживают
+  comitup, если он приедет с чужим образом. netguard теперь в АВТО-БАЗЕ (`stage_system_apply`),
+  так что Wi-Fi-резерв покрыт всегда, а comitup не нужен в принципе. Пока comitup жил: NAS на проводе → netguard
   держит autoconnect домашнего Wi-Fi выключенным → comitup читает «у wlan0 нет сети» и поднимает
   хотспот `comitup-*` по 10–29 раз в час; а при реальном обрыве провода wlan0 возвращался В ХОТСПОТ,
   а не в домашнюю сеть, и давал каждой попытке возврата ~20 с — мало для скана 5 ГГц → NAS жив, но
