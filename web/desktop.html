@@ -6768,8 +6768,13 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
    dest:["Where the copies land",push?"The destination for the copies — a disk on this NAS or another server.":"The folder on THIS NAS where the copies land."],
    excl:["Exclusions","Optional: what NOT to copy — junk, caches, service files. rsync patterns, one per line."]};
   if(part){
+   // "Separate" mode: each folder's destination is edited in the folder list —
+   // show that list right here, otherwise the toggle's effect is on another step
+   const perList=(part==="dest"&&per)?(JOBS.length
+     ?`<div class="set-h">Each folder's destination</div><div id="sJobs"></div>`
+     :`<div class="set-h">Each folder's destination</div><div style="color:var(--mut);font-size:12px;padding:4px 0">The folders are picked on the «What to copy» step — each one will get its own destination button here.</div>`):"";
    tc.innerHTML=`<h3 class="set-title">${HD[part][0]}</h3><p class="set-sub">${HD[part][1]}</p>`
-     +(part==="folders"?secFolders:part==="dest"?secDest:exclInner);
+     +(part==="folders"?secFolders:part==="dest"?secDest+perList:exclInner);
   }else{
    tc.innerHTML=`<h3 class="set-title">What to copy</h3><p class="set-sub">${push?"Step 1 — pick which folders of this NAS to send. Step 2 below — check where the copies land.":"Step 1 — pick which folders to take from the source (the other NAS). Step 2 below — check where the copies land on THIS NAS."}</p>
    ${secFolders}
