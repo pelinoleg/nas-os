@@ -463,8 +463,10 @@ tabConnPush — мёртвый код старой модели (не вызыв
 блок `.nb-flow` «From — the data lives here → To — the copies land here» (статус приёмника
 `oRecvDot/oRecvV` живёт в карточке To); ниже три плашки (Folders/Schedule+next/Deleted);
 oProg сразу под ними. Формулировки против путаницы source/destination: вкладка Sources
-переименована в «What to copy», destCard — «Destination — copies land here»,
-«a folder on THIS NAS».
+переименована в «What to copy» и читается В ПОРЯДКЕ ПОТОКА ДАННЫХ — сабтайтл
+«Step 1… Step 2…», секция «Folders» (+Pick) ПЕРВОЙ, затем секция-заголовок
+«Where the copies land» с destCard (внутри карточки просто «Destination» — смысл несёт
+заголовок секции, дублей «What to copy» больше нет), «a folder on THIS NAS».
 **Анализатор места** (DaisyDisk-стиль, `winDiskUsage`): фоновый скан тома в пределах одной ФС
 (`du -x` по `st_dev`; в mergerfs-пуле `st_dev` консистентен → работает и для пула/системы/USB), кэш
 в `~/nas-config/duscan-*.json` + ленивая отдача узлов (`/api/fs/duscan/{status,node,start,cancel}`),
