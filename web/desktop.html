@@ -925,7 +925,8 @@
   .nb-sum.good b{color:var(--good)}
   .nb-sum.warn b{color:var(--warn)}
   .nb-sum.bad b{color:var(--danger)}
-  .nb-sum-i{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--dim);padding:2px 0 0 2px}
+  .nb-sum-i{display:flex;align-items:center;flex-wrap:wrap;gap:4px 7px;font-size:12px;color:var(--dim);padding:2px 0 0 2px;line-height:1.5}
+  .nb-sum-i .mono{word-break:break-all}
   .nb-sum-h{font-size:11.5px;color:var(--mut);padding-top:4px}
   /* destination — a separate prominent block: glass + border, transport tabs in the header */
   .nb-dest{background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);padding:13px 14px;margin:4px 0 16px}
@@ -1005,6 +1006,18 @@
   .nb-hbar{width:64px;height:5px;border-radius:3px;background:var(--track,rgba(128,128,128,.25));overflow:hidden;flex:none;margin-left:auto}
   .nb-hbar i{display:block;height:100%;background:var(--accent);border-radius:3px}
   .nb-hrun.aborted .nb-hmeta{color:var(--danger)}
+  /* first-run wizard: steps ribbon + pane + footer */
+  .nbwiz{flex:1;display:flex;flex-direction:column;min-height:0;padding:14px 18px 12px}
+  .nbwiz-steps{display:flex;gap:4px;align-items:center;flex-wrap:wrap;margin-bottom:12px;flex:none}
+  .nbwiz-step{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--mut);padding:5px 11px;border-radius:999px}
+  .nbwiz-step .nb-stepn{width:18px;height:18px;font-size:10px;background:var(--track,rgba(128,128,128,.3));color:var(--text)}
+  .nbwiz-step.on{background:var(--sel);color:var(--accent);font-weight:650;box-shadow:var(--sh-sm)}
+  .nbwiz-step.on .nb-stepn{background:var(--accent);color:var(--accent-ink,#fff)}
+  .nbwiz-step.done{color:var(--dim)}
+  .nbwiz-step.done .nb-stepn{background:var(--good);color:#fff}
+  .nbwiz-pane{flex:1;overflow:auto;min-height:0;padding-right:4px}
+  .nbwiz-foot{display:flex;align-items:center;gap:10px;padding-top:12px;border-top:1px solid var(--line);flex:none}
+  .nbwiz-foot #wzSkip{margin-left:auto;color:var(--mut)}
   .nbwrap .set-h:first-child{margin-top:6px;padding-top:0;border-top:none}
   /* metrics history */
   .grow{flex:1;min-width:8px}
@@ -1023,11 +1036,15 @@
   .ov-health{margin-bottom:14px}
   .ovh-top{display:flex;align-items:center;gap:10px;margin-bottom:8px;font-size:13.5px}
   .ovh-badge{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;color:#fff;font-weight:800;font-size:12px;flex:none}
-  .ovh-list{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden}
-  .ovh-row{display:flex;align-items:center;gap:8px;background:var(--card);padding:8px 12px;font-size:12px}
+  .ovh-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden}
+  /* label over a fully readable value: a one-line flex row squeezed long paths
+     ("ssh root@…:…" ellipsized to uselessness). The dot stays scoped to these
+     tiles — .ovh-dot itself is reused inline in history/folder rows. */
+  .ovh-row{position:relative;display:block;background:var(--card);padding:8px 12px 9px 27px;font-size:12px;min-width:0}
+  .ovh-row>.ovh-dot{position:absolute;left:12px;top:12px}
   .ovh-dot{width:7px;height:7px;border-radius:50%;flex:none}
-  .ovh-n{flex:1;min-width:0;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .ovh-v{font-family:var(--mono);font-size:11px;font-weight:600;flex:none;max-width:68%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ovh-n{display:block;color:var(--dim);font-size:11px;margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ovh-v{display:block;font-family:var(--mono);font-size:11px;font-weight:600;white-space:normal;word-break:break-word;line-height:1.45}
   .caplbls{display:flex;justify-content:space-between;font-size:12px;color:var(--mut);margin-top:10px}
   .caplbls b{color:var(--text);font-weight:650;font-family:var(--mono)}
   /* Unobtrusive "install the service" reminder (Scrutiny/WUD) — glass, not solid */
@@ -6532,7 +6549,7 @@ function nbPickSource(preselected,preExcl,onPick,opts){const s=document.getEleme
    refresh();})();}
 function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
  body.style.display="flex";body.style.flexDirection="column";body.style.padding="0";
- let tab="overview",CFG={},JOBS=[],PROFS=[],nbFootMo=null;
+ let tab="overview",CFG={},JOBS=[],PROFS=[],nbFootMo=null,wizStep=0;
  // window opened → show the profile that matters now: a running run (or one waiting
  // in the queue), otherwise the one edited/run most recently. After that the choice is the user's
  let autoPick=true;
@@ -7219,7 +7236,7 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
  const TABS={overview:tabOverview,conn:tabConn,sources:tabSources,deleted:tabDeleted,sched:tabSched,compare:tabCompare,history:tabHistory};
  /* ── profiles: tab bar ── */
  const curProf=()=>PROFS.find(x=>x.id===NB_PID)||PROFS[0]||{};
- const switchTo=id=>{if(id===NB_PID)return;NB_PID=id;tab="overview";nbCursor=0;nbStarted=null;render();};
+ const switchTo=id=>{if(id===NB_PID)return;NB_PID=id;tab="overview";nbCursor=0;nbStarted=null;wizStep=0;render();};
 
  const addDlg=()=>{const s=document.getElementById("scrim"),src=curProf();
   s.innerHTML=`<div class="dialog"><h3>New backup</h3>
@@ -7289,6 +7306,45 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
         {label:"Delete profile",ic:svg("trash",15),dng:1,act:delDlg}]);};});
   bar.querySelector("#nbAdd").onclick=addDlg;};
 
+ // connection is "set" the same way nb_profiles_public counts it: a host, or a
+ // push to a local disk with a chosen destination folder
+ const connOk=()=>!!CFG.host||(isPush()&&CFG.transport==="local"&&!!CFG.dest_base);
+ /* ── first-run wizard: a fresh profile walks Connection → Folders → Deleted →
+    Schedule → Finish in ONE column, no left tabs. The panes are the very same
+    tab renderers (they auto-save), the wizard only adds Back/Next rails, so
+    nothing is duplicated and going back keeps every entered value. ── */
+ const WSTEPS=[{id:"conn",n:"Connection"},{id:"sources",n:"What to copy"},{id:"deleted",n:"Deleted files"},{id:"sched",n:"Schedule"},{id:"done",n:"Finish"}];
+ function renderWizDone(tc){const c=CFG,push=isPush();
+  const ep=push?(isPushSsh()?(c.host?c.user+"@"+c.host+":"+(c.dest_base||"?"):"not set"):(c.dest_base||"not selected"))
+              :(c.host?c.user+"@"+c.host:"not set");
+  const s=c.schedule||{},nj=(c.jobs||[]).length;
+  tc.innerHTML=`<h3 class="set-title">Ready</h3><p class="set-sub">Check the summary — everything can be changed later on the tabs.</p>
+   <div class="ov-health"><div class="ovh-list">
+    <div class="ovh-row"><span class="ovh-dot" style="background:var(--good)"></span><span class="ovh-n">${push?"Destination":"Source"}</span><span class="ovh-v">${esc(ep)}</span></div>
+    <div class="ovh-row"><span class="ovh-dot" style="background:var(--accent)"></span><span class="ovh-n">Folders to copy</span><span class="ovh-v">${nj}${nj?" — "+esc((c.jobs||[]).slice(0,3).map(j=>String(j.src).split("/").filter(Boolean).pop()).join(", "))+(nj>3?" …":""):""}</span></div>
+    <div class="ovh-row"><span class="ovh-dot" style="background:var(--accent-2)"></span><span class="ovh-n">Schedule</span><span class="ovh-v">${s.enabled?esc((s.freq==="weekly"?"weekly ("+(s.dow||"Mon")+") at ":"daily at ")+(s.time||"03:00")):"manual runs only"}</span></div>
+    <div class="ovh-row"><span class="ovh-dot" style="background:var(--dim)"></span><span class="ovh-n">Deleted files</span><span class="ovh-v">${c.delete_mode==="mirror"?"mirror":c.delete_mode==="add"?"keep":"archive"}</span></div>
+   </div></div>
+   <div class="mon-note" style="margin-top:12px">Press <b>Finish</b> — you'll land on the overview. «Run backup» makes the first copy; «Dry run» shows what would happen without changing anything.</div>`;}
+ function renderWizard(){
+  if(wizStep>=WSTEPS.length)wizStep=WSTEPS.length-1;
+  const cur=WSTEPS[wizStep].id;
+  body.innerHTML=`<div class="nbtabs" id="nbTabs"></div>
+   <div class="nbwiz"><div class="nbwiz-steps">${WSTEPS.map((s,i)=>`<div class="nbwiz-step${i===wizStep?" on":i<wizStep?" done":""}"><span class="nb-stepn">${i<wizStep?svg("check",11):(i+1)}</span><span>${s.n}</span></div>`).join("")}</div>
+   <div class="set-pane nbwiz-pane" id="tc"></div>
+   <div class="nbwiz-foot"><button class="btn" id="wzBack"${wizStep?"":" disabled"}>Back</button>
+    <button class="btn sm" id="wzSkip" title="Close the wizard and configure via the tabs at any pace">Set up later</button>
+    <button class="btn pri" id="wzNext">${cur==="done"?"Finish":"Next"} ${cur==="done"?svg("check",14):svg("chev",14)}</button></div></div>`;
+  renderTabs();
+  const tc=body.querySelector("#tc");
+  if(cur==="done")renderWizDone(tc);else TABS[cur](tc);
+  body.querySelector("#wzBack").onclick=()=>{if(wizStep){wizStep--;render();}};
+  body.querySelector("#wzSkip").onclick=async()=>{await saveCfg({setup_done:true});render();};
+  body.querySelector("#wzNext").onclick=async()=>{
+   if(cur==="conn"&&!connOk()){toast("Set up the connection first — or press «Set up later»");return;}
+   if(cur==="sources"&&!JOBS.length){toast("Choose at least one folder to copy");return;}
+   if(cur==="done"){await saveCfg({setup_done:true});tab="overview";SET.nbTab=tab;saveSettings();render();return;}
+   wizStep++;render();};}
  const render=async()=>{const r=await nbG("/api/backup/config");
   CFG=(r&&r.config)||{};JOBS=(CFG.jobs||[]).slice();
   PROFS=(r&&r.profiles)||[];NB_PID=(r&&r.profile)||NB_PID;
@@ -7299,6 +7355,9 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
    const want=((act||last)||{}).id;
    if(want&&want!==NB_PID){NB_PID=want;tab="overview";nbCursor=0;nbStarted=null;return render();}}
   if(nbFootMo){nbFootMo.disconnect();nbFootMo=null;}
+  // a profile that has neither a connection nor folders and never finished the
+  // wizard gets the wizard instead of the tabs
+  if(!CFG.setup_done&&!(connOk()&&JOBS.length)){renderWizard();return;}
   // "Delete profile" deliberately NOT in the nav: destructive actions live in the
   // profile tab's context menu, not next to everyday navigation
   body.innerHTML=`<div class="nbtabs" id="nbTabs"></div>

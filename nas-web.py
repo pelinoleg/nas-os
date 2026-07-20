@@ -4617,6 +4617,9 @@ def nb_save(patch, pid=None):
         cur["direction"] = patch["direction"]
     if "verify" in patch:
         cur["verify"] = bool(patch["verify"])
+    # first-run wizard completed (or skipped) — pure UI flag, persisted with the profile
+    if "setup_done" in patch:
+        cur["setup_done"] = bool(patch["setup_done"])
     # Free choice of sides: the UI sends {"src":{...},"dst":{...}}. We unpack it
     # into profile fields (direction/transport/host/…), so all the rest of the code —
     # screen tiles, dest_off, retention — keeps working unchanged.
