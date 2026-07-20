@@ -16,6 +16,38 @@ die(){ printf '\033[31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 
 [ "$(id -u)" -eq 0 ] || die "Root required. Run:  curl -fsSL .../install.sh | sudo bash"
 
+# --- OS check: NAS-OS targets Debian / Raspberry Pi OS -----------------------
+# On Ubuntu the Docker CE repo falls back to Debian packages and nothing here is
+# tested. Warn BEFORE anything is installed, while reinstalling the OS is cheap.
+# Skip the question with NASOS_FORCE_OS=1 (e.g. unattended installs on a derivative).
+OS_ID="$(. /etc/os-release 2>/dev/null && echo "${ID:-unknown}")"
+OS_NAME="$(. /etc/os-release 2>/dev/null && echo "${PRETTY_NAME:-$OS_ID}")"
+case "$OS_ID" in
+  debian|raspbian) ;;
+  *)
+    printf '\033[33;1m'
+    echo "⚠  This system is: $OS_NAME"
+    echo "   NAS-OS is built and tested for Debian / Raspberry Pi OS only."
+    echo "   On Ubuntu (or other distros) Docker gets Debian's packages and the"
+    echo "   setup is untested — things may break now or after an OS upgrade."
+    echo "   Best move: stop now and reinstall the box with Debian or Raspberry Pi OS."
+    printf '\033[0m\n'
+    if [ "${NASOS_FORCE_OS:-0}" != "1" ]; then
+      # stdin is the piped script itself (curl | bash) — ask on the terminal directly
+      if [ -r /dev/tty ]; then
+        printf 'Continue anyway on %s? [y/N] ' "$OS_ID"
+        read -r ans </dev/tty || ans=""
+        case "$ans" in y|Y|yes|YES) say "Continuing on $OS_ID (unsupported)…" ;;
+                       *) die "Aborted — install Debian / Raspberry Pi OS and re-run this script." ;;
+        esac
+      else
+        say "No terminal to ask on — continuing in 15 s, press Ctrl+C to abort…"
+        sleep 15
+      fi
+    fi
+    ;;
+esac
+
 # whoever invoked sudo — used for permissions, the config home folder and the terminal (drop root→this user)
 TARGET_USER="${SUDO_USER:-}"
 [ -n "$TARGET_USER" ] || TARGET_USER="$(logname 2>/dev/null || id -un 1000 2>/dev/null || echo root)"

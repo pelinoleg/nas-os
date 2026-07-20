@@ -3351,6 +3351,14 @@ setup_snapraid_notify_noninteractive() { :; }   # notifications are configured s
 # ---------------------------------------------------------------------------
 stage_system_apply() {
     export DEBIAN_FRONTEND=noninteractive
+    # NAS-OS targets Debian / Raspberry Pi OS. On anything else (Ubuntu etc.) the
+    # Docker repo silently falls back to Debian packages and nothing is tested —
+    # say so up front (install.sh asks interactively; here we can only warn).
+    local _osid; _osid="$(. /etc/os-release 2>/dev/null && echo "${ID:-}")"
+    case "$_osid" in
+        debian|raspbian) ;;
+        *) warn "OS '$_osid' is not supported — NAS-OS targets Debian / Raspberry Pi OS (Ubuntu is untested); consider reinstalling the system before going further" ;;
+    esac
     # first thing — update the whole system (as requested: apt update && full-upgrade)
     run apt-get update
     run apt-get full-upgrade -y
@@ -3361,6 +3369,10 @@ stage_system_apply() {
     install_packages "Pi packages" "${PI_PACKAGES[@]}"
     ensure_docker_repo   # docker-ce + compose-plugin from the official Docker repo
     ensure_gh            # GitHub CLI (to push panel code from the box)
+    # Automatic security updates are part of the base: a box that nobody touches for
+    # a year must not sit on unpatched CVEs. Security-only channel (Debian default
+    # origins), so nothing feature-breaking arrives; panel Settings can toggle it off.
+    sec_unattended
     local svc
     for svc in docker; do enable_service "$svc"; done
     systemctl list-unit-files fstrim.timer >/dev/null 2>&1 && enable_service fstrim.timer

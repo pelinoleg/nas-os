@@ -21,7 +21,11 @@
   ставит из коробки (2026-07-20 расширена): пакеты (STACK/UTIL/PI + docker + gh), watchdog,
   uas-off, usb-timeout, smartd-guard, thumbs-таймер, **avahi+libnss-mdns** (`.local`),
   **Samba** (`install_smb_shares` — вкладка Sharing живая, шар ноль), **drivetemp** (темп. SATA),
-  notify-helper, motd и **netguard** (сетевая устойчивость — теперь в базе, не в стадии backup).
+  notify-helper, motd, **netguard** (сетевая устойчивость — теперь в базе, не в стадии backup)
+и **unattended-upgrades** (2026-07-20: авто-security-обновления в базе — бокс без присмотра не
+копит CVE; канал только security, тумблер в панели остаётся). Целевая ОС — **Debian/RaspiOS**:
+install.sh на другой ОС (Ubuntu) громко предупреждает и спрашивает подтверждение через `/dev/tty`
+(пайп `curl|bash` — stdin занят скриптом), headless-обход `NASOS_FORCE_OS=1`.
   Дальше — диски/пул/шары/стеки/тюнинг в панели/веб-мастере (железо у всех разное).
 
 ## Рабочий цикл разработки
