@@ -457,6 +457,14 @@ Back/Next/«Set up later»; **панели шагов = те же tab-ренде
 обрезал «ssh root@…» до бесполезности; `.ovh-dot` абсолютный ТОЛЬКО внутри `.ovh-row`
 (он же используется инлайн в history/folder-строках). `.nb-sum-i` — flex-wrap.
 tabConnPush — мёртвый код старой модели (не вызывается), не удалён.
+**Overview пересобран в панель (2026-07-20, вторая итерация)**: заголовок = ИМЯ ПРОФИЛЯ
+(+ карандаш → renameDlg; хардкода «Main NAS backup» больше нет) + бейдж направления
+`.nb-dirbadge`; кнопки Dry/Run/Stop — В HERO сверху (главные действия — наверху);
+блок `.nb-flow` «From — the data lives here → To — the copies land here» (статус приёмника
+`oRecvDot/oRecvV` живёт в карточке To); ниже три плашки (Folders/Schedule+next/Deleted);
+oProg сразу под ними. Формулировки против путаницы source/destination: вкладка Sources
+переименована в «What to copy», destCard — «Destination — copies land here»,
+«a folder on THIS NAS».
 **Анализатор места** (DaisyDisk-стиль, `winDiskUsage`): фоновый скан тома в пределах одной ФС
 (`du -x` по `st_dev`; в mergerfs-пуле `st_dev` консистентен → работает и для пула/системы/USB), кэш
 в `~/nas-config/duscan-*.json` + ленивая отдача узлов (`/api/fs/duscan/{status,node,start,cancel}`),

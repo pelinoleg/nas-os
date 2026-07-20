@@ -990,9 +990,20 @@
   .usb-pre{font-family:var(--font)}
   .usb-tok:hover,.usb-pre:hover{background:var(--accent-soft);border-color:var(--accent-line);color:var(--accent)}
   .nb-foot .grow{flex:1}
-  .nb-hero{display:flex;align-items:center;gap:10px;font-size:13.5px;padding:12px 14px;background:var(--glass);
+  .nb-hero{display:flex;align-items:center;flex-wrap:wrap;gap:10px;font-size:13.5px;padding:11px 14px;background:var(--glass);
     border:1px solid var(--line);border-radius:var(--r-md);margin-bottom:12px}
   .nb-hero-dot{width:10px;height:10px;border-radius:50%;flex:none}
+  .nb-head{display:flex;align-items:center;gap:8px;margin-bottom:10px}
+  .nb-head .iconbtn{opacity:.55}.nb-head .iconbtn:hover{opacity:1}
+  .nb-dirbadge{font-size:10.5px;font-family:var(--mono);color:var(--dim);background:var(--card);border:1px solid var(--line);
+    padding:3px 9px;border-radius:999px;flex:none}
+  /* From → To: the two ends of the pipe, each labeled in plain words */
+  .nb-flow{display:flex;align-items:stretch;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+  .nb-flow-side{flex:1;min-width:180px;background:var(--card);border:1px solid var(--line);border-radius:var(--r-md);padding:9px 12px}
+  .nb-flow-k{display:flex;align-items:center;gap:6px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);font-family:var(--mono);margin-bottom:3px}
+  .nb-flow-v{display:block;font-family:var(--mono);font-size:11.5px;font-weight:600;word-break:break-word;line-height:1.45}
+  .nb-flow-arr{align-self:center;color:var(--mut);flex:none;display:flex}
+  .nb-flow-st{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--dim);margin-top:5px}
   .nb-setup{display:flex;flex-direction:column;gap:6px;margin-bottom:14px}
   .nb-step{display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid var(--line);border-radius:var(--r-md);
     background:var(--card);cursor:pointer;font-size:12.5px;text-align:left;color:var(--text);transition:.12s}
@@ -6725,10 +6736,10 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
     "Local | SSH server" (the same transport as on the "Destination" tab), while pull's
     destination can only be local, so instead of tabs there's an explanation. ── */
  const destCard=()=>{const c=CFG,D=c.dst||{kind:"local"},ssh=D.kind==="ssh",rnet=D.provider==="rsyncnet";
-  const who=ssh?`${esc(D.user||"?")}@${esc(D.host||"not set")}${rnet?" · rsync.net":""}`:"a folder on this NAS";
+  const who=ssh?`${esc(D.user||"?")}@${esc(D.host||"not set")}${rnet?" · rsync.net":""}`:"a folder on THIS NAS";
   const ph=ssh?(rnet?host()+"-backup":"/mnt/backup/"+host()):"/media/usb-disk/backup";
   return `<div class="nb-dest">
-   <div class="nb-dest-h"><span class="nb-dest-t">${svg(ssh&&push?"net":"folder",15)} Destination</span>
+   <div class="nb-dest-h"><span class="nb-dest-t">${svg(ssh&&push?"net":"folder",15)} Destination — copies land here</span>
     <span class="nb-dest-w mono">${who}</span>
     <div class="seg sm" id="dTr"><button data-v="local" class="${ssh?"":"on"}">This NAS</button><button data-v="ssh" class="${ssh?"on":""}">SSH server</button></div></div>
    <div class="nb-field-row"><input class="mono" id="sBase" value="${att(c.dest_base||"")}" placeholder="${esc(ph)}"><button class="btn sm" id="sBaseB">${svg("folder",13)} Choose</button>
@@ -6739,7 +6750,7 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
 
  /* ── What to copy ── */
  function tabSources(tc){const c=CFG,push=isPush(),per=!isPushSsh()&&c.dest_mode==="per";
-  tc.innerHTML=`<h3 class="set-title">Sources</h3><p class="set-sub">${push?"Which folders of this NAS to send to the destination.":"Which main-NAS folders to copy and where."}</p>
+  tc.innerHTML=`<h3 class="set-title">What to copy</h3><p class="set-sub">${push?"Which folders of this NAS to send out. The destination below is where the copies land.":"Which folders to take from the source (the other NAS). The destination below is the folder on THIS NAS where the copies land."}</p>
    ${destCard()}
    ${isPushSsh()?"":`<div class="srow"><div class="srow-l"><div class="srow-t">Destination mode${tipHTML("Single folder — everything into one folder, as subfolders. Separate per source — each source gets its own folder-destination.")}</div><div class="srow-d">${per?"each source gets its own folder":"everything into one folder, as subfolders"}</div></div><div class="srow-c"><div class="seg" id="sDm"><button data-v="single" class="${!per?"on":""}">Single folder</button><button data-v="per" class="${per?"on":""}">Separate</button></div></div></div>`}
    <div style="display:flex;justify-content:space-between;align-items:center;margin:16px 0 6px"><span class="set-h" style="margin:0;padding:0;border:none">What to copy</span><button class="btn sm pri" id="sAdd">${svg("plus",13)} ${push?"Choose folders":"Pick from NAS"}</button></div>
@@ -6871,21 +6882,37 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
    const when=days<=0?"today":days===1?"tomorrow":["Sun","Mon","Tue","Wed","Thu","Fri","Sat"][t.getDay()];
    return `next: ${when} at ${hhmm}`;};
   const nx=nextRunTxt();
-  tc.innerHTML=`<h3 class="set-title">${push?"Backup from this NAS":"Main NAS backup"}</h3>
-   <div class="nb-hero" id="oHero"><span class="nb-hero-dot" style="background:var(--mut)"></span><span id="oHeroT">checking…</span></div>
+  // From → To in plain words: which side is which was the #1 confusion
+  const fromTxt=push?"This NAS":(c.host?((c.transport==="ssh"?"ssh · ":"rsync · ")+c.user+"@"+c.host):"not set — open «Connection»");
+  const toTxt=push?(isPushSsh()?(c.host?c.user+"@"+c.host+" : "+(c.dest_base||"?"):"not set — open «Destination»")
+                              :(c.dest_base||"no folder chosen yet"))
+                  :("This NAS · "+(c.dest_base||"/mnt/storage/nas-backup"));
+  const prof=curProf();
+  tc.innerHTML=`
+   <div class="nb-head"><h3 class="set-title" style="margin:0">${esc(prof.name||"Backup")}</h3>
+     <button class="iconbtn" id="oRen" title="Rename this backup profile">${svg("edit",14)}</button>
+     <span class="nb-dirbadge">${push?"↑ push · sends data out":"↓ pull · brings data here"}</span></div>
+   <div class="nb-hero" id="oHero"><span class="nb-hero-dot" style="background:var(--mut)"></span><span id="oHeroT">checking…</span>
+     <span class="grow"></span>
+     <button class="btn sm" id="oDry" title="Shows what WOULD be copied or deleted — changes nothing">Dry run</button>
+     <button class="btn pri" id="oRun">${svg("sync",14)} Run backup</button>
+     <button class="btn dng" id="oCancel" style="display:none">${svg("x",13)} Stop</button></div>
    <div id="oSetup"></div>
+   <div class="nb-flow">
+     <div class="nb-flow-side"><span class="nb-flow-k">${svg(push?"hdd":"net",12)} From — the data lives here</span><span class="nb-flow-v">${esc(fromTxt)}</span></div>
+     <div class="nb-flow-arr">${svg("chev",16)}</div>
+     <div class="nb-flow-side"><span class="nb-flow-k">${svg(push&&isPushSsh()?"net":"hdd",12)} To — the copies land here</span><span class="nb-flow-v">${esc(toTxt)}</span>
+       <span class="nb-flow-st"><span class="ovh-dot" id="oRecvDot" style="background:var(--mut)"></span><span id="oRecvV">checking…</span></span></div>
+   </div>
    <div class="ov-health"><div class="ovh-list">
-     <div class="ovh-row"><span class="ovh-dot" style="background:${epOk?"var(--good)":"var(--mut)"}"></span><span class="ovh-n">${push?"Destination":"Source"}</span><span class="ovh-v" title="${att(ep)}">${esc(ep)}</span></div>
-     <div class="ovh-row"><span class="ovh-dot" style="background:var(--accent)"></span><span class="ovh-n">Folders in backup</span><span class="ovh-v">${(c.jobs||[]).length}</span></div>
-     <div class="ovh-row"><span class="ovh-dot" style="background:var(--accent-2)"></span><span class="ovh-n">Schedule</span><span class="ovh-v" title="${att(sched)}">${esc(sched)}${nx?` · <b>${esc(nx)}</b>`:""}</span></div>
-     <div class="ovh-row"><span class="ovh-dot" style="background:var(--dim)"></span><span class="ovh-n">Deleted</span><span class="ovh-v">${c.delete_mode==="mirror"?"mirror":c.delete_mode==="add"?"keep":"archive"}${c.verify?" · verification":""}</span></div>
-     <div class="ovh-row"><span class="ovh-dot" id="oRecvDot" style="background:var(--mut)"></span><span class="ovh-n">${push?"Status":"Destination"}</span><span class="ovh-v" id="oRecvV">checking…</span></div>
+     <div class="ovh-row"><span class="ovh-dot" style="background:var(--accent)"></span><span class="ovh-n">Folders in backup</span><span class="ovh-v">${(c.jobs||[]).length||"none yet"}</span></div>
+     <div class="ovh-row"><span class="ovh-dot" style="background:var(--accent-2)"></span><span class="ovh-n">Schedule</span><span class="ovh-v">${esc(sched)}${nx?` · <b>${esc(nx)}</b>`:""}</span></div>
+     <div class="ovh-row"><span class="ovh-dot" style="background:var(--dim)"></span><span class="ovh-n">Deleted files</span><span class="ovh-v">${c.delete_mode==="mirror"?"mirror":c.delete_mode==="add"?"keep":"archive"}${c.verify?" · verification on":""}</span></div>
    </div></div>
+   <div class="nb-prog" id="oProg" style="display:none;margin-bottom:10px"></div>
+   <div id="oGuard" class="nb-dwarn" style="display:none"></div>
    <div class="set-h">Last run</div>
    <div id="oStatus" style="font-size:12.5px;color:var(--dim);padding:2px 2px 6px">loading…</div>
-   <div class="nb-foot"><button class="btn" id="oDry">Dry run</button><button class="btn pri" id="oRun">${svg("sync",14)} Run backup</button><button class="btn sm dng" id="oCancel" style="display:none">${svg("x",13)} Stop</button></div>
-   <div class="nb-prog" id="oProg" style="display:none;margin-top:10px"></div>
-   <div id="oGuard" class="nb-dwarn" style="display:none"></div>
    <div class="set-h">Folders</div>
    <div id="oDwarn" class="nb-dwarn" style="display:none"></div>
    <div id="oJobs"></div>
@@ -7196,6 +7223,7 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
    if(rr&&rr.queued){toast("Another backup is already running — queued");waitQueue();return;}
    attachLog();};
   g("#oRun").onclick=()=>run(false);g("#oDry").onclick=()=>run(true);
+  {const rb=g("#oRen");if(rb)rb.onclick=renameDlg;}
   g("#oCancel").onclick=()=>{setStopping(true);nbP("/api/backup/cancel");toast("Stopping…");};
   // on tab open: preload the LAST run's log so «Show log» is never empty,
   // then reattach if a run is active or waiting in the queue (journal stays hidden)
