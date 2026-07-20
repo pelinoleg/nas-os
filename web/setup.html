@@ -270,11 +270,11 @@ const R={
    <div class="actions"><button class="btn pri" id="go">Configure SnapRAID</button></div><div class="console" id="con"></div>`;
   p.querySelector("#go").onclick=()=>run("snapraid",{sync:p.querySelector("[data-k=sync]").checked?"1":"0"});},
  shares(p){p.innerHTML=head("Network","File access","Share /mnt/storage over the network. (Apps like Scrutiny/Syncthing/Immich — including Dockge — are installed from the App Store in the panel's Docker window.)")+
-  `<div class="card" id="box">${chk("samba","Samba (SMB)","Windows, Mac, phone",true,"share")}${chk("nfs","NFS","Linux clients",false,"share")}${chk("avahi","Avahi/mDNS","reach the box as <host>.local",true,"net")}</div>
+  `<div class="card" id="box">${chk("samba","Samba (SMB)","recommended · Windows, Mac, phone",STATE.samba,"share")}${chk("nfs","NFS","Linux clients",STATE.nfs,"share")}${chk("avahi","Avahi/mDNS","reach the box by name over mDNS (host.local)",STATE.avahi,"net")}</div>
    <div class="actions"><button class="btn pri" id="go">Apply</button></div><div class="console" id="con"></div>`;
   p.querySelector("#go").onclick=()=>run("shares",{keys:keys(p.querySelector("#box"))});},
  security(p){p.innerHTML=head("Security","Security &amp; remote access","Sensible defaults — the firewall opens SSH before enabling. Tailscale (below) gives secure remote access without opening any ports.")+
-  `<div class="card" id="box">${chk("unattended","Automatic security updates","recommended — keep on",true,"shield")}${chk("ufw","Firewall (ufw)","enable if the NAS is exposed to the internet",false,"shield")}${chk("fail2ban","fail2ban","bans SSH brute-force — if SSH is reachable from outside",false,"shield")}${chk("journald","Journal size limit (200 MB)","less SD-card wear — keep on",true,"save")}${chk("log2ram","log2ram (logs in RAM)","big SD-card lifesaver; optional on SSD/NVMe",false,"save")}</div>
+  `<div class="card" id="box">${chk("unattended","Automatic security updates","recommended — keep on",STATE.unattended,"shield")}${chk("ufw","Firewall (ufw)","enable if the NAS is exposed to the internet",STATE.ufw,"shield")}${chk("fail2ban","fail2ban","bans SSH brute-force — if SSH is reachable from outside",STATE.fail2ban,"shield")}${chk("journald","Journal size limit (200 MB)","recommended — less SD-card wear",STATE.journald,"save")}${chk("log2ram","log2ram (logs in RAM)","big SD-card lifesaver; optional on SSD/NVMe",STATE.log2ram,"save")}</div>
    <div class="actions"><button class="btn pri" id="go">Apply</button></div>
    <div class="card" style="margin-top:14px"><div class="opt"><span class="ic">${svg("shield",16)}</span><span class="m"><span class="t">Tailscale</span><span class="d">secure remote access without port forwarding (optional)</span></span><button class="btn sm" data-a="tailscale">Install</button></div></div>
    <div class="console" id="con"></div>`;
@@ -285,7 +285,7 @@ const R={
    <div class="actions"><button class="btn pri" id="go">Apply</button></div><div class="console" id="con"></div>`;
   p.querySelector("#go").onclick=()=>run("pi",{keys:keys(p.querySelector("#box"))});},
  alerts(p){p.innerHTML=head("Monitoring","Alerts","Watch disk health (SMART) and space/temperature, and get pinged on your phone via Pushover when something's wrong. File backups are separate — set those up in the Backup app inside the panel.")+
-  `<div class="card" id="box">${chk("smartd","SMART disk-health monitor","warns before a disk dies — bad sectors, wear, read errors",true,"save")}${chk("spacetemp","Space & temperature","hourly — alerts if a disk fills up or overheats",true,"sliders")}</div>
+  `<div class="card" id="box">${chk("smartd","SMART disk-health monitor","recommended — warns before a disk dies (bad sectors, wear)",STATE.smartd,"save")}${chk("spacetemp","Space & temperature","recommended — hourly; alerts if a disk fills up or overheats",STATE.spacetemp,"sliders")}</div>
    <div class="card" style="margin-top:14px"><div class="field"><label>Pushover User Key <span style="color:var(--mut);font-weight:400">— optional, where alerts are sent</span></label><input class="mono" id="pu" placeholder="u xxxxxxxxxxxxxxxx"></div>
     <div class="field"><label>Pushover Application Token</label><input class="mono" id="pt" placeholder="a xxxxxxxxxxxxxxxx"></div></div>
    <div class="actions"><button class="btn pri" id="go">Apply</button><button class="btn" id="test">Test Pushover</button></div><div class="console" id="con"></div>`;

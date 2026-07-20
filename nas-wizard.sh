@@ -3704,7 +3704,7 @@ api_state() {                  # brief state for the wizard (JSON)
     cl=/boot/firmware/cmdline.txt;  [ -f "$cl" ]  || cl=/boot/cmdline.txt
     # tuning items: report the ACTUAL on-disk/live state so the wizard's checkboxes
     # reflect reality instead of static defaults (t_* fields below)
-    printf '{"host":"%s","tz":"%s","iface":"%s","docker":%s,"data_disks":%s,"parity_disks":%s,"pool":%s,"snapraid":%s,"samba":%s,"nfs":%s,"fail2ban":%s,"ufw":%s,"smartd":%s,"unattended":%s,"t_usbpower":%s,"t_pcie3":%s,"t_cgroup":%s,"t_sysctl":%s,"t_zram":%s,"t_chrony":%s,"t_governor":%s}\n' \
+    printf '{"host":"%s","tz":"%s","iface":"%s","docker":%s,"data_disks":%s,"parity_disks":%s,"pool":%s,"snapraid":%s,"samba":%s,"nfs":%s,"fail2ban":%s,"ufw":%s,"smartd":%s,"unattended":%s,"avahi":%s,"journald":%s,"log2ram":%s,"spacetemp":%s,"t_usbpower":%s,"t_pcie3":%s,"t_cgroup":%s,"t_sysctl":%s,"t_zram":%s,"t_chrony":%s,"t_governor":%s}\n' \
         "$host" "$tz" "$iface" \
         "$(command -v docker >/dev/null 2>&1 && echo true || echo false)" \
         "$(mounted_data_disks | grep -c . )" \
@@ -3717,6 +3717,10 @@ api_state() {                  # brief state for the wizard (JSON)
         "$(ufw status 2>/dev/null | grep -q 'Status: active' && echo true || echo false)" \
         "$(systemctl is-active smartmontools >/dev/null 2>&1 && echo true || echo false)" \
         "$([ -f /etc/apt/apt.conf.d/20auto-upgrades ] && echo true || echo false)" \
+        "$(systemctl is-active avahi-daemon >/dev/null 2>&1 && echo true || echo false)" \
+        "$([ -f /etc/systemd/journald.conf.d/99-nas.conf ] && echo true || echo false)" \
+        "$(systemctl is-active log2ram >/dev/null 2>&1 && echo true || echo false)" \
+        "$(systemctl is-active nas-health.timer >/dev/null 2>&1 && echo true || echo false)" \
         "$(grep -qs 'usb_max_current_enable=1' "$cfg" && echo true || echo false)" \
         "$(grep -qs 'pciex1_gen=3' "$cfg" && echo true || echo false)" \
         "$(grep -qs 'cgroup_enable=memory' "$cl" && echo true || echo false)" \
