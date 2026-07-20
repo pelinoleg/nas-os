@@ -1441,6 +1441,8 @@
   .fm-badge{margin-left:auto;font-size:10px;color:var(--mut);font-family:var(--mono);flex:none;padding-right:2px}
   .fm-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;
     width:100%;height:100%;min-height:240px;color:var(--mut);font-size:12.5px;text-align:center}
+  .fm-gh{grid-column:1/-1;font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--mut);
+    font-family:var(--mono);font-weight:600;padding:10px 6px 4px}
   .fm-list:focus,.fm-list:focus-visible{outline:none}   /* tabindex=0 for keys, not for a focus ring */
   .fm-empty svg{opacity:.4}
   .fm-empty small{font-size:11px;opacity:.75}
@@ -5543,7 +5545,9 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    const foldersFirst=SET.fmFoldersFirst!==false;
    arr.sort((a,b)=>{if(foldersFirst&&a.type!==b.type)return a.type==="dir"?-1:1;
      let r=sortKey==="name"?(a.name.toLowerCase()<b.name.toLowerCase()?-1:1):((a[sortKey]||0)-(b[sortKey]||0));return r*sortDir;});
-   const grid=viewMode==="grid"&&!searchRes;   // search results — always a list, so the path is visible
+   // search results — always a list (path must be visible); Recent honors the grid choice
+   const grid=viewMode==="grid"&&(!searchRes||recentOn);
+   if(recentOn&&searchRes)arr.sort((a,b)=>(b.mtime||0)-(a.mtime||0));   // recency order, not the folder sort
    const ICOPX={s:{list:20,grid:44},m:{list:24,grid:60},l:{list:32,grid:84}};
    const isz=(ICOPX[SET.fmIconSize]||ICOPX.m)[grid?"grid":"list"],thumbsOn=SET.fmThumbs!==false;
    listBox.classList.toggle("fm-grid",grid&&arr.length>0);   // grid layout would pin the empty-state block to the top-left
@@ -5553,7 +5557,13 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    if(!arr.length){const msg=searchRes?"Nothing found":(filt?"No matches in this folder. Press Enter to search subfolders.":"This folder is empty");
      listBox.innerHTML=`<div class="fm-empty">${svg("folder",36)}<div>${msg}</div>${(!searchRes&&!filt)?`<small>Drag files here, paste with Ctrl+V or use Upload</small>`:""}</div>`;renderStatus();return;}
    const toggleSel=(e,i,shift)=>{if(shift&&lastIdx>=0){const a=Math.min(lastIdx,i),b=Math.max(lastIdx,i);for(let k=a;k<=b;k++)sel.add(arr[k].path);}else{if(sel.has(e.path))sel.delete(e.path);else sel.add(e.path);}lastIdx=i;renderList();selUpdate();};
+   // Recent: day-group headers ("Today", "Yesterday", …) — DOM-only, curArr indexes untouched
+   const dayBucket=ts=>{const now=new Date(),mid=new Date(now.getFullYear(),now.getMonth(),now.getDate()).getTime()/1000;
+     return !ts?"Earlier":ts>=mid?"Today":ts>=mid-86400?"Yesterday":ts>=mid-6*86400?"This week":"Earlier";};
+   let lastBucket=null;
    arr.forEach((e,i)=>{
+     if(recentOn&&searchRes){const bk=dayBucket(e.mtime);
+       if(bk!==lastBucket){lastBucket=bk;listBox.appendChild(el(`<div class="fm-gh">${bk}</div>`));}}
      const isSel=sel.has(e.path),baseIco=fmIcon(e.name,e.type,isz);
      const isHid=e.name.startsWith(".")||e.name===FM_HIDE_BK;   // dim when shown
      let ficon;
@@ -5676,7 +5686,8 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
      const pv=ov.querySelector("#qlPrev"),nx=ov.querySelector("#qlNext");
      if(pv)pv.onclick=ev=>{ev.stopPropagation();step(-1);};if(nx)nx.onclick=ev=>{ev.stopPropagation();step(1);};}
    win.appendChild(ov);document.addEventListener("keydown",onkey,true);draw();}
- function scrollCur(){const n=listBox.children[cursor];if(n&&n.scrollIntoView)n.scrollIntoView({block:"nearest"});}
+ // query by class, not children[i]: Recent injects day-group headers between rows
+ function scrollCur(){const n=listBox.querySelectorAll(".fm-row,.fm-tile")[cursor];if(n&&n.scrollIntoView)n.scrollIntoView({block:"nearest"});}
  function moveCur(delta,range){if(!curArr.length)return;cursor=cursor<0?0:Math.max(0,Math.min(curArr.length-1,cursor+delta));
    if(!range){sel.clear();sel.add(curArr[cursor].path);}else sel.add(curArr[cursor].path);
    lastIdx=cursor;renderList();selUpdate();scrollCur();}
@@ -5765,7 +5776,10 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
      +(f.kind?"&kind="+f.kind:"")+(f.minsize?"&minsize="+f.minsize:"")+(f.days?"&days="+f.days:""));
    searchRes=(r&&r.entries)||[];sel.clear();renderList();selUpdate();
    if(r&&r.truncated)toast("Showing first "+searchRes.length);}
- async function loadRecent(){toast("Scanning for recent files…");
+ async function loadRecent(){
+   // sshfs: find(1) would walk the tree over the network — slow and pointless
+   if(cwd==="/mnt/remote"||cwd.startsWith("/mnt/remote/")){toast("Recent is not available on remote servers");return;}
+   toast("Scanning for recent files…");
    const dir=cwd;
    const r=await api("/api/fs/recent?path="+encodeURIComponent(dir)+"&days=7");
    if(!r||!r.ok){toast("Error: "+((r&&r.log)||"?"));return;}
@@ -6025,7 +6039,8 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    {label:"Download from link (URL)…",ic:svg("globe",16),act:doFetchUrl}]);};}
  body.querySelector("#fPaste").onclick=doPaste;
  function updPlaces(){const b=body.querySelector("#fTrashN");if(b)b.textContent=TRASH_STAT.count?String(TRASH_STAT.count):"";
-   const rc=body.querySelector("#fRecent");if(rc)rc.classList.toggle("on",recentOn);}
+   const rc=body.querySelector("#fRecent");if(rc){rc.classList.toggle("on",recentOn);
+     rc.style.opacity=(cwd==="/mnt/remote"||cwd.startsWith("/mnt/remote/"))?".45":"";}}
  body.querySelector("#fTrashP").onclick=()=>winTrash();
  refreshTrashStat().then(()=>{if(body.isConnected)updPlaces();});
  inp.onchange=()=>{const files=[...inp.files];inp.value="";if(files.length)doUpload(files);};
