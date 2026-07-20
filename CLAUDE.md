@@ -179,6 +179,12 @@ HTML отдаётся `Cache-Control: no-store` (мобильные при `no-c
   зеркало в `/etc/nas-os/smb-users.json` (root 0600, секретная секция бэкапа `smbpw`), чтобы
   показывать в UI. Каждая запись → `testparm` → `smbcontrol all reload-config`. Иконка в
   Finder→Сеть = avahi `_device-info` `model=RackMac` (не дублировать с TM-сервисом).
+  **Чистый слейт:** дефолтные секции Debian (`[homes]` под `map to guest = bad user` показывается
+  на Mac как `nobody`, плюс `[printers]`/`[print$]`) `smb_ensure()` КОММЕНТИРУЕТ (`;`, обратимо,
+  идемпотентно), а `[global]` гасит принтеры (`load printers = no`/`printing = bsd`/`disable
+  spoolss = yes`/`usershare max shares = 0`). Авто-миграции `[storage]` НЕТ (она «придумывала»
+  шару, которую юзер не создавал) — визард тоже больше не пишет `[storage]`; шары/юзеры создаются
+  ТОЛЬКО из панели, свежий бокс шарит ноль до первого добавления (`testparm -s` → один `[global]`).
 - `getComputedStyle().getPropertyValue('--x')` НЕ резолвит `var()` внутри кастом-проперти —
   читай уже-вычисленные `--{surface}-good/…` с `:root` (они хексы, поставлены `setProperty`).
 - **Тема заметок (`.nt-root`) ПЕРЕОПРЕДЕЛЯЕТ `--code-fg` под свои нужды** (в светлой теме это
