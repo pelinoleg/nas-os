@@ -6749,22 +6749,34 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
   </div>`;};
 
  /* ── What to copy ── */
- function tabSources(tc){const c=CFG,push=isPush(),per=!isPushSsh()&&c.dest_mode==="per";
-  // order = data flow: first WHAT we copy, then WHERE it lands. The tab used to
-  // open with the destination and repeat "What to copy" twice — nobody could tell
-  // which side was which.
-  tc.innerHTML=`<h3 class="set-title">What to copy</h3><p class="set-sub">${push?"Step 1 — pick which folders of this NAS to send. Step 2 below — check where the copies land.":"Step 1 — pick which folders to take from the source (the other NAS). Step 2 below — check where the copies land on THIS NAS."}</p>
-   <div style="display:flex;justify-content:space-between;align-items:center;margin:4px 0 6px"><span class="set-h" style="margin:0;padding:0;border:none">Folders</span><button class="btn sm pri" id="sAdd">${svg("plus",13)} ${push?"Choose folders":"Pick from NAS"}</button></div>
-   <div id="sJobs"></div>
+ /* part: undefined = the full tab (folders → destination → exclusions, data-flow
+    order); "folders" | "dest" | "excl" = one section only — the first-run wizard
+    shows them as separate small steps. Same markup and the same wiring either
+    way, so a fix lands in both. */
+ function tabSources(tc,part){const c=CFG,push=isPush(),per=!isPushSsh()&&c.dest_mode==="per";
+  const again=()=>tabSources(tc,part);
+  const secFolders=`<div style="display:flex;justify-content:space-between;align-items:center;margin:4px 0 6px"><span class="set-h" style="margin:0;padding:0;border:none">Folders</span><button class="btn sm pri" id="sAdd">${svg("plus",13)} ${push?"Choose folders":"Pick from NAS"}</button></div>
+   <div id="sJobs"></div>`;
+  const secDest=`${destCard()}
+   ${isPushSsh()?"":`<div class="srow"><div class="srow-l"><div class="srow-t">Destination mode${tipHTML("Single folder — everything into one folder, as subfolders. Separate per source — each source gets its own folder-destination.")}</div><div class="srow-d">${per?"each source gets its own folder":"everything into one folder, as subfolders"}</div></div><div class="srow-c"><div class="seg" id="sDm"><button data-v="single" class="${!per?"on":""}">Single folder</button><button data-v="per" class="${per?"on":""}">Separate</button></div></div></div>`}`;
+  const exclInner=`<textarea id="sExcl" class="nb-excl" spellcheck="false">${esc((c.excludes||[]).join("\n"))}</textarea>
+     <div style="display:flex;gap:8px;margin-top:6px"><button class="btn sm" id="sExDev">${svg("code",13)} Add development patterns</button><button class="btn sm" id="sExReset">Reset to defaults</button></div>`;
+  const HD={folders:["What to copy",push?"Pick which folders of this NAS to send.":"Pick which folders to take from the source (the other NAS)."],
+   dest:["Where the copies land",push?"The destination for the copies — a disk on this NAS or another server.":"The folder on THIS NAS where the copies land."],
+   excl:["Exclusions","Optional: what NOT to copy — junk, caches, service files. rsync patterns, one per line."]};
+  if(part){
+   tc.innerHTML=`<h3 class="set-title">${HD[part][0]}</h3><p class="set-sub">${HD[part][1]}</p>`
+     +(part==="folders"?secFolders:part==="dest"?secDest:exclInner);
+  }else{
+   tc.innerHTML=`<h3 class="set-title">What to copy</h3><p class="set-sub">${push?"Step 1 — pick which folders of this NAS to send. Step 2 below — check where the copies land.":"Step 1 — pick which folders to take from the source (the other NAS). Step 2 below — check where the copies land on THIS NAS."}</p>
+   ${secFolders}
    <div class="set-h">Where the copies land</div>
-   ${destCard()}
-   ${isPushSsh()?"":`<div class="srow"><div class="srow-l"><div class="srow-t">Destination mode${tipHTML("Single folder — everything into one folder, as subfolders. Separate per source — each source gets its own folder-destination.")}</div><div class="srow-d">${per?"each source gets its own folder":"everything into one folder, as subfolders"}</div></div><div class="srow-c"><div class="seg" id="sDm"><button data-v="single" class="${!per?"on":""}">Single folder</button><button data-v="per" class="${per?"on":""}">Separate</button></div></div></div>`}
-   <details class="nb-det"><summary class="nb-sum">Exclusions${tipHTML("rsync patterns (one per line): what not to copy — junk, caches, service files.")}</summary>
-     <textarea id="sExcl" class="nb-excl" spellcheck="false">${esc((c.excludes||[]).join("\n"))}</textarea>
-     <div style="display:flex;gap:8px;margin-top:6px"><button class="btn sm" id="sExDev">${svg("code",13)} Add development patterns</button><button class="btn sm" id="sExReset">Reset to defaults</button></div>
-   </details>`;
+   ${secDest}
+   <details class="nb-det"><summary class="nb-sum">Exclusions${tipHTML("rsync patterns (one per line): what not to copy — junk, caches, service files.")}</summary>${exclInner}</details>`;
+  }
   const g=s=>tc.querySelector(s);
-  const drawJobs=()=>{const box=g("#sJobs");box.innerHTML=JOBS.length?"":'<div style="color:var(--mut);font-size:12px;padding:6px 0">Empty — click «Pick from NAS».</div>';
+  const drawJobs=()=>{const box=g("#sJobs");if(!box)return;
+   box.innerHTML=JOBS.length?"":'<div style="color:var(--mut);font-size:12px;padding:6px 0">Empty — click «'+(push?"Choose folders":"Pick from NAS")+'».</div>';
    JOBS.forEach((j,i)=>{const exc=(j.excludes&&j.excludes.length)?`<span class="nb-exc" title="${att("Excluded from this folder:\n"+j.excludes.join("\n"))}">−${j.excludes.length} excl.</span>`:"";
     const srcT=(push?"/":"")+j.src;
     const row=el(`<div class="nb-job"><span class="nb-src mono" title="${att(srcT)}">${svg(push?"folder":"net",13)} ${esc(srcT)}</span>${exc}<span class="nb-arr">→</span><span class="nb-dst mono" title="${att(j.dest)}">${esc(j.dest)}</span>${per?`<button class="iconbtn nb-jb" title="Destination folder">${svg("folder",14)}</button>`:""}<button class="iconbtn dng nb-jx" title="Remove">${svg("x",14)}</button></div>`);
@@ -6772,9 +6784,9 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
     const jb=row.querySelector(".nb-jb");if(jb)jb.onclick=()=>nbPickLocal(j.dest.replace(/\/[^/]+$/,"")||"/mnt",p=>{JOBS[i].dest=p.replace(/\/$/,"")+"/"+j.src.split("/").pop();saveCfg({jobs:JOBS});drawJobs();});
     box.appendChild(row);});};
   drawJobs();
-  wireSeg(tc,"#sDm",v=>saveCfg({dest_mode:v}).then(()=>tabSources(tc)));
-  wireSeg(tc,"#dTr",v=>saveCfg({dst:{kind:v}}).then(()=>tabSources(tc)));
-  {const dc=g("#dConn");if(dc)dc.onclick=()=>{tab="conn";render();};}
+  wireSeg(tc,"#sDm",v=>saveCfg({dest_mode:v}).then(again));
+  wireSeg(tc,"#dTr",v=>saveCfg({dst:{kind:v}}).then(again));
+  {const dc=g("#dConn");if(dc)dc.onclick=()=>{tab="conn";wizStep=0;render();};}
   // redraw after saving: the server re-derives every job's dest from the new base, so the
   // list must be repainted — otherwise it keeps showing the destinations of the old folder
   const remoteDest=()=>((CFG.dst||{}).kind==="ssh");
@@ -6791,8 +6803,8 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
     if(!CFG.host||!CFG.user){toast("Fill in the connection first (address and user)");return;}
     nbPickDest(bb.value.trim(),p=>{bb.value=p;saveDest(p);});
    }else nbPickLocal(bb.value||"/mnt",p=>{bb.value=p;saveDest(p);});};
-  g("#sAdd").onclick=()=>{
-    if(push&&!CFG.dest_base){toast("First choose a destination (the «Destination» tab)");return;}
+  const sAddBtn=g("#sAdd");if(sAddBtn)sAddBtn.onclick=()=>{
+    if(push&&!CFG.dest_base){toast("First choose the destination («Where the copies land»)");return;}
     // existing per-job exclusions → absolute paths for tree pre-selection
     const preExcl=[];JOBS.forEach(j=>{const base=j.src.replace(/\/$/,"");(j.excludes||[]).forEach(rel=>preExcl.push(base+rel));});
     nbPickSource(JOBS.map(j=>j.src),preExcl,(list,exl)=>{const chosen=new Set(list);
@@ -6803,13 +6815,15 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
     JOBS.forEach(j=>{const base=j.src.replace(/\/$/,"");
       const ex=(exl||[]).filter(p=>p.startsWith(base+"/")).map(p=>p.slice(base.length));
       if(ex.length)j.excludes=ex;else delete j.excludes;});
-    saveCfg({jobs:JOBS}).then(()=>tabSources(tc));},
+    saveCfg({jobs:JOBS}).then(again);},
     push?{title:"What to copy from this NAS",loading:"Reading folders…"}:null);};
-  const exList=()=>g("#sExcl").value.split("\n").map(x=>x.trim()).filter(Boolean);
-  const exSet=arr=>{const uniq=[...new Set(arr)];g("#sExcl").value=uniq.join("\n");saveCfg({excludes:uniq});};
-  g("#sExcl").onchange=()=>exSet(exList());
-  g("#sExDev").onclick=()=>exSet(exList().concat(NB_EXCL_DEV));
-  g("#sExReset").onclick=()=>exSet(NB_EXCL_DEFAULT.slice());
+  if(g("#sExcl")){
+   const exList=()=>g("#sExcl").value.split("\n").map(x=>x.trim()).filter(Boolean);
+   const exSet=arr=>{const uniq=[...new Set(arr)];g("#sExcl").value=uniq.join("\n");saveCfg({excludes:uniq});};
+   g("#sExcl").onchange=()=>exSet(exList());
+   g("#sExDev").onclick=()=>exSet(exList().concat(NB_EXCL_DEV));
+   g("#sExReset").onclick=()=>exSet(NB_EXCL_DEFAULT.slice());
+  }
  }
  /* ── Deleted files ── */
  function tabDeleted(tc){const c=CFG,dm=c.delete_mode||"archive",push=isPush();
@@ -7344,7 +7358,15 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
     Schedule → Finish in ONE column, no left tabs. The panes are the very same
     tab renderers (they auto-save), the wizard only adds Back/Next rails, so
     nothing is duplicated and going back keeps every entered value. ── */
- const WSTEPS=[{id:"conn",n:"Connection"},{id:"sources",n:"What to copy"},{id:"deleted",n:"Deleted files"},{id:"sched",n:"Schedule"},{id:"done",n:"Finish"}];
+ // small steps: one decision per screen. Push must choose WHERE before WHAT
+ // (job destinations derive from the base folder); pull naturally reads WHAT → WHERE.
+ const WSTEPS=()=>{const a=[{id:"conn",n:"Connection"}];
+  if(isPush())a.push({id:"dest",n:"Where to"},{id:"folders",n:"What to copy"});
+  else a.push({id:"folders",n:"What to copy"},{id:"dest",n:"Where to"});
+  a.push({id:"excl",n:"Exclusions"},{id:"deleted",n:"Deleted files"},{id:"sched",n:"Schedule"},{id:"done",n:"Finish"});
+  return a;};
+ const WPANE={conn:tc=>TABS.conn(tc),folders:tc=>tabSources(tc,"folders"),dest:tc=>tabSources(tc,"dest"),
+  excl:tc=>tabSources(tc,"excl"),deleted:tc=>TABS.deleted(tc),sched:tc=>TABS.sched(tc)};
  function renderWizDone(tc){const c=CFG,push=isPush();
   const ep=push?(isPushSsh()?(c.host?c.user+"@"+c.host+":"+(c.dest_base||"?"):"not set"):(c.dest_base||"not selected"))
               :(c.host?c.user+"@"+c.host:"not set");
@@ -7358,22 +7380,24 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
    </div></div>
    <div class="mon-note" style="margin-top:12px">Press <b>Finish</b> — you'll land on the overview. «Run backup» makes the first copy; «Dry run» shows what would happen without changing anything.</div>`;}
  function renderWizard(){
-  if(wizStep>=WSTEPS.length)wizStep=WSTEPS.length-1;
-  const cur=WSTEPS[wizStep].id;
+  const WS=WSTEPS();
+  if(wizStep>=WS.length)wizStep=WS.length-1;
+  const cur=WS[wizStep].id;
   body.innerHTML=`<div class="nbtabs" id="nbTabs"></div>
-   <div class="nbwiz"><div class="nbwiz-steps">${WSTEPS.map((s,i)=>`<div class="nbwiz-step${i===wizStep?" on":i<wizStep?" done":""}"><span class="nb-stepn">${i<wizStep?svg("check",11):(i+1)}</span><span>${s.n}</span></div>`).join("")}</div>
+   <div class="nbwiz"><div class="nbwiz-steps">${WS.map((s,i)=>`<div class="nbwiz-step${i===wizStep?" on":i<wizStep?" done":""}"><span class="nb-stepn">${i<wizStep?svg("check",11):(i+1)}</span><span>${s.n}</span></div>`).join("")}</div>
    <div class="set-pane nbwiz-pane" id="tc"></div>
    <div class="nbwiz-foot"><button class="btn" id="wzBack"${wizStep?"":" disabled"}>Back</button>
     <button class="btn sm" id="wzSkip" title="Close the wizard and configure via the tabs at any pace">Set up later</button>
     <button class="btn pri" id="wzNext">${cur==="done"?"Finish":"Next"} ${cur==="done"?svg("check",14):svg("chev",14)}</button></div></div>`;
   renderTabs();
   const tc=body.querySelector("#tc");
-  if(cur==="done")renderWizDone(tc);else TABS[cur](tc);
+  if(cur==="done")renderWizDone(tc);else WPANE[cur](tc);
   body.querySelector("#wzBack").onclick=()=>{if(wizStep){wizStep--;render();}};
   body.querySelector("#wzSkip").onclick=async()=>{await saveCfg({setup_done:true});render();};
   body.querySelector("#wzNext").onclick=async()=>{
    if(cur==="conn"&&!connOk()){toast("Set up the connection first — or press «Set up later»");return;}
-   if(cur==="sources"&&!JOBS.length){toast("Choose at least one folder to copy");return;}
+   if(cur==="folders"&&!JOBS.length){toast("Choose at least one folder to copy");return;}
+   if(cur==="dest"&&isPush()&&!CFG.dest_base){toast("Choose the destination folder first");return;}
    if(cur==="done"){await saveCfg({setup_done:true});tab="overview";SET.nbTab=tab;saveSettings();render();return;}
    wizStep++;render();};}
  const render=async()=>{const r=await nbG("/api/backup/config");
