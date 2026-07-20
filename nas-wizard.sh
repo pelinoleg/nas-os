@@ -2171,18 +2171,21 @@ sec_log2ram() {
         *) warn "root is not on an SD card (/dev/${rootdev:-?}) — log2ram is unneeded and costs you logs on an emergency power-off"
            return 0 ;;
     esac
-    if dpkg -s log2ram >/dev/null 2>&1; then info "log2ram already installed"; return 0; fi
-    info "adding the external azlux repository for log2ram"
-    run mkdir -p /usr/share/keyrings
-    if [ "$DRY_RUN" -eq 1 ]; then
-        info "[DRY-RUN] add azlux key+repo, apt install log2ram"
-    else
+    if ! dpkg -s log2ram >/dev/null 2>&1; then
+        info "adding the external azlux repository for log2ram"
+        run mkdir -p /usr/share/keyrings
+        if [ "$DRY_RUN" -eq 1 ]; then
+            info "[DRY-RUN] add azlux key+repo, apt install log2ram"; return 0
+        fi
         wget -qO- https://azlux.fr/repo.gpg 2>>"$LOG" | gpg --dearmor > /usr/share/keyrings/azlux.gpg 2>>"$LOG" || { warn "failed to fetch azlux key"; return 1; }
         echo "deb [signed-by=/usr/share/keyrings/azlux.gpg] http://packages.azlux.fr/debian/ stable main" > /etc/apt/sources.list.d/azlux.list
         run apt-get update
-        run apt-get install -y log2ram
+        run apt-get install -y log2ram || { warn "log2ram install failed"; return 1; }
     fi
-    info "log2ram installed (logs in RAM, flushed to disk on a timer)"
+    # ALWAYS enable it — the package doesn't enable itself, and it's harmless to
+    # re-enable an already-installed one (this is why a re-run must not return early).
+    [ "$DRY_RUN" -eq 0 ] && enable_service log2ram
+    info "log2ram enabled (logs in RAM, flushed to disk on a timer; full effect after a reboot)"
 }
 sec_ufw() {
     install_packages "firewall" ufw
@@ -3730,7 +3733,7 @@ api_state() {                  # brief state for the wizard (JSON)
         "$([ -f /etc/apt/apt.conf.d/20auto-upgrades ] && echo true || echo false)" \
         "$(systemctl is-active avahi-daemon >/dev/null 2>&1 && echo true || echo false)" \
         "$([ -f /etc/systemd/journald.conf.d/99-nas.conf ] && echo true || echo false)" \
-        "$(systemctl is-active log2ram >/dev/null 2>&1 && echo true || echo false)" \
+        "$(systemctl is-enabled log2ram >/dev/null 2>&1 && echo true || echo false)" \
         "$(systemctl is-active nas-health.timer >/dev/null 2>&1 && echo true || echo false)" \
         "$(grep -qs 'usb_max_current_enable=1' "$cfg" && echo true || echo false)" \
         "$(grep -qs 'pciex1_gen=3' "$cfg" && echo true || echo false)" \
