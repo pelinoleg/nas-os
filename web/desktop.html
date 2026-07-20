@@ -6086,8 +6086,8 @@ function pickFolder(opts){
       <button class="btn pri" id="pfO">Choose this folder</button></div></div>`;
   s.classList.add("show");
   $("#pfUp").onclick=()=>{if(cur!=="/"){cur=parent(cur);mk=false;draw();}};
-  $("#pfX").onclick=()=>s.classList.remove("show");
-  $("#pfO").onclick=()=>{s.classList.remove("show");opts.onPick&&opts.onPick(cur);};
+  $("#pfX").onclick=()=>{s.classList.remove("show");opts.onClose&&opts.onClose(null);};
+  $("#pfO").onclick=()=>{s.classList.remove("show");opts.onPick&&opts.onPick(cur);opts.onClose&&opts.onClose(cur);};
   $("#pfMk").onclick=()=>{mk=!mk;paintList(lastDirs);if(mk)focusMk();};
   const pi=$("#pfPath");
   pi.onkeydown=ev=>{if(ev.key==="Enter"){ev.preventDefault();const v=pi.value.trim();if(v){cur=v;mk=false;draw();}}};
@@ -9330,7 +9330,10 @@ function sharingTab(tc){
  const load=async()=>{const d=await api("/api/smb");render(d||{});};
  /* share add/edit */
  const shareDlg=(sh,users)=>{const s=scrim(),ed=!!sh;sh=sh||{name:"",path:"",guest:false,users:[],readonly:false};
-  let path=sh.path,guest=!!sh.guest,sel=new Set(sh.users||[]),ro=!!sh.readonly;
+  /* name/path/guest/sel/ro are closure state so the form survives a re-draw —
+     needed both when toggling Guest/Users and when the folder picker (which
+     shares #scrim) closes and we re-open this dialog. */
+  let name=sh.name||"",path=sh.path||"",guest=!!sh.guest,sel=new Set(sh.users||[]),ro=!!sh.readonly;
   const draw=()=>{
    s.innerHTML=`<div class="dialog" style="max-width:460px"><h3>${ed?"Edit share":"New share"}</h3>
     <label class="smb-l">Name</label><input id="shn" placeholder="e.g. Media" ${ed?"disabled":""}>
@@ -9340,19 +9343,20 @@ function sharingTab(tc){
     <div id="shusers" style="${guest?"display:none":""};margin-top:8px">${users.length?users.map(()=>`<label class="smb-uck"><input type="checkbox"><span></span></label>`).join(""):`<div class="nt-mut" style="padding:4px 0">No users yet — create one below, or use Open (guest).</div>`}</div>
     <label class="smb-uck" style="margin-top:12px"><input type="checkbox" id="shro" ${ro?"checked":""}><span>Read only</span></label>
     <div class="r"><button class="btn" id="shx">Cancel</button><button class="btn pri" id="shok">${ed?"Save":"Create"}</button></div></div>`;
-   if(!ed)s.querySelector("#shn").value="";else s.querySelector("#shn").value=sh.name;
+   const nm=s.querySelector("#shn");nm.value=name;nm.oninput=e=>name=e.target.value;
    s.querySelector("#shp").value=path;
    s.querySelectorAll("#shusers .smb-uck").forEach((lab,i)=>{const u=users[i];lab.querySelector("span").textContent=u.name;const c=lab.querySelector("input");c.checked=sel.has(u.name);c.onchange=()=>{c.checked?sel.add(u.name):sel.delete(u.name);};});
-   s.querySelector("#shpick").onclick=()=>pickFolder({title:"Share folder",start:path||start||HOME_DIR,onPick:p=>{path=p;s.querySelector("#shp").value=p;}});
+   s.querySelector("#shpick").onclick=()=>pickFolder({title:"Share folder",start:path||start||HOME_DIR,onPick:p=>{path=p;},onClose:()=>show()});
    s.querySelectorAll("#shacc button").forEach(b=>b.onclick=()=>{guest=b.dataset.g==="1";draw();});
    s.querySelector("#shro").onchange=e=>ro=e.target.checked;
    s.querySelector("#shx").onclick=()=>s.classList.remove("show");
-   s.querySelector("#shok").onclick=async()=>{const name=ed?sh.name:s.querySelector("#shn").value.trim();
-    if(!name)return toast("Enter a name");if(!path)return toast("Pick a folder");
+   s.querySelector("#shok").onclick=async()=>{const nn=(ed?sh.name:name).trim();
+    if(!nn)return toast("Enter a name");if(!path)return toast("Pick a folder");
     if(!guest&&!sel.size)return toast("Pick users, or make it Open (guest)");
-    const r=await api("/api/smb/share",{method:"POST",body:JSON.stringify({name,old:ed?sh.name:"",path,guest,users:[...sel],readonly:ro})});
+    const r=await api("/api/smb/share",{method:"POST",body:JSON.stringify({name:nn,old:ed?sh.name:"",path,guest,users:[...sel],readonly:ro})});
     if(r&&r.ok){s.classList.remove("show");load();}else toast("Error: "+((r&&r.log)||"?"));};};
-  s.classList.add("show");draw();};
+  const show=()=>{draw();s.classList.add("show");};
+  show();};
  /* user add/change */
  const rndpw=()=>{const a="abcdefghijkmnpqrstuvwxyz23456789";let x="";for(let i=0;i<10;i++)x+=a[Math.floor(Math.random()*a.length)];return x.slice(0,4)+"-"+x.slice(4,7)+"-"+x.slice(7);};
  const userDlg=u=>{const s=scrim(),ed=!!u;
