@@ -3026,91 +3026,93 @@ _KNOWN_IPS_FILE = os.path.join(NAS_CONFIG, "known-ips.json")
 # priority hint: 2 = data-loss risk (requires acknowledgement), 1 = important/urgent,
 # 0 = normal, -1 = informational (no sound), -2 = badge only.
 def _def_monitor():
+    # Curated defaults. on = Pushover (phone); desk = Desktop banner + bell;
+    # priority = Pushover level, capped at 1 ("high": loud, bypasses Do-Not-Disturb,
+    # never repeats). Rule of thumb: real problems → Pushover+Desktop@1; routine/info
+    # → Desktop only; power-user metrics (mem/swap/load/traffic/…) → off (opt-in).
     return {"enabled": False, "cooldown": 1800, "events": {
         # --- disks: attach/detach/mode ---
-        "disk_add":    {"on": True,  "priority": 0},
-        "disk_remove": {"on": True,  "priority": 1},
-        "readonly":    {"on": True,  "priority": 2},
+        "disk_add":    {"on": False, "priority": 0,  "desk": True},   # you plugged it in — info
+        "disk_remove": {"on": True,  "priority": 1},                   # unexpected removal = data risk
+        "readonly":    {"on": True,  "priority": 1},                   # fs went read-only
         "fserror":     {"on": True,  "priority": 1},
         # --- disk health (SMART, every 10 min) ---
-        "smart":       {"on": True,  "priority": 2},
+        "smart":       {"on": True,  "priority": 1},                   # disk failing
         "smart_wear":  {"on": True,  "priority": 1, "threshold": 1},
         "disktemp":    {"on": True,  "priority": 1, "threshold": 60},
         # --- space ---
-        "pool":        {"on": True,  "priority": 0, "threshold": 90},
-        "diskfull":    {"on": True,  "priority": 0, "threshold": 90},
+        "pool":        {"on": True,  "priority": 1, "threshold": 90},
+        "diskfull":    {"on": True,  "priority": 1, "threshold": 90},
         # --- Pi: power/temperature/resources ---
         "temp":        {"on": True,  "priority": 1, "threshold": 75},
         "throttle":    {"on": True,  "priority": 1},
-        "undervolt":   {"on": True,  "priority": 2},
+        "undervolt":   {"on": True,  "priority": 1},
         "cfg_corrupt": {"on": True,  "priority": 1},
-        "mem":         {"on": False, "priority": 0, "threshold": 92},
+        "mem":         {"on": False, "priority": 0, "threshold": 92},  # power-metrics: opt-in
         "swap":        {"on": False, "priority": 0, "threshold": 60},
         "load":        {"on": False, "priority": 0, "threshold": 8},
         # --- services and containers ---
         "svcfail":     {"on": True,  "priority": 1},
-        "container":   {"on": True,  "priority": 0},
-        "container_loop": {"on": True, "priority": 1},
-        "docker_space":{"on": False, "priority": 0, "threshold": 20},
+        "container":   {"on": False, "priority": 0, "desk": True},     # a container went down — desk only
+        "container_loop": {"on": True, "priority": 1},                 # crash loop = the real problem
+        "docker_space":{"on": False, "priority": 0, "threshold": 20, "desk": True},
         # --- access (panel login / SSH) ---
-        "panel_new":   {"on": True,  "priority": 1},
+        "panel_new":   {"on": True,  "priority": 1},                   # new device logged into the panel
         "panel_fail":  {"on": True,  "priority": 1, "threshold": 5},
-        "ssh_login":   {"on": False, "priority": 0},
+        "ssh_login":   {"on": False, "priority": 0, "desk": True},     # SSH login — desk only
         # --- network ---
-        "ip_changed":  {"on": True,  "priority": 0},
-        "link_changed":{"on": True,  "priority": 0},
-        "vpn_offline": {"on": True,  "priority": 1},
+        "ip_changed":  {"on": False, "priority": 0, "desk": True},     # info → desk
+        "link_changed":{"on": False, "priority": 0, "desk": True},
+        "vpn_offline": {"on": True,  "priority": 1},                   # remote access lost
         # --- data protection (SnapRAID / mergerfs / backup) ---
-        "snap_ok":     {"on": False, "priority": -1},
+        "snap_ok":     {"on": False, "priority": -1},                  # routine success — silent
         "snap_err":    {"on": True,  "priority": 1},
-        "scrub_err":   {"on": True,  "priority": 2},
+        "scrub_err":   {"on": True,  "priority": 1},                   # silent corruption found
         "delete_block":{"on": True,  "priority": 1},
-        "backup":      {"on": False, "priority": 0},
+        "backup":      {"on": False, "priority": 0, "desk": True},     # backup-app run result — desk
         "mergerfs":    {"on": True,  "priority": 1},
-        # --- file history (fswatch); priority 2 = Pushover emergency (retries
-        #     every minute until acknowledged) — not used by default ---
+        # --- file history (fswatch) ---
         "fsw_corrupt": {"on": True,  "priority": 1},
         "fsw_guard":   {"on": True,  "priority": 1},
         "fsw_root":    {"on": True,  "priority": 1},
-        "fsw_del":     {"on": True,  "priority": 0, "threshold": 50},
-        "fsw_scan":    {"on": True,  "priority": -1},
+        "fsw_del":     {"on": True,  "priority": 0, "threshold": 50, "desk": True},
+        "fsw_scan":    {"on": False, "priority": -1},
         # --- maintenance ---
-        "reboot_req":  {"on": True,  "priority": -1},
+        "reboot_req":  {"on": False, "priority": -1, "desk": True},    # info → desk
         "root_full":   {"on": True,  "priority": 1, "threshold": 90},
         "sd_degrade":  {"on": True,  "priority": 1},
-        "sustained_heat": {"on": False, "priority": 1, "threshold": 10},
+        "sustained_heat": {"on": True, "priority": 1, "threshold": 10},
         "fan_stall":   {"on": True,  "priority": 1},
-        "cron_failed": {"on": True,  "priority": 0},
-        "time_drift":  {"on": True,  "priority": 0},
-        "health":      {"on": True,  "priority": 1},   # hourly health-check thresholds (agent: nas-health-check.sh)
-        "updates":     {"on": False, "priority": -1},
-        "sec_updates": {"on": False, "priority": -1},
-        "weekly":      {"on": False, "priority": -1},
-        # --- behavioral ---
+        "cron_failed": {"on": True,  "priority": 0, "desk": True},
+        "time_drift":  {"on": False, "priority": 0, "desk": True},     # info → desk
+        "health":      {"on": True,  "priority": 1},                   # hourly health-check thresholds
+        "updates":     {"on": False, "priority": -1, "desk": True},    # info → desk
+        "sec_updates": {"on": False, "priority": -1, "desk": True},
+        "weekly":      {"on": False, "priority": -1, "desk": True},    # heartbeat → desk (not phone)
+        # --- behavioral (power-metrics: opt-in) ---
         "traffic":     {"on": False, "priority": 0, "threshold": 50},
         "slow_disk":   {"on": False, "priority": 0, "threshold": 250},
         "proc_hog":    {"on": False, "priority": 0, "threshold": 80},
         "inodes":      {"on": True,  "priority": 1, "threshold": 90},
-        "boot":        {"on": False, "priority": -1},
-        # --- USB auto-import (SD/flash copy result; Pushover off — the import
-        #     script can send on its own, to avoid duplicates) ---
+        "boot":        {"on": False, "priority": -1, "desk": True},    # box rebooted → desk
+        # --- USB auto-import (Pushover comes from the import script's IMPORT_NOTIFY) ---
         "usb_import":  {"on": False, "priority": 0, "desk": True},
         # --- backup of the main NAS onto this NAS (run result) ---
-        "nas_backup":  {"on": True, "priority": 0, "desk": True},
+        "nas_backup":  {"on": False, "priority": 0, "desk": True},     # routine pull result → desk
         # --- backup health (periodic checks, every 30 min) ---
         "nb_conn":     {"on": True,  "priority": 1, "desk": True},
         "nb_srcmiss":  {"on": False, "priority": 1, "desk": True},
         "nb_stale":    {"on": True,  "priority": 1, "threshold": 7,  "desk": True},
         "nb_size":     {"on": False, "priority": 0, "threshold": 40, "desk": True},
         "nb_dest":     {"on": True,  "priority": 1, "threshold": 95, "desk": True},
-        "nb_guard":    {"on": True,  "priority": 2, "desk": True},   # --max-delete guard fired
-        "nb_verify":   {"on": True,  "priority": 1, "desk": True},   # checksum verification found mismatches
+        "nb_guard":    {"on": True,  "priority": 1, "desk": True},   # --max-delete guard fired
+        "nb_verify":   {"on": True,  "priority": 1, "desk": True},   # checksum mismatch found
         # --- reliability: disk reconnected on its own (auto-mount) ---
-        "disk_remount":{"on": True, "priority": 0, "desk": True},
+        "disk_remount":{"on": False, "priority": 0, "desk": True},   # self-healed → desk
         # --- active thermal protection (warning/action) ---
         "thermal_guard":{"on": True, "priority": 1, "desk": True},
-        # --- daily/weekly status summary ---
-        "daily_summary":{"on": True, "priority": -1, "desk": False},
+        # --- daily status summary (silent; weekly is the heartbeat) ---
+        "daily_summary":{"on": False, "priority": -1, "desk": False},
     }}
 
 def _monitor_defaults_desk(d):
