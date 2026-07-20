@@ -937,9 +937,15 @@
   .nb-dest .seg{margin-left:auto}
   /* compact segment in the card header (there was no .seg.sm class in the system) */
   .nb-dest .seg.sm button{padding:4px 10px;font-size:11.5px}
-  .nb-grid2{display:grid;grid-template-columns:1fr 1fr;gap:9px 12px}
-  .nb-grid2 label{display:flex;flex-direction:column;gap:4px;font-size:11.5px;color:var(--dim)}
+  /* connection fields sized to their content, not 50% of the card each:
+     address is the long one, user/port/password are short */
+  .nb-grid2{display:flex;flex-wrap:wrap;gap:9px 12px}
+  .nb-grid2 label{display:flex;flex-direction:column;gap:4px;font-size:11.5px;color:var(--dim);flex:0 1 auto}
   .nb-grid2 input{width:100%}
+  .nb-grid2 label:first-child{flex:1 1 200px;min-width:170px}      /* Address */
+  .nb-grid2 label:not(:first-child){width:120px}
+  .nb-grid2 input[id^="p_"]{width:100%}
+  .nb-grid2 label:has(input[id^="p_"]){width:64px}                 /* Port */
   /* arrow between the side cards: from → to, without extra words */
   .nb-arrow-row{display:flex;justify-content:center;color:var(--mut);margin:-6px 0 6px;transform:rotate(180deg)}
   .st-opt{display:flex;align-items:center;gap:11px;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r-lg);cursor:pointer;margin-bottom:6px}
@@ -971,7 +977,7 @@
   .nb-field>label{display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:600;margin-bottom:6px}
   .nb-field-row{display:flex;gap:8px}
   .nb-field-row input{flex:1;min-width:0}
-  .nb-excl{width:100%;min-height:150px;font-family:var(--mono);font-size:12px;line-height:1.6;resize:vertical;margin-top:8px}
+  .nb-excl{width:100%;min-height:220px;font-family:var(--mono);font-size:12px;line-height:1.6;resize:vertical;margin-top:8px}
   .nb-det{margin-top:16px}
   .nb-sum{cursor:pointer;list-style:none;display:flex;align-items:center;gap:6px;font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--mut);font-family:var(--mono);padding:4px 0;user-select:none}
   .nb-sum::-webkit-details-marker{display:none}
@@ -6676,7 +6682,10 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
    <div class="nb-dest-h"><span class="nb-dest-t">${svg(rem?"net":"folder",15)} ${ttl}</span>
     <span class="nb-dest-w mono">${rem?esc((S.user||"?")+"@"+(S.host||"not set")):(w==="src"?"folders on this NAS":"a folder on this NAS")}</span>
     <div class="seg sm" id="k_${w}">${kinds.map(([v,l])=>`<button data-v="${v}" class="${S.kind===v?"on":""}">${l}</button>`).join("")}</div></div>
-   ${rem?`<div class="nb-grid2">
+   ${rem?`<div class="nb-help">${S.kind==="rsyncd"
+     ?`<b>rsync daemon</b><span>The classic "rsync service" of NAS boxes (Synology, UGREEN, QNAP backup modules): faster on a home LAN but unencrypted, and you sign in with a module name and its own password — not a system user. Pick it when the other NAS advertises rsync modules; the address field takes the NAS address, the folder is the module name.</span>`
+     :`<b>SSH server</b><span>Works with any Linux machine or NAS that has SSH: encrypted, signs in with a normal user account. The safe default — pick this if unsure.</span>`}</div>
+   <div class="nb-grid2">
     <label>Address<input class="mono" id="h_${w}" value="${att(S.host||"")}" placeholder="${w==="dst"&&rnet?"usw-s001.rsync.net":"192.168.1.50"}"></label>
     <label>User<input class="mono" id="u_${w}" value="${att(S.user||"")}" placeholder="${w==="dst"&&rnet?"de1234":"root"}"></label>
     ${S.kind==="ssh"?`<label>Port<input class="mono" id="p_${w}" value="${S.port||22}"></label>`:""}
@@ -6762,8 +6771,9 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
    <div id="sJobs"></div>`;
   const secDest=`${destCard()}
    ${isPushSsh()?"":`<div class="srow"><div class="srow-l"><div class="srow-t">Destination mode${tipHTML("Single folder — everything into one folder, as subfolders. Separate per source — each source gets its own folder-destination.")}</div><div class="srow-d">${per?"each source gets its own folder":"everything into one folder, as subfolders"}</div></div><div class="srow-c"><div class="seg" id="sDm"><button data-v="single" class="${!per?"on":""}">Single folder</button><button data-v="per" class="${per?"on":""}">Separate</button></div></div></div>`}`;
-  const exclInner=`<textarea id="sExcl" class="nb-excl" spellcheck="false">${esc((c.excludes||[]).join("\n"))}</textarea>
-     <div style="display:flex;gap:8px;margin-top:6px"><button class="btn sm" id="sExDev">${svg("code",13)} Add development patterns</button><button class="btn sm" id="sExReset">Reset to defaults</button></div>`;
+  // no "add dev patterns"/"reset" buttons: the default list already ships with
+  // everything (junk + development) — the textarea IS the whole interface
+  const exclInner=`<textarea id="sExcl" class="nb-excl" spellcheck="false">${esc((c.excludes||[]).join("\n"))}</textarea>`;
   const HD={folders:["What to copy",push?"Pick which folders of this NAS to send.":"Pick which folders to take from the source (the other NAS)."],
    dest:["Where the copies land",push?"The destination for the copies — a disk on this NAS or another server.":"The folder on THIS NAS where the copies land."],
    excl:["Exclusions","Optional: what NOT to copy — junk, caches, service files. rsync patterns, one per line."]};
@@ -6775,6 +6785,8 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
      :`<div class="set-h">Each folder's destination</div><div style="color:var(--mut);font-size:12px;padding:4px 0">The folders are picked on the «What to copy» step — each one will get its own destination button here.</div>`):"";
    tc.innerHTML=`<h3 class="set-title">${HD[part][0]}</h3><p class="set-sub">${HD[part][1]}</p>`
      +(part==="folders"?secFolders:part==="dest"?secDest+perList:exclInner);
+   if(part==="excl"){tc.style.display="flex";tc.style.flexDirection="column";
+     const ta=tc.querySelector("#sExcl");if(ta){ta.style.flex="1";ta.style.minHeight="240px";ta.style.resize="none";}}
   }else{
    tc.innerHTML=`<h3 class="set-title">What to copy</h3><p class="set-sub">${push?"Step 1 — pick which folders of this NAS to send. Step 2 below — check where the copies land.":"Step 1 — pick which folders to take from the source (the other NAS). Step 2 below — check where the copies land on THIS NAS."}</p>
    ${secFolders}
@@ -6829,8 +6841,6 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
    const exList=()=>g("#sExcl").value.split("\n").map(x=>x.trim()).filter(Boolean);
    const exSet=arr=>{const uniq=[...new Set(arr)];g("#sExcl").value=uniq.join("\n");saveCfg({excludes:uniq});};
    g("#sExcl").onchange=()=>exSet(exList());
-   g("#sExDev").onclick=()=>exSet(exList().concat(NB_EXCL_DEV));
-   g("#sExReset").onclick=()=>exSet(NB_EXCL_DEFAULT.slice());
   }
  }
  /* ── Deleted files ── */
