@@ -8935,8 +8935,16 @@ def fs_list(path):
         except OSError:
             pass
     entries.sort(key=lambda e: (e["type"] != "dir", e["name"].lower()))
+    # free space of the volume this folder lives on — the FM status bar shows it
+    # and warns before a paste that won't fit
+    try:
+        st = os.statvfs(path)
+        free, vtotal = st.f_bavail * st.f_frsize, st.f_blocks * st.f_frsize
+    except OSError:
+        free = vtotal = None
     return {"ok": True, "path": path,
             "parent": (os.path.dirname(path) if path != "/" else None),
+            "free": free, "vtotal": vtotal,
             "entries": entries}
 
 # Trees that must NEVER be the target of a destructive file manager operation —
@@ -9210,21 +9218,343 @@ def fs_move(src, dst_dir):
         return {"ok": False, "log": str(e)}
     return {"ok": True, "path": dst}
 
-def fs_search(path, query, limit=400):
+# ---------------------------------------------------------------------------
+#  Long file operations as background jobs (copy / move / archive / unzip).
+#  A 300 GB folder copy must not be one opaque HTTP request: same
+#  start/status/cancel pattern as _FETCH_JOBS, byte-level progress, cancel
+#  works mid-file. Conflicts are reported BEFORE the job starts so the UI can
+#  ask (replace / skip / keep both) instead of silently minting "name (1)".
+# ---------------------------------------------------------------------------
+_FSJOBS = {}
+_FSJOBS_LOCK = threading.Lock()
+
+class _FsCancelled(Exception):
+    pass
+
+def _fsjob_new(op, label):
+    jid = secrets.token_hex(8)
+    job = {"id": jid, "op": op, "label": label, "state": "running", "cur": "",
+           "done_bytes": 0, "total_bytes": 0, "done_items": 0, "total_items": 0,
+           "log": "", "cancel": threading.Event(), "t0": time.time()}
+    with _FSJOBS_LOCK:
+        for k in [k for k, v in _FSJOBS.items() if v["state"] != "running"][:-20]:
+            _FSJOBS.pop(k, None)
+        _FSJOBS[jid] = job
+    return job
+
+def _fsjob_public(j):
+    return {k: j[k] for k in ("id", "op", "label", "state", "cur", "done_bytes",
+                              "total_bytes", "done_items", "total_items", "log")}
+
+def _fsjob_tree_size(paths, job=None):
+    total = 0
+    for p in paths:
+        if os.path.isdir(p) and not os.path.islink(p):
+            for root, _dirs, files in os.walk(p):
+                if job and job["cancel"].is_set():
+                    raise _FsCancelled()
+                for nm in files:
+                    try:
+                        total += os.lstat(os.path.join(root, nm)).st_size
+                    except OSError:
+                        pass
+        else:
+            try:
+                total += os.lstat(p).st_size
+            except OSError:
+                pass
+    return total
+
+def _fsjob_copy_file(src, dst, job):
+    # chunked copy: byte progress + cancel mid-file; a half-written target is removed
+    try:
+        with open(src, "rb") as fi, open(dst, "wb") as fo:
+            while True:
+                if job["cancel"].is_set():
+                    raise _FsCancelled()
+                buf = fi.read(1024 * 1024)
+                if not buf:
+                    break
+                fo.write(buf)
+                job["done_bytes"] += len(buf)
+        shutil.copystat(src, dst, follow_symlinks=False)
+    except (_FsCancelled, OSError):
+        try:
+            os.unlink(dst)
+        except OSError:
+            pass
+        raise
+
+def _fsjob_copy_entry(src, dst_dir, job, policy):
+    """Copy src into dst_dir honoring the conflict policy.
+    policy: replace (files overwritten, folders merged) | skip | both (rename)."""
+    if job["cancel"].is_set():
+        raise _FsCancelled()
+    dst = os.path.join(dst_dir, os.path.basename(src.rstrip("/")))
+    exists = os.path.lexists(dst)
+    if os.path.islink(src) or not os.path.isdir(src):
+        if exists and src != dst:
+            if policy == "skip":
+                try:
+                    job["done_bytes"] += os.lstat(src).st_size
+                except OSError:
+                    pass
+                return None
+            if policy == "both" or src == os.path.realpath(dst):
+                dst = _uniq(dst)
+            elif os.path.isdir(dst) and not os.path.islink(dst):
+                shutil.rmtree(dst)          # replace a folder with a file
+        elif exists:
+            dst = _uniq(dst)                # copy into its own folder = duplicate
+        job["cur"] = src
+        if os.path.islink(src):
+            try:
+                os.unlink(dst)
+            except OSError:
+                pass
+            os.symlink(os.readlink(src), dst)
+        else:
+            _fsjob_copy_file(src, dst, job)
+        return dst
+    # directory
+    if exists:
+        if policy == "skip":
+            job["done_bytes"] += _fsjob_tree_size([src], job)
+            return None
+        if policy == "both" or _into_self(src, dst_dir):
+            dst = _uniq(dst)
+        elif not os.path.isdir(dst):
+            os.unlink(dst)                  # replace a file with a folder
+    os.makedirs(dst, exist_ok=True)
+    for nm in sorted(os.listdir(src)):
+        _fsjob_copy_entry(os.path.join(src, nm), dst, job, policy)
+    try:
+        shutil.copystat(src, dst)
+    except OSError:
+        pass
+    return dst
+
+def _fsjob_move_entry(src, dst_dir, job, policy):
+    dst = os.path.join(dst_dir, os.path.basename(src.rstrip("/")))
+    exists = os.path.lexists(dst)
+    if exists and policy == "skip":
+        job["done_bytes"] += _fsjob_tree_size([src], job)
+        return None
+    if exists and policy == "both":
+        dst = _uniq(dst)
+        exists = False
+    if not exists:
+        try:
+            sz = _fsjob_tree_size([src], job)
+            os.rename(src, dst)             # same filesystem: instant
+            job["done_bytes"] += sz
+            return dst
+        except OSError:
+            pass                            # cross-device (or race) → copy + delete below
+    # replace/merge, or a cross-device move: copy honoring the policy, then remove the source
+    out = _fsjob_copy_entry(src, dst_dir, job, policy)
+    if os.path.isdir(src) and not os.path.islink(src):
+        shutil.rmtree(src)
+    else:
+        os.unlink(src)
+    return out
+
+def _fsjob_run(job, items, dest, name, policy):
+    import zipfile
+    try:
+        op = job["op"]
+        if op in ("copy", "move"):
+            job["cur"] = "calculating size…"
+            job["total_bytes"] = _fsjob_tree_size(items, job)
+            job["total_items"] = len(items)
+            # will it fit? for a move only what crosses onto another device counts
+            try:
+                ddev = os.stat(dest).st_dev
+                need = job["total_bytes"] if op == "copy" else _fsjob_tree_size(
+                    [p for p in items if os.stat(p).st_dev != ddev], job)
+                free = shutil.disk_usage(dest).free
+                if need and free < need + 64 * 2**20:
+                    raise OSError(f"not enough space: need {need // 2**20} MB, "
+                                  f"free {free // 2**20} MB")
+            except FileNotFoundError:
+                pass
+            for p in items:
+                (_fsjob_copy_entry if op == "copy" else _fsjob_move_entry)(p, dest, job, policy)
+                job["done_items"] += 1
+        elif op == "archive":
+            job["total_bytes"] = _fsjob_tree_size(items, job)
+            out = _uniq(os.path.join(dest, os.path.basename(name)))
+            try:
+                with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+                    for it in items:
+                        if os.path.isdir(it):
+                            base = os.path.dirname(it)
+                            for root, _d, files in os.walk(it):
+                                for f in files:
+                                    if job["cancel"].is_set():
+                                        raise _FsCancelled()
+                                    fp = os.path.join(root, f)
+                                    job["cur"] = fp
+                                    z.write(fp, os.path.relpath(fp, base))
+                                    try:
+                                        job["done_bytes"] += os.lstat(fp).st_size
+                                    except OSError:
+                                        pass
+                        elif os.path.isfile(it):
+                            job["cur"] = it
+                            z.write(it, os.path.basename(it))
+                            job["done_bytes"] += os.lstat(it).st_size
+            except (_FsCancelled, OSError):
+                try:
+                    os.unlink(out)
+                except OSError:
+                    pass
+                raise
+            job["log"] = out
+        elif op == "unzip":
+            src = items[0]
+            os.makedirs(dest, exist_ok=True)
+            if src.lower().endswith(".zip"):
+                with zipfile.ZipFile(src) as z:
+                    infos = z.infolist()
+                    job["total_items"] = len(infos)
+                    job["total_bytes"] = sum(i.file_size for i in infos)
+                    for i in infos:
+                        if job["cancel"].is_set():
+                            raise _FsCancelled()
+                        job["cur"] = i.filename
+                        z.extract(i, dest)
+                        job["done_bytes"] += i.file_size
+                        job["done_items"] += 1
+            else:
+                # tar.*: no cheap member progress — one indeterminate step
+                job["cur"] = os.path.basename(src)
+                shutil.unpack_archive(src, dest)
+        job["state"] = "done"
+    except _FsCancelled:
+        job["state"] = "cancelled"
+    except Exception as e:                  # noqa: BLE001 — the job must report, not die silently
+        job["state"] = "error"
+        job["log"] = str(e)
+    job["cur"] = ""
+
+def fs_job_start(op, items, dest="", name="", policy=""):
+    items = [os.path.realpath(p) for p in (items or []) if p]
+    items = [p for p in items if os.path.lexists(p)]
+    if not items:
+        return {"ok": False, "log": "no items"}
+    if op not in ("copy", "move", "archive", "unzip"):
+        return {"ok": False, "log": "unknown op"}
+    dest = os.path.realpath(dest or "/")
+    if op == "unzip" and not dest:
+        dest = os.path.dirname(items[0])
+    if not os.path.isdir(dest):
+        return {"ok": False, "log": "target is not a directory"}
+    if op in ("copy", "move"):
+        for p in items:
+            if os.path.isdir(p) and _into_self(p, dest):
+                return {"ok": False, "log": "cannot copy into itself"}
+            if op == "move":
+                _, err = _fs_guard(p)
+                if err:
+                    return {"ok": False, "log": err}
+        # conflicts are decided by the USER, not by a silent "name (1)"
+        conflicts = [os.path.basename(p) for p in items
+                     if os.path.dirname(p) != dest
+                     and os.path.lexists(os.path.join(dest, os.path.basename(p)))]
+        if conflicts and policy not in ("replace", "skip", "both"):
+            return {"ok": False, "need_policy": True,
+                    "conflicts": conflicts[:20], "n_conflicts": len(conflicts)}
+    if op == "archive":
+        name = (name or "archive").strip() or "archive"
+        if not name.endswith(".zip"):
+            name += ".zip"
+    job = _fsjob_new(op, name or os.path.basename(items[0]))
+    threading.Thread(target=_fsjob_run, args=(job, items, dest, name, policy),
+                     daemon=True).start()
+    return {"ok": True, "id": job["id"]}
+
+def fs_job_status(jid):
+    j = _FSJOBS.get(jid)
+    return {"ok": True, "job": _fsjob_public(j)} if j else {"ok": False, "log": "no such job"}
+
+def fs_job_cancel(jid):
+    j = _FSJOBS.get(jid)
+    if not j:
+        return {"ok": False, "log": "no such job"}
+    j["cancel"].set()
+    return {"ok": True}
+
+# Recently modified files in a subtree. find(1) walks in C (a python walk over the
+# pool takes minutes) and -xdev keeps it on one volume; newest first.
+def fs_recent(path, days=7, limit=300):
+    path = os.path.realpath(path or "/")
+    if not os.path.isdir(path):
+        return {"ok": False, "log": "not a directory"}
+    days = max(1, min(90, int(days or 7)))
+    limit = max(10, min(1000, int(limit or 300)))
+    cmd = ["find", path, "-xdev",
+           "(", "-name", ".*", "-o", "-name", "#recycle", "-o", "-name", "@eaDir", ")",
+           "-prune", "-o", "-type", "f", "-mtime", "-%d" % days,
+           "-printf", "%T@\t%s\t%p\n"]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=25)
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "log": "scan took too long — try a smaller folder"}
+    rows = []
+    for ln in r.stdout.splitlines():
+        try:
+            ts, sz, p = ln.split("\t", 2)
+            rows.append((float(ts), int(sz), p))
+        except ValueError:
+            continue
+    rows.sort(reverse=True)
+    ents = [{"name": os.path.basename(p), "path": p, "type": "file",
+             "size": sz, "mtime": int(ts)} for ts, sz, p in rows[:limit]]
+    return {"ok": True, "entries": ents, "days": days, "truncated": len(rows) > limit}
+
+# extension groups for the search "type" filter (mirrors the client's fmKind groups)
+_SEARCH_KIND_RE = {
+    "image":   re.compile(r"\.(jpe?g|png|gif|webp|heic|heif|bmp|svg|tiff?|raw|dng|avif)$", re.I),
+    "video":   re.compile(r"\.(mp4|mkv|avi|mov|webm|m4v|ts|mpe?g|wmv|flv|3gp)$", re.I),
+    "audio":   re.compile(r"\.(mp3|flac|wav|ogg|m4a|aac|opus|wma|aiff?)$", re.I),
+    "doc":     re.compile(r"\.(pdf|docx?|xlsx?|pptx?|odt|ods|odp|txt|md|rtf|csv|epub)$", re.I),
+    "archive": re.compile(r"\.(zip|tar|gz|tgz|bz2|xz|7z|rar)$", re.I),
+}
+
+def fs_search(path, query, limit=400, kind="", minsize=0, days=0):
     path = os.path.realpath(path or "/")
     q = (query or "").lower().strip()
-    if not q or not os.path.isdir(path):
+    kre = _SEARCH_KIND_RE.get(kind)
+    # filters alone are a valid query ("all video over 1 GB"), name is optional then
+    if (not q and not kre and kind != "dir" and not minsize and not days) or not os.path.isdir(path):
         return {"ok": True, "entries": [], "query": q}
+    cutoff = time.time() - days * 86400 if days else 0
     out = []
     for root, dirs, files in os.walk(path):
         for nm in dirs + files:
-            if q in nm.lower():
-                try:
-                    out.append(_fs_entry(os.path.join(root, nm)))
-                except OSError:
-                    pass
-                if len(out) >= limit:
-                    return {"ok": True, "entries": out, "truncated": True, "query": q}
+            if q and q not in nm.lower():
+                continue
+            isdir = nm in dirs
+            if kind == "dir":
+                if not isdir:
+                    continue
+            elif kre:
+                if isdir or not kre.search(nm):
+                    continue
+            elif (minsize or cutoff) and isdir:
+                continue                     # size/date filters are about files
+            try:
+                e = _fs_entry(os.path.join(root, nm))
+            except OSError:
+                continue
+            if minsize and (e.get("size") or 0) < minsize:
+                continue
+            if cutoff and (e.get("mtime") or 0) < cutoff:
+                continue
+            out.append(e)
+            if len(out) >= limit:
+                return {"ok": True, "entries": out, "truncated": True, "query": q}
     return {"ok": True, "entries": out, "query": q}
 
 def fs_chmod(path, mode, recursive=False):
@@ -14038,7 +14368,16 @@ class H(BaseHTTPRequestHandler):
             elif p == "/api/fm/favorites":
                 self._json({"favorites": load_favs()})
             elif p == "/api/fs/search":
-                self._json(fs_search((q.get("path") or ["/"])[0], (q.get("q") or [""])[0]))
+                self._json(fs_search((q.get("path") or ["/"])[0], (q.get("q") or [""])[0],
+                                     kind=(q.get("kind") or [""])[0],
+                                     minsize=int((q.get("minsize") or ["0"])[0] or 0),
+                                     days=int((q.get("days") or ["0"])[0] or 0)))
+            elif p == "/api/fs/recent":
+                self._json(fs_recent((q.get("path") or ["/"])[0],
+                                     (q.get("days") or ["7"])[0],
+                                     (q.get("limit") or ["300"])[0]))
+            elif p == "/api/fs/job/status":
+                self._json(fs_job_status((q.get("id") or [""])[0]))
             elif p == "/api/fs/stat":
                 self._json(fs_stat((q.get("path") or [""])[0]))
             elif p == "/api/fs/du":
@@ -14532,6 +14871,13 @@ class H(BaseHTTPRequestHandler):
                 b = self._body(); self._json(fs_newfile(b.get("path", ""), b.get("name", "")))
             elif p == "/api/fs/copy":
                 b = self._body(); self._json(fs_copy(b.get("src", ""), b.get("dest", "")))
+            elif p == "/api/fs/job/start":
+                b = self._body()
+                self._json(fs_job_start(b.get("op", ""), b.get("items", []),
+                                        b.get("dest", ""), b.get("name", ""),
+                                        b.get("policy", "")))
+            elif p == "/api/fs/job/cancel":
+                b = self._body(); self._json(fs_job_cancel(b.get("id", "")))
             elif p == "/api/fs/move":
                 b = self._body(); self._json(fs_move(b.get("src", ""), b.get("dest", "")))
             elif p == "/api/fs/chmod":

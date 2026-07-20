@@ -1416,7 +1416,9 @@
   .fm-band{position:absolute;border:1px solid var(--accent);background:var(--accent-soft);opacity:.55;pointer-events:none;z-index:5;border-radius:2px}
   .iconbtn.pri{color:var(--accent);background:var(--accent-soft)}
   /* favorites sidebar */
-  .fm-fav{width:160px;flex:none;display:flex;flex-direction:column;border-right:1px solid var(--line);margin-right:12px;padding-right:10px}
+  .fm-fav{width:190px;flex:none;display:flex;flex-direction:column;border-right:1px solid var(--line);margin-right:12px;padding-right:10px}
+  .fm-filters{display:flex;gap:8px;align-items:center;padding:2px 0 6px;flex-wrap:wrap}
+  .fm-filters select{background:var(--card);color:var(--text);border:1px solid var(--line);border-radius:var(--r-sm);padding:4px 8px;font-size:12px;font-family:inherit}
   .fm.fav-hidden .fm-fav{display:none}
   .fm-fav-h{display:flex;align-items:center;justify-content:space-between;font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--mut);font-family:var(--mono);margin-bottom:6px;padding:2px 4px}
   .fm-fav-h .iconbtn{padding:1px 7px;font-size:15px;line-height:1}
@@ -5198,11 +5200,12 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
  body.style.padding="4px 16px 12px";   // the file manager has no use for a large top padding
  let cwd=initPath||SET.fmStart||"/mnt/storage",entries=[],searchRes=null;
  let tabs=[cwd],tabI=0;
- const sel=new Set();let clip=null,showHidden=SET.fmHidden===true,filt="",sortKey=SET.fmSortKey||"name",sortDir=SET.fmSortDir===-1?-1:1,lastIdx=-1,favs=[],dragPaths=null,favDragI=null,searchMode="name";
+ const sel=new Set();let clip=null,showHidden=SET.fmHidden===true,filt="",sortKey=SET.fmSortKey||"name",sortDir=SET.fmSortDir===-1?-1:1,lastIdx=-1,favs=[],dragPaths=null,favDragI=null,searchMode="name",volFree=null,undoOp=null;
  let viewMode="list";try{viewMode=SET.fmView||localStorage.getItem("fmview")||"list";}catch(e){}
  let dblDir=(SET.fmClickDir||SET.fmClick||"single")==="double";    // folders: double click?
  let dblFile=(SET.fmClickFile||SET.fmClick||"single")==="double"; // files: double click?
  body.innerHTML=`<div class="fm fm-sz-${(SET.fmIconSize||"m").replace(/[^slm]/g,"")||"m"}"><div class="fm-fav">
+   <div style="flex:none;margin-bottom:4px"><div class="fm-fav-i" id="fRecent" title="Files modified in the last 7 days under the current folder"><span class="fi">${svg("clock",15)}</span><span class="fn">Recent</span></div></div>
    <div class="fm-fav-h"><span>Favorites</span><button class="iconbtn" id="fFavAdd" title="Add the current folder to favorites">+</button></div>
    <div class="fm-fav-list" id="fFav"></div>
    <div id="fVolsWrap" style="display:none;flex:none"><div class="fm-fav-h"><span>Disks</span></div>
@@ -5234,6 +5237,11 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
        <button class="btn sm" id="fPaste" style="display:none"></button>
        <input type="file" id="fInp" multiple style="display:none">
        <input type="file" id="fInpDir" webkitdirectory directory multiple style="display:none"></div>
+     <div class="fm-filters" id="fFilt" style="display:none">
+       <select id="ffType"><option value="">Any type</option><option value="dir">Folders</option><option value="image">Images</option><option value="video">Video</option><option value="audio">Audio</option><option value="doc">Documents</option><option value="archive">Archives</option></select>
+       <select id="ffSize"><option value="0">Any size</option><option value="10485760">&gt; 10 MB</option><option value="104857600">&gt; 100 MB</option><option value="1073741824">&gt; 1 GB</option></select>
+       <select id="ffDays"><option value="0">Any date</option><option value="1">Last 24 h</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option></select>
+       <button class="btn sm" id="ffGo">${svg("search",13)} Find</button></div>
      <div class="fm-selbar" id="fSel" style="display:none"></div></div>
    <div class="fm-cols" id="fCols"><span style="width:15px;flex:none"></span><span class="c-n on" data-k="name">Name</span><span class="c-s" data-k="size">Size</span><span class="c-d" data-k="mtime">Modified</span></div>
    <div class="fm-list" id="fList" tabindex="0"></div><div class="fm-status" id="fStatus"></div></div></div>`;
@@ -5242,6 +5250,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
  function renderStatus(){const st=body.querySelector("#fStatus");if(!st)return;
    const tot=curArr.filter(e=>e.type==="file").reduce((s,e)=>s+(e.size||0),0);
    let t=`<span><b>${curArr.length}</b> items</span><span>${fmtB(tot)}</span>`;
+   if(volFree!=null)t+=`<span title="Free space on this volume">${fmtB(volFree)} free</span>`;
    if(sel.size){const ss=curArr.filter(e=>sel.has(e.path)&&e.type==="file").reduce((s,e)=>s+(e.size||0),0);t+=`<span style="color:var(--accent)"><b>${sel.size}</b> selected · ${fmtB(ss)}</span>`;}
    st.innerHTML=t;}
  const selOr=e=>(sel.has(e.path)&&sel.size>1)?[...sel]:[e.path];
@@ -5501,7 +5510,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
  let lastSig="";
  async function load(d){const r=await api("/api/fs/list?path="+encodeURIComponent(d));
    if(!r||!r.ok){toast((r&&r.log)||"access denied");return;}
-   cwd=r.path;tabs[tabI]=r.path;entries=r.entries||[];searchRes=null;sel.clear();filt="";lastIdx=-1;
+   cwd=r.path;tabs[tabI]=r.path;entries=r.entries||[];searchRes=null;sel.clear();filt="";lastIdx=-1;volFree=(r.free!=null)?r.free:null;
    lastSig=dirSig(entries);
    const si=body.querySelector("#fSearch");if(si)si.value="";
    cursor=-1;renderTabs();renderCrumb();renderFav();renderVols();renderRemotes(false);
@@ -5526,7 +5535,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    if(!r||!r.ok||cwd!==dir)return;                          // managed to move to another folder
    const sig=dirSig(r.entries);
    if(sig===lastSig)return;
-   lastSig=sig;entries=r.entries||[];
+   lastSig=sig;entries=r.entries||[];if(r.free!=null)volFree=r.free;
    const top=listBox.scrollTop;
    [...sel].forEach(p=>{if(!entries.some(e=>e.path===p))sel.delete(p);});  // drop deleted items from the selection
    renderList();selUpdate();listBox.scrollTop=top;}
@@ -5573,7 +5582,8 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    else if(ctrl&&k.toLowerCase()==="a"){ev.preventDefault();a.forEach(e=>sel.add(e.path));renderList();selUpdate();}
    else if(ctrl&&k.toLowerCase()==="c"){if(sel.size){clip={mode:"copy",items:[...sel]};toast("Copied: "+sel.size);selUpdate();}}
    else if(ctrl&&k.toLowerCase()==="x"){if(sel.size){clip={mode:"cut",items:[...sel]};toast("Cut: "+sel.size);selUpdate();}}
-   else if(ctrl&&k.toLowerCase()==="v"){if(clip&&clip.items.length)doPaste();}});
+   else if(ctrl&&k.toLowerCase()==="v"){if(clip&&clip.items.length)doPaste();}
+   else if(ctrl&&k.toLowerCase()==="z"){ev.preventDefault();doUndo();}});
  async function doProps(e){const r=await api("/api/fs/stat?path="+encodeURIComponent(e.path)),d=(r&&r.ok)?r:{},sc=document.getElementById("scrim");
    // inside an SSH mount we show both paths; the real server-side one is resolved by the backend
    // (NAS symlinks like /Backup → /volume2/Backup are expanded honestly)
@@ -5599,11 +5609,9 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    sc.innerHTML=`<div class="dialog"><h3>Create archive</h3><p>${paths.length} items → zip in the current folder.</p><div class="field"><label>Archive name</label><input id="az" value="archive.zip"></div><div class="r"><button class="btn" id="ax">Cancel</button><button class="btn pri" id="ao">Create</button></div></div>`;
    sc.classList.add("show");sc.querySelector("#ax").onclick=()=>sc.classList.remove("show");
    sc.querySelector("#ao").onclick=async()=>{const an=sc.querySelector("#az").value.trim();sc.classList.remove("show");
-     const o=opAdd("Archive: "+an);opSet(o,null,paths.length+" items");
-     const r=await api("/api/fs/archive",{method:"POST",body:JSON.stringify({items:paths,dest:cwd,name:an})});
-     opEnd(o,!!(r&&r.ok),r&&r.ok?"":((r&&r.log)||"error"));
-     if(LIVE){notifyDone(r&&r.ok?"Archive created":"Archive error",r&&r.ok?an:((r&&r.log)||""));logAct(r&&r.ok?`Created archive ${an}`:`Archive ${an} — error`,cwd,r&&r.ok?"ok":"warn");}else toast("Demo");
-     if(r&&r.ok)load(cwd);};}
+     const j=await fsJob("archive",paths,cwd,{name:an,title:"Archive: "+an});
+     if(LIVE&&j){notifyDone("Archive created",an);logAct(`Created archive ${an}`,cwd,"ok");}
+     if(j)load(cwd);};}
  function doBulkRename(items){if(!items||items.length<2)return;const s=document.getElementById("scrim");
    const splitExt=n=>{const d=n.lastIndexOf(".");return(d>0)?[n.slice(0,d),n.slice(d)]:[n,""];};
    const calc=()=>{const find=s.querySelector("#brFind").value,repl=s.querySelector("#brRepl").value,
@@ -5638,23 +5646,80 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    s.querySelector("#brO").onclick=async()=>{const plan=calc().filter(r=>r.name&&r.name!==r.old);
      if(!plan.length){toast("Nothing to change");return;}s.classList.remove("show");
      const ok=await runBatch("Renaming…",plan,async r=>{const w=await api("/api/fs/rename",{method:"POST",body:JSON.stringify({path:r.path,name:r.name})});if(w&&w.log&&!(w&&w.ok))toast("Error: "+w.log);return w&&w.ok;});
-     toast(LIVE?`Renamed: ${ok}/${plan.length}`:"Demo");load(cwd);};}
- async function doSearch(q){if(!q){searchRes=null;renderList();return;}
-   const r=await api("/api/fs/search?path="+encodeURIComponent(cwd)+"&q="+encodeURIComponent(q));
+     undoOp={type:"bulkrename",pairs:plan.map(p=>({now:p.path.replace(/\/[^/]+$/,"")+"/"+p.name,old:p.old}))};
+     toast(LIVE?`Renamed: ${ok}/${plan.length} — Ctrl+Z to undo`:"Demo");load(cwd);};}
+ const searchFilters=()=>{const g=id=>body.querySelector(id);
+   return {kind:(g("#ffType")||{}).value||"",minsize:+((g("#ffSize")||{}).value||0),days:+((g("#ffDays")||{}).value||0)};};
+ async function doSearch(q){const f=searchFilters();
+   if(!q&&!f.kind&&!f.minsize&&!f.days){searchRes=null;renderList();return;}
+   const r=await api("/api/fs/search?path="+encodeURIComponent(cwd)+"&q="+encodeURIComponent(q)
+     +(f.kind?"&kind="+f.kind:"")+(f.minsize?"&minsize="+f.minsize:"")+(f.days?"&days="+f.days:""));
    searchRes=(r&&r.entries)||[];sel.clear();renderList();selUpdate();
    if(r&&r.truncated)toast("Showing first "+searchRes.length);}
+ async function loadRecent(){toast("Scanning for recent files…");
+   const dir=cwd;
+   const r=await api("/api/fs/recent?path="+encodeURIComponent(dir)+"&days=7");
+   if(!r||!r.ok){toast("Error: "+((r&&r.log)||"?"));return;}
+   if(cwd!==dir)return;   // user navigated away while find(1) was walking
+   searchRes=r.entries||[];sel.clear();renderList();selUpdate();
+   toast(searchRes.length?`Modified in 7 days: ${searchRes.length}${r.truncated?"+":""}`:"Nothing modified in the last 7 days");}
  async function doGrep(q){if(!q){searchRes=null;renderList();return;}
    toast("Searching in contents…");const r=await api("/api/fs/grep?path="+encodeURIComponent(cwd)+"&q="+encodeURIComponent(q));
    searchRes=(r&&r.entries)||[];sel.clear();renderList();selUpdate();
    toast(searchRes.length?(`Found: ${searchRes.length}`+(r&&r.truncated?"+":"")):"Nothing found");}
  function openEntry(e){if(e.type==="dir")load(e.path);else if(isMediaName(e.name))openMediaWin(e);else openFileWin(e);}
  /* operations */
+ /* Long operations run as server-side jobs: byte progress + a cancel that aborts
+    mid-file (a plain /api/fs/copy of a huge folder was one opaque request). Name
+    conflicts come back BEFORE any work starts and the USER decides — no more
+    silent "name (1)" duplicate trees. */
+ async function fsJob(op,items,dest,opts){opts=opts||{};
+   const start=pol=>api("/api/fs/job/start",{method:"POST",body:JSON.stringify({op,items,dest,name:opts.name||"",policy:pol||""})});
+   let r=await start(opts.policy);
+   if(r&&r.need_policy){const pol=await conflictDlg(r);if(!pol)return null;r=await start(pol);}
+   if(!r||!r.ok){toast("Error: "+((r&&r.log)||"?"));return null;}
+   const id=r.id,title=opts.title||op;
+   const o=opAdd(title,{cancel:()=>api("/api/fs/job/cancel",{method:"POST",body:JSON.stringify({id})})});
+   let j=null;
+   while(true){const s=await api("/api/fs/job/status?id="+encodeURIComponent(id));j=s&&s.job;
+     if(!j){opEnd(o,false,"job lost");return null;}
+     if(j.state!=="running")break;
+     opSet(o,j.total_bytes?j.done_bytes/j.total_bytes:null,
+       `${fmtB(j.done_bytes)}${j.total_bytes?` of ${fmtB(j.total_bytes)}`:""}${j.total_items>1?` · ${j.done_items} / ${j.total_items}`:""}${j.cur?` · ${baseName(j.cur)}`:""}`);
+     await new Promise(res=>setTimeout(res,600));}
+   const ok=j.state==="done";
+   opEnd(o,ok,j.state==="cancelled"?"cancelled":(ok?"":errShort(j.log||"error")));
+   if(LIVE)logAct(`${title}: ${ok?"done":j.state}`,`${items.length} item(s) → ${dest}`,ok?"ok":"warn");
+   return ok?j:null;}
+ function conflictDlg(r){return new Promise(res=>{const s=document.getElementById("scrim");
+   const n=r.n_conflicts||(r.conflicts||[]).length;
+   s.innerHTML=`<div class="dialog" style="max-width:520px"><h3>Already exists</h3>
+     <p>${n} item(s) with the same name are already in the target folder:</p>
+     <p class="mono" style="font-size:11.5px;word-break:break-all;margin:6px 0;color:var(--mut)">${(r.conflicts||[]).slice(0,8).map(esc).join(", ")}${n>8?" …":""}</p>
+     <p style="font-size:12px;color:var(--mut)">Replace: same-named files are overwritten, folders are merged. Keep both: the copy gets a " (1)" suffix.</p>
+     <div class="r"><button class="btn" id="cfX">Cancel</button><button class="btn" id="cfS">Skip existing</button><button class="btn" id="cfB">Keep both</button><button class="btn dng" id="cfR">Replace</button></div></div>`;
+   s.classList.add("show");
+   const done=v=>{s.classList.remove("show");res(v);};
+   s.querySelector("#cfX").onclick=()=>done(null);s.querySelector("#cfS").onclick=()=>done("skip");
+   s.querySelector("#cfB").onclick=()=>done("both");s.querySelector("#cfR").onclick=()=>done("replace");});}
+ /* Single-step undo (Ctrl+Z) for move and rename — the trash covers deletes, but
+    "dragged into the wrong folder" had no way back. Undo moves use policy "both"
+    so they never stomp something created meanwhile. */
+ async function doUndo(){const u=undoOp;if(!u){toast("Nothing to undo");return;}undoOp=null;
+   if(u.type==="move"){const j=await fsJob("move",u.names.map(n=>u.dest.replace(/\/$/,"")+"/"+n),u.back,{title:"Undo move",policy:"both"});toast(j?"Move undone":"Could not undo");}
+   else if(u.type==="rename"){const r=await api("/api/fs/rename",{method:"POST",body:JSON.stringify({path:u.path,name:u.old})});toast(r&&r.ok?"Rename undone":"Could not undo: "+((r&&r.log)||"?"));}
+   else if(u.type==="bulkrename"){const ok=await runBatch("Undo rename",u.pairs,async pr=>{const w=await api("/api/fs/rename",{method:"POST",body:JSON.stringify({path:pr.now,name:pr.old})});return w&&w.ok;});toast("Undone: "+ok+" / "+u.pairs.length);}
+   load(cwd);}
  async function doPaste(){if(!clip||!clip.items.length)return;const items=clip.items,cut=clip.mode==="cut";
-   const ok=await runBatch(cut?"Moving":"Copying",items,async src=>{const r=await api(cut?"/api/fs/move":"/api/fs/copy",{method:"POST",body:JSON.stringify({src,dest:cwd})});if(r&&r.log&&!(r&&r.ok))toast("Error: "+r.log);return {ok:!!(r&&r.ok),log:r&&r.log};});
-   toast(LIVE?`Pasted: ${ok}/${items.length}`:"Demo");if(cut)clip=null;load(cwd);}
+   const j=await fsJob(cut?"move":"copy",items,cwd,{title:cut?"Moving":"Copying"});
+   if(j&&cut){undoOp={type:"move",names:items.map(baseName),dest:cwd,back:items[0].replace(/\/[^/]+$/,"")||"/"};clip=null;toast("Moved — Ctrl+Z to undo");}
+   else if(j)toast("Copied");
+   selUpdate();load(cwd);}
  async function doMoveInto(paths,dir){const items=paths.filter(src=>!(src===dir||dir===src.replace(/\/[^/]+$/,"")));
-   const ok=await runBatch("Moving",items,async src=>{const r=await api("/api/fs/move",{method:"POST",body:JSON.stringify({src,dest:dir})});if(r&&r.log&&!(r&&r.ok))toast("Error: "+r.log);return {ok:!!(r&&r.ok),log:r&&r.log};});
-   toast(LIVE?`Moved: ${ok}`:"Demo");load(cwd);}
+   if(!items.length)return;
+   const j=await fsJob("move",items,dir,{title:"Moving"});
+   if(j){undoOp={type:"move",names:items.map(baseName),dest:dir,back:items[0].replace(/\/[^/]+$/,"")||"/"};toast("Moved — Ctrl+Z to undo");}
+   load(cwd);}
  async function doDelete(paths){if(!paths.length)return;
    const ok=await runBatch("To trash",paths,async p=>{const r=await api("/api/fs/trash",{method:"POST",body:JSON.stringify({path:p})});if(r&&r.log&&!(r&&r.ok))toast("Error: "+r.log);return {ok:!!(r&&r.ok),log:r&&r.log};});
    toast(LIVE?`To trash: ${ok}`:"Demo");load(cwd);refreshTrashStat();}
@@ -5672,7 +5737,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    s.innerHTML=`<div class="dialog"><h3>Rename</h3><div class="field"><label>New name</label><input id="rn" value="${att(e.name)}"></div><div class="r"><button class="btn" id="rx">Cancel</button><button class="btn pri" id="ro">OK</button></div></div>`;
    s.classList.add("show");const i=s.querySelector("#rn");i.focus();i.select();
    s.querySelector("#rx").onclick=()=>s.classList.remove("show");
-   s.querySelector("#ro").onclick=async()=>{const r=await api("/api/fs/rename",{method:"POST",body:JSON.stringify({path:e.path,name:i.value.trim()})});toast(LIVE?(r&&r.ok?"Renamed":("Error: "+((r&&r.log)||""))):"Demo");if(r&&r.ok){s.classList.remove("show");load(cwd);}};}
+   s.querySelector("#ro").onclick=async()=>{const nn=i.value.trim();const r=await api("/api/fs/rename",{method:"POST",body:JSON.stringify({path:e.path,name:nn})});toast(LIVE?(r&&r.ok?"Renamed":("Error: "+((r&&r.log)||""))):"Demo");if(r&&r.ok){undoOp={type:"rename",path:(r.path||e.path.replace(/\/[^/]+$/,"")+"/"+nn),old:e.name};s.classList.remove("show");load(cwd);}};}
  async function doPerms(e){const s=document.getElementById("scrim");const r=await api("/api/fs/stat?path="+encodeURIComponent(e.path)),d=(r&&r.ok)?r:{},isdir=e.type==="dir";
    s.innerHTML=`<div class="dialog"><h3>Permissions and owner</h3><p class="mono" style="font-size:11px;color:var(--mut);word-break:break-all">${esc(e.path)}</p>
      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px 12px">
@@ -5687,11 +5752,10 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
      if(mode&&mode!==(d.mode||e.mode)){const w=await api("/api/fs/chmod",{method:"POST",body:JSON.stringify({path:e.path,mode,recursive:rec})});msgs.push(w&&w.ok?"permissions ✓":"permissions: "+((w&&w.log)||"error"));}
      if((own&&own!==d.owner)||(grp&&grp!==d.group)){const w=await api("/api/fs/chown",{method:"POST",body:JSON.stringify({path:e.path,owner:own,group:grp,recursive:rec})});msgs.push(w&&w.ok?"owner ✓":"owner: "+((w&&w.log)||"error"));}
      toast(LIVE?(msgs.join(" · ")||"no changes"):"Demo");s.classList.remove("show");load(cwd);};}
- async function doUnzip(e){const o=opAdd("Extracting: "+e.name);
-   const r=await api("/api/fs/unzip",{method:"POST",body:JSON.stringify({path:e.path,dest:cwd})});
-   opEnd(o,!!(r&&r.ok),r&&r.ok?"":((r&&r.log)||"error"));
-   if(LIVE){notifyDone(r&&r.ok?"Extracted":"Extraction error",r&&r.ok?e.name:((r&&r.log)||""));logAct(r&&r.ok?`Extracted archive ${e.name}`:`Extraction ${e.name} — error`,cwd,r&&r.ok?"ok":"warn");}else toast("Demo");
-   if(r&&r.ok)load(cwd);}
+ async function doUnzip(e){
+   const j=await fsJob("unzip",[e.path],cwd,{title:"Extracting: "+e.name});
+   if(LIVE&&j){notifyDone("Extracted",e.name);logAct(`Extracted archive ${e.name}`,cwd,"ok");}
+   if(j)load(cwd);}
  function doMkdir(){const s=document.getElementById("scrim");
    s.innerHTML=`<div class="dialog"><h3>New folder</h3><div class="field"><label>Name</label><input id="mk" placeholder="new-folder"></div><div class="r"><button class="btn" id="mx">Cancel</button><button class="btn pri" id="mo">Create</button></div></div>`;
    s.classList.add("show");s.querySelector("#mk").focus();s.querySelector("#mx").onclick=()=>s.classList.remove("show");
@@ -5799,6 +5863,11 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    it.push({label:"Create archive…",ic:svg("archive",16),act:()=>doArchive(selOr(e))});
    if(/\.(zip|tar|gz|tgz|bz2|xz)$/i.test(e.name))it.push({label:"Extract here",ic:svg("archive",16),act:()=>doUnzip(e)});
    it.push({label:"Permissions and owner…",ic:svg("shield",16),act:()=>doPerms(e)});
+   // USB imports and docker leave root-owned files; one click instead of typing names into the perms dialog
+   if(USER_NAME)it.push({label:`Take ownership (${USER_NAME})`,ic:svg("key",16),act:()=>confirmDlg("Take ownership?",
+     `${esc(e.name)} and everything inside becomes owned by <b>${esc(USER_NAME)}</b> (chown, recursive). Useful when files from a USB import or docker belong to root.`,async()=>{
+       const r=await api("/api/fs/chown",{method:"POST",body:JSON.stringify({path:e.path,owner:USER_NAME,group:USER_NAME,recursive:true})});
+       toast(r&&r.ok?"Ownership taken":"Error: "+((r&&r.log)||"?"));load(cwd);})});
    if(e.type==="dir")it.push({label:"Analyze space",ic:svg("chartpie",16),act:()=>winDiskUsage(e.path)});
    it.push({label:"Terminal here",ic:svg("term",16),act:()=>terminalHere(e.type==="dir"?e.path:cwd)});
    it.push({label:"Properties",ic:svg("eye",16),act:()=>doProps(e)});
@@ -5833,9 +5902,12 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    inpDir.value="";if(items.length)doUpload(items);};
  const si=body.querySelector("#fSearch"),findBtn=body.querySelector("#fFind"),smBtn=body.querySelector("#fSMode"),crumbEl=body.querySelector("#fCrumb");
  let searchOpen=false;
+ const filtRow=body.querySelector("#fFilt");
  function toggleFind(open){searchOpen=open;findBtn.classList.toggle("pri",open);
    crumbEl.style.display=open?"none":"";si.style.display=open?"":"none";smBtn.style.display=open?"":"none";
-   if(open)si.focus();else{si.value="";filt="";if(searchRes)searchRes=null;renderList();}}
+   filtRow.style.display=(open&&searchMode==="name")?"flex":"none";   // filters make no sense for content grep
+   if(open)si.focus();else{si.value="";filt="";if(searchRes)searchRes=null;
+     filtRow.querySelectorAll("select").forEach(s=>s.selectedIndex=0);renderList();}}
  findBtn.onclick=()=>toggleFind(!searchOpen);
  si.oninput=e=>{filt=e.target.value.toLowerCase();if(searchRes)searchRes=null;renderList();};
  si.onkeydown=e=>{if(e.key==="Enter"){e.preventDefault();const v=e.target.value.trim();searchMode==="text"?doGrep(v):doSearch(v);}
@@ -5843,7 +5915,18 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
  si.onblur=()=>{if(searchOpen&&!si.value.trim()&&!searchRes)toggleFind(false);};
  smBtn.onclick=()=>{searchMode=searchMode==="text"?"name":"text";smBtn.classList.toggle("pri",searchMode==="text");
    si.placeholder=searchMode==="text"?"in file contents…  (Enter)":"filter…  (Enter — search subfolders)";
+   filtRow.style.display=(searchOpen&&searchMode==="name")?"flex":"none";
    searchRes=null;renderList();si.focus();};
+ body.querySelector("#ffGo").onclick=()=>doSearch(si.value.trim());
+ body.querySelector("#fRecent").onclick=loadRecent;
+ // Ctrl+V with files (e.g. a screenshot) in the OS clipboard = upload into the current
+ // folder; the internal FM clipboard, when set, wins (its keydown handler pastes files)
+ body.addEventListener("paste",ev=>{
+   if(clip&&clip.items.length)return;
+   const fs=[...((ev.clipboardData&&ev.clipboardData.files)||[])];
+   if(!fs.length)return;ev.preventDefault();
+   const stamp=new Date().toISOString().slice(0,19).replace(/[T:]/g,"-");
+   doUpload(fs.map((f,i)=>({file:(f.name&&f.name!=="image.png")?f:new File([f],`pasted-${stamp}${fs.length>1?"-"+(i+1):""}.png`,{type:f.type}),rel:""})),cwd);});
  {const SZO=["s","m","l"],fsz=body.querySelector("#fSize");const paintSz=()=>{fsz.textContent=(SET.fmIconSize||"m").toUpperCase();};paintSz();
   fsz.onclick=()=>{const c=SET.fmIconSize||"m";SET.fmIconSize=SZO[(SZO.indexOf(c)+1)%3]||"m";saveSettings();paintSz();syncSettings();};}
  body.querySelectorAll("#fCols [data-k]").forEach(h=>h.onclick=()=>{const k=h.dataset.k;
