@@ -937,15 +937,14 @@
   .nb-dest .seg{margin-left:auto}
   /* compact segment in the card header (there was no .seg.sm class in the system) */
   .nb-dest .seg.sm button{padding:4px 10px;font-size:11.5px}
-  /* connection fields sized to their content, not 50% of the card each:
-     address is the long one, user/port/password are short */
-  .nb-grid2{display:flex;flex-wrap:wrap;gap:9px 12px}
-  .nb-grid2 label{display:flex;flex-direction:column;gap:4px;font-size:11.5px;color:var(--dim);flex:0 1 auto}
+  /* address / user / password share the row equally; port is a fixed stub at the end */
+  .nb-grid2{display:flex;flex-wrap:wrap;gap:9px 10px}
+  .nb-grid2 label{display:flex;flex-direction:column;gap:4px;font-size:11.5px;color:var(--dim);flex:1 1 140px;min-width:120px}
   .nb-grid2 input{width:100%}
-  .nb-grid2 label:first-child{flex:1 1 200px;min-width:170px}      /* Address */
-  .nb-grid2 label:not(:first-child){width:120px}
-  .nb-grid2 input[id^="p_"]{width:100%}
-  .nb-grid2 label:has(input[id^="p_"]){width:64px}                 /* Port */
+  .nb-grid2 label:has(input[id^="p_"]){flex:0 0 68px;min-width:0}  /* Port */
+  /* one-line kind hint: small print, not a card of its own */
+  .nb-kindhint{font-size:11px;line-height:1.45;color:var(--mut);margin:6px 0 8px}
+  .nb-kindhint b{color:var(--dim);font-weight:640}
   /* arrow between the side cards: from → to, without extra words */
   .nb-arrow-row{display:flex;justify-content:center;color:var(--mut);margin:-6px 0 6px;transform:rotate(180deg)}
   .st-opt{display:flex;align-items:center;gap:11px;padding:10px 12px;border:1px solid var(--line);border-radius:var(--r-lg);cursor:pointer;margin-bottom:6px}
@@ -1023,10 +1022,17 @@
   .nb-hbar{width:64px;height:5px;border-radius:3px;background:var(--track,rgba(128,128,128,.25));overflow:hidden;flex:none;margin-left:auto}
   .nb-hbar i{display:block;height:100%;background:var(--accent);border-radius:3px}
   .nb-hrun.aborted .nb-hmeta{color:var(--danger)}
-  /* first-run wizard: steps ribbon + pane + footer */
-  .nbwiz{flex:1;display:flex;flex-direction:column;min-height:0;padding:14px 18px 12px}
-  .nbwiz-steps{display:flex;gap:4px;align-items:center;flex-wrap:wrap;margin-bottom:12px;flex:none}
-  .nbwiz-step{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--mut);padding:5px 11px;border-radius:999px}
+  /* first-run wizard: vertical steps on the LEFT (a top ribbon of 8 steps ate
+     two lines of vertical space), pane + footer on the right */
+  .nbwiz{flex:1;display:flex;flex-direction:row;min-height:0;gap:16px;padding:14px 18px 12px}
+  .nbwiz-steps{display:flex;flex-direction:column;gap:2px;align-items:stretch;width:168px;flex:none;
+    border-right:1px solid var(--line);padding-right:14px}
+  .nbwiz-main{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
+  .nbwiz-step{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--mut);padding:7px 11px;border-radius:10px}
+  @media (max-width:1024px){
+    .nbwiz{flex-direction:column;gap:10px}
+    .nbwiz-steps{flex-direction:row;flex-wrap:wrap;width:auto;border-right:none;padding-right:0;gap:4px}
+    .nbwiz-step{border-radius:999px;padding:5px 11px}}
   .nbwiz-step .nb-stepn{width:18px;height:18px;font-size:10px;background:var(--track,rgba(128,128,128,.3));color:var(--text)}
   .nbwiz-step.on{background:var(--sel);color:var(--accent);font-weight:650;box-shadow:var(--sh-sm)}
   .nbwiz-step.on .nb-stepn{background:var(--accent);color:var(--accent-ink,#fff)}
@@ -6682,14 +6688,14 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
    <div class="nb-dest-h"><span class="nb-dest-t">${svg(rem?"net":"folder",15)} ${ttl}</span>
     <span class="nb-dest-w mono">${rem?esc((S.user||"?")+"@"+(S.host||"not set")):(w==="src"?"folders on this NAS":"a folder on this NAS")}</span>
     <div class="seg sm" id="k_${w}">${kinds.map(([v,l])=>`<button data-v="${v}" class="${S.kind===v?"on":""}">${l}</button>`).join("")}</div></div>
-   ${rem?`<div class="nb-help">${S.kind==="rsyncd"
-     ?`<b>rsync daemon</b><span>The classic "rsync service" of NAS boxes (Synology, UGREEN, QNAP backup modules): faster on a home LAN but unencrypted, and you sign in with a module name and its own password — not a system user. Pick it when the other NAS advertises rsync modules; the address field takes the NAS address, the folder is the module name.</span>`
-     :`<b>SSH server</b><span>Works with any Linux machine or NAS that has SSH: encrypted, signs in with a normal user account. The safe default — pick this if unsure.</span>`}</div>
+   ${rem?`<div class="nb-kindhint">${S.kind==="rsyncd"
+     ?`<b>rsync daemon</b> — the NAS "rsync service" (Synology/UGREEN/QNAP modules): faster on a LAN, unencrypted; signs in with a module name + its password, the folder field takes the module name.`
+     :`<b>SSH server</b> — any Linux/NAS with SSH: encrypted, normal user account. The safe default.`}</div>
    <div class="nb-grid2">
     <label>Address<input class="mono" id="h_${w}" value="${att(S.host||"")}" placeholder="${w==="dst"&&rnet?"usw-s001.rsync.net":"192.168.1.50"}"></label>
     <label>User<input class="mono" id="u_${w}" value="${att(S.user||"")}" placeholder="${w==="dst"&&rnet?"de1234":"root"}"></label>
-    ${S.kind==="ssh"?`<label>Port<input class="mono" id="p_${w}" value="${S.port||22}"></label>`:""}
     <label>Password<input type="password" class="mono" id="w_${w}" placeholder="${S.has_password?"•••••• (set)":"password"}"></label>
+    ${S.kind==="ssh"?`<label>Port<input class="mono" id="p_${w}" value="${S.port||22}"></label>`:""}
    </div>
    ${S.kind==="ssh"?`<div class="srow" style="padding:8px 0 0"><div class="srow-l"><div class="srow-t">Sign-in method</div><div class="srow-d">${key?"the panel's key (a password is needed once, to install the key)":"the password is stored in the config"}</div></div><div class="srow-c"><div class="seg sm" id="a_${w}"><button data-v="password" class="${key?"":"on"}">Password</button><button data-v="key" class="${key?"on":""}">Key</button></div></div></div>`:""}
    ${w==="dst"&&S.kind==="ssh"?`<div class="srow" style="padding:6px 0 0"><div class="srow-l"><div class="srow-t">Server type</div><div class="srow-d">${rnet?"paths are relative to the home folder, no leading slash; no archive pruning needed thanks to ZFS snapshots":"a standard server with SSH and rsync"}</div></div><div class="srow-c"><div class="seg sm" id="v_${w}"><button data-v="" class="${rnet?"":"on"}">Standard</button><button data-v="rsyncnet" class="${rnet?"on":""}">rsync.net</button></div></div></div>`:""}
@@ -7410,10 +7416,10 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
   const cur=WS[wizStep].id;
   body.innerHTML=`<div class="nbtabs" id="nbTabs"></div>
    <div class="nbwiz"><div class="nbwiz-steps">${WS.map((s,i)=>`<div class="nbwiz-step${i===wizStep?" on":i<wizStep?" done":""}"><span class="nb-stepn">${i<wizStep?svg("check",11):(i+1)}</span><span>${s.n}</span></div>`).join("")}</div>
-   <div class="set-pane nbwiz-pane" id="tc"></div>
+   <div class="nbwiz-main"><div class="set-pane nbwiz-pane" id="tc"></div>
    <div class="nbwiz-foot"><button class="btn" id="wzBack"${wizStep?"":" disabled"}>Back</button>
     <button class="btn sm" id="wzSkip" title="Close the wizard and configure via the tabs at any pace">Set up later</button>
-    <button class="btn pri" id="wzNext">${cur==="done"?"Finish":"Next"} ${cur==="done"?svg("check",14):svg("chev",14)}</button></div></div>`;
+    <button class="btn pri" id="wzNext">${cur==="done"?"Finish":"Next"} ${cur==="done"?svg("check",14):svg("chev",14)}</button></div></div></div>`;
   renderTabs();
   const tc=body.querySelector("#tc");
   if(cur==="done")renderWizDone(tc);else WPANE[cur](tc);
