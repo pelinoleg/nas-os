@@ -6729,6 +6729,7 @@ _BK_SECTIONS = (
                                                        "nas-config/store.json", "nas-config/remotes.json",
                                                        "nas-config/credentials.json",
                                                        "root/.ssh/nas-backup")),
+    ("smbpw",     "SMB passwords (cleartext)",  True,  ("etc/nas-os/smb-users.json",)),
     ("network",   "Network (Wi-Fi, IP)",       True,  ("reference/etc/netplan/",)),   # Wi-Fi password → secret; restore by hand (reference)
     ("other",     "Other",                     False, ()),      # everything not matched above
 )
@@ -6743,6 +6744,7 @@ _BK_DESC = {
     "disks":     "the saved disk configuration (for reference)",
     "webauth":   "the web-panel login password",
     "nasbackup": "«Backup» app profiles, SSH passwords and key",
+    "smbpw":     "cleartext SMB user passwords (so the panel can show them)",
     "network":   "netplan network profiles: Wi-Fi and static IP (placed alongside, applied manually)",
     "other":     "external screen token, main storage choice, operation history",
 }
@@ -6830,6 +6832,8 @@ def _bk_sources():
     for p, arc in (("/etc/nas-os/webauth.json", "etc/nas-os/webauth.json"),
                    (NB_CONF, "etc/nas-os/nas-backup.json"),
                    ("/etc/samba/smb.conf", "etc/samba/smb.conf"),
+                   ("/etc/samba/nas-shares.conf", "etc/samba/nas-shares.conf"),   # panel-managed shares
+                   ("/etc/nas-os/smb-users.json", "etc/nas-os/smb-users.json"),   # cleartext SMB passwords → secret section
                    ("/var/lib/samba/private/passdb.tdb", "var/lib/samba/private/passdb.tdb"),
                    # SSH key of the «Backup» app (key-based push to servers): without it
                    # key-based push profiles stop authenticating after a reinstall
@@ -11518,6 +11522,306 @@ def motd_save(b):
     _motd_extras_apply(motd_load())
     return {"ok": True, "log": "saved", "preview": motd_preview()}
 
+# --------------------------------------------------------------------------- #
+#  Samba shares & users — managed straight from the panel.
+#  Source of truth for shares: /etc/samba/nas-shares.conf — a macOS-friendly
+#  [global] header + one section per share, included ONCE at the END of
+#  smb.conf. (include right after [global] mis-attributes every later global to
+#  the last share — verified with testparm — so it must go at the end.)
+#  Passwords are ALSO mirrored in cleartext (root 0600) so the panel can show
+#  them; the authoritative hash stays in passdb.tdb.
+# --------------------------------------------------------------------------- #
+SMB_CONF_F   = "/etc/samba/smb.conf"
+SMB_INC      = "/etc/samba/nas-shares.conf"
+SMB_PW       = "/etc/nas-os/smb-users.json"
+SMB_AVAHI    = "/etc/avahi/services/nas-shares.service"
+SMB_TM_AVAHI = "/etc/avahi/services/nas-timemachine.service"
+SMB_INC_LINE = "include = " + SMB_INC
+# fruit/vfs = clean macOS behaviour (proper metadata, no ._ turds); fruit:model
+# is what puts a server icon on the NAS in the Finder → Network list.
+SMB_GLOBAL = (
+    "# NAS-OS shared folders — managed by the panel. Do not edit by hand.\n"
+    "[global]\n"
+    "   min protocol = SMB2\n"
+    "   vfs objects = catia fruit streams_xattr\n"
+    "   fruit:metadata = stream\n"
+    "   fruit:model = RackMac\n"
+    "   fruit:posix_rename = yes\n"
+    "   fruit:veto_appledouble = no\n"
+    "   fruit:nfs_aces = no\n"
+    "   fruit:wipe_intentionally_left_blank_rfork = yes\n"
+    "   fruit:delete_empty_adfiles = yes\n")
+_SMB_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 _.-]{0,31}$")
+_SMB_DEFAULTS = ("homes", "printers", "print$")   # Debian's own sections — never ours
+
+def _smb_installed():
+    return bool(shutil.which("smbd") or os.path.exists("/usr/sbin/smbd"))
+
+def _smb_atomic(path, text, mode=0o644):
+    d = os.path.dirname(path)
+    if d and not os.path.isdir(d):
+        os.makedirs(d, exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        f.write(text)
+    os.chmod(tmp, mode)
+    os.replace(tmp, path)
+
+def _smb_primary_user():
+    """The human account (first uid>=1000 with a /home dir). Guest shares map
+    to it via `force user` so guests can actually write to the folder."""
+    try:
+        import pwd
+        for u in sorted(pwd.getpwall(), key=lambda x: x.pw_uid):
+            if 1000 <= u.pw_uid < 65534 and (u.pw_dir or "").startswith("/home"):
+                return u.pw_name
+    except Exception:
+        pass
+    return "root"
+
+def smb_load_pw():
+    return _json_load_strict(SMB_PW, {})
+
+def _smb_save_pw(d):
+    _smb_atomic(SMB_PW, json.dumps(d, indent=2, ensure_ascii=False), 0o600)
+
+def _smb_parse(text):
+    """Parse share sections from smb.conf-style text → [{name,path,guest,users,readonly}].
+    Skips [global] and the Debian default sections."""
+    shares, cur = [], None
+    for raw in (text or "").splitlines():
+        line = raw.strip()
+        if not line or line[0] in "#;":
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            nm = line[1:-1].strip()
+            cur = None if (nm.lower() == "global" or nm.lower() in _SMB_DEFAULTS) else \
+                {"name": nm, "path": "", "guest": False, "users": [], "readonly": False}
+            if cur is not None:
+                shares.append(cur)
+            continue
+        if cur is None or "=" not in line:
+            continue
+        k, _, v = line.partition("=")
+        k = k.strip().lower(); v = v.strip()
+        if k == "path":
+            cur["path"] = v
+        elif k in ("guest ok", "public"):
+            cur["guest"] = v.lower() in ("yes", "true", "1")
+        elif k == "valid users":
+            cur["users"] = [u for u in re.split(r"[,\s]+", v) if u and not u.startswith("@")]
+        elif k in ("read only", "writable", "writeable"):
+            b = v.lower() in ("yes", "true", "1")
+            cur["readonly"] = b if k == "read only" else (not b)
+    return shares
+
+def smb_get_shares():
+    return _smb_parse(_read(SMB_INC))
+
+def _smb_block(s):
+    out = ["[%s]" % s["name"], "   path = %s" % s["path"], "   browseable = yes"]
+    if s.get("guest"):
+        out += ["   guest ok = yes", "   guest only = yes",
+                "   force user = " + (s.get("force_user") or _smb_primary_user())]
+    else:
+        users = " ".join(u for u in (s.get("users") or []) if _SMB_NAME.match(u))
+        out.append("   valid users = " + users)
+    out.append("   read only = " + ("yes" if s.get("readonly") else "no"))
+    if not s.get("readonly"):
+        out += ["   create mask = 0664", "   directory mask = 0775"]
+    return "\n".join(out) + "\n"
+
+def smb_write_shares(shares):
+    _smb_atomic(SMB_INC, SMB_GLOBAL + "\n" + "\n".join(_smb_block(s) for s in shares))
+
+def smb_write_avahi():
+    # If Time Machine already advertises _device-info (its own model), don't add a
+    # second, conflicting one — just advertise the SMB service.
+    dev = "" if os.path.exists(SMB_TM_AVAHI) else (
+        "  <service>\n    <type>_device-info._tcp</type>\n    <port>0</port>\n"
+        "    <txt-record>model=RackMac</txt-record>\n  </service>\n")
+    _smb_atomic(SMB_AVAHI,
+        "<?xml version=\"1.0\" standalone='no'?>\n"
+        "<!DOCTYPE service-group SYSTEM \"avahi-service.dtd\">\n"
+        "<service-group>\n"
+        "  <name replace-wildcards=\"yes\">%h</name>\n"
+        "  <service>\n    <type>_smb._tcp</type>\n    <port>445</port>\n  </service>\n"
+        + dev + "</service-group>\n")
+
+def smb_ensure():
+    """Idempotent: make sure the include exists at the END of smb.conf, the
+    managed file exists, and the avahi service is in place. Safe to call anytime."""
+    if not os.path.isfile(SMB_INC):
+        smb_write_shares(smb_get_shares())
+    conf = _read(SMB_CONF_F)
+    if SMB_INC_LINE not in conf:
+        # drop any stray earlier include of our file, then append at the very end
+        keep = [l for l in conf.splitlines() if l.strip() != SMB_INC_LINE]
+        _smb_atomic(SMB_CONF_F, "\n".join(keep).rstrip("\n") + "\n\n" + SMB_INC_LINE + "\n")
+    smb_write_avahi()
+
+def smb_reload():
+    t = _run(["testparm", "-s"], timeout=20)
+    if t.get("code") not in (0, None) and "Loaded services file OK" not in t["log"]:
+        return {"ok": False, "log": "testparm rejected the config:\n" + t["log"][-600:]}
+    _run(["smbcontrol", "all", "reload-config"], timeout=15)
+    if _run(["systemctl", "is-active", "smbd"], timeout=8).get("code") != 0:
+        _run(["systemctl", "enable", "--now", "smbd"], timeout=30)
+        _run(["systemctl", "enable", "--now", "nmbd"], timeout=20)
+    return {"ok": True}
+
+def smb_migrate_storage():
+    """One-time: pull a wizard-created [storage] share out of smb.conf into the
+    managed file, so the panel can manage it. Backed up + testparm-verified;
+    reverts smb.conf if the result doesn't validate."""
+    conf = _read(SMB_CONF_F)
+    m = re.search(r"(?ms)^[ \t]*\[storage\][^\[]*", conf)
+    if not m:
+        return
+    parsed = _smb_parse(m.group(0))
+    shares = smb_get_shares()
+    if parsed and not any(s["name"].lower() == "storage" for s in shares):
+        shares.append(parsed[0])
+    bak = SMB_CONF_F + ".nas-premigrate"
+    try:
+        shutil.copy2(SMB_CONF_F, bak)
+    except OSError:
+        pass
+    smb_write_shares(shares)
+    _smb_atomic(SMB_CONF_F, conf[:m.start()] + conf[m.end():])
+    smb_ensure()
+    t = _run(["testparm", "-s"], timeout=20)
+    if "Loaded services file OK" not in t.get("log", "") and os.path.isfile(bak):
+        shutil.copy2(bak, SMB_CONF_F)          # revert — leave the box as it was
+
+def smb_users():
+    pw = smb_load_pw()
+    names = set()
+    r = _run(["pdbedit", "-L"], timeout=12)
+    if r["ok"]:
+        for line in r["log"].splitlines():
+            n = line.split(":")[0].strip()
+            if n:
+                names.add(n)
+    return [{"name": n, "password": pw.get(n, "")} for n in sorted(names)]
+
+def smb_overview():
+    if not _smb_installed():
+        return {"ok": True, "installed": False, "shares": [], "users": [], "host": socket.gethostname()}
+    try:
+        smb_ensure()
+        smb_migrate_storage()
+    except OSError:
+        pass
+    return {"ok": True, "installed": True, "host": socket.gethostname(),
+            "running": _run(["systemctl", "is-active", "smbd"], timeout=6).get("code") == 0,
+            "shares": smb_get_shares(), "users": smb_users()}
+
+def smb_share_set(b):
+    name = str(b.get("name") or "").strip()
+    old = str(b.get("old") or "").strip()
+    path = str(b.get("path") or "").strip().rstrip("/")
+    if not _SMB_NAME.match(name):
+        return {"ok": False, "log": "invalid share name (letters, digits, space, . _ -)"}
+    if name.lower() in _SMB_DEFAULTS + ("global",):
+        return {"ok": False, "log": "reserved name"}
+    if not path.startswith("/") or ".." in path:
+        return {"ok": False, "log": "pick a folder"}
+    guest = bool(b.get("guest"))
+    users = [u for u in (b.get("users") or []) if _SMB_NAME.match(str(u))]
+    if not guest and not users:
+        return {"ok": False, "log": "add at least one user, or make the share open (guest)"}
+    if not os.path.isdir(path):
+        try:
+            os.makedirs(path, exist_ok=True)
+        except OSError as e:
+            return {"ok": False, "log": "cannot create folder: " + str(e)}
+    shares = [s for s in smb_get_shares() if s["name"] != name and (not old or s["name"] != old)]
+    shares.append({"name": name, "path": path, "guest": guest, "users": users,
+                   "readonly": bool(b.get("readonly"))})
+    smb_ensure()
+    smb_write_shares(shares)
+    r = smb_reload()
+    if not r["ok"]:
+        return r
+    return {"ok": True, "shares": smb_get_shares()}
+
+def smb_share_del(name):
+    name = str(name or "").strip()
+    smb_ensure()
+    smb_write_shares([s for s in smb_get_shares() if s["name"] != name])
+    smb_reload()
+    return {"ok": True, "shares": smb_get_shares()}
+
+def smb_user_set(b):
+    name = str(b.get("name") or "").strip()
+    pwd_ = str(b.get("password") or "")
+    if not _SMB_NAME.match(name) or "$" in name:
+        return {"ok": False, "log": "invalid user name (letters, digits, . _ -)"}
+    if len(pwd_) < 4:
+        return {"ok": False, "log": "password too short (min 4 characters)"}
+    import pwd as _pwmod
+    try:
+        _pwmod.getpwnam(name)
+        exists = True
+    except KeyError:
+        exists = False
+    if not exists:
+        r = _run(["useradd", "-M", "-N", "-s", "/usr/sbin/nologin", name], timeout=20)
+        if not r["ok"]:
+            return {"ok": False, "log": "useradd: " + r["log"]}
+    p = subprocess.run(["smbpasswd", "-a", "-s", name],
+                       input="%s\n%s\n" % (pwd_, pwd_), capture_output=True, text=True, timeout=20)
+    if p.returncode != 0:
+        return {"ok": False, "log": "smbpasswd: " + (p.stdout + p.stderr).strip()}
+    _run(["smbpasswd", "-e", name], timeout=10)      # make sure the account is enabled
+    store = smb_load_pw()
+    store[name] = pwd_
+    _smb_save_pw(store)
+    return {"ok": True, "users": smb_users()}
+
+def smb_user_del(name):
+    name = str(name or "").strip()
+    if not _SMB_NAME.match(name):
+        return {"ok": False, "log": "bad name"}
+    _run(["smbpasswd", "-x", name], timeout=15)
+    # userdel only if it's a samba-only account we made (nologin shell) — never a real login user
+    try:
+        import pwd as _pwmod
+        u = _pwmod.getpwnam(name)
+        if (u.pw_shell or "").endswith(("nologin", "false")) and u.pw_uid >= 1000:
+            _run(["userdel", name], timeout=20)
+    except KeyError:
+        pass
+    store = smb_load_pw()
+    store.pop(name, None)
+    _smb_save_pw(store)
+    # drop the user from any share's valid-users list
+    shares = smb_get_shares()
+    changed = False
+    for s in shares:
+        if name in (s.get("users") or []):
+            s["users"] = [u for u in s["users"] if u != name]; changed = True
+    if changed:
+        smb_write_shares(shares); smb_reload()
+    return {"ok": True, "users": smb_users(), "shares": smb_get_shares()}
+
+def smb_browse(path):
+    """Directory-only listing for the share folder picker (path='' → root)."""
+    path = "/" + str(path or "").strip().lstrip("/")
+    if ".." in path:
+        return {"ok": False, "log": "bad path"}
+    try:
+        ents = []
+        for nm in sorted(os.listdir(path)):
+            fp = os.path.join(path, nm)
+            if nm.startswith(".") or not os.path.isdir(fp):
+                continue
+            ents.append({"name": nm, "path": fp.rstrip("/")})
+    except OSError as e:
+        return {"ok": False, "log": str(e)}
+    return {"ok": True, "path": path.rstrip("/") or "/", "dirs": ents}
+
 USB_IMPORT_CONF = "/etc/nas-wizard/usb-import.conf"
 USB_IMPORT_SH   = "/usr/local/bin/nas-usb-import.sh"
 USB_IMPORT_RULE = "/etc/udev/rules.d/98-nas-usb-import.rules"
@@ -13825,6 +14129,10 @@ class H(BaseHTTPRequestHandler):
                 self._json(usb_devices())
             elif p == "/api/motd":
                 self._json({"config": motd_load(), "preview": motd_preview()})
+            elif p == "/api/smb":
+                self._json(smb_overview())
+            elif p == "/api/smb/browse":
+                self._json(smb_browse((q.get("path") or [""])[0]))
             elif p == "/api/usb-import/progress":
                 self._json(usb_import_progress())
             elif p == "/api/ops":
@@ -13998,6 +14306,14 @@ class H(BaseHTTPRequestHandler):
                 self._json(usb_import_run(self._body().get("dev", "")))
             elif p == "/api/motd":
                 self._json(motd_save(self._body()))
+            elif p == "/api/smb/share":
+                self._json(smb_share_set(self._body()))
+            elif p == "/api/smb/share/delete":
+                self._json(smb_share_del(self._body().get("name", "")))
+            elif p == "/api/smb/user":
+                self._json(smb_user_set(self._body()))
+            elif p == "/api/smb/user/delete":
+                self._json(smb_user_del(self._body().get("name", "")))
             elif p == "/api/ops":
                 self._json(ops_hist_add(self._body()))
             elif p == "/api/ops/clear":

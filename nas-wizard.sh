@@ -2260,6 +2260,7 @@ Check:
 # ---------------------------------------------------------------------------
 shares_samba() {
     install_packages "samba" samba
+    install_smb_shares          # macOS globals + Finder-icon avahi + panel-managed include
     local user pass1 pass2 share="/mnt/storage"
     findmnt -no TARGET "$share" >/dev/null 2>&1 || warn "$share not mounted yet (mergerfs pool) — the share will serve a local folder"
     if ! grep -qs '^\[storage\]' /etc/samba/smb.conf; then
@@ -2314,6 +2315,70 @@ shares_avahi() {
     install_packages "avahi" avahi-daemon
     enable_service avahi-daemon
     info "Avahi/mDNS enabled: $(hostname).local"
+}
+
+# macOS-friendly Samba globals + Finder-icon Avahi service + the panel's managed
+# shares include. Shares themselves are created/edited from the panel (Settings →
+# Sharing), which owns /etc/samba/nas-shares.conf; here we only lay the groundwork
+# so a fresh box behaves nicely on macOS even before the tab is opened.
+SMB_SHARES_INC="/etc/samba/nas-shares.conf"
+SMB_SHARES_AVAHI="/etc/avahi/services/nas-shares.service"
+install_smb_shares() {
+    install_packages "samba" samba
+    install_packages "avahi" avahi-daemon
+    if [ ! -f "$SMB_SHARES_INC" ]; then
+        write_file "$SMB_SHARES_INC" <<'EOF'
+# NAS-OS shared folders — managed by the panel. Do not edit by hand.
+[global]
+   min protocol = SMB2
+   vfs objects = catia fruit streams_xattr
+   fruit:metadata = stream
+   fruit:model = RackMac
+   fruit:posix_rename = yes
+   fruit:veto_appledouble = no
+   fruit:nfs_aces = no
+   fruit:wipe_intentionally_left_blank_rfork = yes
+   fruit:delete_empty_adfiles = yes
+EOF
+    fi
+    # include at the END of smb.conf (never inside [global]; see tm_ensure_include)
+    [ -f "$SMB_CONF" ] || write_file "$SMB_CONF" <<'EOF'
+[global]
+   workgroup = WORKGROUP
+   server role = standalone server
+EOF
+    if [ "$(tail -n1 "$SMB_CONF" 2>/dev/null)" != "include = $SMB_SHARES_INC" ] \
+       || [ "$(grep -cF "include = $SMB_SHARES_INC" "$SMB_CONF" 2>/dev/null)" != 1 ]; then
+        if [ "$DRY_RUN" -eq 0 ]; then
+            backup_file "$SMB_CONF"
+            grep -vF "include = $SMB_SHARES_INC" "$SMB_CONF" > "$SMB_CONF.tmp"
+            printf '\ninclude = %s\n' "$SMB_SHARES_INC" >> "$SMB_CONF.tmp"
+            mv "$SMB_CONF.tmp" "$SMB_CONF"
+        fi
+    fi
+    # Finder → Network icon: advertise SMB + a device model over mDNS
+    write_file "$SMB_SHARES_AVAHI" <<'EOF'
+<?xml version="1.0" standalone='no'?>
+<!DOCTYPE service-group SYSTEM "avahi-service.dtd">
+<service-group>
+  <name replace-wildcards="yes">%h</name>
+  <service>
+    <type>_smb._tcp</type>
+    <port>445</port>
+  </service>
+  <service>
+    <type>_device-info._tcp</type>
+    <port>0</port>
+    <txt-record>model=RackMac</txt-record>
+  </service>
+</service-group>
+EOF
+    enable_service smbd
+    systemctl list-unit-files nmbd.service >/dev/null 2>&1 && enable_service nmbd
+    enable_service avahi-daemon
+    [ "$DRY_RUN" -eq 0 ] && command -v testparm >/dev/null 2>&1 && testparm -s >/dev/null 2>>"$LOG" \
+        && smbcontrol all reload-config >/dev/null 2>&1
+    info "Samba shares groundwork ready (manage from the panel: Settings → Sharing)"
 }
 
 # --------------------------------------------------------------------------- #
@@ -2388,15 +2453,22 @@ tm_ensure_include() {
    workgroup = WORKGROUP
    server role = standalone server
 EOF
-    if ! grep -qs "include = $TM_INC" "$SMB_CONF"; then
+    # The include MUST be top-level at the END of smb.conf, not inside [global]:
+    # an include placed after [global] mis-attributes every global parameter that
+    # follows it to the include's last share section (verified with testparm).
+    # Normalise idempotently: if it's not already the sole, last line, strip every
+    # occurrence (old buggy in-[global] placement included) and re-append at the end.
+    if [ "$(tail -n1 "$SMB_CONF" 2>/dev/null)" = "include = $TM_INC" ] \
+       && [ "$(grep -cF "include = $TM_INC" "$SMB_CONF" 2>/dev/null)" = 1 ]; then
+        :
+    elif [ "$DRY_RUN" -eq 1 ]; then
+        info "[DRY-RUN] place Time Machine include at the end of smb.conf"
+    else
         backup_file "$SMB_CONF"
-        if [ "$DRY_RUN" -eq 0 ]; then
-            awk -v inc="   include = $TM_INC" '
-                {print}
-                (!done && tolower($0) ~ /^\[global\]/){print inc; done=1}
-            ' "$SMB_CONF" > "$SMB_CONF.tmp" && mv "$SMB_CONF.tmp" "$SMB_CONF"
-        fi
-        info "Time Machine include added to smb.conf"
+        grep -vF "include = $TM_INC" "$SMB_CONF" > "$SMB_CONF.tmp"
+        printf '\ninclude = %s\n' "$TM_INC" >> "$SMB_CONF.tmp"
+        mv "$SMB_CONF.tmp" "$SMB_CONF"
+        info "Time Machine include placed at the end of smb.conf"
     fi
 }
 
