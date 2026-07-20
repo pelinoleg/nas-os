@@ -4793,7 +4793,9 @@ def nb_profiles_public():
                     "configured": bool(conn and p.get("jobs")),
                     # which window to open with: "last touched" = a config edit or a run
                     "saved": int(p.get("saved") or 0),
-                    "last_run": int(st.get("started") or 0)})
+                    "last_run": int(st.get("started") or 0),
+                    # outcome of the newest history entry — colors the tab dot
+                    "last_result": (nb_history(pid) or [{}])[0].get("result") or ""})
     return out
 
 def _nb_new_pid(existing):
