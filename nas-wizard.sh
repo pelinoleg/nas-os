@@ -3700,7 +3700,7 @@ api_state() {                  # brief state for the wizard (JSON)
     host="$(hostnamectl --static 2>/dev/null || hostname)"
     tz="$(timedatectl show -p Timezone --value 2>/dev/null)"
     iface="$(ip route show default 2>/dev/null | awk '/default/{print $5; exit}')"
-    printf '{"host":"%s","tz":"%s","iface":"%s","docker":%s,"data_disks":%s,"parity_disks":%s,"pool":%s,"snapraid":%s,"samba":%s,"nfs":%s,"fail2ban":%s,"ufw":%s,"unattended":%s}\n' \
+    printf '{"host":"%s","tz":"%s","iface":"%s","docker":%s,"data_disks":%s,"parity_disks":%s,"pool":%s,"snapraid":%s,"samba":%s,"nfs":%s,"fail2ban":%s,"ufw":%s,"smartd":%s,"unattended":%s}\n' \
         "$host" "$tz" "$iface" \
         "$(command -v docker >/dev/null 2>&1 && echo true || echo false)" \
         "$(mounted_data_disks | grep -c . )" \
@@ -3711,6 +3711,7 @@ api_state() {                  # brief state for the wizard (JSON)
         "$(systemctl is-active nfs-kernel-server >/dev/null 2>&1 && echo true || echo false)" \
         "$(systemctl is-active fail2ban >/dev/null 2>&1 && echo true || echo false)" \
         "$(ufw status 2>/dev/null | grep -q 'Status: active' && echo true || echo false)" \
+        "$(systemctl is-active smartmontools >/dev/null 2>&1 && echo true || echo false)" \
         "$([ -f /etc/apt/apt.conf.d/20auto-upgrades ] && echo true || echo false)"
 }
 

@@ -193,13 +193,10 @@ const STEPS=[
  {id:"disks",nm:"Disks",ic:"disks"},
  {id:"mergerfs",nm:"Pool",ic:"layers"},
  {id:"snapraid",nm:"Parity",ic:"layers"},
- {id:"services",nm:"Services",ic:"cube"},
  {id:"shares",nm:"Access",ic:"share"},
  {id:"security",nm:"Security",ic:"shield"},
  {id:"tuning",nm:"Pi Tuning",ic:"sliders"},
- {id:"notify",nm:"Notifications",ic:"bell"},
- {id:"backup",nm:"Monitoring",ic:"save"},
- {id:"modules",nm:"Modules",ic:"plug"},
+ {id:"alerts",nm:"Alerts",ic:"bell"},
 ];
 let cur="system";const DONE={};
 function renderRail(){const r=document.getElementById("rail");r.innerHTML="";STEPS.forEach(s=>{
@@ -230,11 +227,11 @@ function chk(id,t,d,on,ic){return `<label class="opt ${on?"on":""}"><span class=
 function keys(box){return [...box.querySelectorAll("[data-k]:checked")].map(x=>x.dataset.k).join(" ");}
 
 const R={
- system(p){p.innerHTML=head("Step 1","System preparation","Updates and installation of Docker, mergerfs, SnapRAID and utilities. Anything already installed is skipped.")+
+ system(p){p.innerHTML=head("System","System preparation","Updates and installation of Docker, mergerfs, SnapRAID and utilities. Anything already installed is skipped.")+
   `<div class="card"><div class="opt on"><span class="ic">${svg("cpu",16)}</span><span class="m"><span class="t">NAS stack + utilities + Pi packages</span><span class="d">docker · mergerfs · snapraid · smartmontools · nvme-cli · htop · git · …</span></span></div></div>
    <div class="actions"><button class="btn pri" id="go">Install</button></div><div class="console" id="con"></div>`;
   p.querySelector("#go").onclick=()=>run("system");},
- disks(p){p.innerHTML=head("Step 2","Disks","Choose a free disk, its role and filesystem. Formatting requires typing the device path manually. The system disk is excluded.")+`<div id="dl"></div><div class="console" id="con"></div>`;
+ disks(p){p.innerHTML=head("Storage","Disks","Choose a free disk, its role and filesystem. Formatting requires typing the device path manually. The system disk is excluded.")+`<div id="dl"></div><div class="console" id="con"></div>`;
   api("/api/disks").then(d=>{const dl=p.querySelector("#dl");const all=(d&&d.disks)||[];
    const free=all.filter(x=>x.role==="free"&&x.size&&x.size!=="0B");
    // mounted external disks are also pool candidates, but must be unmounted first
@@ -257,44 +254,33 @@ const R={
     seg.querySelectorAll("button").forEach(b=>b.onclick=()=>{role=b.dataset.r;seg.querySelectorAll("button").forEach(z=>z.classList.toggle("on",z===b));});
     const fmt=el(`<button class="btn dng sm">Format</button>`);fmt.onclick=()=>fmtModal(x.path,()=>run("format-disk",{dev:x.path,role,fs}));
     ctl.appendChild(seg);ctl.appendChild(fmt);row.appendChild(ctl);dl.appendChild(row);});});},
- mergerfs(p){p.innerHTML=head("Step 3","mergerfs pool","Combines data disks into /mnt/storage. Requires ≥2 disks — otherwise this step is skipped automatically.")+`<div class="actions"><button class="btn pri" id="go">Build pool</button></div><div class="console" id="con"></div>`;p.querySelector("#go").onclick=()=>run("mergerfs");},
- snapraid(p){p.innerHTML=head("Step 4","Parity · SnapRAID","Generates snapraid.conf, sets up mass-deletion protection and timers (sync 03:00, scrub Sun 05:00).")+
+ mergerfs(p){p.innerHTML=head("Storage","mergerfs pool","Combines data disks into /mnt/storage. Requires ≥2 disks — otherwise this step is skipped automatically.")+`<div class="actions"><button class="btn pri" id="go">Build pool</button></div><div class="console" id="con"></div>`;p.querySelector("#go").onclick=()=>run("mergerfs");},
+ snapraid(p){p.innerHTML=head("Storage","Parity · SnapRAID","Generates snapraid.conf, sets up mass-deletion protection and timers (sync 03:00, scrub Sun 05:00).")+
   `<div class="card">${chk("sync","Run the first sync now","May take a while on large disks",false,"layers")}</div>
    <div class="actions"><button class="btn pri" id="go">Configure SnapRAID</button></div><div class="console" id="con"></div>`;
   p.querySelector("#go").onclick=()=>run("snapraid",{sync:p.querySelector("[data-k=sync]").checked?"1":"0"});},
- services(p){p.innerHTML=head("Step 5","Apps · Dockge","Installs Dockge — a web manager for docker stacks. Apps themselves are installed from the “App Store” in the panel: it copies the stack, asks for the required fields and brings it up itself.")+
-  `<div class="card"><div class="opt on"><span class="ic">${svg("cube",16)}</span><span class="m"><span class="t">Dockge</span><span class="d">stack manager · port 5001 · directory /opt/stacks</span></span></div>
-    <div class="actions" style="margin-top:12px"><button class="btn pri" id="godk">Install Dockge</button><a class="btn" href="http://${location.hostname}:5001" target="_blank">Open Dockge ↗</a></div></div>
-   <div class="note">${svg("cube",18)}<span>Install apps (Scrutiny, Syncthing, Immich, etc.) from the <b>App Store</b> in the panel — a tab in the Docker window. It also has fields like passwords and ports. Dockge stays around for logs, editing compose files, and start/stop.</span></div>
-   <div class="console" id="con"></div>`;
-  p.querySelector("#godk").onclick=()=>run("dockge");},
- shares(p){p.innerHTML=head("Step 6","File access","Share /mnt/storage over the network and set up remote access.")+
-  `<div class="card" id="box">${chk("samba","Samba (SMB)","Windows, Mac, phone",true,"share")}${chk("nfs","NFS","Linux clients",false,"share")}${chk("avahi","Avahi/mDNS","<host>.local",true,"net")}</div>
+ shares(p){p.innerHTML=head("Network","File access","Share /mnt/storage over the network. (Apps like Scrutiny/Syncthing/Immich — including Dockge — are installed from the App Store in the panel's Docker window.)")+
+  `<div class="card" id="box">${chk("samba","Samba (SMB)","Windows, Mac, phone",true,"share")}${chk("nfs","NFS","Linux clients",false,"share")}${chk("avahi","Avahi/mDNS","reach the box as <host>.local",true,"net")}</div>
    <div class="actions"><button class="btn pri" id="go">Apply</button></div><div class="console" id="con"></div>`;
   p.querySelector("#go").onclick=()=>run("shares",{keys:keys(p.querySelector("#box"))});},
- security(p){p.innerHTML=head("Step 7","Security","Sensible defaults. The firewall opens SSH before enabling; key-only login only if keys exist.")+
+ security(p){p.innerHTML=head("Security","Security &amp; remote access","Sensible defaults — the firewall opens SSH before enabling. Tailscale (below) gives secure remote access without opening any ports.")+
   `<div class="card" id="box">${chk("unattended","Automatic security updates","recommended — keep on",true,"shield")}${chk("ufw","Firewall (ufw)","enable if the NAS is exposed to the internet",false,"shield")}${chk("fail2ban","fail2ban","bans SSH brute-force — if SSH is reachable from outside",false,"shield")}${chk("journald","Journal size limit (200 MB)","less SD-card wear — keep on",true,"save")}${chk("log2ram","log2ram (logs in RAM)","big SD-card lifesaver; optional on SSD/NVMe",false,"save")}</div>
-   <div class="actions"><button class="btn pri" id="go">Apply</button></div><div class="console" id="con"></div>`;
-  p.querySelector("#go").onclick=()=>run("security",{keys:keys(p.querySelector("#box"))});},
- tuning(p){p.innerHTML=head("Step 8","Raspberry Pi tuning","Optional hardware tweaks — enable only what fits your setup (hint under each). config.txt changes need a reboot. TRIM and the hardware watchdog are already on by default.")+
+   <div class="actions"><button class="btn pri" id="go">Apply</button></div>
+   <div class="card" style="margin-top:14px"><div class="opt"><span class="ic">${svg("shield",16)}</span><span class="m"><span class="t">Tailscale</span><span class="d">secure remote access without port forwarding (optional)</span></span><button class="btn sm" data-a="tailscale">Install</button></div></div>
+   <div class="console" id="con"></div>`;
+  p.querySelector("#go").onclick=()=>run("security",{keys:keys(p.querySelector("#box"))});
+  p.querySelectorAll("[data-a]").forEach(b=>b.onclick=()=>run(b.dataset.a));},
+ tuning(p){p.innerHTML=head("Hardware","Raspberry Pi tuning","Optional hardware tweaks — enable only what fits your setup (hint under each). config.txt changes need a reboot. TRIM and the hardware watchdog are already on by default.")+
   `<div class="card" id="box">${chk("usbpower","USB power (Pi 5)","enable if you run USB SSD/HDD — needs the 27 W PSU",true,"plug")}${chk("pcie3","PCIe Gen3 for NVMe","faster NVMe, slightly out of spec — turn off if the drive glitches",false,"cpu")}${chk("cgroup","Docker memory limits","only if you cap container RAM",false,"cpu")}${chk("sysctl","Sysctl tuning","safe: less swapping + steadier network under load",false,"sliders")}${chk("zram","zram swap","compressed swap in RAM — good on low-RAM or SD-card boxes",false,"cpu")}${chk("chrony","Accurate time (chrony)","usually skip; enable only if precise time matters",false,"cpu")}${chk("governor","Thermal CPU governor","slows the CPU when hot (≥80°C) — for passive cooling",false,"sliders")}</div>
    <div class="actions"><button class="btn pri" id="go">Apply</button></div><div class="console" id="con"></div>`;
   p.querySelector("#go").onclick=()=>run("pi",{keys:keys(p.querySelector("#box"))});},
- notify(p){p.innerHTML=head("Step 9","Notifications · Pushover","SnapRAID status, SMART problems and overheating — delivered to the Pushover app on your phone.")+
-  `<div class="card"><div class="field"><label>User Key</label><input class="mono" id="pu" placeholder="u xxxxxxxxxxxxxxxx"></div>
-   <div class="field"><label>Application Token</label><input class="mono" id="pt" placeholder="a xxxxxxxxxxxxxxxx"></div></div>
-   <div class="actions"><button class="btn pri" id="go">Save</button><button class="btn" id="test">Test</button></div><div class="console" id="con"></div>`;
-  p.querySelector("#go").onclick=()=>run("notify",{puser:p.querySelector("#pu").value,ptoken:p.querySelector("#pt").value});
-  p.querySelector("#test").onclick=()=>run("notify",{puser:p.querySelector("#pu").value,ptoken:p.querySelector("#pt").value});},
- backup(p){p.innerHTML=head("Step 10","Monitoring & alerts","Disk-health (SMART) and space/temperature checks that ping you via Pushover. This is NOT file backup — real backups live in the Backup app inside the panel (pull from another NAS / push to a disk or server).")+
+ alerts(p){p.innerHTML=head("Monitoring","Alerts","Watch disk health (SMART) and space/temperature, and get pinged on your phone via Pushover when something's wrong. File backups are separate — set those up in the Backup app inside the panel.")+
   `<div class="card" id="box">${chk("smartd","SMART disk-health monitor","warns before a disk dies — bad sectors, wear, read errors",true,"save")}${chk("spacetemp","Space & temperature","hourly — alerts if a disk fills up or overheats",true,"sliders")}</div>
-   <div class="actions"><button class="btn pri" id="go">Apply</button></div><div class="console" id="con"></div>`;
-  p.querySelector("#go").onclick=()=>run("backup",{keys:keys(p.querySelector("#box"))});},
- modules(p){p.innerHTML=head("Step 11","Additional modules","Networking and remote access. Installed individually.")+
-  `<div class="card">
-   <div class="opt"><span class="ic">${svg("shield",16)}</span><span class="m"><span class="t">Tailscale</span><span class="d">secure remote access without port forwarding</span></span><button class="btn sm" data-a="tailscale">Install</button></div>
-   </div><div class="console" id="con"></div>`;
-  p.querySelectorAll("[data-a]").forEach(b=>b.onclick=()=>run(b.dataset.a));},
+   <div class="card" style="margin-top:14px"><div class="field"><label>Pushover User Key <span style="color:var(--mut);font-weight:400">— optional, where alerts are sent</span></label><input class="mono" id="pu" placeholder="u xxxxxxxxxxxxxxxx"></div>
+    <div class="field"><label>Pushover Application Token</label><input class="mono" id="pt" placeholder="a xxxxxxxxxxxxxxxx"></div></div>
+   <div class="actions"><button class="btn pri" id="go">Apply</button><button class="btn" id="test">Test Pushover</button></div><div class="console" id="con"></div>`;
+  p.querySelector("#go").onclick=()=>run("backup",{keys:keys(p.querySelector("#box"))},()=>{const u=p.querySelector("#pu").value,t=p.querySelector("#pt").value;if(u||t)run("notify",{puser:u,ptoken:t});});
+  p.querySelector("#test").onclick=()=>run("notify",{puser:p.querySelector("#pu").value,ptoken:p.querySelector("#pt").value});},
 };
 function renderPanel(){const p=document.getElementById("panel");p.innerHTML="";(R[cur]||R.system)(p);
  // if the step is already configured — show a green "already installed" banner up top, so there's no guessing
@@ -336,8 +322,8 @@ try{applyDeskTheme(JSON.parse(localStorage.getItem("nasdesk")||"{}"));}catch(e){
    DONE.disks=(STATE.data_disks||0)>0;
    DONE.mergerfs=!!STATE.pool;
    DONE.snapraid=!!STATE.snapraid;
-   DONE.services=!!STATE.docker;
    DONE.shares=!!(STATE.samba||STATE.nfs);
-   DONE.security=!!(STATE.ufw||STATE.fail2ban);}
+   DONE.security=!!(STATE.ufw||STATE.fail2ban);
+   DONE.alerts=!!STATE.smartd;}
  else document.getElementById("hostlbl").textContent="demo (no backend)";renderRail();renderPanel();})();
 </script></body></html>
