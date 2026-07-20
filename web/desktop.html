@@ -237,7 +237,13 @@
   .menu button:hover{background:var(--accent-fill);color:var(--accent-ink)}
   .menu button.dng:hover{background:var(--danger-soft);color:var(--danger)}
   .menu .sep{height:1px;background:var(--line);margin:6px 6px}
-  .menu .ic{color:var(--dim);display:flex;width:18px}.menu button:hover .ic{color:inherit}
+  /* accent-tinted icons: with --dim they melted into the label text */
+  .menu .ic{color:var(--accent);display:flex;width:18px;flex:none}.menu button:hover .ic{color:inherit}
+  .menu button.dng .ic{color:var(--danger)}.menu button.dng:hover .ic{color:inherit}
+  .menu .mlabel{flex:1;min-width:0}
+  .menu .subarrow{margin-left:auto;color:var(--mut);display:flex;flex:none}
+  .menu button:hover .subarrow{color:inherit}
+  .menu.sub{z-index:2601}
 
   /* desktop layout — apps left, widgets pinned right */
   .desk{position:fixed;inset:40px 0 96px 0}
@@ -1413,6 +1419,9 @@
   /* inside an SSH mount folders are blue-teal, to avoid confusing them with local ones */
   .fm-list.fm-remote .fmico path[fill="#E0A63C"]{fill:#2E86AB}
   .fm-list.fm-remote .fmico path[fill="#F5C24C"]{fill:#4FA8CF}
+  /* folder glyphs are tuned to the local yellow — on recolored remote/external
+     listings (blue/green folders) the orange glyph clashes, so hide it there */
+  .fm-list.fm-remote .fmico .dirglyph,.fm-list.fm-extdisk .fmico .dirglyph{display:none}
   /* disks outside the pool (USB, individual pool members, parity) — green */
   .fm-list.fm-extdisk .fmico path[fill="#E0A63C"]{fill:#3E9E52}
   .fm-list.fm-extdisk .fmico path[fill="#F5C24C"]{fill:#64C178}
@@ -1431,7 +1440,8 @@
   .fm-chip.on{background:var(--sel);color:var(--accent);box-shadow:var(--sh-sm);border-color:transparent;font-weight:600}
   .fm-badge{margin-left:auto;font-size:10px;color:var(--mut);font-family:var(--mono);flex:none;padding-right:2px}
   .fm-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;
-    min-height:180px;height:60%;color:var(--mut);font-size:12.5px;text-align:center}
+    width:100%;height:100%;min-height:240px;color:var(--mut);font-size:12.5px;text-align:center}
+  .fm-list:focus,.fm-list:focus-visible{outline:none}   /* tabindex=0 for keys, not for a focus ring */
   .fm-empty svg{opacity:.4}
   .fm-empty small{font-size:11px;opacity:.75}
   .fm-vs{display:inline-flex;align-items:center;gap:6px}
@@ -2969,15 +2979,38 @@ const tempLoad=t=>t==null?0:Math.max(0,Math.min(100,(t-45)/40*100));
 const roleName={data:"data",parity:"parity",system:"system",pool:"pool",free:"not in pool",removable:"external"};
 
 /* menus */
-function showMenu(x,y,items){
- closeMenu();const m=el(`<div class="menu"></div>`);
+/* Menus support one level of submenus ({sub:[…]}): a flyout opens on hover
+   (120 ms intent delay) or on click/tap. Only one flyout at a time; hovering a
+   plain sibling closes it. The outside-click closer ignores clicks in ANY .menu
+   so flyout items remain clickable. */
+function buildMenu(items){
+ const m=el(`<div class="menu"></div>`);
  items.forEach(it=>{if(it.sep){m.appendChild(el(`<div class="sep"></div>`));return;}
-  const b=el(`<button class="${it.dng?"dng":""}"><span class="ic">${it.ic||""}</span>${it.label}</button>`);
-  b.onclick=()=>{closeMenu();it.act();};m.appendChild(b);});
+  const b=el(`<button class="${it.dng?"dng":""}"><span class="ic">${it.ic||""}</span><span class="mlabel">${it.label}</span>${it.sub?`<span class="subarrow">${svg("chev",13)}</span>`:""}</button>`);
+  if(it.sub){
+    const openSub=()=>{
+      document.querySelectorAll(".menu.sub").forEach(s=>{if(s._parentBtn!==b)s.remove();});
+      if(b._sub&&document.body.contains(b._sub))return;
+      const s=buildMenu(it.sub);s.classList.add("sub");s._parentBtn=b;b._sub=s;document.body.appendChild(s);
+      const br=b.getBoundingClientRect(),sr=s.getBoundingClientRect();
+      let sx=br.right+2;if(sx+sr.width>innerWidth-8)sx=br.left-sr.width-2;
+      s.style.left=Math.max(8,sx)+"px";s.style.top=Math.max(8,Math.min(br.top-6,innerHeight-sr.height-8))+"px";};
+    b.onpointerenter=()=>{clearTimeout(b._st);b._st=setTimeout(openSub,120);};
+    b.onpointerleave=()=>clearTimeout(b._st);
+    b.onclick=ev=>{ev.stopPropagation();openSub();};
+  }else{
+    b.onpointerenter=()=>{document.querySelectorAll(".menu.sub").forEach(s=>{
+      if(s._parentBtn&&s._parentBtn.parentElement===b.parentElement)s.remove();});};
+    b.onclick=()=>{closeMenu();it.act();};
+  }
+  m.appendChild(b);});
+ return m;}
+function showMenu(x,y,items){
+ closeMenu();const m=buildMenu(items);
  document.body.appendChild(m);
  const r=m.getBoundingClientRect();
  m.style.left=Math.min(x,innerWidth-r.width-8)+"px";m.style.top=Math.min(y,innerHeight-r.height-8)+"px";
- const off=ev=>{if(!m.contains(ev.target)){document.removeEventListener("pointerdown",off,true);closeMenu();}};
+ const off=ev=>{if(!(ev.target.closest&&ev.target.closest(".menu"))){document.removeEventListener("pointerdown",off,true);closeMenu();}};
  m._off=off;setTimeout(()=>document.addEventListener("pointerdown",off,true),0);
 }
 function closeMenu(){document.querySelectorAll(".menu").forEach(m=>{if(m._off)document.removeEventListener("pointerdown",m._off,true);m.remove();});}
@@ -5197,7 +5230,7 @@ const FM_DIR_GLYPH={
  pub:'<circle cx="10.2" cy="13.4" r="1.35"/><path d="M7.9 17.9c0-1.3 1.03-2.2 2.3-2.2s2.3.9 2.3 2.2z"/><circle cx="14.2" cy="13.1" r="1.1"/><path d="M13.3 17.9c.1-1.05.9-1.9 2-1.9 1 0 1.85.75 1.95 1.9z"/>'};
 function fmIcon(name,type,size){const k=fmKind(name,type);
  if(k==="folder"){const g=FM_DIR_GLYPH[FM_DIR_ALIAS[(name||"").toLowerCase()]||""];
-   return `<svg class="fmico" viewBox="0 0 24 24" width="${size}" height="${size}"><path fill="#E0A63C" d="M2.8 6.4c0-1 .8-1.8 1.8-1.8h4.1c.5 0 1 .2 1.35.58L11.3 6.5h8.1c1 0 1.8.8 1.8 1.8v1.1H2.8z"/><path fill="#F5C24C" d="M2.2 9.4c0-.9.72-1.6 1.6-1.6h16.4c.9 0 1.6.72 1.6 1.6l-.66 8.1c-.075.92-.84 1.62-1.76 1.62H4.62c-.92 0-1.685-.7-1.76-1.62z"/>${g?`<g fill="#C9962A">${g}</g>`:""}</svg>`;}
+   return `<svg class="fmico" viewBox="0 0 24 24" width="${size}" height="${size}"><path fill="#E0A63C" d="M2.8 6.4c0-1 .8-1.8 1.8-1.8h4.1c.5 0 1 .2 1.35.58L11.3 6.5h8.1c1 0 1.8.8 1.8 1.8v1.1H2.8z"/><path fill="#F5C24C" d="M2.2 9.4c0-.9.72-1.6 1.6-1.6h16.4c.9 0 1.6.72 1.6 1.6l-.66 8.1c-.075.92-.84 1.62-1.76 1.62H4.62c-.92 0-1.685-.7-1.76-1.62z"/>${g?`<g class="dirglyph" fill="#C9962A" transform="translate(12 14.4) scale(.84) translate(-12 -15)">${g}</g>`:""}</svg>`;}
  const c=FM_ICO_C[k]||FM_ICO_C.file;
  return `<svg class="fmico" viewBox="0 0 24 24" width="${size}" height="${size}"><path fill="${c[0]}" d="M6 2.6h7L19 8.6V19a2.4 2.4 0 0 1-2.4 2.4H6A2.4 2.4 0 0 1 3.6 19V5A2.4 2.4 0 0 1 6 2.6z"/><path fill="${c[1]}" d="M13 2.6l6 6h-4.5A1.5 1.5 0 0 1 13 7.1z"/>${FM_GLYPH[k]||""}</svg>`;}
 /* Video duration badges on grid thumbnails: lazily via /api/fs/vmeta (server caches
@@ -5263,7 +5296,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
  body.style.padding="4px 16px 12px";   // the file manager has no use for a large top padding
  let cwd=initPath||SET.fmStart||"/mnt/storage",entries=[],searchRes=null;
  let tabs=[cwd],tabI=0;
- const sel=new Set();let clip=null,showHidden=SET.fmHidden===true,filt="",sortKey=SET.fmSortKey||"name",sortDir=SET.fmSortDir===-1?-1:1,lastIdx=-1,favs=[],dragPaths=null,favDragI=null,searchMode="name",volFree=null,volTotal=null,undoOp=null,filtKind="",filtSize=0,filtDays=0;
+ const sel=new Set();let clip=null,showHidden=SET.fmHidden===true,filt="",sortKey=SET.fmSortKey||"name",sortDir=SET.fmSortDir===-1?-1:1,lastIdx=-1,favs=[],dragPaths=null,favDragI=null,searchMode="name",volFree=null,volTotal=null,undoOp=null,filtKind="",filtSize=0,filtDays=0,recentOn=false;
  let viewMode="list";try{viewMode=SET.fmView||localStorage.getItem("fmview")||"list";}catch(e){}
  let dblDir=(SET.fmClickDir||SET.fmClick||"single")==="double";    // folders: double click?
  let dblFile=(SET.fmClickFile||SET.fmClick||"single")==="double"; // files: double click?
@@ -5375,7 +5408,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
        if(after==null){if(c.lastElementChild!==dragEl)c.appendChild(dragEl);}
        else if(dragEl.nextElementSibling!==after)c.insertBefore(dragEl,after);});
      c.addEventListener("drop",ev=>{if(favDragI!=null)ev.preventDefault();});}
-   favs.forEach((f,i)=>{const it=el(`<div class="fm-fav-i${f.path===cwd?" on":""}" draggable="true"><span class="fi">${fmIcon(f.name,"dir",17)}</span><span class="fn" title="${att(f.path)}">${esc(f.name)}</span><button class="fx" title="Remove">${svg("trash",12)}</button></div>`);
+   favs.forEach((f,i)=>{const it=el(`<div class="fm-fav-i${f.path===cwd&&!recentOn?" on":""}" draggable="true"><span class="fi">${fmIcon(f.name,"dir",17)}</span><span class="fn" title="${att(f.path)}">${esc(f.name)}</span><button class="fx" title="Remove">${svg("trash",12)}</button></div>`);
      it._fav=f;
      it.onclick=ev=>{if(ev.target.closest(".fx"))return;load(f.path);};
      it.querySelector(".fn").ondblclick=ev=>{ev.stopPropagation();renameFav(it,f);};
@@ -5513,7 +5546,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    const grid=viewMode==="grid"&&!searchRes;   // search results — always a list, so the path is visible
    const ICOPX={s:{list:20,grid:44},m:{list:24,grid:60},l:{list:32,grid:84}};
    const isz=(ICOPX[SET.fmIconSize]||ICOPX.m)[grid?"grid":"list"],thumbsOn=SET.fmThumbs!==false;
-   listBox.classList.toggle("fm-grid",grid);
+   listBox.classList.toggle("fm-grid",grid&&arr.length>0);   // grid layout would pin the empty-state block to the top-left
    const cols=body.querySelector("#fCols");if(cols)cols.style.display=grid?"none":"flex";
    curArr=arr;if(cursor>=arr.length)cursor=arr.length-1;
    listBox.innerHTML="";
@@ -5583,7 +5616,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    cwd=r.path;tabs[tabI]=r.path;entries=r.entries||[];searchRes=null;sel.clear();filt="";lastIdx=-1;
    volFree=(r.free!=null&&!remFree)?r.free:null;volTotal=(r.vtotal!=null&&!remFree)?r.vtotal:null;
    listBox.dataset.drop="Drop to upload into "+(cwd.split("/").filter(Boolean).pop()||"/");
-   updPlaces();
+   recentOn=false;updPlaces();
    lastSig=dirSig(entries);
    const si=body.querySelector("#fSearch");if(si)si.value="";
    cursor=-1;renderTabs();renderCrumb();renderFav();renderVols();renderRemotes(false);
@@ -5737,7 +5770,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    const r=await api("/api/fs/recent?path="+encodeURIComponent(dir)+"&days=7");
    if(!r||!r.ok){toast("Error: "+((r&&r.log)||"?"));return;}
    if(cwd!==dir)return;   // user navigated away while find(1) was walking
-   searchRes=r.entries||[];sel.clear();renderList();selUpdate();
+   searchRes=r.entries||[];sel.clear();recentOn=true;updPlaces();renderFav();renderList();selUpdate();
    toast(searchRes.length?`Modified in 7 days: ${searchRes.length}${r.truncated?"+":""}`:"Nothing modified in the last 7 days");}
  async function doGrep(q){if(!q){searchRes=null;renderList();return;}
    toast("Searching in contents…");const r=await api("/api/fs/grep?path="+encodeURIComponent(cwd)+"&q="+encodeURIComponent(q));
@@ -5924,28 +5957,37 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
        logAct(j.ok?`Downloaded file ${j.name}`:`Download ${j.name} failed`,j.ok?(j.path||""):(j.log||""),j.ok?"ok":"warn");
        if(j.ok)load(cwd);return;}
      await new Promise(res=>setTimeout(res,700));}}
- function rowMenu(e,x,y){const it=[{label:"Open",ic:svg(e.type==="dir"?"folder":"file",16),act:()=>openEntry(e)}];
-   if(sel.size>1&&sel.has(e.path))it.push({label:`Download selected (${sel.size}) as ZIP`,ic:svg("download",16),act:()=>doZip(selOr(e))});
+ /* Context menu, grouped by intent: [open & get] [edit: clipboard/name] [package
+    & organize] [More ▸ = rare admin stuff] [Properties] [danger]. One submenu
+    level only — frequent actions stay top-level. */
+ function rowMenu(e,x,y){
+   const multi=sel.size>1&&sel.has(e.path);
+   const it=[{label:"Open",ic:svg(e.type==="dir"?"folder":"file",16),act:()=>openEntry(e)}];
+   if(multi)it.push({label:`Download selected (${sel.size}) as ZIP`,ic:svg("download",16),act:()=>doZip(selOr(e))});
    else if(e.type==="file")it.push({label:"Download",ic:svg("download",16),act:()=>dl(e)});
-   else if(e.type==="dir")it.push({label:"Download as ZIP",ic:svg("download",16),act:()=>doZip([e.path])});
-   it.push({label:"Copy path",ic:svg("copy",16),act:()=>{copyText(e.path);toast("Path copied");}});
-   it.push({label:"Add to favorites",ic:svg("folder",16),act:()=>{if(favs.some(f=>f.path===e.path)){toast("Already in favorites");return;}favs.push({name:e.name,path:e.type==="dir"?e.path:cwd});saveFav();renderFav();toast("Added");}});
+   else it.push({label:"Download as ZIP",ic:svg("download",16),act:()=>doZip([e.path])});
    it.push({sep:1});
    it.push({label:"Copy",ic:svg("copy",16),act:()=>{clip={mode:"copy",items:selOr(e)};toast("To clipboard: "+clip.items.length);selUpdate();}});
    it.push({label:"Cut",ic:svg("file",16),act:()=>{clip={mode:"cut",items:selOr(e)};toast("Cut: "+clip.items.length);selUpdate();}});
-   it.push({label:"Rename",ic:svg("save",16),act:()=>doRename(e)});
-   if(sel.size>1&&sel.has(e.path))it.push({label:`Rename selected (${sel.size})…`,ic:svg("save",16),act:()=>doBulkRename(curArr.filter(x=>sel.has(x.path)))});
-   it.push({label:"Duplicate",ic:svg("copy",16),act:()=>doDup(e)});
+   if(multi)it.push({label:`Rename selected (${sel.size})…`,ic:svg("edit",16),act:()=>doBulkRename(curArr.filter(x=>sel.has(x.path)))});
+   else it.push({label:"Rename",ic:svg("edit",16),act:()=>doRename(e)});
+   it.push({sep:1});
    it.push({label:"Create archive…",ic:svg("archive",16),act:()=>doArchive(selOr(e))});
    if(/\.(zip|tar|gz|tgz|bz2|xz)$/i.test(e.name))it.push({label:"Extract here",ic:svg("archive",16),act:()=>doUnzip(e)});
-   it.push({label:"Permissions and owner…",ic:svg("shield",16),act:()=>doPerms(e)});
+   if(e.type==="dir")it.push({label:"Add to favorites",ic:svg("star",16),act:()=>{if(favs.some(f=>f.path===e.path)){toast("Already in favorites");return;}favs.push({name:e.name,path:e.path});saveFav();renderFav();toast("Added");}});
+   it.push({sep:1});
+   const adv=[
+     {label:"Duplicate",ic:svg("copy",16),act:()=>doDup(e)},
+     {label:"Copy path",ic:svg("clip",16),act:()=>{copyText(e.path);toast("Path copied");}},
+     {label:"Permissions and owner…",ic:svg("shield",16),act:()=>doPerms(e)}];
    // USB imports and docker leave root-owned files; one click instead of typing names into the perms dialog
-   if(USER_NAME)it.push({label:`Take ownership (${USER_NAME})`,ic:svg("key",16),act:()=>confirmDlg("Take ownership?",
+   if(USER_NAME)adv.push({label:`Take ownership (${USER_NAME})`,ic:svg("key",16),act:()=>confirmDlg("Take ownership?",
      `${esc(e.name)} and everything inside becomes owned by <b>${esc(USER_NAME)}</b> (chown, recursive). Useful when files from a USB import or docker belong to root.`,async()=>{
        const r=await api("/api/fs/chown",{method:"POST",body:JSON.stringify({path:e.path,owner:USER_NAME,group:USER_NAME,recursive:true})});
        toast(r&&r.ok?"Ownership taken":"Error: "+((r&&r.log)||"?"));load(cwd);})});
-   if(e.type==="dir")it.push({label:"Analyze space",ic:svg("chartpie",16),act:()=>winDiskUsage(e.path)});
-   it.push({label:"Terminal here",ic:svg("term",16),act:()=>terminalHere(e.type==="dir"?e.path:cwd)});
+   if(e.type==="dir")adv.push({label:"Analyze space",ic:svg("chartpie",16),act:()=>winDiskUsage(e.path)});
+   adv.push({label:"Terminal here",ic:svg("term",16),act:()=>terminalHere(e.type==="dir"?e.path:cwd)});
+   it.push({label:"More",ic:svg("cog",16),sub:adv});
    it.push({label:"Properties",ic:svg("eye",16),act:()=>doProps(e)});
    it.push({sep:1},{label:"To trash",ic:svg("trash",16),dng:1,act:()=>doDelete(selOr(e))});
    it.push({label:"Delete permanently",ic:svg("trash",16),dng:1,act:()=>doDeleteForever(selOr(e))});
@@ -5982,7 +6024,8 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    {label:"Upload folder…",ic:svg("folder",16),act:()=>inpDir.click()},
    {label:"Download from link (URL)…",ic:svg("globe",16),act:doFetchUrl}]);};}
  body.querySelector("#fPaste").onclick=doPaste;
- function updPlaces(){const b=body.querySelector("#fTrashN");if(b)b.textContent=TRASH_STAT.count?String(TRASH_STAT.count):"";}
+ function updPlaces(){const b=body.querySelector("#fTrashN");if(b)b.textContent=TRASH_STAT.count?String(TRASH_STAT.count):"";
+   const rc=body.querySelector("#fRecent");if(rc)rc.classList.toggle("on",recentOn);}
  body.querySelector("#fTrashP").onclick=()=>winTrash();
  refreshTrashStat().then(()=>{if(body.isConnected)updPlaces();});
  inp.onchange=()=>{const files=[...inp.files];inp.value="";if(files.length)doUpload(files);};
@@ -6002,7 +6045,9 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
  si.oninput=e=>{filt=e.target.value.toLowerCase();if(searchRes)searchRes=null;renderList();};
  si.onkeydown=e=>{if(e.key==="Enter"){e.preventDefault();const v=e.target.value.trim();searchMode==="text"?doGrep(v):doSearch(v);}
    else if(e.key==="Escape"){e.preventDefault();toggleFind(false);}};
- si.onblur=()=>{if(searchOpen&&!si.value.trim()&&!searchRes)toggleFind(false);};
+ si.onblur=ev=>{const rt=ev.relatedTarget;   // click on a filter chip / its menu must not collapse the search UI
+   if(rt&&(filtRow.contains(rt)||(rt.closest&&rt.closest(".menu"))))return;
+   if(searchOpen&&!si.value.trim()&&!searchRes&&!(filtKind||filtSize||filtDays))toggleFind(false);};
  smBtn.onclick=()=>{searchMode=searchMode==="text"?"name":"text";smBtn.classList.toggle("pri",searchMode==="text");
    si.placeholder=searchMode==="text"?"in file contents…  (Enter)":"filter…  (Enter — search subfolders)";
    filtRow.style.display=(searchOpen&&searchMode==="name")?"flex":"none";
