@@ -5106,6 +5106,8 @@ def _nb_unit_active(pid):
     except (OSError, subprocess.SubprocessError):
         return False
 
+_NB_ORPHAN_LOCK = threading.Lock()
+
 def nb_run_active(pid=NB_MAIN):
     """Whether a run is in progress: the state flag AND a live transient unit (so it doesn't stick after a crash)."""
     st = _nb_run_state_read(pid)
@@ -5118,18 +5120,23 @@ def nb_run_active(pid=NB_MAIN):
     # (it would flip running:=False and log a bogus "aborted" history entry).
     if time.time() - (st.get("started") or 0) < 15:
         return True
-    # Orphaned run: state says "running" but the unit is gone (power loss / hard
-    # reboot killed it mid-run). Close it out once — otherwise the dock spinner
-    # sticks forever — and leave an "aborted" trace in run history.
-    st["running"] = False
-    st["result"] = st.get("result") or "aborted"
-    _nb_run_state_write(pid, st)
-    try:
-        started = int(st.get("started") or 0)
-        _nb_history_add(pid, {"ts": started or int(time.time()), "dur": 0,
-                              "result": "aborted", "jobs": []})
-    except Exception:
-        pass
+    # Orphaned run: state says "running" but the unit is gone (power loss / hard reboot killed
+    # it mid-run). Close it out ONCE — the panel serves pollers from many threads concurrently,
+    # so take a lock and re-read the state inside it: whoever loses the race sees running:False
+    # and bails, so only ONE "aborted" history row is written (not one per concurrent poller).
+    with _NB_ORPHAN_LOCK:
+        st = _nb_run_state_read(pid)
+        if not st.get("running"):
+            return False
+        st["running"] = False
+        st["result"] = st.get("result") or "aborted"
+        _nb_run_state_write(pid, st)
+        try:
+            started = int(st.get("started") or 0)
+            _nb_history_add(pid, {"ts": started or int(time.time()), "dur": 0,
+                                  "result": "aborted", "jobs": []})
+        except Exception:
+            pass
     return False
 
 def nb_any_active():
@@ -5539,6 +5546,12 @@ def nb_save(patch, pid=None):
         cur["remote_path"] = re.sub(r"[^\w \-.А-Яа-яЁё/]", "", patch["remote_path"]).replace("..", "").strip("/")[:200]
     if isinstance(patch.get("deleted_dir"), str):
         v = re.sub(r"[^\w \-.{}/А-Яа-яЁё]", "", patch["deleted_dir"]).replace("..", "").strip("/")[:120]
+        # the archive TOP (first path segment) must be CONSTANT: it's the exclude anchor and the
+        # prune root. A leading token (e.g. "{date}/x") would make the top change every day, so
+        # yesterday's archive wouldn't be excluded from today's copy and prune couldn't find it.
+        # Prefix a constant "_deleted/" when the first segment carries a template token.
+        if v and "{" in v.split("/")[0]:
+            v = "_deleted/" + v
         cur["deleted_dir"] = v or "_deleted/{date}"
     for k in ("ssh_port", "retention_days", "retention_gb", "bwlimit"):
         if k in patch:
@@ -5636,6 +5649,10 @@ def nb_public(cfg=None):
     # cloud, no bridge), so it is NEVER "both_remote" — otherwise the UI shows a bogus
     # "flows through this NAS via sshfs" warning on a cloud→cloud profile.
     c["both_remote"] = _nb_remote_both(cfg or nb_load())
+    # the ACTUAL storage root (pool, or the chosen USB path on a pool-less box) so the UI's
+    # destFor strips the same prefix the server's _nb_dest_for does — otherwise a per-source
+    # dest preview on a pool-less box would carry the wrong prefix
+    c["storage_root"] = (storage_base() or STORAGE).strip("/")
     return c
 
 def _nb_pid(pid):
@@ -7577,6 +7594,11 @@ def nb_run_cli(pid=None, dry=False, allow_delete=False):
         if logf:
             try: logf.close()
             except OSError: pass
+        # start the next queued run IMMEDIATELY instead of waiting up to a minute for the
+        # scheduler tick (this profile's state now says running:False, so nb_any_active won't
+        # count it). Best-effort — the once-a-minute _nb_sched_tick drain is still the backstop.
+        try: _nb_queue_drain()
+        except Exception: pass
 
 # --------------------------------------------------------------------------- #
 #  Compare with the source: an on-demand rsync dry-run (--itemize) that answers

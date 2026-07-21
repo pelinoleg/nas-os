@@ -6945,13 +6945,16 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
  const isC2C=()=>isRcloneSrc()&&(CFG.dst||{}).kind==="rclone";    // cloud → cloud (dst2 remote)
  const c2cDst=()=>{const d=CFG.dst||{};return (d.remote||"?")+":"+((d.remote_path||"").replace(/^\/+|\/+$/g,""));};
  const isDstSsh=()=>(CFG.dst||{}).kind==="ssh";   // destination is a remote SSH server (push-ssh OR pull SSH→SSH)
+ // strip the ACTUAL storage root (server sends it) — hardcoding /mnt/storage was wrong on a
+ // pool-less box whose root is a mounted USB path
+ const stripRoot=rel=>{const r=CFG.storage_root||"mnt/storage";return rel===r?"":rel.startsWith(r+"/")?rel.slice(r.length+1):rel;};
  const destFor=src=>{const rel0=String(src).replace(/^\/+/,"");
-  if(isC2C()){const d=CFG.dst||{},rel=rel0.replace(/^mnt\/storage\//,""),rb=(d.remote_path||"").replace(/^\/+|\/+$/g,"");
+  if(isC2C()){const d=CFG.dst||{},rel=stripRoot(rel0),rb=(d.remote_path||"").replace(/^\/+|\/+$/g,"");
    return (d.remote||"remote")+":"+[rb,rel].filter(Boolean).join("/");}   // cloud→cloud: dest is the dst2 remote:path
-  if(isRclone()){const rel=rel0.replace(/^mnt\/storage\//,""),rb=(CFG.remote_path||"").replace(/^\/+|\/+$/g,"");
+  if(isRclone()){const rel=stripRoot(rel0),rb=(CFG.remote_path||"").replace(/^\/+|\/+$/g,"");
    return (CFG.remote||"remote")+":"+[rb,rel].filter(Boolean).join("/");}
   const base=(CFG.dest_base||(isPush()?"":"/mnt/storage/nas-backup")).replace(/\/$/,"");
-  return base+"/"+(isPush()?rel0.replace(/^mnt\/storage\//,""):rel0);};
+  return base+"/"+(isPush()?stripRoot(rel0):rel0);};
 
  // verify toggle row shared by both directions (checksum re-read after each run)
  const verifyRow=c=>`<div class="srow"><div class="srow-l"><div class="srow-t">Verify after copying${tipHTML("After the run rsync re-reads files on BOTH sides and compares checksums (--checksum). Catches corrupted copies and silent bit rot, but reads all data — slow on large volumes and heavy on the disks. Note: during transfer rsync already verifies every transferred file with a checksum — this pass is an extra safety net for important data.")}</div><div class="srow-d">checksums of all files after the run</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="cVer"${c.verify?" checked":""}><span class="sl"></span></label></div></div>`;
@@ -7357,7 +7360,7 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
    if(steps[0].done&&steps[1].done){su.style.display="none";su.innerHTML="";}
    else{su.innerHTML=`<div class="nb-setup">${steps.map((s,i)=>`<button class="nb-step${s.done?" done":""}" data-t="${s.t}"><span class="nb-stepn">${s.done?svg("check",12):(i+1)}</span><span>${s.name}${s.opt?` <i>optional</i>`:""}</span></button>`).join("")}</div>`;
     su.querySelectorAll(".nb-step").forEach(b=>b.onclick=()=>{tab=b.dataset.t;SET.nbTab=tab;saveSettings();render();});}}
-  const qCaption=st=>`<span style="color:var(--warn)">queued${st.queue_after?` — will start after «${esc(st.queue_after)}»`:""}${st.queue_ahead?`, ahead of it: ${st.queue_ahead}`:""}</span>`;
+  const qCaption=st=>`<span style="color:var(--warn)">queued${st.queue_after?` — will start after «${esc(st.queue_after)}»`:" — starting shortly"}${st.queue_ahead?`, ahead of it: ${st.queue_ahead}`:""}</span>`;
   /* run summary in plain language: everything copied or has problems and which ones.
      A bare "code 23" says nothing — we decode rsync codes and add its own
      first error line (it's English and not subject to translation — it's rsync output). */
@@ -7517,7 +7520,7 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
     else if(emptyN){m=`Empty folders in the receiver: ${emptyN}.`;cls="nb-dwarn wrn";}
     // FAT32 aborts the whole run on the very first file >4 GiB — it's not "some files
     // will be skipped", it's "the backup won't arrive", so it's separate and redder
-    else if(ds&&ds.fs_fat){m=`⚠ The destination disk is formatted as ${esc(ds.fs||"")} (FAT32). It cannot hold files larger than 4 GiB: on the first such file the run will ABORT with «File too large» rather than just skip it. It also keeps no symlinks, special files or permissions. Reformat the destination as ext4 — or exfat, if you also need the disk on Windows/Mac.`;}
+    else if(ds&&ds.fs_fat){m=`⚠ The destination disk is formatted as ${esc(ds.fs||"")} (FAT32). It cannot hold files larger than 4 GiB${isRcloneAny()?": any such file will fail to copy (rclone reports it per file). It also keeps no symlinks or permissions":": on the first such file an rsync run will ABORT with «File too large» rather than just skip it. It also keeps no symlinks, special files or permissions"}. Reformat the destination as ext4 — or exfat, if you also need the disk on Windows/Mac.`;}
     // disk destination on exFAT/NTFS: some files just won't fit — better to say this
     // IN ADVANCE, rather than leaving the user guessing over an endless "code 23"
     else if(ds&&ds.fs_limited){m=`The destination disk is formatted as ${esc(ds.fs||"")}. Such a filesystem does not keep symlinks, special files or permissions, and it simply rejects names containing «:» or a line break — those files will be skipped on every run (everything else copies fine). For a full-fidelity backup, reformat the disk as ext4.`;cls="nb-dwarn wrn";}
@@ -7538,6 +7541,8 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
     else if(miss)setHero("danger",`<b>${miss} folder${miss>1?"s are":" is"} missing in the destination</b> — run the backup to restore ${miss>1?"them":"it"}`);
     else if(st&&st.ts&&bad)setHero("danger",`<b>Last run had problems</b> — ${bad} folder${bad>1?"s":""} not copied · ${fmDate(st.ts)}`);
     else if(st&&st.ts&&vbad)setHero("warn",`<b>Verification found differences</b> — see the last run · ${fmDate(st.ts)}`);
+    else if(ds&&ds.fs_fat)setHero("warn","<b>Destination is FAT32</b> — files larger than 4 GiB will fail; reformat it to ext4");
+    else if(emptyN)setHero("warn",`<b>${emptyN} destination folder${emptyN>1?"s are":" is"} empty</b> — nothing has been copied there yet`);
     else if(st&&st.ts)setHero("good",`<b>All good</b> — last run ${fmDate(st.ts)}`);
     else setHero("mut","<b>Never run yet</b> — press «Run backup» to make the first copy");}
    paintDelGuard((st&&st.jobs)||[]);});
@@ -7651,8 +7656,10 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
   const run=async (dry,allow)=>{if(!(c.jobs||[]).length){toast("Select sources first (the «Sources» tab)");return;}
    if(isRcloneSrc()&&!CFG.remote){toast("Choose a cloud remote first (Connection tab)");return;}
    if(isC2C()&&!(CFG.dst||{}).remote){toast("Choose the destination remote (Connection tab)");return;}
-   if(!isPush()&&!isC2C()&&!CFG.dest_base){toast(isDstSsh()?"Choose the destination folder on the server first (the «Where to» tab)":"Choose a local destination folder first (the «Where to» tab)");return;}
-   if(isPush()&&(isRclone()?!CFG.remote:!CFG.dest_base)){toast(isRclone()?"Choose a cloud remote first (Connection tab)":"First choose a destination (the «Destination» tab)");return;}
+   // in "Separate" (per-source) mode each job carries its own destination, so a base folder
+   // isn't required — only demand dest_base in single-folder mode
+   if(!isPush()&&!isC2C()&&!CFG.dest_base&&CFG.dest_mode!=="per"){toast(isDstSsh()?"Choose the destination folder on the server first (the «Where to» tab)":"Choose a local destination folder first (the «Where to» tab)");return;}
+   if(isPush()&&(isRclone()?!CFG.remote:(!CFG.dest_base&&CFG.dest_mode!=="per"))){toast(isRclone()?"Choose a cloud remote first (Connection tab)":"First choose a destination (the «Destination» tab)");return;}
    if(isPushSsh()&&!CFG.host){toast("Set the destination server address (Connection tab)");return;}
    if(!isPush()&&!isRcloneAny()&&!CFG.host){toast("Set the source server address (Connection tab)");return;}
    if((CFG.dst||{}).kind==="ssh"&&!(CFG.dst||{}).host){toast("Set the destination server address (Connection tab)");return;}
@@ -7660,7 +7667,7 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
    setHero("accent",dry?"<b>Dry run is running…</b>":"<b>Backup is running…</b>");
    const gn=g("#oGuard");if(gn&&allow){gn.style.display="none";gn.innerHTML="";}
    const rr=await nbP("/api/backup/run-bg",{dry,allow_delete:!!allow});
-   if(rr&&rr.queued){toast("Another backup is already running — queued");waitQueue();return;}
+   if(rr&&rr.queued){toast("Another backup is already running — queued");setHero("warn","<b>Queued</b> — waiting for the running backup to finish");waitQueue();return;}
    attachLog();};
   g("#oRun").onclick=()=>run(false);g("#oDry").onclick=()=>run(true);
   {const rb=g("#oRen");if(rb)rb.onclick=renameDlg;}
