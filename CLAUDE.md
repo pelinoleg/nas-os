@@ -416,6 +416,14 @@ unmount,mount-remove,about,size,opts,check/*}`. Приложение Бэкап 
 ветка `cd["kind"]=="rclone"` ПЕРВОЙ — облачное назначение ВСЕГДА делает профиль push (источник
 принудительно local). rclone как ИСТОЧНИК (pull-профиль cloud→NAS) пока не сделан — on-demand
 покрывает Restore; KINDS_SRC без rclone.
+Приложение переименовано в **«Rclone»**; иконка — фирменный 3-цветный логотип (`RAW_LOGOS.rclone`
+в `svg()`, свой viewBox с паддингом чтоб не был крупнее line-иконок). Save-бар вкладок закреплён
+снизу (`setFootAdopt`, как в Настройках). Путь в remote выбирается пикером `rcloneRemotePicker`
+(read-only браузер). **rclone-маунты видны в сайдбаре ФМ** (секция «Cloud», `renderRcloneMounts`,
+появляется при маунте, исчезает при unmount; кросс-окно через `OPEN.__files._rcloneMounts`).
+**ГРАБЛЯ (исправлена)**: read-only rclone/sshfs FUSE-маунт ложно поднимал алерт «Filesystem
+read-only» — `_readonly_mounts()` теперь пропускает `fstype fuse*` и `/mnt/{rclone,remote}/`.
+Плитки лончпада увеличены (иконки — фикс-размер SVG, масштаб через CSS `.lp-grid .tile>svg`).
 Общие настройки rclone (конфиг/версия/remote'ы) — НЕ в сайдбаре профиля (там табы профиля), а
 кнопкой «Cloud (rclone)» в шапке окна → оверлей `rcloneDlg` (редактор + Test у каждого remote +
 Restore). **Restore из облака (pull)** — `rcloneRestoreDlg`: браузер remote'а (read-only `lsjson`

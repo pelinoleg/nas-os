@@ -3543,6 +3543,10 @@ def _readonly_mounts():
         src, mp, fstype, opts = p[0], p[1], p[2], p[3]
         if fstype in ("iso9660", "squashfs", "tmpfs", "devtmpfs", "overlay", "proc", "sysfs", "cgroup2"):
             continue
+        # network/cloud FUSE mounts (rclone, sshfs) can be read-only BY DESIGN — that's
+        # not a disk I/O failure. Never raise the "filesystem read-only" alarm for them.
+        if fstype.startswith("fuse") or mp.startswith("/mnt/rclone/") or mp.startswith("/mnt/remote/"):
+            continue
         if not (mp.startswith("/mnt/") or mp.startswith("/media/")):
             continue
         if mp.startswith(amb) or src in rem:      # removable — not our concern
