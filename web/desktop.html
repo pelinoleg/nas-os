@@ -6704,28 +6704,58 @@ function rcloneRestoreDlg(remote){
   if(st.running&&st.remote===remote){running=true;dest=st.dest||"";path=st.path||"";draw();paintProg(st);tick();}})();
 }
 
-/* Read-only remote folder picker (reused by Mount and anywhere a remote path is chosen). */
+/* Remote folder picker — same look as the local pickFolder (.pf-dlg), read-only browse
+   PLUS "＋ Folder" (rclone mkdir) so you can create a destination while copying to the cloud. */
 function rcloneRemotePicker(remote,onPick){
  const s=document.getElementById("scrim");
- let path="",entries=null;
- const crumbs=()=>{const parts=path?path.split("/"):[];let acc="";
-  return `<a data-p="">${esc(remote)}:</a>`+parts.map(seg=>{acc=acc?acc+"/"+seg:seg;return ` / <a data-p="${att(acc)}">${esc(seg)}</a>`;}).join("");};
- const draw=()=>{
-  s.innerHTML=`<div class="dialog nb-rcdlg" style="max-width:600px;width:90vw">
-    <div class="set-titrow"><h3 style="margin:0">${svg("folder",16)} ${esc(remote)} — pick a folder</h3><button class="iconbtn" id="rpX">${svg("x",16)}</button></div>
-    <div class="rr-crumb">${crumbs()}</div>
-    <div class="rr-list" id="rpList">${entries===null?'<div class="set-load">loading…</div>':(()=>{const ds=entries.filter(e=>e.dir);return ds.length?ds.map(e=>`<div class="nb-job rr-ent" data-n="${att(e.name)}" style="cursor:pointer"><span class="nb-src mono" style="flex:1">${svg("folder",13)} ${esc(e.name)}</span><span class="nb-arr">›</span></div>`).join(""):'<div style="color:var(--mut);font-size:12px;padding:6px 0">No subfolders here.</div>';})()}</div>
-    <div class="rr-target mono">Selected: <b>${esc(remote+":"+path)}</b>${path?"":" — the whole remote"}</div>
-    <div class="r"><button class="btn" id="rpX2">Cancel</button><button class="btn pri" id="rpOk">Use this folder</button></div></div>`;
+ let path="",entries=null,mk=false,busy=false;
+ const $=q=>s.querySelector(q);
+ const spec=p=>remote+":"+(p||"");
+ const build=()=>{
+  s.innerHTML=`<div class="dialog pf-dlg"><h3>${svg("folder",16)} Pick a folder in ${esc(remote)}</h3>
+    <div class="pf-body"><div class="pf-main" style="flex:1">
+      <div class="pf-bar">
+        <button class="iconbtn" id="pfUp" title="Up">${svg("arrowup",15)}</button>
+        <input class="mono" id="pfPath" spellcheck="false" placeholder="(remote root)">
+        <button class="btn sm" id="pfMk" title="Create a folder here">${svg("plus",13)} Folder</button>
+      </div>
+      <div class="pf-list" id="pfList"></div>
+    </div></div>
+    <div class="pf-foot"><span class="pf-cur" id="pfCur"></span>
+      <button class="btn" id="pfX">Cancel</button>
+      <button class="btn pri" id="pfO">Choose this folder</button></div></div>`;
   s.classList.add("show");
-  s.querySelectorAll(".rr-crumb a").forEach(a=>a.onclick=()=>go(a.dataset.p));
-  s.querySelectorAll(".rr-ent").forEach(row=>row.onclick=()=>go(path?path+"/"+row.dataset.n:row.dataset.n));
-  s.querySelector("#rpX").onclick=s.querySelector("#rpX2").onclick=()=>s.classList.remove("show");
-  s.querySelector("#rpOk").onclick=()=>{s.classList.remove("show");onPick(path);};
+  $("#pfUp").onclick=()=>{if(path){path=path.replace(/\/[^/]+$/,"").replace(/^\/+/,"");mk=false;draw();}};
+  $("#pfX").onclick=()=>s.classList.remove("show");
+  $("#pfO").onclick=()=>{s.classList.remove("show");onPick(path);};
+  $("#pfMk").onclick=()=>{mk=!mk;paintList();if(mk)focusMk();};
+  const pi=$("#pfPath");
+  pi.onkeydown=ev=>{if(ev.key==="Enter"){ev.preventDefault();path=pi.value.trim().replace(/^\/+|\/+$/g,"");mk=false;draw();}};
  };
- const go=p=>{entries=null;draw();browse(p);};
- const browse=async p=>{const r=await rcloneP("/api/backup/rclone/ls",{remote,path:p});if(r&&r.ok){path=r.path;entries=r.entries;}else{entries=[];toast((r&&r.log)||"listing failed");}draw();};
- draw();browse("");
+ const focusMk=()=>{const mn=$("#pfMkName");if(!mn)return;mn.focus();
+  mn.onkeydown=async ev=>{
+   if(ev.key==="Escape"){mk=false;paintList();return;}
+   if(ev.key!=="Enter")return;
+   const name=mn.value.trim();if(!name)return;
+   const np=(path?path+"/":"")+name;
+   const rr=await rcloneP("/api/backup/rclone/mkdir",{remote,path:np});
+   if(!(rr&&rr.ok)){toast("Error: "+((rr&&rr.log)||"cannot create the folder"));return;}
+   toast("Folder created");mk=false;path=np;draw();};};   // step straight into the new folder
+ const paintList=()=>{const box=$("#pfList");if(!box)return;box.scrollTop=0;
+  const dirs=(entries||[]).filter(e=>e.dir);
+  box.innerHTML=(mk?`<div class="pf-row"><span>${svg("folder",15)}</span><input class="mono" id="pfMkName" placeholder="new folder name" style="flex:1"></div>`:"")
+   +(entries===null?`<div class="pf-empty">loading…</div>`
+     :(dirs.map(d=>`<div class="pf-row" data-n="${att(d.name)}">${svg("folder",15)}<span>${esc(d.name)}</span></div>`).join("")
+       ||(mk?"":`<div class="pf-empty">No subfolders here — you can pick this one, or ＋ create one</div>`)));
+  box.querySelectorAll("[data-n]").forEach(n=>n.onclick=()=>{path=(path?path+"/":"")+n.dataset.n;mk=false;draw();});};
+ const chrome=()=>{const pi=$("#pfPath");if(pi&&document.activeElement!==pi)pi.value=path;
+  const cu=$("#pfCur");if(cu){cu.textContent=spec(path);cu.title=spec(path);}
+  const up=$("#pfUp");if(up)up.disabled=!path;};
+ const draw=async()=>{if(busy)return;busy=true;entries=null;paintList();
+  const r=await rcloneP("/api/backup/rclone/ls",{remote,path});busy=false;
+  if(!r||!r.ok){toast((r&&r.log)||"listing failed");entries=[];}else{path=r.path;entries=r.entries;}
+  chrome();paintList();if(mk)focusMk();};
+ build();draw();
 }
 
 /* Mount dialog: choose an optional subpath (Browse the remote), read-only (safe) and auto-remount. */

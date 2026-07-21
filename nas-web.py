@@ -4473,6 +4473,27 @@ def _rclone_progress_line(st):
             eta = ""
     return "%12d  %3d%%  %.2fMB/s%s" % (b, pct, spd / 1048576.0, eta)
 
+def rclone_mkdir(remote, path):
+    """Create a folder on a remote (rclone mkdir remote:path) — for the folder picker.
+    On object stores (S3/B2) an empty folder may not persist until a file lands in it;
+    that's fine, the path is still valid as a copy target."""
+    remote = str(remote or "").strip().rstrip(":")
+    if not rclone_installed() or remote not in rclone_remotes():
+        return {"ok": False, "log": "no such remote in rclone.conf"}
+    path = str(path or "").strip().strip("/")
+    if not path or ".." in path or "\n" in path:
+        return {"ok": False, "log": "invalid folder name"}
+    try:
+        r = subprocess.run([_rclone_bin(), "--config", RCLONE_CONF, "mkdir", remote + ":" + path,
+                            "--timeout", "25s", "--contimeout", "15s"],
+                           capture_output=True, text=True, timeout=45)
+    except (OSError, subprocess.SubprocessError) as e:
+        return {"ok": False, "log": str(e)[:160]}
+    if r.returncode != 0:
+        err = ((r.stderr or r.stdout) or "").strip().splitlines()
+        return {"ok": False, "log": (err[-1] if err else "could not create the folder")[:180]}
+    return {"ok": True}
+
 def rclone_ls(remote, path):
     """Read-only listing of a remote path — for the restore browser. Never writes to
     the remote. Dirs first; one level deep (lsjson is non-recursive by default)."""
@@ -15980,6 +16001,9 @@ class H(BaseHTTPRequestHandler):
             elif p == "/api/backup/rclone/ls":
                 b = self._body()
                 self._json(rclone_ls(b.get("remote", ""), b.get("path", "")))
+            elif p == "/api/backup/rclone/mkdir":
+                b = self._body()
+                self._json(rclone_mkdir(b.get("remote", ""), b.get("path", "")))
             elif p == "/api/backup/rclone/restore/start":
                 b = self._body()
                 self._json(rclone_restore_start(b.get("remote", ""), b.get("path", ""),
