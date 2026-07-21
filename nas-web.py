@@ -5340,6 +5340,15 @@ def _nb_push(cfg):
 def _nb_push_ssh(cfg):
     return _nb_push(cfg) and (cfg or {}).get("transport") == "ssh"
 
+def _nb_dest_ssh(cfg):
+    """The destination is a remote SSH server — a push to SSH, OR a pull whose destination
+    bridges to another SSH server (SSH→SSH via dst2). Both want the same handling: mkdir over
+    SSH, remote age-only archive pruning, no local --chown, no local FS/mount probing. This is
+    what the runner already does at nb_run (push_ssh |= dst kind ssh); the helper carries the
+    same test to the places that only looked at _nb_push_ssh (push-only) and so mis-treated a
+    pull SSH→SSH destination as a local disk."""
+    return _nb_sides(cfg or {})[1].get("kind") == "ssh"
+
 def _nb_rclone(cfg):
     """rclone PUSH: the destination is a cloud remote (this NAS → cloud). Kept push-only
     on purpose — a lot of push logic (dest = remote:path, no local dest disk) hangs off it."""
@@ -5539,7 +5548,7 @@ def nb_save(patch, pid=None):
         jobs = []
         rclone = _nb_rclone(cur) or _nb_rclone_c2c(cur)   # destination is a cloud 'remote:path'
         dst_ok = (_nb_valid_rclone_dest if rclone
-                  else _nb_valid_push_dest if _nb_push_ssh(cur) else _nb_valid_dest)
+                  else _nb_valid_push_dest if _nb_dest_ssh(cur) else _nb_valid_dest)
         for j in patch["jobs"][:200]:
             if not isinstance(j, dict): continue
             src = str(j.get("src", "")).strip().rstrip("/")   # keep the leading / (SSH abs paths)
@@ -5587,7 +5596,7 @@ def nb_save(patch, pid=None):
     # rclone always derives dests from (remote, remote_path, src) — same single-folder
     # rule; there is no per-job hand-editing of a 'remote:path' destination
     rc_dest = _nb_rclone(cur) or _nb_rclone_c2c(cur)   # destination is a cloud remote:path
-    per_mode = cur["dest_mode"] == "per" and not _nb_push_ssh(cur) and not rc_dest
+    per_mode = cur["dest_mode"] == "per" and not _nb_dest_ssh(cur) and not rc_dest
     if rc_dest:
         # rclone dests are ALWAYS derived from (remote, remote_path, src) and re-derived on
         # every save — so switching a profile INTO rclone (before a remote is picked) keeps
@@ -5600,7 +5609,7 @@ def nb_save(patch, pid=None):
         if not per_mode and have_base:
             for j in cur.get("jobs") or []:
                 j["dest"] = _nb_dest_for(cur, j["src"])
-        final_ok = _nb_valid_push_dest if _nb_push_ssh(cur) else _nb_valid_dest
+        final_ok = _nb_valid_push_dest if _nb_dest_ssh(cur) else _nb_valid_dest
         cur["jobs"] = [j for j in (cur.get("jobs") or []) if final_ok(j.get("dest", ""))]
     cur["saved"] = int(time.time())   # the last-touched profile is the one to open
     profs = [cur if p["id"] == cur["id"] else p for p in nb_profiles()]
@@ -6200,6 +6209,19 @@ def _nb_deleted_nested(cfg):
     parts = [x for x in (cfg.get("deleted_dir") or "_deleted/{date}").split("/") if x]
     return len(parts) > 2
 
+def _nb_deleted_day_bucket(cfg):
+    """True only when the deleted-archive template is <top>/<one day-or-finer bucket> — the
+    ONLY shape the NAME-based rclone pruner can date precisely. A coarse single bucket ({year}
+    or {year}-{month}) is dated by its period START (a {year} folder reads as Jan-1), so
+    age-pruning it by name would purge the whole bucket long before its newest contents expire.
+    Coarse and nested archives are left for manual cleanup on the remote."""
+    parts = [x for x in (cfg.get("deleted_dir") or "_deleted/{date}").split("/") if x]
+    if len(parts) != 2:
+        return False
+    leaf = parts[1]
+    return ("{date}" in leaf) or ("{datetime}" in leaf) or \
+           ("{year}" in leaf and "{month}" in leaf and "{day}" in leaf)
+
 def nb_build_cmd(cfg, job, dry, prev_files=0, mkpath=False, allow_delete=False, stage=None):
     """rsync command (+env) for one job. prev_files — the number of files in the
     previous run (for the percentage --max-delete guard). stage — sshfs mount of
@@ -6219,7 +6241,7 @@ def nb_build_cmd(cfg, job, dry, prev_files=0, mkpath=False, allow_delete=False, 
     else:
         args = ["rsync", "-rltD", "--info=progress2", "--stats", "--no-inc-recursive",
                 "--no-owner", "--no-group", "--no-perms"] + rsh
-        if not _nb_push_ssh(cfg):   # local receiver — store files under the panel owner
+        if not _nb_dest_ssh(cfg):   # local receiver — store files under the panel owner
             args.append("--chown=%s:%s" % (owner, owner))
     dm = cfg.get("delete_mode", "archive")
     if dm in ("archive", "mirror"):
@@ -6233,7 +6255,7 @@ def nb_build_cmd(cfg, job, dry, prev_files=0, mkpath=False, allow_delete=False, 
         # template with tokens, default _deleted/{date}. A RELATIVE --backup-dir is
         # resolved by rsync against the destination dir — required for module-style
         # push-ssh dests (joining them would double-nest: dest/HDD6TB/…/dest/_deleted)
-        snap = nb_deleted_rel(cfg) if (_nb_push_ssh(cfg) and not job["dest"].startswith("/")) \
+        snap = nb_deleted_rel(cfg) if (_nb_dest_ssh(cfg) and not job["dest"].startswith("/")) \
             else os.path.join(dest, nb_deleted_rel(cfg))
         args += ["--backup", "--backup-dir=" + snap]
         args.append("--exclude=/" + nb_deleted_top(cfg)) # don't back up the deleted-files archive itself
@@ -6399,8 +6421,8 @@ def _fs_type(path):
     return best
 
 def nb_dest_fs(cfg, dest=None):
-    """Destination FS type — only when it is LOCAL (we don't probe a push over SSH)."""
-    if _nb_push_ssh(cfg):
+    """Destination FS type — only when it is LOCAL (we don't probe a remote SSH dest)."""
+    if _nb_dest_ssh(cfg):
         return ""
     d = dest or cfg.get("dest_base") or ""
     return _fs_type(d) if d.startswith("/") else ""
@@ -6695,9 +6717,12 @@ def _nb_rclone_prune(cfg, writer):
     days = int(cfg.get("retention_days", 0) or 0)
     if days <= 0:
         return 0
-    if _nb_deleted_nested(cfg):
-        writer("archive uses a nested template (%s) — automatic age-pruning is disabled; "
-               "remove old snapshots on the remote manually" % (cfg.get("deleted_dir") or ""))
+    if not _nb_deleted_day_bucket(cfg):
+        # only a <top>/<day-level bucket> can be pruned by name; a coarse ({year}, {year}-{month})
+        # or nested template would over-delete (a {year} folder reads as Jan-1 → whole year purged)
+        writer("archive template «%s» isn't a single day-level bucket — automatic remote pruning "
+               "is disabled to avoid over-deleting; remove old snapshots on the remote manually"
+               % (cfg.get("deleted_dir") or "_deleted/{date}"))
         return 0
     # the archive is on the DESTINATION remote: push → cfg.remote; cloud→cloud → dst2
     if _nb_rclone_c2c(cfg):
@@ -6731,7 +6756,9 @@ def _nb_rclone_prune(cfg, writer):
         # ModTime for name templates that carry no parseable date (e.g. a numeric-only {month}).
         ts = None
         nm = str(it.get("Name") or "")
-        dm = re.search(r"(\d{4})-(\d\d)-(\d\d)", nm) or re.search(r"^(\d{4})-(\d\d)$", nm) or re.search(r"^(\d{4})$", nm)
+        # day (or finer) only — a bare "{year}" folder must NOT be dated to Jan-1 and purged
+        # (that would drop the whole year); a stray year bucket falls through to ModTime instead
+        dm = re.search(r"(\d{4})-(\d\d)-(\d\d)", nm) or re.search(r"^(\d{4})-(\d\d)$", nm)
         if dm:
             g = list(dm.groups()); g += ["01"] * (3 - len(g))          # pad missing month/day → period start
             try: ts = calendar.timegm((int(g[0]), int(g[1]), int(g[2]), 0, 0, 0, 0, 0, 0))
@@ -7184,7 +7211,7 @@ def nb_dest_state(pid=None):
     if _nb_push(cfg) and not base:
         # fresh push profile: destination not chosen yet — not the same as "unmounted"
         return {"base": "", "unset": True, "base_mounted": True, "base_exists": False, "jobs": []}
-    if _nb_push_ssh(cfg):
+    if _nb_dest_ssh(cfg):
         # destination on another server — do not probe folders over SSH (too costly per UI tick)
         return {"base": base, "remote": True, "base_mounted": True, "base_exists": True,
                 "jobs": [{"src": j.get("src", ""), "dest": j.get("dest", ""),
@@ -7295,7 +7322,7 @@ def _nb_health_one(cfg, many, fire, ev, pri, thr, now):
     def fire_p(key, title, msg, priority, ev_name=None, lvl=None):
         fire(key + ":" + pid, title + sfx, msg, priority, ev_name=ev_name or key, lvl=lvl)
     jobs = [j for j in cfg.get("jobs", []) if j.get("enabled", True)]
-    push, push_ssh = _nb_push(cfg), _nb_push_ssh(cfg)
+    push, push_ssh = _nb_push(cfg), _nb_dest_ssh(cfg)   # "dest is a remote SSH server" (incl. pull SSH→SSH)
     if not jobs or (not cfg.get("host") and not (push and cfg.get("transport") == "local")):
         return
     hs = _nb_health_load(pid)

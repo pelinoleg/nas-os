@@ -6944,6 +6944,7 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
  const isRcloneAny=()=>CFG.transport==="rclone";
  const isC2C=()=>isRcloneSrc()&&(CFG.dst||{}).kind==="rclone";    // cloud → cloud (dst2 remote)
  const c2cDst=()=>{const d=CFG.dst||{};return (d.remote||"?")+":"+((d.remote_path||"").replace(/^\/+|\/+$/g,""));};
+ const isDstSsh=()=>(CFG.dst||{}).kind==="ssh";   // destination is a remote SSH server (push-ssh OR pull SSH→SSH)
  const destFor=src=>{const rel0=String(src).replace(/^\/+/,"");
   if(isRclone()){const rel=rel0.replace(/^mnt\/storage\//,""),rb=(CFG.remote_path||"").replace(/^\/+|\/+$/g,"");
    return (CFG.remote||"remote")+":"+[rb,rel].filter(Boolean).join("/");}
@@ -7040,7 +7041,9 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
    const S=(w==="src"?CFG.src:CFG.dst)||{};
    // switching EITHER side INTO rclone (dst=push to cloud, src=pull from cloud) defaults to
    // the safe Copy mode (never deletes)
-   wireSeg(tc,"#k_"+w,v=>saveCfg(v==="rclone"?{[w]:{kind:v},delete_mode:"add"}:{[w]:{kind:v}}).then(again));
+   // in the wizard a kind change can add/remove a step (rclone/c2c drop «Where to»), so
+   // re-run the whole wizard (render) — a pane-only `again` would leave wizStep/cur stale
+   wireSeg(tc,"#k_"+w,v=>saveCfg(v==="rclone"?{[w]:{kind:v},delete_mode:"add"}:{[w]:{kind:v}}).then(part?render:again));
    wireSeg(tc,"#a_"+w,v=>saveCfg({[w]:{auth:v}}).then(again));
    wireSeg(tc,"#v_"+w,v=>saveCfg({[w]:{provider:v}}).then(again));
    const h=g("#h_"+w);if(h)h.onchange=()=>saveCfg({[w]:{host:h.value.trim()}});
@@ -7112,12 +7115,12 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
     order); "folders" | "dest" | "excl" = one section only — the first-run wizard
     shows them as separate small steps. Same markup and the same wiring either
     way, so a fix lands in both. */
- function tabSources(tc,part){const c=CFG,push=isPush(),per=!isPushSsh()&&!isRclone()&&!isC2C()&&c.dest_mode==="per";
+ function tabSources(tc,part){const c=CFG,push=isPush(),per=!isDstSsh()&&!isRclone()&&!isC2C()&&c.dest_mode==="per";
   const again=()=>tabSources(tc,part);
   const secFolders=`<div style="display:flex;justify-content:space-between;align-items:center;margin:4px 0 6px"><span class="set-h" style="margin:0;padding:0;border:none">Folders</span><button class="btn sm pri" id="sAdd">${svg("plus",13)} ${push?"Choose folders":isRcloneSrc()?"Pick from cloud":"Pick from NAS"}</button></div>
    <div id="sJobs"></div>`;
   const secDest=`${destCard()}
-   ${(isPushSsh()||isRclone()||isC2C())?"":`<div class="srow"><div class="srow-l"><div class="srow-t">Destination mode${tipHTML("Single folder — everything into one folder, as subfolders. Separate per source — each source gets its own folder-destination.")}</div><div class="srow-d">${per?"each source gets its own folder":"everything into one folder, as subfolders"}</div></div><div class="srow-c"><div class="seg" id="sDm"><button data-v="single" class="${!per?"on":""}">Single folder</button><button data-v="per" class="${per?"on":""}">Separate</button></div></div></div>`}`;
+   ${(isDstSsh()||isRclone()||isC2C())?"":`<div class="srow"><div class="srow-l"><div class="srow-t">Destination mode${tipHTML("Single folder — everything into one folder, as subfolders. Separate per source — each source gets its own folder-destination.")}</div><div class="srow-d">${per?"each source gets its own folder":"everything into one folder, as subfolders"}</div></div><div class="srow-c"><div class="seg" id="sDm"><button data-v="single" class="${!per?"on":""}">Single folder</button><button data-v="per" class="${per?"on":""}">Separate</button></div></div></div>`}`;
   // no "add dev patterns"/"reset" buttons: the default list already ships with
   // everything (junk + development) — the textarea IS the whole interface
   const exclInner=`<textarea id="sExcl" class="nb-excl" spellcheck="false">${esc((c.excludes||[]).join("\n"))}</textarea>`;
@@ -7158,7 +7161,10 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
   drawJobs();
   wireSeg(tc,"#sDm",v=>saveCfg({dest_mode:v}).then(again));
   // switching the destination INTO rclone defaults to the safe Copy mode (never deletes)
-  wireSeg(tc,"#dTr",v=>saveCfg(v==="rclone"?{dst:{kind:v},delete_mode:"add"}:{dst:{kind:v}}).then(again));
+  // wizard: switching the destination to/from Cloud changes the step list (drops «Where to»),
+  // so re-render the whole wizard, not just this pane — otherwise wizStep/cur desync (a
+  // mandatory step could be skipped or a stale guard could block Next)
+  wireSeg(tc,"#dTr",v=>saveCfg(v==="rclone"?{dst:{kind:v},delete_mode:"add"}:{dst:{kind:v}}).then(part?render:again));
   {const dc=g("#dConn");if(dc)dc.onclick=()=>{tab="conn";wizStep=0;render();};}
   // redraw after saving: the server re-derives every job's dest from the new base, so the
   // list must be repainted — otherwise it keeps showing the destinations of the old folder
@@ -7227,8 +7233,8 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
      <div class="usb-chips"><span class="usb-lbl">Tokens:</span>${DEL_TOKENS.map(t=>`<button class="usb-tok" data-t="${att(t[0])}" title="${att(t[1])}">${esc(t[0])}</button>`).join("")}<button class="usb-tok" data-t="/" title="nested folder">/</button></div>
      <div class="usb-chips"><span class="usb-lbl">Presets:</span><button class="usb-pre" data-t="_deleted/{date}">by date</button><button class="usb-pre" data-t="_deleted/{year}/{month}">year / month</button><button class="usb-pre" data-t="_deleted/{datetime}">date & time</button></div>
    </div>
-   <div class="srow" id="dRetRow"><div class="srow-l"><div class="srow-t">Keep deleted archive${tipHTML("Old snapshots are pruned by age"+(isPushSsh()||isRclone()||isC2C()?" (days)":" AND by total size — whichever comes first")+". 0 in the field — don't apply this limit.")}</div><div class="srow-d">prune by age${isPushSsh()||isRclone()||isC2C()?"":" and by size"}</div></div><div class="srow-c"><input class="mono" id="dRd" style="max-width:60px" value="${c.retention_days||0}"><span style="color:var(--mut);font-size:12px">days</span>${isPushSsh()||isRclone()||isC2C()?"":`<input class="mono" id="dRg" style="max-width:60px" value="${c.retention_gb||0}"><span style="color:var(--mut);font-size:12px">GB</span>`}</div></div>
-   ${isRclone()||isC2C()?`<div class="mon-note">On a cloud (rclone) destination only the age limit (days) applies — sizing the archive over the network is too costly. Old <span class="mono">_deleted</span> snapshots older than N days are purged on the remote after each run.</div>`:isPushSsh()?`<div class="mon-note">On an SSH destination only the age limit (days) applies: sizing the archive over the network is too expensive, so the GB cap is not enforced. If the destination path is module-style (no leading /), automatic archive cleanup is not available at all — delete old snapshots manually.</div>`:""}
+   <div class="srow" id="dRetRow"><div class="srow-l"><div class="srow-t">Keep deleted archive${tipHTML("Old snapshots are pruned by age"+(isDstSsh()||isRclone()||isC2C()?" (days)":" AND by total size — whichever comes first")+". 0 in the field — don't apply this limit.")}</div><div class="srow-d">prune by age${isDstSsh()||isRclone()||isC2C()?"":" and by size"}</div></div><div class="srow-c"><input class="mono" id="dRd" style="max-width:60px" value="${c.retention_days||0}"><span style="color:var(--mut);font-size:12px">days</span>${isDstSsh()||isRclone()||isC2C()?"":`<input class="mono" id="dRg" style="max-width:60px" value="${c.retention_gb||0}"><span style="color:var(--mut);font-size:12px">GB</span>`}</div></div>
+   ${isRclone()||isC2C()?`<div class="mon-note">On a cloud (rclone) destination only the age limit (days) applies — sizing the archive over the network is too costly. Old <span class="mono">_deleted</span> snapshots older than N days are purged on the remote after each run.</div>`:isDstSsh()?`<div class="mon-note">On an SSH destination only the age limit (days) applies: sizing the archive over the network is too expensive, so the GB cap is not enforced. If the destination path is module-style (no leading /), automatic archive cleanup is not available at all — delete old snapshots manually.</div>`:""}
    </div>`;
   const g=s=>tc.querySelector(s);
   wireSeg(tc,"#dDel",v=>{g("#dArch").style.display=v==="archive"?"":"none";g("#dGuardRow").style.display=v==="add"?"none":"";const hh=HELP[v];g("#dHelp").innerHTML=`<b>${esc(hh.t)}</b><span>${esc(hh.d)}</span>`;saveCfg({delete_mode:v});});
@@ -7265,7 +7271,7 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
   const sched=c.schedule&&c.schedule.enabled?((c.schedule.freq==="weekly"?"weekly at":"daily at")+" "+(c.schedule.time||"03:00")):"disabled";
   // first row: pull — where we take FROM; push — where we send TO
   const epOk=isC2C()?(!!((c.src||{}).remote||c.remote)&&!!(c.dst||{}).remote)
-             :(rcl||isRcloneSrc())?!!c.remote:push?(isPushSsh()?!!c.host:!!c.dest_base):!!c.host;
+             :(rcl||isRcloneSrc())?!!c.remote:push?(isPushSsh()?!!c.host:!!c.dest_base):(!!c.host&&(!isDstSsh()||!!(c.dst||{}).host));
   // next scheduled start, human-readable ("today/tomorrow at 03:00") — the schedule
   // row alone answers "how often", not "when"
   const nextRunTxt=()=>{const s=c.schedule||{};if(!s.enabled)return "";
@@ -7836,7 +7842,7 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
    // require the destination FOLDER on the «Where to» step whenever it's local (push to a disk,
    // any pull incl. cloud→NAS) — an unset dest_base silently falls back to /mnt/storage and,
    // for pull archive, would dump the _deleted archive onto the system disk.
-   if(cur==="dest"&&!isPushSsh()&&!isRclone()&&!CFG.dest_base){toast("Choose the destination folder first");return;}
+   if(cur==="dest"&&!isPushSsh()&&!isRclone()&&!isC2C()&&!CFG.dest_base){toast("Choose the destination folder first");return;}
    if(cur==="done"){wizOn=false;await saveCfg({setup_done:true});tab="overview";SET.nbTab=tab;saveSettings();render();return;}
    wizStep++;setPos();render();};}
  const render=async()=>{const r=await nbG("/api/backup/config");
