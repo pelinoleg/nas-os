@@ -6918,6 +6918,7 @@ function winRclone(initTab){openWin("__rclone","Rclone",(body,win)=>{
     <div class="srow"><div class="srow-l"><div class="srow-t">Parallel transfers</div><div class="srow-d">files copied at once (--transfers)</div></div><div class="srow-c"><input class="mono" id="oT" style="max-width:80px" value="${o.transfers}"></div></div>
     <div class="srow"><div class="srow-l"><div class="srow-t">Checkers</div><div class="srow-d">parallel comparisons (--checkers)</div></div><div class="srow-c"><input class="mono" id="oC" style="max-width:80px" value="${o.checkers}"></div></div>
     <div class="srow"><div class="srow-l"><div class="srow-t">Speed limit</div><div class="srow-d">global cap for restore/mount; 0 = unlimited</div></div><div class="srow-c"><input class="mono" id="oB" style="max-width:90px" value="${o.bwlimit}"><span style="color:var(--mut);font-size:12px"> KB/s</span></div></div>
+    <div class="srow"><div class="srow-l"><div class="srow-t">Bandwidth schedule${tipHTML("Time-based cap (rclone --bwlimit). e.g. «08:00,512 19:00,off» — 512 KB/s from 8am, unlimited from 7pm. Applies to restore/mount and to backups that have no limit of their own; overrides the flat limit above. Blank = off.")}</div><div class="srow-d">e.g. 08:00,512 19:00,off — throttle by day, full at night</div></div><div class="srow-c"><input class="mono" id="oBs" style="max-width:230px" placeholder="08:00,512 19:00,off" value="${att(o.bwlimit_schedule||"")}"></div></div>
     <div class="set-h">Mounts</div>
     <div class="srow"><div class="srow-l"><div class="srow-t">VFS cache mode${tipHTML("How a mounted cloud caches files locally. writes = safe & fast for editing (default). full = also cache reads. off = stream directly (lowest disk use).")}</div></div><div class="srow-c"><div class="seg" id="oVfs">${["off","minimal","writes","full"].map(v=>`<button data-v="${v}" class="${o.vfs_cache_mode===v?"on":""}">${v}</button>`).join("")}</div></div></div>
     <div class="srow"><div class="srow-l"><div class="srow-t">Cache max size</div><div class="srow-d">disk used for the mount cache, e.g. 2G</div></div><div class="srow-c"><input class="mono" id="oVsz" style="max-width:90px" value="${att(o.vfs_cache_max_size)}"></div></div>
@@ -6925,7 +6926,7 @@ function winRclone(initTab){openWin("__rclone","Rclone",(body,win)=>{
   let vfs=o.vfs_cache_mode;
   tc.querySelectorAll("#oVfs button").forEach(b=>b.onclick=()=>{vfs=b.dataset.v;tc.querySelectorAll("#oVfs button").forEach(x=>x.classList.toggle("on",x===b));});
   tc.querySelector("#oSave").onclick=async()=>{const msg=tc.querySelector("#oMsg");msg.textContent="saving…";
-    const body={transfers:+tc.querySelector("#oT").value||4,checkers:+tc.querySelector("#oC").value||8,bwlimit:+tc.querySelector("#oB").value||0,vfs_cache_mode:vfs,vfs_cache_max_size:tc.querySelector("#oVsz").value.trim()||"2G"};
+    const body={transfers:+tc.querySelector("#oT").value||4,checkers:+tc.querySelector("#oC").value||8,bwlimit:+tc.querySelector("#oB").value||0,bwlimit_schedule:tc.querySelector("#oBs").value.trim(),vfs_cache_mode:vfs,vfs_cache_max_size:tc.querySelector("#oVsz").value.trim()||"2G"};
     const rr=await rcloneP("/api/backup/rclone/opts",body);msg.textContent=rr&&rr.ok?"saved":"failed";toast("Options saved");};
  }
 

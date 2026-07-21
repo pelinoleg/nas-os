@@ -4362,6 +4362,9 @@ def rclone_installed():
 # restore, mount). Centralised so the user tunes throughput/cache in one place.
 RCLONE_OPTS_FILE = os.path.join(NAS_CONFIG, "rclone-opts.json")
 _RCLONE_VFS_MODES = ("off", "minimal", "writes", "full")
+# a time-scheduled --bwlimit like "08:00,512k 19:00,off" (or a plain "10M"/"off"). Permissive on
+# form, strict on safety: only these chars, never a leading '-' (so it can't become an argv option).
+_RCLONE_BWSCHED_RE = re.compile(r"^(?!-)[\w:.,\- ]{1,120}$")
 
 def rclone_opts_get():
     d = _json_load_strict(RCLONE_OPTS_FILE, {})
@@ -4372,9 +4375,12 @@ def rclone_opts_get():
     mode = d.get("vfs_cache_mode")
     vsz = str(d.get("vfs_cache_max_size") or "").strip().upper()   # validate on READ too, not only on set
     if not re.match(r"^\d{1,5}[KMGT]?$", vsz): vsz = "2G"
+    sch = str(d.get("bwlimit_schedule") or "").strip()             # time-scheduled bandwidth, e.g. "08:00,512k 19:00,off"
+    if not _RCLONE_BWSCHED_RE.match(sch): sch = ""
     return {"transfers": _i("transfers", 4, 1, 64),
             "checkers": _i("checkers", 8, 1, 64),
             "bwlimit": _i("bwlimit", 0, 0, 10_000_000),      # KB/s, 0 = unlimited
+            "bwlimit_schedule": sch,
             "vfs_cache_mode": mode if mode in _RCLONE_VFS_MODES else "writes",
             "vfs_cache_max_size": vsz}
 
@@ -4384,6 +4390,9 @@ def rclone_opts_set(d):
         if k in d:
             try: cur[k] = int(d[k])
             except (TypeError, ValueError): pass
+    if "bwlimit_schedule" in d:
+        s = str(d.get("bwlimit_schedule") or "").strip()
+        cur["bwlimit_schedule"] = s if (s == "" or _RCLONE_BWSCHED_RE.match(s)) else cur.get("bwlimit_schedule", "")
     if d.get("vfs_cache_mode") in _RCLONE_VFS_MODES:
         cur["vfs_cache_mode"] = d["vfs_cache_mode"]
     if isinstance(d.get("vfs_cache_max_size"), str) and re.match(r"^\d{1,5}[KMGTkmgt]?$", d["vfs_cache_max_size"].strip()):
@@ -4392,10 +4401,15 @@ def rclone_opts_set(d):
     return rclone_opts_get()      # re-read → re-validated/clamped
 
 def _rclone_perf_args():
-    """Parallelism flags from the global options (transfers/checkers). bwlimit is added
-    by the caller: a push profile has its OWN speed limit, restore/mount use the global one."""
+    """Parallelism flags from the global options (transfers/checkers), plus a time-scheduled
+    --bwlimit if configured. A flat bwlimit is added by the caller (per-profile for a backup,
+    global for restore/mount); a schedule, when set, is the global default (a per-profile flat
+    limit added after it still wins for that backup)."""
     o = rclone_opts_get()
-    return ["--transfers", str(o["transfers"]), "--checkers", str(o["checkers"])]
+    a = ["--transfers", str(o["transfers"]), "--checkers", str(o["checkers"])]
+    if o.get("bwlimit_schedule"):
+        a += ["--bwlimit", o["bwlimit_schedule"]]
+    return a
 
 def rclone_version():
     """Installed rclone version string ('' if missing)."""
@@ -4695,7 +4709,7 @@ def _rclone_restore_cli(remote, path, dest, dry):
             "--retries", "3", "--low-level-retries", "10", "--fast-list",
             "--create-empty-src-dirs"] + _rclone_perf_args()
     _ro = rclone_opts_get()
-    if _ro["bwlimit"] > 0:
+    if not _ro.get("bwlimit_schedule") and _ro["bwlimit"] > 0:   # schedule (from perf args) wins when set
         args += ["--bwlimit", "%dk" % _ro["bwlimit"]]
     if dry:
         args.append("--dry-run")
@@ -4870,7 +4884,7 @@ def rclone_mount_start(remote, path="", readonly=True, auto=False, save=True):
             "--umask", "022"]
     if readonly:
         args.append("--read-only")
-    if o["bwlimit"] > 0:
+    if not o.get("bwlimit_schedule") and o["bwlimit"] > 0:   # schedule (from perf args) wins when set
         args += ["--bwlimit", "%dk" % o["bwlimit"]]
     cmd = ["systemd-run", "--unit", unit, "--collect",
            "--property=Restart=on-failure", "--property=RestartSec=5",
