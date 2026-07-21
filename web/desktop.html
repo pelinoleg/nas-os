@@ -984,6 +984,18 @@
   .nb-rc-cm .CodeMirror{height:300px;max-height:46vh;font-size:12.5px}
   .nb-rcdlg{max-height:92vh;overflow:auto}
   .nb-rcdlg .set-h:first-of-type{margin-top:10px}
+  /* rclone restore dialog */
+  .rr-crumb{font-size:12.5px;margin:2px 0 6px;color:var(--dim);word-break:break-all}
+  .rr-crumb a{cursor:pointer;color:var(--win-accent,var(--accent));text-decoration:none}
+  .rr-crumb a:hover{text-decoration:underline}
+  .rr-list{max-height:230px;overflow:auto;border:1px solid var(--win-line,var(--line));border-radius:var(--r-sm);padding:4px}
+  .rr-ent{border-radius:var(--r-sm)}
+  .rr-ent[data-dir="1"]:hover{background:var(--card-2)}
+  .rr-target{font-size:12px;color:var(--dim);margin:8px 0 2px;word-break:break-all}
+  .rr-prog{margin:10px 0 2px}
+  .rr-head{display:flex;align-items:center;gap:8px;font-size:12.5px;margin-bottom:5px}
+  .rr-head>span{flex:1}
+  .rr-head.ok{color:var(--good)}.rr-head.warn{color:var(--warn)}
   .nb-det{margin-top:16px}
   .nb-sum{cursor:pointer;list-style:none;display:flex;align-items:center;gap:6px;font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--mut);font-family:var(--mono);padding:4px 0;user-select:none}
   .nb-sum::-webkit-details-marker{display:none}
@@ -6642,11 +6654,12 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
     <p class="set-sub" style="margin-top:4px">One configuration shared by every backup profile. Create the remotes on your Mac (<span class="mono">rclone config</span>) and paste rclone.conf here; then any profile can send its folders to them.</p>
     <div class="srow"><div class="srow-l"><div class="srow-t">rclone</div><div class="srow-d">${inst?("installed · version "+esc(ver)):"not installed on this NAS"}</div></div><div class="srow-c"><button class="btn sm" id="rcUp">${svg("download",13)} ${inst?"Update":"Install"} rclone</button></div></div>
     <div class="set-h">Remotes (connections)</div>
-    <div id="rcRemotes">${remotes.length?remotes.map(r=>`<div class="nb-job"><span class="nb-src mono" style="flex:1">${svg("net",13)} ${esc(r)}</span><span class="mono" id="rct_${cid(r)}" style="font-size:11.5px"></span><button class="btn sm nb-rctest" data-r="${att(r)}">Test</button></div>`).join(""):`<div style="color:var(--mut);font-size:12px;padding:6px 0">No remotes yet — paste your rclone.conf below and Save.</div>`}</div>
+    <div id="rcRemotes">${remotes.length?remotes.map(r=>`<div class="nb-job"><span class="nb-src mono" style="flex:1">${svg("net",13)} ${esc(r)}</span><span class="mono" id="rct_${cid(r)}" style="font-size:11.5px"></span><button class="btn sm nb-rcrest" data-r="${att(r)}" title="Restore files from this remote to this NAS">${svg("download",13)} Restore…</button><button class="btn sm nb-rctest" data-r="${att(r)}">Test</button></div>`).join(""):`<div style="color:var(--mut);font-size:12px;padding:6px 0">No remotes yet — paste your rclone.conf below and Save.</div>`}</div>
     <div class="set-h">rclone.conf${tipHTML("The full rclone config. Each [name] section is one remote. Paste what «rclone config» wrote on your Mac (~/.config/rclone/rclone.conf). Passwords are stored obscured by rclone itself.")}</div>
     <div id="rcEdHost" class="nb-rc-cm"></div>
     <div class="set-savebar"><span class="sb-left" id="rcMsg" style="margin-right:auto;color:var(--mut);font-size:12px">Stored at <span class="mono">${esc(path)}</span> · secret section of the settings backup</span><button class="btn sm" id="rcClose">Close</button><button class="btn pri sm" id="rcSave">${svg("check",13)} Save config</button></div>`;
    ensureCM(()=>{cm=CodeMirror(box().querySelector("#rcEdHost"),{value:DATA.conf||"",mode:"properties",lineNumbers:true,tabSize:2,styleActiveLine:true,lineWrapping:false});setTimeout(()=>cm.refresh(),40);});
+   box().querySelectorAll(".nb-rcrest").forEach(b=>b.onclick=()=>rcloneRestoreDlg(b.dataset.r));
    box().querySelectorAll(".nb-rctest").forEach(b=>b.onclick=async()=>{
     const r=b.dataset.r,cell=box().querySelector("#rct_"+cid(r));
     if(cell){cell.textContent="testing…";cell.style.color="var(--mut)";}b.disabled=true;
@@ -6666,6 +6679,68 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
   };
   const load=async()=>{DATA=(await api("/api/backup/rclone"))||{};RCLONE=DATA;draw();};
   load();
+ }
+ /* ── Restore FROM a cloud remote (pull). Browse the remote read-only, pick a folder
+    and a local destination, then rclone COPY it back (never deletes: the cloud is only
+    read, local files are only added/updated). Dry run previews without writing. ── */
+ function rcloneRestoreDlg(remote){
+  const s=document.getElementById("scrim");
+  let path="",entries=null,dest="",running=false,poll=null;
+  const stopPoll=()=>{if(poll){clearTimeout(poll);poll=null;}};
+  const close=()=>{stopPoll();s.classList.remove("show");};
+  const crumbs=()=>{const parts=path?path.split("/"):[];let acc="";
+   return `<a data-p="">${esc(remote)}:</a>`+parts.map(seg=>{acc=acc?acc+"/"+seg:seg;return ` / <a data-p="${att(acc)}">${esc(seg)}</a>`;}).join("");};
+  const draw=()=>{
+   s.innerHTML=`<div class="dialog nb-rcdlg" style="max-width:720px;width:92vw">
+     <div class="set-titrow"><h3 style="margin:0">${svg("download",17)} Restore from ${esc(remote)}</h3><button class="iconbtn" id="rrX" title="Close">${svg("x",16)}</button></div>
+     <p class="set-sub" style="margin-top:4px">Copies from the cloud into a folder on this NAS. The cloud is only read — nothing there is changed or deleted; locally, files are added and updated (never deleted).</p>
+     <div class="set-h">Pick what to restore</div>
+     <div class="rr-crumb">${crumbs()}</div>
+     <div class="rr-list" id="rrList">${entries===null?'<div class="set-load">loading…</div>':entries.length?entries.map((e,i)=>`<div class="nb-job rr-ent" data-i="${i}" data-dir="${e.dir?1:0}"${e.dir?' style="cursor:pointer"':""}><span class="nb-src mono" style="flex:1">${svg(e.dir?"folder":"file",13)} ${esc(e.name)}</span>${e.dir?`<span class="nb-arr">›</span>`:`<span class="mono" style="color:var(--mut);font-size:11px">${fmtB(e.size)}</span>`}</div>`).join(""):'<div style="color:var(--mut);font-size:12px;padding:6px 0">This folder is empty.</div>'}</div>
+     <div class="rr-target mono">Restoring: <b>${esc(remote+":"+path)}</b>${path?"":" — the whole remote"}</div>
+     <div class="set-h">Restore to (a folder on this NAS)</div>
+     <div class="nb-field-row"><input class="mono" id="rrDest" value="${att(dest)}" placeholder="/mnt/storage/restore"><button class="btn sm" id="rrPick">${svg("folder",13)} Choose</button></div>
+     <div class="rr-prog" id="rrProg" style="display:none"></div>
+     <div class="set-savebar"><span class="sb-left" id="rrMsg" style="margin-right:auto;color:var(--mut);font-size:12px"></span>
+       <button class="btn sm" id="rrDry">${svg("shield",13)} Dry run</button>
+       <button class="btn pri sm" id="rrGo">${svg("download",13)} Restore</button></div></div>`;
+   s.classList.add("show");
+   const q=x=>s.querySelector(x);
+   s.querySelectorAll(".rr-crumb a").forEach(a=>a.onclick=()=>nav(a.dataset.p));
+   s.querySelectorAll(".rr-ent").forEach(row=>{if(row.dataset.dir==="1")row.onclick=()=>{const e=entries[+row.dataset.i];nav(path?path+"/"+e.name:e.name);};});
+   q("#rrX").onclick=close;
+   q("#rrDest").onchange=()=>{dest=q("#rrDest").value.trim();};
+   q("#rrPick").onclick=()=>pickFolder({start:dest||"/media",title:"Restore to",onPick:p=>{dest=p;},onClose:()=>draw()});
+   q("#rrDry").onclick=()=>start(true);
+   q("#rrGo").onclick=()=>start(false);
+   if(running)applyRunning();
+  };
+  const nav=p=>{entries=null;draw();browse(p);};
+  const browse=async p=>{const r=await nbP("/api/backup/rclone/ls",{remote,path:p});
+   if(r&&r.ok){path=r.path;entries=r.entries;}else{entries=[];toast((r&&r.log)||"listing failed");}draw();};
+  const start=async dry=>{const d=s.querySelector("#rrDest");dest=(d&&d.value||"").trim();
+   if(!dest){toast("Choose a local folder to restore into");return;}
+   const r=await nbP("/api/backup/rclone/restore/start",{remote,path,dest,dry});
+   if(!(r&&r.ok)){toast((r&&r.log)||"could not start");return;}
+   running=true;applyRunning();tick();};
+  const applyRunning=()=>{const g=s.querySelector("#rrGo"),d=s.querySelector("#rrDry"),pr=s.querySelector("#rrProg");
+   if(g)g.disabled=running;if(d)d.disabled=running;if(pr&&running)pr.style.display="";};
+  const tick=async()=>{const st=(await api("/api/backup/rclone/restore/status"))||{};paintProg(st);
+   if(st.running){poll=setTimeout(tick,1000);}else{running=false;stopPoll();const g=s.querySelector("#rrGo"),d=s.querySelector("#rrDry");if(g)g.disabled=false;if(d)d.disabled=false;}};
+  const paintProg=st=>{const pr=s.querySelector("#rrProg");if(!pr)return;pr.style.display="";
+   const m=/(\d+)%\s+([\d.]+[kKMGTP]?B\/s)/.exec(st.line||"");const pct=m?+m[1]:(st.running?0:100);
+   const head=st.running?`Restoring… ${m?m[1]+"% · "+m[2]:""}`
+     :st.result==="stopped"?"Stopped"
+     :st.dry?`Dry run — would transfer ${st.files||0} files · ${fmtB(st.bytes||0)}`
+     :st.result==="ok"?`Restored ${st.files||0} files · ${fmtB(st.bytes||0)}`
+     :`Finished with problems${st.err?" — "+esc(st.err):""}`;
+   const cls=st.running?"":((st.result==="ok"||st.dry)?"ok":"warn");
+   pr.innerHTML=`<div class="rr-head ${cls}"><span>${head}</span>${st.running?`<button class="btn sm" id="rrStop">Stop</button>`:""}</div><div class="bar"><i class="pg" style="width:${pct}%"></i></div>`;
+   const stop=s.querySelector("#rrStop");if(stop)stop.onclick=async()=>{await nbP("/api/backup/rclone/restore/cancel");toast("Stopping…");};};
+  draw();browse("");
+  // reconnect to a restore already in progress (e.g. reopened dialog)
+  (async()=>{const st=(await api("/api/backup/rclone/restore/status"))||{};
+   if(st.running&&st.remote===remote){running=true;dest=st.dest||"";path=st.path||"";draw();paintProg(st);tick();}})();
  }
  /* ── Destination (push: where to send from this NAS) ── */
  // (legacy push-only tabConnPush removed — active Connection tab is tabConn/sideCard)

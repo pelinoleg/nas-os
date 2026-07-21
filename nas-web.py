@@ -4419,6 +4419,239 @@ def rclone_test_remote(remote):
     except (OSError, subprocess.SubprocessError) as e:
         return {"ok": False, "log": str(e)[:200]}
 
+def _rclone_progress_line(st):
+    """Format an rclone JSON-stats object as an rsync --info=progress2 line
+    ("<bytes> <pct>% <rate> <eta>") so the panel's nbProg parser and the «%…/s»
+    cur_line grep both work unchanged for backups AND restores."""
+    b, tot = int(st.get("bytes") or 0), int(st.get("totalBytes") or 0)
+    spd, pct = int(st.get("speed") or 0), (int(b * 100 / tot) if tot else 0)
+    eta = ""
+    if st.get("eta") is not None:
+        try:
+            e = int(st["eta"]); eta = "  %d:%02d:%02d" % (e // 3600, (e % 3600) // 60, e % 60)
+        except (TypeError, ValueError):
+            eta = ""
+    return "%12d  %3d%%  %.2fMB/s%s" % (b, pct, spd / 1048576.0, eta)
+
+def rclone_ls(remote, path):
+    """Read-only listing of a remote path — for the restore browser. Never writes to
+    the remote. Dirs first; one level deep (lsjson is non-recursive by default)."""
+    if not rclone_installed():
+        return {"ok": False, "log": "rclone is not installed"}
+    remote = str(remote or "").strip().rstrip(":")
+    if not _RCLONE_REMOTE_RE.match(remote) or remote not in rclone_remotes():
+        return {"ok": False, "log": "no such remote in rclone.conf"}
+    path = str(path or "").strip().strip("/")
+    if ".." in path:
+        return {"ok": False, "log": "invalid path"}
+    spec = remote + ":" + path
+    try:
+        r = subprocess.run([_rclone_bin(), "--config", RCLONE_CONF, "lsjson", spec,
+                            "--no-modtime", "--no-mimetype", "--low-level-retries", "1",
+                            "--retries", "1", "--timeout", "25s", "--contimeout", "15s"],
+                           capture_output=True, text=True, timeout=55)
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "log": "timed out — remote did not respond"}
+    except (OSError, subprocess.SubprocessError) as e:
+        return {"ok": False, "log": str(e)[:200]}
+    if r.returncode != 0:
+        err = ((r.stderr or r.stdout) or "").strip().splitlines()
+        return {"ok": False, "log": (err[-1] if err else "listing failed")[:200]}
+    try:
+        items = json.loads(r.stdout or "[]")
+    except ValueError:
+        items = []
+    ents = [{"name": it.get("Name", ""), "dir": bool(it.get("IsDir")),
+             "size": int(it.get("Size") or 0)} for it in items if it.get("Name")]
+    ents.sort(key=lambda e: (not e["dir"], e["name"].lower()))
+    return {"ok": True, "remote": remote, "path": path, "entries": ents}
+
+# --------------------------------------------------------------------------- #
+#  Restore FROM a cloud remote (pull). rclone COPY only — never sync/delete: the
+#  cloud copy is read-only, and locally files are only added/updated into a folder
+#  the user picks. One restore at a time, its own transient unit + state/log.
+# --------------------------------------------------------------------------- #
+RCLONE_RESTORE_STATE  = os.path.join(NAS_CONFIG, "rclone-restore.json")
+RCLONE_RESTORE_LOG    = os.path.join(NAS_CONFIG, "rclone-restore.log")
+RCLONE_RESTORE_CANCEL = os.path.join(NAS_CONFIG, "rclone-restore.cancel")
+RCLONE_RESTORE_UNIT   = "nas-rclone-restore"
+_RESTORE_DEST_OK = ("/mnt/", "/media/", "/srv/", "/home/")
+
+def _rclone_restore_valid_dest(p):
+    p = os.path.normpath(str(p or ""))
+    return p.startswith(_RESTORE_DEST_OK) and ".." not in p
+
+def rclone_restore_state():
+    st = _json_load_strict(RCLONE_RESTORE_STATE, {})
+    if st.get("running") and time.time() - (st.get("started") or 0) > 15 \
+            and not _systemd_active(RCLONE_RESTORE_UNIT + ".service"):
+        st["running"] = False                     # orphaned (crash/reboot)
+        st["result"] = st.get("result") or "aborted"
+        st["done"] = st.get("done") or int(time.time())
+    return st
+
+def rclone_restore_status():
+    st = rclone_restore_state()
+    lines = []
+    try:
+        with open(RCLONE_RESTORE_LOG) as f:
+            lines = f.read().split("\n")
+        if lines and lines[-1] == "":
+            lines.pop()
+    except OSError:
+        pass
+    cur = ""
+    for l in reversed(lines[-8:]):
+        if "%" in l and "/s" in l:
+            cur = l.strip(); break
+    return dict(st, line=cur, log=lines[-200:])
+
+def rclone_restore_start(remote, path, dest, dry=False):
+    if rclone_restore_state().get("running"):
+        return {"ok": False, "log": "a restore is already running"}
+    if not rclone_installed():
+        return {"ok": False, "log": "rclone is not installed"}
+    remote = str(remote or "").strip().rstrip(":")
+    if not _RCLONE_REMOTE_RE.match(remote) or remote not in rclone_remotes():
+        return {"ok": False, "log": "no such remote in rclone.conf"}
+    path = str(path or "").strip().strip("/")
+    if ".." in path or "\n" in path:
+        return {"ok": False, "log": "invalid remote path"}
+    dest = os.path.normpath(str(dest or "").strip())
+    if not _rclone_restore_valid_dest(dest):
+        return {"ok": False, "log": "the restore folder must be under /mnt, /media, /srv or /home"}
+    if _dest_disk_absent(dest):
+        return {"ok": False, "log": "the restore disk is not mounted (%s leads into the system partition)" % dest}
+    try:
+        if os.path.exists(RCLONE_RESTORE_CANCEL):
+            os.remove(RCLONE_RESTORE_CANCEL)
+    except OSError:
+        pass
+    _json_save(RCLONE_RESTORE_STATE, {"running": True, "started": int(time.time()), "remote": remote,
+                                      "path": path, "dest": dest, "dry": bool(dry), "result": None}, indent=None)
+    cmd = ["systemd-run", "--collect", "--quiet", "--unit", RCLONE_RESTORE_UNIT,
+           "--setenv=SUDO_USER=" + TARGET_USER, "--setenv=HOME=" + HOME,
+           # paths (may contain spaces) go through the unit env, not argv
+           "--setenv=RCR_REMOTE", "--setenv=RCR_PATH", "--setenv=RCR_DEST", "--setenv=RCR_DRY",
+           sys.executable, os.path.join(HERE, "nas-web.py"), "rclone-restore"]
+    env = dict(os.environ, RCR_REMOTE=remote, RCR_PATH=path, RCR_DEST=dest,
+               RCR_DRY=("1" if dry else ""))
+    try:
+        r = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError) as e:
+        _json_save(RCLONE_RESTORE_STATE, {"running": False, "result": "warn", "error": str(e)}, indent=None)
+        return {"ok": False, "log": str(e)}
+    if r.returncode != 0:
+        _json_save(RCLONE_RESTORE_STATE, {"running": False, "result": "warn"}, indent=None)
+        return {"ok": False, "log": (r.stderr or "failed to start")[:200]}
+    return {"ok": True, "log": "started"}
+
+def rclone_restore_cancel():
+    try:
+        with open(RCLONE_RESTORE_CANCEL, "w") as f:
+            f.write("1")
+    except OSError:
+        pass
+    try:
+        subprocess.run(["systemctl", "stop", RCLONE_RESTORE_UNIT], capture_output=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    st = _json_load_strict(RCLONE_RESTORE_STATE, {})
+    st["running"] = False; st["stopped"] = True; st["result"] = "stopped"; st["done"] = int(time.time())
+    _json_save(RCLONE_RESTORE_STATE, st, indent=None)
+    return {"ok": True}
+
+def _rclone_restore_cli(remote, path, dest, dry):
+    """Driver (transient unit): rclone copy remote:path -> local dest, streaming
+    progress. COPY only — the remote is never modified."""
+    started = int(time.time())
+    _json_save(RCLONE_RESTORE_STATE, {"running": True, "started": started, "remote": remote,
+                                      "path": path, "dest": dest, "dry": bool(dry),
+                                      "result": None, "pid": os.getpid()}, indent=None)
+    try:
+        logf = open(RCLONE_RESTORE_LOG, "w", buffering=1)
+    except OSError:
+        logf = None
+    def w(l):
+        if logf:
+            try: logf.write(l + "\n")
+            except OSError: pass
+    def cancel():
+        return os.path.exists(RCLONE_RESTORE_CANCEL)
+    src = remote + ":" + (path.strip("/") if path else "")
+    args = [_rclone_bin(), "copy", src, dest, "--config", RCLONE_CONF,
+            "--stats", "1s", "--stats-log-level", "NOTICE", "--use-json-log",
+            "--transfers", "4", "--checkers", "8", "--retries", "3",
+            "--low-level-retries", "10", "--create-empty-src-dirs"]
+    if dry:
+        args.append("--dry-run")
+    w("restore %s → %s%s" % (src, dest, "  (dry run — nothing is written)" if dry else ""))
+    last_stats, err_lines, errs, rc = {}, [], 0, 1
+    try:
+        os.makedirs(dest, exist_ok=True)
+        p = subprocess.Popen(args, env=os.environ.copy(), stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT, text=True, bufsize=1)
+        done_ev = threading.Event()
+        def _watch():
+            while not done_ev.wait(0.5):
+                if cancel():
+                    try: p.kill()
+                    except OSError: pass
+                    return
+        threading.Thread(target=_watch, daemon=True).start()
+        for line in iter(p.stdout.readline, ""):
+            line = line.rstrip("\n")
+            if not line.strip():
+                continue
+            obj = None
+            if line.lstrip().startswith("{"):
+                try: obj = json.loads(line)
+                except ValueError: obj = None
+            if obj is None:
+                w(line)
+            else:
+                stt = obj.get("stats")
+                if isinstance(stt, dict):
+                    last_stats = stt
+                    w(_rclone_progress_line(stt))
+                else:
+                    msg, lvl = str(obj.get("msg") or "").strip(), str(obj.get("level") or "").lower()
+                    if msg:
+                        if lvl in ("error", "critical", "fatal"):
+                            errs += 1
+                            if len(err_lines) < 3: err_lines.append(msg[:180])
+                            w("ERROR: " + msg)
+                        elif lvl == "warning":
+                            w("warning: " + msg)
+                        else:
+                            w(msg)
+            if cancel():
+                p.kill(); break
+        p.wait(); done_ev.set(); rc = p.returncode
+    except Exception as e:
+        w("restore failed: %s" % e)
+    finally:
+        stopped = cancel()
+        ok = (rc == 0 and not stopped)
+        st = _json_load_strict(RCLONE_RESTORE_STATE, {})
+        st.update(running=False, done=int(time.time()), code=rc,
+                  result=("stopped" if stopped else "ok" if ok else "warn"),
+                  files=int(last_stats.get("transfers") or 0),
+                  bytes=int(last_stats.get("bytes") or 0))
+        if err_lines and not ok and not stopped:
+            st["err"] = err_lines[0][:180]
+        _json_save(RCLONE_RESTORE_STATE, st, indent=None)
+        w("[%s] %d files, %s" % ("OK" if ok else ("stopped" if stopped else "error %d" % rc),
+                                 int(last_stats.get("transfers") or 0),
+                                 fmt_bytes(int(last_stats.get("bytes") or 0))))
+        try:
+            if os.path.exists(RCLONE_RESTORE_CANCEL): os.remove(RCLONE_RESTORE_CANCEL)
+        except OSError:
+            pass
+        if logf:
+            try: logf.close()
+            except OSError: pass
+
 # A backup run is launched as a SEPARATE process in a transient systemd unit
 # (outside the service cgroup) → it survives a restart/update of nas-web. The driver
 # writes output to a log file and status to json; the UI/server read them and reconnect.
@@ -5793,18 +6026,7 @@ def _nb_rclone_run(cfg, dry, writer, cancel, on_job, allow_delete):
                 st = obj.get("stats")
                 if isinstance(st, dict):
                     last_stats = st
-                    b, tot = int(st.get("bytes") or 0), int(st.get("totalBytes") or 0)
-                    spd, pct = int(st.get("speed") or 0), (int(b * 100 / tot) if tot else 0)
-                    eta = ""
-                    if st.get("eta") is not None:
-                        try:
-                            e = int(st["eta"]); eta = "  %d:%02d:%02d" % (e // 3600, (e % 3600) // 60, e % 60)
-                        except (TypeError, ValueError):
-                            eta = ""
-                    # emit the SAME shape rsync --info=progress2 does ("<bytes> <pct>% <rate>
-                    # <eta>") so the panel's nbProg parser and the «%…/s» cur_line grep both
-                    # light up unchanged — no rclone-specific progress code in the UI
-                    writer("%12d  %3d%%  %.2fMB/s%s" % (b, pct, spd / 1048576.0, eta))
+                    writer(_rclone_progress_line(st))   # rsync-progress2 shape → reuses nbProg
                 else:
                     msg, lvl = str(obj.get("msg") or "").strip(), str(obj.get("level") or "").lower()
                     if not msg:
@@ -14872,6 +15094,8 @@ class H(BaseHTTPRequestHandler):
                 self._json({"installed": rclone_installed(), "version": rclone_version(),
                             "path": RCLONE_CONF, "conf": rclone_conf_read(),
                             "remotes": rclone_remotes()})
+            elif p == "/api/backup/rclone/restore/status":
+                self._json(rclone_restore_status())
             elif p == "/api/backup/status":
                 self._json(nb_status(_nb_qpid(q)))
             elif p == "/api/backup/dest-state":
@@ -15351,6 +15575,15 @@ class H(BaseHTTPRequestHandler):
                             "version": rclone_version(), "installed": rclone_installed()})
             elif p == "/api/backup/rclone/test":
                 self._json(rclone_test_remote(self._body().get("remote", "")))
+            elif p == "/api/backup/rclone/ls":
+                b = self._body()
+                self._json(rclone_ls(b.get("remote", ""), b.get("path", "")))
+            elif p == "/api/backup/rclone/restore/start":
+                b = self._body()
+                self._json(rclone_restore_start(b.get("remote", ""), b.get("path", ""),
+                                                b.get("dest", ""), dry=bool(b.get("dry"))))
+            elif p == "/api/backup/rclone/restore/cancel":
+                self._json(rclone_restore_cancel())
             elif p == "/api/backup/key":
                 b = self._body()
                 act = str(b.get("action") or "")
@@ -15514,6 +15747,10 @@ if __name__ == "__main__":
         _args = sys.argv[2:]
         _pid = next((a for a in _args if a != "deep"), NB_MAIN)
         nb_compare_run(_pid, deep=("deep" in _args))
+    elif len(sys.argv) > 1 and sys.argv[1] == "rclone-restore":
+        # paths arrive through the unit env (may contain spaces), not argv
+        _rclone_restore_cli(os.environ.get("RCR_REMOTE", ""), os.environ.get("RCR_PATH", ""),
+                            os.environ.get("RCR_DEST", ""), os.environ.get("RCR_DRY") == "1")
     elif len(sys.argv) > 2 and sys.argv[1] == "screen-op":
         screen_op_run(sys.argv[2])
     else:
