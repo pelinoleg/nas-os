@@ -6936,7 +6936,7 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
   return `<div class="nb-kindhint"><b>Cloud (rclone)</b> — S3, Backblaze B2, SFTP, WebDAV, Google Drive and dozens more. Remotes and the config live in the <b>Rclone</b> app; here you just pick one.</div>
    ${!rcInst?`<div class="nb-dwarn" style="margin-top:8px">rclone is not installed — open the <b>Rclone</b> app to install it.</div>`:""}
    <div class="srow" style="padding:8px 0 0"><div class="srow-l"><div class="srow-t">Remote</div><div class="srow-d">from your shared rclone.conf</div></div><div class="srow-c">${remotes.length?`<select class="mono" id="rc_remote">${!S.remote?`<option value="" selected>— choose —</option>`:""}${remotes.map(r=>`<option ${r===S.remote?"selected":""}>${esc(r)}</option>`).join("")}</select>`:`<button class="btn sm" id="rc_manage2">${svg("net",13)} Add a remote</button>`}</div></div>
-   <div class="nb-field" style="margin-top:8px"><label>Path inside the remote${tipHTML("A base path within the remote where copies go — each source gets its own subfolder under it. Leave empty for the remote's root. Example: nas-backup")}</label><input class="mono" id="rc_path" value="${att(S.remote_path||"")}" placeholder="nas-backup"></div>
+   <div class="nb-field" style="margin-top:8px"><label>Path inside the remote${tipHTML("A base path within the remote where copies go — each source gets its own subfolder under it. Leave empty for the remote's root. Example: nas-backup")}</label><div class="nb-field-row"><input class="mono" id="rc_path" value="${att(S.remote_path||"")}" placeholder="nas-backup"><button class="btn sm" id="rc_pathBrowse"${S.remote?"":" disabled"}>${svg("folder",13)} Browse</button></div></div>
    <div class="srow" style="padding:8px 0 0"><div class="srow-l"><div class="srow-t">Mode</div><div class="srow-d">${RC_MODED[dm]||RC_MODED.add}</div></div><div class="srow-c"><div class="seg sm" id="rc_mode"><button data-v="add" class="${dm==="add"?"on":""}">Copy</button><button data-v="mirror" class="${dm==="mirror"?"on":""}">Mirror</button><button data-v="archive" class="${dm==="archive"?"on":""}">Archive</button></div></div></div>
    <div class="nb-field-row" style="margin-top:10px"><button class="btn sm" id="rc_manage">${svg("net",13)} Manage remotes &amp; config</button></div>`;}
  function sideCard(w){
@@ -7009,6 +7009,9 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
   // rclone destination controls (dst side): pick a remote/path/mode; config is shared (Cloud tab)
   {const rem=g("#rc_remote");if(rem)rem.onchange=()=>saveCfg({remote:rem.value}).then(()=>{JOBS=(CFG.jobs||[]).slice();again();});
    const rp=g("#rc_path");if(rp)rp.onchange=()=>saveCfg({remote_path:rp.value.trim()}).then(()=>{JOBS=(CFG.jobs||[]).slice();again();});
+   const rpb=g("#rc_pathBrowse");if(rpb)rpb.onclick=()=>{const rem2=(CFG.dst||{}).remote||CFG.remote;
+     if(!rem2){toast("Choose a remote first");return;}
+     rcloneRemotePicker(rem2,p=>saveCfg({remote_path:p}).then(()=>{JOBS=(CFG.jobs||[]).slice();again();}));};
    wireSeg(tc,"#rc_mode",v=>saveCfg({delete_mode:v}).then(again));
    const mg=g("#rc_manage");if(mg)mg.onclick=gotoRclone;
    const mg2=g("#rc_manage2");if(mg2)mg2.onclick=gotoRclone;}
