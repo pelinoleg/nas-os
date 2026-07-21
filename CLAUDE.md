@@ -419,6 +419,16 @@ unmount,mount-remove,about,size,opts,check/*}`. Приложение Бэкап 
 ветка `cd["kind"]=="rclone"` ПЕРВОЙ — облачное назначение ВСЕГДА делает профиль push (источник
 принудительно local). rclone как ИСТОЧНИК (pull-профиль cloud→NAS) пока не сделан — on-demand
 покрывает Restore; KINDS_SRC без rclone.
+**Аудит опций по транспортам (что где актуально), 2026-07-21:** delete_mode (Copy/Mirror/Archive)
+задаётся ТОЛЬКО на вкладке «Deleted files» — дубль-селектор «Mode» из rclone-карточки назначения
+УБРАН (был тот же `delete_mode` с другими лейблами). **Verify (rsync -c) СКРЫТ для rclone**
+(rclone чек-суммит при передаче; `_nb_rclone_run` не верифицирует) — в tabConn и wizOpts.
+**Compare-таб СКРЫТ для rclone** (rsync-only dry-run; эквивалент — Verify в Rclone-app;
+`CATv=CATS.filter` + фолбэк tab→overview). **Speed limit** остаётся у профиля (rclone `--bwlimit`
+для этого бэкапа) — тултип транспорто-специфичный; глобальный bwlimit в Rclone-app Options — только
+restore/mount (transfers/checkers — тоже глобальные, `_rclone_perf_args`). **Overview/`nb_dest_state`
+rclone-aware**: приёмник = «cloud remote» (не «not mounted»/«missing»), на тик в сеть не ходим. Визард:
+шаг «Where to» пропускается для rclone (назначение = сам шаг Connection).
 Приложение переименовано в **«Rclone»**; иконка — фирменный 3-цветный логотип (`RAW_LOGOS.rclone`
 в `svg()`, свой viewBox с паддингом чтоб не был крупнее line-иконок). Save-бар вкладок закреплён
 снизу (`setFootAdopt`, как в Настройках). Путь в remote выбирается пикером `rcloneRemotePicker`

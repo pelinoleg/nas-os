@@ -6944,6 +6944,16 @@ def nb_dest_state(pid=None):
     Fast (isdir/listdir, no du). Catches manual deletion of folders from the destination —
     which the last run's dots don't see."""
     cfg = nb_load(pid)
+    if _nb_rclone(cfg):
+        # cloud destination: no local mount concept, and probing the remote every UI tick is
+        # too costly — treat it as present (reachability is checked by Test / at run time)
+        remote = (cfg.get("remote") or "").strip().rstrip(":")
+        rbase = (cfg.get("remote_path") or "").strip("/")
+        return {"base": (remote + ":" + rbase) if remote else "", "rclone": True,
+                "unset": not remote, "base_mounted": True, "base_exists": bool(remote),
+                "jobs": [{"src": j.get("src", ""), "dest": j.get("dest", ""),
+                          "enabled": j.get("enabled", True) is not False,
+                          "exists": True, "empty": False} for j in cfg.get("jobs", [])]}
     base = cfg.get("dest_base") or ("" if _nb_push(cfg) else "/mnt/storage/nas-backup")
     if _nb_push(cfg) and not base:
         # fresh push profile: destination not chosen yet — not the same as "unmounted"
