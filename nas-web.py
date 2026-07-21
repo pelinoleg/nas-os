@@ -12,7 +12,7 @@ Python 3 standard library only (no pip). Serves static files from web/ and a JSO
 System changes are made by the vetted nas-wizard.sh engine (api mode), so the
 server must run as root (the nas-setup.sh launcher does that).
 """
-import json, os, re, subprocess, time, shutil, socket, threading, pwd, mimetypes, glob, errno, heapq, sys, sqlite3, fnmatch
+import json, os, re, subprocess, time, shutil, socket, threading, pwd, mimetypes, glob, errno, heapq, sys, sqlite3, fnmatch, calendar
 import html as _htmllib
 import pty, select, struct, hashlib, base64, signal, fcntl, termios, secrets, hmac, shlex, stat
 import urllib.request, urllib.error
@@ -6486,12 +6486,65 @@ def _nb_rclone_run(cfg, dry, writer, cancel, on_job, allow_delete):
     stopped = cancel()
     allok = all(r["ok"] for r in results) and len(results) == len(jobs) and not stopped
     if not dry:
+        # retention: prune old _deleted snapshots on the remote by AGE (days). Sizing the
+        # archive over the network is too expensive, so the GB cap doesn't apply here — same
+        # policy as a push-ssh destination.
+        if cfg.get("delete_mode", "archive") == "archive":
+            try:
+                pruned = _nb_rclone_prune(cfg, writer)
+                if pruned: writer("old deleted-files snapshots cleaned: %d" % pruned)
+            except Exception: pass
         _nb_write_status(pid, results)
         try: _nb_history_add(pid, {"ts": int(time.time()), "dur": int(time.time() - t0),
                               "result": "stopped" if stopped else ("ok" if allok else "warn"),
                               "jobs": results})
         except Exception: pass
     return {"ok": allok, "jobs": results, "stopped": stopped}
+
+def _nb_rclone_prune(cfg, writer):
+    """Retention of the rclone _deleted archive — by age (days) only. Lists the first-level
+    dated snapshot folders under remote:remote_path/<top> and purges those older than N days
+    (by ModTime). Never touches the live copy, only the archive."""
+    days = int(cfg.get("retention_days", 0) or 0)
+    if days <= 0:
+        return 0
+    remote = (cfg.get("remote") or "").strip().rstrip(":")
+    if not remote:
+        return 0
+    rbase = (cfg.get("remote_path") or "").strip("/")
+    top = nb_deleted_top(cfg)                          # constant first segment, e.g. "_deleted"
+    archroot = "/".join(x for x in (rbase, top) if x)
+    try:
+        r = subprocess.run([_rclone_bin(), "--config", RCLONE_CONF, "lsjson", remote + ":" + archroot,
+                            "--dirs-only", "--no-mimetype", "--timeout", "30s"],
+                           capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return 0
+    if r.returncode != 0:
+        return 0                                       # no archive yet — nothing to prune
+    try:
+        items = json.loads(r.stdout or "[]")
+    except ValueError:
+        return 0
+    cutoff, removed = time.time() - days * 86400, 0
+    for it in items:
+        if not it.get("IsDir"):
+            continue
+        m = re.match(r"(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d):(\d\d)", str(it.get("ModTime") or ""))
+        if not m:
+            continue
+        try:
+            ts = calendar.timegm(tuple(int(x) for x in m.groups()) + (0, 0, 0))   # rclone ModTime is UTC
+        except (ValueError, OverflowError):
+            continue
+        if ts >= cutoff:
+            continue
+        d = (archroot + "/" + it.get("Name", "")).strip("/")
+        pr = subprocess.run([_rclone_bin(), "--config", RCLONE_CONF, "purge", remote + ":" + d,
+                             "--timeout", "60s"], capture_output=True, text=True, timeout=600)
+        if pr.returncode == 0:
+            removed += 1
+    return removed
 
 def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None, allow_delete=False):
     """Run all enabled jobs. writer(line) — output; cancel() — interruption.

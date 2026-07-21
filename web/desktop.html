@@ -7181,16 +7181,17 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
      <div class="usb-chips"><span class="usb-lbl">Tokens:</span>${DEL_TOKENS.map(t=>`<button class="usb-tok" data-t="${att(t[0])}" title="${att(t[1])}">${esc(t[0])}</button>`).join("")}<button class="usb-tok" data-t="/" title="nested folder">/</button></div>
      <div class="usb-chips"><span class="usb-lbl">Presets:</span><button class="usb-pre" data-t="_deleted/{date}">by date</button><button class="usb-pre" data-t="_deleted/{year}/{month}">year / month</button><button class="usb-pre" data-t="_deleted/{datetime}">date & time</button></div>
    </div>
-   <div class="srow" id="dRetRow"><div class="srow-l"><div class="srow-t">Keep deleted archive${tipHTML("Old snapshots are pruned by age AND by total size — whichever comes first. 0 in the field — don't apply this limit.")}</div><div class="srow-d">prune by age and by size</div></div><div class="srow-c"><input class="mono" id="dRd" style="max-width:60px" value="${c.retention_days||0}"><span style="color:var(--mut);font-size:12px">days</span><input class="mono" id="dRg" style="max-width:60px" value="${c.retention_gb||0}"><span style="color:var(--mut);font-size:12px">GB</span></div></div>
-   ${isPushSsh()?`<div class="mon-note">On an SSH destination only the age limit (days) applies: sizing the archive over the network is too expensive, so the GB cap is not enforced. If the destination path is module-style (no leading /), automatic archive cleanup is not available at all — delete old snapshots manually.</div>`:""}
+   <div class="srow" id="dRetRow"><div class="srow-l"><div class="srow-t">Keep deleted archive${tipHTML("Old snapshots are pruned by age"+(isPushSsh()||isRclone()?" (days)":" AND by total size — whichever comes first")+". 0 in the field — don't apply this limit.")}</div><div class="srow-d">prune by age${isPushSsh()||isRclone()?"":" and by size"}</div></div><div class="srow-c"><input class="mono" id="dRd" style="max-width:60px" value="${c.retention_days||0}"><span style="color:var(--mut);font-size:12px">days</span>${isPushSsh()||isRclone()?"":`<input class="mono" id="dRg" style="max-width:60px" value="${c.retention_gb||0}"><span style="color:var(--mut);font-size:12px">GB</span>`}</div></div>
+   ${isRclone()?`<div class="mon-note">On a cloud (rclone) destination only the age limit (days) applies — sizing the archive over the network is too costly. Old <span class="mono">_deleted</span> snapshots older than N days are purged on the remote after each run.</div>`:isPushSsh()?`<div class="mon-note">On an SSH destination only the age limit (days) applies: sizing the archive over the network is too expensive, so the GB cap is not enforced. If the destination path is module-style (no leading /), automatic archive cleanup is not available at all — delete old snapshots manually.</div>`:""}
    </div>`;
   const g=s=>tc.querySelector(s);
   wireSeg(tc,"#dDel",v=>{g("#dArch").style.display=v==="archive"?"":"none";g("#dGuardRow").style.display=v==="add"?"none":"";const hh=HELP[v];g("#dHelp").innerHTML=`<b>${esc(hh.t)}</b><span>${esc(hh.d)}</span>`;saveCfg({delete_mode:v});});
   g("#dMax").onchange=()=>saveCfg({max_delete_pct:+g("#dMax").value||0});
   g("#dRd").onchange=()=>saveCfg({retention_days:+g("#dRd").value||0});
-  g("#dRg").onchange=()=>saveCfg({retention_gb:+g("#dRg").value||0});
-  const dt=g("#dTpl"),dp=g("#dPrev"),base=(c.dest_base||(push?"…":"/mnt/storage/nas-backup")).replace(/\/$/,"");
-  const updD=()=>dp.textContent=base+"/…/"+nbDelPreview(dt.value);updD();
+  {const rg=g("#dRg");if(rg)rg.onchange=()=>saveCfg({retention_gb:+rg.value||0});}
+  const dt=g("#dTpl"),dp=g("#dPrev"),base=isRclone()?((c.remote||"remote")+":"+((c.remote_path||"").replace(/^\/+|\/+$/g,""))):(c.dest_base||(push?"…":"/mnt/storage/nas-backup")).replace(/\/$/,"");
+  // rclone lays the archive as base/_deleted/date/<source tree>; local/ssh as base/<tree>/_deleted/date
+  const updD=()=>dp.textContent=isRclone()?(base+"/"+nbDelPreview(dt.value)+"/…"):(base+"/…/"+nbDelPreview(dt.value));updD();
   dt.oninput=updD;
   dt.onchange=()=>saveCfg({deleted_dir:dt.value.trim()});
   tc.querySelectorAll("#dArch .usb-tok").forEach(b=>b.onclick=()=>{const psel=dt.selectionStart||dt.value.length;
