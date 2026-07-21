@@ -7139,7 +7139,7 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
     nbPickDest(bb.value.trim(),p=>{bb.value=p;saveDest(p);});
    }else nbPickLocal(bb.value||"/mnt",p=>{bb.value=p;saveDest(p);});};
   const sAddBtn=g("#sAdd");if(sAddBtn)sAddBtn.onclick=()=>{
-    if(push&&!CFG.dest_base){toast("First choose the destination («Where the copies land»)");return;}
+    if(push&&(isRclone()?!CFG.remote:!CFG.dest_base)){toast(isRclone()?"Choose a cloud remote first (Connection tab)":"First choose the destination («Where the copies land»)");return;}
     // existing per-job exclusions → absolute paths for tree pre-selection
     const preExcl=[];JOBS.forEach(j=>{const base=j.src.replace(/\/$/,"");(j.excludes||[]).forEach(rel=>preExcl.push(base+rel));});
     nbPickSource(JOBS.map(j=>j.src),preExcl,(list,exl)=>{const chosen=new Set(list);
@@ -7575,7 +7575,7 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
   // allow — a one-time "I deleted this myself on the source": a run without --max-delete.
   // not written to the config: the next run is protected again
   const run=async (dry,allow)=>{if(!(c.jobs||[]).length){toast("Select sources first (the «Sources» tab)");return;}
-   if(isPush()&&!CFG.dest_base){toast("First choose a destination (the «Destination» tab)");return;}
+   if(isPush()&&(isRclone()?!CFG.remote:!CFG.dest_base)){toast(isRclone()?"Choose a cloud remote first (Connection tab)":"First choose a destination (the «Destination» tab)");return;}
    con.innerHTML="";nbCursor=0;nbStarted=null;setBusy(true);
    setHero("accent",dry?"<b>Dry run is running…</b>":"<b>Backup is running…</b>");
    const gn=g("#oGuard");if(gn&&allow){gn.style.display="none";gn.innerHTML="";}
@@ -7739,7 +7739,8 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
  const WPANE={conn:tc=>tabConn(tc,"sides"),folders:tc=>tabSources(tc,"folders"),dest:tc=>tabSources(tc,"dest"),
   excl:tc=>tabSources(tc,"excl"),deleted:tc=>TABS.deleted(tc),sched:tc=>TABS.sched(tc),opts:wizOpts};
  function renderWizDone(tc){const c=CFG,push=isPush();
-  const ep=push?(isPushSsh()?(c.host?c.user+"@"+c.host+":"+(c.dest_base||"?"):"not set"):(c.dest_base||"not selected"))
+  const ep=isRclone()?(c.remote?(c.remote+":"+((c.remote_path||"").replace(/^\/+|\/+$/g,""))):"not set")
+           :push?(isPushSsh()?(c.host?c.user+"@"+c.host+":"+(c.dest_base||"?"):"not set"):(c.dest_base||"not selected"))
               :(c.host?c.user+"@"+c.host:"not set");
   const s=c.schedule||{},nj=(c.jobs||[]).length;
   tc.innerHTML=`<h3 class="set-title">Ready</h3><p class="set-sub">Check the summary — everything can be changed later on the tabs.</p>

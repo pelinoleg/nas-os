@@ -5406,17 +5406,22 @@ def nb_save(patch, pid=None):
             cs = side
         else:
             cd = side
+        # rclone is destination-only AND needs a local source (push). If the change makes
+        # the invalid combo (cloud dst + remote src), honour the side the user JUST set:
+        #   set dst=Cloud  → force the source local (push);
+        #   set src=remote → drop the cloud dst back to local (pull).
+        # Without this, once a profile was cloud you couldn't switch it to pull (dst=rclone
+        # always won), the mirror of the old "can't pick Cloud on a pull profile" bug.
+        if cd["kind"] == "rclone" and cs["kind"] != "local":
+            if sd == "dst":
+                cs = {"kind": "local"}
+            else:
+                cd = {"kind": "local"}
         # fold back into the profile
-        if cd["kind"] == "rclone":
-            # a cloud destination is ALWAYS a push from this NAS — force the source local
-            # even if the profile was a pull before (otherwise picking "Cloud" silently
-            # reverted, because a pull profile's source isn't local). This makes the
-            # destination segment actually switch to Cloud.
-            cur["direction"] = "push"; cur["transport"] = "rclone"
-            far = {}; cur["dst2"] = {}
-        elif cs["kind"] == "local":
+        if cs["kind"] == "local":
             cur["direction"] = "push"
-            cur["transport"] = ("ssh" if cd["kind"] == "ssh" else "local")
+            cur["transport"] = ("rclone" if cd["kind"] == "rclone"
+                                else "ssh" if cd["kind"] == "ssh" else "local")
             far = cd if cd["kind"] == "ssh" else {}
             cur["dst2"] = {}
         else:

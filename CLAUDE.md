@@ -429,6 +429,14 @@ unmount,mount-remove,about,size,opts,check/*}`. Приложение Бэкап 
 restore/mount (transfers/checkers — тоже глобальные, `_rclone_perf_args`). **Overview/`nb_dest_state`
 rclone-aware**: приёмник = «cloud remote» (не «not mounted»/«missing»), на тик в сеть не ходим. Визард:
 шаг «Where to» пропускается для rclone (назначение = сам шаг Connection).
+**Полный аудит движка (2026-07-21):** прогон nb_public/_nb_sides/_nb_dest_for/nb_dest_state/
+nb_status/nb_build_cmd/_nb_rclone_cmd/nb_compare_cmd/nb_verify_cmd × 5 режимов (push local/ssh/
+rclone, pull rsync/ssh) × delete_mode add/mirror/archive — 0 ошибок. e2e dry-run push через
+rclone финализирует корректно (`running=False result=ok`). Найдено+исправлено: (1) **фолд сторон
+не давал push-rclone→pull** (ветка `cd==rclone` имела приоритет) — теперь при смене стороны чиним по
+той, что юзер ТОЛЬКО ЧТО поставил (dst=Cloud→push src local; src=remote→drop cloud dst→pull);
+(2) три UI-гейта на `dest_base` блокировали rclone (у него dest_base пустой): добавление папок,
+запуск, сводка визарда — теперь для rclone проверяют `remote`.
 Приложение переименовано в **«Rclone»**; иконка — фирменный 3-цветный логотип (`RAW_LOGOS.rclone`
 в `svg()`, свой viewBox с паддингом чтоб не был крупнее line-иконок). Save-бар вкладок закреплён
 снизу (`setFootAdopt`, как в Настройках). Путь в remote выбирается пикером `rcloneRemotePicker`
