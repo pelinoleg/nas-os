@@ -979,6 +979,11 @@
   .nb-field-row{display:flex;gap:8px}
   .nb-field-row input{flex:1;min-width:0}
   .nb-excl{width:100%;min-height:220px;font-family:var(--mono);font-size:12px;line-height:1.6;resize:vertical;margin-top:8px}
+  /* rclone.conf editor dialog */
+  .nb-rc-cm{border:1px solid var(--win-line,var(--line));border-radius:var(--r-sm);overflow:hidden;margin:4px 0 8px}
+  .nb-rc-cm .CodeMirror{height:340px;max-height:52vh;font-size:12.5px}
+  .nb-rc-detected{font-size:12px;color:var(--dim);margin-bottom:10px;line-height:1.8}
+  .nb-rc-tag{display:inline-block;background:var(--sel);color:var(--win-fg,var(--ink));border-radius:var(--r-sm);padding:1px 7px;font-size:11.5px;box-shadow:var(--sh-sm)}
   .nb-det{margin-top:16px}
   .nb-sum{cursor:pointer;list-style:none;display:flex;align-items:center;gap:6px;font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--mut);font-family:var(--mono);padding:4px 0;user-select:none}
   .nb-sum::-webkit-details-marker{display:none}
@@ -6576,7 +6581,7 @@ function nbPickSource(preselected,preExcl,onPick,opts){const s=document.getEleme
    refresh();})();}
 function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
  body.style.display="flex";body.style.flexDirection="column";body.style.padding="0";
- let tab="overview",CFG={},JOBS=[],PROFS=[],nbFootMo=null,wizStep=0,wizOn=null;
+ let tab="overview",CFG={},JOBS=[],PROFS=[],nbFootMo=null,wizStep=0,wizOn=null,RCLONE=null;
  // window opened → show the profile that matters now: a running run (or one waiting
  // in the queue), otherwise the one edited/run most recently. After that the choice is the user's
  let autoPick=true;
@@ -6603,23 +6608,63 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
  // single folder mode: recreate the WHOLE source tree under the base (Cloud/Desktop →
  // base/Cloud/Desktop), not just the last folder — otherwise structure is lost and names clash.
  // push: strip the familiar pool prefix mnt/storage (base/photos, not base/mnt/storage/photos)
- const destFor=src=>{const base=(CFG.dest_base||(isPush()?"":"/mnt/storage/nas-backup")).replace(/\/$/,"");
-  const rel=String(src).replace(/^\/+/,"");
-  return base+"/"+(isPush()?rel.replace(/^mnt\/storage\//,""):rel);};
+ const isRclone=()=>isPush()&&CFG.transport==="rclone";
+ const destFor=src=>{const rel0=String(src).replace(/^\/+/,"");
+  if(isRclone()){const rel=rel0.replace(/^mnt\/storage\//,""),rb=(CFG.remote_path||"").replace(/^\/+|\/+$/g,"");
+   return (CFG.remote||"remote")+":"+[rb,rel].filter(Boolean).join("/");}
+  const base=(CFG.dest_base||(isPush()?"":"/mnt/storage/nas-backup")).replace(/\/$/,"");
+  return base+"/"+(isPush()?rel0.replace(/^mnt\/storage\//,""):rel0);};
 
  // verify toggle row shared by both directions (checksum re-read after each run)
  const verifyRow=c=>`<div class="srow"><div class="srow-l"><div class="srow-t">Verify after copying${tipHTML("After the run rsync re-reads files on BOTH sides and compares checksums (--checksum). Catches corrupted copies and silent bit rot, but reads all data — slow on large volumes and heavy on the disks. Note: during transfer rsync already verifies every transferred file with a checksum — this pass is an extra safety net for important data.")}</div><div class="srow-d">checksums of all files after the run</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="cVer"${c.verify?" checked":""}><span class="sl"></span></label></div></div>`;
  const wireVerify=tc=>{const v=tc.querySelector("#cVer");if(v)v.onchange=()=>saveCfg({verify:v.checked});};
  /* ── Destination (push: where to send from this NAS) ── */
- function tabConnPush(tc){const c=CFG,ssh=c.transport==="ssh";
+ // rclone editor + control panel (a third push transport besides local disk / SSH)
+ function rcloneEdit(onSaved){
+  const s=document.getElementById("scrim");
+  s.innerHTML=`<div class="dialog" style="max-width:780px;width:92vw"><h3>rclone.conf${RCLONE&&RCLONE.version?` <span class="mono" style="font-weight:400;color:var(--mut);font-size:12px">rclone ${esc(RCLONE.version)}</span>`:""}</h3>
+    <p style="margin-bottom:6px">Paste the config you created on your Mac (<span class="mono">rclone config</span> writes <span class="mono">~/.config/rclone/rclone.conf</span>). Each <span class="mono">[name]</span> section is one remote you can back up to.</p>
+    <div id="rcEdHost" class="nb-rc-cm"></div>
+    <div class="nb-rc-detected" id="rcDet"></div>
+    <div class="r"><span class="sb-left" id="rcMsg" style="margin-right:auto;color:var(--mut);font-size:12px"></span><button class="btn" id="rcClose">Close</button><button class="btn pri" id="rcSave">${svg("check",13)} Save</button></div></div>`;
+  s.classList.add("show");
+  let cm=null;
+  ensureCM(()=>{cm=CodeMirror(s.querySelector("#rcEdHost"),{value:(RCLONE&&RCLONE.conf)||"",mode:"properties",lineNumbers:true,tabSize:2,styleActiveLine:true,lineWrapping:false});setTimeout(()=>cm.refresh(),40);});
+  const det=()=>{const el=s.querySelector("#rcDet");const rs=(RCLONE&&RCLONE.remotes)||[];
+   el.innerHTML=rs.length?("Detected remotes: "+rs.map(r=>`<span class="nb-rc-tag mono">${esc(r)}</span>`).join(" ")):`<span style="color:var(--mut)">No remotes detected yet — paste a config and Save.</span>`;};
+  det();
+  s.querySelector("#rcClose").onclick=()=>s.classList.remove("show");
+  s.querySelector("#rcSave").onclick=async()=>{
+   if(!cm)return;const msg=s.querySelector("#rcMsg");msg.textContent="saving…";
+   const r=await nbP("/api/backup/rclone/save",{conf:cm.getValue()});
+   if(r&&r.ok){RCLONE=Object.assign(RCLONE||{},{conf:cm.getValue(),remotes:r.remotes||[],version:r.version,installed:r.installed});
+    det();msg.textContent="saved · "+((r.remotes||[]).length)+" remote(s)";toast("rclone.conf saved");if(onSaved)onSaved();}
+   else msg.textContent=(r&&r.log)||"save failed";};
+ }
+ function tabConnPush(tc){const c=CFG,ssh=c.transport==="ssh",rc=c.transport==="rclone";
+  if(rc&&RCLONE===null){api("/api/backup/rclone").then(r=>{RCLONE=r||{};tabConnPush(tc);});}
   const rnet=c.provider==="rsyncnet",key=c.auth==="key",kinfo=c.key||{};
   const MHELP={local:{t:"Disk on this NAS",d:"The destination is a folder on this NAS, usually on an external USB disk. If the disk is not connected, the run is safely skipped: the panel makes sure the copy never spills into the system partition."},
    ssh:{t:"Another server (SSH + rsync)",d:"Send to any server with SSH and rsync: another NAS, a VPS, a box at a relative's place. Password login (via sshpass) or key-based (leave the password empty and add a key: ssh-copy-id user@address). Destination folders are created automatically."}};
-  const mh=MHELP[ssh?"ssh":"local"];
+  const mh=rc?null:MHELP[ssh?"ssh":"local"];
+  const remotes=(RCLONE&&RCLONE.remotes)||[],rcVer=(RCLONE&&RCLONE.version)||"",rcInst=RCLONE?!!RCLONE.installed:true,rcPath=(RCLONE&&RCLONE.path)||"/etc/nas-os/rclone.conf";
+  const dm=c.delete_mode||"add";
+  const MODED={add:"adds and updates files, never deletes on the remote — the safe default",
+   mirror:"mirrors the folder: files deleted locally are also deleted on the remote (capped by the deletion guard)",
+   archive:"mirrors, but deleted/overwritten files are kept in a dated folder on the remote instead of being erased"};
+  const rcloneBody=`<div class="nb-help"><b>Cloud (rclone)</b><span>Back up to any rclone remote — S3, Backblaze B2, SFTP, WebDAV, Google Drive and dozens more. You create the remotes on your Mac (<span class="mono">rclone config</span>) and paste rclone.conf into the editor; the panel stores it and runs the copy.</span></div>
+   ${!rcInst?`<div class="nb-err" style="margin:8px 0">rclone is not installed on this NAS. Use <b>Update rclone</b> below to install the latest version.</div>`:""}
+   <div class="srow"><div class="srow-l"><div class="srow-t">Remote</div><div class="srow-d">a remote defined in rclone.conf</div></div><div class="srow-c">${remotes.length?`<select class="mono" id="cRemote">${!c.remote?`<option value="" ${c.remote?"":"selected"}>— choose —</option>`:""}${remotes.map(r=>`<option ${r===c.remote?"selected":""}>${esc(r)}</option>`).join("")}</select>`:`<span style="color:var(--mut)">no remotes yet — edit rclone.conf</span>`}</div></div>
+   <div class="nb-field" style="margin-top:8px"><label>Path inside the remote${tipHTML("A base path within the remote where copies go — each source gets its own subfolder under it. Leave empty to use the remote's root. Example: nas-backup")}</label><input class="mono" id="cRPath" value="${att(c.remote_path||"")}" placeholder="nas-backup"></div>
+   <div class="srow"><div class="srow-l"><div class="srow-t">Mode</div><div class="srow-d">${MODED[dm]||MODED.add}</div></div><div class="srow-c"><div class="seg" id="cRMode"><button data-v="add" class="${dm==="add"?"on":""}">Copy</button><button data-v="mirror" class="${dm==="mirror"?"on":""}">Mirror</button><button data-v="archive" class="${dm==="archive"?"on":""}">Archive</button></div></div></div>
+   <div class="nb-rc-conf">
+    <div class="nb-field-row"><button class="btn sm" id="cRcEdit">${svg("edit",13)} Edit rclone.conf</button><button class="btn sm" id="cRcUp">${svg("download",13)} ${rcVer?"Update rclone":"Install rclone"}</button><span class="mono" style="color:var(--mut);font-size:11px;align-self:center">${rcVer?("rclone "+esc(rcVer)):"not installed"}</span></div>
+    <div class="srow-d" style="margin-top:4px">Config at <span class="mono">${esc(rcPath)}</span> · saved in the secret section of Settings backup</div>
+   </div>`;
   tc.innerHTML=`<h3 class="set-title">Destination</h3><p class="set-sub">Where to send copies from this NAS.</p>
-   <div class="srow"><div class="srow-l"><div class="srow-t">Where to copy</div></div><div class="srow-c"><div class="seg" id="cTr"><button data-v="local" class="${!ssh?"on":""}">Disk on this NAS</button><button data-v="ssh" class="${ssh?"on":""}">SSH server</button></div></div></div>
-   <div class="nb-help" id="cHelp"><b>${esc(mh.t)}</b><span>${esc(mh.d)}</span></div>
-   ${ssh?`<div class="srow"><div class="srow-l"><div class="srow-t">Server type</div><div class="srow-d">${rnet?"rsync.net: paths are relative to your home folder (no leading /), and the deleted-files archive needs no pruning — the account keeps ZFS snapshots itself":"a standard server with SSH and rsync (another NAS, a VPS, a relative's machine)"}</div></div><div class="srow-c"><div class="seg" id="cProv"><button data-v="" class="${rnet?"":"on"}">Standard</button><button data-v="rsyncnet" class="${rnet?"on":""}">rsync.net</button></div></div></div>
+   <div class="srow"><div class="srow-l"><div class="srow-t">Where to copy</div></div><div class="srow-c"><div class="seg" id="cTr"><button data-v="local" class="${!ssh&&!rc?"on":""}">Disk on this NAS</button><button data-v="ssh" class="${ssh?"on":""}">SSH server</button><button data-v="rclone" class="${rc?"on":""}">Cloud (rclone)</button></div></div></div>
+   ${mh?`<div class="nb-help" id="cHelp"><b>${esc(mh.t)}</b><span>${esc(mh.d)}</span></div>`:""}
+   ${rc?rcloneBody:ssh?`<div class="srow"><div class="srow-l"><div class="srow-t">Server type</div><div class="srow-d">${rnet?"rsync.net: paths are relative to your home folder (no leading /), and the deleted-files archive needs no pruning — the account keeps ZFS snapshots itself":"a standard server with SSH and rsync (another NAS, a VPS, a relative's machine)"}</div></div><div class="srow-c"><div class="seg" id="cProv"><button data-v="" class="${rnet?"":"on"}">Standard</button><button data-v="rsyncnet" class="${rnet?"on":""}">rsync.net</button></div></div></div>
    <div class="srow"><div class="srow-l"><div class="srow-t">Server address</div></div><div class="srow-c"><input class="mono" id="cHost" value="${att(c.host||"")}" placeholder="${rnet?"usw-s001.rsync.net":"192.168.1.50"}"></div></div>
    <div class="srow"><div class="srow-l"><div class="srow-t">User</div></div><div class="srow-c"><input class="mono" id="cUser" value="${att(c.user||"")}" placeholder="${rnet?"de1234":"root"}"></div></div>
    <div class="srow"><div class="srow-l"><div class="srow-t">Sign-in method</div><div class="srow-d">${key?"the panel's key — safer for automation, no password stored":"the password is stored in the config (in the secret section of the settings backup)"}</div></div><div class="srow-c"><div class="seg" id="cAuth"><button data-v="password" class="${key?"":"on"}">Password</button><button data-v="key" class="${key?"on":""}">Key</button></div></div></div>
@@ -6633,12 +6678,24 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
    <div class="srow"><div class="srow-l"><div class="srow-t">SSH port</div></div><div class="srow-c"><input class="mono" id="cPort" style="max-width:90px" value="${c.ssh_port||22}"></div></div>
    <div class="nb-field" style="margin-top:10px"><label>Folder on the server${tipHTML("Where the copies go (each source in its own subfolder); folders are created automatically. Easiest is the «Browse» button — it shows the server's folders as they are. If typing by hand: a regular Linux server takes an absolute path (/mnt/backup/nas), while NAS boxes like UGREEN/Synology wrap rsync into «modules», so the path is written FROM the module without a leading /: e.g. HDD6TB/Downloads/backup.")}</label><div class="nb-field-row"><input class="mono" id="cBase" value="${att(c.dest_base||"")}" placeholder="${rnet?esc(host())+"-backup":"/mnt/backup/"+esc(host())}"><button class="btn sm" id="cBaseR">${svg("folder",13)} Choose</button></div></div>`
    :`<div class="nb-field" style="margin-top:10px"><label>Destination folder${tipHTML("A folder on this NAS where the copies go — usually on an external USB disk. If the disk is not connected, the run is skipped and nothing spills into the system partition.")}</label><div class="nb-field-row"><input class="mono" id="cBase" value="${att(c.dest_base||"")}" placeholder="/media/usb-disk/backup"><button class="btn sm" id="cBaseB">${svg("folder",13)} Choose</button></div></div>`}
-   <div class="srow"><div class="srow-l"><div class="srow-t">Speed limit${tipHTML("Transfer speed limit in KB/s (rsync --bwlimit) so the backup doesn't hog the network and disk. 0 — no limit.")}</div><div class="srow-d">so it doesn't hog the network/disk</div></div><div class="srow-c"><input class="mono" id="cBw" style="max-width:90px" value="${c.bwlimit||0}"><span style="color:var(--mut);font-size:12px">KB/s</span></div></div>
-   ${verifyRow(c)}
+   <div class="srow"><div class="srow-l"><div class="srow-t">Speed limit${tipHTML("Transfer speed limit in KB/s (--bwlimit) so the backup doesn't hog the network and disk. 0 — no limit.")}</div><div class="srow-d">so it doesn't hog the network/disk</div></div><div class="srow-c"><input class="mono" id="cBw" style="max-width:90px" value="${c.bwlimit||0}"><span style="color:var(--mut);font-size:12px">KB/s</span></div></div>
+   ${rc?"":verifyRow(c)}
    <div class="set-savebar"><span class="sb-left nb-saved" id="cSaved"></span><button class="btn sm" id="cTest">${svg("refresh",13)} Check</button></div>
    <div class="nb-testr" id="cTestR"></div>`;
   const g=s=>tc.querySelector(s);
-  wireSeg(tc,"#cTr",v=>saveCfg({transport:v}).then(()=>tabConnPush(tc)));
+  // switching INTO rclone defaults to the safe Copy mode (never deletes on the remote)
+  wireSeg(tc,"#cTr",v=>saveCfg(v==="rclone"?{transport:v,delete_mode:"add"}:{transport:v}).then(()=>tabConnPush(tc)));
+  if(rc){
+   const rem=g("#cRemote");if(rem)rem.onchange=()=>saveCfg({remote:rem.value});
+   const rp=g("#cRPath");if(rp)rp.onchange=()=>saveCfg({remote_path:rp.value.trim()});
+   wireSeg(tc,"#cRMode",v=>saveCfg({delete_mode:v}).then(()=>tabConnPush(tc)));
+   const ed=g("#cRcEdit");if(ed)ed.onclick=()=>rcloneEdit(()=>tabConnPush(tc));
+   const up=g("#cRcUp");if(up)up.onclick=async()=>{
+    toast("Installing/updating rclone… (may take a minute)");up.disabled=true;
+    const r=await nbP("/api/backup/rclone/update",{});up.disabled=false;
+    if(r){RCLONE=Object.assign(RCLONE||{},{version:r.version,installed:r.installed});
+     toast(r.ok?("rclone "+(r.version||"ready")):("update failed"+(r.log?": "+r.log:"")));tabConnPush(tc);}};
+  }
   if(ssh){
    wireSeg(tc,"#cProv",v=>saveCfg({provider:v}).then(()=>tabConnPush(tc)));
    wireSeg(tc,"#cAuth",v=>saveCfg({auth:v}).then(()=>tabConnPush(tc)));
@@ -6685,16 +6742,30 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
     (SSH→SSH) rsync can't do it directly, so the source is mounted via sshfs, and copy
     runs on this NAS — we say so right in the card. ── */
  const KINDS_SRC=[["local","This NAS"],["ssh","SSH server"],["rsyncd","rsync daemon"]];
- const KINDS_DST=[["local","This NAS"],["ssh","SSH server"]];
+ const KINDS_DST=[["local","This NAS"],["ssh","SSH server"],["rclone","Cloud (rclone)"]];
+ const RC_MODED={add:"adds and updates files, never deletes on the remote — the safe default",
+   mirror:"mirrors the folder: files deleted locally are also deleted on the remote (capped by the deletion guard)",
+   archive:"mirrors, but deleted/overwritten files are kept in a dated folder on the remote instead of being erased"};
+ // rclone destination body (dst side only) — remote picker + path + mode + rclone.conf editor
+ function rcloneDstBody(S){
+  const c=CFG,remotes=(RCLONE&&RCLONE.remotes)||[],rcVer=(RCLONE&&RCLONE.version)||"",
+   rcInst=RCLONE?!!RCLONE.installed:true,rcPath=(RCLONE&&RCLONE.path)||"/etc/nas-os/rclone.conf",dm=c.delete_mode||"add";
+  return `<div class="nb-kindhint"><b>Cloud (rclone)</b> — S3, Backblaze B2, SFTP, WebDAV, Google Drive and dozens more. You create the remotes on your Mac (<span class="mono">rclone config</span>) and paste rclone.conf below; the panel stores it and runs the copy.</div>
+   ${!rcInst?`<div class="nb-dwarn" style="margin-top:8px">rclone is not installed on this NAS — use «Install rclone» below.</div>`:""}
+   <div class="srow" style="padding:8px 0 0"><div class="srow-l"><div class="srow-t">Remote</div><div class="srow-d">a remote defined in rclone.conf</div></div><div class="srow-c">${remotes.length?`<select class="mono" id="rc_remote">${!S.remote?`<option value="" selected>— choose —</option>`:""}${remotes.map(r=>`<option ${r===S.remote?"selected":""}>${esc(r)}</option>`).join("")}</select>`:`<span style="color:var(--mut)">no remotes yet — edit rclone.conf</span>`}</div></div>
+   <div class="nb-field" style="margin-top:8px"><label>Path inside the remote${tipHTML("A base path within the remote where copies go — each source gets its own subfolder under it. Leave empty for the remote's root. Example: nas-backup")}</label><input class="mono" id="rc_path" value="${att(S.remote_path||"")}" placeholder="nas-backup"></div>
+   <div class="srow" style="padding:8px 0 0"><div class="srow-l"><div class="srow-t">Mode</div><div class="srow-d">${RC_MODED[dm]||RC_MODED.add}</div></div><div class="srow-c"><div class="seg sm" id="rc_mode"><button data-v="add" class="${dm==="add"?"on":""}">Copy</button><button data-v="mirror" class="${dm==="mirror"?"on":""}">Mirror</button><button data-v="archive" class="${dm==="archive"?"on":""}">Archive</button></div></div></div>
+   <div class="nb-field-row" style="margin-top:10px"><button class="btn sm" id="rc_edit">${svg("edit",13)} Edit rclone.conf</button><button class="btn sm" id="rc_up">${svg("download",13)} ${rcVer?"Update rclone":"Install rclone"}</button><span class="mono" style="color:var(--mut);font-size:11px;align-self:center">${rcVer?("rclone "+esc(rcVer)):"not installed"}</span></div>
+   <div class="srow-d" style="margin-top:4px">Config at <span class="mono">${esc(rcPath)}</span> · saved in the secret section of Settings backup</div>`;}
  function sideCard(w){
-  const c=CFG,S=(w==="src"?c.src:c.dst)||{kind:"local"},rem=S.kind!=="local";
+  const c=CFG,S=(w==="src"?c.src:c.dst)||{kind:"local"},rcl=(w==="dst"&&S.kind==="rclone"),rem=(S.kind==="ssh"||S.kind==="rsyncd");
   const kinds=w==="src"?KINDS_SRC:KINDS_DST,ttl=w==="src"?"Source":"Destination";
   const key=S.auth==="key",rnet=S.provider==="rsyncnet",kinfo=c.key||{};
   return `<div class="nb-dest" data-side="${w}">
-   <div class="nb-dest-h"><span class="nb-dest-t">${svg(rem?"net":"folder",15)} ${ttl}</span>
-    <span class="nb-dest-w mono">${rem?((S.user||S.host)?esc((S.user||"…")+"@"+(S.host||"…")):"not set yet"):(w==="src"?"folders on this NAS":"a folder on this NAS")}</span>
+   <div class="nb-dest-h"><span class="nb-dest-t">${svg(rcl||rem?"net":"folder",15)} ${ttl}</span>
+    <span class="nb-dest-w mono">${rcl?(S.remote?esc(S.remote+":"+(S.remote_path||"")):"no remote chosen"):rem?((S.user||S.host)?esc((S.user||"…")+"@"+(S.host||"…")):"not set yet"):(w==="src"?"folders on this NAS":"a folder on this NAS")}</span>
     <div class="seg sm" id="k_${w}">${kinds.map(([v,l])=>`<button data-v="${v}" class="${S.kind===v?"on":""}">${l}</button>`).join("")}</div></div>
-   ${rem?`<div class="nb-kindhint">${S.kind==="rsyncd"
+   ${rcl?rcloneDstBody(S):rem?`<div class="nb-kindhint">${S.kind==="rsyncd"
      ?`<b>rsync daemon</b> — the NAS "rsync service" (Synology/UGREEN/QNAP modules): faster on a LAN, unencrypted; signs in with a module name + its password, the folder field takes the module name.`
      :`<b>SSH server</b> — any Linux/NAS with SSH: encrypted, normal user account. The safe default.`}</div>
    <div class="nb-grid2">
@@ -6719,6 +6790,8 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
  function tabConn(tc,part){const c=CFG;
   const again=()=>tabConn(tc,part);
   const both=c.both_remote,sides=part==="sides";
+  // rclone destination needs the remotes list / version — fetch once, then re-render
+  if(c.dst&&c.dst.kind==="rclone"&&RCLONE===null){api("/api/backup/rclone").then(r=>{RCLONE=r||{};again();});}
   tc.innerHTML=`<h3 class="set-title">Connections</h3><p class="set-sub">Where we take data from and where we put it. The two sides are independent: each can be this NAS or a remote server.</p>
    ${sideCard("src")}
    <div class="nb-arrow-row">${svg("arrowup",16)}</div>
@@ -6731,7 +6804,8 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
   const g=q=>tc.querySelector(q);
   ["src","dst"].forEach(w=>{
    const S=(w==="src"?CFG.src:CFG.dst)||{};
-   wireSeg(tc,"#k_"+w,v=>saveCfg({[w]:{kind:v}}).then(again));
+   // switching the destination INTO rclone defaults to the safe Copy mode (never deletes)
+   wireSeg(tc,"#k_"+w,v=>saveCfg(w==="dst"&&v==="rclone"?{[w]:{kind:v},delete_mode:"add"}:{[w]:{kind:v}}).then(again));
    wireSeg(tc,"#a_"+w,v=>saveCfg({[w]:{auth:v}}).then(again));
    wireSeg(tc,"#v_"+w,v=>saveCfg({[w]:{provider:v}}).then(again));
    const h=g("#h_"+w);if(h)h.onchange=()=>saveCfg({[w]:{host:h.value.trim()}});
@@ -6749,6 +6823,16 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
   });
   {const su=g("#su_src");if(su)su.onchange=()=>saveCfg({remote_sudo:su.checked});}
   {const bw=g("#cBw");if(bw)bw.onchange=()=>saveCfg({bwlimit:+bw.value||0});}
+  // rclone destination controls (dst side): remote picker, path, mode, config editor, update
+  {const rem=g("#rc_remote");if(rem)rem.onchange=()=>saveCfg({remote:rem.value}).then(()=>{JOBS=(CFG.jobs||[]).slice();again();});
+   const rp=g("#rc_path");if(rp)rp.onchange=()=>saveCfg({remote_path:rp.value.trim()}).then(()=>{JOBS=(CFG.jobs||[]).slice();again();});
+   wireSeg(tc,"#rc_mode",v=>saveCfg({delete_mode:v}).then(again));
+   const ed=g("#rc_edit");if(ed)ed.onclick=()=>rcloneEdit(again);
+   const up=g("#rc_up");if(up)up.onclick=async()=>{
+    toast("Installing/updating rclone… (may take a minute)");up.disabled=true;
+    const r=await nbP("/api/backup/rclone/update",{});up.disabled=false;
+    if(r){RCLONE=Object.assign(RCLONE||{},{version:r.version,installed:r.installed});
+     toast(r.ok?("rclone "+(r.version||"ready")):("update failed"+(r.log?": "+r.log:"")));again();}};}
   wireVerify(tc);
   g("#cTest").onclick=async()=>{const rr=g("#cTestR");rr.innerHTML=`<span class="nb-ok" style="color:var(--mut)">checking…</span>`;
    const t=await nbP("/api/backup/test");
@@ -6759,13 +6843,20 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
  /* ── Destination card, shown under "Where the copies land" on the What-to-copy tab
     (AFTER the folder list: the tab reads in data-flow order). Push has tabs
     "Local | SSH server", while pull's destination can only be local. ── */
- const destCard=()=>{const c=CFG,D=c.dst||{kind:"local"},ssh=D.kind==="ssh",rnet=D.provider==="rsyncnet";
+ const destCard=()=>{const c=CFG,D=c.dst||{kind:"local"},ssh=D.kind==="ssh",rcl=D.kind==="rclone",rnet=D.provider==="rsyncnet";
+  const kseg=`<div class="seg sm" id="dTr"><button data-v="local" class="${!ssh&&!rcl?"on":""}">This NAS</button><button data-v="ssh" class="${ssh?"on":""}">SSH server</button><button data-v="rclone" class="${rcl?"on":""}">Cloud</button></div>`;
+  if(rcl){const rt=D.remote?esc(D.remote+":"+(D.remote_path||"")):"";
+   return `<div class="nb-dest">
+    <div class="nb-dest-h"><span class="nb-dest-t">${svg("net",15)} Destination</span>
+     <span class="nb-dest-w mono">${rt||"no remote chosen"}</span>${kseg}</div>
+    <div class="srow-d" style="margin-top:6px">Cloud (rclone) — set up on the <b>Connection</b> tab. ${rt?"Each folder below is copied to "+rt+"/…":""}<button class="btn sm" id="dConn" style="margin-left:8px">${svg("net",13)} Connection</button></div>
+    ${!D.remote?`<div class="nb-dwarn" style="margin-top:8px">No remote chosen — a run will not start. Choose one on the Connection tab.</div>`:""}
+   </div>`;}
   const who=ssh?`${esc(D.user||"?")}@${esc(D.host||"not set")}${rnet?" · rsync.net":""}`:"a folder on THIS NAS";
   const ph=ssh?(rnet?host()+"-backup":"/mnt/backup/"+host()):"/media/usb-disk/backup";
   return `<div class="nb-dest">
    <div class="nb-dest-h"><span class="nb-dest-t">${svg(ssh&&push?"net":"folder",15)} Destination</span>
-    <span class="nb-dest-w mono">${who}</span>
-    <div class="seg sm" id="dTr"><button data-v="local" class="${ssh?"":"on"}">This NAS</button><button data-v="ssh" class="${ssh?"on":""}">SSH server</button></div></div>
+    <span class="nb-dest-w mono">${who}</span>${kseg}</div>
    <div class="nb-field-row"><input class="mono" id="sBase" value="${att(c.dest_base||"")}" placeholder="${esc(ph)}"><button class="btn sm" id="sBaseB">${svg("folder",13)} Choose</button>
     ${ssh?`<button class="btn sm" id="dConn">${svg("key",13)} Connection</button>`:""}</div>
    ${!c.dest_base?`<div class="nb-dwarn" style="margin-top:8px">No destination selected — a run will not start without it.</div>`:""}
@@ -6782,7 +6873,7 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
   const secFolders=`<div style="display:flex;justify-content:space-between;align-items:center;margin:4px 0 6px"><span class="set-h" style="margin:0;padding:0;border:none">Folders</span><button class="btn sm pri" id="sAdd">${svg("plus",13)} ${push?"Choose folders":"Pick from NAS"}</button></div>
    <div id="sJobs"></div>`;
   const secDest=`${destCard()}
-   ${isPushSsh()?"":`<div class="srow"><div class="srow-l"><div class="srow-t">Destination mode${tipHTML("Single folder — everything into one folder, as subfolders. Separate per source — each source gets its own folder-destination.")}</div><div class="srow-d">${per?"each source gets its own folder":"everything into one folder, as subfolders"}</div></div><div class="srow-c"><div class="seg" id="sDm"><button data-v="single" class="${!per?"on":""}">Single folder</button><button data-v="per" class="${per?"on":""}">Separate</button></div></div></div>`}`;
+   ${(isPushSsh()||isRclone())?"":`<div class="srow"><div class="srow-l"><div class="srow-t">Destination mode${tipHTML("Single folder — everything into one folder, as subfolders. Separate per source — each source gets its own folder-destination.")}</div><div class="srow-d">${per?"each source gets its own folder":"everything into one folder, as subfolders"}</div></div><div class="srow-c"><div class="seg" id="sDm"><button data-v="single" class="${!per?"on":""}">Single folder</button><button data-v="per" class="${per?"on":""}">Separate</button></div></div></div>`}`;
   // no "add dev patterns"/"reset" buttons: the default list already ships with
   // everything (junk + development) — the textarea IS the whole interface
   const exclInner=`<textarea id="sExcl" class="nb-excl" spellcheck="false">${esc((c.excludes||[]).join("\n"))}</textarea>`;
@@ -6817,7 +6908,8 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
     box.appendChild(row);});};
   drawJobs();
   wireSeg(tc,"#sDm",v=>saveCfg({dest_mode:v}).then(again));
-  wireSeg(tc,"#dTr",v=>saveCfg({dst:{kind:v}}).then(again));
+  // switching the destination INTO rclone defaults to the safe Copy mode (never deletes)
+  wireSeg(tc,"#dTr",v=>saveCfg(v==="rclone"?{dst:{kind:v},delete_mode:"add"}:{dst:{kind:v}}).then(again));
   {const dc=g("#dConn");if(dc)dc.onclick=()=>{tab="conn";wizStep=0;render();};}
   // redraw after saving: the server re-derives every job's dest from the new base, so the
   // list must be repainted — otherwise it keeps showing the destinations of the old folder

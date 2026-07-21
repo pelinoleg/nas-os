@@ -3378,6 +3378,51 @@ MOTD
 
 setup_snapraid_notify_noninteractive() { :; }   # notifications are configured separately (api notify)
 
+# rclone — the cloud engine for the panel's «Backup» app (S3/B2/SFTP/WebDAV/Drive/…).
+# Installed from the OFFICIAL binary, not apt: the apt package lags releases and, more
+# importantly, `rclone selfupdate` refuses to touch a package-managed binary — the panel's
+# «Update rclone» button (api rclone-update) relies on selfupdate. So we drop the latest
+# release straight into /usr/bin. install_rclone [ensure|update]:
+#   ensure (default, called from auto-base) — install only if missing;
+#   update (api rclone-update)              — self-update in place to the latest release.
+install_rclone() {
+    local mode="${1:-ensure}"
+    if command -v rclone >/dev/null 2>&1; then
+        if [ "$mode" = update ]; then
+            info "Updating rclone (was $(rclone version 2>/dev/null | awk 'NR==1{print $2}'))"
+            run rclone selfupdate || warn "rclone selfupdate failed"
+        fi
+        info "rclone: $(rclone version 2>/dev/null | head -1)"
+        return 0
+    fi
+    info "Installing rclone (latest official binary)"
+    local arch
+    case "$(uname -m)" in
+        aarch64|arm64) arch=arm64 ;;
+        armv7l)        arch=arm-v7 ;;
+        armv6l)        arch=arm ;;
+        x86_64|amd64)  arch=amd64 ;;
+        *)             arch=arm64 ;;
+    esac
+    local tmp; tmp="$(mktemp -d)" || return 1
+    local zip="$tmp/rclone.zip"
+    if run wget -qO "$zip" "https://downloads.rclone.org/rclone-current-linux-${arch}.zip"; then
+        run unzip -q -o "$zip" -d "$tmp"
+        local bin; bin="$(find "$tmp" -type f -name rclone 2>/dev/null | head -1)"
+        if [ -n "$bin" ]; then
+            run install -m0755 "$bin" /usr/bin/rclone
+            local man; man="$(find "$tmp" -name rclone.1 2>/dev/null | head -1)"
+            [ -n "$man" ] && { run mkdir -p /usr/local/share/man/man1; run install -m0644 "$man" /usr/local/share/man/man1/; }
+        else
+            warn "rclone binary not found in the downloaded archive"
+        fi
+    else
+        warn "could not download rclone (no network?) — the panel can retry via «Update rclone»"
+    fi
+    rm -rf "$tmp"
+    command -v rclone >/dev/null 2>&1 && info "rclone installed: $(rclone version 2>/dev/null | head -1)"
+}
+
 # ---------------------------------------------------------------------------
 # Non-interactive apply wrappers for the API (reuse proven functions)
 # ---------------------------------------------------------------------------
@@ -3401,6 +3446,7 @@ stage_system_apply() {
     install_packages "Pi packages" "${PI_PACKAGES[@]}"
     ensure_docker_repo   # docker-ce + compose-plugin from the official Docker repo
     ensure_gh            # GitHub CLI (to push panel code from the box)
+    install_rclone       # cloud engine for the «Backup» app (latest official binary; selfupdate-able)
     # Automatic security updates are part of the base: a box that nobody touches for
     # a year must not sit on unpatched CVEs. Security-only channel (Debian default
     # origins), so nothing feature-breaking arrives; panel Settings can toggle it off.
@@ -3817,6 +3863,7 @@ run_api() {
         backup)         api_keys_run bk ;;
         notify)         api_notify ;;
         netguard)       install_netguard ;;
+        rclone-update)  install_rclone update ;;
         motd)           install_motd ;;
         tailscale)      mod_tailscale ;;
         staticip)       mod_staticip ;;

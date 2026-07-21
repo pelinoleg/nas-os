@@ -4337,6 +4337,88 @@ NB_MAIN   = "main"                        # id of the first (legacy) profile
 NB_MAX_PROFILES = 8
 _NB_PID_RE = re.compile(r"^[a-z0-9]{1,12}$")
 
+# --------------------------------------------------------------------------- #
+#  rclone — a third push transport (besides local disk / SSH). We do NOT build
+#  remotes here: the user creates them on their Mac (`rclone config`) and pastes
+#  the resulting rclone.conf into the in-app editor. The panel only stores that
+#  file, lists the remotes it defines, and runs `rclone copy/sync`. The config
+#  path is panel-owned and fixed so the user never has to hunt for it on disk;
+#  it holds cloud keys → root 600, and it rides along in the settings backup.
+# --------------------------------------------------------------------------- #
+RCLONE_CONF = "/etc/nas-os/rclone.conf"
+_RCLONE_REMOTE_RE = re.compile(r"^[\w.+ -]{1,64}$")   # rclone remote name (no ':')
+
+def _rclone_bin():
+    return shutil.which("rclone") or "/usr/bin/rclone"
+
+def rclone_installed():
+    return bool(shutil.which("rclone")) or os.path.exists("/usr/bin/rclone")
+
+def rclone_version():
+    """Installed rclone version string ('' if missing)."""
+    if not rclone_installed():
+        return ""
+    try:
+        r = subprocess.run([_rclone_bin(), "version"], capture_output=True, text=True, timeout=10)
+        m = re.search(r"rclone\s+v?([\d.]+)", r.stdout or "")
+        return m.group(1) if m else ""
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+def rclone_conf_read():
+    try:
+        with open(RCLONE_CONF) as f:
+            return f.read()
+    except OSError:
+        return ""
+
+def rclone_conf_write(txt):
+    """Save the pasted rclone.conf (root 600). Returns True on success."""
+    try:
+        os.makedirs(os.path.dirname(RCLONE_CONF), exist_ok=True)
+        tmp = RCLONE_CONF + ".tmp"
+        with open(tmp, "w") as f:
+            f.write(txt if txt.endswith("\n") or not txt else txt + "\n")
+        os.chmod(tmp, 0o600); os.replace(tmp, RCLONE_CONF)
+        return True
+    except OSError:
+        return False
+
+def rclone_remotes():
+    """Names of the remotes defined in rclone.conf (for the destination dropdown)."""
+    if not rclone_installed() or not os.path.exists(RCLONE_CONF):
+        return []
+    try:
+        r = subprocess.run([_rclone_bin(), "--config", RCLONE_CONF, "listremotes"],
+                           capture_output=True, text=True, timeout=12)
+        return [x.strip().rstrip(":") for x in (r.stdout or "").split() if x.strip().endswith(":")]
+    except (OSError, subprocess.SubprocessError):
+        return []
+
+def rclone_test_remote(remote):
+    """Reachability probe for one remote: list its top level with a short timeout."""
+    if not rclone_installed():
+        return {"ok": False, "log": "rclone is not installed"}
+    remote = str(remote or "").strip().rstrip(":")
+    if not _RCLONE_REMOTE_RE.match(remote):
+        return {"ok": False, "log": "invalid remote name"}
+    if remote not in rclone_remotes():
+        return {"ok": False, "log": "no such remote in rclone.conf"}
+    try:
+        r = subprocess.run([_rclone_bin(), "--config", RCLONE_CONF, "lsd", remote + ":",
+                            "--max-depth", "1", "--low-level-retries", "1",
+                            "--retries", "1", "--timeout", "20s", "--contimeout", "15s"],
+                           capture_output=True, text=True, timeout=45)
+        if r.returncode == 0:
+            n = len([l for l in (r.stdout or "").splitlines() if l.strip()])
+            return {"ok": True, "log": "connection works · %d folder(s) at the top level" % n}
+        err = ((r.stderr or r.stdout) or "").strip().splitlines()
+        return {"ok": False, "log": (err[-1] if err else "connection failed")[:200]}
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "log": "timed out — remote did not respond"}
+    except (OSError, subprocess.SubprocessError) as e:
+        return {"ok": False, "log": str(e)[:200]}
+
 # A backup run is launched as a SEPARATE process in a transient systemd unit
 # (outside the service cgroup) → it survives a restart/update of nas-web. The driver
 # writes output to a log file and status to json; the UI/server read them and reconnect.
@@ -4448,6 +4530,8 @@ def _nb_defaults():
     # to an external disk (transport=local) or to another server (transport=ssh)
     return {"direction": "pull", "verify": False,
          "transport": "rsync", "host": "", "user": "", "password": "", "ssh_port": 22,
+         # rclone push transport: which remote (from rclone.conf) and the base path inside it
+         "remote": "", "remote_path": "",
          # auth: "password" (sshpass, as before) or "key" — a key created by the panel.
          # provider: "" = a regular server, "rsyncnet" = an rsync.net account (restricted
          # shell, paths FROM the HOME folder, no retention needed — they have ZFS snapshots).
@@ -4555,7 +4639,14 @@ def _nb_sides(cfg):
     tr = cfg.get("transport") or "rsync"
     if cfg.get("direction") == "push":
         src = {"kind": "local"}
-        dst = dict(conn, kind="ssh") if tr == "ssh" else {"kind": "local"}
+        if tr == "ssh":
+            dst = dict(conn, kind="ssh")
+        elif tr == "rclone":
+            # rclone destination: not host/user but a remote name + base path (from rclone.conf)
+            dst = {"kind": "rclone", "remote": cfg.get("remote", ""),
+                   "remote_path": cfg.get("remote_path", "")}
+        else:
+            dst = {"kind": "local"}
     else:
         src = dict(conn, kind=("rsyncd" if tr == "rsync" else "ssh"))
         # a pull profile's destination can also be remote — that is SSH→SSH
@@ -4589,6 +4680,20 @@ def _nb_push(cfg):
 def _nb_push_ssh(cfg):
     return _nb_push(cfg) and (cfg or {}).get("transport") == "ssh"
 
+def _nb_rclone(cfg):
+    """rclone push transport: the destination is a cloud/remote defined in rclone.conf."""
+    return _nb_push(cfg) and (cfg or {}).get("transport") == "rclone"
+
+def _nb_valid_rclone_dest(p):
+    """An rclone destination is 'remote:path' — a valid remote name before ':' and a
+    safe (no '..') path after it. The remote itself is re-checked against rclone.conf
+    at run time; here we only guard the shape so a bad dest can't reach the command."""
+    p = str(p or "").strip()
+    if ":" not in p:
+        return False
+    remote, _, path = p.partition(":")
+    return bool(_RCLONE_REMOTE_RE.match(remote)) and ".." not in path and "\n" not in p
+
 def _nb_valid_push_dest(p):
     """push-ssh destination: an absolute remote path OR a module-style path (no
     leading /) — NAS boxes like UGREEN/Synology force rsync-over-SSH into daemon
@@ -4601,7 +4706,6 @@ def _nb_dest_for(cfg, src):
     the UI: recreate the WHOLE source tree under the base (base/Cloud/Desktop, not base/Desktop)
     so trees can't collide; on push drop the familiar pool prefix, so it reads base/photos
     instead of base/mnt/storage/photos."""
-    base = (cfg.get("dest_base") or "").rstrip("/")
     rel = str(src).lstrip("/")
     if _nb_push(cfg):
         # mirror the folder tree relative to the ACTUAL storage root, not a literal
@@ -4609,6 +4713,14 @@ def _nb_dest_for(cfg, src):
         root = (storage_base() or STORAGE).strip("/")
         if root and (rel == root or rel.startswith(root + "/")):
             rel = rel[len(root):].lstrip("/")
+    if _nb_rclone(cfg):
+        # rclone destination: 'remote:base/<mirrored tree>'. Not a filesystem path —
+        # never run it through normpath (that would eat the '//' and mangle 'remote:')
+        remote = (cfg.get("remote") or "").strip().rstrip(":")
+        rbase = (cfg.get("remote_path") or "").strip().strip("/")
+        path = "/".join(x for x in (rbase, rel) if x)
+        return remote + ":" + path
+    base = (cfg.get("dest_base") or "").rstrip("/")
     return os.path.normpath(base + "/" + rel)
 
 def nb_save(patch, pid=None):
@@ -4633,7 +4745,8 @@ def nb_save(patch, pid=None):
             continue
         q = patch[sd]
         kind = q.get("kind")
-        if kind not in ("local", "ssh", "rsyncd"):
+        # rclone is a destination-only kind (push to cloud); source stays local
+        if kind not in ("local", "ssh", "rsyncd") and not (sd == "dst" and kind == "rclone"):
             kind = None
         cs, cd = _nb_sides(cur)
         side = dict(cs if sd == "src" else cd)
@@ -4651,7 +4764,8 @@ def nb_save(patch, pid=None):
         # fold back into the profile
         if cs["kind"] == "local":
             cur["direction"] = "push"
-            cur["transport"] = "ssh" if cd["kind"] == "ssh" else "local"
+            cur["transport"] = ("ssh" if cd["kind"] == "ssh"
+                                else "rclone" if cd["kind"] == "rclone" else "local")
             far = cd if cd["kind"] == "ssh" else {}
             cur["dst2"] = {}
         else:
@@ -4683,6 +4797,15 @@ def nb_save(patch, pid=None):
     for k in ("transport", "host", "user", "password", "dest_base", "delete_mode", "dest_mode"):
         if k in patch and isinstance(patch[k], str):
             cur[k] = patch[k].strip()
+    # rclone push: which remote (from rclone.conf) and the base path inside it.
+    # transport=rclone implies push (there's no rclone «pull» profile here).
+    if "remote" in patch and isinstance(patch["remote"], str):
+        r = patch["remote"].strip().rstrip(":")
+        cur["remote"] = r if (r == "" or _RCLONE_REMOTE_RE.match(r)) else cur.get("remote", "")
+    if "remote_path" in patch and isinstance(patch["remote_path"], str):
+        cur["remote_path"] = re.sub(r"[^\w \-.А-Яа-яЁё/]", "", patch["remote_path"]).replace("..", "").strip("/")[:200]
+    if cur.get("transport") == "rclone":
+        cur["direction"] = "push"
     if isinstance(patch.get("deleted_dir"), str):
         v = re.sub(r"[^\w \-.{}/А-Яа-яЁё]", "", patch["deleted_dir"]).replace("..", "").strip("/")[:120]
         cur["deleted_dir"] = v or "_deleted/{date}"
@@ -4697,12 +4820,16 @@ def nb_save(patch, pid=None):
         cur["remote_sudo"] = bool(patch["remote_sudo"])
     if isinstance(patch.get("jobs"), list):
         jobs = []
-        dst_ok = _nb_valid_push_dest if _nb_push_ssh(cur) else _nb_valid_dest
+        rclone = _nb_rclone(cur)
+        dst_ok = (_nb_valid_rclone_dest if rclone
+                  else _nb_valid_push_dest if _nb_push_ssh(cur) else _nb_valid_dest)
         for j in patch["jobs"][:200]:
             if not isinstance(j, dict): continue
             src = str(j.get("src", "")).strip().rstrip("/")   # keep the leading / (SSH abs paths)
-            dst = os.path.normpath(str(j.get("dest", "")).strip())
-            if not src or not dst_ok(dst): continue
+            # rclone dests are 'remote:path' — never normpath them (that mangles the ':'
+            # and the '//'); the final dest is re-derived from src at the end anyway
+            dst = str(j.get("dest", "")).strip() if rclone else os.path.normpath(str(j.get("dest", "")).strip())
+            if not src or (not dst_ok(dst) and not rclone): continue
             job = {"src": src, "dest": dst, "enabled": bool(j.get("enabled", True))}
             # per-job excludes: anchored rsync patterns relative to src (leading /).
             # so unchecking a nested folder excludes it, while the parent copies
@@ -4727,7 +4854,7 @@ def nb_save(patch, pid=None):
         if re.match(r"^([01]\d|2[0-3]):[0-5]\d$", str(s.get("time", ""))): cur["schedule"]["time"] = s["time"]
         if s.get("dow") in ("Mon","Tue","Wed","Thu","Fri","Sat","Sun"): cur["schedule"]["dow"] = s["dow"]
     if cur.get("direction") not in ("pull", "push"): cur["direction"] = "pull"
-    tr_ok = ("local", "ssh") if _nb_push(cur) else ("rsync", "ssh")
+    tr_ok = ("local", "ssh", "rclone") if _nb_push(cur) else ("rsync", "ssh")
     if cur["transport"] not in tr_ok: cur["transport"] = tr_ok[0]
     # re-validate jobs against the FINAL direction/transport: switching e.g. push-ssh →
     # local must not keep module-relative dests ("HDD6TB/…") that a local run would
@@ -4740,12 +4867,23 @@ def nb_save(patch, pid=None):
     # the panel shows the new folder while rsync silently keeps filling the previous one
     # (real case 2026-07-12 — base said /media/nas/UNTITLED_2, jobs still went to
     # /mnt/storage/nas-backup-2). Per-job mode is the one where dests are edited by hand.
-    per_mode = cur["dest_mode"] == "per" and not _nb_push_ssh(cur)   # same rule as the UI
-    if not per_mode and (cur.get("dest_base") or "").strip():
+    # rclone always derives dests from (remote, remote_path, src) — same single-folder
+    # rule; there is no per-job hand-editing of a 'remote:path' destination
+    per_mode = cur["dest_mode"] == "per" and not _nb_push_ssh(cur) and not _nb_rclone(cur)
+    if _nb_rclone(cur):
+        # rclone dests are ALWAYS derived from (remote, remote_path, src) and re-derived on
+        # every save — so switching a profile INTO rclone (before a remote is picked) keeps
+        # every source instead of dropping them for having non-rclone dests. Once the remote
+        # is chosen a later save re-derives them into valid 'remote:path' destinations.
         for j in cur.get("jobs") or []:
             j["dest"] = _nb_dest_for(cur, j["src"])
-    final_ok = _nb_valid_push_dest if _nb_push_ssh(cur) else _nb_valid_dest
-    cur["jobs"] = [j for j in (cur.get("jobs") or []) if final_ok(j.get("dest", ""))]
+    else:
+        have_base = bool((cur.get("dest_base") or "").strip())
+        if not per_mode and have_base:
+            for j in cur.get("jobs") or []:
+                j["dest"] = _nb_dest_for(cur, j["src"])
+        final_ok = _nb_valid_push_dest if _nb_push_ssh(cur) else _nb_valid_dest
+        cur["jobs"] = [j for j in (cur.get("jobs") or []) if final_ok(j.get("dest", ""))]
     cur["saved"] = int(time.time())   # the last-touched profile is the one to open
     profs = [cur if p["id"] == cur["id"] else p for p in nb_profiles()]
     _nb_write_profiles(profs)
@@ -4783,9 +4921,11 @@ def nb_profiles_public():
     out = []
     for p in nb_profiles():
         pid = p["id"]
-        # push to a local disk is configured without a host — a destination and jobs are enough
+        # push to a local disk is configured without a host — a destination and jobs are enough;
+        # push to rclone needs a remote chosen (no host, no dest_base)
         conn = bool(p.get("host")) or (p.get("direction") == "push" and p.get("transport") == "local"
-                                       and bool(p.get("dest_base")))
+                                       and bool(p.get("dest_base"))) \
+               or (_nb_rclone(p) and bool(p.get("remote")))
         st = _nb_run_state_read(pid)
         out.append({"id": pid, "name": p["name"], "direction": p.get("direction") or "pull",
                     "running": nb_run_active(pid), "queued": nb_queued(pid),
@@ -5081,6 +5221,15 @@ def nb_test(cfg=None):
         if not shutil.which("sshfs"):
             return {"ok": False, "log": "SSH to SSH mode requires sshfs"}
         return {"ok": True, "log": "both sides are reachable · the copy will go through this NAS"}
+    if _nb_rclone(cfg):
+        if not rclone_installed():
+            return {"ok": False, "log": "rclone is not installed — install it from the rclone.conf panel"}
+        remote = (cfg.get("remote") or "").strip().rstrip(":")
+        if not remote:
+            return {"ok": False, "log": "no rclone remote selected"}
+        if remote not in rclone_remotes():
+            return {"ok": False, "log": "remote «%s» is not in rclone.conf" % remote}
+        return rclone_test_remote(remote)
     if cfg.get("transport") == "local":
         base = cfg.get("dest_base") or ""
         if not base:
@@ -5533,6 +5682,178 @@ def _nb_owner_access(dest):
         except (OSError, subprocess.SubprocessError):
             pass
 
+def _nb_rclone_cmd(cfg, job, dry, prev_files=0, allow_delete=False):
+    """rclone command for one job. delete_mode maps to the engine:
+      add     → `copy`  (never deletes on the remote — the safe default)
+      mirror  → `sync`  (deletes extras, capped by the --max-delete guard)
+      archive → `sync`  + `--backup-dir` (deleted/overwritten files moved to a dated
+                folder on the remote, the rclone equivalent of the _deleted archive)."""
+    src = "/" + job["src"].lstrip("/")            # local absolute source
+    dest = job["dest"]                            # remote:path (already derived)
+    dm = cfg.get("delete_mode", "archive")
+    op = "sync" if dm in ("archive", "mirror") else "copy"
+    args = [_rclone_bin(), op, src, dest, "--config", RCLONE_CONF,
+            "--stats", "1s", "--stats-log-level", "NOTICE", "--use-json-log",
+            "--transfers", "4", "--checkers", "8",
+            "--retries", "3", "--low-level-retries", "10",
+            "--create-empty-src-dirs"]
+    if op == "sync":
+        # rclone --max-delete is an ABSOLUTE count (no % form), so derive it from the
+        # previous run's file count × the same percentage the rsync path uses. Saves you
+        # from "the source was wiped/unmounted" nuking the remote copy.
+        pct = int(cfg.get("max_delete_pct", 20) or 0)
+        if pct > 0 and prev_files > 0 and not allow_delete:
+            args += ["--max-delete", str(max(1, int(prev_files * pct / 100.0)))]
+    if dm == "archive":
+        # dated archive OUTSIDE any job destination (jobs live under remote_path/<name>,
+        # the archive under remote_path/_deleted/<date>/<name>) — rclone forbids a
+        # --backup-dir that overlaps the destination
+        remote, _, path = dest.partition(":")
+        rbase = (cfg.get("remote_path") or "").strip("/")
+        sub = path[len(rbase):].lstrip("/") if (rbase and path.startswith(rbase)) else path
+        arc = "/".join(x for x in (rbase, nb_deleted_rel(cfg), sub) if x)
+        args += ["--backup-dir", remote + ":" + arc]
+    for ex in list(cfg.get("excludes", [])) + [str(x) for x in job.get("excludes", [])]:
+        ex = str(ex).strip()
+        if not ex:
+            continue
+        # a trailing-slash rsync pattern means "this directory and everything under it";
+        # rclone expresses that as «name/**»
+        args += ["--exclude", ex + "**" if ex.endswith("/") else ex]
+    bw = int(cfg.get("bwlimit", 0) or 0)
+    if bw > 0:
+        args += ["--bwlimit", "%dk" % bw]         # cfg is KB/s
+    if dry:
+        args.append("--dry-run")
+    return args
+
+def _nb_rclone_run(cfg, dry, writer, cancel, on_job, allow_delete):
+    """Run all enabled jobs through rclone (push to a cloud/remote defined in
+    rclone.conf). Mirrors nb_run's shape — same log/status/history files — so the
+    UI, history and screen tiles work unchanged."""
+    pid = cfg.get("id") or NB_MAIN
+    jobs = [j for j in cfg.get("jobs", []) if j.get("enabled", True)]
+    if not jobs:
+        writer("no jobs to back up"); return {"ok": False, "jobs": []}
+    t = nb_test(cfg)
+    if not t.get("ok"):
+        writer("CONNECTION ERROR: " + t.get("log", "")); return {"ok": False, "unreachable": True, "jobs": []}
+    writer("rclone %s · remote «%s»" % (rclone_version() or "?", cfg.get("remote") or "?"))
+    try:
+        with open(nb_status_file(pid)) as f:
+            prevf = {x.get("src"): x.get("files", 0) for x in json.load(f).get("jobs", [])}
+    except (OSError, ValueError):
+        prevf = {}
+    t0 = time.time()
+    if allow_delete:
+        writer("USER PERMISSION: the mass-deletion guard is lifted for THIS run")
+    results = []
+    def emit(r):
+        results.append(r)
+        if on_job:
+            try: on_job(list(results), len(jobs))
+            except Exception: pass
+    for j in jobs:
+        if cancel():
+            writer("— cancelled —"); break
+        writer(""); writer("=== %s → %s ===" % (j["src"], j["dest"]))
+        srcp = "/" + j["src"].lstrip("/")
+        if not os.path.exists(srcp):
+            writer("⚠ SKIPPED: the source is missing on this NAS (%s) — the folder was deleted "
+                   "or the disk is not mounted." % srcp)
+            emit({"src": j["src"], "ok": False, "src_missing": True}); continue
+        args = _nb_rclone_cmd(cfg, j, dry, prev_files=prevf.get(j["src"], 0), allow_delete=allow_delete)
+        try:
+            p = subprocess.Popen(args, env=os.environ.copy(), stdout=subprocess.PIPE,
+                                 stderr=subprocess.STDOUT, text=True, bufsize=1)
+        except OSError as e:
+            writer("could not start rclone: %s" % e); emit({"src": j["src"], "ok": False}); continue
+        done_ev = threading.Event()
+        def _watch_cancel(proc=p):
+            while not done_ev.wait(0.5):
+                if cancel():
+                    try: proc.kill()
+                    except OSError: pass
+                    return
+        threading.Thread(target=_watch_cancel, daemon=True).start()
+        last_stats, err_lines, errs = {}, [], 0
+        try:
+            for line in iter(p.stdout.readline, ""):
+                line = line.rstrip("\n")
+                if not line.strip():
+                    continue
+                obj = None
+                if line.lstrip().startswith("{"):
+                    try: obj = json.loads(line)
+                    except ValueError: obj = None
+                if obj is None:
+                    writer(line)
+                    if cancel(): p.kill(); break
+                    continue
+                st = obj.get("stats")
+                if isinstance(st, dict):
+                    last_stats = st
+                    b, tot = int(st.get("bytes") or 0), int(st.get("totalBytes") or 0)
+                    spd, pct = int(st.get("speed") or 0), (int(b * 100 / tot) if tot else 0)
+                    eta = ""
+                    if st.get("eta") is not None:
+                        try:
+                            e = int(st["eta"]); eta = "  %d:%02d:%02d" % (e // 3600, (e % 3600) // 60, e % 60)
+                        except (TypeError, ValueError):
+                            eta = ""
+                    # emit the SAME shape rsync --info=progress2 does ("<bytes> <pct>% <rate>
+                    # <eta>") so the panel's nbProg parser and the «%…/s» cur_line grep both
+                    # light up unchanged — no rclone-specific progress code in the UI
+                    writer("%12d  %3d%%  %.2fMB/s%s" % (b, pct, spd / 1048576.0, eta))
+                else:
+                    msg, lvl = str(obj.get("msg") or "").strip(), str(obj.get("level") or "").lower()
+                    if not msg:
+                        continue
+                    if lvl in ("error", "critical", "fatal"):
+                        errs += 1
+                        if len(err_lines) < 3: err_lines.append(msg[:180])
+                        writer("ERROR: " + msg)
+                    elif lvl == "warning":
+                        writer("warning: " + msg)
+                    else:
+                        writer(msg)
+                if cancel():
+                    p.kill(); break
+            p.wait()
+        finally:
+            done_ev.set()
+        try: p.stdout.close()
+        except OSError: pass
+        rc = p.returncode
+        ok = rc == 0
+        xfer = int(last_stats.get("transfers") or 0)
+        xb = int(last_stats.get("bytes") or 0)
+        deleted = int(last_stats.get("deletes") or 0)
+        res = {"src": j["src"], "dest": j["dest"], "ok": ok, "code": rc, "size": None,
+               "files": xfer or prevf.get(j["src"], 0), "xfer": xfer,
+               "xfer_bytes": xb, "deleted": deleted}
+        if cancel():
+            res["stopped"] = True
+        elif not ok:
+            if err_lines:
+                res["err"] = err_lines[0][:180]; res["errn"] = errs
+            # exit 9 = deletes exceeded --max-delete: nothing beyond the cap was removed
+            if rc == 9:
+                res["err"] = "deletion guard: too many files would be deleted (source wiped or unmounted?)"
+        emit(res)
+        writer("[%s] %s · %d files, transferred %s" %
+               ("OK" if ok else ("stopped" if cancel() else "error %d" % rc),
+                j["src"], xfer, fmt_bytes(xb)))
+    stopped = cancel()
+    allok = all(r["ok"] for r in results) and len(results) == len(jobs) and not stopped
+    if not dry:
+        _nb_write_status(pid, results)
+        try: _nb_history_add(pid, {"ts": int(time.time()), "dur": int(time.time() - t0),
+                              "result": "stopped" if stopped else ("ok" if allok else "warn"),
+                              "jobs": results})
+        except Exception: pass
+    return {"ok": allok, "jobs": results, "stopped": stopped}
+
 def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None, allow_delete=False):
     """Run all enabled jobs. writer(line) — output; cancel() — interruption.
     on_job(done, total) — after every finished job, so the UI can paint folder dots
@@ -5541,6 +5862,10 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None, allow_delete=Fal
     this run (they deleted many files on the source themselves and confirmed it in the panel).
     NOT written to the config: the next run is guarded again."""
     cfg = cfg or nb_load()
+    if _nb_rclone(cfg):
+        # rclone is a wholly different engine (its own command, output and progress) —
+        # keep the rsync path untouched and run it in a dedicated loop
+        return _nb_rclone_run(cfg, dry, writer, cancel, on_job, allow_delete)
     jobs = [j for j in cfg.get("jobs", []) if j.get("enabled", True)]
     if not jobs:
         writer("no jobs to back up"); return {"ok": False, "jobs": []}
@@ -6732,6 +7057,8 @@ _BK_SECTIONS = (
                                                        # credentials.json — the per-service login/password store
                                                        "nas-config/store.json", "nas-config/remotes.json",
                                                        "nas-config/credentials.json",
+                                                       # rclone.conf holds cloud keys → secret section
+                                                       "etc/nas-os/rclone.conf",
                                                        "root/.ssh/nas-backup")),
     ("smbpw",     "SMB passwords (cleartext)",  True,  ("etc/nas-os/smb-users.json",)),
     ("network",   "Network (Wi-Fi, IP)",       True,  ("reference/etc/netplan/",)),   # Wi-Fi password → secret; restore by hand (reference)
@@ -6838,6 +7165,7 @@ def _bk_sources():
                    ("/etc/samba/smb.conf", "etc/samba/smb.conf"),
                    ("/etc/samba/nas-shares.conf", "etc/samba/nas-shares.conf"),   # panel-managed shares
                    ("/etc/nas-os/smb-users.json", "etc/nas-os/smb-users.json"),   # cleartext SMB passwords → secret section
+                   (RCLONE_CONF, "etc/nas-os/rclone.conf"),                       # rclone remotes (cloud keys) → secret section
                    ("/var/lib/samba/private/passdb.tdb", "var/lib/samba/private/passdb.tdb"),
                    # SSH key of the «Backup» app (key-based push to servers): without it
                    # key-based push profiles stop authenticating after a reinstall
@@ -14538,6 +14866,12 @@ class H(BaseHTTPRequestHandler):
                 cfg = nb_load(_nb_qpid(q))
                 self._json({"config": nb_public(cfg), "profile": cfg["id"],
                             "profiles": nb_profiles_public()})
+            elif p == "/api/backup/rclone":
+                # rclone.conf editor payload: the raw config, the remotes it defines,
+                # the installed version and the fixed on-disk path (shown for reference)
+                self._json({"installed": rclone_installed(), "version": rclone_version(),
+                            "path": RCLONE_CONF, "conf": rclone_conf_read(),
+                            "remotes": rclone_remotes()})
             elif p == "/api/backup/status":
                 self._json(nb_status(_nb_qpid(q)))
             elif p == "/api/backup/dest-state":
@@ -14997,6 +15331,26 @@ class H(BaseHTTPRequestHandler):
                             "profiles": nb_profiles_public()})
             elif p == "/api/backup/test":
                 self._json(nb_test(nb_load(_nb_bpid(self._body()))))
+            elif p == "/api/backup/rclone/save":
+                # save the pasted rclone.conf, then re-read the remotes it now defines
+                b = self._body()
+                txt = b.get("conf")
+                if not isinstance(txt, str):
+                    self._json({"ok": False, "log": "no config text"})
+                elif len(txt) > 512 * 1024:
+                    self._json({"ok": False, "log": "config too large"})
+                elif rclone_conf_write(txt):
+                    self._json({"ok": True, "remotes": rclone_remotes(),
+                                "version": rclone_version(), "installed": rclone_installed()})
+                else:
+                    self._json({"ok": False, "log": "could not write %s" % RCLONE_CONF})
+            elif p == "/api/backup/rclone/update":
+                # install rclone if missing, else self-update to the latest release
+                r = engine("rclone-update")
+                self._json({"ok": r.get("ok"), "log": (r.get("log") or "").strip()[-400:],
+                            "version": rclone_version(), "installed": rclone_installed()})
+            elif p == "/api/backup/rclone/test":
+                self._json(rclone_test_remote(self._body().get("remote", "")))
             elif p == "/api/backup/key":
                 b = self._body()
                 act = str(b.get("action") or "")
