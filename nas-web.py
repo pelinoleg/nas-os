@@ -56,7 +56,7 @@ def _json_save(path, obj, indent=None):
     here answers a parse error with silent defaults, quietly wiping the user's
     settings. Rename is atomic, so the old file survives until the new one is whole."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + ".tmp"
+    tmp = "%s.tmp.%d" % (path, os.getpid())   # per-PID temp: the driver process and the panel can write the same target without colliding on one ".tmp"
     with open(tmp, "w") as f:
         json.dump(obj, f, ensure_ascii=False, indent=indent)
         f.flush()
@@ -4350,7 +4350,7 @@ _NB_PID_RE = re.compile(r"^[a-z0-9]{1,12}$")
 #  it holds cloud keys → root 600, and it rides along in the settings backup.
 # --------------------------------------------------------------------------- #
 RCLONE_CONF = "/etc/nas-os/rclone.conf"
-_RCLONE_REMOTE_RE = re.compile(r"^[\w.+ -]{1,64}$")   # rclone remote name (no ':')
+_RCLONE_REMOTE_RE = re.compile(r"^[\w][\w.+ -]{0,63}$")   # rclone remote name (no ':', no leading '-' → can't become an argv option)
 
 def _rclone_bin():
     return shutil.which("rclone") or "/usr/bin/rclone"
@@ -4365,15 +4365,18 @@ _RCLONE_VFS_MODES = ("off", "minimal", "writes", "full")
 
 def rclone_opts_get():
     d = _json_load_strict(RCLONE_OPTS_FILE, {})
+    if not isinstance(d, dict): d = {}     # valid JSON but not an object (hand-edited) — don't crash every rclone op
     def _i(k, dv, lo, hi):
         try: return max(lo, min(hi, int(d.get(k, dv))))
         except (TypeError, ValueError): return dv
     mode = d.get("vfs_cache_mode")
+    vsz = str(d.get("vfs_cache_max_size") or "").strip().upper()   # validate on READ too, not only on set
+    if not re.match(r"^\d{1,5}[KMGT]?$", vsz): vsz = "2G"
     return {"transfers": _i("transfers", 4, 1, 64),
             "checkers": _i("checkers", 8, 1, 64),
             "bwlimit": _i("bwlimit", 0, 0, 10_000_000),      # KB/s, 0 = unlimited
             "vfs_cache_mode": mode if mode in _RCLONE_VFS_MODES else "writes",
-            "vfs_cache_max_size": str(d.get("vfs_cache_max_size") or "2G")}
+            "vfs_cache_max_size": vsz}
 
 def rclone_opts_set(d):
     cur = rclone_opts_get()
@@ -4540,7 +4543,10 @@ _RESTORE_DEST_OK = ("/mnt/", "/media/", "/srv/", "/home/")
 
 def _rclone_restore_valid_dest(p):
     p = os.path.normpath(str(p or ""))
-    return p.startswith(_RESTORE_DEST_OK) and ".." not in p
+    # not INTO a cloud mount: restoring there would write back to a remote (defeating "the cloud
+    # is never touched") and, on a read-only mount, just fail
+    return (p.startswith(_RESTORE_DEST_OK) and ".." not in p
+            and p != "/mnt/rclone" and not p.startswith("/mnt/rclone/"))
 
 def rclone_restore_state():
     st = _json_load_strict(RCLONE_RESTORE_STATE, {})
@@ -4789,16 +4795,21 @@ def rclone_mount_start(remote, path="", readonly=True, auto=False, save=True):
         return {"ok": False, "log": "invalid remote path"}
     name = _rclone_mnt_name_for(remote, path)
     mp = _rclone_mnt_mp(name)
+    old_ro = None
     if save:
         lst = _rclone_mounts_load()
         cur = next((m for m in lst if m["name"] == name), None)
+        old_ro = bool(cur.get("readonly")) if cur else None
         rec = {"name": name, "remote": remote, "path": path, "readonly": bool(readonly), "auto": bool(auto)}
         if cur:
             cur.update(rec)
         else:
             lst.append(rec)
         _rclone_mounts_save(lst)
-    if _rclone_mnt_mounted(mp):
+    # already mounted: only a no-op if the read-only flag is unchanged. The flag is baked into
+    # the live unit's argv, so if the user just switched RW→RO (or back), a plain re-mount would
+    # keep the OLD access — tear it down and remount so the new protection actually applies.
+    if _rclone_mnt_mounted(mp) and not (old_ro is not None and old_ro != bool(readonly)):
         return {"ok": True, "mount": mp, "name": name}
     _rclone_mnt_unstale(name)
     _ensure_user_allow_other()
@@ -5155,7 +5166,7 @@ def _nb_queue_read():
 def _nb_queue_write(q):
     try:
         os.makedirs(NAS_CONFIG, exist_ok=True)
-        tmp = NB_QUEUE + ".tmp"
+        tmp = "%s.tmp.%d" % (NB_QUEUE, os.getpid())   # per-PID temp (cross-process writers don't collide)
         with open(tmp, "w") as f:
             json.dump(q[:NB_MAX_PROFILES], f)
         os.replace(tmp, NB_QUEUE)
@@ -5573,7 +5584,7 @@ def nb_save(patch, pid=None):
             # rclone dests are 'remote:path' — never normpath them (that mangles the ':'
             # and the '//'); the final dest is re-derived from src at the end anyway
             dst = str(j.get("dest", "")).strip() if rclone else os.path.normpath(str(j.get("dest", "")).strip())
-            if not src or (not dst_ok(dst) and not rclone): continue
+            if not src or ".." in src or (not dst_ok(dst) and not rclone): continue   # ".." in src → traversal on the rclone dest (rsync dests are dst_ok-checked)
             job = {"src": src, "dest": dst, "enabled": bool(j.get("enabled", True))}
             # per-job excludes: anchored rsync patterns relative to src (leading /).
             # so unchecking a nested folder excludes it, while the parent copies
@@ -5592,6 +5603,10 @@ def nb_save(patch, pid=None):
     if isinstance(patch.get("excludes"), list):
         cur["excludes"] = [str(x)[:150] for x in patch["excludes"] if str(x).strip()][:100]
     if isinstance(patch.get("schedule"), dict):
+        # backfill: a hand-edited/half-migrated profile may carry a partial or non-dict schedule
+        # (the profile merge is shallow), and cur["schedule"]["enabled"] below would KeyError → 500
+        _sch = cur.get("schedule")
+        cur["schedule"] = {**_nb_defaults()["schedule"], **(_sch if isinstance(_sch, dict) else {})}
         s = patch["schedule"]
         cur["schedule"]["enabled"] = bool(s.get("enabled", cur["schedule"]["enabled"]))
         if s.get("freq") in ("daily", "weekly"): cur["schedule"]["freq"] = s["freq"]
@@ -5644,6 +5659,11 @@ def nb_public(cfg=None):
     for sd in (src, dst):
         sd["has_password"] = bool(sd.pop("password", ""))
     c["src"], c["dst"] = src, dst                # free sides for the UI
+    # the SSH→SSH destination server's password lives in the parallel raw dst2 field — the
+    # shallow dict() copy above shares it, so strip it here too (mirror the src/dst treatment),
+    # or GET/POST /api/backup/config would return it in cleartext for a pull SSH→SSH profile
+    if isinstance(c.get("dst2"), dict):
+        d2 = dict(c["dst2"]); d2["has_password"] = bool(d2.pop("password", "")); c["dst2"] = d2
     # "both remote" = the sshfs bridge (SSH→SSH): rsync can't do remote→remote, so we mount
     # the source on the NAS and copy through it. rclone does remote→remote DIRECTLY (cloud→
     # cloud, no bridge), so it is NEVER "both_remote" — otherwise the UI shows a bogus
@@ -5780,7 +5800,8 @@ def nb_profile_delete(pid, confirm=""):
     _nb_queue_remove(pid)
     _nb_write_profiles([x for x in profs if x["id"] != pid])
     for f in (nb_status_file(pid), nb_run_log(pid), nb_run_state(pid),
-              nb_run_cancel(pid), nb_history_file(pid), nb_health_file(pid)):
+              nb_run_cancel(pid), nb_history_file(pid), nb_health_file(pid),
+              nb_compare_state_file(pid), nb_compare_cancel(pid)):
         try: os.remove(f)
         except OSError: pass
     log_event("action", "NAS backup: profile «%s» deleted" % p["name"],
@@ -6393,7 +6414,9 @@ def _nb_src_dst(cfg, job, stage=None):
     else:
         s = sp + job["src"] + "/"
     d = (dp if dst["kind"] != "local" else "") + job["dest"].rstrip("/") + "/"
-    return [s, d]
+    # "--" terminates option parsing: a user/host beginning with "-" (or a crafted value) can't
+    # be read by rsync as an option — the src/dst are always the trailing positionals
+    return ["--", s, d]
 
 def nb_verify_cmd(cfg, job, stage=None):
     """Post-run verify command: rsync --checksum --dry-run re-reads files on both
@@ -6621,7 +6644,9 @@ def _nb_rclone_run(cfg, dry, writer, cancel, on_job, allow_delete):
                     writer("⚠ SKIPPED: the cloud source «%s:%s» is empty or unreachable — NOT syncing, "
                            "because mirror/archive would delete the destination copy. Check the remote path "
                            "(or use «Copy» mode, which never deletes)." % (cfg.get("remote"), j["src"]))
-                    emit({"src": j["src"], "ok": False, "src_missing": True}); continue
+                    # code 25 = the deletion guard: surfaces the panel banner + the one-shot
+                    # «I deleted these myself» button (the only way to grant allow_delete)
+                    emit({"src": j["src"], "ok": False, "code": 25, "guard_pct": int(cfg.get("max_delete_pct", 20) or 0)}); continue
         else:
             srcp = "/" + j["src"].lstrip("/")
             if not os.path.exists(srcp):
@@ -6639,7 +6664,7 @@ def _nb_rclone_run(cfg, dry, writer, cancel, on_job, allow_delete):
                     writer("⚠ SKIPPED: the source «%s» is EMPTY — not syncing, because mirror/archive "
                            "would then delete the destination copy. If you really emptied it, run once "
                            "with «I deleted these myself», or use «Copy» mode (never deletes)." % srcp)
-                    emit({"src": j["src"], "ok": False, "src_missing": True}); continue
+                    emit({"src": j["src"], "ok": False, "code": 25, "guard_pct": int(cfg.get("max_delete_pct", 20) or 0)}); continue
         args = _nb_rclone_cmd(cfg, j, dry, prev_files=prevf.get(j["src"], 0), allow_delete=allow_delete)
         try:
             p = subprocess.Popen(args, env=os.environ.copy(), stdout=subprocess.PIPE,
@@ -6903,7 +6928,7 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None, allow_delete=Fal
                     writer("⚠ SKIPPED: the source (%s) is EMPTY — not syncing, because mirror/archive "
                            "would then delete the destination copy. If you really emptied it, run once "
                            "with «I deleted these myself», or use «Copy» mode (never deletes)." % src_local)
-                    emit({"src": j["src"], "ok": False, "src_missing": True}); continue
+                    emit({"src": j["src"], "ok": False, "code": 25, "guard_pct": int(cfg.get("max_delete_pct", 20) or 0)}); continue
         elif deleting and int(prevf.get(j["src"], 0) or 0) == 0:
             # plain pull: the remote source is not locally visible and there is NO delete-guard
             # baseline (first run, or the status file was lost on a reinstall). An uncapped --delete
@@ -6917,7 +6942,7 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None, allow_delete=Fal
                        "the destination already holds a copy — refusing an uncapped mirror/archive that could "
                        "wipe it if the remote source is empty. Run once with «I deleted these myself» to confirm "
                        "the source is intact, or use «Copy» mode (never deletes).")
-                emit({"src": j["src"], "ok": False, "src_missing": True}); continue
+                emit({"src": j["src"], "ok": False, "code": 25, "guard_pct": int(cfg.get("max_delete_pct", 20) or 0)}); continue
         if push_ssh:
             # plain server: mkdir over SSH (works with any remote rsync).
             # Forced daemon (UGREEN/Synology): the shell lives in a DIFFERENT path
@@ -7170,6 +7195,14 @@ def _nb_history_add(pid, entry):
         if not isinstance(hist, list): hist = []
     except (OSError, ValueError):
         hist = []
+    # monotonic clamp: on the RTC-less Pi a manual run in the first seconds after boot (before
+    # NTP) can stamp a stale, past ts — don't let the history timeline jump backwards (it would
+    # show a wildly-wrong "X ago" on the glance tile)
+    if hist and isinstance(entry, dict) and "ts" in entry and isinstance(hist[-1], dict):
+        try:
+            if int(entry["ts"]) < int(hist[-1].get("ts") or 0):
+                entry["ts"] = int(hist[-1].get("ts") or 0)
+        except (TypeError, ValueError): pass
     hist.append(entry)
     hist = hist[-50:]                    # last 50 runs
     try:
@@ -7463,6 +7496,29 @@ def _nb_health_one(cfg, many, fire, ev, pri, thr, now):
                 pass
     _nb_health_save(pid, hs)
 
+NB_START_LOCK = os.path.join(NAS_CONFIG, "nb-start.lock")
+
+class _NbStartLock:
+    """Serialize the 'is anything running? → start it' decision across ALL threads AND the
+    driver/scheduler processes (flock is cross-process). Without it the 'exactly one run at a
+    time' invariant races: two run-bg calls, or a run-end drain colliding with the scheduler
+    tick, could both see nothing active and both start → two rsyncs on one disk, or a second
+    systemd-run failing on the unit name and clobbering the live run's state."""
+    def __enter__(self):
+        try:
+            os.makedirs(NAS_CONFIG, exist_ok=True)
+            self.f = open(NB_START_LOCK, "a")
+            fcntl.flock(self.f, fcntl.LOCK_EX)
+        except OSError:
+            self.f = None            # can't lock — degrade to the old best-effort behaviour
+        return self
+    def __exit__(self, *a):
+        if getattr(self, "f", None):
+            try: fcntl.flock(self.f, fcntl.LOCK_UN)
+            except OSError: pass
+            self.f.close()
+        return False
+
 def _nb_start_unit(pid, dry, allow_delete=False):
     """Bring up a transient unit with the run driver. True — the process started."""
     try:
@@ -7491,29 +7547,36 @@ def nb_run_bg(pid=None, dry=False, allow_delete=False):
     """Start a profile run. EXACTLY ONE run happens at a time: while busy,
     the rest wait in a queue (two rsyncs on one HDD only get in each other's way)."""
     cfg = nb_load(pid); pid = cfg["id"]
-    if nb_run_active(pid):
-        return {"ok": False, "log": "already running"}
-    if nb_any_active():
-        _nb_queue_add(pid, dry, allow_delete)
-        return {"ok": True, "queued": True, "log": "queued"}
-    _nb_queue_remove(pid)
-    if not _nb_start_unit(pid, dry, allow_delete):
-        return {"ok": False, "log": "failed to start"}
+    # the check-then-start must be atomic across threads AND processes, or two callers both see
+    # "nothing active" and both launch (two rsyncs on one disk / a clobbered run state)
+    with _NbStartLock():
+        if nb_run_active(pid):
+            return {"ok": False, "log": "already running"}
+        if nb_any_active():
+            _nb_queue_add(pid, dry, allow_delete)
+            return {"ok": True, "queued": True, "log": "queued"}
+        _nb_queue_remove(pid)
+        if not _nb_start_unit(pid, dry, allow_delete):
+            return {"ok": False, "log": "failed to start"}
     return {"ok": True, "queued": False, "log": "started"}
 
 def _nb_queue_drain():
-    """Once a minute: if nothing is running — start the first one in the queue."""
-    q = _nb_queue_read()
-    if not q or nb_any_active():
-        return
-    known = {p["id"] for p in nb_profiles()}
-    while q:
-        item = q.pop(0)
-        if item["pid"] in known:
-            _nb_queue_write(q)
-            _nb_start_unit(item["pid"], item.get("dry", False), item.get("allow_delete", False))
+    """If nothing is running — start the first one in the queue. Called both from the finishing
+    driver process and the once-a-minute scheduler tick, so it takes the SAME cross-process lock
+    as nb_run_bg — otherwise both processes pop-and-start the same queued item (the second
+    systemd-run fails on the unit name and misreports the live run as failed)."""
+    with _NbStartLock():
+        q = _nb_queue_read()
+        if not q or nb_any_active():
             return
-    _nb_queue_write(q)
+        known = {p["id"] for p in nb_profiles()}
+        while q:
+            item = q.pop(0)
+            if item["pid"] in known:
+                _nb_queue_write(q)
+                _nb_start_unit(item["pid"], item.get("dry", False), item.get("allow_delete", False))
+                return
+        _nb_queue_write(q)
 
 def nb_run_cli(pid=None, dry=False, allow_delete=False):
     """Run driver (started in a transient unit). Writes the log to a file and
@@ -8162,7 +8225,7 @@ def _bk_add_file(tar, src, arc):
 # leftovers after a failure. The .git directory of the nas-config repository even
 # more so: it weighed more than all settings combined and spilled over a foreign history.
 _BK_SKIP_DIRS = (".git",)
-_BK_SKIP_FILE = re.compile(r"^duscan-.+\.json$|\.(log|tmp|bad)$")
+_BK_SKIP_FILE = re.compile(r"^duscan-.+\.json$|\.(log|tmp|bad)$|^nas-backup-(run|compare)")   # transient run/compare state + cancel don't belong in a settings backup
 
 def _bk_sources():
     """(src, arcname) of all backup files. Directories are walked whole —
