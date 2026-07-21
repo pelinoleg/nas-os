@@ -6445,6 +6445,9 @@ function openFileWin(e){openWin("ed:"+e.path,e.name,body=>{
 /* Backup profile: each request is addressed to a specific profile. An empty NB_PID —
    the server takes the first profile itself (older calls behave the same way). */
 let NB_PID="";
+// tabCompare lives OUTSIDE winBackup's closure (it only needs NB_PID + the fetched compare
+// state), so it can't read winBackup's local CFG — mirror the current profile config here for it.
+let NB_CFG={};
 const nbG=p=>api(p+(p.includes("?")?"&":"?")+"p="+encodeURIComponent(NB_PID));
 const nbP=(p,o)=>api(p,{method:"POST",body:JSON.stringify(Object.assign({p:NB_PID},o||{}))});
 async function nbSave(patch){const r=await nbP("/api/backup/config",{config:patch});return (r&&r.config)||{};}
@@ -6934,7 +6937,7 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
  if(SET.nbTab&&CATS.some(c=>c.id===SET.nbTab))tab=SET.nbTab;   // remember the last opened tab
  // the POST response carries a fresh profile summary — keep PROFS in sync, otherwise
  // e.g. the delete guard counts sources the user already removed
- const saveCfg=async patch=>{const r=await nbP("/api/backup/config",{config:patch});CFG=(r&&r.config)||CFG;JOBS=(CFG.jobs||[]).slice();if(r&&r.profiles)PROFS=r.profiles;return CFG;};
+ const saveCfg=async patch=>{const r=await nbP("/api/backup/config",{config:patch});CFG=(r&&r.config)||CFG;NB_CFG=CFG;JOBS=(CFG.jobs||[]).slice();if(r&&r.profiles)PROFS=r.profiles;return CFG;};
  const wireSeg=(tc,id,cb)=>{const seg=tc.querySelector(id);if(!seg)return;seg.querySelectorAll("button").forEach(b=>b.onclick=()=>{seg.querySelectorAll("button").forEach(x=>x.classList.toggle("on",x===b));cb(b.dataset.v);});};
  // single folder mode: recreate the WHOLE source tree under the base (Cloud/Desktop →
  // base/Cloud/Desktop), not just the last folder — otherwise structure is lost and names clash.
@@ -7893,7 +7896,7 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
    if(cur==="done"){wizOn=false;await saveCfg({setup_done:true});tab="overview";SET.nbTab=tab;saveSettings();render();return;}
    wizStep++;setPos();render();};}
  const render=async()=>{const r=await nbG("/api/backup/config");
-  CFG=(r&&r.config)||{};JOBS=(CFG.jobs||[]).slice();
+  CFG=(r&&r.config)||{};NB_CFG=CFG;JOBS=(CFG.jobs||[]).slice();
   PROFS=(r&&r.profiles)||[];NB_PID=(r&&r.profile)||NB_PID;
   // any profile change (switch, add, delete) re-decides the wizard for THAT profile;
   // an unfinished wizard resumes at the step it was left on (WIZPOS, per session)
@@ -7941,8 +7944,8 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
 function tabCompare(tc){
  // SSH→SSH (both sides remote) can't be compared — rsync doesn't itemize remote↔remote. Show a
  // note instead of a dead/broken screen; every other mode (incl. cloud via rclone check) works.
- if(CFG.both_remote){tc.innerHTML=`<div class="cmp-wrap"><h3 class="set-title" style="margin:0 0 3px">Compare</h3><div class="mon-note" style="margin-top:6px">Compare isn't supported in this mode — both the source and the destination are remote SSH servers, and rsync can't itemize a remote-to-remote pair. Check these backups by spot-checking the files on the servers themselves.</div></div>`;return;}
- const rcl=isRcloneAny();
+ if(NB_CFG.both_remote){tc.innerHTML=`<div class="cmp-wrap"><h3 class="set-title" style="margin:0 0 3px">Compare</h3><div class="mon-note" style="margin-top:6px">Compare isn't supported in this mode — both the source and the destination are remote SSH servers, and rsync can't itemize a remote-to-remote pair. Check these backups by spot-checking the files on the servers themselves.</div></div>`;return;}
+ const rcl=NB_CFG.transport==="rclone";   // tabCompare is outside winBackup's scope — read the mirrored config, not CFG
  let showAll=false, filt="", timer=null, findT=null, LAST={};
  const bp=(path,b)=>api(path,{method:"POST",body:JSON.stringify(Object.assign({p:NB_PID},b||{}))});
  const stop=()=>{if(timer){clearTimeout(timer);timer=null;}};
