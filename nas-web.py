@@ -6379,6 +6379,11 @@ def _nb_rclone_cmd(cfg, job, dry, prev_files=0, allow_delete=False):
             "--retries", "3", "--low-level-retries", "10",
             "--create-empty-src-dirs"] + _rclone_perf_args()
     if op == "sync":
+        # never let the sync manage OUR OWN _deleted archive. Normally the archive is a sibling
+        # of the job destination so it isn't in scope, but if a source maps to the destination
+        # ROOT (e.g. pulling a whole remote into dest_base) it WOULD be — mirror/archive would
+        # then delete or re-archive it. Exclude it, exactly like the rsync path (--exclude=/_deleted).
+        args += ["--exclude", "/" + nb_deleted_top(cfg) + "/**"]
         # rclone --max-delete is an ABSOLUTE count (no % form), so derive it from the
         # previous run's file count × the same percentage the rsync path uses. Saves you
         # from "the source was wiped/unmounted" nuking the copy (remote for push, local for pull).
