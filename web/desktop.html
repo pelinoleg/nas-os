@@ -1005,6 +1005,13 @@
   .rc-card-b:not(:empty){margin-top:8px;font-size:12.5px}
   .rc-tag{font-size:10px;font-weight:700;letter-spacing:.04em;background:var(--sel);color:var(--win-dim,var(--dim));border-radius:5px;padding:1px 5px}
   .rc-quota .bar{height:8px}
+  .rc-dot{width:8px;height:8px;border-radius:50%;background:var(--win-dim,var(--dim));flex:none}
+  .rc-type{font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.4px;padding:1px 6px;border-radius:999px;background:var(--sel);color:var(--win-accent,var(--accent));box-shadow:var(--sh-sm)}
+  .rc-quota-line{margin-top:7px}
+  .rc-qtxt{font-size:11.5px;margin-top:4px;color:var(--win-dim,var(--dim))}
+  .rc-meta{margin-top:6px;font-size:11.5px;color:var(--win-dim,var(--dim))}
+  .rc-meta b{color:var(--win-fg,var(--fg));font-weight:600}
+  .rc-mut{color:var(--win-dim,var(--mut))}
   .rc-log{background:var(--code-bg);color:var(--code-fg);border-radius:var(--r-sm);padding:8px 10px;margin:6px 0 0;font-size:11.5px;line-height:1.5;max-height:220px;overflow:auto;white-space:pre-wrap;word-break:break-word;font-family:var(--mono)}
   .nb-det{margin-top:16px}
   .nb-sum{cursor:pointer;list-style:none;display:flex;align-items:center;gap:6px;font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--mut);font-family:var(--mono);padding:4px 0;user-select:none}
@@ -6805,21 +6812,34 @@ function winRclone(initTab){openWin("__rclone","Rclone",(body,win)=>{
     ${!inst?`<div class="nb-dwarn" style="margin-bottom:8px">rclone is not installed — open the <b>Config</b> tab to install it.</div>`:""}
     ${remotes.length?`<div id="rcRemotes"></div>`:`<div style="color:var(--mut);font-size:13px;padding:10px 0">No remotes yet — open <b>Config</b> and paste your rclone.conf.</div>`}`;
   const boxr=tc.querySelector("#rcRemotes");if(!boxr)return;
+  const dash={};((DATA&&DATA.dashboard)||[]).forEach(d=>dash[d.name]=d);
+  const agoR=t=>{if(!t)return"";const s=Math.max(0,Math.floor(Date.now()/1000-t)),m=Math.floor(s/60),h=Math.floor(m/60),dd=Math.floor(h/24);return dd?dd+"d ago":h?h+"h ago":m?m+"m ago":"just now";};
   remotes.forEach(r=>{
+   const dd=dash[r]||{},usedBy=dd.used_by||[];
+   const meta=`${usedBy.length?`Used by <b>${usedBy.map(esc).join(", ")}</b>`:`<span class="rc-mut">not used by any backup yet</span>`}${dd.last_run?` · last backup ${agoR(dd.last_run)}`:""}${dd.sent_bytes?` · ${fmtB(dd.sent_bytes)} transferred recently`:""}`;
    const card=el(`<div class="rc-card">
-     <div class="rc-card-h"><span class="rc-name mono">${svg("net",15)} ${esc(r)}</span>
-      <span class="rc-actions"><button class="btn sm" data-a="test">Test</button><button class="btn sm" data-a="about">Quota</button><button class="btn sm" data-a="size">Size</button><button class="btn sm" data-a="mount">${svg("folder",13)} Mount</button><button class="btn sm pri" data-a="restore">${svg("download",13)} Restore…</button></span></div>
+     <div class="rc-card-h"><span class="rc-name mono"><span class="rc-dot" title="checking reachability…"></span>${svg("net",15)} ${esc(r)}${dd.type?`<span class="rc-type">${esc(dd.type)}</span>`:""}</span>
+      <span class="rc-actions"><button class="btn sm" data-a="size">Size</button><button class="btn sm" data-a="dedupe" title="Find & remove duplicate-content files on this remote">Dedupe</button><button class="btn sm" data-a="cleanup" title="Empty trash / purge old versions where the backend supports it">Clean up</button><button class="btn sm" data-a="mount">${svg("folder",13)} Mount</button><button class="btn sm pri" data-a="restore">${svg("download",13)} Restore…</button></span></div>
+     <div class="rc-quota-line" id="rcq_${cid(r)}"><span class="rc-mut">reading quota…</span></div>
+     <div class="rc-meta">${meta}</div>
      <div class="rc-card-b" id="rcb_${cid(r)}"></div></div>`);
    const info=card.querySelector(".rc-card-b");
+   const dot=card.querySelector(".rc-dot");
+   rcloneP("/api/backup/rclone/test",{remote:r}).then(t=>{if(!dot)return;dot.style.background=`var(--${t&&t.ok?"good":"danger"})`;dot.title=t&&t.ok?"reachable":("unreachable — "+((t&&t.log)||""));}).catch(()=>{});
+   const ql=card.querySelector("#rcq_"+cid(r));
+   rcloneP("/api/backup/rclone/about",{remote:r}).then(q=>{if(!ql)return;
+     if(!q||!q.ok){ql.innerHTML=`<span class="rc-mut">${esc((q&&q.log)||"quota not reported by this backend")}</span>`;return;}
+     const used=q.used||0,total=q.total||0,pct=total?Math.round(used*100/total):0;
+     ql.innerHTML=`<div class="rc-quota"><div class="bar"><i style="width:${pct}%"></i></div><div class="rc-qtxt mono">${fmtB(used)} used${total?" / "+fmtB(total)+" ("+pct+"%)":""}${q.free!=null?" · "+fmtB(q.free)+" free":""}</div></div>`;
+   }).catch(()=>{if(ql)ql.innerHTML='<span class="rc-mut">quota unavailable</span>';});
    const act=async a=>{
      if(a==="restore")return rcloneRestoreDlg(r);
      if(a==="mount")return rcloneMountDlg(r,()=>{refreshFM();tab="mounts";render();});
-     if(a==="test"){info.innerHTML='<span style="color:var(--mut)">testing…</span>';const t=await rcloneP("/api/backup/rclone/test",{remote:r});info.innerHTML=`<span style="color:var(--${t&&t.ok?"good":"danger"})">${t&&t.ok?"✓ ":"✗ "}${esc((t&&t.log)||"")}</span>`;return;}
-     if(a==="about"){info.innerHTML='<span style="color:var(--mut)">reading quota…</span>';const d=await rcloneP("/api/backup/rclone/about",{remote:r});
-       if(!d||!d.ok){info.innerHTML=`<span style="color:var(--mut)">${esc((d&&d.log)||"no quota")}</span>`;return;}
-       const used=d.used||0,total=d.total||0,pct=total?Math.round(used*100/total):0;
-       info.innerHTML=`<div class="rc-quota"><div class="bar"><i style="width:${pct}%"></i></div><div class="mono" style="font-size:11.5px;margin-top:4px;color:var(--dim)">${fmtB(used)} used${total?" / "+fmtB(total)+" ("+pct+"%)":""}${d.free!=null?" · "+fmtB(d.free)+" free":""}</div></div>`;return;}
-     if(a==="size"){info.innerHTML='<span style="color:var(--mut)">calculating size (can take a while)…</span>';const d=await rcloneP("/api/backup/rclone/size",{remote:r,path:""});info.innerHTML=d&&d.ok?`<span class="mono">${(d.count||0)} files · ${fmtB(d.bytes||0)}</span>`:`<span style="color:var(--mut)">${esc((d&&d.log)||"size failed")}</span>`;return;}
+     if(a==="size"){info.innerHTML='<span class="rc-mut">calculating size (can take a while)…</span>';const d=await rcloneP("/api/backup/rclone/size",{remote:r,path:""});info.innerHTML=d&&d.ok?`<span class="mono">${(d.count||0)} files · ${fmtB(d.bytes||0)}</span>`:`<span class="rc-mut">${esc((d&&d.log)||"size failed")}</span>`;return;}
+     if(a==="dedupe"){confirmDlg("Find & remove duplicates?","rclone scans «"+r+"» for files whose CONTENT is identical and keeps one copy of each (the newest). Your other files are untouched.",async()=>{
+       info.innerHTML='<span class="rc-mut">looking for duplicates…</span>';const d=await rcloneP("/api/backup/rclone/dedupe",{remote:r});info.innerHTML=d&&d.ok?`<span class="mono">${esc(d.log||"done")}</span>`:`<span class="rc-mut">${esc((d&&d.log)||"dedupe failed")}</span>`;},true);return;}
+     if(a==="cleanup"){confirmDlg("Clean up the remote?","rclone cleanup empties the trash / purges old file versions on «"+r+"» (only backends that support it, e.g. pCloud, Drive). It never deletes your LIVE files — it reclaims space.",async()=>{
+       info.innerHTML='<span class="rc-mut">cleaning up…</span>';const d=await rcloneP("/api/backup/rclone/cleanup",{remote:r});info.innerHTML=d&&d.ok?`<span style="color:var(--win-good,var(--good))">✓ ${esc(d.log||"cleaned")}</span>`:`<span class="rc-mut">${esc((d&&d.log)||"cleanup not supported by this backend")}</span>`;},true);return;}
    };
    card.querySelectorAll("[data-a]").forEach(b=>b.onclick=()=>act(b.dataset.a));
    boxr.appendChild(card);});

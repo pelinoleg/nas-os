@@ -4438,6 +4438,50 @@ def rclone_remotes():
     except (OSError, subprocess.SubprocessError):
         return []
 
+def rclone_remote_types():
+    """{remote_name: backend_type} from rclone.conf (e.g. 'pcloud', 'sftp', 's3'). Local, fast."""
+    if not rclone_installed() or not os.path.exists(RCLONE_CONF):
+        return {}
+    try:
+        r = subprocess.run([_rclone_bin(), "--config", RCLONE_CONF, "config", "dump"],
+                           capture_output=True, text=True, timeout=12)
+        d = json.loads(r.stdout or "{}")
+        return {k: str((v or {}).get("type", "")) for k, v in d.items() if isinstance(v, dict)}
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return {}
+
+def rclone_dashboard():
+    """Per-remote insight for the Rclone app: backend type, which backup profiles target the
+    remote, total bytes transferred in recent runs, and the last run time. Cheap — no network
+    (quota/reachability are loaded per-card on demand)."""
+    types = rclone_remote_types()
+    remotes = rclone_remotes()
+    use = {r: {"used_by": [], "sent_bytes": 0, "last_run": 0} for r in remotes}
+    for p in nb_profiles():
+        if (p.get("transport") != "rclone"):
+            continue
+        rems = set()
+        if p.get("remote"): rems.add(str(p["remote"]).rstrip(":"))
+        d2 = p.get("dst2") or {}
+        if d2.get("kind") == "rclone" and d2.get("remote"): rems.add(str(d2["remote"]).rstrip(":"))
+        rems = {r for r in rems if r in use}
+        if not rems:
+            continue
+        try:
+            with open(nb_history_file(p["id"])) as f:
+                hist = json.load(f)
+            if not isinstance(hist, list): hist = []
+        except (OSError, ValueError):
+            hist = []
+        sent = sum(int(j.get("xfer_bytes") or 0) for run in hist[-20:]
+                   for j in (run.get("jobs") or []) if isinstance(j, dict))
+        last = max((int(run.get("ts") or 0) for run in hist), default=0)
+        for r in rems:
+            use[r]["used_by"].append(p.get("name") or p["id"])
+            use[r]["sent_bytes"] += sent
+            use[r]["last_run"] = max(use[r]["last_run"], last)
+    return [{"name": r, "type": types.get(r, ""), **use[r]} for r in remotes]
+
 def rclone_test_remote(remote):
     """Reachability probe for one remote: list its top level with a short timeout."""
     if not rclone_installed():
@@ -4926,6 +4970,43 @@ def rclone_size(remote, path=""):
     except ValueError:
         return {"ok": False, "log": "bad response"}
     return {"ok": True, "count": d.get("count"), "bytes": d.get("bytes")}
+
+def rclone_dedupe(remote):
+    """`rclone dedupe --dedupe-mode newest`: finds files with the SAME NAME in the same folder
+    (which some backends — Google Drive — allow) and keeps the newest. Never touches
+    uniquely-named files; on pcloud/SFTP/etc. (unique names) it simply finds none."""
+    remote = str(remote or "").strip().rstrip(":")
+    if not rclone_installed() or not _RCLONE_REMOTE_RE.match(remote) or remote not in rclone_remotes():
+        return {"ok": False, "log": "no such remote"}
+    try:
+        r = subprocess.run([_rclone_bin(), "--config", RCLONE_CONF, "dedupe",
+                            "--dedupe-mode", "newest", "--fast-list", remote + ":"],
+                           capture_output=True, text=True, timeout=1800)
+    except (OSError, subprocess.SubprocessError) as e:
+        return {"ok": False, "log": str(e)[:160]}
+    out = ((r.stdout or "") + "\n" + (r.stderr or "")).strip()
+    if r.returncode != 0:
+        return {"ok": False, "log": (out.splitlines()[-1] if out else "dedupe failed")[:180]}
+    md = re.search(r"(\d+)\s+duplicate", out)
+    return {"ok": True, "log": (md.group(0) + " group(s) resolved") if md else "no duplicate names found"}
+
+def rclone_cleanup(remote):
+    """`rclone cleanup`: empties the trash / purges old file VERSIONS on backends that support it
+    (Google Drive, pCloud, versioned S3…). Never removes live files — reclaims space only."""
+    remote = str(remote or "").strip().rstrip(":")
+    if not rclone_installed() or not _RCLONE_REMOTE_RE.match(remote) or remote not in rclone_remotes():
+        return {"ok": False, "log": "no such remote"}
+    try:
+        r = subprocess.run([_rclone_bin(), "--config", RCLONE_CONF, "cleanup", remote + ":"],
+                           capture_output=True, text=True, timeout=1800)
+    except (OSError, subprocess.SubprocessError) as e:
+        return {"ok": False, "log": str(e)[:160]}
+    if r.returncode == 0:
+        return {"ok": True, "log": "trash / old versions cleaned"}
+    out = ((r.stdout or "") + (r.stderr or "")).lower()
+    if "support" in out or "not implemented" in out:
+        return {"ok": False, "log": "this backend doesn't support cleanup"}
+    return {"ok": False, "log": (((r.stderr or r.stdout) or "").strip().splitlines() or ["cleanup failed"])[-1][:180]}
 
 # --------------------------------------------------------------------------- #
 #  Verify (rclone check): compare a LOCAL folder against a remote path by checksum.
@@ -16057,7 +16138,7 @@ class H(BaseHTTPRequestHandler):
                 # the installed version and the fixed on-disk path (shown for reference)
                 self._json({"installed": rclone_installed(), "version": rclone_version(),
                             "path": RCLONE_CONF, "conf": rclone_conf_read(),
-                            "remotes": rclone_remotes()})
+                            "remotes": rclone_remotes(), "dashboard": rclone_dashboard()})
             elif p == "/api/backup/rclone/restore/status":
                 self._json(rclone_restore_status())
             elif p == "/api/backup/rclone/check/status":
@@ -16562,6 +16643,10 @@ class H(BaseHTTPRequestHandler):
             elif p == "/api/backup/rclone/size":
                 b = self._body()
                 self._json(rclone_size(b.get("remote", ""), b.get("path", "")))
+            elif p == "/api/backup/rclone/dedupe":
+                self._json(rclone_dedupe(self._body().get("remote", "")))
+            elif p == "/api/backup/rclone/cleanup":
+                self._json(rclone_cleanup(self._body().get("remote", "")))
             elif p == "/api/backup/rclone/opts":
                 self._json({"ok": True, "opts": rclone_opts_set(self._body() or {})})
             elif p == "/api/backup/rclone/mount":
