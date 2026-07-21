@@ -5617,7 +5617,11 @@ def nb_public(cfg=None):
     for sd in (src, dst):
         sd["has_password"] = bool(sd.pop("password", ""))
     c["src"], c["dst"] = src, dst                # free sides for the UI
-    c["both_remote"] = src["kind"] != "local" and dst["kind"] != "local"
+    # "both remote" = the sshfs bridge (SSH→SSH): rsync can't do remote→remote, so we mount
+    # the source on the NAS and copy through it. rclone does remote→remote DIRECTLY (cloud→
+    # cloud, no bridge), so it is NEVER "both_remote" — otherwise the UI shows a bogus
+    # "flows through this NAS via sshfs" warning on a cloud→cloud profile.
+    c["both_remote"] = _nb_remote_both(cfg or nb_load())
     return c
 
 def _nb_pid(pid):

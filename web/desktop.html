@@ -7799,13 +7799,16 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
  const WPANE={conn:tc=>tabConn(tc,"sides"),folders:tc=>tabSources(tc,"folders"),dest:tc=>tabSources(tc,"dest"),
   excl:tc=>tabSources(tc,"excl"),deleted:tc=>TABS.deleted(tc),sched:tc=>TABS.sched(tc),opts:wizOpts};
  function renderWizDone(tc){const c=CFG,push=isPush();
-  const ep=(isRclone()||isRcloneSrc())?(c.remote?(c.remote+":"+((c.remote_path||"").replace(/^\/+|\/+$/g,""))):"not set")
+  const srcRemote=c.remote?(c.remote+":"+((c.remote_path||"").replace(/^\/+|\/+$/g,""))):"not set";
+  const ep=(isRclone()||isRcloneSrc())?srcRemote
            :push?(isPushSsh()?(c.host?c.user+"@"+c.host+":"+(c.dest_base||"?"):"not set"):(c.dest_base||"not selected"))
               :(c.host?c.user+"@"+c.host:"not set");
+  // cloud→cloud has TWO cloud endpoints — show both, else the summary would hide where the copies go
+  const epRows=isC2C()?[["Source",srcRemote],["Destination",c2cDst()]]:[[push?"Destination":"Source",ep]];
   const s=c.schedule||{},nj=(c.jobs||[]).length;
   tc.innerHTML=`<h3 class="set-title">Ready</h3><p class="set-sub">Check the summary — everything can be changed later on the tabs.</p>
    <div class="ov-health"><div class="ovh-list">
-    <div class="ovh-row"><span class="ovh-dot" style="background:var(--good)"></span><span class="ovh-n">${push?"Destination":"Source"}</span><span class="ovh-v">${esc(ep)}</span></div>
+    ${epRows.map(([n,v])=>`<div class="ovh-row"><span class="ovh-dot" style="background:var(--good)"></span><span class="ovh-n">${n}</span><span class="ovh-v">${esc(v)}</span></div>`).join("")}
     <div class="ovh-row"><span class="ovh-dot" style="background:var(--accent)"></span><span class="ovh-n">Folders to copy</span><span class="ovh-v">${nj}${nj?" — "+esc((c.jobs||[]).slice(0,3).map(j=>String(j.src).split("/").filter(Boolean).pop()).join(", "))+(nj>3?" …":""):""}</span></div>
     <div class="ovh-row"><span class="ovh-dot" style="background:var(--accent-2)"></span><span class="ovh-n">Schedule</span><span class="ovh-v">${s.enabled?esc((s.freq==="weekly"?"weekly ("+(s.dow||"Mon")+") at ":"daily at ")+(s.time||"03:00")):"manual runs only"}</span></div>
     <div class="ovh-row"><span class="ovh-dot" style="background:var(--dim)"></span><span class="ovh-n">Deleted files</span><span class="ovh-v">${c.delete_mode==="mirror"?"mirror":c.delete_mode==="add"?"keep":"archive"}</span></div>
