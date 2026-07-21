@@ -7703,7 +7703,15 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
 
  // connection is "set" the same way nb_profiles_public counts it: a host, or a
  // push to a local disk with a chosen destination folder
- const connOk=()=>!!CFG.host||(isPush()&&CFG.transport==="local"&&!!CFG.dest_base);
+ // "the connection sides are chosen enough to leave the Connection step". The local
+ // destination FOLDER (dest_base) is picked on the later «Where to» step, so a push to a
+ // local disk is ready here as soon as the source is This NAS — don't demand the folder yet.
+ const connOk=()=>{
+   if(!isPush())return !!CFG.host;                         // pull needs the source address
+   if(CFG.transport==="ssh")return !!CFG.host;             // push to a server needs its address
+   if(CFG.transport==="rclone")return !!((CFG.dst||{}).remote||CFG.remote);  // push to cloud needs a remote
+   return true;                                            // push to a local disk — folder chosen next step
+ };
  /* ── first-run wizard: a fresh profile walks Connection → Folders → Deleted →
     Schedule → Finish in ONE column, no left tabs. The panes are the very same
     tab renderers (they auto-save), the wizard only adds Back/Next rails, so
