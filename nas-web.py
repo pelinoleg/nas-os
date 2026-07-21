@@ -4354,6 +4354,42 @@ def _rclone_bin():
 def rclone_installed():
     return bool(shutil.which("rclone")) or os.path.exists("/usr/bin/rclone")
 
+# Global rclone options — applied to every rclone operation the panel runs (push,
+# restore, mount). Centralised so the user tunes throughput/cache in one place.
+RCLONE_OPTS_FILE = os.path.join(NAS_CONFIG, "rclone-opts.json")
+_RCLONE_VFS_MODES = ("off", "minimal", "writes", "full")
+
+def rclone_opts_get():
+    d = _json_load_strict(RCLONE_OPTS_FILE, {})
+    def _i(k, dv, lo, hi):
+        try: return max(lo, min(hi, int(d.get(k, dv))))
+        except (TypeError, ValueError): return dv
+    mode = d.get("vfs_cache_mode")
+    return {"transfers": _i("transfers", 4, 1, 64),
+            "checkers": _i("checkers", 8, 1, 64),
+            "bwlimit": _i("bwlimit", 0, 0, 10_000_000),      # KB/s, 0 = unlimited
+            "vfs_cache_mode": mode if mode in _RCLONE_VFS_MODES else "writes",
+            "vfs_cache_max_size": str(d.get("vfs_cache_max_size") or "2G")}
+
+def rclone_opts_set(d):
+    cur = rclone_opts_get()
+    for k in ("transfers", "checkers", "bwlimit"):
+        if k in d:
+            try: cur[k] = int(d[k])
+            except (TypeError, ValueError): pass
+    if d.get("vfs_cache_mode") in _RCLONE_VFS_MODES:
+        cur["vfs_cache_mode"] = d["vfs_cache_mode"]
+    if isinstance(d.get("vfs_cache_max_size"), str) and re.match(r"^\d{1,5}[KMGTkmgt]?$", d["vfs_cache_max_size"].strip()):
+        cur["vfs_cache_max_size"] = d["vfs_cache_max_size"].strip().upper()
+    _json_save(RCLONE_OPTS_FILE, cur)
+    return rclone_opts_get()      # re-read → re-validated/clamped
+
+def _rclone_perf_args():
+    """Parallelism flags from the global options (transfers/checkers). bwlimit is added
+    by the caller: a push profile has its OWN speed limit, restore/mount use the global one."""
+    o = rclone_opts_get()
+    return ["--transfers", str(o["transfers"]), "--checkers", str(o["checkers"])]
+
 def rclone_version():
     """Installed rclone version string ('' if missing)."""
     if not rclone_installed():
@@ -4581,8 +4617,11 @@ def _rclone_restore_cli(remote, path, dest, dry):
     src = remote + ":" + (path.strip("/") if path else "")
     args = [_rclone_bin(), "copy", src, dest, "--config", RCLONE_CONF,
             "--stats", "1s", "--stats-log-level", "NOTICE", "--use-json-log",
-            "--transfers", "4", "--checkers", "8", "--retries", "3",
-            "--low-level-retries", "10", "--create-empty-src-dirs"]
+            "--retries", "3", "--low-level-retries", "10",
+            "--create-empty-src-dirs"] + _rclone_perf_args()
+    _ro = rclone_opts_get()
+    if _ro["bwlimit"] > 0:
+        args += ["--bwlimit", "%dk" % _ro["bwlimit"]]
     if dry:
         args.append("--dry-run")
     w("restore %s → %s%s" % (src, dest, "  (dry run — nothing is written)" if dry else ""))
@@ -4646,6 +4685,354 @@ def _rclone_restore_cli(remote, path, dest, dry):
                                  fmt_bytes(int(last_stats.get("bytes") or 0))))
         try:
             if os.path.exists(RCLONE_RESTORE_CANCEL): os.remove(RCLONE_RESTORE_CANCEL)
+        except OSError:
+            pass
+        if logf:
+            try: logf.close()
+            except OSError: pass
+
+# --------------------------------------------------------------------------- #
+#  Mount a cloud remote as a local folder (rclone mount → /mnt/rclone/<name>),
+#  so it shows up in the file manager like an SSH server. Each mount is its own
+#  transient systemd unit (survives a panel restart; systemd re-mounts on failure),
+#  exactly like the sshfs "Servers". Read-only by default — safe for the cloud data.
+# --------------------------------------------------------------------------- #
+RCLONE_MNT_BASE   = "/mnt/rclone"
+RCLONE_MOUNTS_FILE = os.path.join(NAS_CONFIG, "rclone-mounts.json")
+_RCLONE_MNT_NAME  = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,48}$")
+
+def _rclone_mnt_mp(name):   return os.path.join(RCLONE_MNT_BASE, name)
+def _rclone_mnt_unit(name): return "nas-rclone-mnt-%s.service" % name
+
+def _rclone_mnt_listed(mp):
+    return any(l.split()[1:2] == [mp] for l in _read("/proc/mounts").splitlines())
+
+def _rclone_mnt_alive(mp):
+    try:
+        os.statvfs(mp); return True
+    except OSError:
+        return False
+
+def _rclone_mnt_mounted(mp):
+    return _rclone_mnt_listed(mp) and _rclone_mnt_alive(mp)
+
+def _rclone_mnt_unstale(name):
+    mp = _rclone_mnt_mp(name)
+    if _rclone_mnt_listed(mp) and not _rclone_mnt_alive(mp):
+        _run(["systemctl", "stop", _rclone_mnt_unit(name)], timeout=15)
+        _run(["umount", "-l", mp], timeout=10)
+
+def _ensure_user_allow_other():
+    """rclone/sshfs --allow-other (so Samba and the oleg user see the mount, not just
+    root) needs 'user_allow_other' in /etc/fuse.conf. Idempotent; also done in the wizard."""
+    try:
+        txt = _read("/etc/fuse.conf")
+        if "user_allow_other" not in txt:
+            with open("/etc/fuse.conf", "a") as f:
+                f.write(("" if txt.endswith("\n") or not txt else "\n") + "user_allow_other\n")
+    except OSError:
+        pass
+
+def _rclone_mounts_load():
+    return _json_load_strict(RCLONE_MOUNTS_FILE, {}).get("mounts") or []
+
+def _rclone_mounts_save(lst):
+    _json_save(RCLONE_MOUNTS_FILE, {"mounts": lst}, indent=2)
+
+def _rclone_mnt_name_for(remote, path):
+    base = remote if not path else remote + "-" + path
+    return re.sub(r"[^a-zA-Z0-9_-]", "-", base).strip("-")[:48] or "mnt"
+
+def rclone_mounts_list():
+    """Configured mounts + live status. mounted=True means it's actually usable now."""
+    out = []
+    for m in _rclone_mounts_load():
+        mp = _rclone_mnt_mp(m["name"])
+        out.append({"name": m["name"], "remote": m.get("remote", ""), "path": m.get("path", ""),
+                    "readonly": bool(m.get("readonly", True)), "auto": bool(m.get("auto")),
+                    "mount": mp, "mounted": _rclone_mnt_mounted(mp)})
+    return {"ok": True, "base": RCLONE_MNT_BASE, "mounts": out, "installed": rclone_installed()}
+
+def rclone_mount_start(remote, path="", readonly=True, auto=False, save=True):
+    if not rclone_installed():
+        return {"ok": False, "log": "rclone is not installed"}
+    remote = str(remote or "").strip().rstrip(":")
+    if not _RCLONE_REMOTE_RE.match(remote) or remote not in rclone_remotes():
+        return {"ok": False, "log": "no such remote in rclone.conf"}
+    path = str(path or "").strip().strip("/")
+    if ".." in path or "\n" in path:
+        return {"ok": False, "log": "invalid remote path"}
+    name = _rclone_mnt_name_for(remote, path)
+    mp = _rclone_mnt_mp(name)
+    if save:
+        lst = _rclone_mounts_load()
+        cur = next((m for m in lst if m["name"] == name), None)
+        rec = {"name": name, "remote": remote, "path": path, "readonly": bool(readonly), "auto": bool(auto)}
+        if cur:
+            cur.update(rec)
+        else:
+            lst.append(rec)
+        _rclone_mounts_save(lst)
+    if _rclone_mnt_mounted(mp):
+        return {"ok": True, "mount": mp, "name": name}
+    _rclone_mnt_unstale(name)
+    _ensure_user_allow_other()
+    os.makedirs(mp, exist_ok=True)
+    unit = _rclone_mnt_unit(name)
+    _run(["systemctl", "reset-failed", unit], timeout=10)
+    o = rclone_opts_get()
+    args = [_rclone_bin(), "mount", remote + ":" + path, mp, "--config", RCLONE_CONF,
+            "--allow-other", "--dir-cache-time", "30s", "--poll-interval", "30s",
+            "--vfs-cache-mode", o["vfs_cache_mode"], "--vfs-cache-max-size", o["vfs_cache_max_size"],
+            "--umask", "022"]
+    if readonly:
+        args.append("--read-only")
+    if o["bwlimit"] > 0:
+        args += ["--bwlimit", "%dk" % o["bwlimit"]]
+    cmd = ["systemd-run", "--unit", unit, "--collect",
+           "--property=Restart=on-failure", "--property=RestartSec=5",
+           "--property=ExecStopPost=/bin/umount -l %s" % mp,
+           "--setenv=SUDO_USER=" + TARGET_USER, "--setenv=HOME=" + HOME] + args
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as e:
+        return {"ok": False, "log": str(e)}
+    ok = False
+    for _ in range(60):                     # the mount appears a moment after the unit starts
+        if _rclone_mnt_mounted(mp):
+            ok = True; break
+        time.sleep(0.2)
+    if not ok:
+        msg = (_run(["systemctl", "status", "--no-pager", "-n", "12", unit], timeout=10).get("log")
+               or p.stderr or p.stdout or "failed to mount").strip()[-320:]
+        _run(["systemctl", "stop", unit], timeout=15)
+        return {"ok": False, "log": msg}
+    log_event("action", "Cloud mounted: %s" % (remote + (":" + path if path else "")), "", "ok",
+              kind="files", desk=False)
+    return {"ok": True, "mount": mp, "name": name}
+
+def rclone_mount_stop(name):
+    if not _RCLONE_MNT_NAME.match(name or ""):
+        return {"ok": False, "log": "bad mount name"}
+    unit = _rclone_mnt_unit(name); mp = _rclone_mnt_mp(name)
+    _run(["systemctl", "stop", unit], timeout=20)
+    _run(["umount", "-l", mp], timeout=10)
+    _safe(lambda: os.rmdir(mp))
+    return {"ok": True}
+
+def rclone_mount_remove(name):
+    """Unmount and forget a configured mount."""
+    rclone_mount_stop(name)
+    _rclone_mounts_save([m for m in _rclone_mounts_load() if m["name"] != name])
+    return {"ok": True}
+
+_RCLONE_MNT_TRY = {}
+def _rclone_mounts_tick():
+    """Auto-remount the ones flagged auto (after a reboot/dropout). 5-min backoff."""
+    for m in _rclone_mounts_load():
+        if not m.get("auto"):
+            continue
+        name = m["name"]
+        if _rclone_mnt_mounted(_rclone_mnt_mp(name)):
+            continue
+        now = time.time()
+        if now - _RCLONE_MNT_TRY.get(name, 0) < 300:
+            continue
+        _RCLONE_MNT_TRY[name] = now
+        threading.Thread(target=lambda mm=m: _safe(lambda: rclone_mount_start(
+            mm["remote"], mm.get("path", ""), mm.get("readonly", True), True, save=False)),
+            daemon=True).start()
+
+# --------------------------------------------------------------------------- #
+#  Read-only utilities: quota (about), size of a path. Both never write.
+# --------------------------------------------------------------------------- #
+def rclone_about(remote):
+    remote = str(remote or "").strip().rstrip(":")
+    if not rclone_installed() or remote not in rclone_remotes():
+        return {"ok": False, "log": "no such remote"}
+    try:
+        r = subprocess.run([_rclone_bin(), "--config", RCLONE_CONF, "about", remote + ":",
+                            "--json", "--timeout", "25s"], capture_output=True, text=True, timeout=45)
+    except (OSError, subprocess.SubprocessError):
+        return {"ok": False, "log": "timed out"}
+    if r.returncode != 0:
+        # some backends (SFTP, plain WebDAV) don't support quota — not an error
+        return {"ok": False, "log": "this backend does not report quota"}
+    try:
+        d = json.loads(r.stdout or "{}")
+    except ValueError:
+        return {"ok": False, "log": "bad response"}
+    return {"ok": True, "total": d.get("total"), "used": d.get("used"),
+            "free": d.get("free"), "trashed": d.get("trashed")}
+
+def rclone_size(remote, path=""):
+    remote = str(remote or "").strip().rstrip(":")
+    if not rclone_installed() or remote not in rclone_remotes():
+        return {"ok": False, "log": "no such remote"}
+    path = str(path or "").strip().strip("/")
+    if ".." in path:
+        return {"ok": False, "log": "invalid path"}
+    try:
+        r = subprocess.run([_rclone_bin(), "--config", RCLONE_CONF, "size", remote + ":" + path,
+                            "--json", "--timeout", "25s"], capture_output=True, text=True, timeout=180)
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "log": "timed out (folder too large to size quickly)"}
+    except (OSError, subprocess.SubprocessError) as e:
+        return {"ok": False, "log": str(e)[:160]}
+    if r.returncode != 0:
+        err = ((r.stderr or r.stdout) or "").strip().splitlines()
+        return {"ok": False, "log": (err[-1] if err else "size failed")[:180]}
+    try:
+        d = json.loads(r.stdout or "{}")
+    except ValueError:
+        return {"ok": False, "log": "bad response"}
+    return {"ok": True, "count": d.get("count"), "bytes": d.get("bytes")}
+
+# --------------------------------------------------------------------------- #
+#  Verify (rclone check): compare a LOCAL folder against a remote path by checksum.
+#  Read-only on both sides — reports differences, never copies or deletes. Runs in
+#  its own transient unit (can be slow on big trees), same state/log shape as restore.
+# --------------------------------------------------------------------------- #
+RCLONE_CHECK_STATE  = os.path.join(NAS_CONFIG, "rclone-check.json")
+RCLONE_CHECK_LOG    = os.path.join(NAS_CONFIG, "rclone-check.log")
+RCLONE_CHECK_CANCEL = os.path.join(NAS_CONFIG, "rclone-check.cancel")
+RCLONE_CHECK_UNIT   = "nas-rclone-check"
+
+def rclone_check_state():
+    st = _json_load_strict(RCLONE_CHECK_STATE, {})
+    if st.get("running") and time.time() - (st.get("started") or 0) > 15 \
+            and not _systemd_active(RCLONE_CHECK_UNIT + ".service"):
+        st["running"] = False; st["result"] = st.get("result") or "aborted"; st["done"] = int(time.time())
+    return st
+
+def rclone_check_status():
+    st = rclone_check_state()
+    lines = []
+    try:
+        with open(RCLONE_CHECK_LOG) as f:
+            lines = f.read().split("\n")
+        if lines and lines[-1] == "":
+            lines.pop()
+    except OSError:
+        pass
+    return dict(st, log=lines[-200:])
+
+def rclone_check_start(local, remote, path):
+    if rclone_check_state().get("running"):
+        return {"ok": False, "log": "a verify is already running"}
+    if not rclone_installed():
+        return {"ok": False, "log": "rclone is not installed"}
+    remote = str(remote or "").strip().rstrip(":")
+    if not _RCLONE_REMOTE_RE.match(remote) or remote not in rclone_remotes():
+        return {"ok": False, "log": "no such remote in rclone.conf"}
+    path = str(path or "").strip().strip("/")
+    if ".." in path:
+        return {"ok": False, "log": "invalid remote path"}
+    local = os.path.normpath(str(local or "").strip())
+    if not local.startswith(("/mnt/", "/media/", "/srv/", "/home/")) or ".." in local:
+        return {"ok": False, "log": "the local folder must be under /mnt, /media, /srv or /home"}
+    if not os.path.isdir(local):
+        return {"ok": False, "log": "local folder does not exist"}
+    try:
+        if os.path.exists(RCLONE_CHECK_CANCEL): os.remove(RCLONE_CHECK_CANCEL)
+    except OSError:
+        pass
+    _json_save(RCLONE_CHECK_STATE, {"running": True, "started": int(time.time()), "local": local,
+                                    "remote": remote, "path": path, "result": None}, indent=None)
+    cmd = ["systemd-run", "--collect", "--quiet", "--unit", RCLONE_CHECK_UNIT,
+           "--setenv=SUDO_USER=" + TARGET_USER, "--setenv=HOME=" + HOME,
+           "--setenv=RCC_LOCAL", "--setenv=RCC_REMOTE", "--setenv=RCC_PATH",
+           sys.executable, os.path.join(HERE, "nas-web.py"), "rclone-check"]
+    env = dict(os.environ, RCC_LOCAL=local, RCC_REMOTE=remote, RCC_PATH=path)
+    try:
+        r = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError) as e:
+        _json_save(RCLONE_CHECK_STATE, {"running": False, "result": "warn", "error": str(e)}, indent=None)
+        return {"ok": False, "log": str(e)}
+    if r.returncode != 0:
+        _json_save(RCLONE_CHECK_STATE, {"running": False, "result": "warn"}, indent=None)
+        return {"ok": False, "log": (r.stderr or "failed to start")[:200]}
+    return {"ok": True, "log": "started"}
+
+def rclone_check_cancel():
+    try:
+        with open(RCLONE_CHECK_CANCEL, "w") as f: f.write("1")
+    except OSError:
+        pass
+    try:
+        subprocess.run(["systemctl", "stop", RCLONE_CHECK_UNIT], capture_output=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    st = _json_load_strict(RCLONE_CHECK_STATE, {})
+    st["running"] = False; st["stopped"] = True; st["result"] = "stopped"; st["done"] = int(time.time())
+    _json_save(RCLONE_CHECK_STATE, st, indent=None)
+    return {"ok": True}
+
+def _rclone_check_cli(local, remote, path):
+    """Driver: rclone check <local> remote:path — compares checksums both ways,
+    reports differences. Reads only; never writes to either side."""
+    _json_save(RCLONE_CHECK_STATE, {"running": True, "started": int(time.time()), "local": local,
+                                    "remote": remote, "path": path, "result": None, "pid": os.getpid()}, indent=None)
+    try:
+        logf = open(RCLONE_CHECK_LOG, "w", buffering=1)
+    except OSError:
+        logf = None
+    def w(l):
+        if logf:
+            try: logf.write(l + "\n")
+            except OSError: pass
+    def cancel():
+        return os.path.exists(RCLONE_CHECK_CANCEL)
+    dst = remote + ":" + path
+    # --combined -  →  a per-file report on stdout, one line each:
+    #   '='=identical, '*'=differ, '+'=only local, '-'=only remote, '!'=error
+    args = [_rclone_bin(), "check", local, dst, "--config", RCLONE_CONF,
+            "--combined", "-", "--stats", "10s", "--stats-log-level", "INFO"] + _rclone_perf_args()
+    w("verify (checksum)  %s  ↔  %s" % (local, dst))
+    c = {"match": 0, "differ": 0, "only_local": 0, "only_remote": 0, "error": 0}
+    LEG = {"=": "match", "*": "differ", "+": "only_local", "-": "only_remote", "!": "error"}
+    rc = 1
+    try:
+        p = subprocess.Popen(args, env=os.environ.copy(), stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT, text=True, bufsize=1)
+        done_ev = threading.Event()
+        def _watch():
+            while not done_ev.wait(0.5):
+                if cancel():
+                    try: p.kill()
+                    except OSError: pass
+                    return
+        threading.Thread(target=_watch, daemon=True).start()
+        for line in iter(p.stdout.readline, ""):
+            line = line.rstrip("\n")
+            if not line.strip():
+                continue
+            k = LEG.get(line[:1])
+            if k and line[1:2] == " ":
+                c[k] += 1
+                if k != "match":                     # surface only the problems in the log
+                    w({"differ": "≠ ", "only_local": "＋ local only: ", "only_remote": "－ remote only: ",
+                       "error": "! error: "}[k] + line[2:])
+            elif not line.startswith("{"):
+                w(line[:400])                        # rclone's own notices/errors
+            if cancel():
+                p.kill(); break
+        p.wait(); done_ev.set(); rc = p.returncode
+    except Exception as e:
+        w("verify failed: %s" % e)
+    finally:
+        stopped = cancel()
+        bad = c["differ"] + c["only_local"] + c["only_remote"] + c["error"]
+        ok = (rc == 0 and not stopped and bad == 0)
+        st = _json_load_strict(RCLONE_CHECK_STATE, {})
+        st.update(running=False, done=int(time.time()), code=rc, counts=c, bad=bad,
+                  result=("stopped" if stopped else "ok" if ok else "diff"))
+        _json_save(RCLONE_CHECK_STATE, st, indent=None)
+        w("[%s] matched %d · differ %d · only-local %d · only-remote %d · errors %d"
+          % ("identical" if ok else ("stopped" if stopped else "differences"),
+             c["match"], c["differ"], c["only_local"], c["only_remote"], c["error"]))
+        try:
+            if os.path.exists(RCLONE_CHECK_CANCEL): os.remove(RCLONE_CHECK_CANCEL)
         except OSError:
             pass
         if logf:
@@ -4995,10 +5382,16 @@ def nb_save(patch, pid=None):
         else:
             cd = side
         # fold back into the profile
-        if cs["kind"] == "local":
+        if cd["kind"] == "rclone":
+            # a cloud destination is ALWAYS a push from this NAS — force the source local
+            # even if the profile was a pull before (otherwise picking "Cloud" silently
+            # reverted, because a pull profile's source isn't local). This makes the
+            # destination segment actually switch to Cloud.
+            cur["direction"] = "push"; cur["transport"] = "rclone"
+            far = {}; cur["dst2"] = {}
+        elif cs["kind"] == "local":
             cur["direction"] = "push"
-            cur["transport"] = ("ssh" if cd["kind"] == "ssh"
-                                else "rclone" if cd["kind"] == "rclone" else "local")
+            cur["transport"] = ("ssh" if cd["kind"] == "ssh" else "local")
             far = cd if cd["kind"] == "ssh" else {}
             cur["dst2"] = {}
         else:
@@ -5927,9 +6320,8 @@ def _nb_rclone_cmd(cfg, job, dry, prev_files=0, allow_delete=False):
     op = "sync" if dm in ("archive", "mirror") else "copy"
     args = [_rclone_bin(), op, src, dest, "--config", RCLONE_CONF,
             "--stats", "1s", "--stats-log-level", "NOTICE", "--use-json-log",
-            "--transfers", "4", "--checkers", "8",
             "--retries", "3", "--low-level-retries", "10",
-            "--create-empty-src-dirs"]
+            "--create-empty-src-dirs"] + _rclone_perf_args()
     if op == "sync":
         # rclone --max-delete is an ABSOLUTE count (no % form), so derive it from the
         # previous run's file count × the same percentage the rsync path uses. Saves you
@@ -7973,7 +8365,7 @@ def monitor_loop():
             last_full = now
         funcs = ((history_sample, monitor_tick, maintenance_daily, _smart_selftest_tick,
                   _nb_sched_tick, _automount_tick, _summary_tick, _thermal_tick, usb_ops_sync,
-                  _fsw_tick, _replica_tick, _remotes_tick, _screen_tick) if full else
+                  _fsw_tick, _replica_tick, _remotes_tick, _rclone_mounts_tick, _screen_tick) if full else
                  (monitor_tick, _automount_tick, usb_ops_sync))
         for fn in funcs:
             try:
@@ -15096,6 +15488,12 @@ class H(BaseHTTPRequestHandler):
                             "remotes": rclone_remotes()})
             elif p == "/api/backup/rclone/restore/status":
                 self._json(rclone_restore_status())
+            elif p == "/api/backup/rclone/check/status":
+                self._json(rclone_check_status())
+            elif p == "/api/backup/rclone/mounts":
+                self._json(rclone_mounts_list())
+            elif p == "/api/backup/rclone/opts":
+                self._json({"ok": True, "opts": rclone_opts_get()})
             elif p == "/api/backup/status":
                 self._json(nb_status(_nb_qpid(q)))
             elif p == "/api/backup/dest-state":
@@ -15584,6 +15982,27 @@ class H(BaseHTTPRequestHandler):
                                                 b.get("dest", ""), dry=bool(b.get("dry"))))
             elif p == "/api/backup/rclone/restore/cancel":
                 self._json(rclone_restore_cancel())
+            elif p == "/api/backup/rclone/about":
+                self._json(rclone_about(self._body().get("remote", "")))
+            elif p == "/api/backup/rclone/size":
+                b = self._body()
+                self._json(rclone_size(b.get("remote", ""), b.get("path", "")))
+            elif p == "/api/backup/rclone/opts":
+                self._json({"ok": True, "opts": rclone_opts_set(self._body() or {})})
+            elif p == "/api/backup/rclone/mount":
+                b = self._body()
+                self._json(rclone_mount_start(b.get("remote", ""), b.get("path", ""),
+                                              readonly=bool(b.get("readonly", True)),
+                                              auto=bool(b.get("auto"))))
+            elif p == "/api/backup/rclone/unmount":
+                self._json(rclone_mount_stop(self._body().get("name", "")))
+            elif p == "/api/backup/rclone/mount-remove":
+                self._json(rclone_mount_remove(self._body().get("name", "")))
+            elif p == "/api/backup/rclone/check/start":
+                b = self._body()
+                self._json(rclone_check_start(b.get("local", ""), b.get("remote", ""), b.get("path", "")))
+            elif p == "/api/backup/rclone/check/cancel":
+                self._json(rclone_check_cancel())
             elif p == "/api/backup/key":
                 b = self._body()
                 act = str(b.get("action") or "")
@@ -15751,6 +16170,9 @@ if __name__ == "__main__":
         # paths arrive through the unit env (may contain spaces), not argv
         _rclone_restore_cli(os.environ.get("RCR_REMOTE", ""), os.environ.get("RCR_PATH", ""),
                             os.environ.get("RCR_DEST", ""), os.environ.get("RCR_DRY") == "1")
+    elif len(sys.argv) > 1 and sys.argv[1] == "rclone-check":
+        _rclone_check_cli(os.environ.get("RCC_LOCAL", ""), os.environ.get("RCC_REMOTE", ""),
+                          os.environ.get("RCC_PATH", ""))
     elif len(sys.argv) > 2 and sys.argv[1] == "screen-op":
         screen_op_run(sys.argv[2])
     else:

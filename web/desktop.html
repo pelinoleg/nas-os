@@ -996,6 +996,15 @@
   .rr-head{display:flex;align-items:center;gap:8px;font-size:12.5px;margin-bottom:5px}
   .rr-head>span{flex:1}
   .rr-head.ok{color:var(--good)}.rr-head.warn{color:var(--warn)}
+  /* Cloud (rclone) app */
+  .rc-card{background:var(--card);border:1px solid var(--win-line,var(--line));border-radius:var(--r-sm);padding:9px 11px;margin-bottom:9px}
+  .rc-card-h{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .rc-name{font-size:13px;font-weight:600;display:flex;align-items:center;gap:7px;flex:1;min-width:120px}
+  .rc-actions{display:flex;gap:6px;flex-wrap:wrap;margin-left:auto}
+  .rc-card-b:not(:empty){margin-top:8px;font-size:12.5px}
+  .rc-tag{font-size:10px;font-weight:700;letter-spacing:.04em;background:var(--sel);color:var(--win-dim,var(--dim));border-radius:5px;padding:1px 5px}
+  .rc-quota .bar{height:8px}
+  .rc-log{background:var(--code-bg);color:var(--code-fg);border-radius:var(--r-sm);padding:8px 10px;margin:6px 0 0;font-size:11.5px;line-height:1.5;max-height:220px;overflow:auto;white-space:pre-wrap;word-break:break-word;font-family:var(--mono)}
   .nb-det{margin-top:16px}
   .nb-sum{cursor:pointer;list-style:none;display:flex;align-items:center;gap:6px;font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--mut);font-family:var(--mono);padding:4px 0;user-select:none}
   .nb-sum::-webkit-details-marker{display:none}
@@ -1422,16 +1431,20 @@
   .lp-q{width:min(420px,84vw);font-size:14px;padding:9px 14px;border-radius:11px;border:1px solid var(--line);
     background:var(--card);color:var(--text);margin-bottom:24px;flex:none}
   .lp-q:focus{outline:none;border-color:var(--accent-line)}
-  .lp-grid{flex:1;min-height:0;overflow-y:auto;width:min(1020px,94vw);align-content:start;
-    display:grid;grid-template-columns:repeat(auto-fill,minmax(116px,1fr));gap:20px 8px;padding:6px}
-  .lp-grid .app .tile{width:72px;height:72px;border-radius:21px}
-  .lp-grid .app .lbl{font-size:12px;max-width:110px}
+  .lp-grid{flex:1;min-height:0;overflow-y:auto;width:min(1120px,94vw);align-content:start;
+    display:grid;grid-template-columns:repeat(auto-fill,minmax(136px,1fr));gap:22px 8px;padding:6px}
+  .lp-grid .app .tile{width:92px;height:92px;border-radius:26px}
+  .lp-grid .app .lbl{font-size:12.5px;max-width:126px}
   .lp-grid .lp-h{grid-column:1/-1;font-size:11px;font-weight:700;color:var(--dim);padding:8px 6px 0}
   .lp-grid .app{width:auto}
   .lp-grid .lp-empty{grid-column:1/-1;color:var(--dim);font-size:13px;text-align:center;padding:30px}
   .lp-pin{position:absolute;top:4px;right:10px;width:8px;height:8px;border-radius:50%;background:var(--accent);opacity:.85}
   .lp-grid .tile.lp-bare{background:none!important;box-shadow:none!important}
   .lp-grid .tile.lp-bare svg{filter:drop-shadow(0 1px 2px rgba(0,0,0,.25))}
+  /* the glyphs are fixed-size SVGs — scale them up to fill the bigger launchpad tiles */
+  .lp-grid .app .tile>svg{width:48px;height:48px}
+  .lp-grid .app .tile .tico{width:58px;height:58px}
+  .lp-grid .app .tile .tletter{font-size:40px}
   /* activity-graph tooltip: dark bubble, like .tipbox */
   .fsw-tip{position:fixed;z-index:2700;background:#222c3a;color:#f2f5fa;border:1px solid rgba(255,255,255,.12);
     font-size:11.5px;line-height:1.5;padding:8px 11px;border-radius:10px;box-shadow:0 10px 32px rgba(0,0,0,.45);
@@ -3316,6 +3329,7 @@ const INTERNAL=[
  {id:"__duscan",name:"Disk usage",color:"linear-gradient(135deg,#33BE86,#2a9d6e)",ic:"donut",bare:1,fn:()=>winDiskUsage()},
  {id:"__fsw",name:"File history",color:"linear-gradient(135deg,#7c6cf2,#5847d6)",ic:"histf",bare:1,fn:()=>winFsHistory()},
  {id:"__nasbak",name:"Backup",color:"linear-gradient(135deg,#2f9d70,#1f7d78)",ic:"backup",bare:1,fn:()=>winBackup()},
+ {id:"__rclone",name:"Cloud (rclone)",color:"linear-gradient(135deg,#3aa0f0,#5a6cf0)",ic:"net",bare:1,fn:()=>winRclone()},
  {id:"__vault",name:"Credentials",color:"linear-gradient(135deg,#e0913c,#c96f22)",ic:"keyf",bare:1,fn:()=>winVault()},
  {id:"__notes",name:"Notes",color:"linear-gradient(135deg,#F2C14E,#E09F2F)",ic:"notec",bare:1,fn:()=>winNotes()},
  {id:"__trash",name:"Trash",color:"linear-gradient(135deg,#8592a6,#5f6b7d)",ic:"trashf",bare:1,fn:()=>winTrash()},
@@ -6597,6 +6611,218 @@ function nbPickSource(preselected,preExcl,onPick,opts){const s=document.getEleme
    const anc=new Set();[...sel,...excl].forEach(p=>{const pr=p.split("/");let acc="";for(let i=0;i<pr.length-1;i++){acc=(acc?acc+"/":"")+pr[i];anc.add(acc);}});
    for(const p of [...anc].sort((a,b)=>a.split("/").length-b.split("/").length)){expanded.add(p);if(kids[p]===undefined)await browse(p);}
    refresh();})();}
+
+/* ═══ Cloud (rclone) — a dedicated, centralized app. Everything rclone lives here:
+   remote connections, the rclone.conf editor + install/update, mounting a remote as a
+   local folder, read-only utilities (quota/size/verify) and global options. Backup
+   profiles only PICK a remote from here. ═══ */
+const rcloneP=(path,body)=>api(path,{method:"POST",body:JSON.stringify(body||{})});
+
+/* Restore FROM a cloud remote: browse read-only, pick a folder + local destination,
+   rclone COPY it back (never deletes — cloud read-only, local add/update). Dry run previews. */
+function rcloneRestoreDlg(remote){
+ const s=document.getElementById("scrim");
+ let path="",entries=null,dest="",running=false,poll=null;
+ const stopPoll=()=>{if(poll){clearTimeout(poll);poll=null;}};
+ const close=()=>{stopPoll();s.classList.remove("show");};
+ const crumbs=()=>{const parts=path?path.split("/"):[];let acc="";
+  return `<a data-p="">${esc(remote)}:</a>`+parts.map(seg=>{acc=acc?acc+"/"+seg:seg;return ` / <a data-p="${att(acc)}">${esc(seg)}</a>`;}).join("");};
+ const draw=()=>{
+  s.innerHTML=`<div class="dialog nb-rcdlg" style="max-width:720px;width:92vw">
+    <div class="set-titrow"><h3 style="margin:0">${svg("download",17)} Restore from ${esc(remote)}</h3><button class="iconbtn" id="rrX" title="Close">${svg("x",16)}</button></div>
+    <p class="set-sub" style="margin-top:4px">Copies from the cloud into a folder on this NAS. The cloud is only read — nothing there is changed or deleted; locally, files are added and updated (never deleted).</p>
+    <div class="set-h">Pick what to restore</div>
+    <div class="rr-crumb">${crumbs()}</div>
+    <div class="rr-list" id="rrList">${entries===null?'<div class="set-load">loading…</div>':entries.length?entries.map((e,i)=>`<div class="nb-job rr-ent" data-i="${i}" data-dir="${e.dir?1:0}"${e.dir?' style="cursor:pointer"':""}><span class="nb-src mono" style="flex:1">${svg(e.dir?"folder":"file",13)} ${esc(e.name)}</span>${e.dir?`<span class="nb-arr">›</span>`:`<span class="mono" style="color:var(--mut);font-size:11px">${fmtB(e.size)}</span>`}</div>`).join(""):'<div style="color:var(--mut);font-size:12px;padding:6px 0">This folder is empty.</div>'}</div>
+    <div class="rr-target mono">Restoring: <b>${esc(remote+":"+path)}</b>${path?"":" — the whole remote"}</div>
+    <div class="set-h">Restore to (a folder on this NAS)</div>
+    <div class="nb-field-row"><input class="mono" id="rrDest" value="${att(dest)}" placeholder="/mnt/storage/restore"><button class="btn sm" id="rrPick">${svg("folder",13)} Choose</button></div>
+    <div class="rr-prog" id="rrProg" style="display:none"></div>
+    <div class="set-savebar"><span class="sb-left" id="rrMsg" style="margin-right:auto;color:var(--mut);font-size:12px"></span>
+      <button class="btn sm" id="rrDry">${svg("shield",13)} Dry run</button>
+      <button class="btn pri sm" id="rrGo">${svg("download",13)} Restore</button></div></div>`;
+  s.classList.add("show");
+  const q=x=>s.querySelector(x);
+  s.querySelectorAll(".rr-crumb a").forEach(a=>a.onclick=()=>nav(a.dataset.p));
+  s.querySelectorAll(".rr-ent").forEach(row=>{if(row.dataset.dir==="1")row.onclick=()=>{const e=entries[+row.dataset.i];nav(path?path+"/"+e.name:e.name);};});
+  q("#rrX").onclick=close;
+  q("#rrDest").onchange=()=>{dest=q("#rrDest").value.trim();};
+  q("#rrPick").onclick=()=>pickFolder({start:dest||"/media",title:"Restore to",onPick:p=>{dest=p;},onClose:()=>draw()});
+  q("#rrDry").onclick=()=>start(true);
+  q("#rrGo").onclick=()=>start(false);
+  if(running)applyRunning();
+ };
+ const nav=p=>{entries=null;draw();browse(p);};
+ const browse=async p=>{const r=await rcloneP("/api/backup/rclone/ls",{remote,path:p});
+  if(r&&r.ok){path=r.path;entries=r.entries;}else{entries=[];toast((r&&r.log)||"listing failed");}draw();};
+ const start=async dry=>{const d=s.querySelector("#rrDest");dest=(d&&d.value||"").trim();
+  if(!dest){toast("Choose a local folder to restore into");return;}
+  const r=await rcloneP("/api/backup/rclone/restore/start",{remote,path,dest,dry});
+  if(!(r&&r.ok)){toast((r&&r.log)||"could not start");return;}
+  running=true;applyRunning();tick();};
+ const applyRunning=()=>{const g=s.querySelector("#rrGo"),d=s.querySelector("#rrDry"),pr=s.querySelector("#rrProg");
+  if(g)g.disabled=running;if(d)d.disabled=running;if(pr&&running)pr.style.display="";};
+ const tick=async()=>{const st=(await api("/api/backup/rclone/restore/status"))||{};paintProg(st);
+  if(st.running){poll=setTimeout(tick,1000);}else{running=false;stopPoll();const g=s.querySelector("#rrGo"),d=s.querySelector("#rrDry");if(g)g.disabled=false;if(d)d.disabled=false;}};
+ const paintProg=st=>{const pr=s.querySelector("#rrProg");if(!pr)return;pr.style.display="";
+  const m=/(\d+)%\s+([\d.]+[kKMGTP]?B\/s)/.exec(st.line||"");const pct=m?+m[1]:(st.running?0:100);
+  const head=st.running?`Restoring… ${m?m[1]+"% · "+m[2]:""}`
+    :st.result==="stopped"?"Stopped"
+    :st.dry?`Dry run — would transfer ${st.files||0} files · ${fmtB(st.bytes||0)}`
+    :st.result==="ok"?`Restored ${st.files||0} files · ${fmtB(st.bytes||0)}`
+    :`Finished with problems${st.err?" — "+esc(st.err):""}`;
+  const cls=st.running?"":((st.result==="ok"||st.dry)?"ok":"warn");
+  pr.innerHTML=`<div class="rr-head ${cls}"><span>${head}</span>${st.running?`<button class="btn sm" id="rrStop">Stop</button>`:""}</div><div class="bar"><i class="pg" style="width:${pct}%"></i></div>`;
+  const stop=s.querySelector("#rrStop");if(stop)stop.onclick=async()=>{await rcloneP("/api/backup/rclone/restore/cancel",{});toast("Stopping…");};};
+ draw();browse("");
+ (async()=>{const st=(await api("/api/backup/rclone/restore/status"))||{};
+  if(st.running&&st.remote===remote){running=true;dest=st.dest||"";path=st.path||"";draw();paintProg(st);tick();}})();
+}
+
+/* Mount dialog: choose an optional subpath, read-only (safe) and auto-remount, then mount. */
+function rcloneMountDlg(remote,onDone){
+ const s=document.getElementById("scrim");
+ s.innerHTML=`<div class="dialog"><h3>${svg("folder",16)} Mount ${esc(remote)}</h3>
+   <p class="set-sub" style="margin:0 0 8px">Mounts the remote as a folder on this NAS (visible in Files). Read-only keeps the cloud data safe.</p>
+   <div class="nb-field"><label>Path inside the remote (optional)</label><input class="mono" id="mgPath" placeholder="(the whole remote)"></div>
+   <label class="nb-chk"><input type="checkbox" id="mgRo" checked> Read-only (recommended)</label>
+   <label class="nb-chk"><input type="checkbox" id="mgAuto"> Re-mount automatically after a reboot / dropout</label>
+   <div class="r"><button class="btn" id="mgX">Cancel</button><button class="btn pri" id="mgOk">${svg("folder",13)} Mount</button></div></div>`;
+ s.classList.add("show");
+ s.querySelector("#mgX").onclick=()=>s.classList.remove("show");
+ s.querySelector("#mgOk").onclick=async()=>{
+   const path=s.querySelector("#mgPath").value.trim(),readonly=s.querySelector("#mgRo").checked,auto=s.querySelector("#mgAuto").checked;
+   s.classList.remove("show");toast("Mounting… (a moment)");
+   const r=await rcloneP("/api/backup/rclone/mount",{remote,path,readonly,auto});
+   if(r&&r.ok){toast("Mounted: "+r.mount);}else toast((r&&r.log)||"mount failed");
+   if(onDone)onDone(r);};
+}
+
+function winRclone(initTab){openWin("__rclone","Cloud (rclone)",(body,win)=>{
+ let tab=initTab||"remotes",DATA=null,cm=null;
+ const cid=x=>String(x).replace(/[^\w-]/g,"_");
+ const CATS=[{id:"remotes",name:"Remotes",ic:"net"},{id:"mounts",name:"Mounts",ic:"folder"},
+   {id:"tools",name:"Verify",ic:"shield"},{id:"config",name:"Config",ic:"edit"},{id:"opts",name:"Options",ic:"gearf"}];
+ const loadCfg=async()=>{DATA=(await api("/api/backup/rclone"))||{};};
+ const render=()=>{
+   body.innerHTML=`<div class="nbmain"><div class="set-nav">${CATS.map(c=>`<button data-t="${c.id}" class="${tab===c.id?"on":""}">${svg(c.ic,17)}<span>${c.name}</span></button>`).join("")}</div><div class="set-main"><div class="set-pane" id="tc"></div></div></div>`;
+   body.querySelectorAll(".set-nav button").forEach(b=>b.onclick=()=>{tab=b.dataset.t;render();});
+   (TABS[tab]||TABS.remotes)(body.querySelector("#tc"));};
+
+ function tabRemotes(tc){
+  const inst=!!(DATA&&DATA.installed),remotes=(DATA&&DATA.remotes)||[];
+  tc.innerHTML=`<h3 class="set-title">Remotes</h3><p class="set-sub">Your cloud connections from rclone.conf. Create them on your Mac (<span class="mono">rclone config</span>) and paste the config on the <b>Config</b> tab.</p>
+    ${!inst?`<div class="nb-dwarn" style="margin-bottom:8px">rclone is not installed — open the <b>Config</b> tab to install it.</div>`:""}
+    ${remotes.length?`<div id="rcRemotes"></div>`:`<div style="color:var(--mut);font-size:13px;padding:10px 0">No remotes yet — open <b>Config</b> and paste your rclone.conf.</div>`}`;
+  const boxr=tc.querySelector("#rcRemotes");if(!boxr)return;
+  remotes.forEach(r=>{
+   const card=el(`<div class="rc-card">
+     <div class="rc-card-h"><span class="rc-name mono">${svg("net",15)} ${esc(r)}</span>
+      <span class="rc-actions"><button class="btn sm" data-a="test">Test</button><button class="btn sm" data-a="about">Quota</button><button class="btn sm" data-a="size">Size</button><button class="btn sm" data-a="mount">${svg("folder",13)} Mount</button><button class="btn sm pri" data-a="restore">${svg("download",13)} Restore…</button></span></div>
+     <div class="rc-card-b" id="rcb_${cid(r)}"></div></div>`);
+   const info=card.querySelector(".rc-card-b");
+   const act=async a=>{
+     if(a==="restore")return rcloneRestoreDlg(r);
+     if(a==="mount")return rcloneMountDlg(r,()=>{tab="mounts";render();});
+     if(a==="test"){info.innerHTML='<span style="color:var(--mut)">testing…</span>';const t=await rcloneP("/api/backup/rclone/test",{remote:r});info.innerHTML=`<span style="color:var(--${t&&t.ok?"good":"danger"})">${t&&t.ok?"✓ ":"✗ "}${esc((t&&t.log)||"")}</span>`;return;}
+     if(a==="about"){info.innerHTML='<span style="color:var(--mut)">reading quota…</span>';const d=await rcloneP("/api/backup/rclone/about",{remote:r});
+       if(!d||!d.ok){info.innerHTML=`<span style="color:var(--mut)">${esc((d&&d.log)||"no quota")}</span>`;return;}
+       const used=d.used||0,total=d.total||0,pct=total?Math.round(used*100/total):0;
+       info.innerHTML=`<div class="rc-quota"><div class="bar"><i style="width:${pct}%"></i></div><div class="mono" style="font-size:11.5px;margin-top:4px;color:var(--dim)">${fmtB(used)} used${total?" / "+fmtB(total)+" ("+pct+"%)":""}${d.free!=null?" · "+fmtB(d.free)+" free":""}</div></div>`;return;}
+     if(a==="size"){info.innerHTML='<span style="color:var(--mut)">calculating size (can take a while)…</span>';const d=await rcloneP("/api/backup/rclone/size",{remote:r,path:""});info.innerHTML=d&&d.ok?`<span class="mono">${(d.count||0)} files · ${fmtB(d.bytes||0)}</span>`:`<span style="color:var(--mut)">${esc((d&&d.log)||"size failed")}</span>`;return;}
+   };
+   card.querySelectorAll("[data-a]").forEach(b=>b.onclick=()=>act(b.dataset.a));
+   boxr.appendChild(card);});
+ }
+
+ function tabMounts(tc){
+  tc.innerHTML=`<div class="set-titrow"><h3 class="set-title" style="margin:0">Mounts</h3><button class="btn sm pri" id="mAdd">${svg("plus",13)} Add mount</button></div><p class="set-sub">Cloud folders mounted on this NAS — browse and use them in Files like a local disk. Read-only by default.</p><div id="mList"><div class="set-load">loading…</div></div>`;
+  tc.querySelector("#mAdd").onclick=()=>{const rem=(DATA&&DATA.remotes)||[];if(!rem.length){toast("Add a remote first (Config tab)");return;}rcloneMountDlg(rem[0],load);};
+  const draw=list=>{const box=tc.querySelector("#mList");if(!box)return;
+   if(!list.length){box.innerHTML=`<div style="color:var(--mut);font-size:13px;padding:10px 0">No mounts yet. «Add mount» to mount a remote as a folder.</div>`;return;}
+   box.innerHTML="";
+   list.forEach(m=>{const row=el(`<div class="rc-card"><div class="rc-card-h">
+      <span class="rc-name mono"><span class="nbdot ${m.mounted?"ok":"off"}"></span> ${esc(m.remote+":"+(m.path||""))}${m.readonly?' <span class="rc-tag">RO</span>':""}${m.auto?' <span class="rc-tag">auto</span>':""}</span>
+      <span class="rc-actions">${m.mounted?`<button class="btn sm" data-a="open">${svg("folder",13)} Open</button><button class="btn sm" data-a="umount">Unmount</button>`:`<button class="btn sm pri" data-a="mount">Mount</button>`}<button class="btn sm dng" data-a="remove" title="Remove">${svg("trash",13)}</button></span></div>
+      <div class="rc-card-b mono" style="color:var(--mut);font-size:11.5px">${esc(m.mount)}${m.mounted?"":" · not mounted"}</div></div>`);
+     const op=row.querySelector('[data-a="open"]');if(op)op.onclick=()=>winFiles(m.mount);
+     const um=row.querySelector('[data-a="umount"]');if(um)um.onclick=async()=>{toast("Unmounting…");await rcloneP("/api/backup/rclone/unmount",{name:m.name});load();};
+     const mn=row.querySelector('[data-a="mount"]');if(mn)mn.onclick=async()=>{toast("Mounting…");const r=await rcloneP("/api/backup/rclone/mount",{remote:m.remote,path:m.path,readonly:m.readonly,auto:m.auto});if(!(r&&r.ok))toast((r&&r.log)||"mount failed");load();};
+     row.querySelector('[data-a="remove"]').onclick=()=>confirmDlg("Remove this mount?","It is unmounted and forgotten. The cloud data is untouched.",async()=>{await rcloneP("/api/backup/rclone/mount-remove",{name:m.name});load();},true);
+     box.appendChild(row);});};
+  const load=async()=>{const r=await api("/api/backup/rclone/mounts");draw((r&&r.mounts)||[]);};
+  load();
+ }
+
+ function tabTools(tc){
+  const remotes=(DATA&&DATA.remotes)||[];
+  let local="",remote=remotes[0]||"",path="",poll=null;
+  const stop=()=>{if(poll){clearTimeout(poll);poll=null;}};
+  const draw=()=>{
+   tc.innerHTML=`<h3 class="set-title">Verify (checksum compare)</h3><p class="set-sub">Compares a local folder against a cloud path by checksum — proves a backup is intact. Read-only: nothing is copied or deleted.</p>
+     <div class="nb-field"><label>Local folder</label><div class="nb-field-row"><input class="mono" id="vLocal" value="${att(local)}" placeholder="/mnt/storage/…"><button class="btn sm" id="vPick">${svg("folder",13)} Choose</button></div></div>
+     <div class="nb-grid2" style="margin-top:8px"><label>Remote${remotes.length?`<select class="mono" id="vRemote">${remotes.map(r=>`<option ${r===remote?"selected":""}>${esc(r)}</option>`).join("")}</select>`:`<input class="mono" disabled value="no remotes">`}</label><label>Path in the remote<input class="mono" id="vPath" value="${att(path)}" placeholder="(remote root)"></label></div>
+     <div class="rr-prog" id="vProg" style="display:none"></div>
+     <div class="set-savebar"><span class="sb-left" id="vMsg" style="margin-right:auto;color:var(--mut);font-size:12px"></span><button class="btn pri sm" id="vGo">${svg("shield",13)} Verify</button></div>`;
+   const q=x=>tc.querySelector(x);
+   q("#vLocal").onchange=()=>local=q("#vLocal").value.trim();
+   q("#vPick").onclick=()=>pickFolder({start:local||"/mnt",title:"Local folder to verify",onPick:p=>local=p,onClose:()=>draw()});
+   if(q("#vRemote"))q("#vRemote").onchange=()=>remote=q("#vRemote").value;
+   q("#vPath").onchange=()=>path=q("#vPath").value.trim();
+   q("#vGo").onclick=start;
+  };
+  const start=async()=>{const q=x=>tc.querySelector(x);local=(q("#vLocal").value||"").trim();path=(q("#vPath")?q("#vPath").value:"").trim();
+   if(!local){toast("Choose a local folder");return;}if(!remote){toast("No remote");return;}
+   const r=await rcloneP("/api/backup/rclone/check/start",{local,remote,path});
+   if(!(r&&r.ok)){toast((r&&r.log)||"could not start");return;}tick();};
+  const tick=async()=>{const st=(await api("/api/backup/rclone/check/status"))||{};paint(st);if(st.running)poll=setTimeout(tick,1200);else stop();};
+  const paint=st=>{const pr=tc.querySelector("#vProg");if(!pr)return;pr.style.display="";
+   const c=st.counts||{};
+   const head=st.running?"Verifying… (reading checksums, may take a while)"
+     :st.result==="ok"?"✓ Identical — every file matches"
+     :st.result==="stopped"?"Stopped"
+     :`Differences: ${c.differ||0} differ · ${c.only_local||0} only local · ${c.only_remote||0} only remote${c.error?" · "+c.error+" errors":""}`;
+   const cls=st.running?"":(st.result==="ok"?"ok":"warn");
+   const tail=(st.log||[]).slice(-14).map(esc).join("\n");
+   pr.innerHTML=`<div class="rr-head ${cls}"><span>${esc(head)}</span>${st.running?`<button class="btn sm" id="vStop">Stop</button>`:""}</div>${tail?`<pre class="rc-log">${tail}</pre>`:""}`;
+   const sb=tc.querySelector("#vStop");if(sb)sb.onclick=()=>rcloneP("/api/backup/rclone/check/cancel",{});};
+  draw();
+  (async()=>{const st=(await api("/api/backup/rclone/check/status"))||{};if(st.running){local=st.local||"";remote=st.remote||remote;path=st.path||"";draw();paint(st);tick();}})();
+ }
+
+ function tabConfig(tc){
+  const inst=!!(DATA&&DATA.installed),ver=(DATA&&DATA.version)||"",path=(DATA&&DATA.path)||"/etc/nas-os/rclone.conf";
+  tc.innerHTML=`<h3 class="set-title">Config</h3><p class="set-sub">Your rclone.conf — shared by every backup profile and mount. Create remotes on your Mac (<span class="mono">rclone config</span>) and paste it here; each <span class="mono">[name]</span> section is one remote.</p>
+    <div class="srow"><div class="srow-l"><div class="srow-t">rclone</div><div class="srow-d">${inst?("installed · version "+esc(ver)):"not installed on this NAS"}</div></div><div class="srow-c"><button class="btn sm" id="cfUp">${svg("download",13)} ${inst?"Update":"Install"} rclone</button></div></div>
+    <div class="set-h">rclone.conf</div>
+    <div id="cfHost" class="nb-rc-cm"></div>
+    <div class="set-savebar"><span class="sb-left" id="cfMsg" style="margin-right:auto;color:var(--mut);font-size:12px">Stored at <span class="mono">${esc(path)}</span> · secret section of the settings backup</span><button class="btn pri sm" id="cfSave">${svg("check",13)} Save</button></div>`;
+  ensureCM(()=>{cm=CodeMirror(tc.querySelector("#cfHost"),{value:(DATA&&DATA.conf)||"",mode:"properties",lineNumbers:true,tabSize:2,styleActiveLine:true,lineWrapping:false});setTimeout(()=>cm.refresh(),40);});
+  tc.querySelector("#cfUp").onclick=async()=>{const b=tc.querySelector("#cfUp");b.disabled=true;toast("Installing/updating rclone… (may take a minute)");const r=await rcloneP("/api/backup/rclone/update",{});b.disabled=false;if(r){await loadCfg();render();toast(r.ok?("rclone "+(r.version||"ready")):("update failed"+(r.log?": "+r.log:"")));}};
+  tc.querySelector("#cfSave").onclick=async()=>{if(!cm)return;const msg=tc.querySelector("#cfMsg");msg.textContent="saving…";const r=await rcloneP("/api/backup/rclone/save",{conf:cm.getValue()});if(r&&r.ok){DATA.conf=cm.getValue();DATA.remotes=r.remotes||[];DATA.version=r.version;DATA.installed=r.installed;msg.textContent="saved · "+((r.remotes||[]).length)+" remote(s)";toast("rclone.conf saved");}else msg.textContent=(r&&r.log)||"save failed";};
+ }
+
+ async function tabOpts(tc){
+  const r=await api("/api/backup/rclone/opts");const o=(r&&r.opts)||{transfers:4,checkers:8,bwlimit:0,vfs_cache_mode:"writes",vfs_cache_max_size:"2G"};
+  tc.innerHTML=`<h3 class="set-title">Options</h3><p class="set-sub">Global rclone settings — applied to every transfer, restore and mount.</p>
+    <div class="srow"><div class="srow-l"><div class="srow-t">Parallel transfers</div><div class="srow-d">files copied at once (--transfers)</div></div><div class="srow-c"><input class="mono" id="oT" style="max-width:80px" value="${o.transfers}"></div></div>
+    <div class="srow"><div class="srow-l"><div class="srow-t">Checkers</div><div class="srow-d">parallel comparisons (--checkers)</div></div><div class="srow-c"><input class="mono" id="oC" style="max-width:80px" value="${o.checkers}"></div></div>
+    <div class="srow"><div class="srow-l"><div class="srow-t">Speed limit</div><div class="srow-d">global cap for restore/mount; 0 = unlimited</div></div><div class="srow-c"><input class="mono" id="oB" style="max-width:90px" value="${o.bwlimit}"><span style="color:var(--mut);font-size:12px"> KB/s</span></div></div>
+    <div class="set-h">Mounts</div>
+    <div class="srow"><div class="srow-l"><div class="srow-t">VFS cache mode${tipHTML("How a mounted cloud caches files locally. writes = safe & fast for editing (default). full = also cache reads. off = stream directly (lowest disk use).")}</div></div><div class="srow-c"><div class="seg" id="oVfs">${["off","minimal","writes","full"].map(v=>`<button data-v="${v}" class="${o.vfs_cache_mode===v?"on":""}">${v}</button>`).join("")}</div></div></div>
+    <div class="srow"><div class="srow-l"><div class="srow-t">Cache max size</div><div class="srow-d">disk used for the mount cache, e.g. 2G</div></div><div class="srow-c"><input class="mono" id="oVsz" style="max-width:90px" value="${att(o.vfs_cache_max_size)}"></div></div>
+    <div class="set-savebar"><span class="sb-left" id="oMsg" style="margin-right:auto;color:var(--mut);font-size:12px"></span><button class="btn pri sm" id="oSave">${svg("check",13)} Save options</button></div>`;
+  let vfs=o.vfs_cache_mode;
+  tc.querySelectorAll("#oVfs button").forEach(b=>b.onclick=()=>{vfs=b.dataset.v;tc.querySelectorAll("#oVfs button").forEach(x=>x.classList.toggle("on",x===b));});
+  tc.querySelector("#oSave").onclick=async()=>{const msg=tc.querySelector("#oMsg");msg.textContent="saving…";
+    const body={transfers:+tc.querySelector("#oT").value||4,checkers:+tc.querySelector("#oC").value||8,bwlimit:+tc.querySelector("#oB").value||0,vfs_cache_mode:vfs,vfs_cache_max_size:tc.querySelector("#oVsz").value.trim()||"2G"};
+    const rr=await rcloneP("/api/backup/rclone/opts",body);msg.textContent=rr&&rr.ok?"saved":"failed";toast("Options saved");};
+ }
+
+ const TABS={remotes:tabRemotes,mounts:tabMounts,tools:tabTools,config:tabConfig,opts:tabOpts};
+ (async()=>{await loadCfg();render();})();
+},{w:900,h:620});}
+
 function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
  body.style.display="flex";body.style.flexDirection="column";body.style.padding="0";
  let tab="overview",CFG={},JOBS=[],PROFS=[],nbFootMo=null,wizStep=0,wizOn=null,RCLONE=null;
@@ -6636,112 +6862,7 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
  // verify toggle row shared by both directions (checksum re-read after each run)
  const verifyRow=c=>`<div class="srow"><div class="srow-l"><div class="srow-t">Verify after copying${tipHTML("After the run rsync re-reads files on BOTH sides and compares checksums (--checksum). Catches corrupted copies and silent bit rot, but reads all data — slow on large volumes and heavy on the disks. Note: during transfer rsync already verifies every transferred file with a checksum — this pass is an extra safety net for important data.")}</div><div class="srow-d">checksums of all files after the run</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="cVer"${c.verify?" checked":""}><span class="sl"></span></label></div></div>`;
  const wireVerify=tc=>{const v=tc.querySelector("#cVer");if(v)v.onchange=()=>saveCfg({verify:v.checked});};
- /* ── Cloud (rclone) — SHARED settings (rclone.conf is global, one for all profiles),
-    so it's not a per-profile sidebar tab: a header button opens this overlay. Shows the
-    installed version + update, the config editor and the remotes it defines with a
-    per-remote Test. Profiles only pick a remote from here on their destination. ── */
- const gotoRclone=()=>rcloneDlg(render);   // opened from the header button and the destination hints; re-renders on save
- function rcloneDlg(onChange){
-  const s=document.getElementById("scrim");
-  const cid=x=>String(x).replace(/[^\w-]/g,"_");
-  let cm=null,DATA=null,dirty=false;
-  s.innerHTML=`<div class="dialog nb-rcdlg" style="max-width:820px;width:94vw"><div class="set-load">loading…</div></div>`;
-  s.classList.add("show");
-  const box=()=>s.querySelector(".nb-rcdlg");
-  const draw=()=>{
-   const ver=DATA.version||"",inst=!!DATA.installed,remotes=DATA.remotes||[],path=DATA.path||"/etc/nas-os/rclone.conf";
-   box().innerHTML=`<div class="set-titrow"><h3 style="margin:0">${svg("net",18)} Cloud (rclone)</h3><button class="iconbtn" id="rcX" title="Close">${svg("x",16)}</button></div>
-    <p class="set-sub" style="margin-top:4px">One configuration shared by every backup profile. Create the remotes on your Mac (<span class="mono">rclone config</span>) and paste rclone.conf here; then any profile can send its folders to them.</p>
-    <div class="srow"><div class="srow-l"><div class="srow-t">rclone</div><div class="srow-d">${inst?("installed · version "+esc(ver)):"not installed on this NAS"}</div></div><div class="srow-c"><button class="btn sm" id="rcUp">${svg("download",13)} ${inst?"Update":"Install"} rclone</button></div></div>
-    <div class="set-h">Remotes (connections)</div>
-    <div id="rcRemotes">${remotes.length?remotes.map(r=>`<div class="nb-job"><span class="nb-src mono" style="flex:1">${svg("net",13)} ${esc(r)}</span><span class="mono" id="rct_${cid(r)}" style="font-size:11.5px"></span><button class="btn sm nb-rcrest" data-r="${att(r)}" title="Restore files from this remote to this NAS">${svg("download",13)} Restore…</button><button class="btn sm nb-rctest" data-r="${att(r)}">Test</button></div>`).join(""):`<div style="color:var(--mut);font-size:12px;padding:6px 0">No remotes yet — paste your rclone.conf below and Save.</div>`}</div>
-    <div class="set-h">rclone.conf${tipHTML("The full rclone config. Each [name] section is one remote. Paste what «rclone config» wrote on your Mac (~/.config/rclone/rclone.conf). Passwords are stored obscured by rclone itself.")}</div>
-    <div id="rcEdHost" class="nb-rc-cm"></div>
-    <div class="set-savebar"><span class="sb-left" id="rcMsg" style="margin-right:auto;color:var(--mut);font-size:12px">Stored at <span class="mono">${esc(path)}</span> · secret section of the settings backup</span><button class="btn sm" id="rcClose">Close</button><button class="btn pri sm" id="rcSave">${svg("check",13)} Save config</button></div>`;
-   ensureCM(()=>{cm=CodeMirror(box().querySelector("#rcEdHost"),{value:DATA.conf||"",mode:"properties",lineNumbers:true,tabSize:2,styleActiveLine:true,lineWrapping:false});setTimeout(()=>cm.refresh(),40);});
-   box().querySelectorAll(".nb-rcrest").forEach(b=>b.onclick=()=>rcloneRestoreDlg(b.dataset.r));
-   box().querySelectorAll(".nb-rctest").forEach(b=>b.onclick=async()=>{
-    const r=b.dataset.r,cell=box().querySelector("#rct_"+cid(r));
-    if(cell){cell.textContent="testing…";cell.style.color="var(--mut)";}b.disabled=true;
-    const t=await nbP("/api/backup/rclone/test",{remote:r});b.disabled=false;
-    if(cell){cell.textContent=(t&&t.ok?"✓ ":"✗ ")+((t&&t.log)||"");cell.style.color=t&&t.ok?"var(--good)":"var(--danger)";}});
-   box().querySelector("#rcUp").onclick=async()=>{const b=box().querySelector("#rcUp");b.disabled=true;
-    toast("Installing/updating rclone… (may take a minute)");
-    const r=await nbP("/api/backup/rclone/update",{});b.disabled=false;
-    if(r){toast(r.ok?("rclone "+(r.version||"ready")):("update failed"+(r.log?": "+r.log:"")));load();}};
-   const close=()=>{s.classList.remove("show");if(dirty&&onChange)onChange();};
-   box().querySelector("#rcX").onclick=close;box().querySelector("#rcClose").onclick=close;
-   box().querySelector("#rcSave").onclick=async()=>{if(!cm)return;const msg=box().querySelector("#rcMsg");msg.textContent="saving…";
-    const r=await nbP("/api/backup/rclone/save",{conf:cm.getValue()});
-    if(r&&r.ok){DATA=Object.assign(DATA,{conf:cm.getValue(),remotes:r.remotes||[],version:r.version,installed:r.installed});RCLONE=DATA;dirty=true;
-     toast("rclone.conf saved · "+((r.remotes||[]).length)+" remote(s)");draw();}
-    else msg.textContent=(r&&r.log)||"save failed";};
-  };
-  const load=async()=>{DATA=(await api("/api/backup/rclone"))||{};RCLONE=DATA;draw();};
-  load();
- }
- /* ── Restore FROM a cloud remote (pull). Browse the remote read-only, pick a folder
-    and a local destination, then rclone COPY it back (never deletes: the cloud is only
-    read, local files are only added/updated). Dry run previews without writing. ── */
- function rcloneRestoreDlg(remote){
-  const s=document.getElementById("scrim");
-  let path="",entries=null,dest="",running=false,poll=null;
-  const stopPoll=()=>{if(poll){clearTimeout(poll);poll=null;}};
-  const close=()=>{stopPoll();s.classList.remove("show");};
-  const crumbs=()=>{const parts=path?path.split("/"):[];let acc="";
-   return `<a data-p="">${esc(remote)}:</a>`+parts.map(seg=>{acc=acc?acc+"/"+seg:seg;return ` / <a data-p="${att(acc)}">${esc(seg)}</a>`;}).join("");};
-  const draw=()=>{
-   s.innerHTML=`<div class="dialog nb-rcdlg" style="max-width:720px;width:92vw">
-     <div class="set-titrow"><h3 style="margin:0">${svg("download",17)} Restore from ${esc(remote)}</h3><button class="iconbtn" id="rrX" title="Close">${svg("x",16)}</button></div>
-     <p class="set-sub" style="margin-top:4px">Copies from the cloud into a folder on this NAS. The cloud is only read — nothing there is changed or deleted; locally, files are added and updated (never deleted).</p>
-     <div class="set-h">Pick what to restore</div>
-     <div class="rr-crumb">${crumbs()}</div>
-     <div class="rr-list" id="rrList">${entries===null?'<div class="set-load">loading…</div>':entries.length?entries.map((e,i)=>`<div class="nb-job rr-ent" data-i="${i}" data-dir="${e.dir?1:0}"${e.dir?' style="cursor:pointer"':""}><span class="nb-src mono" style="flex:1">${svg(e.dir?"folder":"file",13)} ${esc(e.name)}</span>${e.dir?`<span class="nb-arr">›</span>`:`<span class="mono" style="color:var(--mut);font-size:11px">${fmtB(e.size)}</span>`}</div>`).join(""):'<div style="color:var(--mut);font-size:12px;padding:6px 0">This folder is empty.</div>'}</div>
-     <div class="rr-target mono">Restoring: <b>${esc(remote+":"+path)}</b>${path?"":" — the whole remote"}</div>
-     <div class="set-h">Restore to (a folder on this NAS)</div>
-     <div class="nb-field-row"><input class="mono" id="rrDest" value="${att(dest)}" placeholder="/mnt/storage/restore"><button class="btn sm" id="rrPick">${svg("folder",13)} Choose</button></div>
-     <div class="rr-prog" id="rrProg" style="display:none"></div>
-     <div class="set-savebar"><span class="sb-left" id="rrMsg" style="margin-right:auto;color:var(--mut);font-size:12px"></span>
-       <button class="btn sm" id="rrDry">${svg("shield",13)} Dry run</button>
-       <button class="btn pri sm" id="rrGo">${svg("download",13)} Restore</button></div></div>`;
-   s.classList.add("show");
-   const q=x=>s.querySelector(x);
-   s.querySelectorAll(".rr-crumb a").forEach(a=>a.onclick=()=>nav(a.dataset.p));
-   s.querySelectorAll(".rr-ent").forEach(row=>{if(row.dataset.dir==="1")row.onclick=()=>{const e=entries[+row.dataset.i];nav(path?path+"/"+e.name:e.name);};});
-   q("#rrX").onclick=close;
-   q("#rrDest").onchange=()=>{dest=q("#rrDest").value.trim();};
-   q("#rrPick").onclick=()=>pickFolder({start:dest||"/media",title:"Restore to",onPick:p=>{dest=p;},onClose:()=>draw()});
-   q("#rrDry").onclick=()=>start(true);
-   q("#rrGo").onclick=()=>start(false);
-   if(running)applyRunning();
-  };
-  const nav=p=>{entries=null;draw();browse(p);};
-  const browse=async p=>{const r=await nbP("/api/backup/rclone/ls",{remote,path:p});
-   if(r&&r.ok){path=r.path;entries=r.entries;}else{entries=[];toast((r&&r.log)||"listing failed");}draw();};
-  const start=async dry=>{const d=s.querySelector("#rrDest");dest=(d&&d.value||"").trim();
-   if(!dest){toast("Choose a local folder to restore into");return;}
-   const r=await nbP("/api/backup/rclone/restore/start",{remote,path,dest,dry});
-   if(!(r&&r.ok)){toast((r&&r.log)||"could not start");return;}
-   running=true;applyRunning();tick();};
-  const applyRunning=()=>{const g=s.querySelector("#rrGo"),d=s.querySelector("#rrDry"),pr=s.querySelector("#rrProg");
-   if(g)g.disabled=running;if(d)d.disabled=running;if(pr&&running)pr.style.display="";};
-  const tick=async()=>{const st=(await api("/api/backup/rclone/restore/status"))||{};paintProg(st);
-   if(st.running){poll=setTimeout(tick,1000);}else{running=false;stopPoll();const g=s.querySelector("#rrGo"),d=s.querySelector("#rrDry");if(g)g.disabled=false;if(d)d.disabled=false;}};
-  const paintProg=st=>{const pr=s.querySelector("#rrProg");if(!pr)return;pr.style.display="";
-   const m=/(\d+)%\s+([\d.]+[kKMGTP]?B\/s)/.exec(st.line||"");const pct=m?+m[1]:(st.running?0:100);
-   const head=st.running?`Restoring… ${m?m[1]+"% · "+m[2]:""}`
-     :st.result==="stopped"?"Stopped"
-     :st.dry?`Dry run — would transfer ${st.files||0} files · ${fmtB(st.bytes||0)}`
-     :st.result==="ok"?`Restored ${st.files||0} files · ${fmtB(st.bytes||0)}`
-     :`Finished with problems${st.err?" — "+esc(st.err):""}`;
-   const cls=st.running?"":((st.result==="ok"||st.dry)?"ok":"warn");
-   pr.innerHTML=`<div class="rr-head ${cls}"><span>${head}</span>${st.running?`<button class="btn sm" id="rrStop">Stop</button>`:""}</div><div class="bar"><i class="pg" style="width:${pct}%"></i></div>`;
-   const stop=s.querySelector("#rrStop");if(stop)stop.onclick=async()=>{await nbP("/api/backup/rclone/restore/cancel");toast("Stopping…");};};
-  draw();browse("");
-  // reconnect to a restore already in progress (e.g. reopened dialog)
-  (async()=>{const st=(await api("/api/backup/rclone/restore/status"))||{};
-   if(st.running&&st.remote===remote){running=true;dest=st.dest||"";path=st.path||"";draw();paintProg(st);tick();}})();
- }
+ const gotoRclone=()=>winRclone();   // open the dedicated Cloud (rclone) app
  /* ── Destination (push: where to send from this NAS) ── */
  // (legacy push-only tabConnPush removed — active Connection tab is tabConn/sideCard)
  /* ── Connection ── */
@@ -6797,7 +6918,8 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
   const again=()=>tabConn(tc,part);
   const both=c.both_remote,sides=part==="sides";
   // rclone destination needs the remotes list / version — fetch once, then re-render
-  if(c.dst&&c.dst.kind==="rclone"&&RCLONE===null){api("/api/backup/rclone").then(r=>{RCLONE=r||{};again();});}
+  // always refetch the remotes list (it's edited in the separate Cloud app) — re-render only if it changed, so no loop
+  if(c.dst&&c.dst.kind==="rclone"){const was=JSON.stringify((RCLONE||{}).remotes||null);api("/api/backup/rclone").then(r=>{RCLONE=r||{};if(JSON.stringify(RCLONE.remotes||null)!==was)again();});}
   tc.innerHTML=`<h3 class="set-title">Connections</h3><p class="set-sub">Where we take data from and where we put it. The two sides are independent: each can be this NAS or a remote server.</p>
    ${sideCard("src")}
    <div class="nb-arrow-row">${svg("arrowup",16)}</div>

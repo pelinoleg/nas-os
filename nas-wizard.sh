@@ -3387,6 +3387,11 @@ setup_snapraid_notify_noninteractive() { :; }   # notifications are configured s
 #   update (api rclone-update)              — self-update in place to the latest release.
 install_rclone() {
     local mode="${1:-ensure}"
+    # rclone mount --allow-other (cloud visible to Samba/the user, not just root) needs
+    # user_allow_other in /etc/fuse.conf. Idempotent; the panel also ensures it at mount time.
+    if [ -f /etc/fuse.conf ] && ! grep -q '^user_allow_other' /etc/fuse.conf; then
+        echo "user_allow_other" >> /etc/fuse.conf
+    fi
     if command -v rclone >/dev/null 2>&1; then
         if [ "$mode" = update ]; then
             info "Updating rclone (was $(rclone version 2>/dev/null | awk 'NR==1{print $2}'))"
