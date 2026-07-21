@@ -5098,6 +5098,11 @@ def _nb_unit_active(pid):
     try:
         return subprocess.run(["systemctl", "is-active", "--quiet", nb_unit(pid) + ".service"],
                               timeout=5).returncode == 0
+    except subprocess.TimeoutExpired:
+        # systemctl stalled (loaded box — the documented load-14/apt-storm scenarios): the unit's
+        # state is UNKNOWN, not dead. Assume still active so a live run isn't falsely flipped to
+        # "aborted" by the orphan self-heal (which would stop the poller and add a bogus history row).
+        return True
     except (OSError, subprocess.SubprocessError):
         return False
 
@@ -5964,11 +5969,15 @@ def nb_test(cfg=None):
         if not r1.get("ok") or not _nb_rclone_c2c(cfg):
             return dict(r1, log=("source " + (r1.get("log") or "")) if not r1.get("ok") else r1.get("log"))
         # cloud → cloud: the destination is another remote — check it too
-        dremote = _nb_c2c_dst(cfg)[0]
+        dremote, dpath = _nb_c2c_dst(cfg)
         if not dremote:
             return {"ok": False, "log": "no destination remote selected"}
         if dremote not in rclone_remotes():
             return {"ok": False, "log": "destination remote «%s» is not in rclone.conf" % dremote}
+        # refuse a degenerate self-copy (same remote AND same base path) — in mirror/archive it
+        # would sync a folder onto itself and could delete everything under it
+        if dremote == remote and dpath == (cfg.get("remote_path") or "").strip("/"):
+            return {"ok": False, "log": "source and destination are the same remote path — pick a different destination"}
         r2 = rclone_test_remote(dremote)
         return {"ok": r2.get("ok"), "log": ("destination " + (r2.get("log") or "")) if not r2.get("ok")
                 else "both remotes reachable · %s → %s" % (remote, dremote)}
@@ -6684,9 +6693,16 @@ def _nb_rclone_run(cfg, dry, writer, cancel, on_job, allow_delete):
             if err_lines:
                 res["err"] = err_lines[0][:180]; res["errn"] = errs
             # --max-delete tripped (rclone aborts with a max-delete message, exit 7) — detect it
-            # by text, not exit code: up to the cap may already have been removed before it aborted
+            # by text, not exit code: up to the cap may already have been removed before it aborted.
+            # Report it as code 25 (rsync's guard code) so the panel shows the guard banner + the
+            # one-shot "I deleted these myself" button and fires the mass-deletion notification —
+            # exactly as for rsync (paintDelGuard / notify_event both key on code==25).
             if any("max-delete" in (l or "").lower() or "too many deletes" in (l or "").lower()
                    for l in err_lines):
+                res["code"] = 25
+                pf = int(prevf.get(j["src"], 0) or 0); pctv = int(cfg.get("max_delete_pct", 20) or 0)
+                res["guard_limit"] = max(1, int(pf * pctv / 100.0)) if (pf and pctv) else 0
+                res["guard_pct"] = pctv
                 res["err"] = ("deletion guard: too many files would be deleted (source wiped or "
                               "unmounted?) — up to the cap may already have been removed")
         emit(res)
@@ -6849,21 +6865,41 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None, allow_delete=Fal
             writer("— cancelled —"); break
         writer("")
         writer("=== %s → %s ===" % (j["src"], j["dest"]))
-        if push and not os.path.exists("/" + j["src"].lstrip("/")):
-            writer("⚠ SKIPPED: the source is missing on this NAS (/%s) — the folder was deleted "
-                   "or the disk is not mounted." % j["src"].lstrip("/"))
-            emit({"src": j["src"], "ok": False, "src_missing": True}); continue
-        # SAFETY (mirror/archive): a mounted-but-EMPTY source makes rsync --delete wipe the
-        # destination, and --max-delete doesn't engage on the first run (prev_files=0).
-        if (push and not dry and cfg.get("delete_mode", "archive") in ("mirror", "archive")
-                and not allow_delete):
-            srcp = "/" + j["src"].lstrip("/")
-            try: src_empty = not os.listdir(srcp)
-            except OSError: src_empty = False
-            if src_empty:
-                writer("⚠ SKIPPED: the source (/%s) is EMPTY — not syncing, because mirror/archive "
-                       "would then delete the destination copy. If you really emptied it, run once "
-                       "with «I deleted these myself», or use «Copy» mode (never deletes)." % j["src"].lstrip("/"))
+        # SAFETY — never let a deleting sync (mirror/archive) run against a wiped/empty/unmounted
+        # source: --delete would erase the whole destination copy, and --max-delete doesn't engage
+        # on the first run (prev_files=0). The rclone runner guards ALL directions; the rsync runner
+        # must too. The source is locally visible for push (the NAS folder) and for SSH→SSH (the
+        # sshfs stage). For a plain pull it lives only on the remote — there we refuse an uncapped
+        # delete against an already-populated destination when there is no guard baseline yet.
+        src_local = ("/" + j["src"].lstrip("/")) if push else \
+                    (stage.rstrip("/") + "/" + j["src"].lstrip("/")) if stage else None
+        deleting = (not dry and cfg.get("delete_mode", "archive") in ("mirror", "archive") and not allow_delete)
+        if src_local is not None:
+            if not os.path.exists(src_local):
+                writer("⚠ SKIPPED: the source is missing (%s) — the folder was deleted or the disk "
+                       "is not mounted." % src_local)
+                emit({"src": j["src"], "ok": False, "src_missing": True}); continue
+            if deleting:
+                try: src_empty = not os.listdir(src_local)
+                except OSError: src_empty = False
+                if src_empty:
+                    writer("⚠ SKIPPED: the source (%s) is EMPTY — not syncing, because mirror/archive "
+                           "would then delete the destination copy. If you really emptied it, run once "
+                           "with «I deleted these myself», or use «Copy» mode (never deletes)." % src_local)
+                    emit({"src": j["src"], "ok": False, "src_missing": True}); continue
+        elif deleting and int(prevf.get(j["src"], 0) or 0) == 0:
+            # plain pull: the remote source is not locally visible and there is NO delete-guard
+            # baseline (first run, or the status file was lost on a reinstall). An uncapped --delete
+            # against an already-populated destination would wipe it if the remote source is empty/
+            # gone. Refuse until the user confirms the source is intact.
+            dst = j.get("dest") or ""; arch = nb_deleted_top(cfg)
+            try: dst_has = bool([n for n in os.listdir(dst) if n != arch]) if os.path.isdir(dst) else False
+            except OSError: dst_has = False
+            if dst_has:
+                writer("⚠ SKIPPED: no deletion-guard baseline yet (first run, or the status was reset) and "
+                       "the destination already holds a copy — refusing an uncapped mirror/archive that could "
+                       "wipe it if the remote source is empty. Run once with «I deleted these myself» to confirm "
+                       "the source is intact, or use «Copy» mode (never deletes).")
                 emit({"src": j["src"], "ok": False, "src_missing": True}); continue
         if push_ssh:
             # plain server: mkdir over SSH (works with any remote rsync).
