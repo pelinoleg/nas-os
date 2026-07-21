@@ -7155,6 +7155,7 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
       if(!rem){toast("Choose a cloud remote first (Connection tab)");return;}
       rcloneRemotePicker(rem,p=>{
         const src=(p||"").replace(/^\/+|\/+$/g,"");
+        if(!src){toast("Pick a folder inside the remote (pulling the whole remote isn't supported — add its top-level folders)");return;}
         if(!JOBS.some(j=>j.src===src))JOBS.push({src,dest:destFor(src),enabled:true});
         JOBS.forEach(j=>{j.dest=destFor(j.src);});           // single folder: keep dests aligned
         saveCfg({jobs:JOBS}).then(()=>{JOBS=(CFG.jobs||[]).slice();again();});});
@@ -7596,6 +7597,7 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
   // not written to the config: the next run is protected again
   const run=async (dry,allow)=>{if(!(c.jobs||[]).length){toast("Select sources first (the «Sources» tab)");return;}
    if(isRcloneSrc()&&!CFG.remote){toast("Choose a cloud remote first (Connection tab)");return;}
+   if(!isPush()&&!CFG.dest_base){toast("Choose a local destination folder first (the «Where to» tab)");return;}
    if(isPush()&&(isRclone()?!CFG.remote:!CFG.dest_base)){toast(isRclone()?"Choose a cloud remote first (Connection tab)":"First choose a destination (the «Destination» tab)");return;}
    con.innerHTML="";nbCursor=0;nbStarted=null;setBusy(true);
    setHero("accent",dry?"<b>Dry run is running…</b>":"<b>Backup is running…</b>");
@@ -7792,7 +7794,10 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
   body.querySelector("#wzNext").onclick=async()=>{
    if(cur==="conn"&&!connOk()){toast("Set up the connection first — or press «Set up later»");return;}
    if(cur==="folders"&&!JOBS.length){toast("Choose at least one folder to copy");return;}
-   if(cur==="dest"&&isPush()&&!CFG.dest_base){toast("Choose the destination folder first");return;}
+   // require the destination FOLDER on the «Where to» step whenever it's local (push to a disk,
+   // any pull incl. cloud→NAS) — an unset dest_base silently falls back to /mnt/storage and,
+   // for pull archive, would dump the _deleted archive onto the system disk.
+   if(cur==="dest"&&!isPushSsh()&&!isRclone()&&!CFG.dest_base){toast("Choose the destination folder first");return;}
    if(cur==="done"){wizOn=false;await saveCfg({setup_done:true});tab="overview";SET.nbTab=tab;saveSettings();render();return;}
    wizStep++;setPos();render();};}
  const render=async()=>{const r=await nbG("/api/backup/config");

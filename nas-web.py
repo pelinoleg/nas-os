@@ -6019,6 +6019,10 @@ def nb_browse(cfg, path):
     push: the source is THIS NAS — walk the local FS (paths without a leading /)."""
     cfg = cfg or nb_load()
     path = str(path or "").strip().rstrip("/")
+    if _nb_rclone_pull(cfg):
+        # cloud source: list it read-only via rclone (the UI uses the dedicated picker, but keep
+        # /api/backup/browse correct too — otherwise it would run rsync against an empty host)
+        return rclone_ls(cfg.get("remote", ""), path)
     if _nb_push(cfg):
         path = path.lstrip("/")
         if ".." in path:
@@ -6364,7 +6368,7 @@ def _nb_rclone_cmd(cfg, job, dry, prev_files=0, allow_delete=False):
     delete_mode: add→`copy` (never deletes), mirror→`sync`+--max-delete guard,
     archive→`sync`+`--backup-dir` (deleted/overwritten files kept in a dated _deleted folder;
     on the remote for push, locally for pull)."""
-    pull = not _nb_push(cfg)
+    pull = _nb_rclone_pull(cfg)
     remote = (cfg.get("remote") or "").strip().rstrip(":")
     if pull:
         src = remote + ":" + job["src"].strip("/")    # cloud source (remote:path)
@@ -6396,7 +6400,14 @@ def _nb_rclone_cmd(cfg, job, dry, prev_files=0, allow_delete=False):
         # pull → dest_base/_deleted/<date>/<sub> (a LOCAL folder).
         if pull:
             base = (cfg.get("dest_base") or "").rstrip("/")
-            sub = dest[len(base):].lstrip("/") if (base and dest.startswith(base)) else ""
+            if base and dest.startswith(base):
+                sub = dest[len(base):].lstrip("/")
+            else:
+                # no dest_base prefix (shouldn't happen — the UI forces one): keep the archive a
+                # sibling of THIS job's dest so the --backup-dir stays ABSOLUTE, never a relative
+                # "_deleted/…" that rclone would resolve against / and dump onto the system disk.
+                base = os.path.dirname(dest.rstrip("/")) or "/"
+                sub = os.path.basename(dest.rstrip("/"))
             args += ["--backup-dir", os.path.join(base, nb_deleted_rel(cfg), sub)]
         else:
             rem, _, path = dest.partition(":")
@@ -6459,7 +6470,7 @@ def _nb_rclone_run(cfg, dry, writer, cancel, on_job, allow_delete):
         if on_job:
             try: on_job(list(results), len(jobs))
             except Exception: pass
-    pull = not _nb_push(cfg)
+    pull = _nb_rclone_pull(cfg)
     for j in jobs:
         if cancel():
             writer("— cancelled —"); break
@@ -6478,6 +6489,16 @@ def _nb_rclone_run(cfg, dry, writer, cancel, on_job, allow_delete):
                 os.makedirs(dst, exist_ok=True)
             except OSError as e:
                 writer("could not create the folder: %s" % e); emit({"src": j["src"], "ok": False}); continue
+            # SAFETY (mirror/archive only): a wrong/empty cloud source would make `sync` delete the
+            # local copy — and the --max-delete guard doesn't engage on the FIRST run (prev_files=0).
+            # So verify the remote source actually has content before a deleting sync. copy is safe.
+            if not dry and cfg.get("delete_mode", "archive") in ("mirror", "archive") and not allow_delete:
+                ls = rclone_ls(cfg.get("remote") or "", j["src"])
+                if not ls.get("ok") or not ls.get("entries"):
+                    writer("⚠ SKIPPED: the cloud source «%s:%s» is empty or unreachable — NOT syncing, "
+                           "because mirror/archive would delete the local copy. Check the remote path "
+                           "(or use «Copy» mode, which never deletes)." % (cfg.get("remote"), j["src"]))
+                    emit({"src": j["src"], "ok": False, "src_missing": True}); continue
         else:
             srcp = "/" + j["src"].lstrip("/")
             if not os.path.exists(srcp):
