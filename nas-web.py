@@ -4648,7 +4648,7 @@ def _rclone_restore_cli(remote, path, dest, dry):
     src = remote + ":" + (path.strip("/") if path else "")
     args = [_rclone_bin(), "copy", src, dest, "--config", RCLONE_CONF,
             "--stats", "1s", "--stats-log-level", "NOTICE", "--use-json-log",
-            "--retries", "3", "--low-level-retries", "10",
+            "--retries", "3", "--low-level-retries", "10", "--fast-list",
             "--create-empty-src-dirs"] + _rclone_perf_args()
     _ro = rclone_opts_get()
     if _ro["bwlimit"] > 0:
@@ -5025,7 +5025,7 @@ def _rclone_check_cli(local, remote, path):
     dst = remote + ":" + path
     # --combined -  →  a per-file report on stdout, one line each:
     #   '='=identical, '*'=differ, '+'=only local, '-'=only remote, '!'=error
-    args = [_rclone_bin(), "check", local, dst, "--config", RCLONE_CONF,
+    args = [_rclone_bin(), "check", local, dst, "--config", RCLONE_CONF, "--fast-list",
             "--combined", "-", "--stats", "10s", "--stats-log-level", "INFO"] + _rclone_perf_args()
     w("verify (checksum)  %s  ↔  %s" % (local, dst))
     c = {"match": 0, "differ": 0, "only_local": 0, "only_remote": 0, "error": 0}
@@ -6529,8 +6529,14 @@ def _nb_rclone_cmd(cfg, job, dry, prev_files=0, allow_delete=False):
     args = [_rclone_bin(), op, src, dest, "--config", RCLONE_CONF,
             "--stats", "1s", "--stats-log-level", "NOTICE", "--use-json-log",
             "--retries", "3", "--low-level-retries", "10",
+            "--fast-list",              # one recursive listing (far fewer API calls / faster on S3/B2/…)
             "--create-empty-src-dirs"] + _rclone_perf_args()
     if op == "sync":
+        # detect renamed/moved files and move them server-side instead of re-uploading — big
+        # bandwidth/time saving on large backups. rclone auto-disables it if the remote can't do
+        # a server-side move, so it's safe everywhere (and a wiped source still can't match, so
+        # the empty-source guard is unaffected).
+        args += ["--track-renames"]
         # never let the sync manage OUR OWN _deleted archive. Normally the archive is a sibling
         # of the job destination so it isn't in scope, but if a source maps to the destination
         # ROOT (e.g. pulling a whole remote into dest_base) it WOULD be — mirror/archive would
@@ -7846,7 +7852,7 @@ def _nb_compare_job_rclone(cfg, job, deep, on_scan, cancelled):
         if ex:
             excl += ["--exclude", ex if any(ch in ex for ch in "*?[") else ex.rstrip("/") + "/**"]
     args = [_rclone_bin(), "check", src, dst, "--config", RCLONE_CONF, "--combined", "-",
-            "--exclude", "/" + nb_deleted_top(cfg) + "/**"] + excl + _rclone_perf_args()
+            "--fast-list", "--exclude", "/" + nb_deleted_top(cfg) + "/**"] + excl + _rclone_perf_args()
     if deep:
         args.append("--download")                      # byte-for-byte (default already checksums)
     KMAP = {"+": ("n", "new"), "-": ("d", "deleted"), "*": ("c", "changed")}
