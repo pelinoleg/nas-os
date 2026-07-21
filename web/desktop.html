@@ -7459,39 +7459,41 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
   const paintDelGuard=jobs=>{const gn=g("#oGuard");if(!gn)return;
    const all=(jobs||[]).filter(j=>j.code===25);
    if(!all.length){gn.style.display="none";gn.innerHTML="";return;}
-   // two DIFFERENT situations wear code 25: a PRE-EMPTIVE refusal (src_block — the source was
-   // empty/unavailable, nothing ran) vs a real mass-delete TRIP mid-sync. They need different
-   // wording and, crucially, a differently-scoped confirmation (a src_block "allow" wipes the
-   // WHOLE copy, not just "surplus files").
+   // code 25 covers THREE situations: an empty/unavailable source (pre-emptive refusal), a
+   // first-run/no-baseline pull against a populated dest (pre-emptive refusal, source usually
+   // INTACT), and a real mass-delete TRIP mid-sync. Each needs its own wording.
    const src=all.filter(j=>j.src_block),real=all.filter(j=>!j.src_block);
-   const arch=CFG.delete_mode==="archive";
+   const emptyJ=src.filter(j=>j.block!=="nobaseline"),baseJ=src.filter(j=>j.block==="nobaseline");
+   const arch=CFG.delete_mode==="archive",nm=js=>esc(js.map(j=>j.src).join(", "));
    gn.className="nb-dwarn wrn";gn.style.display="block";
    let html="";
-   if(src.length){const names=src.map(j=>j.src).join(", "),noBase=src.some(j=>j.block==="nobaseline");
+   if(src.length){const noBase=baseJ.length&&!emptyJ.length;
     html+=`<b>Backup refused — the copy is untouched.</b> ${noBase?"There's no deletion-guard baseline yet (first run, or the status was reset) and the destination already holds a copy":"The source is EMPTY or unavailable (the folder was emptied, or its disk is not mounted)"}: `
-     +`<span class="mono">${esc(names)}</span>.`
-     +`<div style="margin-top:6px">In <b>mirror/archive</b> mode a sync against ${noBase?"an unverified":"an empty"} source would delete the destination copy${arch?" (moved to the deleted-files archive)":" — permanently"}. The run was stopped so that couldn't happen. Fix the source (mount the disk / restore the folder) and run again.</div>`
+     +`<span class="mono">${nm(src)}</span>.`
+     +`<div style="margin-top:6px">In <b>mirror/archive</b> mode a sync against ${noBase?"a source with no verified baseline":"an empty"} source would delete the destination copy${arch?" (moved to the deleted-files archive)":" — permanently"}. The run was stopped so that couldn't happen. ${noBase?"If the source is intact, run once with the guard off to establish the baseline.":"Fix the source (mount the disk / restore the folder) and run again."}</div>`
      +`<div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">`
-     +`<button class="btn sm dng" id="oAllowSrc">${svg("check",13)} The source really is empty — sync anyway</button>`
-     +`<span style="font-size:11.5px;color:var(--danger)">This DELETES the entire copy of ${src.length>1?"these folders":"this folder"} in the destination${arch?" (kept in the archive)":""}.</span></div>`;}
-   if(real.length){const pct=real[0].guard_pct||20,lim=real[0].guard_limit||0,names=real.map(j=>j.src).join(", ");
+     +`<button class="btn sm dng" id="oAllowSrc">${svg("check",13)} ${noBase?"The source is intact — sync now":"The source really is empty — sync anyway"}</button></div>`;}
+   if(real.length){const pct=real[0].guard_pct||20,lim=real[0].guard_limit||0;
     html+=`${src.length?'<hr style="border:none;border-top:1px solid var(--line);margin:10px 0">':''}`
      +`<b>Deletion stopped by the guard.</b> The copy held more surplus files than the threshold allows`
-     +`${lim?` (${lim} files = ${pct}% of the previous run)`:` (${pct}% of the previous run)`}: `
-     +`<span class="mono">${esc(names)}</span>. <b>Nothing was deleted</b> — the copy is intact.`
+     +`${lim&&real.length===1?` (${lim} files = ${pct}% of the previous run)`:` (${pct}% of the previous run)`}: `
+     +`<span class="mono">${nm(real)}</span>. <b>Nothing was deleted</b> — the copy is intact.`
      +`<div style="margin-top:6px">There are two possible reasons: you removed a lot of files on the source yourself — then the deletion is legitimate; or the source fell away (disk not mounted, folder deleted by mistake) — then deleting is exactly what you must NOT do, or the copy will repeat the loss.</div>`
      +`<div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">`
-     +`<button class="btn sm dng" id="oAllow">${svg("check",13)} I deleted them myself — synchronise</button>`
-     +`<span style="font-size:11.5px;color:var(--mut)">${arch?"Deleted files move to the deleted-files archive instead of vanishing":"Mirror mode: surplus files are erased for good"}</span></div>`;}
+     +`<button class="btn sm dng" id="oAllow">${svg("check",13)} I deleted them myself — synchronise</button></div>`;}
    gn.innerHTML=html;
-   const asrc=gn.querySelector("#oAllowSrc");
-   if(asrc)asrc.onclick=()=>confirmDlg("Sync against the empty source?",
-     `This runs WITHOUT the safety stop, once. Because the source is empty or unavailable, the sync will DELETE the entire copy in the destination${arch?" (moved to the deleted-files archive, recoverable from there)":" — permanently (mirror mode)"}. Only do this if you deliberately emptied the source and want the copy to match it.`,
+   // ONE global allow_delete lifts EVERY guard for the whole run — so BOTH buttons open the SAME
+   // confirmation, which spells out every consequence (an empty-source sync wipes a whole copy;
+   // a no-baseline sync is normal IF the source is intact; a real trip uncaps surplus deletion).
+   const parts=[];
+   if(emptyJ.length)parts.push(`sync the empty/unavailable source of «${emptyJ.map(j=>j.src).join(", ")}» → their ENTIRE destination copy ${arch?"moves to the deleted-files archive (recoverable)":"is deleted permanently"}`);
+   if(baseJ.length)parts.push(`run the first sync of «${baseJ.map(j=>j.src).join(", ")}» with no baseline guard — normal if the source is intact, but if it is actually empty the copy would be deleted`);
+   if(real.length)parts.push(`lift the mass-deletion guard for «${real.map(j=>j.src).join(", ")}» → surplus files ${arch?"move to the archive":"are erased for good"}`);
+   const doAllow=()=>confirmDlg("Run without the safety guards?",
+     `This runs the WHOLE backup once with the safety guards OFF — it will: `+parts.join("; and ")+`. Only proceed if the sources are exactly as you intend.`,
      ()=>{run(false,true);},true);
-   const ab=gn.querySelector("#oAllow");
-   if(ab)ab.onclick=()=>confirmDlg("Allow the deletion?",
-     `The backup will run WITHOUT the mass-deletion guard — once, for this run only. Surplus files in the copy ${arch?"will move to the deleted-files archive":"will be erased for good"}. Make sure the source is in place and that you deleted the files, not a failure.`,
-     ()=>{run(false,true);},true);};
+   const asrc=gn.querySelector("#oAllowSrc");if(asrc)asrc.onclick=doAllow;
+   const ab=gn.querySelector("#oAllow");if(ab)ab.onclick=doAllow;};
   // folders with the status of the last run (we recolor them after the backup finishes too)
   const paintStatus=()=>Promise.all([nbG("/api/backup/status"),nbG("/api/backup/dest-state")]).then(([st,ds])=>{const jn=g("#oJobs");if(!jn)return;
    const byS={};((st&&st.jobs)||[]).forEach(j=>byS[j.src]=j);
@@ -7914,9 +7916,10 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
    else{wizOn=true;CFG.setup_started=true;saveCfg({setup_started:true});}
   }
   if(wizOn){renderWizard();return;}
-  // Compare is rsync-only (dry-run itemize); for a cloud destination the equivalent is
-  // the Rclone app's Verify (rclone check), so drop the tab here to avoid a dead screen.
-  const CATv=CATS.filter(x=>!(x.id==="compare"&&isRcloneAny()));
+  // Compare is shown for every mode: rsync profiles itemize a dry-run, cloud (rclone) profiles
+  // run `rclone check`. The one unsupported mode is SSH→SSH (both sides remote) — the tab still
+  // shows, but with a "not supported in this mode" note (handled inside tabCompare).
+  const CATv=CATS;
   if(!CATv.some(x=>x.id===tab))tab="overview";      // current tab was filtered out → fall back
   // "Delete profile" deliberately NOT in the nav: destructive actions live in the
   // profile tab's context menu, not next to everyday navigation
@@ -7936,6 +7939,10 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
 // by folder so it's readable, filters out identical/noise. Top-level so it's hoisted into
 // winBackup's TABS; it only needs NB_PID (global) + shared helpers.
 function tabCompare(tc){
+ // SSH→SSH (both sides remote) can't be compared — rsync doesn't itemize remote↔remote. Show a
+ // note instead of a dead/broken screen; every other mode (incl. cloud via rclone check) works.
+ if(CFG.both_remote){tc.innerHTML=`<div class="cmp-wrap"><h3 class="set-title" style="margin:0 0 3px">Compare</h3><div class="mon-note" style="margin-top:6px">Compare isn't supported in this mode — both the source and the destination are remote SSH servers, and rsync can't itemize a remote-to-remote pair. Check these backups by spot-checking the files on the servers themselves.</div></div>`;return;}
+ const rcl=isRcloneAny();
  let showAll=false, filt="", timer=null, findT=null, LAST={};
  const bp=(path,b)=>api(path,{method:"POST",body:JSON.stringify(Object.assign({p:NB_PID},b||{}))});
  const stop=()=>{if(timer){clearTimeout(timer);timer=null;}};
@@ -7988,13 +7995,13 @@ function tabCompare(tc){
  const render=()=>{if(!document.body.contains(tc)){stop();return;}
   const st=LAST,run=st.running,sum=st.summary||{},diffs=(sum.new||0)+(sum.changed||0)+(sum.deleted||0),good=!run&&(st.done||st.shares)&&diffs===0;
   let head="";
-  if(run) head=`<div class="cmp-run"><span class="cmp-spin">${svg("sync",16)}</span><div><b>Comparing…</b>${st.cur?" · "+esc(st.cur):""}<div class="set-sub" style="margin:1px 0 0">${st.deep?"deep (checksums)":"quick (size + date)"} · ${ago(st.started)}${st.scanned?" · "+st.scanned.toLocaleString()+" differences so far":""}</div></div><button class="btn sm dng" id="cmpCancel" style="margin-left:auto">Stop</button></div>`;
-  else if(st.done||st.shares) head=`<div class="cmp-verdict ${good?"good":"warn"}">${svg(good?"check":"shield",20)}<div><b>${good?"Backup matches the server":`${diffs.toLocaleString()} differences · ${bytes((sum.new_bytes||0)+(sum.changed_bytes||0))} to copy`}</b><div class="set-sub">${st.done?"Last compared: "+fmDate(st.done*1000):""}${st.deep?" · deep":" · quick"}${st.stopped?" · stopped early":""}</div></div></div>`
-    +`<div class="cmp-chips"><span class="cmp-chip ok">✓ identical ${(sum.identical||0).toLocaleString()}</span><span class="cmp-chip new">＋ new ${(sum.new||0).toLocaleString()}${sum.new_bytes?" · "+bytes(sum.new_bytes):""}</span><span class="cmp-chip chg">✎ changed ${(sum.changed||0).toLocaleString()}</span><span class="cmp-chip del">✗ extra ${(sum.deleted||0).toLocaleString()}</span></div>`;
-  else head=`<div class="set-sub" style="margin:0 0 4px">Check that the backup is identical to the server. Runs in the background — you can close this window and come back; it remembers when it last ran.</div>`;
+  if(run) head=`<div class="cmp-run"><span class="cmp-spin">${svg("sync",16)}</span><div><b>Comparing…</b>${st.cur?" · "+esc(st.cur):""}<div class="set-sub" style="margin:1px 0 0">${st.deep?(rcl?"deep · byte-for-byte":"deep (checksums)"):(rcl?"checksum compare":"quick (size + date)")} · ${ago(st.started)}${st.scanned?" · "+st.scanned.toLocaleString()+" differences so far":""}</div></div><button class="btn sm dng" id="cmpCancel" style="margin-left:auto">Stop</button></div>`;
+  else if(st.done||st.shares){const toCopy=(sum.new_bytes||0)+(sum.changed_bytes||0);head=`<div class="cmp-verdict ${good?"good":"warn"}">${svg(good?"check":"shield",20)}<div><b>${good?(rcl?"Destination matches the source":"Backup matches the server"):`${diffs.toLocaleString()} differences${toCopy?" · "+bytes(toCopy)+" to copy":""}`}</b><div class="set-sub">${st.done?"Last compared: "+fmDate(st.done*1000):""}${st.deep?" · deep":" · quick"}${st.stopped?" · stopped early":""}</div></div></div>`
+    +`<div class="cmp-chips"><span class="cmp-chip ok">✓ identical ${(sum.identical||0).toLocaleString()}</span><span class="cmp-chip new">＋ new ${(sum.new||0).toLocaleString()}${sum.new_bytes?" · "+bytes(sum.new_bytes):""}</span><span class="cmp-chip chg">✎ changed ${(sum.changed||0).toLocaleString()}</span><span class="cmp-chip del">✗ extra ${(sum.deleted||0).toLocaleString()}</span></div>`;}
+  else head=`<div class="set-sub" style="margin:0 0 4px">${rcl?"Check the destination matches the source, by checksum.":"Check that the backup is identical to the server."} Runs in the background — you can close this window and come back; it remembers when it last ran.</div>`;
   const filters=(st.shares&&st.shares.length)?`<span class="cmp-filters"><label class="cmp-tgl"><input type="checkbox" id="cmpAll"${showAll?" checked":""}> show identical</label><input class="mono" id="cmpFind" placeholder="filter folders…" value="${att(filt)}"></span>`:"";
   tc.innerHTML=`<div class="cmp-wrap"><h3 class="set-title" style="margin:0 0 3px">Compare with the server</h3>${head}
-    <div class="cmp-ctl"><button class="btn sm pri" id="cmpQuick"${run?" disabled":""}>${svg("shield",14)} Compare (quick)</button><button class="btn sm" id="cmpDeep"${run?" disabled":""} title="Re-reads every file and compares checksums — proves the copies are byte-for-byte identical. Slow.">${svg("check",14)} Deep verify</button>${filters}</div>
+    <div class="cmp-ctl"><button class="btn sm pri" id="cmpQuick"${run?" disabled":""}>${svg("shield",14)} Compare (quick)</button><button class="btn sm" id="cmpDeep"${run?" disabled":""} title="${rcl?"Downloads every file from both sides and compares them byte-for-byte. Very slow and uses bandwidth.":"Re-reads every file and compares checksums — proves the copies are byte-for-byte identical. Slow."}">${svg("check",14)} Deep verify</button>${filters}</div>
     <div class="cmp-tree">${buildTree()}</div></div>`;
   const g=s=>tc.querySelector(s);
   if(g("#cmpQuick"))g("#cmpQuick").onclick=()=>start(false);

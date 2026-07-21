@@ -6194,6 +6194,10 @@ def _nb_prune(cfg):
         return 0                      # nested template — first-level pruning would over-delete
     snaps = []   # (mtime, path, size)
     dests = set(j["dest"] for j in cfg.get("jobs", [])) | {cfg.get("dest_base", "")}
+    # rclone pull in "Separate" mode can place the archive a SIBLING of a job dest
+    # (dirname(dest)/_deleted) when that dest isn't under dest_base — scan there too so it's
+    # pruned (harmless empty scan for the rsync/single-folder layouts).
+    dests |= {os.path.dirname(j["dest"]) for j in cfg.get("jobs", []) if j.get("dest")}
     top = nb_deleted_top(cfg)
     for base in dests:
         d = os.path.join(base, top)
@@ -7420,7 +7424,10 @@ def _nb_health_one(cfg, many, fire, ev, pri, thr, now):
         fire(key + ":" + pid, title + sfx, msg, priority, ev_name=ev_name or key, lvl=lvl)
     jobs = [j for j in cfg.get("jobs", []) if j.get("enabled", True)]
     push, push_ssh = _nb_push(cfg), _nb_dest_ssh(cfg)   # "dest is a remote SSH server" (incl. pull SSH→SSH)
-    if not jobs or (not cfg.get("host") and not (push and cfg.get("transport") == "local")):
+    # a cloud (rclone) profile has no host but IS reachable (nb_test / nb_stale work), so don't
+    # bail on it — otherwise the "never run / stale / unreachable" alerts never fire for any cloud backup
+    if not jobs or (not cfg.get("host") and not (push and cfg.get("transport") == "local")
+                    and not (_nb_rclone_any(cfg) and cfg.get("remote"))):
         return
     hs = _nb_health_load(pid)
     remote, env, rsh = _nb_remote_env(cfg)
@@ -7467,8 +7474,9 @@ def _nb_health_one(cfg, many, fire, ev, pri, thr, now):
                 fire_p("nb_stale", "NAS backup: not updated for a long time",
                      "Last run %d days ago (threshold %d)" % (int((now - ts) / 86400), days),
                      pri("nb_stale"), ev_name="nb_stale", lvl="warn")
-    if push_ssh:
-        return   # do not monitor size/space of a destination on a foreign server over SSH
+    if push_ssh or _nb_rclone(cfg) or _nb_rclone_c2c(cfg):
+        return   # no local destination to monitor: a remote SSH server, or a cloud (rclone) dest
+                 # (pull cloud→local keeps a real local dest, so it still gets the space check)
     # --- sharp change in destination size ---
     if ev.get("nb_size", {}).get("on") and not nb_run_active(pid):
         base_dir = cfg.get("dest_base") or "/mnt/storage/nas-backup"
@@ -7801,9 +7809,79 @@ def _nb_compare_job(cfg, job, deep, on_scan, cancelled):
         summ["identical"] = max(0, reg_total - summ["new"] - summ["changed"])
     return {"summary": summ, "tree": tree}
 
+def _nb_compare_job_rclone(cfg, job, deep, on_scan, cancelled):
+    """One job's compare for a CLOUD (rclone) profile: `rclone check SRC DST` between the
+    profile's two sides — local↔remote for push/pull, remote↔remote for cloud→cloud. Read-only:
+    nothing is copied or deleted. rclone's per-file report (`--combined`) is mapped onto the SAME
+    {summary,tree} shape as the rsync compare, so the existing Compare UI renders it unchanged:
+      '+' only-on-source → missing on the destination  → "new" (needs copying)
+      '-' only-on-destination → extra there            → "deleted" (a mirror would remove it)
+      '*' differ                                        → "changed"
+      '=' identical."""
+    pull = _nb_rclone_pull(cfg)
+    remote = (cfg.get("remote") or "").strip().rstrip(":")
+    src = (remote + ":" + job["src"].strip("/")) if pull else ("/" + job["src"].lstrip("/"))
+    dst = job["dest"]                                   # local folder (pull→local) OR remote:path (push / c2c)
+    tree = {"n": 0, "c": 0, "d": 0, "nb": 0, "cb": 0, "ch": {}}
+    summ = {"new": 0, "changed": 0, "deleted": 0, "new_bytes": 0, "changed_bytes": 0,
+            "identical": 0, "total": 0}
+    def add(path, kind):                                # same tree accumulator as _nb_compare_job (sizes unknown → 0)
+        parts = [p for p in path.rstrip("/").split("/") if p]
+        if not parts:
+            return
+        dirs, fname = parts[:-1], parts[-1]
+        node = tree; node[kind] = node.get(kind, 0) + 1; used = 0
+        for part in dirs:
+            if used >= _CMP_DEPTH:
+                break
+            node = node["ch"].setdefault(part, {"n": 0, "c": 0, "d": 0, "nb": 0, "cb": 0, "ch": {}})
+            node[kind] = node.get(kind, 0) + 1; used += 1
+        label = fname if used == len(dirs) else "/".join(parts[used:])
+        fl = node.setdefault("f", [])
+        if len(fl) < _CMP_FILES: fl.append([label, kind, 0])
+        else: node["fo"] = node.get("fo", 0) + 1
+    excl = []
+    for ex in list(cfg.get("excludes", []) or []) + list(job.get("excludes", []) or []):
+        ex = str(ex).strip()
+        if ex:
+            excl += ["--exclude", ex if any(ch in ex for ch in "*?[") else ex.rstrip("/") + "/**"]
+    args = [_rclone_bin(), "check", src, dst, "--config", RCLONE_CONF, "--combined", "-",
+            "--exclude", "/" + nb_deleted_top(cfg) + "/**"] + excl + _rclone_perf_args()
+    if deep:
+        args.append("--download")                      # byte-for-byte (default already checksums)
+    KMAP = {"+": ("n", "new"), "-": ("d", "deleted"), "*": ("c", "changed")}
+    ident, scanned = 0, 0
+    try:
+        p = subprocess.Popen(args, env=os.environ.copy(), stdout=subprocess.PIPE,
+                             stderr=subprocess.DEVNULL, text=True, bufsize=1)
+    except (OSError, subprocess.SubprocessError) as e:
+        return {"summary": summ, "tree": tree, "error": str(e)}
+    for line in p.stdout:
+        if cancelled():
+            try: p.terminate()
+            except OSError: pass
+            break
+        line = line.rstrip("\n")
+        if len(line) < 3 or line[1] != " ":            # "= path" / "* path" / "+ path" / "- path"
+            continue
+        sym, name = line[0], line[2:]
+        if sym == "=":
+            ident += 1
+        elif sym in KMAP and name:
+            k, sk = KMAP[sym]; add(name, k); summ[sk] += 1
+        scanned += 1
+        if scanned % 400 == 0:
+            on_scan(scanned)
+    try: p.wait(timeout=10)
+    except (OSError, subprocess.SubprocessError): pass
+    summ["identical"] = ident
+    summ["total"] = ident + summ["new"] + summ["changed"] + summ["deleted"]
+    return {"summary": summ, "tree": tree}
+
 def nb_compare_run(pid=None, deep=False):
     """Compare driver (runs in the transient unit, as root)."""
     cfg = nb_load(pid); pid = cfg["id"]
+    cmp_job = _nb_compare_job_rclone if _nb_rclone_any(cfg) else _nb_compare_job
     state = {"running": True, "deep": bool(deep), "started": int(time.time()),
              "cur": "", "scanned": 0, "shares": [], "done": None, "ts": int(time.time())}
     last = [0.0]
@@ -7822,7 +7900,7 @@ def nb_compare_run(pid=None, deep=False):
             if cancelled():
                 break
             state["cur"] = str(job.get("src") or job.get("dest")); flush(True)
-            res = _nb_compare_job(cfg, job, deep, on_scan, cancelled)
+            res = cmp_job(cfg, job, deep, on_scan, cancelled)
             res["src"] = str(job.get("src") or job.get("dest"))
             state["shares"].append(res); flush(True)
     except Exception as e:
@@ -7851,10 +7929,12 @@ def nb_compare_state(pid=None):
 
 def nb_compare_bg(pid=None, deep=False):
     cfg = nb_load(pid); pid = cfg["id"]
-    # Compare is an rsync dry-run; it can't describe a cloud (rclone) endpoint — routing an
-    # rclone side through the rsync builder yields a broken "@::" command. Use Rclone → Verify.
-    if _nb_rclone_any(cfg):
-        return {"ok": False, "log": "compare is not available for a cloud (rclone) backup — use Rclone → Verify"}
+    # rclone profiles compare via `rclone check` (handled in the driver). The one shape that has
+    # no compare is SSH→SSH (both sides remote): rsync can't itemize remote↔remote, and staging
+    # the source over sshfs just to dry-run it isn't worth it — the tab shows a "not supported"
+    # note instead.
+    if _nb_remote_both(cfg):
+        return {"ok": False, "log": "compare isn't available in this mode (both source and destination are remote SSH servers)"}
     if nb_compare_state(pid).get("running"):
         return {"ok": False, "log": "compare already running"}
     try:
