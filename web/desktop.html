@@ -6961,6 +6961,12 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
     runs on this NAS — we say so right in the card. ── */
  const KINDS_SRC=[["local","This NAS"],["ssh","SSH server"],["rsyncd","rsync daemon"],["rclone","Cloud (rclone)"]];
  const KINDS_DST=[["local","This NAS"],["ssh","SSH server"],["rclone","Cloud (rclone)"]];
+ // valid DESTINATION kinds depend on the source: a cloud (rclone) source pulls to a LOCAL
+ // folder only; any other pull can also bridge to SSH; only a local source (push) can target
+ // Cloud. Offering the wrong kind would silently flip the whole profile's direction.
+ const dstKinds=()=>isRcloneSrc()?[["local","This NAS"]]
+   :isPush()?KINDS_DST:[["local","This NAS"],["ssh","SSH server"]];
+ const DST_LBL={local:"This NAS",ssh:"SSH server",rclone:"Cloud"};
  // rclone destination body (dst side only) — just pick the remote + base path. What happens
  // to deleted files (Copy/Mirror/Archive = delete_mode) lives ONLY on the «Deleted files»
  // tab, exactly like rsync/ssh — no duplicate mode selector here.
@@ -6981,7 +6987,7 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
    <div class="nb-field-row" style="margin-top:10px"><button class="btn sm" id="rc_manage">${svg("net",13)} Manage remotes &amp; config</button></div>`;}
  function sideCard(w){
   const c=CFG,S=(w==="src"?c.src:c.dst)||{kind:"local"},rcl=(w==="dst"&&S.kind==="rclone"),rclSrc=(w==="src"&&S.kind==="rclone"),rclAny=rcl||rclSrc,rem=(S.kind==="ssh"||S.kind==="rsyncd");
-  const kinds=w==="src"?KINDS_SRC:KINDS_DST,ttl=w==="src"?"Source":"Destination";
+  const kinds=w==="src"?KINDS_SRC:dstKinds(),ttl=w==="src"?"Source":"Destination";
   const key=S.auth==="key",rnet=S.provider==="rsyncnet",kinfo=c.key||{};
   return `<div class="nb-dest" data-side="${w}">
    <div class="nb-dest-h"><span class="nb-dest-t">${svg(rclAny||rem?"net":"folder",15)} ${ttl}</span>
@@ -7067,7 +7073,9 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
     (AFTER the folder list: the tab reads in data-flow order). Push has tabs
     "Local | SSH server", while pull's destination can only be local. ── */
  const destCard=()=>{const c=CFG,D=c.dst||{kind:"local"},ssh=D.kind==="ssh",rcl=D.kind==="rclone",rnet=D.provider==="rsyncnet";
-  const kseg=`<div class="seg sm" id="dTr"><button data-v="local" class="${!ssh&&!rcl?"on":""}">This NAS</button><button data-v="ssh" class="${ssh?"on":""}">SSH server</button><button data-v="rclone" class="${rcl?"on":""}">Cloud</button></div>`;
+  const curK=rcl?"rclone":ssh?"ssh":"local",dk=dstKinds();
+  // only render the switcher when there's a real choice (a cloud source is local-dest-only)
+  const kseg=dk.length<2?"":`<div class="seg sm" id="dTr">${dk.map(([v])=>`<button data-v="${v}" class="${v===curK?"on":""}">${DST_LBL[v]}</button>`).join("")}</div>`;
   if(rcl){const rt=D.remote?esc(D.remote+":"+(D.remote_path||"")):"";
    return `<div class="nb-dest">
     <div class="nb-dest-h"><span class="nb-dest-t">${svg("net",15)} Destination</span>
