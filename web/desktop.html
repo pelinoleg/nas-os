@@ -6731,7 +6731,7 @@ function rcloneRestoreDlg(remote){
 
 /* Remote folder picker — same look as the local pickFolder (.pf-dlg), read-only browse
    PLUS "＋ Folder" (rclone mkdir) so you can create a destination while copying to the cloud. */
-function rcloneRemotePicker(remote,onPick){
+function rcloneRemotePicker(remote,onPick,onClose){
  const s=document.getElementById("scrim");
  let path="",entries=null,mk=false,busy=false;
  const $=q=>s.querySelector(q);
@@ -6752,8 +6752,8 @@ function rcloneRemotePicker(remote,onPick){
       <button class="btn pri" id="pfO">Choose this folder</button></div></div>`;
   s.classList.add("show");
   $("#pfUp").onclick=()=>{if(path){path=path.replace(/\/[^/]+$/,"").replace(/^\/+/,"");mk=false;draw();}};
-  $("#pfX").onclick=()=>s.classList.remove("show");
-  $("#pfO").onclick=()=>{s.classList.remove("show");onPick(path);};
+  $("#pfX").onclick=()=>{s.classList.remove("show");onClose&&onClose();};
+  $("#pfO").onclick=()=>{s.classList.remove("show");onPick(path);onClose&&onClose();};
   $("#pfMk").onclick=()=>{mk=!mk;paintList();if(mk)focusMk();};
   const pi=$("#pfPath");
   pi.onkeydown=ev=>{if(ev.key==="Enter"){ev.preventDefault();path=pi.value.trim().replace(/^\/+|\/+$/g,"");mk=false;draw();}};
@@ -6825,6 +6825,71 @@ function rcloneDuDlg(remote){
  begin();
 }
 
+/* One-off copy between two remotes (srcRemote:path → dstRemote:path). COPY only — the source
+   is never touched and nothing is deleted on the destination. Dry-run previews first. */
+function rcloneCopyDlg(remotes){
+ const s=document.getElementById("scrim");
+ let sr=remotes[0],sp="",dr=remotes[1]||remotes[0],dp="",running=false,poll=null,lastSt=null;
+ const stop=()=>{if(poll){clearTimeout(poll);poll=null;}};
+ const close=()=>{stop();s.classList.remove("show");};
+ const opts=(sel)=>remotes.map(r=>`<option${r===sel?" selected":""}>${esc(r)}</option>`).join("");
+ const draw=()=>{
+  const st=lastSt||{},same=(sr===dr&&sp===dp);
+  let prog="";
+  if(running||st.done){
+   const m=/(\d+)%\s+([\d.]+[kKMGTP]?B\/s)/.exec(st.line||""),pct=m?+m[1]:(st.running?0:100);
+   const head=st.running?`Copying… ${m?m[1]+"% · "+m[2]:""}`
+     :st.result==="stopped"?"Stopped"
+     :st.dry?`Dry run — would copy ${st.files||0} files · ${fmtB(st.bytes||0)}`
+     :st.result==="ok"?`Copied ${st.files||0} files · ${fmtB(st.bytes||0)}`
+     :`Finished with problems${st.err?" — "+esc(st.err):""}`;
+   const cls=st.running?"":((st.result==="ok"||st.dry)?"ok":"warn");
+   prog=`<div class="rr-prog" style="display:block"><div class="rr-head ${cls}"><span>${head}</span>${st.running?`<button class="btn sm" id="cpStop">Stop</button>`:""}</div><div class="bar"><i class="pg" style="width:${pct}%"></i></div></div>`;
+  }
+  s.innerHTML=`<div class="dialog nb-rcdlg" style="max-width:720px;width:92vw">
+    <div class="set-titrow"><h3 style="margin:0">${svg("copy",17)} Copy between remotes</h3><button class="iconbtn" id="cpX" title="Close">${svg("x",16)}</button></div>
+    <p class="set-sub" style="margin-top:4px">Copies straight from one cloud to another — no local staging. <b>Copy only:</b> the source is never changed, and nothing on the destination is deleted (files are added and updated).</p>
+    <div class="set-h">From (source — only read)</div>
+    <div class="nb-field-row"><select id="cpSr" class="mono" style="max-width:210px">${opts(sr)}</select>
+      <input class="mono" id="cpSp" value="${att(sp)}" placeholder="(remote root)" style="flex:1">
+      <button class="btn sm" id="cpSb">${svg("folder",13)} Browse</button></div>
+    <div class="set-h">To (destination — receives the copies)</div>
+    <div class="nb-field-row"><select id="cpDr" class="mono" style="max-width:210px">${opts(dr)}</select>
+      <input class="mono" id="cpDp" value="${att(dp)}" placeholder="(remote root)" style="flex:1">
+      <button class="btn sm" id="cpDb">${svg("folder",13)} Browse</button></div>
+    <div class="rr-target mono">Copying <b>${esc(sr+":"+sp)}</b> → <b>${esc(dr+":"+dp)}</b></div>
+    ${same?`<div class="nb-dwarn" style="margin-top:8px">Source and destination point at the same place — pick a different remote or folder.</div>`:""}
+    ${prog}
+    <div class="set-savebar"><span class="sb-left" id="cpMsg" style="margin-right:auto;color:var(--win-dim,var(--mut));font-size:12px"></span>
+      <button class="btn sm" id="cpDry"${running||same?" disabled":""}>${svg("shield",13)} Dry run</button>
+      <button class="btn pri sm" id="cpGo"${running||same?" disabled":""}>${svg("copy",13)} Copy</button></div></div>`;
+  s.classList.add("show");
+  const q=x=>s.querySelector(x);
+  q("#cpX").onclick=close;
+  q("#cpSr").onchange=e=>{sr=e.target.value;draw();};
+  q("#cpDr").onchange=e=>{dr=e.target.value;draw();};
+  q("#cpSp").onchange=e=>{sp=e.target.value.trim().replace(/^\/+|\/+$/g,"");};
+  q("#cpDp").onchange=e=>{dp=e.target.value.trim().replace(/^\/+|\/+$/g,"");};
+  q("#cpSb").onclick=()=>{sp=q("#cpSp").value.trim();rcloneRemotePicker(sr,p=>{sp=p;},()=>draw());};
+  q("#cpDb").onclick=()=>{dp=q("#cpDp").value.trim();rcloneRemotePicker(dr,p=>{dp=p;},()=>draw());};
+  q("#cpDry").onclick=()=>start(true);
+  q("#cpGo").onclick=()=>start(false);
+  const stp=q("#cpStop");if(stp)stp.onclick=async()=>{await rcloneP("/api/backup/rclone/copy/cancel",{});toast("Stopping…");};
+ };
+ const start=async dry=>{
+  sp=(s.querySelector("#cpSp").value||"").trim().replace(/^\/+|\/+$/g,"");
+  dp=(s.querySelector("#cpDp").value||"").trim().replace(/^\/+|\/+$/g,"");
+  const r=await rcloneP("/api/backup/rclone/copy/start",{src_remote:sr,src_path:sp,dst_remote:dr,dst_path:dp,dry});
+  if(!(r&&r.ok)){toast((r&&r.log)||"could not start");return;}
+  running=true;tick();};
+ const tick=async()=>{const st=(await api("/api/backup/rclone/copy/status"))||{};lastSt=st;
+  if(st.running){running=true;poll=setTimeout(tick,1000);}else{running=false;stop();}draw();};
+ draw();
+ (async()=>{const st=(await api("/api/backup/rclone/copy/status"))||{};
+  if(st.running){lastSt=st;running=true;const p=(st.src||"").split(":");sr=p[0]||sr;sp=p.slice(1).join(":");
+   const d=(st.dst||"").split(":");dr=d[0]||dr;dp=d.slice(1).join(":");draw();tick();}})();
+}
+
 /* Mount dialog: choose an optional subpath (Browse the remote), read-only (safe) and auto-remount. */
 function rcloneMountDlg(remote,onDone,init){
  init=init||{};const s=document.getElementById("scrim");
@@ -6863,9 +6928,10 @@ function winRclone(initTab){openWin("__rclone","Rclone",(body,win)=>{
 
  function tabRemotes(tc){
   const inst=!!(DATA&&DATA.installed),remotes=(DATA&&DATA.remotes)||[];
-  tc.innerHTML=`<h3 class="set-title">Remotes</h3><p class="set-sub">Your cloud connections from rclone.conf. Create them on your Mac (<span class="mono">rclone config</span>) and paste the config on the <b>Config</b> tab.</p>
+  tc.innerHTML=`<div class="set-titrow"><h3 class="set-title" style="margin:0">Remotes</h3>${remotes.length>1?`<button class="btn sm" id="rcCopy" title="Copy files straight from one remote to another">${svg("copy",13)} Copy between remotes…</button>`:""}</div><p class="set-sub">Your cloud connections from rclone.conf. Create them on your Mac (<span class="mono">rclone config</span>) and paste the config on the <b>Config</b> tab.</p>
     ${!inst?`<div class="nb-dwarn" style="margin-bottom:8px">rclone is not installed — open the <b>Config</b> tab to install it.</div>`:""}
     ${remotes.length?`<div id="rcRemotes"></div>`:`<div style="color:var(--mut);font-size:13px;padding:10px 0">No remotes yet — open <b>Config</b> and paste your rclone.conf.</div>`}`;
+  const cpb=tc.querySelector("#rcCopy");if(cpb)cpb.onclick=()=>rcloneCopyDlg(remotes);
   const boxr=tc.querySelector("#rcRemotes");if(!boxr)return;
   const dash={};((DATA&&DATA.dashboard)||[]).forEach(d=>dash[d.name]=d);
   const agoR=t=>{if(!t)return"";const s=Math.max(0,Math.floor(Date.now()/1000-t)),m=Math.floor(s/60),h=Math.floor(m/60),dd=Math.floor(h/24);return dd?dd+"d ago":h?h+"h ago":m?m+"m ago":"just now";};

@@ -4781,6 +4781,197 @@ def _rclone_restore_cli(remote, path, dest, dry):
             except OSError: pass
 
 # --------------------------------------------------------------------------- #
+#  One-off cloud copy: srcRemote:path -> dstRemote:path, ad-hoc, no profile.
+#  COPY only (never sync / --delete / purge) — the destination only gains files,
+#  and neither the source nor any existing dst file is ever removed. Same
+#  transient-unit + progress plumbing as restore. --dry-run previews first.
+# --------------------------------------------------------------------------- #
+RCLONE_COPY_STATE  = os.path.join(NAS_CONFIG, "rclone-copy.json")
+RCLONE_COPY_LOG    = os.path.join(NAS_CONFIG, "rclone-copy.log")
+RCLONE_COPY_CANCEL = os.path.join(NAS_CONFIG, "rclone-copy.cancel")
+RCLONE_COPY_UNIT   = "nas-rclone-copy"
+
+def rclone_copy_state():
+    st = _json_load_strict(RCLONE_COPY_STATE, {})
+    if st.get("running") and time.time() - (st.get("started") or 0) > 15 \
+            and not _systemd_active(RCLONE_COPY_UNIT + ".service"):
+        st["running"] = False
+        st["result"] = st.get("result") or "aborted"
+        st["done"] = st.get("done") or int(time.time())
+    return st
+
+def rclone_copy_status():
+    st = rclone_copy_state()
+    lines = []
+    try:
+        with open(RCLONE_COPY_LOG) as f:
+            lines = f.read().split("\n")
+        if lines and lines[-1] == "":
+            lines.pop()
+    except OSError:
+        pass
+    cur = ""
+    for l in reversed(lines[-8:]):
+        if "%" in l and "/s" in l:
+            cur = l.strip(); break
+    return dict(st, line=cur, log=lines[-200:])
+
+def _rclone_copy_valid(remote, path):
+    remote = str(remote or "").strip().rstrip(":")
+    if not _RCLONE_REMOTE_RE.match(remote) or remote not in rclone_remotes():
+        return None, None, "no such remote in rclone.conf"
+    path = str(path or "").strip().strip("/")
+    if ".." in path or "\n" in path:
+        return None, None, "invalid remote path"
+    return remote, path, None
+
+def rclone_copy_start(src_remote, src_path, dst_remote, dst_path, dry=False):
+    if rclone_copy_state().get("running"):
+        return {"ok": False, "log": "a copy is already running"}
+    if not rclone_installed():
+        return {"ok": False, "log": "rclone is not installed"}
+    sr, sp, err = _rclone_copy_valid(src_remote, src_path)
+    if err:
+        return {"ok": False, "log": "source: " + err}
+    dr, dp, err = _rclone_copy_valid(dst_remote, dst_path)
+    if err:
+        return {"ok": False, "log": "destination: " + err}
+    if sr == dr and sp == dp:
+        return {"ok": False, "log": "source and destination are the same place"}
+    try:
+        if os.path.exists(RCLONE_COPY_CANCEL):
+            os.remove(RCLONE_COPY_CANCEL)
+    except OSError:
+        pass
+    _json_save(RCLONE_COPY_STATE, {"running": True, "started": int(time.time()),
+                                   "src": sr + ":" + sp, "dst": dr + ":" + dp,
+                                   "dry": bool(dry), "result": None}, indent=None)
+    cmd = ["systemd-run", "--collect", "--quiet", "--unit", RCLONE_COPY_UNIT,
+           "--setenv=SUDO_USER=" + TARGET_USER, "--setenv=HOME=" + HOME,
+           "--setenv=RCC_SR", "--setenv=RCC_SP", "--setenv=RCC_DR", "--setenv=RCC_DP", "--setenv=RCC_DRY",
+           sys.executable, os.path.join(HERE, "nas-web.py"), "rclone-copy"]
+    env = dict(os.environ, RCC_SR=sr, RCC_SP=sp, RCC_DR=dr, RCC_DP=dp,
+               RCC_DRY=("1" if dry else ""))
+    try:
+        r = subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError) as e:
+        _json_save(RCLONE_COPY_STATE, {"running": False, "result": "warn", "error": str(e)}, indent=None)
+        return {"ok": False, "log": str(e)}
+    if r.returncode != 0:
+        _json_save(RCLONE_COPY_STATE, {"running": False, "result": "warn"}, indent=None)
+        return {"ok": False, "log": (r.stderr or "failed to start")[:200]}
+    return {"ok": True, "log": "started"}
+
+def rclone_copy_cancel():
+    try:
+        with open(RCLONE_COPY_CANCEL, "w") as f:
+            f.write("1")
+    except OSError:
+        pass
+    try:
+        subprocess.run(["systemctl", "stop", RCLONE_COPY_UNIT], capture_output=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    st = _json_load_strict(RCLONE_COPY_STATE, {})
+    st["running"] = False; st["stopped"] = True; st["result"] = "stopped"; st["done"] = int(time.time())
+    _json_save(RCLONE_COPY_STATE, st, indent=None)
+    return {"ok": True}
+
+def _rclone_copy_cli(sr, sp, dr, dp, dry):
+    """Driver (transient unit): rclone copy srcRemote:path -> dstRemote:path.
+    COPY only — never sync/delete; the source is never modified, the destination
+    only gains or updates files."""
+    started = int(time.time())
+    src = sr + ":" + (sp.strip("/") if sp else "")
+    dst = dr + ":" + (dp.strip("/") if dp else "")
+    _json_save(RCLONE_COPY_STATE, {"running": True, "started": started, "src": src, "dst": dst,
+                                   "dry": bool(dry), "result": None, "pid": os.getpid()}, indent=None)
+    try:
+        logf = open(RCLONE_COPY_LOG, "w", buffering=1)
+    except OSError:
+        logf = None
+    def w(l):
+        if logf:
+            try: logf.write(l + "\n")
+            except OSError: pass
+    def cancel():
+        return os.path.exists(RCLONE_COPY_CANCEL)
+    args = [_rclone_bin(), "copy", src, dst, "--config", RCLONE_CONF,
+            "--stats", "1s", "--stats-log-level", "NOTICE", "--use-json-log",
+            "--retries", "3", "--low-level-retries", "10", "--fast-list",
+            "--create-empty-src-dirs"] + _rclone_perf_args()
+    _ro = rclone_opts_get()
+    if not _ro.get("bwlimit_schedule") and _ro["bwlimit"] > 0:
+        args += ["--bwlimit", "%dk" % _ro["bwlimit"]]
+    if dry:
+        args.append("--dry-run")
+    w("copy %s → %s%s" % (src, dst, "  (dry run — nothing is written)" if dry else ""))
+    last_stats, err_lines, errs, rc = {}, [], 0, 1
+    try:
+        p = subprocess.Popen(args, env=os.environ.copy(), stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT, text=True, bufsize=1)
+        done_ev = threading.Event()
+        def _watch():
+            while not done_ev.wait(0.5):
+                if cancel():
+                    try: p.kill()
+                    except OSError: pass
+                    return
+        threading.Thread(target=_watch, daemon=True).start()
+        for line in iter(p.stdout.readline, ""):
+            line = line.rstrip("\n")
+            if not line.strip():
+                continue
+            obj = None
+            if line.lstrip().startswith("{"):
+                try: obj = json.loads(line)
+                except ValueError: obj = None
+            if obj is None:
+                w(line)
+            else:
+                stt = obj.get("stats")
+                if isinstance(stt, dict):
+                    last_stats = stt
+                    w(_rclone_progress_line(stt))
+                else:
+                    msg, lvl = str(obj.get("msg") or "").strip(), str(obj.get("level") or "").lower()
+                    if msg:
+                        if lvl in ("error", "critical", "fatal"):
+                            errs += 1
+                            if len(err_lines) < 3: err_lines.append(msg[:180])
+                            w("ERROR: " + msg)
+                        elif lvl == "warning":
+                            w("warning: " + msg)
+                        else:
+                            w(msg)
+            if cancel():
+                p.kill(); break
+        p.wait(); done_ev.set(); rc = p.returncode
+    except Exception as e:
+        w("copy failed: %s" % e)
+    finally:
+        stopped = cancel()
+        ok = (rc == 0 and not stopped)
+        st = _json_load_strict(RCLONE_COPY_STATE, {})
+        st.update(running=False, done=int(time.time()), code=rc,
+                  result=("stopped" if stopped else "ok" if ok else "warn"),
+                  files=int(last_stats.get("transfers") or 0),
+                  bytes=int(last_stats.get("bytes") or 0))
+        if err_lines and not ok and not stopped:
+            st["err"] = err_lines[0][:180]
+        _json_save(RCLONE_COPY_STATE, st, indent=None)
+        w("[%s] %d files, %s" % ("OK" if ok else ("stopped" if stopped else "error %d" % rc),
+                                 int(last_stats.get("transfers") or 0),
+                                 fmt_bytes(int(last_stats.get("bytes") or 0))))
+        try:
+            if os.path.exists(RCLONE_COPY_CANCEL): os.remove(RCLONE_COPY_CANCEL)
+        except OSError:
+            pass
+        if logf:
+            try: logf.close()
+            except OSError: pass
+
+# --------------------------------------------------------------------------- #
 #  Mount a cloud remote as a local folder (rclone mount → /mnt/rclone/<name>),
 #  so it shows up in the file manager like an SSH server. Each mount is its own
 #  transient systemd unit (survives a panel restart; systemd re-mounts on failure),
@@ -16770,6 +16961,15 @@ class H(BaseHTTPRequestHandler):
                 self._json(rclone_du_start(b.get("remote", ""), b.get("path", ""), bool(b.get("force"))))
             elif p == "/api/backup/rclone/du/status":
                 self._json(rclone_du_status(self._body().get("remote", "")))
+            elif p == "/api/backup/rclone/copy/start":
+                b = self._body()
+                self._json(rclone_copy_start(b.get("src_remote", ""), b.get("src_path", ""),
+                                             b.get("dst_remote", ""), b.get("dst_path", ""),
+                                             bool(b.get("dry"))))
+            elif p == "/api/backup/rclone/copy/status":
+                self._json(rclone_copy_status())
+            elif p == "/api/backup/rclone/copy/cancel":
+                self._json(rclone_copy_cancel())
             elif p == "/api/backup/rclone/opts":
                 self._json({"ok": True, "opts": rclone_opts_set(self._body() or {})})
             elif p == "/api/backup/rclone/mount":
@@ -16953,6 +17153,11 @@ if __name__ == "__main__":
         # paths arrive through the unit env (may contain spaces), not argv
         _rclone_restore_cli(os.environ.get("RCR_REMOTE", ""), os.environ.get("RCR_PATH", ""),
                             os.environ.get("RCR_DEST", ""), os.environ.get("RCR_DRY") == "1")
+    elif len(sys.argv) > 1 and sys.argv[1] == "rclone-copy":
+        # remote:paths arrive through the unit env (may contain spaces), not argv
+        _rclone_copy_cli(os.environ.get("RCC_SR", ""), os.environ.get("RCC_SP", ""),
+                         os.environ.get("RCC_DR", ""), os.environ.get("RCC_DP", ""),
+                         os.environ.get("RCC_DRY") == "1")
     elif len(sys.argv) > 1 and sys.argv[1] == "rclone-check":
         _rclone_check_cli(os.environ.get("RCC_LOCAL", ""), os.environ.get("RCC_REMOTE", ""),
                           os.environ.get("RCC_PATH", ""))
