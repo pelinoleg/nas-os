@@ -4758,7 +4758,10 @@ def _ensure_user_allow_other():
     root) needs 'user_allow_other' in /etc/fuse.conf. Idempotent; also done in the wizard."""
     try:
         txt = _read("/etc/fuse.conf")
-        if "user_allow_other" not in txt:
+        # anchored check: Debian ships a COMMENTED `#user_allow_other`, so a plain substring test
+        # would falsely conclude it's enabled and never append the real, uncommented line (matches
+        # the wizard's `grep -q '^user_allow_other'`)
+        if not re.search(r"(?m)^\s*user_allow_other\b", txt):
             with open("/etc/fuse.conf", "a") as f:
                 f.write(("" if txt.endswith("\n") or not txt else "\n") + "user_allow_other\n")
     except OSError:
@@ -5529,6 +5532,8 @@ def nb_save(patch, pid=None):
                 if cd["kind"] == "ssh" else {}
             if cur["dst2"]:
                 cur["dst2"]["kind"] = "ssh"
+                try: cur["dst2"]["port"] = max(1, min(65535, int(cur["dst2"].get("port") or 22)))
+                except (TypeError, ValueError): cur["dst2"]["port"] = 22   # clamp: a negative/huge port would reach ssh -p
         if far:
             cur["host"] = str(far.get("host", ""))
             cur["user"] = str(far.get("user", ""))
@@ -6644,9 +6649,12 @@ def _nb_rclone_run(cfg, dry, writer, cancel, on_job, allow_delete):
                     writer("⚠ SKIPPED: the cloud source «%s:%s» is empty or unreachable — NOT syncing, "
                            "because mirror/archive would delete the destination copy. Check the remote path "
                            "(or use «Copy» mode, which never deletes)." % (cfg.get("remote"), j["src"]))
-                    # code 25 = the deletion guard: surfaces the panel banner + the one-shot
-                    # «I deleted these myself» button (the only way to grant allow_delete)
-                    emit({"src": j["src"], "ok": False, "code": 25, "guard_pct": int(cfg.get("max_delete_pct", 20) or 0)}); continue
+                    # code 25 flows the job into the panel's deletion-guard banner (the only place
+                    # that offers the one-shot allow_delete button); src_block tells the UI this was
+                    # a PRE-EMPTIVE refusal (nothing ran) so it shows the correct wording, not the
+                    # "surplus files were about to be deleted" text of a real max-delete trip
+                    emit({"src": j["src"], "ok": False, "code": 25, "src_block": True, "block": "empty",
+                          "guard_pct": int(cfg.get("max_delete_pct", 20) or 0)}); continue
         else:
             srcp = "/" + j["src"].lstrip("/")
             if not os.path.exists(srcp):
@@ -6664,7 +6672,8 @@ def _nb_rclone_run(cfg, dry, writer, cancel, on_job, allow_delete):
                     writer("⚠ SKIPPED: the source «%s» is EMPTY — not syncing, because mirror/archive "
                            "would then delete the destination copy. If you really emptied it, run once "
                            "with «I deleted these myself», or use «Copy» mode (never deletes)." % srcp)
-                    emit({"src": j["src"], "ok": False, "code": 25, "guard_pct": int(cfg.get("max_delete_pct", 20) or 0)}); continue
+                    emit({"src": j["src"], "ok": False, "code": 25, "src_block": True, "block": "empty",
+                          "guard_pct": int(cfg.get("max_delete_pct", 20) or 0)}); continue
         args = _nb_rclone_cmd(cfg, j, dry, prev_files=prevf.get(j["src"], 0), allow_delete=allow_delete)
         try:
             p = subprocess.Popen(args, env=os.environ.copy(), stdout=subprocess.PIPE,
@@ -6928,7 +6937,8 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None, allow_delete=Fal
                     writer("⚠ SKIPPED: the source (%s) is EMPTY — not syncing, because mirror/archive "
                            "would then delete the destination copy. If you really emptied it, run once "
                            "with «I deleted these myself», or use «Copy» mode (never deletes)." % src_local)
-                    emit({"src": j["src"], "ok": False, "code": 25, "guard_pct": int(cfg.get("max_delete_pct", 20) or 0)}); continue
+                    emit({"src": j["src"], "ok": False, "code": 25, "src_block": True, "block": "empty",
+                          "guard_pct": int(cfg.get("max_delete_pct", 20) or 0)}); continue
         elif deleting and int(prevf.get(j["src"], 0) or 0) == 0:
             # plain pull: the remote source is not locally visible and there is NO delete-guard
             # baseline (first run, or the status file was lost on a reinstall). An uncapped --delete
@@ -6942,7 +6952,8 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None, allow_delete=Fal
                        "the destination already holds a copy — refusing an uncapped mirror/archive that could "
                        "wipe it if the remote source is empty. Run once with «I deleted these myself» to confirm "
                        "the source is intact, or use «Copy» mode (never deletes).")
-                emit({"src": j["src"], "ok": False, "code": 25, "guard_pct": int(cfg.get("max_delete_pct", 20) or 0)}); continue
+                emit({"src": j["src"], "ok": False, "code": 25, "src_block": True, "block": "nobaseline",
+                      "guard_pct": int(cfg.get("max_delete_pct", 20) or 0)}); continue
         if push_ssh:
             # plain server: mkdir over SSH (works with any remote rsync).
             # Forced daemon (UGREEN/Synology): the shell lives in a DIFFERENT path
@@ -7606,7 +7617,7 @@ def nb_run_cli(pid=None, dry=False, allow_delete=False):
                                              "size", "verify_bad", "verify_err",
                                              "src_missing", "not_mounted", "stopped",
                                              "err", "errn", "fs_limit", "fs_files", "fs",
-                                             "guard_limit", "guard_pct")}
+                                             "guard_limit", "guard_pct", "src_block", "block")}
                       for r in done]
         st["total"] = total
         _nb_run_state_write(pid, st)
@@ -7623,11 +7634,20 @@ def nb_run_cli(pid=None, dry=False, allow_delete=False):
             try: log_event("nas_backup", title, "stopped by hand", "info", kind="backup", desk=True)
             except Exception: pass
         if not dry and not r.get("stopped"):
-            guarded = [j.get("src") for j in r.get("jobs", []) if j.get("code") == 25]
+            jobs25 = [j for j in r.get("jobs", []) if j.get("code") == 25]
+            guarded = [j.get("src") for j in jobs25 if not j.get("src_block")]   # real max-delete trip (a sync ran)
+            blocked = [j.get("src") for j in jobs25 if j.get("src_block")]        # pre-emptive refusal (nothing ran)
             if guarded:      # the mass-deletion guard tripped — a separate important notification
                 try: notify_event("nb_guard", "nb_guard:" + pid, "NAS backup: stopped by guard" + sfx,
                                   "Mass-deletion guard triggered: " + ", ".join(guarded) +
                                   ". Nothing was deleted — check the source (did you wipe or unmount it?).",
+                                  "crit", cooldown=0)
+                except Exception: pass
+            if blocked:      # nothing ran — an empty/unavailable source would have wiped the copy
+                try: notify_event("nb_guard", "nb_guard:" + pid, "NAS backup: refused — empty source" + sfx,
+                                  "Refused to sync (the copy is untouched): " + ", ".join(blocked) +
+                                  ". The source is empty or unavailable and mirror/archive would delete the "
+                                  "destination copy. Check the source is mounted and intact.",
                                   "crit", cooldown=0)
                 except Exception: pass
             vbad, verr = int(r.get("verify_bad") or 0), bool(r.get("verify_err"))

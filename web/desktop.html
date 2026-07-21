@@ -1066,7 +1066,7 @@
   .nbwiz-step.on{background:var(--sel);color:var(--accent);font-weight:650;box-shadow:var(--sh-sm)}
   .nbwiz-step.on .nb-stepn{background:var(--accent);color:var(--accent-ink,#fff)}
   .nbwiz-step.done{color:var(--dim)}
-  .nbwiz-step.done .nb-stepn{background:var(--good);color:#fff}
+  .nbwiz-step.done .nb-stepn{background:var(--good);color:var(--accent-ink,#fff)}
   .nbwiz-pane{flex:1;overflow:auto;min-height:0;padding-right:4px}
   .nbwiz-foot{display:flex;align-items:center;gap:10px;padding-top:12px;border-top:1px solid var(--line);flex:none}
   .nbwiz-foot #wzSkip{margin-left:auto;color:var(--mut)}
@@ -1087,7 +1087,7 @@
   /* health summary */
   .ov-health{margin-bottom:14px}
   .ovh-top{display:flex;align-items:center;gap:10px;margin-bottom:8px;font-size:13.5px}
-  .ovh-badge{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;color:#fff;font-weight:800;font-size:12px;flex:none}
+  .ovh-badge{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;color:var(--accent-ink,#fff);font-weight:800;font-size:12px;flex:none}
   .ovh-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden}
   /* label over a fully readable value: a one-line flex row squeezed long paths
      ("ssh root@…:…" ellipsized to uselessness). The dot stays scoped to these
@@ -7271,7 +7271,7 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
    <div id="hRow" style="${s.enabled?"":"display:none"}">
     <div class="srow"><div class="srow-l"><div class="srow-t">Frequency</div></div><div class="srow-c"><div class="seg" id="hFreq"><button data-v="daily" class="${!wk?"on":""}">Daily</button><button data-v="weekly" class="${wk?"on":""}">Weekly</button></div></div></div>
     <div class="srow" id="hDowRow" style="${wk?"":"display:none"}"><div class="srow-l"><div class="srow-t">Day of week</div></div><div class="srow-c"><select id="hDow" class="ev-prio">${[["Mon","Monday"],["Tue","Tuesday"],["Wed","Wednesday"],["Thu","Thursday"],["Fri","Friday"],["Sat","Saturday"],["Sun","Sunday"]].map(([v,l])=>`<option value="${v}"${s.dow===v?" selected":""}>${l}</option>`).join("")}</select></div></div>
-    <div class="srow"><div class="srow-l"><div class="srow-t">Time${tipHTML("HH:MM (24h). Night or early morning gets in the way least.")}</div></div><div class="srow-c"><input class="mono" id="hTime" style="max-width:90px" value="${s.time||"03:00"}"></div></div>
+    <div class="srow"><div class="srow-l"><div class="srow-t">Time${tipHTML("HH:MM (24h). Night or early morning gets in the way least.")}</div></div><div class="srow-c"><input type="time" class="mono" id="hTime" style="max-width:120px" value="${s.time||"03:00"}"></div></div>
    </div>`;
   const g=x=>tc.querySelector(x);
   const save=()=>saveCfg({schedule:{enabled:g("#hOn").checked,freq:g("#hFreq .on").dataset.v,dow:g("#hDow").value,time:g("#hTime").value.trim()}});
@@ -7380,6 +7380,7 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
    255:"SSH could not connect — check the address, the port and the password or key"};
   /* short label for the badge in the folder row; full breakdown — in the tooltip (jobIssue) */
   const jobTag=j=>j.src_missing?"source does not exist":j.not_mounted?"no disk"
+   :j.src_block?(j.block==="nobaseline"?"no baseline":"source empty")
    :(j.stopped||(j.code!=null&&j.code<0))?"stopped":j.code===25?"guard"
    :j.fs_limit?`FS rejected ${j.fs_limit}`
    :j.verify_err?"verification":j.verify_bad?`≠ ${j.verify_bad}`:`code ${j.code==null?"?":j.code}`;
@@ -7389,6 +7390,9 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
   const jobIssue=j=>{
    if(j.src_missing)return "the source is missing on this NAS: the folder was deleted or the disk is not mounted";
    if(j.not_mounted)return "the destination disk is not mounted, the folder was skipped";
+   if(j.src_block)return j.block==="nobaseline"
+     ? "no delete-guard baseline yet and the destination already holds a copy — the sync was refused so it can't wipe the copy if the source turns out empty (use «sync anyway» only if the source is intact)"
+     : "the source is empty or unavailable — the sync was refused, because in mirror/archive mode it would then delete the whole destination copy";
    if(j.stopped||(j.code!=null&&j.code<0))return "you stopped it — whatever was already copied stays in place";
    if(j.fs_limit)return `copied, but ${j.fs_limit} files were rejected by the destination: its filesystem ${j.fs||""} cannot hold such names (with «:» or a line break), symlinks or special files`;
    if(j.verify_err)return "the checksum verify could not finish";
@@ -7453,19 +7457,37 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
      than the threshold allows. Silently complaining with code 25 is useless — we explain and offer a button
      "allow": a one-time run without --max-delete, we don't touch the config. */
   const paintDelGuard=jobs=>{const gn=g("#oGuard");if(!gn)return;
-   const hit=(jobs||[]).filter(j=>j.code===25);
-   if(!hit.length){gn.style.display="none";gn.innerHTML="";return;}
-   const pct=hit[0].guard_pct||20,lim=hit[0].guard_limit||0;
-   const names=hit.map(j=>j.src).join(", ");
+   const all=(jobs||[]).filter(j=>j.code===25);
+   if(!all.length){gn.style.display="none";gn.innerHTML="";return;}
+   // two DIFFERENT situations wear code 25: a PRE-EMPTIVE refusal (src_block — the source was
+   // empty/unavailable, nothing ran) vs a real mass-delete TRIP mid-sync. They need different
+   // wording and, crucially, a differently-scoped confirmation (a src_block "allow" wipes the
+   // WHOLE copy, not just "surplus files").
+   const src=all.filter(j=>j.src_block),real=all.filter(j=>!j.src_block);
    const arch=CFG.delete_mode==="archive";
    gn.className="nb-dwarn wrn";gn.style.display="block";
-   gn.innerHTML=`<b>Deletion stopped by the guard.</b> The copy held more surplus files than the threshold allows`
-    +`${lim?` (${lim} files = ${pct}% of the previous run)`:` (${pct}% of the previous run)`}: `
-    +`<span class="mono">${esc(names)}</span>. <b>Nothing was deleted</b> — the copy is intact.`
-    +`<div style="margin-top:6px">There are two possible reasons: you removed a lot of files on the source yourself — then the deletion is legitimate; or the source fell away (disk not mounted, folder deleted by mistake) — then deleting is exactly what you must NOT do, or the copy will repeat the loss.</div>`
-    +`<div style="margin-top:8px;display:flex;gap:8px;align-items:center">`
-    +`<button class="btn sm dng" id="oAllow">${svg("check",13)} I deleted it myself — synchronise</button>`
-    +`<span style="font-size:11.5px;color:var(--mut)">${arch?"Deleted files move to the deleted-files archive instead of vanishing":"Mirror mode: surplus files are erased for good"}</span></div>`;
+   let html="";
+   if(src.length){const names=src.map(j=>j.src).join(", "),noBase=src.some(j=>j.block==="nobaseline");
+    html+=`<b>Backup refused — the copy is untouched.</b> ${noBase?"There's no deletion-guard baseline yet (first run, or the status was reset) and the destination already holds a copy":"The source is EMPTY or unavailable (the folder was emptied, or its disk is not mounted)"}: `
+     +`<span class="mono">${esc(names)}</span>.`
+     +`<div style="margin-top:6px">In <b>mirror/archive</b> mode a sync against ${noBase?"an unverified":"an empty"} source would delete the destination copy${arch?" (moved to the deleted-files archive)":" — permanently"}. The run was stopped so that couldn't happen. Fix the source (mount the disk / restore the folder) and run again.</div>`
+     +`<div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">`
+     +`<button class="btn sm dng" id="oAllowSrc">${svg("check",13)} The source really is empty — sync anyway</button>`
+     +`<span style="font-size:11.5px;color:var(--danger)">This DELETES the entire copy of ${src.length>1?"these folders":"this folder"} in the destination${arch?" (kept in the archive)":""}.</span></div>`;}
+   if(real.length){const pct=real[0].guard_pct||20,lim=real[0].guard_limit||0,names=real.map(j=>j.src).join(", ");
+    html+=`${src.length?'<hr style="border:none;border-top:1px solid var(--line);margin:10px 0">':''}`
+     +`<b>Deletion stopped by the guard.</b> The copy held more surplus files than the threshold allows`
+     +`${lim?` (${lim} files = ${pct}% of the previous run)`:` (${pct}% of the previous run)`}: `
+     +`<span class="mono">${esc(names)}</span>. <b>Nothing was deleted</b> — the copy is intact.`
+     +`<div style="margin-top:6px">There are two possible reasons: you removed a lot of files on the source yourself — then the deletion is legitimate; or the source fell away (disk not mounted, folder deleted by mistake) — then deleting is exactly what you must NOT do, or the copy will repeat the loss.</div>`
+     +`<div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">`
+     +`<button class="btn sm dng" id="oAllow">${svg("check",13)} I deleted them myself — synchronise</button>`
+     +`<span style="font-size:11.5px;color:var(--mut)">${arch?"Deleted files move to the deleted-files archive instead of vanishing":"Mirror mode: surplus files are erased for good"}</span></div>`;}
+   gn.innerHTML=html;
+   const asrc=gn.querySelector("#oAllowSrc");
+   if(asrc)asrc.onclick=()=>confirmDlg("Sync against the empty source?",
+     `This runs WITHOUT the safety stop, once. Because the source is empty or unavailable, the sync will DELETE the entire copy in the destination${arch?" (moved to the deleted-files archive, recoverable from there)":" — permanently (mirror mode)"}. Only do this if you deliberately emptied the source and want the copy to match it.`,
+     ()=>{run(false,true);},true);
    const ab=gn.querySelector("#oAllow");
    if(ab)ab.onclick=()=>confirmDlg("Allow the deletion?",
      `The backup will run WITHOUT the mass-deletion guard — once, for this run only. Surplus files in the copy ${arch?"will move to the deleted-files archive":"will be erased for good"}. Make sure the source is in place and that you deleted the files, not a failure.`,
