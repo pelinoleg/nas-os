@@ -826,6 +826,7 @@
   .pf-it .pf-sub{margin-left:auto;font-size:10.5px;color:var(--mut);font-family:var(--mono)}
   .pf-main{flex:1;min-width:0;height:100%;display:flex;flex-direction:column}
   .pf-bar{display:flex;gap:6px;align-items:center;margin-bottom:6px}
+  .pf-remote{flex:none;align-self:stretch;display:flex;align-items:center;padding:0 8px;border-radius:var(--r-sm);background:var(--sel);color:var(--accent);font-weight:600;font-size:12.5px}
   .pf-bar input{flex:1;font-family:var(--mono);font-size:12px;padding:7px 10px}
   .pf-list{flex:1;min-height:0;overflow-y:auto;border:1px solid var(--line);border-radius:var(--r-md)}
   .pf-row{display:flex;align-items:center;gap:9px;padding:8px 11px;border-top:1px solid var(--line);
@@ -6712,10 +6713,11 @@ function rcloneRemotePicker(remote,onPick){
  const $=q=>s.querySelector(q);
  const spec=p=>remote+":"+(p||"");
  const build=()=>{
-  s.innerHTML=`<div class="dialog pf-dlg"><h3>${svg("folder",16)} Pick a folder in ${esc(remote)}</h3>
+  s.innerHTML=`<div class="dialog pf-dlg"><h3>${svg("net",16)} Cloud remote — ${esc(remote)}</h3>
     <div class="pf-body"><div class="pf-main" style="flex:1">
       <div class="pf-bar">
         <button class="iconbtn" id="pfUp" title="Up">${svg("arrowup",15)}</button>
+        <span class="pf-remote mono" title="You are browsing this cloud remote">${esc(remote)}:</span>
         <input class="mono" id="pfPath" spellcheck="false" placeholder="(remote root)">
         <button class="btn sm" id="pfMk" title="Create a folder here">${svg("plus",13)} Folder</button>
       </div>
@@ -6749,7 +6751,7 @@ function rcloneRemotePicker(remote,onPick){
        ||(mk?"":`<div class="pf-empty">No subfolders here — you can pick this one, or ＋ create one</div>`)));
   box.querySelectorAll("[data-n]").forEach(n=>n.onclick=()=>{path=(path?path+"/":"")+n.dataset.n;mk=false;draw();});};
  const chrome=()=>{const pi=$("#pfPath");if(pi&&document.activeElement!==pi)pi.value=path;
-  const cu=$("#pfCur");if(cu){cu.textContent=spec(path);cu.title=spec(path);}
+  const cu=$("#pfCur");if(cu){cu.textContent="Selected: "+spec(path);cu.title=spec(path);}
   const up=$("#pfUp");if(up)up.disabled=!path;};
  const draw=async()=>{if(busy)return;busy=true;entries=null;paintList();
   const r=await rcloneP("/api/backup/rclone/ls",{remote,path});busy=false;
@@ -7098,7 +7100,7 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
   // no "add dev patterns"/"reset" buttons: the default list already ships with
   // everything (junk + development) — the textarea IS the whole interface
   const exclInner=`<textarea id="sExcl" class="nb-excl" spellcheck="false">${esc((c.excludes||[]).join("\n"))}</textarea>`;
-  const HD={folders:["What to copy",push?"Pick which folders of this NAS to send.":"Pick which folders to take from the source (the other NAS)."],
+  const HD={folders:["What to copy",push?"Pick which folders of this NAS to send.":isRcloneSrc()?("Pick which folders to pull from the cloud remote «"+(c.remote||"?")+"»."):"Pick which folders to take from the source (the other NAS)."],
    dest:["Where the copies land",push?"The destination for the copies — a disk on this NAS or another server.":"The folder on THIS NAS where the copies land."],
    excl:["Exclusions","Optional: what NOT to copy — junk, caches, service files. rsync patterns, one per line."]};
   if(part){
@@ -7112,7 +7114,7 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
    if(part==="excl"){tc.style.display="flex";tc.style.flexDirection="column";
      const ta=tc.querySelector("#sExcl");if(ta){ta.style.flex="1";ta.style.minHeight="240px";ta.style.resize="none";}}
   }else{
-   tc.innerHTML=`<h3 class="set-title">What to copy</h3><p class="set-sub">${push?"Step 1 — pick which folders of this NAS to send. Step 2 below — check where the copies land.":"Step 1 — pick which folders to take from the source (the other NAS). Step 2 below — check where the copies land on THIS NAS."}</p>
+   tc.innerHTML=`<h3 class="set-title">What to copy</h3><p class="set-sub">${push?"Step 1 — pick which folders of this NAS to send. Step 2 below — check where the copies land.":isRcloneSrc()?("Step 1 — pick which folders to pull from the cloud remote «"+(c.remote||"?")+"». Step 2 below — where they land on THIS NAS."):"Step 1 — pick which folders to take from the source (the other NAS). Step 2 below — check where the copies land on THIS NAS."}</p>
    ${secFolders}
    <div class="set-h">Where the copies land</div>
    ${secDest}
@@ -7122,8 +7124,8 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
   const drawJobs=()=>{const box=g("#sJobs");if(!box)return;
    box.innerHTML=JOBS.length?"":'<div style="color:var(--mut);font-size:12px;padding:6px 0">Empty — click «'+(push?"Choose folders":"Pick from NAS")+'».</div>';
    JOBS.forEach((j,i)=>{const exc=(j.excludes&&j.excludes.length)?`<span class="nb-exc" title="${att("Excluded from this folder:\n"+j.excludes.join("\n"))}">−${j.excludes.length} excl.</span>`:"";
-    const srcT=(push?"/":"")+j.src;
-    const row=el(`<div class="nb-job"><span class="nb-src mono" title="${att(srcT)}">${svg(push?"folder":"net",13)} ${esc(srcT)}</span>${exc}<span class="nb-arr">→</span><span class="nb-dst mono" title="${att(j.dest)}">${esc(j.dest)}</span>${per?`<button class="iconbtn nb-jb" title="Destination folder">${svg("folder",14)}</button>`:""}<button class="iconbtn dng nb-jx" title="Remove">${svg("x",14)}</button></div>`);
+    const srcT=isRcloneSrc()?((CFG.remote||"remote")+":"+j.src):(push?"/":"")+j.src;
+    const row=el(`<div class="nb-job"><span class="nb-src mono" title="${att(srcT)}">${svg(push?"folder":isRcloneSrc()?"net":"folder",13)} ${esc(srcT)}</span>${exc}<span class="nb-arr">→</span><span class="nb-dst mono" title="${att(j.dest)}">${esc(j.dest)}</span>${per?`<button class="iconbtn nb-jb" title="Destination folder">${svg("folder",14)}</button>`:""}<button class="iconbtn dng nb-jx" title="Remove">${svg("x",14)}</button></div>`);
     row.querySelector(".nb-jx").onclick=()=>{JOBS.splice(i,1);saveCfg({jobs:JOBS});drawJobs();};
     const jb=row.querySelector(".nb-jb");if(jb)jb.onclick=()=>nbPickLocal(j.dest.replace(/\/[^/]+$/,"")||"/mnt",p=>{JOBS[i].dest=p.replace(/\/$/,"")+"/"+j.src.split("/").pop();saveCfg({jobs:JOBS});drawJobs();});
     box.appendChild(row);});};
@@ -7437,7 +7439,7 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
     else if(r){dot="var(--danger)";tip="Not copied: "+jobWhy(r)+". "+moved;}
     else{dot="var(--mut)";tip="This folder has never been copied — run the backup.";}
     const vb=r&&(r.verify_err?`<span class="nb-warn wrn" title="The checksum verification could not finish — see the log.">verification failed</span>`:r.verify_bad?`<span class="nb-warn dng" title="Contents of ${r.verify_bad} file(s) differ from the source — see the run log.">≠ ${r.verify_bad}</span>`:"")||"";
-    const srcT=(push?"/":"")+j.src;
+    const srcT=isRcloneSrc()?((CFG.remote||"remote")+":"+j.src):(push?"/":"")+j.src;
     // "open and see for yourself": the local end of the pipe — pull/push-to-disk
     // opens the destination, push-over-ssh opens the local source
     const localPath=push?(isPushSsh()?"/"+j.src:j.dest):j.dest;
