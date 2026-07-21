@@ -7091,12 +7091,12 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
     order); "folders" | "dest" | "excl" = one section only — the first-run wizard
     shows them as separate small steps. Same markup and the same wiring either
     way, so a fix lands in both. */
- function tabSources(tc,part){const c=CFG,push=isPush(),per=!isPushSsh()&&!isRclone()&&!isRcloneSrc()&&c.dest_mode==="per";
+ function tabSources(tc,part){const c=CFG,push=isPush(),per=!isPushSsh()&&!isRclone()&&c.dest_mode==="per";
   const again=()=>tabSources(tc,part);
   const secFolders=`<div style="display:flex;justify-content:space-between;align-items:center;margin:4px 0 6px"><span class="set-h" style="margin:0;padding:0;border:none">Folders</span><button class="btn sm pri" id="sAdd">${svg("plus",13)} ${push?"Choose folders":isRcloneSrc()?"Pick from cloud":"Pick from NAS"}</button></div>
    <div id="sJobs"></div>`;
   const secDest=`${destCard()}
-   ${(isPushSsh()||isRclone()||isRcloneSrc())?"":`<div class="srow"><div class="srow-l"><div class="srow-t">Destination mode${tipHTML("Single folder — everything into one folder, as subfolders. Separate per source — each source gets its own folder-destination.")}</div><div class="srow-d">${per?"each source gets its own folder":"everything into one folder, as subfolders"}</div></div><div class="srow-c"><div class="seg" id="sDm"><button data-v="single" class="${!per?"on":""}">Single folder</button><button data-v="per" class="${per?"on":""}">Separate</button></div></div></div>`}`;
+   ${(isPushSsh()||isRclone())?"":`<div class="srow"><div class="srow-l"><div class="srow-t">Destination mode${tipHTML("Single folder — everything into one folder, as subfolders. Separate per source — each source gets its own folder-destination.")}</div><div class="srow-d">${per?"each source gets its own folder":"everything into one folder, as subfolders"}</div></div><div class="srow-c"><div class="seg" id="sDm"><button data-v="single" class="${!per?"on":""}">Single folder</button><button data-v="per" class="${per?"on":""}">Separate</button></div></div></div>`}`;
   // no "add dev patterns"/"reset" buttons: the default list already ships with
   // everything (junk + development) — the textarea IS the whole interface
   const exclInner=`<textarea id="sExcl" class="nb-excl" spellcheck="false">${esc((c.excludes||[]).join("\n"))}</textarea>`;
@@ -7121,11 +7121,16 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
    <details class="nb-det"><summary class="nb-sum">Exclusions${tipHTML("rsync patterns (one per line): what not to copy — junk, caches, service files.")}</summary>${exclInner}</details>`;
   }
   const g=s=>tc.querySelector(s);
+  // On the «What to copy» step show ONLY the sources — where they land (and single vs
+  // separate) is the NEXT step. The mapping/per-job destination shows on the «Where to» step
+  // and in the all-in-one tab.
+  const showMap=part!=="folders";
   const drawJobs=()=>{const box=g("#sJobs");if(!box)return;
-   box.innerHTML=JOBS.length?"":'<div style="color:var(--mut);font-size:12px;padding:6px 0">Empty — click «'+(push?"Choose folders":"Pick from NAS")+'».</div>';
+   box.innerHTML=JOBS.length?"":'<div style="color:var(--mut);font-size:12px;padding:6px 0">Empty — click «'+(push?"Choose folders":isRcloneSrc()?"Pick from cloud":"Pick from NAS")+'».</div>';
    JOBS.forEach((j,i)=>{const exc=(j.excludes&&j.excludes.length)?`<span class="nb-exc" title="${att("Excluded from this folder:\n"+j.excludes.join("\n"))}">−${j.excludes.length} excl.</span>`:"";
     const srcT=isRcloneSrc()?((CFG.remote||"remote")+":"+j.src):(push?"/":"")+j.src;
-    const row=el(`<div class="nb-job"><span class="nb-src mono" title="${att(srcT)}">${svg(push?"folder":isRcloneSrc()?"net":"folder",13)} ${esc(srcT)}</span>${exc}<span class="nb-arr">→</span><span class="nb-dst mono" title="${att(j.dest)}">${esc(j.dest)}</span>${per?`<button class="iconbtn nb-jb" title="Destination folder">${svg("folder",14)}</button>`:""}<button class="iconbtn dng nb-jx" title="Remove">${svg("x",14)}</button></div>`);
+    const map=showMap?`<span class="nb-arr">→</span><span class="nb-dst mono" title="${att(j.dest)}">${esc(j.dest)}</span>${per?`<button class="iconbtn nb-jb" title="Destination folder">${svg("folder",14)}</button>`:""}`:"";
+    const row=el(`<div class="nb-job"><span class="nb-src mono" title="${att(srcT)}" style="${showMap?"":"flex:1"}">${svg(push?"folder":isRcloneSrc()?"net":"folder",13)} ${esc(srcT)}</span>${exc}${map}<button class="iconbtn dng nb-jx" title="Remove">${svg("x",14)}</button></div>`);
     row.querySelector(".nb-jx").onclick=()=>{JOBS.splice(i,1);saveCfg({jobs:JOBS});drawJobs();};
     const jb=row.querySelector(".nb-jb");if(jb)jb.onclick=()=>nbPickLocal(j.dest.replace(/\/[^/]+$/,"")||"/mnt",p=>{JOBS[i].dest=p.replace(/\/$/,"")+"/"+j.src.split("/").pop();saveCfg({jobs:JOBS});drawJobs();});
     box.appendChild(row);});};
