@@ -6997,7 +6997,7 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
  // rclone SOURCE body (src side, pull) — pick the remote; folders chosen on «What to copy»
  function rcloneSrcBody(S){
   const remotes=(RCLONE&&RCLONE.remotes)||[],rcInst=RCLONE?!!RCLONE.installed:true;
-  return `<div class="nb-kindhint"><b>Cloud (rclone)</b> — pull FROM a cloud remote (S3, Backblaze B2, SFTP, WebDAV, Google Drive…) down to a folder on this NAS. Pick the remote here; choose which of its folders to bring on the <b>What to copy</b> tab.</div>
+  return `<div class="nb-kindhint"><b>Cloud (rclone)</b> — pull FROM a cloud remote (S3, Backblaze B2, SFTP, WebDAV, Google Drive…) ${isC2C()?"straight to another cloud (set as the destination below — no local copy is kept)":"down to a folder on this NAS"}. Pick the remote here; choose which of its folders to bring on the <b>What to copy</b> tab.</div>
    ${!rcInst?`<div class="nb-dwarn" style="margin-top:8px">rclone is not installed — open the <b>Rclone</b> app to install it.</div>`:""}
    <div class="srow" style="padding:8px 0 0"><div class="srow-l"><div class="srow-t">Remote</div><div class="srow-d">from your shared rclone.conf</div></div><div class="srow-c">${remotes.length?`<select class="mono" id="rc_remote">${!S.remote?`<option value="" selected>— choose —</option>`:""}${remotes.map(r=>`<option ${r===S.remote?"selected":""}>${esc(r)}</option>`).join("")}</select>`:`<button class="btn sm" id="rc_manage2">${svg("net",13)} Add a remote</button>`}</div></div>
    <div class="nb-field-row" style="margin-top:10px"><button class="btn sm" id="rc_manage">${svg("net",13)} Manage remotes &amp; config</button></div>`;}
@@ -7152,7 +7152,7 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
    if(part==="excl"){tc.style.display="flex";tc.style.flexDirection="column";
      const ta=tc.querySelector("#sExcl");if(ta){ta.style.flex="1";ta.style.minHeight="240px";ta.style.resize="none";}}
   }else{
-   tc.innerHTML=`<h3 class="set-title">What to copy</h3><p class="set-sub">${push?"Step 1 — pick which folders of this NAS to send. Step 2 below — check where the copies land.":isRcloneSrc()?("Step 1 — pick which folders to pull from the cloud remote «"+(c.remote||"?")+"». Step 2 below — where they land on THIS NAS."):"Step 1 — pick which folders to take from the source (the other NAS). Step 2 below — check where the copies land on THIS NAS."}</p>
+   tc.innerHTML=`<h3 class="set-title">What to copy</h3><p class="set-sub">${push?"Step 1 — pick which folders of this NAS to send. Step 2 below — check where the copies land.":isRcloneSrc()?("Step 1 — pick which folders to pull from the cloud remote «"+(c.remote||"?")+"». Step 2 below — "+(isC2C()?"where they land on the destination cloud.":"where they land on THIS NAS.")):"Step 1 — pick which folders to take from the source (the other NAS). Step 2 below — check where the copies land on THIS NAS."}</p>
    ${secFolders}
    <div class="set-h">Where the copies land</div>
    ${secDest}
