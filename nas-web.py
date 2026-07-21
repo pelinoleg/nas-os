@@ -5456,28 +5456,41 @@ def nb_save(patch, pid=None):
         elif cs["kind"] == "rclone" and cd["kind"] in ("ssh", "rsyncd"):
             if sd == "src": cd = {"kind": "local"}
             else:           cs = {"kind": "local"}
-        # fold back into the profile
+        # fold back into the profile. The fold is AUTHORITATIVE over remote/remote_path so a
+        # stale value from the PREVIOUS mode can't leak into the new one — e.g. cloud→cloud →
+        # push must NOT keep the old SOURCE remote as the (new) destination (that once silently
+        # pushed to the wrong cloud and could delete files there).
+        def _vr(v):   # validate an rclone remote name (drop anything malformed)
+            v = str(v or "").strip().rstrip(":")
+            return v if (v == "" or _RCLONE_REMOTE_RE.match(v)) else ""
+        def _vp(v):   # sanitise an rclone base path
+            return re.sub(r"[^\w \-.А-Яа-яЁё/]", "", str(v or "")).replace("..", "").strip("/")[:200]
         if cs["kind"] == "rclone" and cd["kind"] == "rclone":
             # cloud → cloud: source remote in cfg.remote, destination remote in dst2
             cur["direction"] = "pull"; cur["transport"] = "rclone"; far = {}
-            dr = str(cd.get("remote", "")).strip().rstrip(":")
-            dp = re.sub(r"[^\w \-.А-Яа-яЁё/]", "", str(cd.get("remote_path", "") or "")).replace("..", "").strip("/")[:200]
-            cur["dst2"] = {"kind": "rclone", "remote": dr if (dr == "" or _RCLONE_REMOTE_RE.match(dr)) else "",
-                           "remote_path": dp}
+            cur["remote"] = _vr(cs.get("remote")); cur["remote_path"] = _vp(cs.get("remote_path"))
+            cur["dst2"] = {"kind": "rclone", "remote": _vr(cd.get("remote")),
+                           "remote_path": _vp(cd.get("remote_path"))}
         elif cs["kind"] == "rclone":
             # source is a cloud remote → PULL from cloud to a local folder
             cur["direction"] = "pull"; cur["transport"] = "rclone"
+            cur["remote"] = _vr(cs.get("remote")); cur["remote_path"] = _vp(cs.get("remote_path"))
             far = {}; cur["dst2"] = {}
         elif cs["kind"] == "local":
             cur["direction"] = "push"
             cur["transport"] = ("rclone" if cd["kind"] == "rclone"
                                 else "ssh" if cd["kind"] == "ssh" else "local")
             far = cd if cd["kind"] == "ssh" else {}
+            if cd["kind"] == "rclone":   # push destination is a cloud remote
+                cur["remote"] = _vr(cd.get("remote")); cur["remote_path"] = _vp(cd.get("remote_path"))
+            else:                        # local/ssh push — no rclone remote in play
+                cur["remote"] = ""; cur["remote_path"] = ""
             cur["dst2"] = {}
         else:
             cur["direction"] = "pull"
             cur["transport"] = "rsync" if cs["kind"] == "rsyncd" else "ssh"
             far = cs
+            cur["remote"] = ""; cur["remote_path"] = ""   # not a cloud mode
             # a pull profile's remote destination = SSH→SSH (bridge through the NAS)
             cur["dst2"] = {k: cd.get(k, "") for k in
                            ("host", "user", "password", "port", "auth", "provider")} \
@@ -6112,6 +6125,8 @@ def _nb_prune(cfg):
     """Retention of the deleted-files archive (_deleted/DATE): by days AND by total size (GB)."""
     days = int(cfg.get("retention_days", 0) or 0)
     gb   = int(cfg.get("retention_gb", 0) or 0)
+    if _nb_deleted_nested(cfg):
+        return 0                      # nested template — first-level pruning would over-delete
     snaps = []   # (mtime, path, size)
     dests = set(j["dest"] for j in cfg.get("jobs", [])) | {cfg.get("dest_base", "")}
     top = nb_deleted_top(cfg)
@@ -6172,6 +6187,14 @@ def nb_deleted_top(cfg):
 def nb_deleted_rel(cfg, t=None):
     rel = _nb_render_tpl(cfg.get("deleted_dir") or "_deleted/{date}", t)
     return rel or ("_deleted/" + time.strftime("%Y-%m-%d", t or time.localtime()))
+
+def _nb_deleted_nested(cfg):
+    """True when the deleted-archive template nests BELOW its top folder
+    (e.g. _deleted/{year}/{month}): the dated snapshot is then not at the first level, so
+    first-level age-pruning would purge whole parent buckets — a {year} folder read as
+    Jan-1 would drop the entire year. Such archives are left for manual cleanup."""
+    parts = [x for x in (cfg.get("deleted_dir") or "_deleted/{date}").split("/") if x]
+    return len(parts) > 2
 
 def nb_build_cmd(cfg, job, dry, prev_files=0, mkpath=False, allow_delete=False, stage=None):
     """rsync command (+env) for one job. prev_files — the number of files in the
@@ -6508,6 +6531,9 @@ def _nb_rclone_run(cfg, dry, writer, cancel, on_job, allow_delete):
         writer("USER PERMISSION: the mass-deletion guard is lifted for THIS run")
     results = []
     def emit(r):
+        # keep the --max-delete guard baseline armed even when a job is SKIPPED: a skip with
+        # no "files" key would reset prev_files to 0 next run and disarm the deletion cap.
+        r.setdefault("files", prevf.get(r.get("src"), 0))
         results.append(r)
         if on_job:
             try: on_job(list(results), len(jobs))
@@ -6550,6 +6576,18 @@ def _nb_rclone_run(cfg, dry, writer, cancel, on_job, allow_delete):
                 writer("⚠ SKIPPED: the source is missing on this NAS (%s) — the folder was deleted "
                        "or the disk is not mounted." % srcp)
                 emit({"src": j["src"], "ok": False, "src_missing": True}); continue
+            # SAFETY (mirror/archive): a mounted-but-EMPTY source would make `sync` delete the
+            # whole destination copy — and --max-delete doesn't engage on the first run
+            # (prev_files=0). Refuse unless the user explicitly allowed deletes this run.
+            if (not dry and cfg.get("delete_mode", "archive") in ("mirror", "archive")
+                    and not allow_delete):
+                try: src_empty = not os.listdir(srcp)
+                except OSError: src_empty = False
+                if src_empty:
+                    writer("⚠ SKIPPED: the source «%s» is EMPTY — not syncing, because mirror/archive "
+                           "would then delete the destination copy. If you really emptied it, run once "
+                           "with «I deleted these myself», or use «Copy» mode (never deletes)." % srcp)
+                    emit({"src": j["src"], "ok": False, "src_missing": True}); continue
         args = _nb_rclone_cmd(cfg, j, dry, prev_files=prevf.get(j["src"], 0), allow_delete=allow_delete)
         try:
             p = subprocess.Popen(args, env=os.environ.copy(), stdout=subprocess.PIPE,
@@ -6619,9 +6657,12 @@ def _nb_rclone_run(cfg, dry, writer, cancel, on_job, allow_delete):
         elif not ok:
             if err_lines:
                 res["err"] = err_lines[0][:180]; res["errn"] = errs
-            # exit 9 = deletes exceeded --max-delete: nothing beyond the cap was removed
-            if rc == 9:
-                res["err"] = "deletion guard: too many files would be deleted (source wiped or unmounted?)"
+            # --max-delete tripped (rclone aborts with a max-delete message, exit 7) — detect it
+            # by text, not exit code: up to the cap may already have been removed before it aborted
+            if any("max-delete" in (l or "").lower() or "too many deletes" in (l or "").lower()
+                   for l in err_lines):
+                res["err"] = ("deletion guard: too many files would be deleted (source wiped or "
+                              "unmounted?) — up to the cap may already have been removed")
         emit(res)
         writer("[%s] %s · %d files, transferred %s" %
                ("OK" if ok else ("stopped" if cancel() else "error %d" % rc),
@@ -6649,6 +6690,10 @@ def _nb_rclone_prune(cfg, writer):
     (by ModTime). Never touches the live copy, only the archive."""
     days = int(cfg.get("retention_days", 0) or 0)
     if days <= 0:
+        return 0
+    if _nb_deleted_nested(cfg):
+        writer("archive uses a nested template (%s) — automatic age-pruning is disabled; "
+               "remove old snapshots on the remote manually" % (cfg.get("deleted_dir") or ""))
         return 0
     # the archive is on the DESTINATION remote: push → cfg.remote; cloud→cloud → dst2
     if _nb_rclone_c2c(cfg):
@@ -6761,6 +6806,9 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None, allow_delete=Fal
                "if the disk is also needed on Windows/Mac)" % dest_fs)
     results = []
     def emit(r):
+        # keep the --max-delete guard baseline armed even when a job is SKIPPED: a skip with
+        # no "files" key would reset prev_files to 0 next run and disarm the deletion cap.
+        r.setdefault("files", prevf.get(r.get("src"), 0))
         results.append(r)
         if on_job:
             try: on_job(list(results), len(jobs))
@@ -6774,6 +6822,18 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None, allow_delete=Fal
             writer("⚠ SKIPPED: the source is missing on this NAS (/%s) — the folder was deleted "
                    "or the disk is not mounted." % j["src"].lstrip("/"))
             emit({"src": j["src"], "ok": False, "src_missing": True}); continue
+        # SAFETY (mirror/archive): a mounted-but-EMPTY source makes rsync --delete wipe the
+        # destination, and --max-delete doesn't engage on the first run (prev_files=0).
+        if (push and not dry and cfg.get("delete_mode", "archive") in ("mirror", "archive")
+                and not allow_delete):
+            srcp = "/" + j["src"].lstrip("/")
+            try: src_empty = not os.listdir(srcp)
+            except OSError: src_empty = False
+            if src_empty:
+                writer("⚠ SKIPPED: the source (/%s) is EMPTY — not syncing, because mirror/archive "
+                       "would then delete the destination copy. If you really emptied it, run once "
+                       "with «I deleted these myself», or use «Copy» mode (never deletes)." % j["src"].lstrip("/"))
+                emit({"src": j["src"], "ok": False, "src_missing": True}); continue
         if push_ssh:
             # plain server: mkdir over SSH (works with any remote rsync).
             # Forced daemon (UGREEN/Synology): the shell lives in a DIFFERENT path
@@ -6973,6 +7033,9 @@ def _nb_prune_remote(cfg, writer, shell_fs=None):
     shell_fs — probe result from the caller (nb_run), to avoid a second SSH round-trip."""
     days = int(cfg.get("retention_days", 0) or 0)
     if days <= 0:
+        return 0
+    if _nb_deleted_nested(cfg):
+        writer("archive uses a nested template — automatic age-pruning is disabled; clean it manually")
         return 0
     top = nb_deleted_top(cfg)
     if shell_fs is None:
@@ -7616,6 +7679,10 @@ def nb_compare_state(pid=None):
 
 def nb_compare_bg(pid=None, deep=False):
     cfg = nb_load(pid); pid = cfg["id"]
+    # Compare is an rsync dry-run; it can't describe a cloud (rclone) endpoint — routing an
+    # rclone side through the rsync builder yields a broken "@::" command. Use Rclone → Verify.
+    if _nb_rclone_any(cfg):
+        return {"ok": False, "log": "compare is not available for a cloud (rclone) backup — use Rclone → Verify"}
     if nb_compare_state(pid).get("running"):
         return {"ok": False, "log": "compare already running"}
     try:

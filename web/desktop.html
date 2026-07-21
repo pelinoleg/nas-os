@@ -7112,12 +7112,12 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
     order); "folders" | "dest" | "excl" = one section only — the first-run wizard
     shows them as separate small steps. Same markup and the same wiring either
     way, so a fix lands in both. */
- function tabSources(tc,part){const c=CFG,push=isPush(),per=!isPushSsh()&&!isRclone()&&c.dest_mode==="per";
+ function tabSources(tc,part){const c=CFG,push=isPush(),per=!isPushSsh()&&!isRclone()&&!isC2C()&&c.dest_mode==="per";
   const again=()=>tabSources(tc,part);
   const secFolders=`<div style="display:flex;justify-content:space-between;align-items:center;margin:4px 0 6px"><span class="set-h" style="margin:0;padding:0;border:none">Folders</span><button class="btn sm pri" id="sAdd">${svg("plus",13)} ${push?"Choose folders":isRcloneSrc()?"Pick from cloud":"Pick from NAS"}</button></div>
    <div id="sJobs"></div>`;
   const secDest=`${destCard()}
-   ${(isPushSsh()||isRclone())?"":`<div class="srow"><div class="srow-l"><div class="srow-t">Destination mode${tipHTML("Single folder — everything into one folder, as subfolders. Separate per source — each source gets its own folder-destination.")}</div><div class="srow-d">${per?"each source gets its own folder":"everything into one folder, as subfolders"}</div></div><div class="srow-c"><div class="seg" id="sDm"><button data-v="single" class="${!per?"on":""}">Single folder</button><button data-v="per" class="${per?"on":""}">Separate</button></div></div></div>`}`;
+   ${(isPushSsh()||isRclone()||isC2C())?"":`<div class="srow"><div class="srow-l"><div class="srow-t">Destination mode${tipHTML("Single folder — everything into one folder, as subfolders. Separate per source — each source gets its own folder-destination.")}</div><div class="srow-d">${per?"each source gets its own folder":"everything into one folder, as subfolders"}</div></div><div class="srow-c"><div class="seg" id="sDm"><button data-v="single" class="${!per?"on":""}">Single folder</button><button data-v="per" class="${per?"on":""}">Separate</button></div></div></div>`}`;
   // no "add dev patterns"/"reset" buttons: the default list already ships with
   // everything (junk + development) — the textarea IS the whole interface
   const exclInner=`<textarea id="sExcl" class="nb-excl" spellcheck="false">${esc((c.excludes||[]).join("\n"))}</textarea>`;
@@ -7227,15 +7227,15 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
      <div class="usb-chips"><span class="usb-lbl">Tokens:</span>${DEL_TOKENS.map(t=>`<button class="usb-tok" data-t="${att(t[0])}" title="${att(t[1])}">${esc(t[0])}</button>`).join("")}<button class="usb-tok" data-t="/" title="nested folder">/</button></div>
      <div class="usb-chips"><span class="usb-lbl">Presets:</span><button class="usb-pre" data-t="_deleted/{date}">by date</button><button class="usb-pre" data-t="_deleted/{year}/{month}">year / month</button><button class="usb-pre" data-t="_deleted/{datetime}">date & time</button></div>
    </div>
-   <div class="srow" id="dRetRow"><div class="srow-l"><div class="srow-t">Keep deleted archive${tipHTML("Old snapshots are pruned by age"+(isPushSsh()||isRclone()?" (days)":" AND by total size — whichever comes first")+". 0 in the field — don't apply this limit.")}</div><div class="srow-d">prune by age${isPushSsh()||isRclone()?"":" and by size"}</div></div><div class="srow-c"><input class="mono" id="dRd" style="max-width:60px" value="${c.retention_days||0}"><span style="color:var(--mut);font-size:12px">days</span>${isPushSsh()||isRclone()?"":`<input class="mono" id="dRg" style="max-width:60px" value="${c.retention_gb||0}"><span style="color:var(--mut);font-size:12px">GB</span>`}</div></div>
-   ${isRclone()?`<div class="mon-note">On a cloud (rclone) destination only the age limit (days) applies — sizing the archive over the network is too costly. Old <span class="mono">_deleted</span> snapshots older than N days are purged on the remote after each run.</div>`:isPushSsh()?`<div class="mon-note">On an SSH destination only the age limit (days) applies: sizing the archive over the network is too expensive, so the GB cap is not enforced. If the destination path is module-style (no leading /), automatic archive cleanup is not available at all — delete old snapshots manually.</div>`:""}
+   <div class="srow" id="dRetRow"><div class="srow-l"><div class="srow-t">Keep deleted archive${tipHTML("Old snapshots are pruned by age"+(isPushSsh()||isRclone()||isC2C()?" (days)":" AND by total size — whichever comes first")+". 0 in the field — don't apply this limit.")}</div><div class="srow-d">prune by age${isPushSsh()||isRclone()||isC2C()?"":" and by size"}</div></div><div class="srow-c"><input class="mono" id="dRd" style="max-width:60px" value="${c.retention_days||0}"><span style="color:var(--mut);font-size:12px">days</span>${isPushSsh()||isRclone()||isC2C()?"":`<input class="mono" id="dRg" style="max-width:60px" value="${c.retention_gb||0}"><span style="color:var(--mut);font-size:12px">GB</span>`}</div></div>
+   ${isRclone()||isC2C()?`<div class="mon-note">On a cloud (rclone) destination only the age limit (days) applies — sizing the archive over the network is too costly. Old <span class="mono">_deleted</span> snapshots older than N days are purged on the remote after each run.</div>`:isPushSsh()?`<div class="mon-note">On an SSH destination only the age limit (days) applies: sizing the archive over the network is too expensive, so the GB cap is not enforced. If the destination path is module-style (no leading /), automatic archive cleanup is not available at all — delete old snapshots manually.</div>`:""}
    </div>`;
   const g=s=>tc.querySelector(s);
   wireSeg(tc,"#dDel",v=>{g("#dArch").style.display=v==="archive"?"":"none";g("#dGuardRow").style.display=v==="add"?"none":"";const hh=HELP[v];g("#dHelp").innerHTML=`<b>${esc(hh.t)}</b><span>${esc(hh.d)}</span>`;saveCfg({delete_mode:v});});
   g("#dMax").onchange=()=>saveCfg({max_delete_pct:+g("#dMax").value||0});
   g("#dRd").onchange=()=>saveCfg({retention_days:+g("#dRd").value||0});
   {const rg=g("#dRg");if(rg)rg.onchange=()=>saveCfg({retention_gb:+rg.value||0});}
-  const dt=g("#dTpl"),dp=g("#dPrev"),base=isRclone()?((c.remote||"remote")+":"+((c.remote_path||"").replace(/^\/+|\/+$/g,""))):(c.dest_base||(push?"…":"/mnt/storage/nas-backup")).replace(/\/$/,"");
+  const dt=g("#dTpl"),dp=g("#dPrev"),base=isC2C()?c2cDst():isRclone()?((c.remote||"remote")+":"+((c.remote_path||"").replace(/^\/+|\/+$/g,""))):(c.dest_base||(push?"…":"/mnt/storage/nas-backup")).replace(/\/$/,"");
   // rclone lays the archive as base/_deleted/date/<source tree>; local/ssh as base/<tree>/_deleted/date
   const updD=()=>dp.textContent=isRcloneAny()?(base+"/"+nbDelPreview(dt.value)+"/…"):(base+"/…/"+nbDelPreview(dt.value));updD();
   dt.oninput=updD;
@@ -7260,15 +7260,12 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
   g("#hDow").onchange=save;g("#hTime").onchange=save;
  }
  /* ── Overview ── */
- function tabOverview(tc){const c=CFG,push=isPush(),rcl=isRclone();
+ function tabOverview(tc){const c=CFG,push=isPush(),rcl=isRclone(),dstSsh=(CFG.dst||{}).kind==="ssh";
   const rcDest=()=>(c.remote||"remote")+":"+((c.remote_path||"").replace(/^\/+|\/+$/g,""));
   const sched=c.schedule&&c.schedule.enabled?((c.schedule.freq==="weekly"?"weekly at":"daily at")+" "+(c.schedule.time||"03:00")):"disabled";
   // first row: pull — where we take FROM; push — where we send TO
-  const ep=(rcl||isRcloneSrc())?(c.remote?rcDest():"no remote chosen")
-            :push?(isPushSsh()?(c.host?"ssh "+c.user+"@"+c.host+":"+(c.dest_base||"?"):"not set")
-                            :(c.dest_base||"not selected"))
-              :(c.host?(c.transport==="ssh"?"ssh ":"rsync ")+c.user+"@"+c.host:"not set");
-  const epOk=(rcl||isRcloneSrc())?!!c.remote:push?(isPushSsh()?!!c.host:!!c.dest_base):!!c.host;
+  const epOk=isC2C()?(!!((c.src||{}).remote||c.remote)&&!!(c.dst||{}).remote)
+             :(rcl||isRcloneSrc())?!!c.remote:push?(isPushSsh()?!!c.host:!!c.dest_base):!!c.host;
   // next scheduled start, human-readable ("today/tomorrow at 03:00") — the schedule
   // row alone answers "how often", not "when"
   const nextRunTxt=()=>{const s=c.schedule||{};if(!s.enabled)return "";
@@ -7290,6 +7287,7 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
               :rcl?(c.remote?("cloud · "+rcDest()):"not set — open «Connection»")
               :push?(isPushSsh()?(c.host?c.user+"@"+c.host+" : "+(c.dest_base||"?"):"not set — open «Destination»")
                               :(c.dest_base||"no folder chosen yet"))
+              :dstSsh?("ssh · "+((CFG.dst.user?CFG.dst.user+"@":"")+(CFG.dst.host||"?"))+" : "+(c.dest_base||"?"))
                   :("This NAS · "+(c.dest_base||"/mnt/storage/nas-backup"));
   const prof=curProf();
   tc.innerHTML=`
@@ -7305,13 +7303,13 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
    <div class="nb-flow">
      <div class="nb-flow-side"><span class="nb-flow-k">${svg(push?"hdd":"net",12)} From — the data lives here</span><span class="nb-flow-v">${esc(fromTxt)}</span></div>
      <div class="nb-flow-arr">${svg("chev",16)}</div>
-     <div class="nb-flow-side"><span class="nb-flow-k">${svg(rcl||isC2C()?"net":(push&&isPushSsh()?"net":"hdd"),12)} To — the copies land here</span><span class="nb-flow-v">${esc(toTxt)}</span>
+     <div class="nb-flow-side"><span class="nb-flow-k">${svg(rcl||isC2C()||dstSsh?"net":(push&&isPushSsh()?"net":"hdd"),12)} To — the copies land here</span><span class="nb-flow-v">${esc(toTxt)}</span>
        <span class="nb-flow-st"><span class="ovh-dot" id="oRecvDot" style="background:var(--mut)"></span><span id="oRecvV">checking…</span></span></div>
    </div>
    <div class="ov-health"><div class="ovh-list">
      <div class="ovh-row"><span class="ovh-dot" style="background:var(--accent)"></span><span class="ovh-n">Folders in backup</span><span class="ovh-v">${(c.jobs||[]).length||"none yet"}</span></div>
      <div class="ovh-row"><span class="ovh-dot" style="background:var(--accent-2)"></span><span class="ovh-n">Schedule</span><span class="ovh-v">${esc(sched)}${nx?` · <b>${esc(nx)}</b>`:""}</span></div>
-     <div class="ovh-row"><span class="ovh-dot" style="background:var(--dim)"></span><span class="ovh-n">Deleted files</span><span class="ovh-v">${c.delete_mode==="mirror"?"mirror":c.delete_mode==="add"?"keep":"archive"}${(!rcl&&c.verify)?" · verification on":""}</span></div>
+     <div class="ovh-row"><span class="ovh-dot" style="background:var(--dim)"></span><span class="ovh-n">Deleted files</span><span class="ovh-v">${c.delete_mode==="mirror"?"mirror":c.delete_mode==="add"?"keep":"archive"}${(!isRcloneAny()&&c.verify)?" · verification on":""}</span></div>
    </div></div>
    <div class="nb-prog" id="oProg" style="display:none;margin-bottom:10px"></div>
    <div id="oGuard" class="nb-dwarn" style="display:none"></div>
@@ -7467,17 +7465,21 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
     else{dot="var(--mut)";tip="This folder has never been copied — run the backup.";}
     const vb=r&&(r.verify_err?`<span class="nb-warn wrn" title="The checksum verification could not finish — see the log.">verification failed</span>`:r.verify_bad?`<span class="nb-warn dng" title="Contents of ${r.verify_bad} file(s) differ from the source — see the run log.">≠ ${r.verify_bad}</span>`:"")||"";
     const srcT=isRcloneSrc()?((CFG.remote||"remote")+":"+j.src):(push?"/":"")+j.src;
-    // "open and see for yourself": the local end of the pipe — pull/push-to-disk
-    // opens the destination, push-over-ssh opens the local source
-    const localPath=push?(isPushSsh()?"/"+j.src:j.dest):j.dest;
-    const row=el(`<div class="nb-job" data-src="${att(j.src)}"><span class="ovh-dot" style="background:${dot};flex:none" title="${att(tip)}"></span><span class="nb-src mono" title="${att(srcT)}">${esc(srcT)}</span><span class="nb-arr">→</span><span class="nb-dst mono" title="${att(j.dest)}">${esc(j.dest)}</span><button class="iconbtn nb-jgo" title="${att("Open in Files: "+localPath)}">${svg("folder",13)}</button>${badge}${vb}${r&&r.size&&!gone?`<span class="nb-sz mono">${fmtB(r.size)}</span>`:""}</div>`);
-    row.querySelector(".nb-jgo").onclick=()=>winFiles(localPath);
+    // "open and see for yourself": the LOCAL end of the pipe. push-local opens the local
+    // destination; push-ssh & push-rclone open the local SOURCE (it lives on THIS NAS);
+    // pull to a local disk opens the destination. cloud→cloud and SSH→SSH have no local
+    // end at all — a "remote:path"/remote server folder isn't openable, so: no button.
+    const dstSsh=(CFG.dst||{}).kind==="ssh";
+    const localPath=push?((isPushSsh()||isRclone())?"/"+j.src:j.dest):(isC2C()||dstSsh)?"":j.dest;
+    const goBtn=localPath?`<button class="iconbtn nb-jgo" title="${att("Open in Files: "+localPath)}">${svg("folder",13)}</button>`:"";
+    const row=el(`<div class="nb-job" data-src="${att(j.src)}"><span class="ovh-dot" style="background:${dot};flex:none" title="${att(tip)}"></span><span class="nb-src mono" title="${att(srcT)}">${esc(srcT)}</span><span class="nb-arr">→</span><span class="nb-dst mono" title="${att(j.dest)}">${esc(j.dest)}</span>${goBtn}${badge}${vb}${r&&r.size&&!gone?`<span class="nb-sz mono">${fmtB(r.size)}</span>`:""}</div>`);
+    {const goEl=row.querySelector(".nb-jgo");if(goEl)goEl.onclick=()=>winFiles(localPath);}
     jn.appendChild(row);});
    // destination warning + "Destination" line in the summary
    const rd=g("#oRecvDot"),rv=g("#oRecvV"),dw=g("#oDwarn");
    const notMnt=ds&&ds.base_mounted===false;
    if(rd&&rv){rv.title="";   // textContent bypasses the innerHTML translation hook — translate by hand
-    if(ds&&ds.unset){rd.style.background="var(--mut)";rv.textContent=nasTr(isRclone()?"no remote chosen":"not selected");setTip(rd,isRclone()?"No cloud remote is chosen — open «Connection» and pick one.":"No destination is set — the backup has nowhere to put the copies.");}
+    if(ds&&ds.unset){rd.style.background="var(--mut)";rv.textContent=nasTr(isRclone()||isC2C()?"no remote chosen":"not selected");setTip(rd,isRclone()||isC2C()?"No cloud remote is chosen — open «Connection» and pick one.":"No destination is set — the backup has nowhere to put the copies.");}
     else if(ds&&ds.rclone){rd.style.background="var(--accent)";rv.textContent=nasTr("cloud remote");setTip(rd,"The copies go to a cloud remote (rclone) — reachability is checked with «Check» and at run time.");}
     else if(ds&&ds.remote){rd.style.background="var(--accent)";rv.textContent=nasTr("on another server");setTip(rd,"The copies go to another server over SSH — the panel checks folder state during the run.");}
     else if(notMnt){rd.style.background="var(--danger)";rv.textContent=nasTr("not mounted");setTip(rd,"The destination disk is not mounted — the backup will be skipped so that it cannot fill up the system partition.");}
@@ -7629,6 +7631,9 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
    if(isC2C()&&!(CFG.dst||{}).remote){toast("Choose the destination remote (Connection tab)");return;}
    if(!isPush()&&!isC2C()&&!CFG.dest_base){toast("Choose a local destination folder first (the «Where to» tab)");return;}
    if(isPush()&&(isRclone()?!CFG.remote:!CFG.dest_base)){toast(isRclone()?"Choose a cloud remote first (Connection tab)":"First choose a destination (the «Destination» tab)");return;}
+   if(isPushSsh()&&!CFG.host){toast("Set the destination server address (Connection tab)");return;}
+   if(!isPush()&&!isRcloneAny()&&!CFG.host){toast("Set the source server address (Connection tab)");return;}
+   if((CFG.dst||{}).kind==="ssh"&&!(CFG.dst||{}).host){toast("Set the destination server address (Connection tab)");return;}
    con.innerHTML="";nbCursor=0;nbStarted=null;setBusy(true);
    setHero("accent",dry?"<b>Dry run is running…</b>":"<b>Backup is running…</b>");
    const gn=g("#oGuard");if(gn&&allow){gn.style.display="none";gn.innerHTML="";}
@@ -7765,7 +7770,7 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
  const connOk=()=>{
    if(isC2C())return !!((CFG.src||{}).remote||CFG.remote)&&!!(CFG.dst||{}).remote;  // cloud→cloud needs both remotes
    if(isRcloneSrc())return !!((CFG.src||{}).remote||CFG.remote);  // pull from cloud needs a remote
-   if(!isPush())return !!CFG.host;                         // pull (rsync/ssh) needs the source address
+   if(!isPush())return !!CFG.host&&((CFG.dst||{}).kind!=="ssh"||!!(CFG.dst||{}).host);  // pull: source + (SSH→SSH) dest host
    if(CFG.transport==="ssh")return !!CFG.host;             // push to a server needs its address
    if(CFG.transport==="rclone")return !!((CFG.dst||{}).remote||CFG.remote);  // push to cloud needs a remote
    return true;                                            // push to a local disk — folder chosen next step
