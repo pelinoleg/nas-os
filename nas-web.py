@@ -5344,7 +5344,7 @@ def _nb_valid_push_dest(p):
     leading /) — NAS boxes like UGREEN/Synology force rsync-over-SSH into daemon
     mode where paths are resolved from a «module»."""
     p = str(p or "").strip()
-    return bool(p) and ".." not in p and not p.startswith("-")
+    return bool(p) and ".." not in p and not p.startswith("-") and "\n" not in p
 
 def _nb_dest_for(cfg, src):
     """Where one source lands under the common destination folder. Same rule as destFor() in
@@ -6372,9 +6372,18 @@ def _nb_rclone_cmd(cfg, job, dry, prev_files=0, allow_delete=False):
         ex = str(ex).strip()
         if not ex:
             continue
-        # a trailing-slash rsync pattern means "this directory and everything under it";
-        # rclone expresses that as «name/**»
-        args += ["--exclude", ex + "**" if ex.endswith("/") else ex]
+        if ex.endswith("/"):
+            # a trailing-slash rsync pattern means "this directory and everything under it";
+            # rclone expresses that as «name/**»
+            args += ["--exclude", ex + "**"]
+        else:
+            args += ["--exclude", ex]
+            # a LITERAL path (no glob) is a directory in practice — per-job "unchecked folder"
+            # excludes are anchored dir paths like /Photos/private, and OS junk like .Trashes/
+            # .fseventsd are dirs too. Also exclude its CONTENTS so nothing under it is uploaded
+            # (harmless no-op for real files). Junk with globs (*.tmp, ._*) is left as-is.
+            if not any(ch in ex for ch in "*?["):
+                args += ["--exclude", ex.rstrip("/") + "/**"]
     bw = int(cfg.get("bwlimit", 0) or 0)
     if bw > 0:
         args += ["--bwlimit", "%dk" % bw]         # cfg is KB/s
@@ -6394,6 +6403,12 @@ def _nb_rclone_run(cfg, dry, writer, cancel, on_job, allow_delete):
     if not t.get("ok"):
         writer("CONNECTION ERROR: " + t.get("log", "")); return {"ok": False, "unreachable": True, "jobs": []}
     writer("rclone %s · remote «%s»" % (rclone_version() or "?", cfg.get("remote") or "?"))
+    if cfg.get("verify"):
+        # rclone checksums every file as it transfers; the rsync-style post-run verify pass
+        # doesn't apply here. Say so (the toggle is hidden in the rclone UI, but an old profile
+        # may carry it) — for an independent re-check use the Rclone app's Verify (rclone check).
+        writer("note: rclone verifies each file's checksum during transfer — the separate "
+               "post-run verify pass is not used for cloud (use the Rclone app → Verify to re-check).")
     try:
         with open(nb_status_file(pid)) as f:
             prevf = {x.get("src"): x.get("files", 0) for x in json.load(f).get("jobs", [])}
@@ -6473,8 +6488,13 @@ def _nb_rclone_run(cfg, dry, writer, cancel, on_job, allow_delete):
         xfer = int(last_stats.get("transfers") or 0)
         xb = int(last_stats.get("bytes") or 0)
         deleted = int(last_stats.get("deletes") or 0)
+        # "files" = TOTAL files considered (checked + transferred), the rclone equivalent of
+        # rsync's "Number of files". The --max-delete guard derives from THIS (prev run's
+        # total × pct); storing only `transfers` would collapse the guard to 1 after the first
+        # incremental and permanently block legitimate deletions in mirror/archive mode.
+        files_total = int(last_stats.get("checks") or 0) + xfer
         res = {"src": j["src"], "dest": j["dest"], "ok": ok, "code": rc, "size": None,
-               "files": xfer or prevf.get(j["src"], 0), "xfer": xfer,
+               "files": files_total or prevf.get(j["src"], 0), "xfer": xfer,
                "xfer_bytes": xb, "deleted": deleted}
         if cancel():
             res["stopped"] = True
@@ -6535,14 +6555,23 @@ def _nb_rclone_prune(cfg, writer):
     for it in items:
         if not it.get("IsDir"):
             continue
-        m = re.match(r"(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d):(\d\d)", str(it.get("ModTime") or ""))
-        if not m:
-            continue
-        try:
-            ts = calendar.timegm(tuple(int(x) for x in m.groups()) + (0, 0, 0))   # rclone ModTime is UTC
-        except (ValueError, OverflowError):
-            continue
-        if ts >= cutoff:
+        # Age from the snapshot's DATED NAME first (the default template is _deleted/{date}
+        # → "YYYY-MM-DD"): object stores (S3/B2) have synthetic dirs with NO ModTime, so a
+        # ModTime-only check would never prune on exactly rclone's main targets. Fall back to
+        # ModTime for name templates that carry no parseable date (e.g. a numeric-only {month}).
+        ts = None
+        nm = str(it.get("Name") or "")
+        dm = re.search(r"(\d{4})-(\d\d)-(\d\d)", nm) or re.search(r"^(\d{4})-(\d\d)$", nm) or re.search(r"^(\d{4})$", nm)
+        if dm:
+            g = list(dm.groups()); g += ["01"] * (3 - len(g))          # pad missing month/day → period start
+            try: ts = calendar.timegm((int(g[0]), int(g[1]), int(g[2]), 0, 0, 0, 0, 0, 0))
+            except (ValueError, OverflowError): ts = None
+        if ts is None:
+            mt = re.match(r"(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d):(\d\d)", str(it.get("ModTime") or ""))
+            if mt:
+                try: ts = calendar.timegm(tuple(int(x) for x in mt.groups()) + (0, 0, 0))
+                except (ValueError, OverflowError): ts = None
+        if ts is None or ts >= cutoff:
             continue
         d = (archroot + "/" + it.get("Name", "")).strip("/")
         pr = subprocess.run([_rclone_bin(), "--config", RCLONE_CONF, "purge", remote + ":" + d,

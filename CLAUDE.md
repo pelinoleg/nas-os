@@ -437,6 +437,18 @@ rclone финализирует корректно (`running=False result=ok`). 
 той, что юзер ТОЛЬКО ЧТО поставил (dst=Cloud→push src local; src=remote→drop cloud dst→pull);
 (2) три UI-гейта на `dest_base` блокировали rclone (у него dest_base пустой): добавление папок,
 запуск, сводка визарда — теперь для rclone проверяют `remote`.
+**Второй аудит (2 параллельных ревью-агента, 2026-07-21).** UI: (a) HIGH — `destCard()` ссылался
+на несуществующий `push` → на push-SSH/SSH→SSH назначении падала вкладка «What to copy» и шаг
+визарда (→ `isPush()`); (b) MED — переключение per-source профиля на Cloud оставляло `dest_mode:per`
+→ локальный пикер на облачном назначении (→ `per` учитывает `!isRclone()`). Движок: (a) MED —
+rclone-страж `--max-delete` брал `prev_files` из ПЕРЕДАННЫХ файлов (`transfers`), а не총 → после
+инкремента страж схлопывался в 1 и блокировал любое удаление; теперь `files=checks+transfers`
+(аналог rsync «Number of files»); (b) MED — `_nb_rclone_prune` парсил только `ModTime`, которого
+на объектных хранилищах (S3/B2) у синтетических папок НЕТ → ретеншен не работал; теперь дата
+берётся из ИМЕНИ снапшота (`_deleted/{date}`→YYYY-MM-DD), ModTime как fallback (проверено на
+pcloud+SFTP); (c) LOW — per-job dir-excludes для rclone получают `/**` (контент папки),
+push-ssh dest отклоняет `\n`, для rclone с verify в лог пишется note (rclone чек-суммит при
+передаче). retention_gb уже скрыт в UI для rclone/ssh.
 Приложение переименовано в **«Rclone»**; иконка — фирменный 3-цветный логотип (`RAW_LOGOS.rclone`
 в `svg()`, свой viewBox с паддингом чтоб не был крупнее line-иконок). Save-бар вкладок закреплён
 снизу (`setFootAdopt`, как в Настройках). Путь в remote выбирается пикером `rcloneRemotePicker`
