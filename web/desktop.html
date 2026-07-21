@@ -7041,7 +7041,8 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
    const rp=g("#rc_path");if(rp)rp.onchange=()=>saveCfg({remote_path:rp.value.trim()}).then(()=>{JOBS=(CFG.jobs||[]).slice();again();});
    const rpb=g("#rc_pathBrowse");if(rpb)rpb.onclick=()=>{const rem2=(CFG.dst||{}).remote||CFG.remote;
      if(!rem2){toast("Choose a remote first");return;}
-     rcloneRemotePicker(rem2,p=>saveCfg({remote_path:p}).then(()=>{JOBS=(CFG.jobs||[]).slice();again();}));};
+     rcloneRemotePicker(rem2,p=>{const inp=g("#rc_path");if(inp)inp.value=p;   // show it immediately
+       saveCfg({remote_path:p}).then(()=>{JOBS=(CFG.jobs||[]).slice();again();toast("Destination: "+rem2+":"+(p||""));});});};
    wireSeg(tc,"#rc_mode",v=>saveCfg({delete_mode:v}).then(again));
    const mg=g("#rc_manage");if(mg)mg.onclick=gotoRclone;
    const mg2=g("#rc_manage2");if(mg2)mg2.onclick=gotoRclone;}
