@@ -7066,7 +7066,7 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
   const who=ssh?`${esc(D.user||"?")}@${esc(D.host||"not set")}${rnet?" · rsync.net":""}`:"a folder on THIS NAS";
   const ph=ssh?(rnet?host()+"-backup":"/mnt/backup/"+host()):"/media/usb-disk/backup";
   return `<div class="nb-dest">
-   <div class="nb-dest-h"><span class="nb-dest-t">${svg(ssh&&push?"net":"folder",15)} Destination</span>
+   <div class="nb-dest-h"><span class="nb-dest-t">${svg(ssh&&isPush()?"net":"folder",15)} Destination</span>
     <span class="nb-dest-w mono">${who}</span>${kseg}</div>
    <div class="nb-field-row"><input class="mono" id="sBase" value="${att(c.dest_base||"")}" placeholder="${esc(ph)}"><button class="btn sm" id="sBaseB">${svg("folder",13)} Choose</button>
     ${ssh?`<button class="btn sm" id="dConn">${svg("key",13)} Connection</button>`:""}</div>
@@ -7079,7 +7079,7 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
     order); "folders" | "dest" | "excl" = one section only — the first-run wizard
     shows them as separate small steps. Same markup and the same wiring either
     way, so a fix lands in both. */
- function tabSources(tc,part){const c=CFG,push=isPush(),per=!isPushSsh()&&c.dest_mode==="per";
+ function tabSources(tc,part){const c=CFG,push=isPush(),per=!isPushSsh()&&!isRclone()&&c.dest_mode==="per";
   const again=()=>tabSources(tc,part);
   const secFolders=`<div style="display:flex;justify-content:space-between;align-items:center;margin:4px 0 6px"><span class="set-h" style="margin:0;padding:0;border:none">Folders</span><button class="btn sm pri" id="sAdd">${svg("plus",13)} ${push?"Choose folders":"Pick from NAS"}</button></div>
    <div id="sJobs"></div>`;
