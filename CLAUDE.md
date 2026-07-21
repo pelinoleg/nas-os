@@ -419,6 +419,7 @@ unmount,mount-remove,about,size,opts,check/*}`. Приложение Бэкап 
 ветка `cd["kind"]=="rclone"` ПЕРВОЙ — облачное назначение ВСЕГДА делает профиль push (источник
 принудительно local). rclone как ИСТОЧНИК (pull-профиль cloud→NAS) пока не сделан — on-demand
 покрывает Restore; KINDS_SRC без rclone.
+**cloud→cloud (2026-07-21):** rclone умеет remote→remote напрямую (без локальной промежуточной папки, в отличие от rsync SSH→SSH+sshfs). Модель: src=rclone (cfg.remote), dst=rclone хранится в `dst2={kind:rclone,remote,remote_path}` (direction=pull). Предикаты `_nb_rclone_c2c`/`_nb_c2c_dst`; `_nb_rclone_cmd` копирует `src_remote:job.src → dst_remote:path`, archive-backup-dir и `_nb_rclone_prune` идут на DST-remote; `nb_test` проверяет ОБА remote; `_nb_remote_both` возвращает False для rclone (нет sshfs-моста); `nb_dest_state` — облачный dst. UI: `dstKinds` даёт Cloud при облачном источнике, `rcloneDstBody(S,c2c=true)` (свои id `rc_dremote/rc_dpath`, сохраняет через `{dst:{...}}`), `isC2C()`/`c2cDst()`, визард пропускает «Where to». Проверено live: dry-run pcloud→rsync (`both remotes reachable`, result=ok).
 **Аудит опций по транспортам (что где актуально), 2026-07-21:** delete_mode (Copy/Mirror/Archive)
 задаётся ТОЛЬКО на вкладке «Deleted files» — дубль-селектор «Mode» из rclone-карточки назначения
 УБРАН (был тот же `delete_mode` с другими лейблами). **Verify (rsync -c) СКРЫТ для rclone**

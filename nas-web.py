@@ -5293,10 +5293,15 @@ def _nb_sides(cfg):
         else:
             dst = {"kind": "local"}
     elif tr == "rclone":
-        # pull from a cloud remote into a LOCAL folder on this NAS
+        # source is a cloud remote. Destination is either a LOCAL folder (cloud→NAS) or
+        # ANOTHER cloud remote stored in dst2 (cloud→cloud).
         src = {"kind": "rclone", "remote": cfg.get("remote", ""),
                "remote_path": cfg.get("remote_path", "")}
-        dst = {"kind": "local"}
+        d2 = cfg.get("dst2") or {}
+        if d2.get("kind") == "rclone":
+            dst = {"kind": "rclone", "remote": d2.get("remote", ""), "remote_path": d2.get("remote_path", "")}
+        else:
+            dst = {"kind": "local"}
         dst["base"] = cfg.get("dest_base") or ""
         return src, dst
     else:
@@ -5317,7 +5322,10 @@ def _nb_sides(cfg):
 def _nb_remote_both(cfg):
     """SSH→SSH: rsync can't do this ("source and destination cannot both be
     remote"), so we mount the source over sshfs and copy as if from a local
-    folder. Data goes through the NAS — a cost the panel warns about."""
+    folder. Data goes through the NAS — a cost the panel warns about.
+    rclone is NEVER this: it does remote→remote directly (cloud→cloud), no sshfs bridge."""
+    if _nb_rclone_any(cfg):
+        return False
     src, dst = _nb_sides(cfg)
     return src["kind"] != "local" and dst["kind"] != "local"
 
@@ -5342,9 +5350,20 @@ def _nb_rclone_any(cfg):
     return (cfg or {}).get("transport") == "rclone"
 
 def _nb_rclone_pull(cfg):
-    """rclone PULL: the source is a cloud remote, the destination is a LOCAL folder on this
-    NAS (cloud → NAS). Dest/retention/state behave like a normal local pull."""
+    """rclone PULL: the source is a cloud remote. Destination is a LOCAL folder (cloud→NAS)
+    UNLESS it's cloud→cloud (see _nb_rclone_c2c). Direction is stored as 'pull'."""
     return not _nb_push(cfg) and (cfg or {}).get("transport") == "rclone"
+
+def _nb_rclone_c2c(cfg):
+    """rclone CLOUD → CLOUD: both sides are cloud remotes (e.g. move one cloud to another).
+    Source = cfg.remote:job.src; destination = dst2.remote:dst2.remote_path/… . rclone copies
+    remote→remote directly (streamed through this NAS, no local staging)."""
+    return _nb_rclone_pull(cfg) and (cfg.get("dst2") or {}).get("kind") == "rclone"
+
+def _nb_c2c_dst(cfg):
+    """The destination cloud endpoint for a cloud→cloud profile: (remote, base_path)."""
+    d2 = cfg.get("dst2") or {}
+    return (str(d2.get("remote") or "").rstrip(":"), str(d2.get("remote_path") or "").strip("/"))
 
 def _nb_valid_rclone_dest(p):
     """An rclone destination is 'remote:path' — a valid remote name before ':' and a
@@ -5375,6 +5394,11 @@ def _nb_dest_for(cfg, src):
         root = (storage_base() or STORAGE).strip("/")
         if root and (rel == root or rel.startswith(root + "/")):
             rel = rel[len(root):].lstrip("/")
+    if _nb_rclone_c2c(cfg):
+        # cloud → cloud: destination is the OTHER remote (dst2), not local
+        dremote, dbase = _nb_c2c_dst(cfg)
+        path = "/".join(x for x in (dbase, rel) if x)
+        return (dremote or "remote") + ":" + path
     if _nb_rclone(cfg):
         # rclone destination: 'remote:base/<mirrored tree>'. Not a filesystem path —
         # never run it through normpath (that would eat the '//' and mangle 'remote:')
@@ -5414,7 +5438,7 @@ def nb_save(patch, pid=None):
         side = dict(cs if sd == "src" else cd)
         if kind:
             side["kind"] = kind
-        for k in ("host", "user", "port", "auth", "provider"):
+        for k in ("host", "user", "port", "auth", "provider", "remote", "remote_path"):
             if k in q:
                 side[k] = q[k]
         if q.get("password"):
@@ -5423,19 +5447,24 @@ def nb_save(patch, pid=None):
             cs = side
         else:
             cd = side
-        # rclone must pair with a LOCAL side (push: local→cloud; pull: cloud→local); it can't
-        # pair with ssh/rsyncd, and cloud→cloud isn't supported here. When the change makes an
-        # invalid combo, honour the side the user JUST set and reset the other to local:
-        #   dst=Cloud → src local (push);  src=Cloud → dst local (pull);
-        #   the OTHER side changed to a remote while this side is Cloud → drop the Cloud side.
-        if cd["kind"] == "rclone" and cs["kind"] != "local":
+        # rclone pairs with a LOCAL side (push local→cloud, pull cloud→local) OR with ANOTHER
+        # rclone (cloud→cloud). It can't pair with ssh/rsyncd — if the change makes THAT combo,
+        # honour the side the user just set and reset the other to local.
+        if cd["kind"] == "rclone" and cs["kind"] in ("ssh", "rsyncd"):
             if sd == "dst": cs = {"kind": "local"}
             else:           cd = {"kind": "local"}
-        elif cs["kind"] == "rclone" and cd["kind"] != "local":
+        elif cs["kind"] == "rclone" and cd["kind"] in ("ssh", "rsyncd"):
             if sd == "src": cd = {"kind": "local"}
             else:           cs = {"kind": "local"}
         # fold back into the profile
-        if cs["kind"] == "rclone":
+        if cs["kind"] == "rclone" and cd["kind"] == "rclone":
+            # cloud → cloud: source remote in cfg.remote, destination remote in dst2
+            cur["direction"] = "pull"; cur["transport"] = "rclone"; far = {}
+            dr = str(cd.get("remote", "")).strip().rstrip(":")
+            dp = re.sub(r"[^\w \-.А-Яа-яЁё/]", "", str(cd.get("remote_path", "") or "")).replace("..", "").strip("/")[:200]
+            cur["dst2"] = {"kind": "rclone", "remote": dr if (dr == "" or _RCLONE_REMOTE_RE.match(dr)) else "",
+                           "remote_path": dp}
+        elif cs["kind"] == "rclone":
             # source is a cloud remote → PULL from cloud to a local folder
             cur["direction"] = "pull"; cur["transport"] = "rclone"
             far = {}; cur["dst2"] = {}
@@ -5495,7 +5524,7 @@ def nb_save(patch, pid=None):
         cur["remote_sudo"] = bool(patch["remote_sudo"])
     if isinstance(patch.get("jobs"), list):
         jobs = []
-        rclone = _nb_rclone(cur)
+        rclone = _nb_rclone(cur) or _nb_rclone_c2c(cur)   # destination is a cloud 'remote:path'
         dst_ok = (_nb_valid_rclone_dest if rclone
                   else _nb_valid_push_dest if _nb_push_ssh(cur) else _nb_valid_dest)
         for j in patch["jobs"][:200]:
@@ -5544,8 +5573,9 @@ def nb_save(patch, pid=None):
     # /mnt/storage/nas-backup-2). Per-job mode is the one where dests are edited by hand.
     # rclone always derives dests from (remote, remote_path, src) — same single-folder
     # rule; there is no per-job hand-editing of a 'remote:path' destination
-    per_mode = cur["dest_mode"] == "per" and not _nb_push_ssh(cur) and not _nb_rclone(cur)
-    if _nb_rclone(cur):
+    rc_dest = _nb_rclone(cur) or _nb_rclone_c2c(cur)   # destination is a cloud remote:path
+    per_mode = cur["dest_mode"] == "per" and not _nb_push_ssh(cur) and not rc_dest
+    if rc_dest:
         # rclone dests are ALWAYS derived from (remote, remote_path, src) and re-derived on
         # every save — so switching a profile INTO rclone (before a remote is picked) keeps
         # every source instead of dropping them for having non-rclone dests. Once the remote
@@ -5600,7 +5630,7 @@ def nb_profiles_public():
         # push to rclone needs a remote chosen (no host, no dest_base)
         conn = bool(p.get("host")) or (p.get("direction") == "push" and p.get("transport") == "local"
                                        and bool(p.get("dest_base"))) \
-               or (_nb_rclone(p) and bool(p.get("remote")))
+               or (_nb_rclone_any(p) and bool(p.get("remote")))
         st = _nb_run_state_read(pid)
         out.append({"id": pid, "name": p["name"], "direction": p.get("direction") or "pull",
                     "running": nb_run_active(pid), "queued": nb_queued(pid),
@@ -5904,7 +5934,18 @@ def nb_test(cfg=None):
             return {"ok": False, "log": "no rclone remote selected"}
         if remote not in rclone_remotes():
             return {"ok": False, "log": "remote «%s» is not in rclone.conf" % remote}
-        return rclone_test_remote(remote)
+        r1 = rclone_test_remote(remote)
+        if not r1.get("ok") or not _nb_rclone_c2c(cfg):
+            return dict(r1, log=("source " + (r1.get("log") or "")) if not r1.get("ok") else r1.get("log"))
+        # cloud → cloud: the destination is another remote — check it too
+        dremote = _nb_c2c_dst(cfg)[0]
+        if not dremote:
+            return {"ok": False, "log": "no destination remote selected"}
+        if dremote not in rclone_remotes():
+            return {"ok": False, "log": "destination remote «%s» is not in rclone.conf" % dremote}
+        r2 = rclone_test_remote(dremote)
+        return {"ok": r2.get("ok"), "log": ("destination " + (r2.get("log") or "")) if not r2.get("ok")
+                else "both remotes reachable · %s → %s" % (remote, dremote)}
     if cfg.get("transport") == "local":
         base = cfg.get("dest_base") or ""
         if not base:
@@ -6396,9 +6437,10 @@ def _nb_rclone_cmd(cfg, job, dry, prev_files=0, allow_delete=False):
             args += ["--max-delete", str(max(1, int(prev_files * pct / 100.0)))]
     if dm == "archive":
         # dated _deleted archive OUTSIDE the job destination (rclone forbids a --backup-dir that
-        # overlaps the destination). push → remote:remote_path/_deleted/<date>/<sub>;
-        # pull → dest_base/_deleted/<date>/<sub> (a LOCAL folder).
-        if pull:
+        # overlaps the destination). The archive lives WHERE THE DESTINATION is:
+        #   pull→local dest → dest_base/_deleted/<date>/<sub> (LOCAL);
+        #   push → the dst remote (cfg.remote); cloud→cloud → the dst remote (dst2).
+        if pull and not _nb_rclone_c2c(cfg):
             base = (cfg.get("dest_base") or "").rstrip("/")
             if base and dest.startswith(base):
                 sub = dest[len(base):].lstrip("/")
@@ -6411,7 +6453,7 @@ def _nb_rclone_cmd(cfg, job, dry, prev_files=0, allow_delete=False):
             args += ["--backup-dir", os.path.join(base, nb_deleted_rel(cfg), sub)]
         else:
             rem, _, path = dest.partition(":")
-            rbase = (cfg.get("remote_path") or "").strip("/")
+            rbase = _nb_c2c_dst(cfg)[1] if _nb_rclone_c2c(cfg) else (cfg.get("remote_path") or "").strip("/")
             sub = path[len(rbase):].lstrip("/") if (rbase and path.startswith(rbase)) else path
             arc = "/".join(x for x in (rbase, nb_deleted_rel(cfg), sub) if x)
             args += ["--backup-dir", rem + ":" + arc]
@@ -6471,32 +6513,35 @@ def _nb_rclone_run(cfg, dry, writer, cancel, on_job, allow_delete):
             try: on_job(list(results), len(jobs))
             except Exception: pass
     pull = _nb_rclone_pull(cfg)
+    c2c = _nb_rclone_c2c(cfg)
     for j in jobs:
         if cancel():
             writer("— cancelled —"); break
         writer(""); writer("=== %s → %s ===" % (j["src"], j["dest"]))
         if pull:
-            # cloud → local: the source is a remote path (checked at transfer time); make sure
-            # the LOCAL destination is a real, mounted, allowed folder before we pull into it.
-            dst = j["dest"]
-            if not _nb_valid_dest(dst):
-                writer("⚠ SKIPPED: invalid local destination (%s) — choose a folder in "
-                       "/mnt, /media, /srv or /home." % dst); emit({"src": j["src"], "ok": False}); continue
-            if _dest_disk_absent(dst):
-                writer("⚠ SKIPPED: the destination disk is not mounted (%s leads into the system "
-                       "partition) — connect it." % dst); emit({"src": j["src"], "ok": False, "not_mounted": True}); continue
-            try:
-                os.makedirs(dst, exist_ok=True)
-            except OSError as e:
-                writer("could not create the folder: %s" % e); emit({"src": j["src"], "ok": False}); continue
+            # cloud source → local (pull) OR another cloud (cloud→cloud). For a LOCAL destination,
+            # make sure it's a real, mounted, allowed folder and create it. cloud→cloud has no
+            # local dest to prepare.
+            if not c2c:
+                dst = j["dest"]
+                if not _nb_valid_dest(dst):
+                    writer("⚠ SKIPPED: invalid local destination (%s) — choose a folder in "
+                           "/mnt, /media, /srv or /home." % dst); emit({"src": j["src"], "ok": False}); continue
+                if _dest_disk_absent(dst):
+                    writer("⚠ SKIPPED: the destination disk is not mounted (%s leads into the system "
+                           "partition) — connect it." % dst); emit({"src": j["src"], "ok": False, "not_mounted": True}); continue
+                try:
+                    os.makedirs(dst, exist_ok=True)
+                except OSError as e:
+                    writer("could not create the folder: %s" % e); emit({"src": j["src"], "ok": False}); continue
             # SAFETY (mirror/archive only): a wrong/empty cloud source would make `sync` delete the
-            # local copy — and the --max-delete guard doesn't engage on the FIRST run (prev_files=0).
-            # So verify the remote source actually has content before a deleting sync. copy is safe.
+            # destination copy — and the --max-delete guard doesn't engage on the FIRST run
+            # (prev_files=0). So verify the remote source has content before a deleting sync.
             if not dry and cfg.get("delete_mode", "archive") in ("mirror", "archive") and not allow_delete:
                 ls = rclone_ls(cfg.get("remote") or "", j["src"])
                 if not ls.get("ok") or not ls.get("entries"):
                     writer("⚠ SKIPPED: the cloud source «%s:%s» is empty or unreachable — NOT syncing, "
-                           "because mirror/archive would delete the local copy. Check the remote path "
+                           "because mirror/archive would delete the destination copy. Check the remote path "
                            "(or use «Copy» mode, which never deletes)." % (cfg.get("remote"), j["src"]))
                     emit({"src": j["src"], "ok": False, "src_missing": True}); continue
         else:
@@ -6588,7 +6633,7 @@ def _nb_rclone_run(cfg, dry, writer, cancel, on_job, allow_delete):
         # pull → the archive is LOCAL, so use the normal local prune (by age AND size).
         if cfg.get("delete_mode", "archive") == "archive":
             try:
-                pruned = _nb_prune(cfg) if pull else _nb_rclone_prune(cfg, writer)
+                pruned = _nb_prune(cfg) if (pull and not c2c) else _nb_rclone_prune(cfg, writer)
                 if pruned: writer("old deleted-files snapshots cleaned: %d" % pruned)
             except Exception: pass
         _nb_write_status(pid, results)
@@ -6605,10 +6650,14 @@ def _nb_rclone_prune(cfg, writer):
     days = int(cfg.get("retention_days", 0) or 0)
     if days <= 0:
         return 0
-    remote = (cfg.get("remote") or "").strip().rstrip(":")
+    # the archive is on the DESTINATION remote: push → cfg.remote; cloud→cloud → dst2
+    if _nb_rclone_c2c(cfg):
+        remote, rbase = _nb_c2c_dst(cfg)
+    else:
+        remote = (cfg.get("remote") or "").strip().rstrip(":")
+        rbase = (cfg.get("remote_path") or "").strip("/")
     if not remote:
         return 0
-    rbase = (cfg.get("remote_path") or "").strip("/")
     top = nb_deleted_top(cfg)                          # constant first segment, e.g. "_deleted"
     archroot = "/".join(x for x in (rbase, top) if x)
     try:
@@ -7050,11 +7099,15 @@ def nb_dest_state(pid=None):
     Fast (isdir/listdir, no du). Catches manual deletion of folders from the destination —
     which the last run's dots don't see."""
     cfg = nb_load(pid)
-    if _nb_rclone(cfg):
+    if _nb_rclone(cfg) or _nb_rclone_c2c(cfg):
         # cloud destination: no local mount concept, and probing the remote every UI tick is
-        # too costly — treat it as present (reachability is checked by Test / at run time)
-        remote = (cfg.get("remote") or "").strip().rstrip(":")
-        rbase = (cfg.get("remote_path") or "").strip("/")
+        # too costly — treat it as present (reachability is checked by Test / at run time).
+        # push → cfg.remote; cloud→cloud → the dst2 remote.
+        if _nb_rclone_c2c(cfg):
+            remote, rbase = _nb_c2c_dst(cfg)
+        else:
+            remote = (cfg.get("remote") or "").strip().rstrip(":")
+            rbase = (cfg.get("remote_path") or "").strip("/")
         return {"base": (remote + ":" + rbase) if remote else "", "rclone": True,
                 "unset": not remote, "base_mounted": True, "base_exists": bool(remote),
                 "jobs": [{"src": j.get("src", ""), "dest": j.get("dest", ""),
