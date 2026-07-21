@@ -5022,6 +5022,110 @@ def rclone_cleanup(remote):
         return {"ok": False, "log": "this backend doesn't support cleanup"}
     return {"ok": False, "log": (((r.stderr or r.stdout) or "").strip().splitlines() or ["cleanup failed"])[-1][:180]}
 
+# --- Cloud space analyzer: a background `rclone lsf -R` that aggregates folder sizes into a
+#     drill-down tree ("where did my cloud space go"). Streamed + capped so a huge remote can't
+#     blow up memory; result cached to a file so it survives a panel restart. ---
+_RCLONE_DU = {}
+_rclone_du_lock = threading.Lock()
+RCLONE_DU_DEPTH = 8          # aggregate folders down to this many levels
+RCLONE_DU_TOPN = 40          # keep the N biggest children per folder (rest → "…other")
+RCLONE_DU_MAXLINES = 800000  # protect memory on giant remotes
+RCLONE_DU_TTL = 6 * 3600     # reuse a completed scan for this long before re-hitting the API
+
+def _rclone_du_file(remote):
+    return os.path.join(NAS_CONFIG, "rclone-du-" + re.sub(r"[^\w-]", "_", remote) + ".json")
+
+def _rclone_du_worker(remote, path):
+    st = {"running": True, "started": int(time.time()), "scanned": 0, "bytes": 0,
+          "tree": None, "remote": remote, "path": path, "capped": False}
+    last = [0.0]
+    def save(force=False):
+        now = time.time()
+        if not force and now - last[0] < 1.5:
+            return
+        last[0] = now
+        with _rclone_du_lock:
+            _RCLONE_DU[remote] = dict(st)
+        try: _json_save(_rclone_du_file(remote), st, indent=None)
+        except OSError: pass
+    save(True)
+    root = {"sz": 0, "n": 0, "ch": {}}
+    args = [_rclone_bin(), "--config", RCLONE_CONF, "lsf", "--recursive", "--files-only",
+            "--format", "sp", "--separator", "|", "--fast-list", remote + ":" + path.strip("/")]
+    try:
+        p = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1)
+        n = 0
+        for line in p.stdout:
+            n += 1
+            if n > RCLONE_DU_MAXLINES:
+                st["capped"] = True
+                try: p.terminate()
+                except OSError: pass
+                break
+            i = line.find("|")
+            if i < 0:
+                continue
+            try: sz = int(line[:i])
+            except ValueError: continue
+            parts = [x for x in line[i+1:].rstrip("\n").split("/") if x]
+            node = root; node["sz"] += sz; node["n"] += 1
+            for d in parts[:-1][:RCLONE_DU_DEPTH]:
+                node = node["ch"].setdefault(d, {"sz": 0, "n": 0, "ch": {}})
+                node["sz"] += sz; node["n"] += 1
+            st["scanned"] = n; st["bytes"] = root["sz"]
+            save()
+        try: p.wait(timeout=10)
+        except (OSError, subprocess.SubprocessError): pass
+    except Exception as e:
+        st["error"] = str(e)[:160]
+    # keep only the biggest children per folder; roll the rest into "…other"
+    def prune(node):
+        ch = node.get("ch") or {}
+        if not ch:
+            return
+        items = sorted(ch.items(), key=lambda kv: kv[1]["sz"], reverse=True)
+        node["ch"] = dict(items[:RCLONE_DU_TOPN])
+        rest = items[RCLONE_DU_TOPN:]
+        if rest:
+            node["ch"]["…other"] = {"sz": sum(v["sz"] for _, v in rest),
+                                    "n": sum(v["n"] for _, v in rest), "ch": {}}
+        for v in node["ch"].values():
+            prune(v)
+    prune(root)
+    st.update(running=False, done=int(time.time()), tree=root)
+    save(True)
+
+def rclone_du_start(remote, path="", force=False):
+    remote = str(remote or "").strip().rstrip(":")
+    if not rclone_installed() or not _RCLONE_REMOTE_RE.match(remote) or remote not in rclone_remotes():
+        return {"ok": False, "log": "no such remote"}
+    path = str(path or "").strip().strip("/")
+    if ".." in path:
+        return {"ok": False, "log": "invalid path"}
+    with _rclone_du_lock:
+        cur = _RCLONE_DU.get(remote)
+        if cur is None:
+            cur = _json_load_strict(_rclone_du_file(remote), {})
+            if cur:
+                _RCLONE_DU[remote] = cur
+        if cur and cur.get("running"):
+            return {"ok": True, "running": True}
+        # reuse a recent completed scan (of the same path) unless the caller forces a rescan —
+        # a full lsf -R hammers the provider API, so don't re-run it on every dialog open
+        if not force and cur and cur.get("tree") and cur.get("path", "") == path \
+           and (time.time() - cur.get("done", 0)) < RCLONE_DU_TTL:
+            return {"ok": True, "cached": True}
+    threading.Thread(target=_rclone_du_worker, args=(remote, path), daemon=True).start()
+    return {"ok": True, "running": True}
+
+def rclone_du_status(remote):
+    remote = str(remote or "").strip().rstrip(":")
+    with _rclone_du_lock:
+        st = _RCLONE_DU.get(remote)
+    if st is None:
+        st = _json_load_strict(_rclone_du_file(remote), {})
+    return st or {}
+
 # --------------------------------------------------------------------------- #
 #  Verify (rclone check): compare a LOCAL folder against a remote path by checksum.
 #  Read-only on both sides — reports differences, never copies or deletes. Runs in
@@ -16661,6 +16765,11 @@ class H(BaseHTTPRequestHandler):
                 self._json(rclone_dedupe(self._body().get("remote", "")))
             elif p == "/api/backup/rclone/cleanup":
                 self._json(rclone_cleanup(self._body().get("remote", "")))
+            elif p == "/api/backup/rclone/du/start":
+                b = self._body()
+                self._json(rclone_du_start(b.get("remote", ""), b.get("path", ""), bool(b.get("force"))))
+            elif p == "/api/backup/rclone/du/status":
+                self._json(rclone_du_status(self._body().get("remote", "")))
             elif p == "/api/backup/rclone/opts":
                 self._json({"ok": True, "opts": rclone_opts_set(self._body() or {})})
             elif p == "/api/backup/rclone/mount":

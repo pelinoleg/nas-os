@@ -1012,6 +1012,20 @@
   .rc-meta{margin-top:6px;font-size:11.5px;color:var(--win-dim,var(--dim))}
   .rc-meta b{color:var(--win-fg,var(--fg));font-weight:600}
   .rc-mut{color:var(--win-dim,var(--mut))}
+  .du-tot{font-size:12.5px;color:var(--win-dim,var(--dim));margin:2px 0 8px}
+  .du-tot b{color:var(--win-fg,var(--fg))}
+  .du-crumb{font-size:12px;margin-bottom:8px}
+  .du-crumb a{color:var(--win-accent,var(--accent));cursor:pointer}
+  .du-list{max-height:52vh;overflow-y:auto}
+  .du-row{position:relative;display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:var(--r-sm);overflow:hidden}
+  .du-nav{cursor:pointer}
+  .du-bar{position:absolute;inset:0;z-index:0;pointer-events:none}
+  .du-bar i{position:absolute;left:0;top:0;bottom:0;background:color-mix(in srgb,var(--win-accent,var(--accent)) 15%,transparent)}
+  .du-nm{position:relative;z-index:1;flex:1;font-size:12.5px;display:flex;align-items:center;gap:7px;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .du-sz{position:relative;z-index:1;font-size:12px;font-weight:600}
+  .du-n{position:relative;z-index:1;font-size:11px;color:var(--win-dim,var(--mut));min-width:56px;text-align:right}
+  .du-arr{position:relative;z-index:1;color:var(--win-dim,var(--dim))}
+  .du-mut{color:var(--win-dim,var(--mut))}
   .rc-log{background:var(--code-bg);color:var(--code-fg);border-radius:var(--r-sm);padding:8px 10px;margin:6px 0 0;font-size:11.5px;line-height:1.5;max-height:220px;overflow:auto;white-space:pre-wrap;word-break:break-word;font-family:var(--mono)}
   .nb-det{margin-top:16px}
   .nb-sum{cursor:pointer;list-style:none;display:flex;align-items:center;gap:6px;font-size:10.5px;letter-spacing:.11em;text-transform:uppercase;color:var(--mut);font-family:var(--mono);padding:4px 0;user-select:none}
@@ -6770,6 +6784,47 @@ function rcloneRemotePicker(remote,onPick){
  build();draw();
 }
 
+/* Cloud space analyzer: background `rclone lsf -R` → folder-size tree, drill-down with share bars. */
+function rcloneDuDlg(remote){
+ const s=document.getElementById("scrim");
+ let tree=null,cur="",poll=null,lastSt=null;
+ const stop=()=>{if(poll){clearTimeout(poll);poll=null;}};
+ const close=()=>{stop();s.classList.remove("show");};
+ const nodeAt=path=>{let n=tree;if(!n)return null;for(const seg of(path?path.split("/"):[])){n=(n.ch||{})[seg];if(!n)return null;}return n;};
+ const draw=()=>{
+  const st=lastSt||{},node=nodeAt(cur),total=(tree&&tree.sz)||0;
+  let parts=cur?cur.split("/"):[],acc="";
+  const crumbs=`<a data-p="">${esc(remote)}:</a>`+parts.map(seg=>{acc=acc?acc+"/"+seg:seg;return ` / <a data-p="${att(acc)}">${esc(seg)}</a>`;}).join("");
+  let inner;
+  if(!tree){
+   inner=`<div class="set-load">${st.running?`Scanning «${esc(remote)}»… ${(st.scanned||0).toLocaleString()} files · ${fmtB(st.bytes)}`:(st.error?esc(st.error):"starting…")}</div>`;
+  }else{
+   const kids=Object.entries((node&&node.ch)||{}).sort((a,b)=>b[1].sz-a[1].sz);
+   const rows=kids.length?kids.map(([name,ch])=>{const pct=node.sz?Math.round(ch.sz*100/node.sz):0,hasCh=ch.ch&&Object.keys(ch.ch).length;
+     return `<div class="du-row${hasCh?" du-nav":""}"${hasCh?` data-in="${att(cur?cur+"/"+name:name)}"`:""}><div class="du-bar"><i style="width:${pct}%"></i></div><span class="du-nm">${svg(name==="…other"?"file":"folder",13)} ${esc(name)}</span><span class="du-sz mono">${fmtB(ch.sz)}</span><span class="du-n">${(ch.n||0).toLocaleString()}</span>${hasCh?`<span class="du-arr">›</span>`:""}</div>`;
+   }).join(""):`<div class="set-sub" style="padding:8px 2px">No subfolders here — ${fmtB(node?node.sz:0)} in files.</div>`;
+   const age=(!st.running&&st.done)?` · <span class="du-mut">scanned ${duAgo(st.done)}</span>`:"";
+   inner=`<div class="du-tot">Total <b>${fmtB(total)}</b>${st.capped?` · <span style="color:var(--win-warn,var(--warn))">capped — remote is very large</span>`:""}${st.running?` · <span style="color:var(--win-accent,var(--accent))">still scanning…</span>`:age}</div>
+     <div class="du-crumb">${crumbs}</div><div class="du-list">${rows}</div>`;
+  }
+  s.innerHTML=`<div class="dialog nb-rcdlg" style="max-width:760px;width:92vw">
+    <div class="set-titrow"><h3 style="margin:0">${svg("chart",17)} Cloud space — ${esc(remote)}</h3><button class="iconbtn" id="duX" title="Close">${svg("x",16)}</button></div>
+    <p class="set-sub" style="margin-top:4px">What's taking space on this remote, by folder. Read-only — nothing is changed.</p>
+    ${inner}
+    <div class="set-savebar"><span class="sb-left" style="margin-right:auto"></span><button class="btn sm" id="duRe">${svg("refresh",13)} Rescan</button></div></div>`;
+  s.classList.add("show");
+  s.querySelector("#duX").onclick=close;
+  s.querySelector("#duRe").onclick=()=>{tree=null;cur="";begin(true);};
+  s.querySelectorAll(".du-nav").forEach(r=>r.onclick=()=>{cur=r.dataset.in;draw();});
+  s.querySelectorAll(".du-crumb a").forEach(x=>x.onclick=e=>{e.preventDefault();cur=x.dataset.p;draw();});
+ };
+ const duAgo=t=>{const d=Date.now()/1000-t;if(d<90)return"just now";if(d<3600)return Math.round(d/60)+"m ago";if(d<86400)return Math.round(d/3600)+"h ago";return Math.round(d/86400)+"d ago";};
+ const tick=async()=>{const st=await rcloneP("/api/backup/rclone/du/status",{remote});lastSt=st||{};
+  if(st&&st.tree){tree=st.tree;stop();}draw();if(!tree)poll=setTimeout(tick,1500);};
+ const begin=async(force)=>{await rcloneP("/api/backup/rclone/du/start",{remote,force:!!force});tick();};
+ begin();
+}
+
 /* Mount dialog: choose an optional subpath (Browse the remote), read-only (safe) and auto-remount. */
 function rcloneMountDlg(remote,onDone,init){
  init=init||{};const s=document.getElementById("scrim");
@@ -6819,7 +6874,7 @@ function winRclone(initTab){openWin("__rclone","Rclone",(body,win)=>{
    const meta=`${usedBy.length?`Used by <b>${usedBy.map(esc).join(", ")}</b>`:`<span class="rc-mut">not used by any backup yet</span>`}${dd.last_run?` · last backup ${agoR(dd.last_run)}`:""}${dd.sent_bytes?` · ${fmtB(dd.sent_bytes)} transferred recently`:""}`;
    const card=el(`<div class="rc-card">
      <div class="rc-card-h"><span class="rc-name mono"><span class="rc-dot" title="checking reachability…"></span>${svg("net",15)} ${esc(r)}${dd.type?`<span class="rc-type">${esc(dd.type)}</span>`:""}</span>
-      <span class="rc-actions"><button class="btn sm" data-a="size">Size</button><button class="btn sm" data-a="dedupe" title="Find & remove duplicate-content files on this remote">Dedupe</button><button class="btn sm" data-a="cleanup" title="Empty trash / purge old versions where the backend supports it">Clean up</button><button class="btn sm" data-a="mount">${svg("folder",13)} Mount</button><button class="btn sm pri" data-a="restore">${svg("download",13)} Restore…</button></span></div>
+      <span class="rc-actions"><button class="btn sm" data-a="analyze" title="See what's taking space on this remote, by folder">${svg("chart",13)} Analyze</button><button class="btn sm" data-a="dedupe" title="Find & remove duplicate-content files on this remote">Dedupe</button><button class="btn sm" data-a="cleanup" title="Empty trash / purge old versions where the backend supports it">Clean up</button><button class="btn sm" data-a="mount">${svg("folder",13)} Mount</button><button class="btn sm pri" data-a="restore">${svg("download",13)} Restore…</button></span></div>
      <div class="rc-quota-line" id="rcq_${cid(r)}"><span class="rc-mut">reading quota…</span></div>
      <div class="rc-meta">${meta}</div>
      <div class="rc-card-b" id="rcb_${cid(r)}"></div></div>`);
@@ -6835,6 +6890,7 @@ function winRclone(initTab){openWin("__rclone","Rclone",(body,win)=>{
    const act=async a=>{
      if(a==="restore")return rcloneRestoreDlg(r);
      if(a==="mount")return rcloneMountDlg(r,()=>{refreshFM();tab="mounts";render();});
+     if(a==="analyze")return rcloneDuDlg(r);
      if(a==="size"){info.innerHTML='<span class="rc-mut">calculating size (can take a while)…</span>';const d=await rcloneP("/api/backup/rclone/size",{remote:r,path:""});info.innerHTML=d&&d.ok?`<span class="mono">${(d.count||0)} files · ${fmtB(d.bytes||0)}</span>`:`<span class="rc-mut">${esc((d&&d.log)||"size failed")}</span>`;return;}
      if(a==="dedupe"){confirmDlg("Find & remove duplicates?","rclone scans «"+r+"» for files whose CONTENT is identical and keeps one copy of each (the newest). Your other files are untouched.",async()=>{
        info.innerHTML='<span class="rc-mut">looking for duplicates…</span>';const d=await rcloneP("/api/backup/rclone/dedupe",{remote:r});info.innerHTML=d&&d.ok?`<span class="mono">${esc(d.log||"done")}</span>`:`<span class="rc-mut">${esc((d&&d.log)||"dedupe failed")}</span>`;},true);return;}
