@@ -11382,9 +11382,7 @@ function maybeOnboard(){let done=false;try{done=!!SET.onboarded||localStorage.ge
  /* Touch diagnostic (only with ?tdbg=1): shows a fixed log of the raw event sequence for each tap
     so an iPad user can report exactly what fires (pointer/touch/click, target, defaultPrevented,
     pointercancel). Completely inert without the query flag. */
- // TEMP: also auto-on inside an installed PWA (standalone), where ?tdbg=1 can't be typed — so the
- // real inner/safe/wall numbers can be read in standalone mode. Remove the display-mode clause after.
- if(/[?&]tdbg=1/.test(location.search)||matchMedia("(display-mode:standalone)").matches){
+ if(/[?&]tdbg=1/.test(location.search)){
   const box=document.createElement("div");
   box.style.cssText="position:fixed;left:6px;right:6px;bottom:6px;z-index:99999;max-height:38vh;overflow:auto;background:rgba(0,0,0,.86);color:#0f0;font:11px/1.35 monospace;padding:8px 10px;border-radius:8px;white-space:pre-wrap;pointer-events:none";
   box.textContent="touch-debug on — tap a button\n";document.body.appendChild(box);
