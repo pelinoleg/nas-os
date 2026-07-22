@@ -177,6 +177,12 @@
   .dot-custom input{position:absolute;inset:-4px;width:calc(100% + 8px);height:calc(100% + 8px);border:none;padding:0;background:none;cursor:pointer}
   .mono{font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:0}
   button{font-family:inherit;cursor:pointer;color:inherit}
+  /* iOS Safari: with the default touch-action, WebKit holds every tap ~300 ms waiting for a
+     possible double-tap-zoom and in a dense layout often never synthesises the click — the tap
+     shows :active/:hover but the button "does nothing". touch-action:manipulation opts these
+     controls out of double-tap-zoom so the click fires immediately. No effect for mouse/scroll. */
+  button,a,summary,label,input,select,textarea,[role=button],
+  .btn,.iconbtn,.seg,.tgl,.tab,.nbtab,.tile,.chip,.di,.pill,.wb-pill{touch-action:manipulation}
   ::selection{background:var(--accent-soft)}
   ::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-thumb{background:var(--line-2);border-radius:6px;border:3px solid transparent;background-clip:padding-box}
   ::-webkit-scrollbar-thumb:hover{background:var(--mut);background-clip:padding-box;border:3px solid transparent}
@@ -416,6 +422,9 @@
     .srow{padding:14px 0}
     .set-nav button{padding:11px 12px}
     input,select,textarea{font-size:16px}   /* iOS doesn't zoom on focus if ≥16px */
+    /* drag/resize are gated off on touch (see openWin) — hide the now-inert grip/edge handles
+       so a landscape iPad (>1024px, still the desktop window layout) shows no dead resize corner */
+    .win .wgrip,.win>.rz{display:none!important}
   }
   /* first start — onboarding */
   .onboard{position:fixed;inset:0;z-index:600;background:rgba(10,16,26,.62);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);display:grid;place-items:center;padding:20px;opacity:0;pointer-events:none;transition:opacity .28s}
@@ -3239,7 +3248,10 @@ function openWin(id,title,build,opts={}){
  bar.querySelector(".m").onclick=()=>{w.style.display="none";w.classList.remove("wfocus");focusTop();renderWinbar();};
  bar.querySelector(".z").onclick=()=>{w.classList.toggle("max");persistWin(w);};
  bar.querySelector(".wback").onclick=()=>goHome();          // phone: "back" → home (window in background)
- if(!isPhone()&&!isTablet()){drag(w,bar);resize(w,w.querySelector(".wgrip"));resizeEdges(w);}  // on phone/tablet windows are fullscreen — no drag/resize
+ // no drag/resize on phone/tablet (windows are fullscreen) NOR on any touch device: on iPad Safari
+ // the setPointerCapture in these handlers makes WebKit swallow the click on other controls, so a
+ // landscape iPad (>1024px, otherwise the desktop path) would lose every button. Touch = tap only.
+ if(!isPhone()&&!isTablet()&&!isTouch()){drag(w,bar);resize(w,w.querySelector(".wgrip"));resizeEdges(w);}
  w.addEventListener("pointerdown",()=>focus(w));renderDock();renderPhoneNav();return w;
 }
 // phone: collapse all windows to the "home screen" (app grid)
@@ -3333,7 +3345,7 @@ function exitExpo(){if(!EXPO)return;EXPO=false;document.body.classList.remove("e
 function drag(w,h){let sx,sy,ox,oy,d=false;
  h.addEventListener("pointerdown",e=>{if(e.target.closest(".lights"))return;d=true;h.classList.add("drag");sx=e.clientX;sy=e.clientY;ox=w.offsetLeft;oy=w.offsetTop;h.setPointerCapture(e.pointerId);});
  h.addEventListener("pointermove",e=>{if(!d)return;w.classList.remove("max");w.style.left=Math.min(innerWidth-60,Math.max(-40,ox+e.clientX-sx))+"px";w.style.top=Math.min(innerHeight-60,Math.max(MENUBAR_H,oy+e.clientY-sy))+"px";});
- h.addEventListener("pointerup",()=>{d=false;h.classList.remove("drag");persistWin(w);});
+ h.addEventListener("pointerup",e=>{d=false;h.classList.remove("drag");try{h.releasePointerCapture(e.pointerId);}catch(x){}persistWin(w);});
 }
 // screen/monitor resize: bring all windows back into the visible area (title accessible)
 addEventListener("resize",()=>{for(const id in OPEN){const w=OPEN[id];if(!w||w.classList.contains("max")||w.style.display==="none")continue;
