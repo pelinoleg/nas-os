@@ -8641,10 +8641,11 @@ function winFsHistory(){openWin("__fsw","File history",(body,win)=>{
  let nextTs=null;
  async function loadFeed(reset){
   const feed=g("#fswFeed");if(!feed)return;
-  if(reset){feed.innerHTML="";nextTs=null;feed._day="";}
+  if(reset){feed.innerHTML='<div class="set-load">loading…</div>';nextTs=null;feed._day="";}   // no blank pane while the first page loads
   const r=await api(`/api/fsw/events?group=1&kind=${KIND}&q=${encodeURIComponent(Q)}&day=${DAY}${RANGE?"&days="+RANGE:""}${nextTs?"&before="+nextTs:""}`);
   paintCounts(r&&r.counts);
   const grs=(r&&r.groups)||[];
+  if(reset)feed.innerHTML="";   // clear the loading placeholder before the empty-state check / populate
   const more=feed.querySelector(".fsw-more");if(more)more.remove();
   if(!grs.length&&!feed.children.length){
    feed.innerHTML=`<div class="fsw-empty">${svg("shield",34)}<div>${ST&&!ST.last?"The index is not built yet — run the first scan.":(DAY?"No events on that day.":"No events — nothing has happened to the files.")}</div></div>`;
