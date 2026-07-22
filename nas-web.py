@@ -3159,6 +3159,7 @@ def _def_monitor():
         "dirty_boot":  {"on": True,  "priority": 1},                   # power loss / crash detected on boot
         "resil_drill": {"on": True,  "priority": 0, "desk": True},     # weekly readiness audit found blockers
         "log_sentry":  {"on": True,  "priority": 0, "desk": True},     # new error pattern in the journal
+        "write_load":  {"on": True,  "priority": 0, "threshold": 20, "desk": True},  # GB/day to the system disk, 3 days straight
     }}
 
 def _monitor_defaults_desk(d):
@@ -9708,6 +9709,8 @@ def _bb_cpu_read():
     except (OSError, ValueError, IndexError):
         return None
 
+_BB_HAS = {"vcg": True, "pmic": True}   # probe once; don't spawn a failing binary every 10 s forever
+
 def _bb_sample(prev_cpu):
     s = {"t": int(time.time())}
     try:
@@ -9732,10 +9735,23 @@ def _bb_sample(prev_cpu):
             s["temp"] = round(int(f.read().strip()) / 1000.0, 1)
     except (OSError, ValueError):
         pass
-    r = _run(["vcgencmd", "get_throttled"], timeout=5)
-    m = re.search(r"0x([0-9a-fA-F]+)", r.get("log") or "") if r.get("ok") else None
-    if m:
-        s["thr"] = int(m.group(1), 16)
+    if _BB_HAS["vcg"]:
+        r = _run(["vcgencmd", "get_throttled"], timeout=5)
+        m = re.search(r"0x([0-9a-fA-F]+)", r.get("log") or "") if r.get("ok") else None
+        if m:
+            s["thr"] = int(m.group(1), 16)
+        else:
+            _BB_HAS["vcg"] = False
+    if _BB_HAS["pmic"]:
+        # 5V rail voltage straight from the PMIC (Pi 5 only) — the missing clue
+        # in every "died under load" mystery; on other boards the probe fails
+        # once and is never retried
+        r = _run(["vcgencmd", "pmic_read_adc", "EXT5V_V"], timeout=5)
+        m = re.search(r"=([\d.]+)V", r.get("log") or "") if r.get("ok") else None
+        if m:
+            s["volt"] = round(float(m.group(1)), 3)
+        else:
+            _BB_HAS["pmic"] = False
     r = _run(["ps", "-eo", "pcpu,pmem,comm", "--sort=-pcpu", "--no-headers"], timeout=10)
     top = []
     for ln in (r.get("log") or "").splitlines()[:3]:
@@ -9752,6 +9768,48 @@ def _bb_sample(prev_cpu):
 def _bb_dmesg_tail(n=25):
     r = _run(["sh", "-c", "dmesg --time-format iso 2>/dev/null | tail -n %d" % n], timeout=10)
     return (r.get("log") or "").splitlines()[-n:]
+
+def _bb_diagnose(flight):
+    """Best-effort cause-of-death hypothesis from the ring's final minute.
+    Evidence, not verdicts — every rule names what it actually saw."""
+    smp = (flight or {}).get("samples") or []
+    if not smp:
+        return None
+    tail = smp[-6:]
+    dmesg = " ".join((flight.get("dmesg") or [])[-25:]).lower()
+    ev, cause = [], None
+    volts = [s.get("volt") for s in tail if isinstance(s.get("volt"), (int, float))]
+    thr = tail[-1].get("thr") or 0
+    if "under-voltage" in dmesg or (thr & 0x1) or (volts and min(volts) < 4.75):
+        cause = "power"
+        ev.append("undervoltage right before death"
+                  + (" (5V rail at %.2f V)" % min(volts) if volts else ""))
+    temps = [s.get("temp") for s in tail if isinstance(s.get("temp"), (int, float))]
+    if temps and max(temps) >= 80:
+        cause = cause or "heat"
+        ev.append("temperature reached %.0f°C" % max(temps))
+    if "oom-kill" in dmesg or "out of memory" in dmesg:
+        cause = cause or "oom"
+        ev.append("kernel OOM killer fired")
+    else:
+        mems = [s.get("mem") for s in tail if isinstance(s.get("mem"), (int, float))]
+        if mems and max(mems) >= 93:
+            cause = cause or "oom"
+            ev.append("memory was %.0f%% full" % max(mems))
+    if any(k in dmesg for k in ("i/o error", "blk_update_request", "ext4-fs error",
+                                "offlined", "emergency_ro")):
+        cause = cause or "storage"
+        ev.append("storage errors in the kernel log")
+    la = [s.get("load") for s in tail if isinstance(s.get("load"), (int, float))]
+    cp = [s.get("cpu") for s in tail if isinstance(s.get("cpu"), (int, float))]
+    if la and cp and max(la) >= 8 and max(cp) <= 25:
+        cause = cause or "iohang"
+        ev.append("load %.1f with an idle CPU — processes stuck in I/O wait" % max(la))
+    if not cause:
+        return None
+    names = {"power": "power problem (undervoltage)", "heat": "overheating",
+             "oom": "out of memory", "storage": "storage failure", "iohang": "I/O hang"}
+    return {"cause": cause, "name": names[cause], "why": ev}
 
 def _bb_rollover(boot_id):
     """Archive a ring left by a PREVIOUS boot as flight-*.json + a boots.jsonl
@@ -9771,6 +9829,9 @@ def _bb_rollover(boot_id):
             pass
         fn = "flight-%s.json" % time.strftime("%Y%m%d-%H%M%S", time.localtime(died))
         prev["clean"] = clean
+        diag = None if clean else _safe(lambda: _bb_diagnose(prev))
+        if diag:
+            prev["diag"] = diag
         try:
             _json_save(os.path.join(BB_VAR, fn), prev)
             os.unlink(curf)
@@ -9781,6 +9842,7 @@ def _bb_rollover(boot_id):
                 # ts = when the previous boot LAST breathed (this boot's own clock
                 # may still be stale pre-NTP on an RTC-less Pi)
                 f.write(json.dumps({"ts": int(died), "clean": clean, "flight": fn,
+                                    "diag": diag,
                                     "last": (prev.get("samples") or [{}])[-1]}) + "\n")
         except OSError:
             pass
@@ -9851,6 +9913,10 @@ def blackbox_flight(name):
     if not re.match(r"^flight-[0-9-]+\.json$", name or ""):
         return {"ok": False, "log": "bad name"}
     d = _json_load_strict(os.path.join(BB_VAR, name), None)
+    if isinstance(d, dict) and not d.get("clean") and not d.get("diag"):
+        dg = _safe(lambda: _bb_diagnose(d))    # flights archived before diagnosis existed
+        if dg:
+            d["diag"] = dg
     return {"ok": bool(d), "flight": d}
 
 # ---- reboot drill: readiness audit without rebooting ------------------------
@@ -9872,9 +9938,11 @@ def drill_run():
     what is actually wired to come back. Live state only — swapped disks and
     new stacks are picked up automatically on the next run."""
     issues = []
-    def add(sev, area, title, detail="", fix=""):
-        issues.append({"sev": sev, "area": area, "title": title,
-                       "detail": detail, "fix": fix})
+    def add(sev, area, title, detail="", fix="", fixa=None):
+        it = {"sev": sev, "area": area, "title": title, "detail": detail, "fix": fix}
+        if fixa:
+            it["fixa"] = fixa      # structured one-click fix (validated by drill_fix)
+        issues.append(it)
 
     # systemd: running now but disabled -> silently gone after a reboot
     files = {}
@@ -9892,7 +9960,8 @@ def drill_run():
         # (FM sshfs, rclone mounts, backup runs) restart them on their own
         if files.get(u) == "disabled" and not _DRILL_SKIP.match(u):
             add("warn", "services", "%s runs now but is disabled" % u,
-                "It will NOT start after a reboot.", "systemctl enable " + u)
+                "It will NOT start after a reboot.", "systemctl enable " + u,
+                fixa={"a": "enable", "unit": u})
     for u, why in _DRILL_CRIT:
         r = _run(["systemctl", "is-enabled", u], timeout=10)
         st = (r.get("log") or "").strip().splitlines()
@@ -9900,7 +9969,8 @@ def drill_run():
         if st in ("disabled", "masked"):
             add("bad", "services", "%s is %s" % (u, st),
                 why + " — it will not come back after a reboot.",
-                "systemctl enable --now " + u)
+                "systemctl enable --now " + u,
+                fixa={"a": "enable_now", "unit": u} if st == "disabled" else None)
 
     # mounts: fstab promises vs reality, both directions
     fstab, fsmp = [], {}
@@ -9951,14 +10021,16 @@ def drill_run():
         if dev_present(spec):
             add("warn", "mounts", "%s is in fstab but not mounted" % mp,
                 "The device is present and would mount on boot, yet right now it is not mounted — "
-                "something unmounted it, or it fails to mount.", "mount " + mp)
+                "something unmounted it, or it fails to mount.", "mount " + mp,
+                fixa={"a": "mount", "mp": mp})
         elif "nofail" in opts:
             add("info", "mounts", "%s: disk absent (nofail)" % mp,
                 "Boot continues fine without it. Remove the fstab line if the disk is gone for good.")
         else:
             add("bad", "mounts", "%s: disk absent and no 'nofail'" % mp,
                 "systemd will wait ~90 s for this device on EVERY boot and can drop to emergency mode.",
-                "add 'nofail' to its fstab options or remove the line")
+                "add 'nofail' to its fstab options or remove the line",
+                fixa={"a": "nofail", "mp": mp})
     for mp in sorted(mounted):
         src, fstype = mounted[mp]
         if not mp.startswith(("/mnt/", "/srv/", "/media/")):
@@ -10001,7 +10073,9 @@ def drill_run():
                     ("Its stack auto-start unit (nas-stacks) is disabled." if in_stack else
                      "Restart policy is 'no' and it is not part of an auto-started stack."),
                     ("systemctl enable nas-stacks.service" if in_stack else
-                     "docker update --restart unless-stopped " + nm))
+                     "docker update --restart unless-stopped " + nm),
+                    fixa=({"a": "enable_now", "unit": "nas-stacks.service"} if in_stack else
+                          {"a": "docker_restart", "name": nm}))
 
     counts = {s: sum(1 for i in issues if i["sev"] == s) for s in ("bad", "warn", "info")}
     score = max(0, 100 - 20 * counts["bad"] - 7 * counts["warn"])
@@ -10013,6 +10087,85 @@ def drill_run():
 def drill_last():
     return _json_load_strict(DRILL_FILE, None) or \
         {"ok": True, "ts": 0, "score": None, "issues": [], "counts": {}}
+
+_FIX_UNIT_RE = re.compile(r"^[A-Za-z0-9@:._\\-]+\.(service|timer)$")
+
+def _fstab_add_nofail(mp, path="/etc/fstab"):
+    """Append nofail to the options of ONE fstab entry, byte-preserving every
+    other line. Backup first; daemon-reload after (mount units are generated)."""
+    try:
+        with open(path) as f:
+            lines = f.read().splitlines()
+    except OSError as e:
+        return {"ok": False, "log": str(e)}
+    hit = False
+    for i, ln in enumerate(lines):
+        t = ln.strip()
+        if not t or t.startswith("#"):
+            continue
+        p = t.split()
+        if len(p) >= 4 and p[1] == mp and "nofail" not in p[3].split(","):
+            p[3] += ",nofail"
+            lines[i] = "\t".join(p)
+            hit = True
+    if not hit:
+        return {"ok": False, "log": "fstab entry not found (or already nofail)"}
+    try:
+        shutil.copy2(path, path + ".nasos-bak")
+        tmp = path + ".tmp.nasos"
+        with open(tmp, "w") as f:
+            f.write("\n".join(lines) + "\n")
+        os.replace(tmp, path)
+    except OSError as e:
+        return {"ok": False, "log": str(e)}
+    if path == "/etc/fstab":
+        _run(["systemctl", "daemon-reload"], timeout=30)
+    return {"ok": True}
+
+def drill_fix(b):
+    """One-click fix for a drill issue. STRUCTURED actions only — the client
+    sends {a, unit|mp|name}, every value is validated here; there is no
+    free-form command path."""
+    a = (b or {}).get("a")
+    if a in ("enable", "enable_now"):
+        u = str(b.get("unit") or "")
+        if not _FIX_UNIT_RE.match(u):
+            return {"ok": False, "log": "bad unit name"}
+        r = _run(["systemctl", "enable"] + (["--now"] if a == "enable_now" else []) + [u],
+                 timeout=60)
+        if not r.get("ok"):
+            return {"ok": False, "log": (r.get("log") or "")[-300:]}
+    elif a == "mount":
+        mp = str(b.get("mp") or "")
+        ok = False
+        try:
+            with open("/etc/fstab") as f:
+                for ln in f:
+                    t = ln.strip()
+                    if t and not t.startswith("#") and len(t.split()) >= 2 \
+                            and t.split()[1] == mp:
+                        ok = True
+        except OSError:
+            pass
+        if not ok:
+            return {"ok": False, "log": "not an fstab mountpoint"}
+        r = _run(["mount", mp], timeout=90)
+        if not r.get("ok"):
+            return {"ok": False, "log": (r.get("log") or "")[-300:]}
+    elif a == "nofail":
+        res = _fstab_add_nofail(str(b.get("mp") or ""))
+        if not res.get("ok"):
+            return res
+    elif a == "docker_restart":
+        nm = str(b.get("name") or "")
+        if not re.match(r"^[a-zA-Z0-9][a-zA-Z0-9._-]*$", nm):
+            return {"ok": False, "log": "bad container name"}
+        r = _run(["docker", "update", "--restart", "unless-stopped", nm], timeout=30)
+        if not r.get("ok"):
+            return {"ok": False, "log": (r.get("log") or "")[-300:]}
+    else:
+        return {"ok": False, "log": "unknown fix action"}
+    return drill_run()      # fresh audit so the UI reflects the fix immediately
 
 # ---- config history: git snapshots of the config surface --------------------
 
@@ -10653,6 +10806,21 @@ def _resil_tick():
                              "load %s, temp %s°C, CPU %s%%. Open Resilience → Black box for the flight."
                              % (smp.get("load", "?"), smp.get("temp", "?"), smp.get("cpu", "?")),
                              cooldown=0)
+    # sustained heavy writes: 3 complete days in a row above the event threshold
+    if now - (st.get("writes_chk") or 0) >= 21600:
+        st["writes_chk"] = now
+        ch = True
+        w = _safe(resil_writes, {}) or {}
+        thrgb = (load_monitor().get("events", {}).get("write_load") or {}).get("threshold", 20)
+        full_days = (w.get("days") or [])[:-1][-3:]      # today is partial — judge complete days only
+        if len(full_days) == 3 and all(x.get("sys", 0) > thrgb * 1e9 for x in full_days):
+            notify_event("write_load", "writeload:%s" % w.get("sysdev"),
+                         "Heavy writes to the system disk",
+                         "%s: over %d GB/day for 3 days straight (%s). Open Resilience → "
+                         "Write load to see who is writing."
+                         % (w.get("kind") or "system disk", thrgb,
+                            ", ".join("%.0f GB" % (x.get("sys", 0) / 1e9) for x in full_days)),
+                         cooldown=3 * 86400)
     if now - (st.get("confgit") or 0) >= 86400:
         st["confgit"] = now
         ch = True
@@ -17920,6 +18088,8 @@ class H(BaseHTTPRequestHandler):
                 self._json({"ok": True})
             elif p == "/api/resil/drill/run":
                 self._json(drill_run())
+            elif p == "/api/resil/drill/fix":
+                self._json(drill_fix(self._body()))
             elif p == "/api/resil/confgit/snap":
                 self._json(confgit_snapshot("manual snapshot"))
             elif p == "/api/resil/disaster/rebuild":

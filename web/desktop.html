@@ -1112,6 +1112,7 @@
   .rs-cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
   .rs-wrow{display:flex;align-items:center;gap:8px;font-size:12.5px;margin-bottom:5px}
   .rs-wn{flex:none;width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .rs-diag{display:inline-block;font-size:11px;font-weight:600;padding:1px 8px;border-radius:999px;background:var(--sel);color:var(--win-danger,var(--danger));box-shadow:var(--sh-sm);vertical-align:1px}
   .rc-card2{background:var(--card);border:1px solid var(--win-line,var(--line));border-radius:var(--r-md);padding:13px 14px;display:flex;flex-direction:column;gap:9px}
   .rc-top{display:flex;align-items:center;gap:11px}
   .rc-logo{width:44px;height:44px;flex:none;border:none;background:none;border-radius:11px;font-size:30px;line-height:1;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;transition:transform .1s}
@@ -7195,9 +7196,12 @@ function winResil(initTab){openWin("__resil","Resilience",(body,win)=>{
   const d=await api("/api/resil/blackbox");
   if(!d){tc.innerHTML='<div class="set-load">failed to load</div>';return;}
   const KEYS=[["load","Load","","--win-accent,var(--accent)"],["cpu","CPU","%","--win-accent,var(--accent)"],
-   ["temp","Temp","°C","--win-warn,var(--warn)"],["mem","Memory","%","--win-good,var(--good)"]];
+   ["temp","Temp","°C","--win-warn,var(--warn)"],["mem","Memory","%","--win-good,var(--good)"],
+   ["volt","5V rail","V","--win-danger,var(--danger)"]];
   const graphs=(smp)=>{const last=smp[smp.length-1]||{};
-   return KEYS.map(([k,lab,un,cv])=>`<div class="rs-g"><div class="rs-gl">${lab}<span class="mono">${last[k]??"—"}${un}</span></div>${spark(smp.map(x=>x[k]),`var(${cv})`)}</div>`).join("");};
+   return KEYS.filter(([k])=>smp.some(x=>typeof x[k]==="number"))
+    .map(([k,lab,un,cv])=>`<div class="rs-g"><div class="rs-gl">${lab}<span class="mono">${last[k]??"—"}${un}</span></div>${spark(smp.map(x=>x[k]),`var(${cv})`)}</div>`).join("");};
+  const diagChip=g=>g?`<span class="rs-diag" title="${att((g.why||[]).join("; "))}">likely: ${esc(g.name)}</span>`:"";
   const live=d.live||{},smp=live.samples||[],last=smp[smp.length-1]||{};
   tc.innerHTML=`<div class="set-titrow"><h3 class="set-title" style="margin:0">Black box</h3>
     <span class="rs-badge ${d.running?"ok":"bad"}">${d.running?"● recording":"recorder OFF"}</span></div>
@@ -7211,14 +7215,15 @@ function winResil(initTab){openWin("__resil","Resilience",(body,win)=>{
   const bx=tc.querySelector("#rsBoots");
   (d.boots||[]).forEach(b=>{
    const row=el(`<div class="rs-issue" style="cursor:${b.flight?"pointer":"default"}">${sevDot(b.clean?"good":"bad")}
-     <div><b>${b.clean?"clean shutdown":"power loss / crash"}</b> · ${dts(b.ts)}
+     <div><b>${b.clean?"clean shutdown":"power loss / crash"}</b> · ${dts(b.ts)} ${b.clean?"":diagChip(b.diag)}
      ${b.last&&b.last.t?`<div class="rs-mut">last recorded ${dts(b.last.t)} — load ${b.last.load??"?"}, ${b.last.temp??"?"}°C, CPU ${b.last.cpu??"?"}%</div>`:""}</div></div>`);
    if(b.flight)row.onclick=async()=>{
      const f=await api("/api/resil/blackbox/flight?f="+encodeURIComponent(b.flight));
      const fb=tc.querySelector("#rsFlight");
      if(!f||!f.ok||!f.flight){fb.innerHTML='<div class="rs-mut">flight file is gone (only the last 20 are kept)</div>';return;}
-     const fs=f.flight.samples||[];
+     const fs=f.flight.samples||[],fg=f.flight.diag;
      fb.innerHTML=`<h3 class="set-title" style="margin-top:14px">Flight — the last minutes before that shutdown</h3>
+      ${fg?`<div class="rs-note" style="border-left-color:var(--win-danger,var(--danger))"><b>Looks like: ${esc(fg.name)}.</b> Evidence: ${esc((fg.why||[]).join("; "))}.</div>`:""}
       <div class="rs-graphs">${graphs(fs)}</div>
       ${(f.flight.dmesg||[]).length?`<div class="rs-gl" style="margin-top:10px">kernel log tail at the moment of death</div><pre class="rs-pre">${esc(f.flight.dmesg.join("\n"))}</pre>`:""}`;
      fb.scrollIntoView({behavior:"smooth",block:"nearest"});};
@@ -7266,9 +7271,17 @@ function winResil(initTab){openWin("__resil","Resilience",(body,win)=>{
      :'<div class="rs-mut" style="margin-bottom:10px">Never ran yet — click Run drill.</div>'}
     <div id="rsIss"></div>`;
    const ib=tc.querySelector("#rsIss");
-   ((d&&d.issues)||[]).forEach(i=>ib.appendChild(el(`<div class="rs-issue">${sevDot(i.sev)}
-     <div><b>${esc(i.title)}</b><div class="rs-mut">${esc(i.detail||"")}</div>
-     ${i.fix?`<div class="rs-fix mono">${esc(i.fix)}</div>`:""}</div></div>`)));
+   ((d&&d.issues)||[]).forEach(i=>{
+    const row=el(`<div class="rs-issue">${sevDot(i.sev)}
+     <div style="flex:1;min-width:0"><b>${esc(i.title)}</b><div class="rs-mut">${esc(i.detail||"")}</div>
+     ${i.fix?`<div class="rs-fix mono">${esc(i.fix)}</div>`:""}</div>
+     ${i.fixa?`<button class="btn sm pri" style="flex:none" title="${att(i.fix||"apply the fix")}">Fix</button>`:""}</div>`);
+    const fb=row.querySelector("button");
+    if(fb)fb.onclick=async()=>{fb.disabled=true;fb.textContent="fixing…";
+     const r=await api("/api/resil/drill/fix",{method:"POST",body:JSON.stringify(i.fixa)});
+     if(r&&r.ok){toast("Fixed — re-audited");paint(r);}
+     else{toast("Fix failed: "+((r&&r.log)||""));fb.disabled=false;fb.textContent="Fix";}};
+    ib.appendChild(row);});
    if(has&&!((d.issues||[]).length))ib.innerHTML='<div class="rs-allgood">✓ Everything that runs now is wired to come back after a reboot.</div>';
    tc.querySelector("#rsRun").onclick=async()=>{
     const b=tc.querySelector("#rsRun");b.disabled=true;b.textContent="auditing…";
@@ -10661,6 +10674,7 @@ const EVMETA=[
  {k:"dirty_boot",t:"Power loss / crash",d:"the box went down without a clean shutdown (black box archived a flight)",dp:1},
  {k:"resil_drill",t:"Reboot drill blockers",d:"the weekly readiness audit found things that won't survive a reboot",dp:0},
  {k:"log_sentry",t:"New error pattern in logs",d:"the log sentry saw a repeating error this box never produced before",dp:0},
+ {k:"write_load",t:"Heavy writes to system disk",d:"more than the threshold written per day, 3 days straight (SD wear)",thr:"GB",dp:0},
 ];
 const PRIO=[[2,"Emergency"],[1,"Important"],[0,"Normal"],[-1,"Quiet"],[-2,"Badge"]];
 function notifyTab(tc){tc.innerHTML=`<div style="color:var(--mut);font-size:12px">loading…</div>`;
