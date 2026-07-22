@@ -68,18 +68,9 @@
   }
   *{box-sizing:border-box}
   html,body{height:100%;margin:0;overflow:hidden;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
-  /* wallpaper is mirrored onto <html> in applyWall() so the CANVAS covers the native safe-area
-     strips (iOS paints those from the root background, not from any child layer) */
-  html{background-size:cover;background-position:center center;background-repeat:no-repeat}
   body{font-family:var(--font);color:var(--text);font-size:14px;background:var(--bg);letter-spacing:-.006em}
-  /* Background layers must cover the PHYSICAL screen. In a PWA fixed;inset:0 (and even negative
-     safe-area insets) can stop at the "layout" viewport, leaving the home-indicator strip showing
-     the body's --bg (propagated to the canvas). Sizing by VIEWPORT UNITS instead — the largest of
-     vh/dvh/lvh, which in a standalone PWA is the whole screen — reaches the real edges. Off-PWA
-     these all equal the window height, so nothing changes on desktop. */
-  .wall,.wall-fx{position:fixed;top:0;left:0;width:100vw;height:100vh;height:max(100vh,100dvh,100lvh);width:max(100vw,100dvw,100lvw)}
-  .wall{z-index:-3;transition:background-image .5s ease,filter .25s ease,transform .25s ease;background-size:cover;background-position:center center;background-repeat:no-repeat}
-  .wall-fx{pointer-events:none;transition:opacity .2s ease}
+  .wall{position:fixed;inset:0;z-index:-3;transition:background-image .5s ease,filter .25s ease,transform .25s ease;background-size:cover;background-position:center center;background-repeat:no-repeat}
+  .wall-fx{position:fixed;inset:0;pointer-events:none;transition:opacity .2s ease}
   #wallDim{z-index:-2;background:#000;opacity:0}
   #wallNoise{z-index:-1;opacity:0;mix-blend-mode:overlay;background-size:200px 200px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
   /* styled like the top bar: background/blur/colors taken from the same --mb-* variables,
@@ -2831,13 +2822,6 @@ function applyWall(){
  const wall=document.getElementById("wall"),fb=WALLS[0];
  if(SET.wpVer){wall.style.backgroundColor=isLight()?"#e6edf5":"#0a0f1a";wall.style.backgroundImage=`url(/api/wallpaper/img?v=${SET.wpVer})`;}
  else{wall.style.backgroundColor="";wall.style.backgroundImage=isLight()?fb.l:fb.d;}
- // Mirror the wallpaper onto the ROOT element. iOS paints the native safe-area strips (home
- // indicator, the bar behind the clock) with the CANVAS background, which comes from the root —
- // a child <div>#wall never reaches them however far we stretch it. With the wallpaper on <html>
- // those strips show the wallpaper instead of body's solid --bg. #wall stays on top for blur/dim.
- const root=document.documentElement;
- root.style.backgroundColor=wall.style.backgroundColor;
- root.style.backgroundImage=wall.style.backgroundImage;
 }
 let WALL_LUM=null;
 function sampleWallLum(){
