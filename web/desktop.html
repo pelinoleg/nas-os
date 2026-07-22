@@ -3026,9 +3026,13 @@ async function uploadWallFile(f){if(!f)return;const rd=new FileReader();rd.onloa
 async function setScrWallUrl(refresh){if(!SET.scrWpUrl){toast("Enter a URL");return;}toast(refresh?"Refreshing…":"Loading wallpaper…");const r=await api("/api/wallpaper/fetch",{method:"POST",body:JSON.stringify({url:SET.scrWpUrl,screen:true})});if(r&&r.ok){SET.scrWpType="url";SET.scrWpVer=Date.now();saveSettings();toast(refresh?"Touchscreen wallpaper updated":"Touchscreen wallpaper set");}else toast("Error: "+((r&&r.log)||"?"));}
 async function uploadScrWallFile(f,lb){if(!f)return;const rd=new FileReader();rd.onload=async()=>{toast("Loading wallpaper…");const r=await api("/api/wallpaper/upload",{method:"POST",body:JSON.stringify({data:rd.result,screen:true})});if(r&&r.ok){SET.scrWpType="upload";SET.scrWpVer=Date.now();saveSettings();toast("Touchscreen wallpaper set");if(lb)paintScrWpPrev(lb.querySelector("#scrWpPrev"));}else toast("Error: "+((r&&r.log)||"?"));};rd.readAsDataURL(f);}
 function paintScrWpPrev(box){if(!box)return;if(SET.scrWpVer){box.style.backgroundImage=`url(/api/wallpaper/img?screen=1&v=${SET.scrWpVer})`;box.classList.remove("empty");box.textContent="";}else{box.style.backgroundImage="";box.classList.add("empty");box.textContent=nasTr("no wallpaper set — using the desktop one");}}
+// PER-DEVICE settings: layout/size that should differ between the desktop and the tablet — kept only
+// in this device's localStorage, never pushed to (nor overridden by) the shared server config.
+const DEVICE_KEYS=["deskIcon","deskFs","dockIcon","dockPos"];
 function saveSettings(){themeSnapshot(CUR_THEME);
- try{localStorage.setItem("nasdesk",JSON.stringify(SET));}catch(e){}
- api("/api/settings",{method:"POST",body:JSON.stringify({settings:SET})});}
+ try{localStorage.setItem("nasdesk",JSON.stringify(SET));}catch(e){}   // full SET (incl. device keys) stays local
+ const shared={};for(const k in SET)if(!DEVICE_KEYS.includes(k))shared[k]=SET[k];  // strip device keys before syncing
+ api("/api/settings",{method:"POST",body:JSON.stringify({settings:shared})});}
 
 /* api with mock */
 const MOCK={
@@ -11280,10 +11284,11 @@ function maybeOnboard(){let done=false;try{done=!!SET.onboarded||localStorage.ge
  // the server is the source of truth; we cache in THIS origin's localStorage so that the next
  // load (including via a different address nas.local↔IP) doesn't start from the default theme
  try{const sv=await api("/api/settings");if(sv&&sv.settings&&Object.keys(sv.settings).length){
-   SET=Object.assign(SET,sv.settings);CUR_THEME=null;applySettings();
+   const dev={};DEVICE_KEYS.forEach(k=>{if(k in SET)dev[k]=SET[k];});   // keep THIS device's size/layout
+   SET=Object.assign(SET,sv.settings,dev);CUR_THEME=null;applySettings();   // …so the shared server config can't override it
    try{localStorage.setItem("nasdesk",JSON.stringify(SET));}catch(e){}}}catch(e){}
- // window positions/sizes come from the server (they survive localStorage clearing and address changes nas.local↔IP); local edits on top
- try{const wp=await api("/api/winpos");if(wp&&wp.winpos&&Object.keys(wp.winpos).length)WINPOS=Object.assign({},wp.winpos,WINPOS);}catch(e){}
+ // window geometry is per-device: loaded from localStorage only (a window sized for the desktop is
+ // wrong on the tablet). The server copy is a write-only backup — we do NOT pull it back here.
  const tb=document.getElementById("themeBtn");if(tb)tb.onclick=cycleTheme;
  const pb=document.getElementById("powerBtn");
  if(pb){pb.innerHTML=svg("power",17);pb.onclick=()=>{const r=pb.getBoundingClientRect();
