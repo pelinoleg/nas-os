@@ -1058,8 +1058,10 @@
   .rc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;align-items:start}
   .rc-card2{background:var(--card);border:1px solid var(--win-line,var(--line));border-radius:var(--r-md);padding:13px 14px;display:flex;flex-direction:column;gap:9px}
   .rc-top{display:flex;align-items:center;gap:11px}
-  .rc-logo{width:44px;height:44px;flex:none;border:none;border-radius:13px;font-size:23px;line-height:1;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:var(--sh-sm);transition:transform .1s}
-  .rc-logo:hover{transform:scale(1.06)}
+  .rc-logo{width:44px;height:44px;flex:none;border:none;background:none;border-radius:11px;font-size:30px;line-height:1;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;transition:transform .1s}
+  .rc-logo:hover{transform:scale(1.08)}
+  .rc-logo img{width:100%;height:100%;object-fit:contain;border-radius:inherit;display:block}
+  .rcl-hint{font-size:10.5px;color:var(--mut);margin:7px 2px 5px}
   .rc-id{min-width:0;flex:1}
   .rc-card2 .rc-name{font-size:14px;font-weight:650;display:flex;align-items:center;gap:7px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .rc-type2{margin-top:2px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--win-dim,var(--mut))}
@@ -6871,7 +6873,7 @@ function rcloneDuDlg(remote){
   const crumbs=`<a data-p="">${esc(remote)}:</a>`+parts.map(seg=>{acc=acc?acc+"/"+seg:seg;return ` / <a data-p="${att(acc)}">${esc(seg)}</a>`;}).join("");
   let inner;
   if(!tree){
-   inner=`<div class="set-load">${st.running?`Scanning «${esc(remote)}»… ${(st.scanned||0).toLocaleString()} files · ${fmtB(st.bytes)}`:(st.error?esc(st.error):"starting…")}</div>`;
+   inner=`<div class="set-load" id="duScan">${st.running?`Scanning «${esc(remote)}»… ${(st.scanned||0).toLocaleString()} files · ${fmtB(st.bytes)}`:(st.error?esc(st.error):"starting…")}</div>`;
   }else{
    const kids=Object.entries((node&&node.ch)||{}).sort((a,b)=>b[1].sz-a[1].sz);
    const rows=kids.length?kids.map(([name,ch])=>{const pct=node.sz?Math.round(ch.sz*100/node.sz):0,hasCh=ch.ch&&Object.keys(ch.ch).length;
@@ -6894,8 +6896,12 @@ function rcloneDuDlg(remote){
  };
  const duAgo=t=>{const d=Date.now()/1000-t;if(d<90)return"just now";if(d<3600)return Math.round(d/60)+"m ago";if(d<86400)return Math.round(d/3600)+"h ago";return Math.round(d/86400)+"d ago";};
  const tick=async()=>{const st=await rcloneP("/api/backup/rclone/du/status",{remote});lastSt=st||{};
-  if(st&&st.tree){tree=st.tree;stop();}draw();if(!tree)poll=setTimeout(tick,1500);};
- const begin=async(force)=>{await rcloneP("/api/backup/rclone/du/start",{remote,force:!!force});tick();};
+  if(st&&st.tree){tree=st.tree;stop();draw();return;}                 // tree ready → render once
+  const sc=s.querySelector("#duScan");                                 // still scanning: update in place
+  const txt=st&&st.running?`Scanning «${esc(remote)}»… ${(st.scanned||0).toLocaleString()} files · ${fmtB(st.bytes)}`:(st&&st.error?esc(st.error):"starting…");
+  if(sc)sc.innerHTML=txt;else draw();                                  // no flicker — only redraw if the line is gone
+  poll=setTimeout(tick,1500);};
+ const begin=async(force)=>{draw();await rcloneP("/api/backup/rclone/du/start",{remote,force:!!force});tick();};
  begin();
 }
 
@@ -6993,19 +6999,32 @@ const RCL_TYPES={
  yandex:{e:"☁️",c:"#ff3b3b"},crypt:{e:"🔐",c:"#8a7dff"},azureblob:{e:"☁️",c:"#0089d6"},swift:{e:"☁️",c:"#e00"},
  jottacloud:{e:"☁️",c:"#e6007e"},koofr:{e:"☁️",c:"#00a0dc"},http:{e:"🌐",c:"#6b7688"},local:{e:"🗄️",c:"#6b7688"}};
 const rclDef=t=>RCL_TYPES[String(t||"").toLowerCase()]||{e:"☁️",c:"var(--accent)"};
-const rclLogo=(remote,type)=>{const c=(SET.rclLogos||{})[remote],d=rclDef(type);return {emoji:c||d.e,color:d.c,custom:!!c};};
+const rclLogo=(remote,type)=>{const v=(SET.rclLogos||{})[remote]||rclDef(type).e;return {value:v,isImg:/^data:/.test(String(v))};};
+const rclLogoHTML=lg=>lg.isImg?`<img src="${lg.value}" alt="">`:lg.value;
 const RCL_EMOJI=["☁️","📦","🗄️","🪣","🔒","🔐","🌐","📁","🗂️","🖼️","💾","📡","🚀","🏠","🔑","⭐","🟢","🔵","🟠","🔴","🟣","⚡"];
 function rclLogoPick(remote,type,x,y,onSet){
  closeMenu();
- const p=el(`<div class="menu rcl-pick" style="left:${x}px;top:${y}px;min-width:210px"></div>`);
- p.innerHTML=`<div class="rcl-pgrid">${RCL_EMOJI.map(e=>`<button class="rcl-e" data-e="${e}">${e}</button>`).join("")}</div>
-   <div class="rcl-prow"><input class="mono rcl-in" maxlength="3" placeholder="type any…"><button class="btn sm rcl-reset">Default</button></div>`;
+ const p=el(`<div class="menu rcl-pick" style="left:${x}px;top:${y}px;min-width:230px"></div>`);
+ p.innerHTML=`<div class="rcl-prow"><button class="btn sm pri rcl-up">${svg("upload",13)} Upload image…</button><button class="btn sm rcl-reset">Default</button></div>
+   <div class="rcl-hint">any image format · or pick an emoji</div>
+   <div class="rcl-pgrid">${RCL_EMOJI.map(e=>`<button class="rcl-e" data-e="${e}">${e}</button>`).join("")}</div>
+   <input type="file" accept="image/*" class="rcl-file" style="display:none">`;
  document.body.appendChild(p);
  const r=p.getBoundingClientRect();if(r.right>innerWidth-8)p.style.left=(innerWidth-r.width-8)+"px";if(r.bottom>innerHeight-8)p.style.top=(y-r.height-8)+"px";
  const set=v=>{const m=Object.assign({},SET.rclLogos||{});if(v)m[remote]=v;else delete m[remote];SET.rclLogos=m;saveSettings();closeMenu();onSet();};
  p.querySelectorAll(".rcl-e").forEach(b=>b.onclick=()=>set(b.dataset.e));
  p.querySelector(".rcl-reset").onclick=()=>set("");
- const inp=p.querySelector(".rcl-in");inp.onkeydown=ev=>{if(ev.key==="Enter"&&inp.value.trim())set(inp.value.trim());};
+ const file=p.querySelector(".rcl-file");
+ p.querySelector(".rcl-up").onclick=()=>file.click();
+ file.onchange=()=>{const f=file.files&&file.files[0];if(!f)return;
+   const rd=new FileReader();
+   rd.onload=()=>{const img=new Image();
+     img.onload=()=>{const S=128,c=document.createElement("canvas");c.width=c.height=S;const g=c.getContext("2d");
+       const k=Math.min(S/(img.width||1),S/(img.height||1)),w=(img.width||S)*k,h=(img.height||S)*k;   // contain
+       g.drawImage(img,(S-w)/2,(S-h)/2,w,h);
+       try{set(c.toDataURL("image/png"));}catch(e){toast("Couldn't process that image");}};
+     img.onerror=()=>toast("Couldn't read that image");img.src=rd.result;};
+   rd.onerror=()=>toast("Couldn't read that file");rd.readAsDataURL(f);};
  const off=ev=>{if(!p.contains(ev.target)){document.removeEventListener("pointerdown",off,true);p.remove();}};
  setTimeout(()=>document.addEventListener("pointerdown",off,true),0);
 }
@@ -7041,7 +7060,7 @@ function winRclone(initTab){openWin("__rclone","Rclone",(body,win)=>{
    const lg=rclLogo(r,dd.type);
    const card=el(`<div class="rc-card2">
      <div class="rc-top">
-       <button class="rc-logo" title="Click to set an icon" style="background:${lg.color}">${lg.emoji}</button>
+       <button class="rc-logo" title="Click to set an icon">${rclLogoHTML(lg)}</button>
        <div class="rc-id"><div class="rc-name mono"><span class="rc-dot" title="checking reachability…"></span>${esc(r)}</div>${dd.type?`<div class="rc-type2">${esc(dd.type)}</div>`:""}</div>
      </div>
      <div class="rc-quota-line" id="rcq_${cid(r)}"><span class="rc-mut">reading quota…</span></div>
@@ -7058,7 +7077,7 @@ function winRclone(initTab){openWin("__rclone","Rclone",(body,win)=>{
    const info=card.querySelector(".rc-card-b");
    const dot=card.querySelector(".rc-dot");
    const logo=card.querySelector(".rc-logo");
-   logo.onclick=()=>{const rc=logo.getBoundingClientRect();rclLogoPick(r,dd.type,Math.round(rc.left),Math.round(rc.bottom+4),()=>{const l2=rclLogo(r,dd.type);logo.textContent=l2.emoji;logo.style.background=l2.color;});};
+   logo.onclick=()=>{const rc=logo.getBoundingClientRect();rclLogoPick(r,dd.type,Math.round(rc.left),Math.round(rc.bottom+4),()=>{logo.innerHTML=rclLogoHTML(rclLogo(r,dd.type));});};
    rcloneP("/api/backup/rclone/test",{remote:r}).then(t=>{if(!dot)return;dot.style.background=`var(--${t&&t.ok?"good":"danger"})`;dot.title=t&&t.ok?"reachable":("unreachable — "+((t&&t.log)||""));}).catch(()=>{});
    const ql=card.querySelector("#rcq_"+cid(r));
    rcloneP("/api/backup/rclone/about",{remote:r}).then(q=>{if(!ql)return;
