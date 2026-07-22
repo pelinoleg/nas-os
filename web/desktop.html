@@ -69,11 +69,12 @@
   *{box-sizing:border-box}
   html,body{height:100%;margin:0;overflow:hidden;-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
   body{font-family:var(--font);color:var(--text);font-size:14px;background:var(--bg);letter-spacing:-.006em}
-  /* Background layers cover the PHYSICAL screen, past every safe-area inset — in a PWA fixed;inset:0
-     stops at the safe viewport, so below it the body's --bg (propagated to the canvas) showed as a
-     solid strip in the home-indicator area. Extending by the insets makes the wallpaper reach the
-     real edges. All insets are 0 in a normal browser, so nothing changes off-PWA. */
-  .wall,.wall-fx{position:fixed;top:calc(-1 * env(safe-area-inset-top,0px));right:calc(-1 * env(safe-area-inset-right,0px));bottom:calc(-1 * env(safe-area-inset-bottom,0px));left:calc(-1 * env(safe-area-inset-left,0px))}
+  /* Background layers must cover the PHYSICAL screen. In a PWA fixed;inset:0 (and even negative
+     safe-area insets) can stop at the "layout" viewport, leaving the home-indicator strip showing
+     the body's --bg (propagated to the canvas). Sizing by VIEWPORT UNITS instead — the largest of
+     vh/dvh/lvh, which in a standalone PWA is the whole screen — reaches the real edges. Off-PWA
+     these all equal the window height, so nothing changes on desktop. */
+  .wall,.wall-fx{position:fixed;top:0;left:0;width:100vw;height:100vh;height:max(100vh,100dvh,100lvh);width:max(100vw,100dvw,100lvw)}
   .wall{z-index:-3;transition:background-image .5s ease,filter .25s ease,transform .25s ease;background-size:cover;background-position:center center;background-repeat:no-repeat}
   .wall-fx{pointer-events:none;transition:opacity .2s ease}
   #wallDim{z-index:-2;background:#000;opacity:0}
@@ -11385,6 +11386,19 @@ function maybeOnboard(){let done=false;try{done=!!SET.onboarded||localStorage.ge
   const box=document.createElement("div");
   box.style.cssText="position:fixed;left:6px;right:6px;bottom:6px;z-index:99999;max-height:38vh;overflow:auto;background:rgba(0,0,0,.86);color:#0f0;font:11px/1.35 monospace;padding:8px 10px;border-radius:8px;white-space:pre-wrap;pointer-events:none";
   box.textContent="touch-debug on — tap a button\n";document.body.appendChild(box);
+  // one-shot viewport / safe-area readout (helps diagnose the PWA edge strips)
+  try{const probe=document.createElement("div");
+   probe.style.cssText="position:fixed;top:0;left:0;padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);visibility:hidden";
+   document.body.appendChild(probe);const cs=getComputedStyle(probe);
+   const wall=document.getElementById("wall"),wr=wall?wall.getBoundingClientRect():{};
+   box.textContent="VIEWPORT/SAFE-AREA\n"
+    +"  inner "+innerWidth+"x"+innerHeight+"  screen "+screen.width+"x"+screen.height+"\n"
+    +"  safe T/R/B/L "+cs.paddingTop+" / "+cs.paddingRight+" / "+cs.paddingBottom+" / "+cs.paddingLeft+"\n"
+    +"  display-mode standalone="+matchMedia("(display-mode:standalone)").matches+" fullscreen="+matchMedia("(display-mode:fullscreen)").matches+"\n"
+    +"  wall rect top="+Math.round(wr.top)+" bottom="+Math.round(wr.bottom)+" h="+Math.round(wr.height)+"  (bottom should ≥ "+innerHeight+")\n"
+    +box.textContent;
+   probe.remove();
+  }catch(e){}
   const desc=t=>{try{return (t.tagName||"?").toLowerCase()+(t.className&&t.className.baseVal===undefined?"."+(""+t.className).trim().replace(/\s+/g,".").slice(0,26):"");}catch(e){return "?";}};
   const log=s=>{box.textContent=(s+"\n"+box.textContent).split("\n").slice(0,40).join("\n");};
   ["touchstart","pointerdown","pointerup","pointercancel","touchend","touchcancel","mousedown","mouseup","click"].forEach(t=>{
