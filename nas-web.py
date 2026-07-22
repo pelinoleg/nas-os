@@ -10082,6 +10082,44 @@ def confgit_diff(h):
         out = out[:400000] + "\n… (truncated)"
     return {"ok": bool(r.get("ok")), "diff": out}
 
+def confgit_files(h):
+    """Per-file change list of one snapshot: [{path, st(A/M/D), add, del}].
+    The UI shows this instead of one giant raw patch — a human wants "what
+    changed", not 55k patch lines."""
+    if not re.match(r"^[0-9a-f]{6,40}$", h or ""):
+        return {"ok": False, "log": "bad hash"}
+    r = _confgit_git("show", "--pretty=format:", "--name-status", "--no-color", h)
+    st = {}
+    for ln in (r.get("log") or "").splitlines():
+        p = ln.split("\t")
+        if len(p) >= 2 and p[0][:1] in "AMDRT":
+            st[p[-1]] = p[0][:1]          # rename lines carry old\tnew — take the new path
+    r = _confgit_git("show", "--pretty=format:", "--numstat", "--no-color", h)
+    files = []
+    for ln in (r.get("log") or "").splitlines():
+        p = ln.split("\t")
+        if len(p) == 3:
+            try:
+                a = int(p[0]) if p[0] != "-" else None
+                d = int(p[1]) if p[1] != "-" else None
+            except ValueError:
+                a = d = None
+            files.append({"path": p[2], "st": st.get(p[2], "M"), "add": a, "del": d})
+    return {"ok": True, "files": files[:2000], "total": len(files)}
+
+def confgit_filediff(h, path):
+    """Diff of ONE file inside one snapshot (the per-file drill-down)."""
+    if not re.match(r"^[0-9a-f]{6,40}$", h or ""):
+        return {"ok": False, "log": "bad hash"}
+    path = (path or "").lstrip("/")
+    if not path or ".." in path or path.startswith("-"):
+        return {"ok": False, "log": "bad path"}
+    r = _confgit_git("show", "--pretty=format:", "--patch", "--no-color", h, "--", path)
+    out = r.get("log") or ""
+    if len(out) > 200000:
+        out = out[:200000] + "\n… (truncated)"
+    return {"ok": bool(r.get("ok")), "diff": out}
+
 # ---- disaster card ----------------------------------------------------------
 
 def disaster_build():
@@ -17286,6 +17324,11 @@ class H(BaseHTTPRequestHandler):
                 self._json(confgit_log(min(200, int((q.get("limit") or ["60"])[0]))))
             elif p == "/api/resil/confgit/diff":
                 self._json(confgit_diff((q.get("h") or [""])[0]))
+            elif p == "/api/resil/confgit/files":
+                self._json(confgit_files((q.get("h") or [""])[0]))
+            elif p == "/api/resil/confgit/filediff":
+                self._json(confgit_filediff((q.get("h") or [""])[0],
+                                            (q.get("path") or [""])[0]))
             elif p == "/api/resil/disaster":
                 self._json(disaster_get())
             elif p == "/api/resil/sentry":

@@ -1099,6 +1099,13 @@
   .rs-allgood{color:var(--win-good,var(--good));font-size:13px;padding:8px 0}
   .rs-top{font-size:12px;color:var(--win-dim,var(--mut));margin-top:8px}
   .rs-hash{color:var(--win-accent,var(--accent));font-size:12px;margin-top:2px;flex:none}
+  .rs-commit{margin-bottom:6px}
+  .rs-cbody{background:var(--glass);border-radius:0 0 10px 10px;padding:6px 11px 9px;margin-top:1px}
+  .rs-gh{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--win-dim,var(--mut));margin:9px 0 3px}
+  .rs-file{display:flex;align-items:baseline;gap:8px;padding:3px 6px;border-radius:7px;cursor:pointer;font-size:12.5px}
+  .rs-file:hover{background:var(--sel)}
+  .rs-fst{flex:none;font-size:11px;font-weight:600;width:52px}
+  .rs-fp{flex:1;min-width:0;overflow-wrap:anywhere}
   .rc-card2{background:var(--card);border:1px solid var(--win-line,var(--line));border-radius:var(--r-md);padding:13px 14px;display:flex;flex-direction:column;gap:9px}
   .rc-top{display:flex;align-items:center;gap:11px}
   .rc-logo{width:44px;height:44px;flex:none;border:none;background:none;border-radius:11px;font-size:30px;line-height:1;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;transition:transform .1s}
@@ -7098,7 +7105,8 @@ function rclLogoPick(remote,type,x,y,onSet){
    history, disaster card, log sentry. Everything self-maintains: each tab
    just shows what the server derived from the LIVE system. */
 function winResil(initTab){openWin("__resil","Resilience",(body,win)=>{
- body.style.padding="0";
+ // flex column + hidden overflow: only .set-pane scrolls, the sidebar stays put
+ body.style.padding="0";body.style.display="flex";body.style.flexDirection="column";body.style.overflow="hidden";
  let tab=initTab||"overview";
  const CATS=[{id:"overview",name:"Overview",ic:"lifebuoy"},{id:"bb",name:"Black box",ic:"activity"},
   {id:"drill",name:"Reboot drill",ic:"refresh"},{id:"cfg",name:"Config history",ic:"clock"},
@@ -7216,30 +7224,79 @@ function winResil(initTab){openWin("__resil","Resilience",(body,win)=>{
    l.startsWith("+")&&!l.startsWith("+++")?`<span style="color:var(--win-good,var(--good))">${l}</span>`:
    l.startsWith("-")&&!l.startsWith("---")?`<span style="color:var(--win-danger,var(--danger))">${l}</span>`:l).join("\n");
 
+ // Config history: human view. A snapshot expands into "what changed, grouped by
+ // area"; a file expands into its own diff. Never one giant raw patch.
+ const cfgArea=p=>{
+  if(p.startsWith("stacks/"))return "Docker stack: "+(p.split("/")[1]||"");
+  if(p.startsWith("nas-config/"))return "Panel settings";
+  if(p.startsWith("etc/samba"))return "File sharing (Samba)";
+  if(p.startsWith("etc/systemd"))return "Services (systemd)";
+  if(p.startsWith("etc/udev"))return "Hardware rules (udev)";
+  if(p.startsWith("etc/network")||p.startsWith("etc/NetworkManager")||p.startsWith("etc/netplan"))return "Network";
+  if(p.startsWith("etc/cron")||p.startsWith("etc/anacron"))return "Scheduled tasks (cron)";
+  if(p.startsWith("etc/ssh"))return "SSH";
+  if(p.startsWith("etc/apt"))return "Package sources (apt)";
+  if(p==="etc/fstab"||p.startsWith("etc/snapraid"))return "Disks & pool";
+  return "System (/etc)";};
+ const cfgTitle=m=>({"daily snapshot":"Daily check","initial snapshot":"Baseline — first recording",
+   "manual snapshot":"Manual snapshot"})[m]||m;
  async function tabCfg(tc){
   tc.innerHTML='<div class="set-load">loading…</div>';
   const d=await api("/api/resil/confgit");
+  const commits=(d&&d.commits)||[];
   tc.innerHTML=`<div class="set-titrow"><h3 class="set-title" style="margin:0">Config history</h3>
     <button class="btn sm pri" id="rsSnap">${svg("plus",13)} Snapshot now</button></div>
-   <p class="set-sub">Daily git snapshots of the whole config surface: /etc, stack composes, panel settings. Click a snapshot to see exactly what changed — including changes made outside the panel.</p>
-   ${d&&d.dirty?`<div class="rs-note">${d.dirty} file(s) changed since the last snapshot — the next daily pass (or “Snapshot now”) records them.</div>`:""}
-   <div id="rsCommits">${((d&&d.commits)||[]).length?"":'<div class="rs-mut">No snapshots yet — the first one is taken automatically within a day.</div>'}</div>
-   <div id="rsDiff"></div>`;
+   <p class="set-sub">Once a day the panel photographs every config on this box — <b>/etc</b> (services, network, shares, disks), <b>docker stacks</b> (compose + .env) and <b>panel settings</b> — into a local archive. So when something breaks, you can answer “what changed, and when?”. Open a day to see what changed; open a file to see the exact lines. Changes made by hand or by updates are caught too.</p>
+   ${d&&d.dirty?`<div class="rs-note">${d.dirty} file(s) differ from the last snapshot right now — the next daily pass (or “Snapshot now”) will record them.</div>`:""}
+   <div id="rsCommits">${commits.length?"":'<div class="rs-mut">No snapshots yet — the first one is taken automatically within a day.</div>'}</div>`;
   const cb=tc.querySelector("#rsCommits");
-  ((d&&d.commits)||[]).forEach(c=>{
-   const row=el(`<div class="rs-issue" style="cursor:pointer"><span class="mono rs-hash">${c.h}</span>
-     <div><b>${esc(c.msg)}</b><div class="rs-mut">${dts(c.ts)}${c.stat?" · "+esc(c.stat):""}</div></div></div>`);
-   row.onclick=async()=>{
-    const df=await api("/api/resil/confgit/diff?h="+c.h);
-    tc.querySelector("#rsDiff").innerHTML=df&&df.ok?
-      `<h3 class="set-title" style="margin-top:14px">${c.h} — ${esc(c.msg)}</h3><pre class="rs-pre">${colorDiff(df.diff||"")}</pre>`
-      :'<div class="rs-mut">diff failed</div>';
-    tc.querySelector("#rsDiff").scrollIntoView({behavior:"smooth",block:"nearest"});};
+  commits.forEach(c=>{
+   const isBase=c.msg==="initial snapshot";
+   const m=(c.stat||"").match(/(\d+) files? changed/);
+   const row=el(`<div class="rs-commit"><div class="rs-issue" style="cursor:pointer;margin-bottom:0">
+     <span class="mono rs-hash">${c.h}</span>
+     <div style="flex:1"><b>${esc(cfgTitle(c.msg))}</b>
+       <div class="rs-mut">${dts(c.ts)}${m?` · ${m[1]} file${m[1]==="1"?"":"s"} changed`:""}</div></div>
+     <span class="rs-mut">${svg("chev",14)}</span></div>
+     <div class="rs-cbody" style="display:none"></div></div>`);
+   const bodyEl=row.querySelector(".rs-cbody");
+   row.querySelector(".rs-issue").onclick=async()=>{
+    if(bodyEl.style.display!=="none"){bodyEl.style.display="none";return;}
+    bodyEl.style.display="block";
+    if(bodyEl.dataset.loaded)return;
+    bodyEl.dataset.loaded=1;
+    if(isBase){
+     bodyEl.innerHTML='<div class="rs-mut" style="padding:8px 4px">This is the starting point — the first full recording of every config file. Nothing “changed” here; every later snapshot shows its differences against the previous one.</div>';
+     return;}
+    bodyEl.innerHTML='<div class="set-load">loading…</div>';
+    const df=await api("/api/resil/confgit/files?h="+c.h);
+    if(!df||!df.ok){bodyEl.innerHTML='<div class="rs-mut">failed to load</div>';return;}
+    const groups={};
+    (df.files||[]).forEach(f=>{(groups[cfgArea(f.path)]=groups[cfgArea(f.path)]||[]).push(f);});
+    bodyEl.innerHTML="";
+    Object.keys(groups).sort().forEach(g=>{
+     bodyEl.appendChild(el(`<div class="rs-gh">${esc(g)}</div>`));
+     groups[g].forEach(f=>{
+      const stc=f.st==="A"?"good":f.st==="D"?"danger":"accent";
+      const fr=el(`<div class="rs-file"><span class="rs-fst" style="color:var(--win-${stc},var(--${stc}))">${f.st==="A"?"new":f.st==="D"?"deleted":"changed"}</span>
+        <span class="mono rs-fp">${esc(f.path)}</span>
+        <span class="rs-mut mono">${f.add!=null?`+${f.add}`:""}${f.del?` −${f.del}`:""}</span></div>`);
+      const dv=el(`<div style="display:none"></div>`);
+      fr.onclick=async()=>{
+       if(dv.style.display!=="none"){dv.style.display="none";return;}
+       dv.style.display="block";
+       if(!dv.dataset.l){dv.dataset.l=1;dv.innerHTML='<div class="set-load">loading…</div>';
+        const fd=await api("/api/resil/confgit/filediff?h="+c.h+"&path="+encodeURIComponent(f.path));
+        dv.innerHTML=fd&&fd.ok&&fd.diff?`<pre class="rs-pre" style="max-height:300px;margin:4px 0 8px">${colorDiff(fd.diff)}</pre>`
+          :'<div class="rs-mut" style="padding:4px">no text diff (binary or permissions-only change)</div>';}
+      };
+      bodyEl.appendChild(fr);bodyEl.appendChild(dv);});});
+    if(df.total>2000)bodyEl.appendChild(el(`<div class="rs-mut">…and ${df.total-2000} more files</div>`));};
    cb.appendChild(row);});
   tc.querySelector("#rsSnap").onclick=async()=>{
    const b=tc.querySelector("#rsSnap");b.disabled=true;b.textContent="snapshotting…";
    const r=await api("/api/resil/confgit/snap",{method:"POST",body:"{}"});
-   toast(r&&r.ok?(r.changed?"Snapshot saved":"No changes since the last snapshot"):"Snapshot failed: "+((r&&r.log)||""));
+   toast(r&&r.ok?(r.changed?"Snapshot saved":"No changes since the last snapshot — nothing to record"):"Snapshot failed: "+((r&&r.log)||""));
    tabCfg(tc);};}
 
  async function tabCard(tc){
