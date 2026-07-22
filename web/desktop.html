@@ -1049,6 +1049,24 @@
   .rc-meta{margin-top:6px;font-size:11.5px;color:var(--win-dim,var(--dim))}
   .rc-meta b{color:var(--win-fg,var(--fg));font-weight:600}
   .rc-mut{color:var(--win-dim,var(--mut))}
+  /* Remotes dashboard — responsive grid of cards, each with a per-remote logo tile */
+  .rc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;align-items:start}
+  .rc-card2{background:var(--card);border:1px solid var(--win-line,var(--line));border-radius:var(--r-md);padding:13px 14px;display:flex;flex-direction:column;gap:9px}
+  .rc-top{display:flex;align-items:center;gap:11px}
+  .rc-logo{width:44px;height:44px;flex:none;border:none;border-radius:13px;font-size:23px;line-height:1;display:flex;align-items:center;justify-content:center;cursor:pointer;box-shadow:var(--sh-sm);transition:transform .1s}
+  .rc-logo:hover{transform:scale(1.06)}
+  .rc-id{min-width:0;flex:1}
+  .rc-card2 .rc-name{font-size:14px;font-weight:650;display:flex;align-items:center;gap:7px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .rc-type2{margin-top:2px;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;color:var(--win-dim,var(--mut))}
+  .rc-acts{display:flex;align-items:center;gap:5px;margin-top:2px}
+  .rc-acts .iconbtn{padding:7px 8px}
+  .rcl-pick{padding:8px}
+  .rcl-pick button{width:auto}
+  .rcl-pgrid{display:grid;grid-template-columns:repeat(6,1fr);gap:2px}
+  .rcl-e{border:none;background:none;font-size:20px;padding:5px;border-radius:8px;cursor:pointer;line-height:1}
+  .rcl-e:hover{background:var(--sel)}
+  .rcl-prow{display:flex;gap:6px;margin-top:7px;align-items:center}
+  .rcl-in{flex:1;min-width:0}
   .du-tot{font-size:12.5px;color:var(--win-dim,var(--dim));margin:2px 0 8px}
   .du-tot b{color:var(--win-fg,var(--fg))}
   .du-crumb{font-size:12px;margin-bottom:8px}
@@ -6961,7 +6979,33 @@ function rcloneMountDlg(remote,onDone,init){
    if(onDone)onDone(r);};
 }
 
+/* Per-backend default logo (emoji + tile colour) with a user override in SET.rclLogos (shared via
+   the server config). Emoji keeps it CSP-safe and lets the user pick anything without uploading. */
+const RCL_TYPES={
+ s3:{e:"📦",c:"#e8912d"},b2:{e:"🪣",c:"#d9333f"},drive:{e:"📁",c:"#1a73e8"},dropbox:{e:"📦",c:"#0061ff"},
+ onedrive:{e:"☁️",c:"#0364b8"},pcloud:{e:"☁️",c:"#12b0a6"},mega:{e:"☁️",c:"#d9272e"},box:{e:"📦",c:"#0061d5"},
+ sftp:{e:"🔒",c:"#6b7688"},ftp:{e:"📡",c:"#6b7688"},webdav:{e:"🌐",c:"#6b4fbb"},googlephotos:{e:"🖼️",c:"#ea4335"},
+ yandex:{e:"☁️",c:"#ff3b3b"},crypt:{e:"🔐",c:"#8a7dff"},azureblob:{e:"☁️",c:"#0089d6"},swift:{e:"☁️",c:"#e00"},
+ jottacloud:{e:"☁️",c:"#e6007e"},koofr:{e:"☁️",c:"#00a0dc"},http:{e:"🌐",c:"#6b7688"},local:{e:"🗄️",c:"#6b7688"}};
+const rclDef=t=>RCL_TYPES[String(t||"").toLowerCase()]||{e:"☁️",c:"var(--accent)"};
+const rclLogo=(remote,type)=>{const c=(SET.rclLogos||{})[remote],d=rclDef(type);return {emoji:c||d.e,color:d.c,custom:!!c};};
+const RCL_EMOJI=["☁️","📦","🗄️","🪣","🔒","🔐","🌐","📁","🗂️","🖼️","💾","📡","🚀","🏠","🔑","⭐","🟢","🔵","🟠","🔴","🟣","⚡"];
+function rclLogoPick(remote,type,x,y,onSet){
+ closeMenu();
+ const p=el(`<div class="menu rcl-pick" style="left:${x}px;top:${y}px;min-width:210px"></div>`);
+ p.innerHTML=`<div class="rcl-pgrid">${RCL_EMOJI.map(e=>`<button class="rcl-e" data-e="${e}">${e}</button>`).join("")}</div>
+   <div class="rcl-prow"><input class="mono rcl-in" maxlength="3" placeholder="type any…"><button class="btn sm rcl-reset">Default</button></div>`;
+ document.body.appendChild(p);
+ const r=p.getBoundingClientRect();if(r.right>innerWidth-8)p.style.left=(innerWidth-r.width-8)+"px";if(r.bottom>innerHeight-8)p.style.top=(y-r.height-8)+"px";
+ const set=v=>{const m=Object.assign({},SET.rclLogos||{});if(v)m[remote]=v;else delete m[remote];SET.rclLogos=m;saveSettings();closeMenu();onSet();};
+ p.querySelectorAll(".rcl-e").forEach(b=>b.onclick=()=>set(b.dataset.e));
+ p.querySelector(".rcl-reset").onclick=()=>set("");
+ const inp=p.querySelector(".rcl-in");inp.onkeydown=ev=>{if(ev.key==="Enter"&&inp.value.trim())set(inp.value.trim());};
+ const off=ev=>{if(!p.contains(ev.target)){document.removeEventListener("pointerdown",off,true);p.remove();}};
+ setTimeout(()=>document.addEventListener("pointerdown",off,true),0);
+}
 function winRclone(initTab){openWin("__rclone","Rclone",(body,win)=>{
+ body.style.padding="0";   // the .nbmain/.set-pane provides its own padding — no double frame (like Settings)
  let tab=initTab||"remotes",DATA=null,cm=null;
  const cid=x=>String(x).replace(/[^\w-]/g,"_");
  const CATS=[{id:"remotes",name:"Remotes",ic:"net"},{id:"mounts",name:"Mounts",ic:"folder"},
@@ -6981,7 +7025,7 @@ function winRclone(initTab){openWin("__rclone","Rclone",(body,win)=>{
   const inst=!!(DATA&&DATA.installed),remotes=(DATA&&DATA.remotes)||[];
   tc.innerHTML=`<div class="set-titrow"><h3 class="set-title" style="margin:0">Remotes</h3>${remotes.length>1?`<button class="btn sm" id="rcCopy" title="Copy files straight from one remote to another">${svg("copy",13)} Copy between remotes…</button>`:""}</div><p class="set-sub">Your cloud connections from rclone.conf. Create them on your Mac (<span class="mono">rclone config</span>) and paste the config on the <b>Config</b> tab.</p>
     ${!inst?`<div class="nb-dwarn" style="margin-bottom:8px">rclone is not installed — open the <b>Config</b> tab to install it.</div>`:""}
-    ${remotes.length?`<div id="rcRemotes"></div>`:`<div style="color:var(--mut);font-size:13px;padding:10px 0">No remotes yet — open <b>Config</b> and paste your rclone.conf.</div>`}`;
+    ${remotes.length?`<div id="rcRemotes" class="rc-grid"></div>`:`<div style="color:var(--mut);font-size:13px;padding:10px 0">No remotes yet — open <b>Config</b> and paste your rclone.conf.</div>`}`;
   const cpb=tc.querySelector("#rcCopy");if(cpb)cpb.onclick=()=>rcloneCopyDlg(remotes);
   const boxr=tc.querySelector("#rcRemotes");if(!boxr)return;
   const dash={};((DATA&&DATA.dashboard)||[]).forEach(d=>dash[d.name]=d);
@@ -6989,14 +7033,27 @@ function winRclone(initTab){openWin("__rclone","Rclone",(body,win)=>{
   remotes.forEach(r=>{
    const dd=dash[r]||{},usedBy=dd.used_by||[];
    const meta=`${usedBy.length?`Used by <b>${usedBy.map(esc).join(", ")}</b>`:`<span class="rc-mut">not used by any backup yet</span>`}${dd.last_run?` · last backup ${agoR(dd.last_run)}`:""}${dd.sent_bytes?` · ${fmtB(dd.sent_bytes)} transferred recently`:""}`;
-   const card=el(`<div class="rc-card">
-     <div class="rc-card-h"><span class="rc-name mono"><span class="rc-dot" title="checking reachability…"></span>${svg("net",15)} ${esc(r)}${dd.type?`<span class="rc-type">${esc(dd.type)}</span>`:""}</span>
-      <span class="rc-actions"><button class="btn sm" data-a="analyze" title="See what's taking space on this remote, by folder">${svg("chart",13)} Analyze</button><button class="btn sm" data-a="dedupe" title="Find & remove duplicate-content files on this remote">${svg("copy",13)} Dedupe</button><button class="btn sm" data-a="cleanup" title="Empty trash / purge old versions where the backend supports it">${svg("trash",13)} Clean up</button><button class="btn sm" data-a="mount">${svg("folder",13)} Mount</button><button class="btn sm pri" data-a="restore">${svg("download",13)} Restore…</button></span></div>
+   const lg=rclLogo(r,dd.type);
+   const card=el(`<div class="rc-card2">
+     <div class="rc-top">
+       <button class="rc-logo" title="Click to set an icon" style="background:${lg.color}">${lg.emoji}</button>
+       <div class="rc-id"><div class="rc-name mono"><span class="rc-dot" title="checking reachability…"></span>${esc(r)}</div>${dd.type?`<div class="rc-type2">${esc(dd.type)}</div>`:""}</div>
+     </div>
      <div class="rc-quota-line" id="rcq_${cid(r)}"><span class="rc-mut">reading quota…</span></div>
      <div class="rc-meta">${meta}</div>
-     <div class="rc-card-b" id="rcb_${cid(r)}"></div></div>`);
+     <div class="rc-card-b" id="rcb_${cid(r)}"></div>
+     <div class="rc-acts">
+       <button class="iconbtn" data-a="analyze" title="Cloud space — what's using it">${svg("chart",16)}</button>
+       <button class="iconbtn" data-a="dedupe" title="Find & remove duplicates">${svg("copy",16)}</button>
+       <button class="iconbtn" data-a="cleanup" title="Clean up — empty trash / old versions">${svg("trash",16)}</button>
+       <button class="iconbtn" data-a="mount" title="Mount as a folder">${svg("folder",16)}</button>
+       <span style="flex:1"></span>
+       <button class="btn sm pri" data-a="restore" title="Restore files from this remote">${svg("download",13)} Restore</button>
+     </div></div>`);
    const info=card.querySelector(".rc-card-b");
    const dot=card.querySelector(".rc-dot");
+   const logo=card.querySelector(".rc-logo");
+   logo.onclick=()=>{const rc=logo.getBoundingClientRect();rclLogoPick(r,dd.type,Math.round(rc.left),Math.round(rc.bottom+4),()=>{const l2=rclLogo(r,dd.type);logo.textContent=l2.emoji;logo.style.background=l2.color;});};
    rcloneP("/api/backup/rclone/test",{remote:r}).then(t=>{if(!dot)return;dot.style.background=`var(--${t&&t.ok?"good":"danger"})`;dot.title=t&&t.ok?"reachable":("unreachable — "+((t&&t.log)||""));}).catch(()=>{});
    const ql=card.querySelector("#rcq_"+cid(r));
    rcloneP("/api/backup/rclone/about",{remote:r}).then(q=>{if(!ql)return;
