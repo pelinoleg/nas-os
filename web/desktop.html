@@ -11314,28 +11314,38 @@ function maybeOnboard(){let done=false;try{done=!!SET.onboarded||localStorage.ge
    }).catch(()=>{});
  }
  matchMedia("(prefers-color-scheme:light)").addEventListener("change",()=>{if(SET.theme==="auto")applySettings();});
- /* iOS click bridge. iOS Safari only synthesises a `click` from a tap on NATIVELY clickable
-    elements (button/a/input/…). Our traffic lights are <i> and many controls are <div>/<span>
-    wired with a JS `.onclick` property — WebKit never fires their click, so the tap is dead
-    (pointer/touch events arrive, but no mousedown/mouseup/click — proven with ?tdbg=1). Blink
-    (Android) DOES fire it, so this runs on iOS only, or it would double-fire. On a stationary
-    tap whose target is NOT inside a native control, we dispatch the click WebKit withheld. */
+ /* iOS click bridge. iOS Safari often fails to synthesise a `click` from a tap: never for
+    non-native controls (our <i> traffic lights and <div>/<span> wired with a JS .onclick), and
+    NOT even for native <button>s when the tap lands inside a scroll container (e.g. the Backup
+    sidebar is a horizontal overflow ribbon) — WebKit treats the tap as a possible pan and drops
+    the click. touch-action can't fix that (it governs zoom/scroll, not click synthesis). So don't
+    guess native-vs-not: after every stationary tap, wait a beat; if the browser delivered no real
+    click, dispatch one ourselves at the tap point. A genuine click cancels the fallback, and a
+    late duplicate is swallowed — no double-fire. iOS-only (Blink already clicks correctly). */
  (function(){
   var ua=navigator.userAgent||"";
   var IOS=/iP(hone|ad|od)/.test(ua)||(navigator.maxTouchPoints>1&&/Macintosh/.test(ua));
   if(!IOS)return;
-  var sx=0,sy=0,moved=false;
-  addEventListener("touchstart",function(e){var t=e.touches[0];if(!t)return;sx=t.clientX;sy=t.clientY;moved=false;},{passive:true,capture:true});
+  var sx=0,sy=0,ts=0,moved=false,pending=null,synthT=0,synthX=0,synthY=0;
+  addEventListener("touchstart",function(e){var t=e.touches[0];if(!t)return;sx=t.clientX;sy=t.clientY;ts=Date.now();moved=false;},{passive:true,capture:true});
   addEventListener("touchmove",function(e){var t=e.touches[0];if(!t)return;if(Math.abs(t.clientX-sx)>10||Math.abs(t.clientY-sy)>10)moved=true;},{passive:true,capture:true});
+  addEventListener("click",function(e){
+   if(!e.isTrusted)return;                       // our own synthetic click — ignore
+   if(pending){pending=null;return;}             // the real click arrived → cancel the fallback
+   // a late real click duplicating one we already synthesised at the same spot → swallow it
+   if(Date.now()-synthT<700&&Math.abs(e.clientX-synthX)<14&&Math.abs(e.clientY-synthY)<14){e.stopPropagation();e.preventDefault();}
+  },{capture:true});
   addEventListener("touchend",function(e){
-   if(moved||e.touches.length)return;
-   var t=e.target;
-   if(!t||!t.closest)return;
-   // native controls already get their click from iOS — leave them alone (avoids a double click)
-   if(t.closest("a[href],button,input,select,textarea,label,summary,[role=button],[contenteditable]"))return;
-   e.preventDefault();
-   t.dispatchEvent(new MouseEvent("click",{bubbles:true,cancelable:true,view:window}));
-  },{passive:false,capture:true});
+   if(moved||e.touches.length||Date.now()-ts>600)return;   // moved / multi-touch / long-press → not a tap
+   var x=sx,y=sy,mine={};pending=mine;
+   setTimeout(function(){
+    if(pending!==mine)return;                     // a real click already handled this tap
+    pending=null;
+    var el=document.elementFromPoint(x,y);
+    if(el){synthT=Date.now();synthX=x;synthY=y;
+     el.dispatchEvent(new MouseEvent("click",{bubbles:true,cancelable:true,view:window,clientX:x,clientY:y}));}
+   },140);
+  },{passive:true,capture:true});
  })();
  /* Touch diagnostic (only with ?tdbg=1): shows a fixed log of the raw event sequence for each tap
     so an iPad user can report exactly what fires (pointer/touch/click, target, defaultPrevented,
