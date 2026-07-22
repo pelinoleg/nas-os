@@ -1950,6 +1950,9 @@
   .tgl input{opacity:0;width:0;height:0;position:absolute}
   .tgl .sl{position:absolute;inset:0;background:rgba(128,140,158,.42);border-radius:22px;transition:.15s;cursor:pointer}
   .tgl .sl::before{content:"";position:absolute;width:16px;height:16px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.15s;box-shadow:0 1px 3px rgba(0,0,0,.35)}
+  .tgl input:disabled+.sl{opacity:.4;cursor:not-allowed}
+  .ev-prio:disabled,select:disabled{opacity:.45;cursor:not-allowed}
+  .ev-c.is-off{opacity:.5}
   .tgl input:checked+.sl{background:var(--accent-fill)}
   .tgl input:checked+.sl::before{background:var(--accent-ink)}
   .tgl input:focus-visible+.sl{box-shadow:0 0 0 3px var(--accent-soft)}
@@ -6174,7 +6177,6 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    if(e.type==="dir")it.push({label:"Add to favorites",ic:svg("star",16),act:()=>{if(favs.some(f=>f.path===e.path)){toast("Already in favorites");return;}favs.push({name:e.name,path:e.path});saveFav();renderFav();toast("Added");}});
    it.push({sep:1});
    const adv=[
-     {label:"Duplicate",ic:svg("copy",16),act:()=>doDup(e)},
      {label:"Copy path",ic:svg("clip",16),act:()=>{copyText(e.path);toast("Path copied");}},
      {label:"Permissions and owner…",ic:svg("shield",16),act:()=>doPerms(e)}];
    // USB imports and docker leave root-owned files; one click instead of typing names into the perms dialog
@@ -10174,8 +10176,15 @@ function notifyTab(tc){tc.innerHTML=`<div style="color:var(--mut);font-size:12px
   const items=EVMETA.filter(m=>m.k);
   const collect=()=>{const events={};items.forEach(m=>{const o={on:tc.querySelector("#evon_"+m.k).checked,desk:tc.querySelector("#evd_"+m.k).checked,priority:+tc.querySelector("#evp_"+m.k).value};if(m.thr!==undefined)o.threshold=+tc.querySelector("#ev_"+m.k).value||0;events[m.k]=o;});return {enabled:en.checked,cooldown:Math.max(1,+cd.value||30)*60,events};};
   const saveMon=()=>api("/api/monitor",{method:"POST",body:JSON.stringify({monitor:collect()})});
-  en.onchange=saveMon;cd.onchange=saveMon;
+  // when the Pushover master toggle is off, grey out everything that only affects Pushover — the
+  // per-event priority selects and push switches, and Test — but leave the Desktop switches alone
+  const syncPush=()=>{const off=!en.checked;
+    items.forEach(m=>{const s=tc.querySelector("#evp_"+m.k),o=tc.querySelector("#evon_"+m.k);
+      if(s)s.disabled=off;if(o){o.disabled=off;const cell=o.closest(".ev-c");if(cell)cell.classList.toggle("is-off",off);}});
+    const t=tc.querySelector("#nfTest");if(t)t.disabled=off;};
+  en.onchange=()=>{saveMon();syncPush();};cd.onchange=saveMon;
   items.forEach(m=>{tc.querySelector("#evon_"+m.k).onchange=saveMon;tc.querySelector("#evd_"+m.k).onchange=saveMon;tc.querySelector("#evp_"+m.k).onchange=saveMon;if(m.thr!==undefined)tc.querySelector("#ev_"+m.k).onchange=saveMon;});
+  syncPush();
   tc.querySelector("#nfSave").onclick=async()=>{const rr=await api("/api/monitor",{method:"POST",body:JSON.stringify({notify:{user:tc.querySelector("#nfU").value.trim(),token:tc.querySelector("#nfT").value.trim()}})});const st=tc.querySelector("#nfStat");if(rr&&rr.notify){st.textContent=nasTr(rr.notify.configured?"✓ keys set":"not configured");st.style.color=rr.notify.configured?"var(--good)":"var(--mut)";}toast(LIVE?"Keys saved":"Demo");flashSaved(tc.querySelector("#nfSave"));};
   tc.querySelector("#nfTest").onclick=async()=>{const rr=await api("/api/monitor",{method:"POST",body:JSON.stringify({test:true})});toast(LIVE?(rr&&rr.ok?"Test sent to Pushover ✓":"Not sent: "+((rr&&rr.log)||"")):"Demo");};
  });}
