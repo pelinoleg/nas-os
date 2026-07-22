@@ -7958,6 +7958,191 @@ def _nb_start_unit(pid, dry, allow_delete=False):
         return False
     return True
 
+# --------------------------------------------------------------------------- #
+#  Restore drill — proof that a backup can actually be restored, not just written.
+#  Samples a few files FROM THE BACKUP, reads each end-to-end (a bad sector /
+#  unreadable file / silently-unmounted disk fails here) and restores it to a temp
+#  folder (exercises the real restore path). Quick + sampled so it can run often;
+#  tracked so the Overview shows "restore verified 2h ago" vs "never tested".
+#  Local dest → direct read+copy; rclone dest → `rclone copyto` (download+checksum).
+# --------------------------------------------------------------------------- #
+NB_DRILL_UNIT     = "nas-backup-drill"
+NB_DRILL_SAMPLE   = 6
+NB_DRILL_MAXBYTES = 60 * 1024 * 1024
+
+def _nb_drill_file(pid): return _nb_f(pid, "drill", "json")
+def _nb_drill_unit(pid): return NB_DRILL_UNIT + ("" if pid == NB_MAIN else "-" + pid)
+
+def nb_drill_state(pid):
+    st = _json_load_strict(_nb_drill_file(pid), {})
+    if st.get("running") and time.time() - (st.get("started") or 0) > 15 \
+            and not _systemd_active(_nb_drill_unit(pid) + ".service"):
+        st["running"] = False; st["result"] = st.get("result") or "aborted"; st["done"] = st.get("done") or int(time.time())
+    return st
+
+def nb_drill_status(pid=NB_MAIN): return nb_drill_state(pid)
+
+def nb_drill_start(pid=NB_MAIN):
+    cfg = nb_load(pid); pid = cfg["id"]
+    if nb_drill_state(pid).get("running"):
+        return {"ok": False, "log": "a drill is already running"}
+    _json_save(_nb_drill_file(pid), {"running": True, "started": int(time.time()), "sampled": 0,
+                                     "ok": 0, "fail": 0, "result": None, "line": "starting…"}, indent=None)
+    cmd = ["systemd-run", "--collect", "--quiet", "--unit", _nb_drill_unit(pid),
+           "--setenv=SUDO_USER=" + TARGET_USER, "--setenv=HOME=" + HOME,
+           sys.executable, os.path.join(HERE, "nas-web.py"), "backup-drill", pid]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError) as e:
+        _json_save(_nb_drill_file(pid), {"running": False, "result": "warn", "error": str(e)[:160]}, indent=None)
+        return {"ok": False, "log": str(e)}
+    if r.returncode != 0:
+        _json_save(_nb_drill_file(pid), {"running": False, "result": "warn"}, indent=None)
+        return {"ok": False, "log": (r.stderr or "failed to start")[:200]}
+    return {"ok": True, "log": "started"}
+
+def nb_drill_cancel(pid=NB_MAIN):
+    try:
+        subprocess.run(["systemctl", "stop", _nb_drill_unit(pid)], capture_output=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    st = _json_load_strict(_nb_drill_file(pid), {})
+    st.update(running=False, result="stopped", done=int(time.time()))
+    _json_save(_nb_drill_file(pid), st, indent=None)
+    return {"ok": True}
+
+def _nb_drill_sample_local(dirs):
+    import random
+    pool = []
+    for d in dirs:
+        if not d or not os.path.isdir(d):
+            continue
+        cnt = 0
+        for root, _dirs, files in os.walk(d):
+            for fn in files:
+                p = os.path.join(root, fn)
+                try: sz = os.path.getsize(p)
+                except OSError: continue
+                pool.append((p, sz)); cnt += 1
+            if cnt > 20000:
+                break
+    random.shuffle(pool)
+    out, total = [], 0
+    for p, sz in pool:
+        if len(out) >= NB_DRILL_SAMPLE:
+            break
+        if sz > NB_DRILL_MAXBYTES:
+            continue
+        if total + sz > NB_DRILL_MAXBYTES and out:
+            break
+        out.append((p, sz)); total += sz
+    return out
+
+def _sha256_read(path, restore_to):
+    """Read a file end-to-end while copying it out; return its hash (raises OSError on a bad read)."""
+    h = hashlib.sha256()
+    with open(path, "rb") as fin, open(restore_to, "wb") as fout:
+        for b in iter(lambda: fin.read(262144), b""):
+            h.update(b); fout.write(b)
+    return h.digest()
+
+def _nb_drill_local(cfg, tmp, st, save):
+    dirs = [j["dest"] for j in (cfg.get("jobs") or []) if j.get("dest") and os.path.isabs(j["dest"])]
+    if not dirs and cfg.get("dest_base"):
+        dirs = [cfg["dest_base"]]
+    sample = _nb_drill_sample_local(dirs)
+    st["sampled"] = len(sample); st["line"] = "restoring %d files…" % len(sample); save()
+    if not sample:
+        st["result"] = "empty"; st["line"] = "nothing to test — the backup is empty or its disk isn't mounted"; return
+    for i, (p, sz) in enumerate(sample):
+        st["line"] = "restoring %d/%d · %s" % (i + 1, len(sample), os.path.basename(p)); save()
+        out = os.path.join(tmp, "f%d" % i)
+        try:
+            a = _sha256_read(p, out)                              # read backup file + restore it out
+            b = hashlib.sha256()
+            with open(out, "rb") as fr:
+                for chunk in iter(lambda: fr.read(262144), b""): b.update(chunk)
+            if a == b.digest():
+                st["ok"] += 1; st["bytes"] += sz
+            else:
+                st["fail"] += 1; st["failures"].append({"path": p, "why": "restored copy did not match (read error)"})
+        except OSError as e:
+            st["fail"] += 1; st["failures"].append({"path": p, "why": str(e)[:120]})
+        save()
+
+def _nb_drill_rclone(cfg, dst, tmp, st, save):
+    import random
+    remote = dst.get("remote"); base = (dst.get("remote_path") or "").strip("/")
+    if not remote:
+        st["result"] = "skip"; st["line"] = "no cloud remote configured"; return
+    spec = remote + ":" + base
+    r = subprocess.run([_rclone_bin(), "--config", RCLONE_CONF, "lsf", "-R", "--files-only",
+                        "--format", "sp", "--separator", "|", spec], capture_output=True, text=True, timeout=180)
+    files = []
+    for ln in (r.stdout or "").splitlines():
+        i = ln.find("|")
+        if i < 0: continue
+        try: sz = int(ln[:i])
+        except ValueError: continue
+        files.append((ln[i + 1:].rstrip("\n"), sz))
+    random.shuffle(files)
+    pick, total = [], 0
+    for pth, sz in files:
+        if len(pick) >= NB_DRILL_SAMPLE: break
+        if sz > NB_DRILL_MAXBYTES: continue
+        if total + sz > NB_DRILL_MAXBYTES and pick: break
+        pick.append((pth, sz)); total += sz
+    st["sampled"] = len(pick); st["line"] = "downloading %d files…" % len(pick); save()
+    if not pick:
+        st["result"] = "empty"; st["line"] = "nothing to test on this remote"; return
+    for i, (pth, sz) in enumerate(pick):
+        st["line"] = "restoring %d/%d · %s" % (i + 1, len(pick), pth.split("/")[-1]); save()
+        out = os.path.join(tmp, "f%d" % i)
+        src = spec + ("/" if base or not pth.startswith("/") else "") + pth
+        rr = subprocess.run([_rclone_bin(), "--config", RCLONE_CONF, "copyto", src, out, "--no-traverse"],
+                            capture_output=True, text=True, timeout=600)
+        if rr.returncode == 0 and os.path.exists(out):
+            st["ok"] += 1; st["bytes"] += sz
+        else:
+            st["fail"] += 1; st["failures"].append({"path": pth, "why": (rr.stderr or "download failed").strip()[-120:]})
+        save()
+
+def _nb_drill_cli(pid):
+    cfg = nb_load(pid); pid = cfg["id"]
+    st = {"running": True, "started": int(time.time()), "sampled": 0, "ok": 0, "fail": 0,
+          "failures": [], "bytes": 0, "result": None, "line": "sampling…", "pid_": os.getpid()}
+    def save(): _json_save(_nb_drill_file(pid), st, indent=None)
+    save()
+    tmp = os.path.join(NAS_CONFIG, "restore-drill", pid)
+    try:
+        shutil.rmtree(tmp, ignore_errors=True); os.makedirs(tmp, exist_ok=True)
+    except OSError:
+        pass
+    try:
+        _src, dst = _nb_sides(cfg)
+        if dst.get("kind") == "rclone":
+            _nb_drill_rclone(cfg, dst, tmp, st, save)
+        elif dst.get("kind") == "local":
+            _nb_drill_local(cfg, tmp, st, save)
+        else:
+            st["result"] = "skip"; st["line"] = "restore drill isn't available for this backup type yet"
+    except Exception as e:
+        st["result"] = "warn"; st["error"] = str(e)[:180]
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+        if st.get("result") is None:
+            st["result"] = "warn" if st.get("fail") else ("ok" if st.get("ok") else "empty")
+        st["running"] = False; st["done"] = int(time.time())
+        save()
+        if st.get("result") == "warn" and st.get("fail"):
+            try:
+                push_notify("Restore drill failed",
+                            "%s — %d of %d sampled files could not be restored" % (cfg.get("name", pid), st["fail"], st["sampled"]), 1)
+                log_event("nb_drill", "Restore drill failed",
+                          "%s: %d/%d files unrecoverable" % (cfg.get("name", pid), st["fail"], st["sampled"]), lvl="warn", kind="backup")
+            except Exception:
+                pass
+
 def nb_run_bg(pid=None, dry=False, allow_delete=False):
     """Start a profile run. EXACTLY ONE run happens at a time: while busy,
     the rest wait in a queue (two rsyncs on one HDD only get in each other's way)."""
@@ -17010,6 +17195,12 @@ class H(BaseHTTPRequestHandler):
                 self._json(nb_compare_bg(_nb_bpid(b), deep=bool(b.get("deep", False))))
             elif p == "/api/backup/compare/cancel":
                 self._json(nb_compare_cancel_req(_nb_bpid(self._body())))
+            elif p == "/api/backup/drill/start":
+                self._json(nb_drill_start(_nb_bpid(self._body())))
+            elif p == "/api/backup/drill/status":
+                self._json(nb_drill_status(_nb_bpid(self._body())))
+            elif p == "/api/backup/drill/cancel":
+                self._json(nb_drill_cancel(_nb_bpid(self._body())))
             elif p == "/api/backup/cancel":
                 b = self._body()
                 pid = nb_load(_nb_bpid(b))["id"]
@@ -17149,6 +17340,8 @@ if __name__ == "__main__":
         _args = sys.argv[2:]
         _pid = next((a for a in _args if a != "deep"), NB_MAIN)
         nb_compare_run(_pid, deep=("deep" in _args))
+    elif len(sys.argv) > 1 and sys.argv[1] == "backup-drill":
+        _nb_drill_cli(sys.argv[2] if len(sys.argv) > 2 else NB_MAIN)
     elif len(sys.argv) > 1 and sys.argv[1] == "rclone-restore":
         # paths arrive through the unit env (may contain spaces), not argv
         _rclone_restore_cli(os.environ.get("RCR_REMOTE", ""), os.environ.get("RCR_PATH", ""),
