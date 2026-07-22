@@ -584,9 +584,11 @@
      green light still restores it. */
   @media(min-width:1025px){
     .win.max{inset:0!important;width:auto!important;height:auto!important;border-radius:0!important}
-    /* truly fullscreen: the menubar (z-index above windows) and dock would otherwise still show
-       through — hide them while any window is maximized. Restore via the window's green light. */
-    body:has(.win.max) .menubar,body:has(.win.max) .dock{display:none!important}
+    /* truly fullscreen: every fixed chrome layer sits above the window in z-order, so hide them
+       all while any window is maximized — menubar, its gradient, the dock, the wallpaper-refresh
+       button and the base-packages nag. Restore via the window's own green light. */
+    body:has(.win.max) .menubar,body:has(.win.max) .mb-grad,body:has(.win.max) .dock,
+    body:has(.win.max) .wall-refresh,body:has(.win.max) .basepkgs{display:none!important}
   }
   .win .wgrip{position:absolute;right:0;bottom:0;width:20px;height:20px;cursor:nwse-resize;z-index:6;touch-action:none}
   /* window resize from all sides/corners: invisible handle strips, cursor only */
