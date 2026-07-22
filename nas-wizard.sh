@@ -2897,6 +2897,36 @@ disable_comitup() {
     return 0
 }
 
+install_blackbox() {
+    # Black box flight recorder (Resilience app). Its OWN unit on purpose: the
+    # panel dying/restarting is exactly when the recorder must keep writing
+    # (systemctl restart nas-web kills the whole nas-web cgroup — same lesson
+    # as the sshfs transient units). The loop itself lives in nas-web.py
+    # (blackbox-daemon CLI) so JSON/proc parsing stays in one codebase.
+    # ExecStopPost leaves a marker: present on next boot = clean shutdown,
+    # absent = power cut / kernel death → the archived ring becomes a "flight".
+    run mkdir -p /var/lib/nas-wizard/blackbox
+    write_file /etc/systemd/system/nas-blackbox.service <<UNIT
+[Unit]
+Description=NAS-OS black box flight recorder
+After=local-fs.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 $SCRIPT_DIR/nas-web.py blackbox-daemon
+ExecStopPost=/bin/touch /var/lib/nas-wizard/blackbox/clean-shutdown
+Restart=always
+RestartSec=10
+Nice=5
+IOSchedulingClass=idle
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+    run systemctl daemon-reload
+    run systemctl enable --now nas-blackbox.service
+}
+
 install_netguard() {
     write_file /usr/local/bin/nas-netguard.sh <<'GUARD'
 #!/bin/bash
@@ -3490,6 +3520,8 @@ EOF
     # panel self-heal, availability log. Also masks comitup (incompatible: it fights
     # over wlan0). Core reliability → base, so a fresh box is protected from boot one.
     install_netguard
+    # Black box flight recorder (Resilience app): crash forensics from boot one.
+    install_blackbox
     id -nG "$TARGET_USER" 2>/dev/null | tr ' ' '\n' | grep -qx docker || run usermod -aG docker "$TARGET_USER"
     run mkdir -p "$STORAGE_MNT" "$DOCKER_ROOT" "$SERVICES_SRC"
     if [ ! -d "$NAS_CONFIG" ]; then run mkdir -p "$NAS_CONFIG/scripts"; run chown -R "$TARGET_USER:$TARGET_USER" "$NAS_CONFIG"; fi
@@ -3868,6 +3900,7 @@ run_api() {
         backup)         api_keys_run bk ;;
         notify)         api_notify ;;
         netguard)       install_netguard ;;
+        blackbox)       install_blackbox ;;
         rclone-update)  install_rclone update ;;
         motd)           install_motd ;;
         tailscale)      mod_tailscale ;;

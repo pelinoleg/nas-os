@@ -3155,6 +3155,10 @@ def _def_monitor():
         "thermal_guard":{"on": True, "priority": 1, "desk": True},
         # --- daily status summary (silent; weekly is the heartbeat) ---
         "daily_summary":{"on": False, "priority": -1, "desk": False},
+        # --- Resilience app ---
+        "dirty_boot":  {"on": True,  "priority": 1},                   # power loss / crash detected on boot
+        "resil_drill": {"on": True,  "priority": 0, "desk": True},     # weekly readiness audit found blockers
+        "log_sentry":  {"on": True,  "priority": 0, "desk": True},     # new error pattern in the journal
     }}
 
 def _monitor_defaults_desk(d):
@@ -9667,6 +9671,692 @@ def _poke_watcher():
             last = m
         time.sleep(1.5)
 
+# --------------------------------------------------------------------------- #
+#  Resilience app — "will this box survive a bad day?"
+#  Five modules, one design rule: NOTHING here is configured or inventoried by
+#  hand. Every picture is re-derived from the LIVE system on each run/tick
+#  (a hand-made list would rot — same lesson as the UAS quirk list).
+#    * black box    — flight recorder daemon (own systemd unit, survives panel
+#                     restarts); keeps the last ~15 min of vitals on disk and
+#                     archives the previous boot's ring as a "flight" with a
+#                     clean/dirty shutdown verdict
+#    * reboot drill — audit "will everything come back after a reboot" without
+#                     actually rebooting
+#    * config git   — daily git snapshots of /etc + stack composes + panel json
+#    * disaster card— auto-generated "the box is dead, now what" document
+#    * log sentry   — learns the journal's normal error noise, alerts on NEW
+#                     repeating patterns nobody wrote a check for yet
+# --------------------------------------------------------------------------- #
+BB_RUN      = "/run/nas-blackbox"
+BB_VAR      = "/var/lib/nas-wizard/blackbox"
+BB_INTERVAL = 10           # seconds between samples
+BB_KEEP     = 90           # ring length (~15 min of history)
+BB_FLIGHTS  = 20           # archived pre-crash flights to keep
+CONFGIT_DIR = "/var/lib/nas-wizard/confgit"
+DRILL_FILE  = "/var/lib/nas-wizard/resil-drill.json"
+SENTRY_FILE = "/var/lib/nas-wizard/logsentry.json"
+RESIL_STATE = "/var/lib/nas-wizard/resil.json"
+DISASTER_MD = os.path.join(NAS_CONFIG, "disaster-card.md")
+
+# ---- black box: flight recorder --------------------------------------------
+
+def _bb_cpu_read():
+    try:
+        with open("/proc/stat") as f:
+            v = [int(x) for x in f.readline().split()[1:9]]
+        return sum(v), v[3] + v[4]          # total, idle+iowait
+    except (OSError, ValueError, IndexError):
+        return None
+
+def _bb_sample(prev_cpu):
+    s = {"t": int(time.time())}
+    try:
+        s["load"] = round(os.getloadavg()[0], 2)
+    except OSError:
+        pass
+    try:
+        mi = {}
+        with open("/proc/meminfo") as f:
+            for ln in f:
+                k, _, rest = ln.partition(":")
+                mi[k] = int(rest.split()[0])
+        s["mem"] = round(100 - mi.get("MemAvailable", 0) * 100.0 / max(mi.get("MemTotal", 1), 1), 1)
+    except (OSError, ValueError, IndexError):
+        pass
+    cur = _bb_cpu_read()
+    if cur and prev_cpu and cur[0] > prev_cpu[0]:
+        dt, di = cur[0] - prev_cpu[0], cur[1] - prev_cpu[1]
+        s["cpu"] = round(max(0.0, 100.0 * (dt - di) / dt), 1)
+    try:
+        with open("/sys/class/thermal/thermal_zone0/temp") as f:
+            s["temp"] = round(int(f.read().strip()) / 1000.0, 1)
+    except (OSError, ValueError):
+        pass
+    r = _run(["vcgencmd", "get_throttled"], timeout=5)
+    m = re.search(r"0x([0-9a-fA-F]+)", r.get("log") or "") if r.get("ok") else None
+    if m:
+        s["thr"] = int(m.group(1), 16)
+    r = _run(["ps", "-eo", "pcpu,pmem,comm", "--sort=-pcpu", "--no-headers"], timeout=10)
+    top = []
+    for ln in (r.get("log") or "").splitlines()[:3]:
+        p = ln.split(None, 2)
+        try:
+            if len(p) == 3 and float(p[0]) >= 1.0:
+                top.append([p[2][:24], float(p[0]), float(p[1])])
+        except ValueError:
+            pass
+    if top:
+        s["top"] = top
+    return s, cur
+
+def _bb_dmesg_tail(n=25):
+    r = _run(["sh", "-c", "dmesg --time-format iso 2>/dev/null | tail -n %d" % n], timeout=10)
+    return (r.get("log") or "").splitlines()[-n:]
+
+def blackbox_daemon():
+    """Recorder loop for nas-blackbox.service (its OWN unit: the panel dying is
+    exactly when the recorder must keep writing). Samples vitals every
+    BB_INTERVAL s into a tmpfs ring (/run — zero SD wear) and persists a copy
+    every 3rd sample, so after a power cut the on-disk ring still holds the
+    last ~30 s before death. On start, a ring left by a DIFFERENT boot becomes
+    flight-*.json with a clean/dirty verdict (the clean-shutdown marker is
+    written by the unit's ExecStopPost; a power cut leaves none)."""
+    os.makedirs(BB_RUN, exist_ok=True)
+    os.makedirs(BB_VAR, exist_ok=True)
+    try:
+        with open("/proc/sys/kernel/random/boot_id") as f:
+            boot_id = f.read().strip()
+    except OSError:
+        boot_id = "?"
+    marker = os.path.join(BB_VAR, "clean-shutdown")
+    curf = os.path.join(BB_VAR, "current.json")
+    prev = _json_load_strict(curf, None)
+    if isinstance(prev, dict) and prev.get("boot_id") and prev["boot_id"] != boot_id:
+        clean = os.path.exists(marker)
+        stamp = time.strftime("%Y%m%d-%H%M%S",
+                              time.localtime(prev.get("updated") or time.time()))
+        fn = "flight-%s.json" % stamp
+        prev["clean"] = clean
+        try:
+            _json_save(os.path.join(BB_VAR, fn), prev)
+            os.unlink(curf)
+        except OSError:
+            pass
+        try:
+            with open(os.path.join(BB_VAR, "boots.jsonl"), "a") as f:
+                f.write(json.dumps({"ts": int(time.time()), "clean": clean, "flight": fn,
+                                    "last": (prev.get("samples") or [{}])[-1]}) + "\n")
+        except OSError:
+            pass
+        for fp in sorted(glob.glob(os.path.join(BB_VAR, "flight-*.json")))[:-BB_FLIGHTS]:
+            try:
+                os.unlink(fp)
+            except OSError:
+                pass
+    try:
+        os.unlink(marker)     # marker is per-shutdown; a stale one must not whitewash the next crash
+    except OSError:
+        pass
+    ring, dm, prev_cpu, n = [], [], _bb_cpu_read(), 0
+    time.sleep(2)             # first CPU delta needs a baseline
+    while True:
+        try:
+            s, prev_cpu = _bb_sample(prev_cpu)
+            ring = (ring + [s])[-BB_KEEP:]
+            n += 1
+            if n % 3 == 1:
+                dm = _bb_dmesg_tail()
+            payload = {"boot_id": boot_id, "updated": int(time.time()),
+                       "interval": BB_INTERVAL, "samples": ring, "dmesg": dm}
+            _json_save(os.path.join(BB_RUN, "current.json"), payload)
+            if n % 3 == 0:
+                _json_save(curf, payload)   # the on-disk copy is what survives a power cut
+        except Exception:
+            pass
+        time.sleep(BB_INTERVAL)
+
+def blackbox_status():
+    live = (_json_load_strict(os.path.join(BB_RUN, "current.json"), None)
+            or _json_load_strict(os.path.join(BB_VAR, "current.json"), None))
+    boots = []
+    try:
+        with open(os.path.join(BB_VAR, "boots.jsonl")) as f:
+            for ln in f:
+                try:
+                    boots.append(json.loads(ln))
+                except ValueError:
+                    pass
+    except OSError:
+        pass
+    act = _run(["systemctl", "is-active", "nas-blackbox.service"], timeout=5)
+    return {"ok": True, "live": live, "boots": boots[-30:][::-1],
+            "flights": sorted((os.path.basename(f) for f in
+                               glob.glob(os.path.join(BB_VAR, "flight-*.json"))), reverse=True),
+            "running": (act.get("log") or "").strip() == "active"}
+
+def blackbox_flight(name):
+    if not re.match(r"^flight-[0-9-]+\.json$", name or ""):
+        return {"ok": False, "log": "bad name"}
+    d = _json_load_strict(os.path.join(BB_VAR, name), None)
+    return {"ok": bool(d), "flight": d}
+
+# ---- reboot drill: readiness audit without rebooting ------------------------
+
+_DRILL_CRIT = (
+    ("nas-web.service",      "the web panel itself"),
+    ("docker.service",       "the Docker engine"),
+    ("nas-stacks.service",   "brings docker stacks back up after boot"),
+    ("smbd.service",         "network shares (SMB)"),
+    ("avahi-daemon.service", "<host>.local discovery"),
+    ("nas-netguard.timer",   "network watchdog + availability log"),
+    ("nas-blackbox.service", "flight recorder"),
+)
+_DRILL_SKIP = re.compile(r"^(nas-remote-|nas-rclone-|nas-backup|session-|user@|getty@"
+                         r"|serial-getty@|ifup@|wpa_supplicant)")
+
+def drill_run():
+    """Reboot-readiness audit WITHOUT rebooting: everything currently running vs
+    what is actually wired to come back. Live state only — swapped disks and
+    new stacks are picked up automatically on the next run."""
+    issues = []
+    def add(sev, area, title, detail="", fix=""):
+        issues.append({"sev": sev, "area": area, "title": title,
+                       "detail": detail, "fix": fix})
+
+    # systemd: running now but disabled -> silently gone after a reboot
+    files = {}
+    r = _run(["systemctl", "list-unit-files", "--type=service",
+              "--no-legend", "--plain", "--no-pager"], timeout=20)
+    for ln in (r.get("log") or "").splitlines():
+        p = ln.split()
+        if len(p) >= 2:
+            files[p[0]] = p[1]
+    r = _run(["systemctl", "list-units", "--type=service", "--state=running",
+              "--no-legend", "--plain", "--no-pager"], timeout=20)
+    for ln in (r.get("log") or "").splitlines():
+        u = (ln.split() or [""])[0]
+        # transient units (systemd-run) are absent from unit-files — their owners
+        # (FM sshfs, rclone mounts, backup runs) restart them on their own
+        if files.get(u) == "disabled" and not _DRILL_SKIP.match(u):
+            add("warn", "services", "%s runs now but is disabled" % u,
+                "It will NOT start after a reboot.", "systemctl enable " + u)
+    for u, why in _DRILL_CRIT:
+        r = _run(["systemctl", "is-enabled", u], timeout=10)
+        st = (r.get("log") or "").strip().splitlines()
+        st = st[-1].strip() if st else ""
+        if st in ("disabled", "masked"):
+            add("bad", "services", "%s is %s" % (u, st),
+                why + " — it will not come back after a reboot.",
+                "systemctl enable --now " + u)
+
+    # mounts: fstab promises vs reality, both directions
+    fstab, fsmp = [], {}
+    try:
+        with open("/etc/fstab") as f:
+            for ln in f:
+                t = ln.strip()
+                if t and not t.startswith("#"):
+                    p = t.split()
+                    if len(p) >= 4:
+                        fstab.append(p)
+                        fsmp[p[1]] = p
+    except OSError:
+        pass
+    mounted = {}
+    try:
+        with open("/proc/mounts") as f:
+            for ln in f:
+                p = ln.split()
+                if len(p) >= 3:
+                    mounted[p[1].replace("\\040", " ")] = (p[0], p[2])
+    except OSError:
+        pass
+    am_base = "/media/nas"
+    try:
+        with open("/etc/nas-wizard/automount.conf") as f:
+            m = re.search(r'^BASE="?([^"\n]+?)"?$', f.read(), re.M)
+            if m:
+                am_base = m.group(1)
+    except OSError:
+        pass
+    def dev_present(spec):
+        if spec.startswith("UUID="):
+            return os.path.exists("/dev/disk/by-uuid/" + spec[5:])
+        if spec.startswith("LABEL="):
+            return os.path.exists("/dev/disk/by-label/" + spec[6:].replace(" ", "\\x20"))
+        if spec.startswith("PARTUUID="):
+            return os.path.exists("/dev/disk/by-partuuid/" + spec[9:])
+        if spec.startswith("/dev/"):
+            return os.path.exists(spec)
+        return True     # mergerfs branch globs, network fs, tmpfs, …
+    for p in fstab:
+        spec, mp, fstype, opts = p[0], p[1], p[2], p[3]
+        if fstype == "swap" or not mp.startswith(("/mnt", "/srv", "/media", "/home", "/var/backups")):
+            continue
+        if mp in mounted:
+            continue
+        if dev_present(spec):
+            add("warn", "mounts", "%s is in fstab but not mounted" % mp,
+                "The device is present and would mount on boot, yet right now it is not mounted — "
+                "something unmounted it, or it fails to mount.", "mount " + mp)
+        elif "nofail" in opts:
+            add("info", "mounts", "%s: disk absent (nofail)" % mp,
+                "Boot continues fine without it. Remove the fstab line if the disk is gone for good.")
+        else:
+            add("bad", "mounts", "%s: disk absent and no 'nofail'" % mp,
+                "systemd will wait ~90 s for this device on EVERY boot and can drop to emergency mode.",
+                "add 'nofail' to its fstab options or remove the line")
+    for mp in sorted(mounted):
+        src, fstype = mounted[mp]
+        if not mp.startswith(("/mnt/", "/srv/", "/media/")):
+            continue
+        if fstype.startswith("fuse") or fstype == "autofs":
+            continue     # rclone/sshfs — the panel remounts them itself (transient units)
+        if mp.startswith(("/mnt/rclone/", "/mnt/remote/")):
+            continue
+        if mp == am_base or mp.startswith(am_base + "/"):
+            continue     # udev automount re-creates these on boot coldplug
+        if mp not in fsmp:
+            add("warn", "mounts", "%s is mounted by hand" % mp,
+                "Mounted now (%s), but absent from fstab — after a reboot it will be gone." % src,
+                "add it to fstab (Disks app does this when formatting/assigning a role)")
+    r = _run(["findmnt", "--verify"], timeout=20)
+    for ln in [x.strip() for x in (r.get("log") or "").splitlines() if "[E]" in x][:5]:
+        add("bad", "mounts", "fstab error", ln[:300], "fix /etc/fstab")
+
+    # docker: running containers nothing brings back. Stack containers are re-upped
+    # by nas-stacks.service, so only judge them when that unit is off.
+    r = _run(["systemctl", "is-enabled", "nas-stacks.service"], timeout=10)
+    stacks_on = (r.get("log") or "").strip().startswith("enabled")
+    r = _run(["docker", "ps", "--format", "{{.Names}}"], timeout=20)
+    names = [n for n in (r.get("log") or "").split() if n]
+    if names:
+        r = _run(["docker", "inspect", "-f",
+                  "{{.Name}}\t{{.HostConfig.RestartPolicy.Name}}\t"
+                  "{{index .Config.Labels \"com.docker.compose.project.working_dir\"}}",
+                  *names], timeout=30)
+        for ln in (r.get("log") or "").splitlines():
+            p = ln.split("\t")
+            if len(p) < 3:
+                continue
+            nm, pol, wd = p[0].lstrip("/"), p[1] or "no", p[2]
+            in_stack = wd.startswith(STACKS_DIR)
+            if in_stack and stacks_on:
+                continue
+            if pol in ("no", ""):
+                add("warn", "docker", "container %s won't come back" % nm,
+                    ("Its stack auto-start unit (nas-stacks) is disabled." if in_stack else
+                     "Restart policy is 'no' and it is not part of an auto-started stack."),
+                    ("systemctl enable nas-stacks.service" if in_stack else
+                     "docker update --restart unless-stopped " + nm))
+
+    counts = {s: sum(1 for i in issues if i["sev"] == s) for s in ("bad", "warn", "info")}
+    score = max(0, 100 - 20 * counts["bad"] - 7 * counts["warn"])
+    res = {"ok": True, "ts": int(time.time()), "score": score,
+           "counts": counts, "issues": issues}
+    _json_save(DRILL_FILE, res)
+    return res
+
+def drill_last():
+    return _json_load_strict(DRILL_FILE, None) or \
+        {"ok": True, "ts": 0, "score": None, "issues": [], "counts": {}}
+
+# ---- config history: git snapshots of the config surface --------------------
+
+def _confgit_git(*args, timeout=60):
+    return _run(["git", "-C", CONFGIT_DIR, "-c", "user.email=resil@nas",
+                 "-c", "user.name=nas-resilience", *args], timeout=timeout)
+
+def confgit_snapshot(reason="manual"):
+    """Copy the system's config surface into a private git repo and commit if
+    anything changed. Content: /etc (minus volatile files), stack composes,
+    panel JSON configs. Repo is root-only 0700 — /etc contains shadow."""
+    try:
+        os.makedirs(CONFGIT_DIR, exist_ok=True)
+        os.chmod(CONFGIT_DIR, 0o700)
+    except OSError as e:
+        return {"ok": False, "log": str(e)}
+    if not os.path.isdir(os.path.join(CONFGIT_DIR, ".git")):
+        r = _confgit_git("init", "-q")
+        if not r.get("ok"):
+            return {"ok": False, "log": (r.get("log") or "")[-300:]}
+    excl = ["--exclude=mtab", "--exclude=adjtime", "--exclude=.pwd.lock",
+            "--exclude=*.swp", "--exclude=*.dpkg-new", "--exclude=*.dpkg-old",
+            "--exclude=ld.so.cache", "--exclude=blkid.tab*", "--exclude=.etckeeper",
+            "--exclude=lvm/archive", "--exclude=lvm/backup"]
+    r = _run(["rsync", "-a", "--delete", *excl, "/etc/",
+              os.path.join(CONFGIT_DIR, "etc/")], timeout=180)
+    if not r.get("ok"):
+        return {"ok": False, "log": "rsync /etc: " + (r.get("log") or "")[-300:]}
+    _run(["rsync", "-a", "--delete", "--include=*/", "--include=compose*.y*ml",
+          "--include=docker-compose*.y*ml", "--include=.env", "--exclude=*",
+          "--prune-empty-dirs", STACKS_DIR + "/",
+          os.path.join(CONFGIT_DIR, "stacks/")], timeout=60)
+    # panel configs: top-level json only, minus journals/caches (noise, size)
+    _run(["rsync", "-a", "--delete", "--exclude=events.json",
+          "--exclude=nas-backup-history*.json", "--exclude=nas-backup-changes*.json",
+          "--exclude=duscan-*.json", "--exclude=rclone-du-*.json",
+          "--exclude=rclone-copy.json", "--exclude=rclone-restore.json",
+          "--exclude=known-ips.json", "--include=/*.json", "--exclude=*",
+          NAS_CONFIG + "/", os.path.join(CONFGIT_DIR, "nas-config/")], timeout=60)
+    _confgit_git("add", "-A")
+    r = _confgit_git("status", "--porcelain")
+    if not (r.get("log") or "").strip():
+        return {"ok": True, "changed": False}
+    r = _confgit_git("commit", "-q", "-m", reason)
+    if not r.get("ok"):
+        return {"ok": False, "log": (r.get("log") or "")[-300:]}
+    return {"ok": True, "changed": True}
+
+def confgit_log(limit=60):
+    if not os.path.isdir(os.path.join(CONFGIT_DIR, ".git")):
+        return {"ok": True, "commits": [], "dirty": 0}
+    r = _confgit_git("log", "--pretty=format:%h%x09%ct%x09%s", "-n", str(limit))
+    commits = []
+    for ln in (r.get("log") or "").splitlines():
+        p = ln.split("\t")
+        if len(p) == 3:
+            try:
+                commits.append({"h": p[0], "ts": int(p[1]), "msg": p[2]})
+            except ValueError:
+                pass
+    r = _confgit_git("log", "--pretty=format:@%h", "--shortstat", "-n", str(limit))
+    stats, cur = {}, None
+    for ln in (r.get("log") or "").splitlines():
+        if ln.startswith("@"):
+            cur = ln[1:]
+        elif cur and "changed" in ln:
+            stats[cur] = ln.strip()
+    for c in commits:
+        c["stat"] = stats.get(c["h"], "")
+    rd = _confgit_git("status", "--porcelain")
+    dirty = len([x for x in (rd.get("log") or "").splitlines() if x.strip()])
+    return {"ok": True, "commits": commits, "dirty": dirty}
+
+def confgit_diff(h):
+    if not re.match(r"^[0-9a-f]{6,40}$", h or ""):
+        return {"ok": False, "log": "bad hash"}
+    r = _confgit_git("show", "--stat", "--patch", "--no-color", h, timeout=60)
+    out = r.get("log") or ""
+    if len(out) > 400000:
+        out = out[:400000] + "\n… (truncated)"
+    return {"ok": bool(r.get("ok")), "diff": out}
+
+# ---- disaster card ----------------------------------------------------------
+
+def disaster_build():
+    """Regenerate ~/nas-config/disaster-card.md — the "box is dead, now what"
+    document. It lives in nas-config, so the settings backup carries it OFF-box
+    automatically. Everything is read from the live system at build time."""
+    host = socket.gethostname()
+    model = ""
+    try:
+        with open("/proc/device-tree/model") as f:
+            model = f.read().strip("\x00 ")
+    except OSError:
+        pass
+    ips = ((_run(["hostname", "-I"], timeout=5).get("log") or "").strip())
+    L = ["# Disaster card — %s" % host, "",
+         "_Auto-generated by NAS-OS Resilience on %s. Do not edit — it is rebuilt daily._"
+         % time.strftime("%Y-%m-%d %H:%M"), "",
+         "Box: **%s**%s · IP: `%s`" % (host, " (%s)" % model if model else "", ips or "?"), "",
+         "## If this box is dead", "",
+         "1. The DATA is on the disks, not the box: pool branches are plain ext4 — any of them "
+         "can be read alone on another Linux machine (a USB adapter is fine). mergerfs stores "
+         "whole files per branch, nothing is striped.",
+         "2. Reinstall NAS-OS on a fresh box: "
+         "`curl -fsSL https://raw.githubusercontent.com/pelinoleg/nas-os/main/install.sh | sudo bash`",
+         "3. Restore panel settings from **Settings → Settings backup** (the archive contains this "
+         "card, Samba config+users, stack composes, backup profiles, SSH keys).",
+         "4. Reattach the disks and rebuild the pool from the actually mounted branches: "
+         "`nas-wizard.sh api mergerfs`.",
+         "5. Databases inside file backups are LOGICAL DUMPS (live DB dirs are excluded on purpose): "
+         "restore with `gunzip -c dump.sql.gz | docker exec -i <db-container> psql -U <user> -d <db>`.", ""]
+    r = _run(["lsblk", "-J", "-o",
+              "NAME,TYPE,MODEL,SERIAL,SIZE,FSTYPE,LABEL,MOUNTPOINT,TRAN,UUID"], timeout=15)
+    try:
+        bd = json.loads(r.get("log") or "{}").get("blockdevices") or []
+    except ValueError:
+        bd = []
+    flat = []
+    def walk(d):
+        flat.append(d)
+        for c in d.get("children") or []:
+            walk(c)
+    for d in bd:
+        walk(d)
+    L += ["## Disks right now", "",
+          "| device | model | serial | size | fs | label | mounted at | bus |",
+          "|---|---|---|---|---|---|---|---|"]
+    for d in flat:
+        if d.get("type") in ("disk", "part"):
+            L.append("| %s | %s | %s | %s | %s | %s | %s | %s |" % tuple(
+                str(d.get(k) or "") for k in
+                ("name", "model", "serial", "size", "fstype", "label", "mountpoint", "tran")))
+    L.append("")
+    fstab = ""
+    try:
+        with open("/etc/fstab") as f:
+            fstab = f.read().strip()
+    except OSError:
+        pass
+    L += ["## /etc/fstab", "", "```", fstab, "```", ""]
+    if os.path.isfile("/etc/snapraid.conf"):
+        try:
+            with open("/etc/snapraid.conf") as f:
+                txt = "\n".join(ln for ln in f.read().splitlines()
+                                if ln.strip() and not ln.strip().startswith("#"))
+            L += ["## SnapRAID", "", "```", txt, "```", ""]
+        except OSError:
+            pass
+    shares, cur = [], None
+    try:
+        with open("/etc/samba/nas-shares.conf") as f:
+            for ln in f:
+                m = re.match(r"^\[(.+)\]", ln.strip())
+                if m:
+                    cur = m.group(1)
+                    continue
+                m = re.match(r"^\s*path\s*=\s*(.+)", ln)
+                if m and cur and cur.lower() != "global":
+                    shares.append((cur, m.group(1).strip()))
+    except OSError:
+        pass
+    if shares:
+        L += ["## SMB shares", ""] + ["- **%s** → `%s`" % s for s in shares] + [""]
+    rows = []
+    for d in sorted(glob.glob(os.path.join(STACKS_DIR, "*"))):
+        if not os.path.isdir(d):
+            continue
+        cp = _compose_path(os.path.basename(d))
+        imgs = []
+        try:
+            with open(cp) as f:
+                for ln in f:
+                    m = re.match(r"^\s*image:\s*[\"']?([^\"'#\s]+)", ln)
+                    if m:
+                        imgs.append(m.group(1))
+        except OSError:
+            pass
+        rows.append("- **%s** — %s" % (os.path.basename(d), ", ".join(imgs) or "compose"))
+    if rows:
+        L += ["## Docker stacks (/opt/stacks)", ""] + rows + [""]
+    rows = []
+    for p in _safe(nb_profiles, []) or []:
+        bits = [p.get("direction") or "?"]
+        if p.get("dest_base"):
+            bits.append("dest %s" % p["dest_base"])
+        rows.append("- **%s** — %s (full config restores with the settings backup)"
+                    % (p.get("name") or p.get("id"), ", ".join(bits)))
+    if rows:
+        L += ["## Backup profiles on this box", ""] + rows + [""]
+    md = "\n".join(L) + "\n"
+    tmp = DISASTER_MD + ".tmp"
+    try:
+        with open(tmp, "w") as f:
+            f.write(md)
+        os.replace(tmp, DISASTER_MD)
+        shutil.chown(DISASTER_MD, TARGET_USER, TARGET_USER)
+    except (OSError, LookupError):
+        pass
+    return {"ok": True, "ts": int(time.time()), "md": md}
+
+def disaster_get():
+    if not os.path.isfile(DISASTER_MD):
+        return disaster_build()
+    try:
+        with open(DISASTER_MD) as f:
+            return {"ok": True, "ts": int(os.stat(DISASTER_MD).st_mtime), "md": f.read()}
+    except OSError:
+        return disaster_build()
+
+# ---- log sentry: novel-error detector --------------------------------------
+
+_SENTRY_LAST = [0.0]
+
+def _sentry_tpl(msg):
+    """Collapse a journal message to its shape: ids/numbers/paths → placeholders,
+    so 'read error on sda at 12345' and '… at 99' are ONE pattern."""
+    t = re.sub(r"\b[0-9a-fA-F]{8,}\b", "#", msg)
+    t = re.sub(r"(/[\w.@+~-]+){2,}", "/…", t)
+    t = re.sub(r"\d+", "#", t)
+    return t.strip()[:240]
+
+def sentry_scan():
+    """Learn the journal's normal error noise; flag NEW patterns. The state keeps
+    a journal cursor, so each scan reads only fresh err-priority entries. First
+    24 h = learning (baseline fills silently); afterwards a new pattern that
+    repeats ≥3 times raises the log_sentry event once."""
+    now = time.time()
+    st = _json_load_strict(SENTRY_FILE, {})
+    pats = st.get("patterns") or {}
+    cmd = ["journalctl", "-p", "3", "-o", "json", "--no-pager"]
+    cmd += ["--after-cursor", st["cursor"]] if st.get("cursor") else ["-n", "400"]
+    r = _run(cmd, timeout=30)
+    lines = (r.get("log") or "").splitlines()
+    st.setdefault("learn_until", now + 86400)
+    fresh = []
+    for ln in lines:
+        try:
+            e = json.loads(ln)
+        except ValueError:
+            continue
+        if e.get("__CURSOR"):
+            st["cursor"] = e["__CURSOR"]
+        msg = e.get("MESSAGE")
+        if not isinstance(msg, str) or not msg.strip():
+            continue     # binary/blob messages — not worth pattern-matching
+        unit = e.get("_SYSTEMD_UNIT") or e.get("SYSLOG_IDENTIFIER") or "kernel"
+        tpl = _sentry_tpl(msg)
+        key = hashlib.sha1((unit + "|" + tpl).encode("utf-8", "ignore")).hexdigest()[:12]
+        p = pats.get(key)
+        if p:
+            p["n"] = p.get("n", 0) + 1
+            p["last"] = int(now)
+        else:
+            p = pats[key] = {"tpl": tpl, "unit": unit, "ex": msg[:300], "n": 1,
+                             "first": int(now), "last": int(now),
+                             "new": now > st["learn_until"]}
+        if p.get("new") and not p.get("muted") and not p.get("sent") and p["n"] >= 3:
+            p["sent"] = True
+            fresh.append(p)
+    for p in fresh[:3]:
+        notify_event("log_sentry", "sentry:" + p["unit"] + p["tpl"][:40],
+                     "New error pattern in system log",
+                     "%s: %s (seen %d times)" % (p["unit"], p["ex"][:200], p["n"]))
+    if len(pats) > 1500:
+        for k in sorted(pats, key=lambda k: pats[k].get("last", 0))[:len(pats) - 1500]:
+            pats.pop(k, None)
+    st["patterns"] = pats
+    st["scanned"] = int(now)
+    _json_save(SENTRY_FILE, st)
+    return {"ok": True}
+
+def sentry_status():
+    st = _json_load_strict(SENTRY_FILE, {})
+    pats = st.get("patterns") or {}
+    recent = [dict(v, key=k) for k, v in pats.items()
+              if v.get("new") and not v.get("muted")]
+    recent.sort(key=lambda p: -p.get("last", 0))
+    return {"ok": True, "learning": time.time() < (st.get("learn_until") or 0),
+            "total": len(pats), "scanned": st.get("scanned") or 0,
+            "recent": recent[:80]}
+
+def sentry_mute(key):
+    st = _json_load_strict(SENTRY_FILE, {})
+    p = (st.get("patterns") or {}).get(str(key or ""))
+    if not p:
+        return {"ok": False, "log": "no such pattern"}
+    p["muted"] = True
+    _json_save(SENTRY_FILE, st)
+    return {"ok": True}
+
+# ---- overview + periodic tick ----------------------------------------------
+
+def resil_overview():
+    bb = blackbox_status()
+    live = bb.get("live") or {}
+    samples = live.get("samples") or []
+    drill = drill_last()
+    cg = _safe(confgit_log, {}) or {}
+    sn = sentry_status()
+    return {"ok": True,
+            "blackbox": {"running": bb.get("running"),
+                         "last_sample": samples[-1] if samples else None,
+                         "boots": (bb.get("boots") or [])[:5]},
+            "drill": {"ts": drill.get("ts"), "score": drill.get("score"),
+                      "counts": drill.get("counts") or {}},
+            "confgit": {"last": (cg.get("commits") or [{"ts": 0}])[0].get("ts", 0),
+                        "commits": len(cg.get("commits") or []),
+                        "dirty": cg.get("dirty") or 0},
+            "sentry": {"learning": sn.get("learning"), "new": len(sn.get("recent") or []),
+                       "total": sn.get("total")},
+            "disaster": {"ts": int(os.stat(DISASTER_MD).st_mtime)
+                         if os.path.isfile(DISASTER_MD) else 0}}
+
+def _resil_tick():
+    """Self-maintaining cadence: sentry 5 min, confgit + disaster card daily,
+    drill weekly, dirty-boot alert as soon as the recorder archives a flight."""
+    now = time.time()
+    if now - _SENTRY_LAST[0] >= 300:
+        _SENTRY_LAST[0] = now
+        _safe(sentry_scan)
+    st = _json_load_strict(RESIL_STATE, {})
+    ch = False
+    boots = (_safe(blackbox_status, {}) or {}).get("boots") or []
+    if boots:
+        last = boots[0]
+        if last.get("ts") and last["ts"] != st.get("boot_seen"):
+            st["boot_seen"] = last["ts"]
+            ch = True
+            if not last.get("clean"):
+                smp = last.get("last") or {}
+                notify_event("dirty_boot", "dirtyboot:%s" % last["ts"],
+                             "Box lost power or crashed",
+                             "The previous boot ended without a clean shutdown. Last recorded: "
+                             "load %s, temp %s°C, CPU %s%%. Open Resilience → Black box for the flight."
+                             % (smp.get("load", "?"), smp.get("temp", "?"), smp.get("cpu", "?")),
+                             cooldown=0)
+    if now - (st.get("confgit") or 0) >= 86400:
+        st["confgit"] = now
+        ch = True
+        _safe(lambda: confgit_snapshot("daily snapshot"))
+    if now - (st.get("disaster") or 0) >= 86400:
+        st["disaster"] = now
+        ch = True
+        _safe(disaster_build)
+    if now - (st.get("drill") or 0) >= 7 * 86400:
+        st["drill"] = now
+        ch = True
+        res = _safe(drill_run) or {}
+        if (res.get("counts") or {}).get("bad"):
+            notify_event("resil_drill", "drill:weekly",
+                         "Reboot drill: %d blocker(s)" % res["counts"]["bad"],
+                         "The weekly reboot-readiness audit found things that will NOT survive "
+                         "a reboot. Open Resilience → Reboot drill.")
+    if ch:
+        _json_save(RESIL_STATE, st)
+
 def monitor_loop():
     _safe(_therm_recover)      # release containers orphaned by thermal guard before a crash/reboot
     threading.Thread(target=_poke_watcher, daemon=True).start()
@@ -9684,7 +10374,8 @@ def monitor_loop():
             last_full = now
         funcs = ((history_sample, monitor_tick, maintenance_daily, _smart_selftest_tick,
                   _nb_sched_tick, _nb_drill_sched_tick, _automount_tick, _summary_tick, _thermal_tick, usb_ops_sync,
-                  _fsw_tick, _replica_tick, _remotes_tick, _rclone_mounts_tick, _screen_tick) if full else
+                  _fsw_tick, _replica_tick, _remotes_tick, _rclone_mounts_tick, _screen_tick,
+                  _resil_tick) if full else
                  (monitor_tick, _automount_tick, usb_ops_sync))
         for fn in funcs:
             try:
@@ -16583,6 +17274,22 @@ class H(BaseHTTPRequestHandler):
                     self._sendraw(fp)
                 else:
                     self._json({"error": "no file"}, 404)
+            elif p == "/api/resil/overview":
+                self._json(resil_overview())
+            elif p == "/api/resil/drill":
+                self._json(drill_last())
+            elif p == "/api/resil/blackbox":
+                self._json(blackbox_status())
+            elif p == "/api/resil/blackbox/flight":
+                self._json(blackbox_flight((q.get("f") or [""])[0]))
+            elif p == "/api/resil/confgit":
+                self._json(confgit_log(min(200, int((q.get("limit") or ["60"])[0]))))
+            elif p == "/api/resil/confgit/diff":
+                self._json(confgit_diff((q.get("h") or [""])[0]))
+            elif p == "/api/resil/disaster":
+                self._json(disaster_get())
+            elif p == "/api/resil/sentry":
+                self._json(sentry_status())
             elif p == "/api/net":
                 self._json(net_info())
             elif p == "/api/net/speedtest":
@@ -16886,6 +17593,14 @@ class H(BaseHTTPRequestHandler):
             if p == "/api/creds":
                 b = self._body(); save_creds(b.get("creds", []))
                 self._json({"ok": True})
+            elif p == "/api/resil/drill/run":
+                self._json(drill_run())
+            elif p == "/api/resil/confgit/snap":
+                self._json(confgit_snapshot("manual snapshot"))
+            elif p == "/api/resil/disaster/rebuild":
+                self._json(disaster_build())
+            elif p == "/api/resil/sentry/mute":
+                self._json(sentry_mute((self._body() or {}).get("key")))
             elif p == "/api/settings":
                 b = self._body(); save_settings(b.get("settings", {}))
                 self._json({"ok": True})
@@ -17537,5 +18252,7 @@ if __name__ == "__main__":
                           os.environ.get("RCC_PATH", ""))
     elif len(sys.argv) > 2 and sys.argv[1] == "screen-op":
         screen_op_run(sys.argv[2])
+    elif len(sys.argv) > 1 and sys.argv[1] == "blackbox-daemon":
+        blackbox_daemon()   # nas-blackbox.service (see install_blackbox in nas-wizard.sh)
     else:
         main()
