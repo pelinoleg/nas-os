@@ -11314,6 +11314,29 @@ function maybeOnboard(){let done=false;try{done=!!SET.onboarded||localStorage.ge
    }).catch(()=>{});
  }
  matchMedia("(prefers-color-scheme:light)").addEventListener("change",()=>{if(SET.theme==="auto")applySettings();});
+ /* iOS click bridge. iOS Safari only synthesises a `click` from a tap on NATIVELY clickable
+    elements (button/a/input/…). Our traffic lights are <i> and many controls are <div>/<span>
+    wired with a JS `.onclick` property — WebKit never fires their click, so the tap is dead
+    (pointer/touch events arrive, but no mousedown/mouseup/click — proven with ?tdbg=1). Blink
+    (Android) DOES fire it, so this runs on iOS only, or it would double-fire. On a stationary
+    tap whose target is NOT inside a native control, we dispatch the click WebKit withheld. */
+ (function(){
+  var ua=navigator.userAgent||"";
+  var IOS=/iP(hone|ad|od)/.test(ua)||(navigator.maxTouchPoints>1&&/Macintosh/.test(ua));
+  if(!IOS)return;
+  var sx=0,sy=0,moved=false;
+  addEventListener("touchstart",function(e){var t=e.touches[0];if(!t)return;sx=t.clientX;sy=t.clientY;moved=false;},{passive:true,capture:true});
+  addEventListener("touchmove",function(e){var t=e.touches[0];if(!t)return;if(Math.abs(t.clientX-sx)>10||Math.abs(t.clientY-sy)>10)moved=true;},{passive:true,capture:true});
+  addEventListener("touchend",function(e){
+   if(moved||e.touches.length)return;
+   var t=e.target;
+   if(!t||!t.closest)return;
+   // native controls already get their click from iOS — leave them alone (avoids a double click)
+   if(t.closest("a[href],button,input,select,textarea,label,summary,[role=button],[contenteditable]"))return;
+   e.preventDefault();
+   t.dispatchEvent(new MouseEvent("click",{bubbles:true,cancelable:true,view:window}));
+  },{passive:false,capture:true});
+ })();
  /* Touch diagnostic (only with ?tdbg=1): shows a fixed log of the raw event sequence for each tap
     so an iPad user can report exactly what fires (pointer/touch/click, target, defaultPrevented,
     pointercancel). Completely inert without the query flag. */
