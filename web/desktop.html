@@ -436,6 +436,9 @@
     .srow{padding:14px 0}
     .set-nav button{padding:11px 12px}
     input,select,textarea{font-size:16px}   /* iOS doesn't zoom on focus if ≥16px */
+    /* tighten the airy perimeter padding of settings/Rclone/Backup panes on touch (.win beats the
+       later base .set-pane rule; the width-based overrides lost to it on source order) */
+    .win .set-pane{padding:13px 14px}
     /* window traffic lights: bigger dots, more space between them, and a wide invisible hit
        zone — the 11px dots are hard to hit with a finger (.win specificity beats the base rule) */
     .win .lights{gap:15px}
@@ -6988,7 +6991,7 @@ function winRclone(initTab){openWin("__rclone","Rclone",(body,win)=>{
    const meta=`${usedBy.length?`Used by <b>${usedBy.map(esc).join(", ")}</b>`:`<span class="rc-mut">not used by any backup yet</span>`}${dd.last_run?` · last backup ${agoR(dd.last_run)}`:""}${dd.sent_bytes?` · ${fmtB(dd.sent_bytes)} transferred recently`:""}`;
    const card=el(`<div class="rc-card">
      <div class="rc-card-h"><span class="rc-name mono"><span class="rc-dot" title="checking reachability…"></span>${svg("net",15)} ${esc(r)}${dd.type?`<span class="rc-type">${esc(dd.type)}</span>`:""}</span>
-      <span class="rc-actions"><button class="btn sm" data-a="analyze" title="See what's taking space on this remote, by folder">${svg("chart",13)} Analyze</button><button class="btn sm" data-a="dedupe" title="Find & remove duplicate-content files on this remote">Dedupe</button><button class="btn sm" data-a="cleanup" title="Empty trash / purge old versions where the backend supports it">Clean up</button><button class="btn sm" data-a="mount">${svg("folder",13)} Mount</button><button class="btn sm pri" data-a="restore">${svg("download",13)} Restore…</button></span></div>
+      <span class="rc-actions"><button class="btn sm" data-a="analyze" title="See what's taking space on this remote, by folder">${svg("chart",13)} Analyze</button><button class="btn sm" data-a="dedupe" title="Find & remove duplicate-content files on this remote">${svg("copy",13)} Dedupe</button><button class="btn sm" data-a="cleanup" title="Empty trash / purge old versions where the backend supports it">${svg("trash",13)} Clean up</button><button class="btn sm" data-a="mount">${svg("folder",13)} Mount</button><button class="btn sm pri" data-a="restore">${svg("download",13)} Restore…</button></span></div>
      <div class="rc-quota-line" id="rcq_${cid(r)}"><span class="rc-mut">reading quota…</span></div>
      <div class="rc-meta">${meta}</div>
      <div class="rc-card-b" id="rcb_${cid(r)}"></div></div>`);
@@ -7023,7 +7026,7 @@ function winRclone(initTab){openWin("__rclone","Rclone",(body,win)=>{
    box.innerHTML="";
    list.forEach(m=>{const row=el(`<div class="rc-card"><div class="rc-card-h">
       <span class="rc-name mono"><span class="nbdot ${m.mounted?"ok":"off"}"></span> ${esc(m.remote+":"+(m.path||""))}${m.readonly?' <span class="rc-tag">RO</span>':""}${m.auto?' <span class="rc-tag">auto</span>':""}</span>
-      <span class="rc-actions">${m.mounted?`<button class="btn sm" data-a="open">${svg("folder",13)} Open</button><button class="btn sm" data-a="umount">Unmount</button>`:`<button class="btn sm pri" data-a="mount">Mount</button>`}<button class="btn sm dng" data-a="remove" title="Remove">${svg("trash",13)}</button></span></div>
+      <span class="rc-actions">${m.mounted?`<button class="btn sm" data-a="open">${svg("folder",13)} Open</button><button class="btn sm" data-a="umount">${svg("eject",13)} Unmount</button>`:`<button class="btn sm pri" data-a="mount">${svg("folder",13)} Mount</button>`}<button class="btn sm dng" data-a="remove" title="Remove">${svg("trash",13)}</button></span></div>
       <div class="rc-card-b mono" style="color:var(--mut);font-size:11.5px">${esc(m.mount)}${m.mounted?"":" · not mounted"}</div></div>`);
      const op=row.querySelector('[data-a="open"]');if(op)op.onclick=()=>winFiles(m.mount);
      const um=row.querySelector('[data-a="umount"]');if(um)um.onclick=async()=>{toast("Unmounting…");await rcloneP("/api/backup/rclone/unmount",{name:m.name});load();};
