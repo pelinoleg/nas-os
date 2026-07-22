@@ -9753,6 +9753,47 @@ def _bb_dmesg_tail(n=25):
     r = _run(["sh", "-c", "dmesg --time-format iso 2>/dev/null | tail -n %d" % n], timeout=10)
     return (r.get("log") or "").splitlines()[-n:]
 
+def _bb_rollover(boot_id):
+    """Archive a ring left by a PREVIOUS boot as flight-*.json + a boots.jsonl
+    verdict line. Split out of the daemon loop so it is testable in isolation.
+    Verdict: clean only if the clean-shutdown marker exists AND is not older
+    than the ring's last write (a marker left by a manual `systemctl stop`
+    months ago must not whitewash a later power cut)."""
+    marker = os.path.join(BB_VAR, "clean-shutdown")
+    curf = os.path.join(BB_VAR, "current.json")
+    prev = _json_load_strict(curf, None)
+    if isinstance(prev, dict) and prev.get("boot_id") and prev["boot_id"] != boot_id:
+        died = prev.get("updated") or int(time.time())
+        clean = False
+        try:
+            clean = os.stat(marker).st_mtime >= died - 120
+        except OSError:
+            pass
+        fn = "flight-%s.json" % time.strftime("%Y%m%d-%H%M%S", time.localtime(died))
+        prev["clean"] = clean
+        try:
+            _json_save(os.path.join(BB_VAR, fn), prev)
+            os.unlink(curf)
+        except OSError:
+            pass
+        try:
+            with open(os.path.join(BB_VAR, "boots.jsonl"), "a") as f:
+                # ts = when the previous boot LAST breathed (this boot's own clock
+                # may still be stale pre-NTP on an RTC-less Pi)
+                f.write(json.dumps({"ts": int(died), "clean": clean, "flight": fn,
+                                    "last": (prev.get("samples") or [{}])[-1]}) + "\n")
+        except OSError:
+            pass
+        for fp in sorted(glob.glob(os.path.join(BB_VAR, "flight-*.json")))[:-BB_FLIGHTS]:
+            try:
+                os.unlink(fp)
+            except OSError:
+                pass
+    try:
+        os.unlink(marker)     # marker is per-shutdown; a stale one must not whitewash the next crash
+    except OSError:
+        pass
+
 def blackbox_daemon():
     """Recorder loop for nas-blackbox.service (its OWN unit: the panel dying is
     exactly when the recorder must keep writing). Samples vitals every
@@ -9768,35 +9809,7 @@ def blackbox_daemon():
             boot_id = f.read().strip()
     except OSError:
         boot_id = "?"
-    marker = os.path.join(BB_VAR, "clean-shutdown")
-    curf = os.path.join(BB_VAR, "current.json")
-    prev = _json_load_strict(curf, None)
-    if isinstance(prev, dict) and prev.get("boot_id") and prev["boot_id"] != boot_id:
-        clean = os.path.exists(marker)
-        stamp = time.strftime("%Y%m%d-%H%M%S",
-                              time.localtime(prev.get("updated") or time.time()))
-        fn = "flight-%s.json" % stamp
-        prev["clean"] = clean
-        try:
-            _json_save(os.path.join(BB_VAR, fn), prev)
-            os.unlink(curf)
-        except OSError:
-            pass
-        try:
-            with open(os.path.join(BB_VAR, "boots.jsonl"), "a") as f:
-                f.write(json.dumps({"ts": int(time.time()), "clean": clean, "flight": fn,
-                                    "last": (prev.get("samples") or [{}])[-1]}) + "\n")
-        except OSError:
-            pass
-        for fp in sorted(glob.glob(os.path.join(BB_VAR, "flight-*.json")))[:-BB_FLIGHTS]:
-            try:
-                os.unlink(fp)
-            except OSError:
-                pass
-    try:
-        os.unlink(marker)     # marker is per-shutdown; a stale one must not whitewash the next crash
-    except OSError:
-        pass
+    _bb_rollover(boot_id)
     ring, dm, prev_cpu, n = [], [], _bb_cpu_read(), 0
     time.sleep(2)             # first CPU delta needs a baseline
     while True:
@@ -10023,7 +10036,8 @@ def confgit_snapshot(reason="manual"):
     excl = ["--exclude=mtab", "--exclude=adjtime", "--exclude=.pwd.lock",
             "--exclude=*.swp", "--exclude=*.dpkg-new", "--exclude=*.dpkg-old",
             "--exclude=ld.so.cache", "--exclude=blkid.tab*", "--exclude=.etckeeper",
-            "--exclude=lvm/archive", "--exclude=lvm/backup"]
+            "--exclude=lvm/archive", "--exclude=lvm/backup",
+            "--exclude=ssl/private"]     # private keys have no business in a diff viewer
     r = _run(["rsync", "-a", "--delete", *excl, "/etc/",
               os.path.join(CONFGIT_DIR, "etc/")], timeout=180)
     if not r.get("ok"):
@@ -10271,6 +10285,12 @@ def sentry_scan():
     cmd = ["journalctl", "-p", "3", "-o", "json", "--no-pager"]
     cmd += ["--after-cursor", st["cursor"]] if st.get("cursor") else ["-n", "400"]
     r = _run(cmd, timeout=30)
+    if st.get("cursor") and not r.get("ok"):
+        # the journal was rotated/vacuumed under our cursor — journalctl refuses
+        # to seek and we would be stuck forever; drop it and re-seed next scan
+        st.pop("cursor", None)
+        _json_save(SENTRY_FILE, st)
+        return {"ok": False, "log": "journal cursor lost — reseeding"}
     lines = (r.get("log") or "").splitlines()
     st.setdefault("learn_until", now + 86400)
     fresh = []
@@ -10434,6 +10454,16 @@ def _writes_sample():
         _json_save(WRITELOG, st)
 
 def resil_writes():
+    # the monitor thread mutates the same dicts every ~60 s; a rare mid-iteration
+    # collision raises RuntimeError — retry instead of 500ing the tab
+    for _ in range(3):
+        try:
+            return _resil_writes_calc()
+        except RuntimeError:
+            time.sleep(0.05)
+    return {"ok": False, "log": "busy"}
+
+def _resil_writes_calc():
     st = _WRT["st"] or _json_load_strict(WRITELOG, {}) or {}
     sysdev = _sys_disk()
     days = st.get("days") or {}
