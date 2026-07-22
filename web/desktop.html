@@ -425,6 +425,11 @@
     .srow{padding:14px 0}
     .set-nav button{padding:11px 12px}
     input,select,textarea{font-size:16px}   /* iOS doesn't zoom on focus if ≥16px */
+    /* window traffic lights: bigger dots, more space between them, and a wide invisible hit
+       zone — the 11px dots are hard to hit with a finger (.win specificity beats the base rule) */
+    .win .lights{gap:15px}
+    .win .lights i{width:16px;height:16px}
+    .win .lights i::before{left:-7px;right:-7px;top:-14px;bottom:-14px}
   }
   /* first start — onboarding */
   .onboard{position:fixed;inset:0;z-index:600;background:rgba(10,16,26,.62);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);display:grid;place-items:center;padding:20px;opacity:0;pointer-events:none;transition:opacity .28s}
@@ -1586,17 +1591,23 @@
   .ql-nav.prev{left:10px}.ql-nav.prev svg{transform:rotate(180deg)}.ql-nav.next{right:10px}
   .fm-crumb a.cur{color:var(--text);font-weight:650}
   .fm.fav-hidden .fm-fav{display:none}
-  .fm-fav-h{display:flex;align-items:center;justify-content:space-between;font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--mut);font-family:var(--mono);margin-bottom:6px;padding:2px 4px}
-  .fm-fav-h .iconbtn{padding:1px 7px;font-size:15px;line-height:1}
+  .fm-fav-h{display:flex;align-items:center;justify-content:space-between;font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--mut);font-family:var(--mono);margin-bottom:5px;padding:2px 4px;min-height:22px}
+  /* section header action (＋ / rclone) — quiet by default so it doesn't compete with the row eject icons */
+  .fm-fav-h .iconbtn{padding:2px 5px;font-size:13px;line-height:1;color:var(--mut);border-radius:6px;transition:background .12s,color .12s}
+  .fm-fav-h .iconbtn:hover{color:var(--accent);background:var(--sel)}
+  /* clear gaps between the Disks / Servers / Cloud groups (collapse when a group is hidden) */
+  #fVolsWrap,#fRemWrap,#fCloudWrap{margin-top:13px}
   .fm-fav-list{flex:1;overflow:auto;margin:0 -4px}
   .fm-fav-i{display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:var(--r-sm);cursor:pointer;font-size:12.5px;color:var(--dim);transition:background .12s,box-shadow .12s,opacity .12s}
   .fm-fav-i:hover{background:var(--sel);color:var(--text)}
   .fm-fav-i.on{background:var(--sel);color:var(--text);font-weight:650;box-shadow:var(--sh-sm)}
   .fm-fav-i .fi{flex:none;color:var(--accent-2);display:flex}
   .fm-fav-i .fn{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .fm-fav-i .fx{border:none;background:none;color:var(--mut);display:flex;visibility:hidden;padding:2px;cursor:pointer}
+  .fm-fav-i .fx{border:none;background:none;color:var(--mut);display:flex;visibility:hidden;padding:3px;cursor:pointer;border-radius:6px;flex:none}
   .fm-fav-i:hover .fx{visibility:visible}.fm-fav-i .fx:hover{color:var(--danger)}
-  .fm-fav-i .fx.fx-eject{visibility:visible;color:var(--accent)}
+  /* eject: always visible (needed on touch — no hover), but quiet grey until you touch/hover it */
+  .fm-fav-i .fx.fx-eject{visibility:visible;color:var(--mut)}
+  .fm-fav-i .fx.fx-eject:hover{color:var(--accent);background:var(--sel)}
   /* dragging a favorite: items part live, the source is semi-transparent */
   .fm-fav-i.fav-drag{opacity:.4}
   .fm-fav-i .fav-edit{flex:1;min-width:0;font:inherit;font-size:12.5px;background:var(--glass);border:1px solid var(--accent);border-radius:5px;color:var(--text);padding:2px 6px;outline:none}
@@ -5451,7 +5462,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    <div id="fVols" style="margin:0 -4px"></div></div>
    <div id="fRemWrap" style="flex:none"><div class="fm-fav-h"><span>Servers</span><button class="iconbtn" id="fRemAdd" title="Add an SSH server">+</button></div>
    <div id="fRem" style="margin:0 -4px"></div></div>
-   <div id="fCloudWrap" style="display:none;flex:none"><div class="fm-fav-h"><span>Cloud</span><button class="iconbtn" id="fCloudAdd" title="Open the Rclone app">${svg("rclone",13)}</button></div>
+   <div id="fCloudWrap" style="display:none;flex:none"><div class="fm-fav-h"><span>Cloud</span><button class="iconbtn" id="fCloudAdd" title="Manage cloud remotes (Rclone app)">${svg("cog",14)}</button></div>
    <div id="fCloud" style="margin:0 -4px"></div></div></div>
    <div class="fm-side">
    <div class="fm-top">
