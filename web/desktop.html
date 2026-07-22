@@ -214,10 +214,13 @@
       transparent 100%);
     opacity:var(--mb-grad-o,1)}
   html.mb-grad-on .mb-grad{height:var(--mb-grad-h,90px)}
-  /* In an installed PWA the iOS status bar (clock/battery) can't be hidden — Apple forbids it — and
-     iPads have no notch, so env(safe-area-inset-top) may read 0. Guarantee a small reserve in
-     standalone/fullscreen mode so that strip never overlaps the panel's own top bar. */
-  @media (display-mode:standalone),(display-mode:fullscreen){:root{--st:max(env(safe-area-inset-top,0px),24px)}}
+  /* In an installed PWA on a TOUCH device the iOS status bar (clock/battery) can't be hidden — Apple
+     forbids it — and iPads have no notch, so env(safe-area-inset-top) may read 0. Reserve a small
+     strip only there (pointer:coarse) so a desktop PWA, where nothing overlaps, gets no top gap. */
+  @media (pointer:coarse) and (display-mode:standalone),(pointer:coarse) and (display-mode:fullscreen){:root{--st:max(env(safe-area-inset-top,0px),24px)}}
+  /* on touch (iPad/iPhone) the system status bar already shows the time — hide our own clock and
+     the separator that would otherwise dangle at the end of the bar */
+  @media (pointer:coarse){.menubar .clock,.menubar>.mb-sep:last-of-type{display:none}}
   .menubar{position:fixed;top:0;left:0;right:0;height:var(--top);box-sizing:border-box;z-index:300;display:flex;align-items:center;gap:12px;
     padding:var(--st) 16px 0;background:var(--mb-bg,transparent);
     --text:var(--mb-fg,#1A2431);--ink:var(--mb-fg,#1A2431);--dim:var(--mb-dim,rgba(0,0,0,.72));--mut:var(--mb-mut,rgba(0,0,0,.56));color:var(--text);
@@ -11320,7 +11323,7 @@ function maybeOnboard(){let done=false;try{done=!!SET.onboarded||localStorage.ge
   document.getElementById("lpQ").oninput=lpDraw;
   document.addEventListener("keydown",e=>{if(e.key==="Escape"&&lpEl.classList.contains("show"))lpClose();});}
  const hb=document.getElementById("healthBtn");if(hb){paintHealthBtn();hb.onclick=healthPop;}
- const qn=document.getElementById("qnoteBtn");if(qn){qn.innerHTML=svg("note",16);qn.onclick=qnotePop;}
+ const qn=document.getElementById("qnoteBtn");if(qn){qn.innerHTML=appIcon("notec",18);qn.onclick=qnotePop;}
  const blb=document.getElementById("bellBtn");if(blb){paintBell();blb.onclick=bellPop;}
  const opb=document.getElementById("opsBtn");if(opb)opb.onclick=()=>{OPS.autoOpened=false;opsPop();};
  document.addEventListener("keydown",e=>{if(e.key==="F9"){e.preventDefault();toggleExpo();}else if(e.key==="Escape"&&EXPO){exitExpo();}});
