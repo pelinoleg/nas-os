@@ -1071,6 +1071,34 @@
   .rc-mut{color:var(--win-dim,var(--mut))}
   /* Remotes dashboard — responsive grid of cards, each with a per-remote logo tile */
   .rc-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;align-items:start}
+  /* Resilience app */
+  .rs-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px}
+  .rs-card{background:var(--card);border:1px solid var(--win-line,var(--line));border-radius:var(--r-md);padding:12px 13px;cursor:pointer;transition:background .15s}
+  .rs-card:hover{background:var(--sel)}
+  .rs-ch{display:flex;align-items:center;gap:7px;font-size:13px;margin-bottom:6px}
+  .rs-ch svg{color:var(--win-accent,var(--accent));flex:none}
+  .rs-ch b{flex:1}
+  .rs-dot{width:9px;height:9px;border-radius:50%;flex:none;display:inline-block}
+  .rs-cv{font-size:15px;font-weight:600;margin-bottom:3px}
+  .rs-cl{font-size:12px;color:var(--win-dim,var(--mut))}
+  .rs-issue{display:flex;gap:9px;align-items:flex-start;padding:9px 11px;border-radius:10px;background:var(--glass);margin-bottom:6px;font-size:13px}
+  .rs-issue .rs-dot{margin-top:4px}
+  .rs-mut{color:var(--win-dim,var(--mut));font-size:12px}
+  .rs-fix{font-size:12px;background:var(--code-bg);color:var(--code-fg);border-radius:6px;padding:3px 7px;margin-top:4px;display:inline-block;max-width:100%;overflow-x:auto}
+  .rs-pre{background:var(--code-bg);color:var(--code-fg);border-radius:10px;padding:10px 12px;font-size:12px;line-height:1.5;overflow:auto;max-height:420px;white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,monospace}
+  .rs-graphs{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:10px}
+  .rs-g{background:var(--glass);border-radius:10px;padding:9px 11px}
+  .rs-g svg{width:100%;height:36px;display:block}
+  .rs-gl{display:flex;justify-content:space-between;font-size:12px;color:var(--win-dim,var(--mut));margin-bottom:4px}
+  .rs-badge{font-size:11px;padding:3px 9px;border-radius:999px;font-weight:600;background:var(--sel);box-shadow:var(--sh-sm)}
+  .rs-badge.ok{color:var(--win-good,var(--good))}
+  .rs-badge.bad{color:var(--win-danger,var(--danger))}
+  .rs-scorebox{display:flex;align-items:center;gap:12px;margin:10px 0 14px}
+  .rs-score{font-size:44px;font-weight:700;line-height:1}
+  .rs-note{background:var(--glass);border-left:3px solid var(--win-warn,var(--warn));padding:8px 12px;border-radius:8px;font-size:13px;margin-bottom:10px}
+  .rs-allgood{color:var(--win-good,var(--good));font-size:13px;padding:8px 0}
+  .rs-top{font-size:12px;color:var(--win-dim,var(--mut));margin-top:8px}
+  .rs-hash{color:var(--win-accent,var(--accent));font-size:12px;margin-top:2px;flex:none}
   .rc-card2{background:var(--card);border:1px solid var(--win-line,var(--line));border-radius:var(--r-md);padding:13px 14px;display:flex;flex-direction:column;gap:9px}
   .rc-top{display:flex;align-items:center;gap:11px}
   .rc-logo{width:44px;height:44px;flex:none;border:none;background:none;border-radius:11px;font-size:30px;line-height:1;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;transition:transform .1s}
@@ -2651,6 +2679,7 @@ const P={
  layers:'<path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 12.18-9.17 4.16a2 2 0 0 1-1.66 0L2 12.18"/><path d="m22 17.18-9.17 4.16a2 2 0 0 1-1.66 0L2 17.18"/>',
  save:'<path d="M15.2 3a2 2 0 0 1 1.4.6l3.8 3.8a2 2 0 0 1 .6 1.4V19a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path d="M17 21v-7a1 1 0 0 0-1-1H8a1 1 0 0 0-1 1v7"/><path d="M7 3v4a1 1 0 0 0 1 1h7"/>',
  search:'<circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/>',
+ lifebuoy:'<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="4"/><path d="m4.93 4.93 4.24 4.24"/><path d="m14.83 14.83 4.24 4.24"/><path d="m14.83 9.17 4.24-4.24"/><path d="m4.93 19.07 4.24-4.24"/>',
  edit:'<path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z"/>',
  x:'<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
  home:'<path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/>',
@@ -2757,6 +2786,7 @@ const AP={
  folderc:'<path fill="#D98E1F" d="M1.4 6.1a2.7 2.7 0 0 1 2.7-2.7h5.3a2.3 2.3 0 0 1 1.9.95l1.65 2.25h7a2.7 2.7 0 0 1 2.7 2.7v9.4a2.7 2.7 0 0 1-2.7 2.7H4.1a2.7 2.7 0 0 1-2.7-2.7V6.1Z"/><path fill="#FFC24B" d="M4.3 8.7h15.4a2.5 2.5 0 0 1 2.5 2.5v7.3a2.7 2.7 0 0 1-2.7 2.7H4.5a2.7 2.7 0 0 1-2.7-2.7v-7.3a2.5 2.5 0 0 1 2.5-2.5Z"/><path fill="#FFFFFF" opacity=".22" d="M4.3 8.7h15.4a2.5 2.5 0 0 1 2.5 2.5v.55a2.5 2.5 0 0 0-2.5-2.5H4.3a2.5 2.5 0 0 0-2.5 2.5v-.55a2.5 2.5 0 0 1 2.5-2.5Z"/>',
  notec:'<path fill="#F5C351" d="M3 4.6A2.6 2.6 0 0 1 5.6 2h12.8A2.6 2.6 0 0 1 21 4.6v9.9L14.5 21H5.6A2.6 2.6 0 0 1 3 18.4V4.6Z"/><path fill="#E3A93C" d="M21 14.5 14.5 21v-4.4a2.1 2.1 0 0 1 2.1-2.1H21Z"/><path fill="#8A6D1F" opacity=".55" d="M6.6 7.2h10.8v1.5H6.6zM6.6 10.6h10.8v1.5H6.6zM6.6 14h5.4v1.5H6.6z"/>',
  histf:'<path fill="#DCD6FF" d="M12 2.2c2.2 1.6 4.9 2.6 7.4 2.7.5 0 .9.4.9.9v6.6c0 4.7-3.3 7.3-7.9 9.3a1 1 0 0 1-.8 0c-4.6-2-7.9-4.6-7.9-9.3V5.8c0-.5.4-.9.9-.9 2.5-.1 5.2-1.1 7.4-2.7Z"/><circle cx="12" cy="11.4" r="4.8" fill="#5847D6" opacity=".28"/><path fill="#3A2B9E" d="M12 7.9a.9.9 0 0 1 .9.9v2.3l1.7 1.55a.9.9 0 1 1-1.2 1.33l-2-1.8a.9.9 0 0 1-.3-.67V8.8a.9.9 0 0 1 .9-.9Z"/>',
+ lifef:'<circle cx="12" cy="12" r="11" fill="#E5544E"/><rect x="10.6" y="1" width="2.8" height="7" rx="1" fill="#F3E9DC"/><rect x="10.6" y="16" width="2.8" height="7" rx="1" fill="#F3E9DC"/><rect x="1" y="10.6" width="7" height="2.8" rx="1" fill="#F3E9DC"/><rect x="16" y="10.6" width="7" height="2.8" rx="1" fill="#F3E9DC"/><circle cx="12" cy="12" r="4.8" fill="#2E3949"/><circle cx="12" cy="12" r="4.8" fill="none" stroke="#F3E9DC" stroke-width="1.4"/>',
  donut:'<path fill="#2FA36F" d="M10.06 0.97A11.2 11.2 0 0 1 22.52 15.83L19.14 14.60A7.6 7.6 0 0 0 10.68 4.52Z"/><path fill="#46B98A" d="M22.07 16.91A11.2 11.2 0 0 1 3.42 19.20L6.18 16.89A7.6 7.6 0 0 0 18.83 15.33Z"/><path fill="#8FDCBC" d="M2.71 18.26A11.2 11.2 0 0 1 11.22 0.83L11.47 4.42A7.6 7.6 0 0 0 5.70 16.25Z"/><path fill="#1F7D78" d="M10.82 5.30A6.8 6.8 0 0 1 16.37 17.21L14.06 14.45A3.2 3.2 0 0 0 11.44 8.85Z"/><path fill="#33BE86" d="M15.80 17.64A6.8 6.8 0 1 1 11.53 5.22L11.78 8.81A3.2 3.2 0 1 0 13.79 14.65Z"/>',
  backup:'<g transform="translate(-.08 .47) scale(.949)"><path fill="#3EAE80" d="M6.9 20.2a5.4 5.4 0 0 1-1.06-10.7 6.5 6.5 0 0 1 12.06-2.06A5.35 5.35 0 0 1 17.6 20.2Z"/><circle cx="12.24" cy="10.64" r="6.2" fill="#4CBE8D"/></g><path fill="none" stroke="#fff" stroke-width="1.9" d="M8.52 12.37A3.6 3.6 0 0 1 15.48 12.37"/><path fill="#fff" d="M15.96 14.16 12.93 11.77 17.38 10.58z"/><path fill="none" stroke="#BCE8D3" stroke-width="1.9" d="M15.48 14.23A3.6 3.6 0 0 1 8.52 14.23"/><path fill="#BCE8D3" d="M8.04 12.44 11.07 14.83 6.62 16.02z"/>',
  keyf:'<path fill-rule="evenodd" fill="#E8A33C" d="M8.6 2.4a6.1 6.1 0 1 1 0 12.2 6.1 6.1 0 0 1 0-12.2Zm0 3.4a2.7 2.7 0 1 0 0 5.4 2.7 2.7 0 0 0 0-5.4Z"/><path fill="#D98E1F" d="m12.6 11 2.1-2.1 7.5 7.5a1.4 1.4 0 0 1 0 2l-.8.8a1.4 1.4 0 0 1-2 0l-.8-.8-1.7 1.7-2.1-2.1 1.7-1.7-1.4-1.4-1.6 1.6-2.1-2.1 1.6-1.6-.4-.4Z"/>',
@@ -3465,6 +3495,7 @@ const INTERNAL=[
  {id:"__fsw",name:"File history",color:"linear-gradient(135deg,#7c6cf2,#5847d6)",ic:"histf",bare:1,fn:()=>winFsHistory()},
  {id:"__nasbak",name:"Backup",color:"linear-gradient(135deg,#2f9d70,#1f7d78)",ic:"backup",bare:1,fn:()=>winBackup()},
  {id:"__rclone",name:"Rclone",color:"linear-gradient(135deg,#3aa0f0,#5a6cf0)",ic:"rclone",bare:1,fn:()=>winRclone()},
+ {id:"__resil",name:"Resilience",color:"linear-gradient(135deg,#F08C4B,#D9603B)",ic:"lifef",bare:1,fn:()=>winResil()},
  {id:"__vault",name:"Credentials",color:"linear-gradient(135deg,#e0913c,#c96f22)",ic:"keyf",bare:1,fn:()=>winVault()},
  {id:"__notes",name:"Notes",color:"linear-gradient(135deg,#F2C14E,#E09F2F)",ic:"notec",bare:1,fn:()=>winNotes()},
  {id:"__trash",name:"Trash",color:"linear-gradient(135deg,#8592a6,#5f6b7d)",ic:"trashf",bare:1,fn:()=>winTrash()},
@@ -7062,6 +7093,193 @@ function rclLogoPick(remote,type,x,y,onSet){
  const off=ev=>{if(!p.contains(ev.target)){document.removeEventListener("pointerdown",off,true);p.remove();}};
  setTimeout(()=>document.addEventListener("pointerdown",off,true),0);
 }
+/* ============================ Resilience ============================
+   "Will this box survive a bad day?" — black box, reboot drill, config
+   history, disaster card, log sentry. Everything self-maintains: each tab
+   just shows what the server derived from the LIVE system. */
+function winResil(initTab){openWin("__resil","Resilience",(body,win)=>{
+ body.style.padding="0";
+ let tab=initTab||"overview";
+ const CATS=[{id:"overview",name:"Overview",ic:"lifebuoy"},{id:"bb",name:"Black box",ic:"activity"},
+  {id:"drill",name:"Reboot drill",ic:"refresh"},{id:"cfg",name:"Config history",ic:"clock"},
+  {id:"card",name:"Disaster card",ic:"note"},{id:"sentry",name:"Log sentry",ic:"search"}];
+ const ago=t=>{if(!t)return"never";const s=Math.max(0,Math.floor(Date.now()/1000-t));if(s<90)return"just now";
+  const m=Math.floor(s/60),h=Math.floor(m/60),d=Math.floor(h/24);return d?d+"d ago":h?h+"h ago":m+"m ago";};
+ const dts=t=>t?new Date(t*1000).toLocaleString():"—";
+ const spark=(vals,col)=>{const v=vals.filter(x=>typeof x==="number");if(v.length<2)return"";
+  const mx=Math.max(...v),mn=Math.min(...v),sp=(mx-mn)||1,W=260,H=36;
+  const pts=v.map((x,i)=>`${(i/(v.length-1)*W).toFixed(1)},${(H-1-(x-mn)/sp*(H-2)).toFixed(1)}`).join(" ");
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none"><polyline fill="none" stroke="${col}" stroke-width="1.6" points="${pts}"/></svg>`;};
+ const sevDot=s=>{const c=s==="bad"?"danger":s==="warn"?"warn":"good";
+  return `<span class="rs-dot" style="background:var(--win-${c},var(--${c}))"></span>`;};
+ const render=()=>{
+  body.innerHTML=`<div class="nbmain"><div class="set-nav">${CATS.map(c=>`<button data-t="${c.id}" class="${tab===c.id?"on":""}">${svg(c.ic,17)}<span>${c.name}</span></button>`).join("")}</div><div class="set-main"><div class="set-pane" id="tc"></div></div></div>`;
+  body.querySelectorAll(".set-nav button").forEach(b=>b.onclick=()=>{tab=b.dataset.t;render();});
+  ({overview:tabOverview,bb:tabBB,drill:tabDrill,cfg:tabCfg,card:tabCard,sentry:tabSentry}[tab]||tabOverview)(body.querySelector("#tc"));};
+
+ async function tabOverview(tc){
+  tc.innerHTML='<div class="set-load">loading…</div>';
+  const d=await api("/api/resil/overview");
+  if(!d||!d.ok){tc.innerHTML='<div class="set-load">failed to load</div>';return;}
+  const bb=d.blackbox||{},dr=d.drill||{},cg=d.confgit||{},sn=d.sentry||{},dz=d.disaster||{};
+  const s=bb.last_sample||{},cnt=dr.counts||{},lastBoot=(bb.boots||[])[0];
+  const card=(id,ic,title,verdict,lines,st)=>`<div class="rs-card" data-go="${id}">
+    <div class="rs-ch">${svg(ic,18)}<b>${title}</b>${sevDot(st)}</div>
+    <div class="rs-cv">${verdict}</div><div class="rs-cl">${lines}</div></div>`;
+  tc.innerHTML=`<h3 class="set-title">Will this box survive a bad day?</h3>
+   <p class="set-sub">Everything below maintains itself — swapped disks, new stacks and services are picked up automatically on the next pass. Open a card for details.</p>
+   <div class="rs-grid">
+   ${card("bb","activity","Black box",bb.running?"recording":"recorder is OFF",
+     bb.running?`load ${s.load??"?"} · ${s.temp??"?"}°C · CPU ${s.cpu??"?"}%`:"install: nas-wizard.sh api blackbox",bb.running?"good":"bad")}
+   ${card("drill","refresh","Reboot drill",dr.score==null?"never ran":`score ${dr.score}/100`,
+     dr.score==null?"open to run the first audit":`${cnt.bad||0} blockers · ${cnt.warn||0} warnings · ${ago(dr.ts)}`,
+     dr.score==null?"warn":cnt.bad?"bad":cnt.warn?"warn":"good")}
+   ${card("cfg","clock","Config history",cg.last?`snapshot ${ago(cg.last)}`:"no snapshots yet",
+     `${cg.commits||0} snapshots${cg.dirty?` · <b>${cg.dirty} files changed since</b>`:""}`,cg.last?"good":"warn")}
+   ${card("card","note","Disaster card",dz.ts?`rebuilt ${ago(dz.ts)}`:"not built yet",
+     "the “box is dead, now what” document — rides inside every settings backup",dz.ts?"good":"warn")}
+   ${card("sentry","search","Log sentry",sn.learning?"learning the normal noise":(sn.new?`${sn.new} new error pattern${sn.new>1?"s":""}`:"nothing new"),
+     `${sn.total||0} known patterns`,sn.new?"warn":"good")}
+   ${lastBoot?card("bb","zap","Last boot",lastBoot.clean?"clean shutdown":"POWER LOSS / CRASH",dts(lastBoot.ts),lastBoot.clean?"good":"bad"):""}
+   </div>`;
+  tc.querySelectorAll(".rs-card").forEach(c=>c.onclick=()=>{tab=c.dataset.go;render();});}
+
+ async function tabBB(tc){
+  tc.innerHTML='<div class="set-load">loading…</div>';
+  const d=await api("/api/resil/blackbox");
+  if(!d){tc.innerHTML='<div class="set-load">failed to load</div>';return;}
+  const KEYS=[["load","Load","","--win-accent,var(--accent)"],["cpu","CPU","%","--win-accent,var(--accent)"],
+   ["temp","Temp","°C","--win-warn,var(--warn)"],["mem","Memory","%","--win-good,var(--good)"]];
+  const graphs=(smp)=>{const last=smp[smp.length-1]||{};
+   return KEYS.map(([k,lab,un,cv])=>`<div class="rs-g"><div class="rs-gl">${lab}<span class="mono">${last[k]??"—"}${un}</span></div>${spark(smp.map(x=>x[k]),`var(${cv})`)}</div>`).join("");};
+  const live=d.live||{},smp=live.samples||[],last=smp[smp.length-1]||{};
+  tc.innerHTML=`<div class="set-titrow"><h3 class="set-title" style="margin:0">Black box</h3>
+    <span class="rs-badge ${d.running?"ok":"bad"}">${d.running?"● recording":"recorder OFF"}</span></div>
+   <p class="set-sub">The flight recorder keeps the last ~15 minutes of vitals on disk. It is its own service — it keeps writing while the panel restarts, and after a crash or power cut the ring becomes a “flight”: the last seconds before death.</p>
+   <div class="rs-graphs" id="rsG">${graphs(smp)}</div>
+   <div class="rs-top" id="rsTop">${last.top?("busy now: "+last.top.map(t=>`<span class="mono">${esc(t[0])} ${t[1]}%</span>`).join(" · ")):""}</div>
+   <h3 class="set-title" style="margin-top:16px">Boots &amp; flights</h3>
+   <p class="set-sub">Every reboot gets a verdict — clean shutdown, or power-loss/crash with the previous boot's final minutes attached.</p>
+   <div id="rsBoots">${(d.boots||[]).length?"":'<div class="rs-mut">No reboots recorded yet — this list fills in as the box reboots.</div>'}</div>
+   <div id="rsFlight"></div>`;
+  const bx=tc.querySelector("#rsBoots");
+  (d.boots||[]).forEach(b=>{
+   const row=el(`<div class="rs-issue" style="cursor:${b.flight?"pointer":"default"}">${sevDot(b.clean?"good":"bad")}
+     <div><b>${b.clean?"clean shutdown":"power loss / crash"}</b> · ${dts(b.ts)}
+     ${b.last&&b.last.t?`<div class="rs-mut">last recorded ${dts(b.last.t)} — load ${b.last.load??"?"}, ${b.last.temp??"?"}°C, CPU ${b.last.cpu??"?"}%</div>`:""}</div></div>`);
+   if(b.flight)row.onclick=async()=>{
+     const f=await api("/api/resil/blackbox/flight?f="+encodeURIComponent(b.flight));
+     const fb=tc.querySelector("#rsFlight");
+     if(!f||!f.ok||!f.flight){fb.innerHTML='<div class="rs-mut">flight file is gone (only the last 20 are kept)</div>';return;}
+     const fs=f.flight.samples||[];
+     fb.innerHTML=`<h3 class="set-title" style="margin-top:14px">Flight — the last minutes before that shutdown</h3>
+      <div class="rs-graphs">${graphs(fs)}</div>
+      ${(f.flight.dmesg||[]).length?`<div class="rs-gl" style="margin-top:10px">kernel log tail at the moment of death</div><pre class="rs-pre">${esc(f.flight.dmesg.join("\n"))}</pre>`:""}`;
+     fb.scrollIntoView({behavior:"smooth",block:"nearest"});};
+   bx.appendChild(row);});
+  // live graphs: refresh in place while the tab is open
+  if(win._rsT)clearInterval(win._rsT);
+  win._rsT=setInterval(async()=>{
+   const g=tc.querySelector("#rsG");
+   if(!g||!document.body.contains(g)){clearInterval(win._rsT);return;}
+   const nd=await api("/api/resil/blackbox");
+   if(!nd||!nd.live)return;
+   const ns=nd.live.samples||[],nl=ns[ns.length-1]||{};
+   g.innerHTML=graphs(ns);
+   const tp=tc.querySelector("#rsTop");
+   if(tp)tp.innerHTML=nl.top?("busy now: "+nl.top.map(t=>`<span class="mono">${esc(t[0])} ${t[1]}%</span>`).join(" · ")):"";},15000);}
+
+ async function tabDrill(tc){
+  tc.innerHTML='<div class="set-load">loading…</div>';
+  const d0=await api("/api/resil/drill");
+  const paint=d=>{
+   const has=d&&d.ts,cnt=(d&&d.counts)||{};
+   tc.innerHTML=`<div class="set-titrow"><h3 class="set-title" style="margin:0">Reboot drill</h3>
+     <button class="btn sm pri" id="rsRun">${svg("refresh",13)} Run drill</button></div>
+    <p class="set-sub">Answers “will everything come back after a reboot?” — without rebooting. A live audit each run: services running now vs enabled, mounts vs fstab (both directions), containers vs restart policies. Nothing is stored or configured — a new disk or stack is simply seen on the next run.</p>
+    ${has?`<div class="rs-scorebox"><span class="rs-score" style="color:var(--win-${cnt.bad?"danger":cnt.warn?"warn":"good"},var(--${cnt.bad?"danger":cnt.warn?"warn":"good"}))">${d.score}</span>
+      <div><b>/100</b><div class="rs-mut">last run ${ago(d.ts)} · ${cnt.bad||0} blockers, ${cnt.warn||0} warnings, ${cnt.info||0} notes · re-runs weekly by itself</div></div></div>`
+     :'<div class="rs-mut" style="margin-bottom:10px">Never ran yet — click Run drill.</div>'}
+    <div id="rsIss"></div>`;
+   const ib=tc.querySelector("#rsIss");
+   ((d&&d.issues)||[]).forEach(i=>ib.appendChild(el(`<div class="rs-issue">${sevDot(i.sev)}
+     <div><b>${esc(i.title)}</b><div class="rs-mut">${esc(i.detail||"")}</div>
+     ${i.fix?`<div class="rs-fix mono">${esc(i.fix)}</div>`:""}</div></div>`)));
+   if(has&&!((d.issues||[]).length))ib.innerHTML='<div class="rs-allgood">✓ Everything that runs now is wired to come back after a reboot.</div>';
+   tc.querySelector("#rsRun").onclick=async()=>{
+    const b=tc.querySelector("#rsRun");b.disabled=true;b.textContent="auditing…";
+    const r=await api("/api/resil/drill/run",{method:"POST",body:"{}"});
+    paint(r&&r.ok?r:d);};};
+  paint(d0);}
+
+ const colorDiff=t=>esc(t).split("\n").map(l=>
+   l.startsWith("+")&&!l.startsWith("+++")?`<span style="color:var(--win-good,var(--good))">${l}</span>`:
+   l.startsWith("-")&&!l.startsWith("---")?`<span style="color:var(--win-danger,var(--danger))">${l}</span>`:l).join("\n");
+
+ async function tabCfg(tc){
+  tc.innerHTML='<div class="set-load">loading…</div>';
+  const d=await api("/api/resil/confgit");
+  tc.innerHTML=`<div class="set-titrow"><h3 class="set-title" style="margin:0">Config history</h3>
+    <button class="btn sm pri" id="rsSnap">${svg("plus",13)} Snapshot now</button></div>
+   <p class="set-sub">Daily git snapshots of the whole config surface: /etc, stack composes, panel settings. Click a snapshot to see exactly what changed — including changes made outside the panel.</p>
+   ${d&&d.dirty?`<div class="rs-note">${d.dirty} file(s) changed since the last snapshot — the next daily pass (or “Snapshot now”) records them.</div>`:""}
+   <div id="rsCommits">${((d&&d.commits)||[]).length?"":'<div class="rs-mut">No snapshots yet — the first one is taken automatically within a day.</div>'}</div>
+   <div id="rsDiff"></div>`;
+  const cb=tc.querySelector("#rsCommits");
+  ((d&&d.commits)||[]).forEach(c=>{
+   const row=el(`<div class="rs-issue" style="cursor:pointer"><span class="mono rs-hash">${c.h}</span>
+     <div><b>${esc(c.msg)}</b><div class="rs-mut">${dts(c.ts)}${c.stat?" · "+esc(c.stat):""}</div></div></div>`);
+   row.onclick=async()=>{
+    const df=await api("/api/resil/confgit/diff?h="+c.h);
+    tc.querySelector("#rsDiff").innerHTML=df&&df.ok?
+      `<h3 class="set-title" style="margin-top:14px">${c.h} — ${esc(c.msg)}</h3><pre class="rs-pre">${colorDiff(df.diff||"")}</pre>`
+      :'<div class="rs-mut">diff failed</div>';
+    tc.querySelector("#rsDiff").scrollIntoView({behavior:"smooth",block:"nearest"});};
+   cb.appendChild(row);});
+  tc.querySelector("#rsSnap").onclick=async()=>{
+   const b=tc.querySelector("#rsSnap");b.disabled=true;b.textContent="snapshotting…";
+   const r=await api("/api/resil/confgit/snap",{method:"POST",body:"{}"});
+   toast(r&&r.ok?(r.changed?"Snapshot saved":"No changes since the last snapshot"):"Snapshot failed: "+((r&&r.log)||""));
+   tabCfg(tc);};}
+
+ async function tabCard(tc){
+  tc.innerHTML='<div class="set-load">loading…</div>';
+  const d=await api("/api/resil/disaster");
+  tc.innerHTML=`<div class="set-titrow"><h3 class="set-title" style="margin:0">Disaster card</h3>
+    <button class="btn sm" id="rsDl">${svg("download",13)} Download</button>
+    <button class="btn sm" id="rsRb">${svg("refresh",13)} Rebuild now</button></div>
+   <p class="set-sub">The “box is dead, now what” document: exact disks with serials, fstab, pool, shares, stacks and recovery steps. Rebuilt automatically every day from the live system and carried off-box inside every settings backup${d&&d.ts?` · current version: ${dts(d.ts)}`:""}.</p>
+   <pre class="rs-pre" style="max-height:none">${esc((d&&d.md)||"")}</pre>`;
+  tc.querySelector("#rsDl").onclick=()=>{
+   const a=document.createElement("a");
+   a.href=URL.createObjectURL(new Blob([(d&&d.md)||""],{type:"text/markdown"}));
+   a.download="disaster-card.md";a.click();URL.revokeObjectURL(a.href);};
+  tc.querySelector("#rsRb").onclick=async()=>{
+   const b=tc.querySelector("#rsRb");b.disabled=true;
+   await api("/api/resil/disaster/rebuild",{method:"POST",body:"{}"});
+   toast("Disaster card rebuilt");tabCard(tc);};}
+
+ async function tabSentry(tc){
+  tc.innerHTML='<div class="set-load">loading…</div>';
+  const d=await api("/api/resil/sentry");
+  tc.innerHTML=`<h3 class="set-title">Log sentry</h3>
+   <p class="set-sub">Watches the system journal for error patterns this box has never produced before — the kind of problem nobody wrote a check for yet. It learns the normal noise by itself; there is nothing to configure.</p>
+   ${d&&d.learning?'<div class="rs-note">Learning the baseline — new-pattern alerts start after the first 24 hours.</div>':""}
+   <div class="rs-mut" style="margin-bottom:8px">${d?`${d.total||0} known patterns · last scan ${ago(d.scanned)}`:""}</div>
+   <div id="rsPat">${((d&&d.recent)||[]).length?"":'<div class="rs-allgood">✓ No new error patterns.</div>'}</div>`;
+  const pb=tc.querySelector("#rsPat");
+  ((d&&d.recent)||[]).forEach(p=>{
+   const row=el(`<div class="rs-issue">${sevDot("warn")}
+     <div style="flex:1;min-width:0"><b class="mono">${esc(p.unit)}</b> <span class="rs-mut">seen ${p.n}× · first ${ago(p.first)} · last ${ago(p.last)}</span>
+     <div class="rs-fix mono">${esc(p.ex||p.tpl)}</div></div>
+     <button class="btn sm" title="Expected noise on this box — stop showing and alerting on it">Mute</button></div>`);
+   row.querySelector("button").onclick=async()=>{
+    await api("/api/resil/sentry/mute",{method:"POST",body:JSON.stringify({key:p.key})});row.remove();};
+   pb.appendChild(row);});}
+
+ render();
+});}
+
 function winRclone(initTab){openWin("__rclone","Rclone",(body,win)=>{
  body.style.padding="0";   // the .nbmain/.set-pane provides its own padding — no double frame (like Settings)
  let tab=initTab||"remotes",DATA=null,cm=null;
@@ -10326,6 +10544,10 @@ const EVMETA=[
  {k:"weekly",t:"Weekly report",d:"once a week: «alive», uptime/temp/space",dp:-1},
  {k:"daily_summary",t:"Status summary",d:"daily/weekly summary: temp, memory, space, health, backup",dp:-1},
  {k:"boot",t:"System boot",d:"the NAS powered on or rebooted",dp:-1},
+ {grp:"Resilience"},
+ {k:"dirty_boot",t:"Power loss / crash",d:"the box went down without a clean shutdown (black box archived a flight)",dp:1},
+ {k:"resil_drill",t:"Reboot drill blockers",d:"the weekly readiness audit found things that won't survive a reboot",dp:0},
+ {k:"log_sentry",t:"New error pattern in logs",d:"the log sentry saw a repeating error this box never produced before",dp:0},
 ];
 const PRIO=[[2,"Emergency"],[1,"Important"],[0,"Normal"],[-1,"Quiet"],[-2,"Badge"]];
 function notifyTab(tc){tc.innerHTML=`<div style="color:var(--mut);font-size:12px">loading…</div>`;

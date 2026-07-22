@@ -730,6 +730,39 @@ paperless/mail-archiver добавлен **sidecar `db-backup`** (`prodrigestivi
 нет); проверять маппинг backup-style rsync'ом `--rsync-path="sudo rsync"`, а не интерактивным
 `sudo -n rsync` (у него CWD=home → «No such file»). Восстановление БД:
 `gunzip -c dump.sql.gz | docker exec -i <db-контейнер> psql -U <user> -d <db>`.
+**Приложение «Resilience» (`winResil`, dock `__resil`, иконка-спасательный круг `lifef`, 2026-07-22)** —
+«переживёт ли бокс плохой день». Пять модулей, API `/api/resil/*`, серверный блок в nas-web.py перед
+monitor_loop, тик `_resil_tick` в monitor_loop. ЖЕЛЕЗНЫЙ принцип дизайна: НИЧЕГО не настраивается и не
+инвентаризируется руками — каждая картина пересобирается из ЖИВОЙ системы на каждом прогоне (сменил
+диск/стек — следующий прогон сам увидит; та же грабля, что список UAS-мостов).
+- **Black box** — бортовой самописец: СВОЙ юнит `nas-blackbox.service` (`install_blackbox` в авто-базе
+  визарда, `api blackbox`; ExecStart=`nas-web.py blackbox-daemon` — CLI-режим как thumbs-sweep; свой
+  юнит потому, что рестарт nas-web убивает всю cgroup — грабля sshfs). Семпл каждые 10 с (load/CPU%/
+  mem/temp/throttled/top-процессы + dmesg-хвост) в кольцо на 90 семплов: каждый семпл → `/run/nas-blackbox/`
+  (tmpfs, ноль износа SD), каждый 3-й → `/var/lib/nas-wizard/blackbox/current.json` (переживает обрыв
+  питания). На старте кольцо ЧУЖОГО boot_id архивируется в `flight-*.json` (хранится 20) + строка в
+  `boots.jsonl` с вердиктом clean/dirty: маркер `clean-shutdown` пишет ExecStopPost, нет маркера =
+  обрыв питания/краш → событие `dirty_boot` (шлёт `_resil_tick` по новой записи в boots.jsonl).
+- **Reboot drill** — аудит «поднимется ли всё после ребута» БЕЗ ребута: running-но-disabled юниты
+  (transient nas-remote-*/nas-rclone-* скипаются — их владельцы сами поднимают), критичные юниты
+  (nas-web/docker/nas-stacks/smbd/avahi/netguard.timer/blackbox), fstab↔/proc/mounts в ОБЕ стороны
+  (маунт без fstab = «не вернётся»; fstab без диска без nofail = «повиснет boot»; fuse/rclone/remote и
+  automount-база из automount.conf скипаются — они самовосстанавливающиеся), `findmnt --verify`,
+  контейнеры с restart=no ВНЕ автостартуемых стеков (стеки поднимает nas-stacks — политика не важна).
+  Score 100−20×bad−7×warn → `resil-drill.json`; еженедельный авто-прогон, блокеры → событие `resil_drill`.
+- **Config history** — git-снапшоты конфиг-поверхности в `/var/lib/nas-wizard/confgit` (root 0700 —
+  там shadow): rsync /etc (минус volatile: mtab/adjtime/*.dpkg-*…), composes+.env из /opt/stacks,
+  топ-левел *.json из nas-config (минус журналы/кэши: events, nas-backup-history*, duscan-* и т.п.).
+  Ежедневно + кнопка; лог/дифф через git log/show (дифф красится в UI). Коммит только при изменениях.
+- **Disaster card** — авто-документ `~/nas-config/disaster-card.md` («бокс умер — что делать»: диски
+  с серийниками, fstab, snapraid, шары, стеки+образы, профили бэкапа, шаги восстановления). Пересборка
+  ежедневно; лежит в nas-config → уезжает с бэкапом настроек сам. UI: просмотр+Download+Rebuild.
+- **Log sentry** — детектор НОВЫХ паттернов ошибок в journald (`-p 3`, курсор в `logsentry.json`):
+  нормализация сообщения (числа/hex/пути → #), первые 24 ч — обучение базлайну, потом новый паттерн
+  с ≥3 повторами → событие `log_sentry` (один раз на паттерн); Mute в UI. Скан раз в 5 мин в тике.
+События в каталоге монитора: `dirty_boot`(prio 1)/`resil_drill`/`log_sentry` (+ лейблы в notifyTab).
+Тестировано живьём: дрель ловит ручной tmpfs-маунт (score 93→100 после umount), confgit коммитит
+1852 файла и молчит без изменений, sentry учится, black box пишет и переживает рестарт панели.
 Идеи в бэклоге: Telegram-бот, «топ самых больших файлов» в анализаторе,
 glance: спарклайны в плитках, пользовательские проверки из `~/nas-config/scripts`;
 бэкап наружу — пользователь делает сторонним сервисом в Docker (zerobyte).
