@@ -13,6 +13,10 @@
 <style>
   /* ---- design tokens : airy consumer, light default + equal dark ---- */
   :root{
+    /* iOS PWA status-bar height (clock/battery strip) — 0 in a normal browser, the real inset in a
+       standalone PWA with viewport-fit=cover. Everything at the top is shifted down by it so the
+       iPad clock never sits on top of the panel's own menubar. --top = menubar bottom edge. */
+    --st:env(safe-area-inset-top,0px); --top:calc(40px + var(--st));
     --bg:#EAEEF4; --surface:#FFFFFF;
     --glass:rgba(255,255,255,.74); --glass-2:rgba(255,255,255,.92);
     --ink:#1A2431; --text:#1A2431; --dim:#53637B; --mut:#8493AA;
@@ -210,8 +214,12 @@
       transparent 100%);
     opacity:var(--mb-grad-o,1)}
   html.mb-grad-on .mb-grad{height:var(--mb-grad-h,90px)}
-  .menubar{position:fixed;top:0;left:0;right:0;height:40px;z-index:300;display:flex;align-items:center;gap:12px;
-    padding:0 16px;background:var(--mb-bg,transparent);
+  /* In an installed PWA the iOS status bar (clock/battery) can't be hidden — Apple forbids it — and
+     iPads have no notch, so env(safe-area-inset-top) may read 0. Guarantee a small reserve in
+     standalone/fullscreen mode so that strip never overlaps the panel's own top bar. */
+  @media (display-mode:standalone),(display-mode:fullscreen){:root{--st:max(env(safe-area-inset-top,0px),24px)}}
+  .menubar{position:fixed;top:0;left:0;right:0;height:var(--top);box-sizing:border-box;z-index:300;display:flex;align-items:center;gap:12px;
+    padding:var(--st) 16px 0;background:var(--mb-bg,transparent);
     --text:var(--mb-fg,#1A2431);--ink:var(--mb-fg,#1A2431);--dim:var(--mb-dim,rgba(0,0,0,.72));--mut:var(--mb-mut,rgba(0,0,0,.56));color:var(--text);
     --accent:var(--mb-accent,#12B0A6);--accent-2:var(--mb-accent2,#4C8DF6);--accent-soft:var(--mb-accent-soft,rgba(18,176,166,.16));--accent-line:var(--mb-accent-line,rgba(18,176,166,.5));--accent-ink:var(--mb-accent-ink,#fff);--accent-fill:var(--mb-accent-fill,#12B0A6);--sel:var(--mb-sel,rgba(0,0,0,.07));--line:var(--mb-line,rgba(0,0,0,.14));--good:var(--mb-good,#1FA971);--warn:var(--mb-warn,#CF881B);--danger:var(--mb-danger,#DE4E48);
     backdrop-filter:var(--mb-bf,none);-webkit-backdrop-filter:var(--mb-bf,none)}
@@ -255,7 +263,7 @@
   .menu.sub{z-index:2601}
 
   /* desktop layout — apps left, widgets pinned right */
-  .desk{position:fixed;inset:40px 0 96px 0}
+  .desk{position:fixed;inset:var(--top) 0 96px 0}
   .apps{position:absolute;inset:0 398px 0 0;padding:32px 34px;overflow:auto;
     /* column = actual icon width: it used to be a hard 96px, and when the icon
        size was >1 the tile (--desk-icon+36) overflowed the column and overlapped the neighbor */
@@ -283,11 +291,11 @@
   /* phone bottom tab bar (fullscreen + tab bar) */
   .phone-nav{display:none}
   @media(max-width:640px){
-    .menubar{gap:7px;padding:0 10px;height:40px}
+    .menubar{gap:7px;padding:var(--st) 10px 0;height:var(--top)}
     .mb-brand #brandName{max-width:96px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
     .clock small{display:none}
     .tray .pill:nth-child(3){display:none}
-    .desk{inset:40px 0 calc(60px + env(safe-area-inset-bottom)) 0;overflow-y:auto}
+    .desk{inset:var(--top) 0 calc(60px + env(safe-area-inset-bottom)) 0;overflow-y:auto}
     /* on phones icons are fixed small and do NOT follow the desktop size setting
        (--desk-icon is overridden on .apps → overrides the inline from html for this
        subtree); grid = tile width, so they don't overlap */
@@ -297,8 +305,8 @@
     /* caption in 2 lines with wrapping — otherwise long names stuck to neighbors */
     .app .lbl{font-size:11px;line-height:1.2;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
     .rail{position:static;width:auto;overflow:visible;display:flex;flex-direction:column;gap:12px;padding:6px 16px 20px}
-    .win{inset:40px 0 calc(60px + env(safe-area-inset-bottom)) 0!important;width:auto!important;height:auto!important;border-radius:0;max-width:100%}
-    .win.max{inset:40px 0 calc(60px + env(safe-area-inset-bottom)) 0!important}
+    .win{inset:var(--top) 0 calc(60px + env(safe-area-inset-bottom)) 0!important;width:auto!important;height:auto!important;border-radius:0;max-width:100%}
+    .win.max{inset:var(--top) 0 calc(60px + env(safe-area-inset-bottom)) 0!important}
     .win .wgrip,.win>.rz{display:none}
     .win .wbar{cursor:default}
     .win .wbar .lights{display:none}       /* hide the traffic lights — yes to "back" */
@@ -328,7 +336,7 @@
     .desk,body.dock-left .desk,body.dock-right .desk{bottom:calc(60px + env(safe-area-inset-bottom))!important}
     body.dock-left .apps,body.dock-right .apps,body.dock-right .rail{left:auto!important;right:auto!important}
     /* windows — full height between the menubar and the dock (on tablets too) */
-    .win,.win.max{inset:40px 0 calc(60px + env(safe-area-inset-bottom)) 0!important;width:auto!important;height:auto!important;border-radius:0!important;max-width:100%}
+    .win,.win.max{inset:var(--top) 0 calc(60px + env(safe-area-inset-bottom)) 0!important;width:auto!important;height:auto!important;border-radius:0!important;max-width:100%}
     .win .wgrip,.win>.rz{display:none}
     .win .wbar{cursor:default}
     .win .wbar .lights{display:none}
@@ -588,7 +596,7 @@
      menubar and dock. The window's own title bar (traffic lights) stays at the top, so the
      green light still restores it. */
   @media(min-width:1025px){
-    .win.max{inset:0!important;width:auto!important;height:auto!important;border-radius:0!important}
+    .win.max{inset:var(--st) 0 0 0!important;width:auto!important;height:auto!important;border-radius:0!important}
     /* truly fullscreen: every fixed chrome layer sits above the window in z-order, so hide them
        all while any window is maximized — menubar, its gradient, the dock, the wallpaper-refresh
        button and the base-packages nag. Restore via the window's own green light. */
