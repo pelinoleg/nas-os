@@ -3111,7 +3111,7 @@ async function api(path,opts){
  try{const r=await fetch(path,Object.assign({headers:{"Content-Type":"application/json"}},opts));
   if(r.status===401){authGate();throw 0;}
   if(!r.ok)throw 0;LIVE=true;return await r.json();}
- catch(e){const k=path.split("?")[0].replace("/api/","").split("/")[0];return MOCK[k]||{};}
+ catch(e){const k=path.split("?")[0].replace("/api/","").split("/")[0];return Object.assign({_mock:1},MOCK[k]||{});}
 }
 
 /* login: the backend returns 401 without a session; on first run the password is not set yet */
@@ -7619,6 +7619,7 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
      <div class="ovh-row"><span class="ovh-dot" style="background:var(--accent)"></span><span class="ovh-n">Folders in backup</span><span class="ovh-v">${(c.jobs||[]).length||"none yet"}</span></div>
      <div class="ovh-row"><span class="ovh-dot" style="background:var(--accent-2)"></span><span class="ovh-n">Schedule</span><span class="ovh-v">${esc(sched)}${nx?` · <b>${esc(nx)}</b>`:""}</span></div>
      <div class="ovh-row"><span class="ovh-dot" style="background:var(--dim)"></span><span class="ovh-n">Deleted files</span><span class="ovh-v">${c.delete_mode==="mirror"?"mirror":c.delete_mode==="add"?"keep":"archive"}${(!isRcloneAny()&&c.verify)?" · verification on":""}</span></div>
+     <div class="ovh-row"><span class="ovh-dot" id="oDrillDot" style="background:var(--dim)"></span><span class="ovh-n">Restore drill${tipHTML("Pulls a few random files back OUT of the backup and checks they restore intact — proof the backup is actually recoverable, not just written.")}</span><span class="ovh-v" id="oDrillV">checking…</span><button class="btn sm" id="oDrillBtn" style="margin-left:8px;padding:3px 10px">Run</button></div>
    </div></div>
    <div class="nb-prog" id="oProg" style="display:none;margin-bottom:10px"></div>
    <div id="oGuard" class="nb-dwarn" style="display:none"></div>
@@ -7855,6 +7856,23 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
     else setHero("mut","<b>Never run yet</b> — press «Run backup» to make the first copy");}
    paintDelGuard((st&&st.jobs)||[]);});
   paintStatus();
+  // Restore drill: verdict + Run/Stop button, polled while it runs
+  {const drillAgo=t=>{if(!t)return"";const d=Date.now()/1000-t;if(d<90)return"just now";if(d<3600)return Math.round(d/60)+"m ago";if(d<86400)return Math.round(d/3600)+"h ago";return Math.round(d/86400)+"d ago";};
+   const paintDrill=d=>{const v=g("#oDrillV"),dot=g("#oDrillDot"),btn=g("#oDrillBtn");if(!v||!btn)return;
+    if(d&&d.running){dot.style.background="var(--accent)";v.innerHTML=`<span style="color:var(--accent)">${esc(d.line||"running…")}</span>`;btn.textContent="Stop";return;}
+    btn.textContent="Run";
+    if(!d||(d.result==null&&!d.done&&!d.sampled)){dot.style.background="var(--mut)";v.innerHTML='<span style="color:var(--mut)">never tested</span>';}
+    else if(d.result==="ok"){dot.style.background="var(--good)";v.innerHTML=`✓ ${d.ok} file${d.ok!=1?"s":""} restored · ${drillAgo(d.done)}`;}
+    else if(d.result==="warn"){dot.style.background="var(--danger)";v.innerHTML=`⚠ ${d.fail} of ${d.sampled} could not be restored · ${drillAgo(d.done)}`;}
+    else if(d.result==="empty"){dot.style.background="var(--warn)";v.innerHTML=`<span style="color:var(--dim)">${esc(d.line||"nothing to test")}</span>`;}
+    else if(d.result==="skip"){dot.style.background="var(--mut)";v.innerHTML=`<span style="color:var(--mut)">${esc(d.line||"not available for this backup type")}</span>`;}
+    else{dot.style.background="var(--mut)";v.innerHTML="—";}};
+   const pollDrill=()=>{clearInterval(win._drpi);win._drpi=setInterval(async()=>{const d=await nbP("/api/backup/drill/status");paintDrill(d);if(!d||!d.running){clearInterval(win._drpi);win._drpi=null;}},1500);};
+   nbP("/api/backup/drill/status").then(d=>{paintDrill(d);if(d&&d.running)pollDrill();});
+   const db=g("#oDrillBtn");if(db)db.onclick=async()=>{const running=db.textContent==="Stop";
+    if(running){await nbP("/api/backup/drill/cancel");toast("Stopping…");}
+    else{const r=await nbP("/api/backup/drill/start");if(!(r&&r.ok)){toast((r&&r.log)||"could not start");return;}toast("Restore drill started");pollDrill();}
+    setTimeout(()=>nbP("/api/backup/drill/status").then(paintDrill),400);};}
   const con=g("#oCon");
   // background + reconnect to the log (survives a page reload)
   const nbErr=l=>/^rsync:|\(code \d|IO error|permission denied|failed to (set|create|open)|cannot |ERROR|DENIED|failed|cannot create|failed to start/i.test(l);
@@ -11359,7 +11377,8 @@ async function poll(){const s=await api("/api/stats");LAST=s;pushHist(s);paintTr
  const nr=!!(s&&s.nb_running);if(nr!==NB_RUNNING){NB_RUNNING=nr;renderDock();}
  syncUsbOps(s&&s.usb_import);
  if(OPEN.__sys&&OPEN.__sys._sub)OPEN.__sys._sub(s);}
-async function pollApps(){const d=await api("/api/desktop");APPS=(d&&d.apps)||[];VOLS=(d&&d.volumes)||[];if(d&&d.home)HOME_DIR=d.home;if(d&&d.user)USER_NAME=d.user;APPS_LOADED=true;renderApps();paintVols();
+async function pollApps(){const d=await api("/api/desktop");if(d&&d._mock)return;   // don't flash demo placeholders (Dockge/Jellyfin/…) before the real shortcuts load
+ APPS=(d&&d.apps)||[];VOLS=(d&&d.volumes)||[];if(d&&d.home)HOME_DIR=d.home;if(d&&d.user)USER_NAME=d.user;APPS_LOADED=true;renderApps();paintVols();
  if(OPEN.__files&&OPEN.__files._vols)OPEN.__files._vols();
  if(OPEN.__duscan&&OPEN.__duscan._paintRoots)OPEN.__duscan._paintRoots();}   // keep the analyzer's external-disk roots in sync
 async function pollDisks(){const d=await api("/api/disks");paintDiskWidget(d.disks||[]);}
