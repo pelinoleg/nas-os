@@ -5842,6 +5842,9 @@ def nb_save(patch, pid=None):
         cur["verify"] = bool(patch["verify"])
     if "drill_auto" in patch:                    # auto-run the restore drill after each clean backup
         cur["drill_auto"] = bool(patch["drill_auto"])
+    if "drill_every" in patch:                   # floor: re-drill if the last one is older than N days (0=off)
+        try: cur["drill_every"] = max(0, min(365, int(patch["drill_every"])))
+        except (ValueError, TypeError): pass
     # first-run wizard flags — pure UI state, persisted with the profile:
     # setup_started = the wizard was shown at least once (profile stays "unconfigured"
     # until Finish, even if connection+folders are already filled in);
@@ -9246,6 +9249,28 @@ def _nb_sched_tick():
                 nb_run_bg(cfg["id"], dry=False)
     _nb_queue_drain()      # freed up — take the next one from the queue
 
+def _nb_drill_sched_tick():
+    """Freshness floor for the restore drill: if a profile's newest drill is older than
+    its drill_every (days), re-run it — so "restore verified" never silently goes stale,
+    even for a backup that hasn't run in a while. Read-only, one per pass, and never while
+    a backup or another drill is busy (a drill on a live backup disk only gets in the way)."""
+    if nb_any_active():
+        return
+    now = time.time()
+    for cfg in nb_profiles():
+        every = int(cfg.get("drill_every", 0) or 0)
+        if every <= 0:
+            continue
+        if _nb_sides(cfg)[1].get("kind") not in ("local", "rclone"):
+            continue                         # only drillable destinations
+        st = nb_drill_state(cfg["id"])
+        if st.get("running"):
+            return                           # a drill is busy — try again next pass
+        last = st.get("done") or st.get("started") or 0
+        if now - last >= every * 86400:
+            if nb_drill_start(cfg["id"]).get("ok"):
+                return                       # one per pass; the next due one waits a minute
+
 def notify_event(name, key, title, msg, lvl=None, priority=None, cooldown=1800):
     """Deliver an event outside monitor_tick: always journal + Pushover, if enabled and ev.on.
     key — the cooldown key (reuses _MON_LAST, like fire())."""
@@ -9595,7 +9620,7 @@ def monitor_loop():
         if full:
             last_full = now
         funcs = ((history_sample, monitor_tick, maintenance_daily, _smart_selftest_tick,
-                  _nb_sched_tick, _automount_tick, _summary_tick, _thermal_tick, usb_ops_sync,
+                  _nb_sched_tick, _nb_drill_sched_tick, _automount_tick, _summary_tick, _thermal_tick, usb_ops_sync,
                   _fsw_tick, _replica_tick, _remotes_tick, _rclone_mounts_tick, _screen_tick) if full else
                  (monitor_tick, _automount_tick, usb_ops_sync))
         for fn in funcs:
@@ -17282,12 +17307,13 @@ class H(BaseHTTPRequestHandler):
             elif p == "/api/backup/drill/start":
                 self._json(nb_drill_start(_nb_bpid(self._body())))
             elif p == "/api/backup/drill/status":
-                _dp = _nb_bpid(self._body()); _ds = dict(nb_drill_status(_dp))
-                _ds["auto"] = nb_load(_dp).get("drill_auto", True)
+                _dp = _nb_bpid(self._body()); _ds = dict(nb_drill_status(_dp)); _dc = nb_load(_dp)
+                _ds["auto"] = _dc.get("drill_auto", True); _ds["every"] = int(_dc.get("drill_every", 7) or 0)
                 self._json(_ds)
-            elif p == "/api/backup/drill/auto":
+            elif p == "/api/backup/drill/sched":
                 _b = self._body()
-                self._json(nb_save({"drill_auto": bool(_b.get("on"))}, _nb_bpid(_b)))
+                self._json(nb_save({"drill_auto": bool(_b.get("auto")),
+                                    "drill_every": int(_b.get("every") or 0)}, _nb_bpid(_b)))
             elif p == "/api/backup/drill/cancel":
                 self._json(nb_drill_cancel(_nb_bpid(self._body())))
             elif p == "/api/backup/cancel":
