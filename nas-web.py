@@ -10329,6 +10329,225 @@ def sentry_mute(key):
     _json_save(SENTRY_FILE, st)
     return {"ok": True}
 
+# ---- write load: who is wearing out the SD card / system disk --------------
+
+WRITELOG = "/var/lib/nas-wizard/writelog.json"
+BOOTLOG  = "/var/lib/nas-wizard/bootlog.jsonl"
+_WRT = {"st": None, "saved": 0.0}
+_WRT_DEV_RE = re.compile(r"^(sd[a-z]+|mmcblk[0-9]+|nvme[0-9]+n[0-9]+)$")
+
+def _sys_disk():
+    """Base block device the root filesystem lives on (mmcblk0 / nvme0n1 / sda)."""
+    r = _run(["findmnt", "-no", "SOURCE", "/"], timeout=5)
+    src = os.path.basename((r.get("log") or "").strip())
+    m = (re.match(r"^(mmcblk[0-9]+|nvme[0-9]+n[0-9]+)p[0-9]+$", src)
+         or re.match(r"^(sd[a-z]+)[0-9]+$", src))
+    return m.group(1) if m else (src or "?")
+
+def _writes_sample():
+    """Accumulate per-disk and per-process write deltas into daily buckets.
+    Runs every ~60 s from _resil_tick; the state is saved only every 5 min —
+    the wear log must not itself become the wear."""
+    now = time.time()
+    st = _WRT["st"]
+    if st is None:
+        st = _WRT["st"] = _json_load_strict(WRITELOG, {}) or {}
+    try:
+        with open("/proc/sys/kernel/random/boot_id") as f:
+            boot_id = f.read().strip()
+    except OSError:
+        boot_id = "?"
+    rebooted = st.get("boot_id") != boot_id
+    st["boot_id"] = boot_id
+    if rebooted:
+        # credit this boot's writes to today only when the boot IS recent;
+        # first-ever run on a box that has been up for days would otherwise
+        # lump days of old writes into one scary "today"
+        try:
+            with open("/proc/uptime") as f:
+                if float(f.read().split()[0]) > 21600:
+                    rebooted = False
+                    st["last"] = {}       # drop stale baselines, start clean
+        except (OSError, ValueError):
+            pass
+    day = time.strftime("%Y-%m-%d")
+    days = st.setdefault("days", {})
+    dbucket = days.setdefault(day, {})
+    last = st.setdefault("last", {})
+    try:
+        with open("/proc/diskstats") as f:
+            for ln in f:
+                p = ln.split()
+                if len(p) < 10 or not _WRT_DEV_RE.match(p[2]):
+                    continue
+                dev, sect = p[2], int(p[9])       # field 10 = sectors written (×512 by definition)
+                prev = last.get(dev)
+                if rebooted:
+                    # kernel counters restart at boot: credit everything written this boot so far
+                    dbucket[dev] = dbucket.get(dev, 0) + sect * 512
+                elif prev is not None and sect >= prev:
+                    dbucket[dev] = dbucket.get(dev, 0) + (sect - prev) * 512
+                last[dev] = sect
+    except (OSError, ValueError):
+        pass
+    # per-process attribution: /proc/<pid>/io write_bytes is cumulative per process;
+    # identity is pid+starttime so a recycled pid never inherits a foreign baseline
+    plast = st.setdefault("plast", {})
+    pdays = st.setdefault("pdays", {})
+    pbucket = pdays.setdefault(day, {})
+    seen = set()
+    for pid in os.listdir("/proc"):
+        if not pid.isdigit():
+            continue
+        try:
+            with open("/proc/%s/stat" % pid) as f:
+                start = f.read().rsplit(")", 1)[-1].split()[19]
+            key = pid + ":" + start
+            wb = 0
+            with open("/proc/%s/io" % pid) as f:
+                for ln in f:
+                    if ln.startswith("write_bytes:"):
+                        wb = int(ln.split()[1])
+                        break
+            seen.add(key)
+            prev = plast.get(key)
+            if prev is None:
+                with open("/proc/%s/comm" % pid) as f:
+                    comm = f.read().strip()[:24] or "?"
+                plast[key] = [comm, wb]           # baseline only — attribute from the next tick
+            elif wb > prev[1]:
+                pbucket[prev[0]] = pbucket.get(prev[0], 0) + (wb - prev[1])
+                prev[1] = wb
+        except (OSError, ValueError, IndexError):
+            continue
+    for k in [k for k in plast if k not in seen]:
+        del plast[k]
+    for dd in sorted(days)[:-90]:
+        del days[dd]
+    for dd in sorted(pdays)[:-90]:
+        del pdays[dd]
+    if now - _WRT["saved"] >= 300:
+        _WRT["saved"] = now
+        for dd in list(pdays):                    # keep the top writers; the tail is noise
+            if len(pdays[dd]) > 20:
+                pdays[dd] = dict(sorted(pdays[dd].items(), key=lambda kv: -kv[1])[:20])
+        _json_save(WRITELOG, st)
+
+def resil_writes():
+    st = _WRT["st"] or _json_load_strict(WRITELOG, {}) or {}
+    sysdev = _sys_disk()
+    days = st.get("days") or {}
+    out_days = [{"d": d, "sys": days[d].get(sysdev, 0), "total": sum(days[d].values()),
+                 "devs": days[d]} for d in sorted(days)[-45:]]
+    prev = [x["sys"] for x in out_days[:-1]][-7:]
+    avg = (sum(prev) / len(prev)) if prev else (out_days[-1]["sys"] if out_days else 0)
+    size = None
+    r = _run(["lsblk", "-bdno", "SIZE,ROTA", "/dev/" + sysdev], timeout=5)
+    p = (r.get("log") or "").split()
+    if p:
+        try:
+            size = int(p[0])
+        except ValueError:
+            pass
+    kind = ("SD card" if sysdev.startswith("mmcblk") else
+            "NVMe SSD" if sysdev.startswith("nvme") else
+            "HDD" if len(p) > 1 and p[1] == "1" else "SSD/USB disk")
+    pdays = st.get("pdays") or {}
+    today = time.strftime("%Y-%m-%d")
+    def top(agg):
+        return sorted(({"comm": k, "bytes": v} for k, v in agg.items()),
+                      key=lambda x: -x["bytes"])[:12]
+    agg7 = {}
+    for d in sorted(pdays)[-7:]:
+        for k, v in pdays[d].items():
+            agg7[k] = agg7.get(k, 0) + v
+    return {"ok": True, "sysdev": sysdev, "kind": kind, "size": size,
+            "avg_day": int(avg), "days": out_days,
+            "top_today": top(pdays.get(today) or {}), "top_week": top(agg7)}
+
+# ---- boot time trend --------------------------------------------------------
+
+_DUR_RE = re.compile(r"(?:(\d+)\s*min\s*)?([\d.]+)\s*s")
+
+def _parse_dur(s):
+    m = _DUR_RE.search(s or "")
+    return round(int(m.group(1) or 0) * 60 + float(m.group(2)), 2) if m else None
+
+def _bootlog_tick(st):
+    """Record startup time + slowest units once per boot. systemd-analyze fails
+    until startup actually finishes, so we simply retry on later ticks."""
+    try:
+        with open("/proc/sys/kernel/random/boot_id") as f:
+            boot_id = f.read().strip()
+    except OSError:
+        return False
+    if st.get("boot_analyzed") == boot_id:
+        return False
+    r = _run(["systemd-analyze", "time"], timeout=15)
+    out = r.get("log") or ""
+    if not r.get("ok") or "Startup finished" not in out:
+        return False
+    head = out.splitlines()[0]
+    def seg(label):
+        m = re.search(r"([^+=]+)\(" + label + r"\)", head)
+        return _parse_dur(m.group(1)) if m else None
+    kernel, user = seg("kernel"), seg("userspace")
+    m = re.search(r"=\s*([^\n]+)$", head)
+    total = _parse_dur(m.group(1)) if m else None
+    if total is None:
+        total = round((kernel or 0) + (user or 0), 2) or None
+    if not total:
+        return False
+    blame = []
+    rb = _run(["systemd-analyze", "blame", "--no-pager"], timeout=15)
+    for ln in (rb.get("log") or "").splitlines():
+        p = ln.strip().rsplit(" ", 1)
+        if len(p) == 2:
+            dur = _parse_dur(p[0])
+            if dur is not None:
+                blame.append([p[1], dur])
+        if len(blame) >= 12:
+            break
+    try:
+        with open("/proc/uptime") as f:
+            boot_ts = int(time.time() - float(f.read().split()[0]))
+    except (OSError, ValueError):
+        boot_ts = int(time.time())
+    rec = {"ts": boot_ts, "total": total, "kernel": kernel, "user": user, "blame": blame}
+    try:
+        lines = []
+        if os.path.isfile(BOOTLOG):
+            with open(BOOTLOG) as f:
+                lines = [l for l in f.read().splitlines() if l.strip()]
+        if lines:
+            try:                          # same boot already recorded (state was lost) — don't duplicate
+                if abs(json.loads(lines[-1]).get("ts", 0) - boot_ts) < 5:
+                    st["boot_analyzed"] = boot_id
+                    return True
+            except ValueError:
+                pass
+        lines = lines[-59:] + [json.dumps(rec)]
+        with open(BOOTLOG + ".tmp", "w") as f:
+            f.write("\n".join(lines) + "\n")
+        os.replace(BOOTLOG + ".tmp", BOOTLOG)
+    except OSError:
+        return False
+    st["boot_analyzed"] = boot_id
+    return True
+
+def resil_bootlog():
+    recs = []
+    try:
+        with open(BOOTLOG) as f:
+            for ln in f:
+                try:
+                    recs.append(json.loads(ln))
+                except ValueError:
+                    pass
+    except OSError:
+        pass
+    return {"ok": True, "boots": recs[-30:]}
+
 # ---- overview + periodic tick ----------------------------------------------
 
 def resil_overview():
@@ -10338,7 +10557,14 @@ def resil_overview():
     drill = drill_last()
     cg = _safe(confgit_log, {}) or {}
     sn = sentry_status()
+    wr = _safe(resil_writes, {}) or {}
+    bt = [b.get("total") for b in ((_safe(resil_bootlog, {}) or {}).get("boots") or [])
+          if b.get("total")]
     return {"ok": True,
+            "writes": {"avg_day": wr.get("avg_day"), "kind": wr.get("kind"),
+                       "sysdev": wr.get("sysdev")},
+            "boottime": {"last": bt[-1] if bt else None,
+                         "median": sorted(bt)[len(bt) // 2] if bt else None},
             "blackbox": {"running": bb.get("running"),
                          "last_sample": samples[-1] if samples else None,
                          "boots": (bb.get("boots") or [])[:5]},
@@ -10361,6 +10587,9 @@ def _resil_tick():
         _safe(sentry_scan)
     st = _json_load_strict(RESIL_STATE, {})
     ch = False
+    _safe(_writes_sample)
+    if _safe(lambda: _bootlog_tick(st)):
+        ch = True
     boots = (_safe(blackbox_status, {}) or {}).get("boots") or []
     if boots:
         last = boots[0]
@@ -17333,6 +17562,10 @@ class H(BaseHTTPRequestHandler):
                 self._json(disaster_get())
             elif p == "/api/resil/sentry":
                 self._json(sentry_status())
+            elif p == "/api/resil/writes":
+                self._json(resil_writes())
+            elif p == "/api/resil/boottime":
+                self._json(resil_bootlog())
             elif p == "/api/net":
                 self._json(net_info())
             elif p == "/api/net/speedtest":

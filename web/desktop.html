@@ -1106,6 +1106,12 @@
   .rs-file:hover{background:var(--sel)}
   .rs-fst{flex:none;font-size:11px;font-weight:600;width:52px}
   .rs-fp{flex:1;min-width:0;overflow-wrap:anywhere}
+  .rs-bars{display:flex;align-items:flex-end;gap:2px;height:58px;background:var(--glass);border-radius:10px;padding:6px 8px;margin:4px 0 12px}
+  .rs-bars i{flex:1;min-width:2px;max-width:18px;background:var(--win-accent,var(--accent));border-radius:2px 2px 0 0;opacity:.85}
+  .rs-bars i:hover{opacity:1}
+  .rs-cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px}
+  .rs-wrow{display:flex;align-items:center;gap:8px;font-size:12.5px;margin-bottom:5px}
+  .rs-wn{flex:none;width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .rc-card2{background:var(--card);border:1px solid var(--win-line,var(--line));border-radius:var(--r-md);padding:13px 14px;display:flex;flex-direction:column;gap:9px}
   .rc-top{display:flex;align-items:center;gap:11px}
   .rc-logo{width:44px;height:44px;flex:none;border:none;background:none;border-radius:11px;font-size:30px;line-height:1;display:flex;align-items:center;justify-content:center;cursor:pointer;padding:0;transition:transform .1s}
@@ -7109,7 +7115,8 @@ function winResil(initTab){openWin("__resil","Resilience",(body,win)=>{
  body.style.padding="0";body.style.display="flex";body.style.flexDirection="column";body.style.overflow="hidden";
  let tab=initTab||"overview";
  const CATS=[{id:"overview",name:"Overview",ic:"lifebuoy"},{id:"bb",name:"Black box",ic:"activity"},
-  {id:"drill",name:"Reboot drill",ic:"refresh"},{id:"cfg",name:"Config history",ic:"clock"},
+  {id:"drill",name:"Reboot drill",ic:"refresh"},{id:"writes",name:"Write load",ic:"save"},
+  {id:"cfg",name:"Config history",ic:"clock"},
   {id:"card",name:"Disaster card",ic:"note"},{id:"sentry",name:"Log sentry",ic:"search"}];
  const ago=t=>{if(!t)return"never";const s=Math.max(0,Math.floor(Date.now()/1000-t));if(s<90)return"just now";
   const m=Math.floor(s/60),h=Math.floor(m/60),d=Math.floor(h/24);return d?d+"d ago":h?h+"h ago":m+"m ago";};
@@ -7123,7 +7130,11 @@ function winResil(initTab){openWin("__resil","Resilience",(body,win)=>{
  const render=()=>{
   body.innerHTML=`<div class="nbmain"><div class="set-nav">${CATS.map(c=>`<button data-t="${c.id}" class="${tab===c.id?"on":""}">${svg(c.ic,17)}<span>${c.name}</span></button>`).join("")}</div><div class="set-main"><div class="set-pane" id="tc"></div></div></div>`;
   body.querySelectorAll(".set-nav button").forEach(b=>b.onclick=()=>{tab=b.dataset.t;render();});
-  ({overview:tabOverview,bb:tabBB,drill:tabDrill,cfg:tabCfg,card:tabCard,sentry:tabSentry}[tab]||tabOverview)(body.querySelector("#tc"));};
+  ({overview:tabOverview,bb:tabBB,drill:tabDrill,writes:tabWrites,cfg:tabCfg,card:tabCard,sentry:tabSentry}[tab]||tabOverview)(body.querySelector("#tc"));};
+ // write-load thresholds per media kind: SD dies from writes far sooner than SSD
+ const wrState=(avg,kind)=>{const sd=kind==="SD card",w=sd?5e9:4e10,b=sd?2e10:1.5e11;
+  return avg==null?"warn":avg>b?"bad":avg>w?"warn":"good";};
+ const gbTxt=b=>b>=1e9?(b/1e9).toFixed(b>=1e10?0:1)+" GB":(b/1e6).toFixed(0)+" MB";
 
  async function tabOverview(tc){
   tc.innerHTML='<div class="set-load">loading…</div>';
@@ -7148,9 +7159,36 @@ function winResil(initTab){openWin("__resil","Resilience",(body,win)=>{
      "the “box is dead, now what” document — rides inside every settings backup",dz.ts?"good":"warn")}
    ${card("sentry","search","Log sentry",sn.learning?"learning the normal noise":(sn.new?`${sn.new} new error pattern${sn.new>1?"s":""}`:"nothing new"),
      `${sn.total||0} known patterns`,sn.new?"warn":"good")}
+   ${card("writes","save","Write load",(d.writes&&d.writes.avg_day!=null)?gbTxt(d.writes.avg_day)+"/day":"collecting…",
+     `written to the system ${(d.writes&&d.writes.kind)||"disk"}${d.boottime&&d.boottime.last?` · last boot took ${d.boottime.last}s`:""}`,
+     wrState(d.writes&&d.writes.avg_day,d.writes&&d.writes.kind))}
    ${lastBoot?card("bb","zap","Last boot",lastBoot.clean?"clean shutdown":"POWER LOSS / CRASH",dts(lastBoot.ts),lastBoot.clean?"good":"bad"):""}
    </div>`;
   tc.querySelectorAll(".rs-card").forEach(c=>c.onclick=()=>{tab=c.dataset.go;render();});}
+
+ async function tabWrites(tc){
+  tc.innerHTML='<div class="set-load">loading…</div>';
+  const d=await api("/api/resil/writes");
+  if(!d||!d.ok){tc.innerHTML='<div class="set-load">failed to load</div>';return;}
+  const sd=d.kind==="SD card",stt=wrState(d.avg_day,d.kind);
+  const rewrite=d.size&&d.avg_day?Math.round(d.size/d.avg_day):null;
+  const mx=Math.max(...(d.days||[]).map(y=>y.sys),1);
+  tc.innerHTML=`<h3 class="set-title">Write load</h3>
+   <p class="set-sub">How much gets written to the system disk (<b>${esc(d.kind||"?")}</b>, <span class="mono">${esc(d.sysdev)}</span>) and — more importantly — <b>by whom</b>. ${sd?"SD cards die from writes: a card rewritten end-to-end too often wears out in months, and it takes the whole system with it.":"Flash wears out from writes; a quiet system should write little."} Collected by itself, day by day.</p>
+   <div class="rs-scorebox"><span class="rs-score" style="color:var(--win-${stt==="bad"?"danger":stt},var(--${stt==="bad"?"danger":stt}))">${gbTxt(d.avg_day)}</span>
+    <div><b>per day</b><div class="rs-mut">7-day average to the system disk${rewrite?` · a full ${gbTxt(d.size)} rewrite every ~${rewrite} day${rewrite>1?"s":""}`:""}</div></div></div>
+   ${(d.days||[]).length>1?`<div class="rs-gl">daily writes to ${esc(d.sysdev)}, last ${d.days.length} days</div>
+   <div class="rs-bars">${d.days.map(x=>`<i style="height:${Math.max(3,Math.round(x.sys/mx*54))}px" title="${x.d}: ${gbTxt(x.sys)} to the system disk, ${gbTxt(x.total)} to all disks"></i>`).join("")}</div>`
+   :'<div class="rs-mut" style="margin-bottom:10px">The daily chart appears after the first full day of collecting.</div>'}
+   <div class="rs-cols">
+    <div><h3 class="set-title">Top writers today</h3><div id="rsWt"></div></div>
+    <div><h3 class="set-title">Top writers, 7 days</h3><div id="rsWw"></div></div></div>
+   <p class="rs-mut" style="margin-top:10px">Writers are counted across ALL disks (the kernel reports per-process totals, not per-disk) — a big rsync to a USB disk lands here too, and that's fine: the goal is to notice who suddenly started writing a lot.</p>`;
+  const fill=(sel,list)=>{const bx=tc.querySelector(sel);
+   if(!list.length){bx.innerHTML='<div class="rs-mut">nothing recorded yet — figures appear within minutes</div>';return;}
+   const wm=Math.max(...list.map(x=>x.bytes),1);
+   list.forEach(x=>bx.appendChild(el(`<div class="rs-wrow"><span class="mono rs-wn" title="${esc(x.comm)}">${esc(x.comm)}</span><div class="bar" style="flex:1"><i class="pg" style="width:${Math.max(2,Math.round(x.bytes/wm*100))}%;display:block;height:100%"></i></div><span class="rs-mut mono" style="flex:none">${fmtB(x.bytes)}</span></div>`)));};
+  fill("#rsWt",d.top_today||[]);fill("#rsWw",d.top_week||[]);}
 
  async function tabBB(tc){
   tc.innerHTML='<div class="set-load">loading…</div>';
@@ -7185,6 +7223,24 @@ function winResil(initTab){openWin("__resil","Resilience",(body,win)=>{
       ${(f.flight.dmesg||[]).length?`<div class="rs-gl" style="margin-top:10px">kernel log tail at the moment of death</div><pre class="rs-pre">${esc(f.flight.dmesg.join("\n"))}</pre>`:""}`;
      fb.scrollIntoView({behavior:"smooth",block:"nearest"});};
    bx.appendChild(row);});
+  // boot time trend: recorded once per boot (systemd-analyze), creeping up = some unit drags
+  api("/api/resil/boottime").then(bt=>{
+   const boots=(bt&&bt.boots)||[];
+   if(!boots.length||!document.body.contains(tc))return;
+   const lastB=boots[boots.length-1];
+   const sec=el(`<div><h3 class="set-title" style="margin-top:16px">Boot time</h3>
+     <p class="set-sub">How long each boot took (one bar per boot — click for the slowest services of that boot). If it creeps up, some service started dragging its feet.</p>
+     <div class="rs-bars" id="rsBt" style="height:64px"></div><div id="rsBl"></div></div>`);
+   tc.appendChild(sec);
+   const bmx=Math.max(...boots.map(b=>b.total||0),1);
+   const showBlame=b=>{sec.querySelector("#rsBl").innerHTML=
+     `<div class="rs-gl" style="margin:6px 0 4px">boot at ${dts(b.ts)} — ${b.total}s total (kernel ${b.kernel??"?"}s + services ${b.user??"?"}s); slowest units:</div>`+
+     ((b.blame||[]).map(x=>`<div class="rs-wrow"><span class="mono rs-wn" style="width:220px" title="${esc(x[0])}">${esc(x[0])}</span><div class="bar" style="flex:1"><i class="pg" style="width:${Math.max(2,Math.round(x[1]/(b.blame[0][1]||1)*100))}%;display:block;height:100%"></i></div><span class="rs-mut mono" style="flex:none">${x[1]}s</span></div>`).join("")||'<div class="rs-mut">no per-unit data</div>');};
+   boots.forEach(b=>{
+    const i=el(`<i style="height:${Math.max(3,Math.round((b.total||0)/bmx*58))}px;cursor:pointer" title="${dts(b.ts)} — ${b.total}s"></i>`);
+    i.onclick=()=>showBlame(b);
+    sec.querySelector("#rsBt").appendChild(i);});
+   showBlame(lastB);});
   // live graphs: refresh in place while the tab is open
   if(win._rsT)clearInterval(win._rsT);
   win._rsT=setInterval(async()=>{
