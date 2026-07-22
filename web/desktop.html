@@ -8520,7 +8520,7 @@ function winFsHistory(){openWin("__fsw","File history",(body,win)=>{
   const c=ST.config||{};
   let h=`<div>${svg("clock",12)} ${c.enabled?"scan at "+esc(c.time||"02:30"):"auto-scan off"}</div>
    <div>${svg("refresh",12)} ${ST.last?"last scan: "+ago(ST.last.ts):"not yet"}</div>
-   <div>${svg("db",12)} db ${fmtB(ST.db_size)}</div>`;
+   <div>${svg("disks",12)} db ${fmtB(ST.db_size)}</div>`;
   if(ST.corrupt)h+=`<div class="bad">${svg("warn",12)} corrupted: ${ST.corrupt}</div>`;
   el.innerHTML=h;
  }
