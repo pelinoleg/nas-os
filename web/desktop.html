@@ -510,7 +510,9 @@
     background:color-mix(in srgb,var(--warn) 10%,transparent);cursor:help}
   .wg-lanwarn svg{flex:none}
   .krow span{color:var(--dim);display:inline-flex;align-items:center;gap:6px}.krow span svg{opacity:.65;flex:none}.krow b{font-family:var(--mono);font-variant-numeric:tabular-nums}
-  .dline{display:flex;align-items:center;gap:9px;font-size:12.5px;padding:6px 0}
+  .dline{display:flex;flex-wrap:wrap;align-items:center;gap:0 9px;font-size:12.5px;padding:6px 0}
+  /* fill bar spans the whole row on its own line at the bottom (out of the name flex item) */
+  .dline>.dbar{flex:0 0 100%;width:100%;margin-top:5px}
   .dline.sys{opacity:.8}
   .dline .ddot{width:7px;height:7px;border-radius:50%;flex:none}
   .dline .ddot-pi{width:15px;height:15px;flex:none;margin:0 -4px 0 -4px}
@@ -10883,9 +10885,10 @@ function dRow(role,name,pct,free,temp,sys,sub){
  const mark=sys?`<img class="ddot-pi" src="/icon-flat.svg" alt="">`:`<span class="ddot" style="background:${DROLE_COL[role]||"var(--mut)"}"></span>`;
  return `<div class="dline${sys?" sys":""}" title="${att((sub?sub+" · ":"")+(roleName[role]||role)+(temp!=null?" · "+temp+"°C":""))}">
    ${mark}
-   <span class="nm"><span class="dn">${esc(name)}</span>${sub?`<span class="dsub">${esc(sub)}</span>`:""}${pct!=null?`<div class="dbar"><i style="width:${Math.max(pct,.4)}%;background:${barCol(pct)}"></i></div>`:""}</span>
+   <span class="nm"><span class="dn">${esc(name)}</span>${sub?`<span class="dsub">${esc(sub)}</span>`:""}</span>
    ${temp!=null?`<span class="dtemp" style="color:${diskTcol(temp)}">${temp}°</span>`:""}
-   <span class="pc">${free}</span></div>`;}
+   <span class="pc">${free}</span>
+   ${pct!=null?`<div class="dbar"><i style="width:${Math.max(pct,.4)}%;background:${barCol(pct)}"></i></div>`:""}</div>`;}
 // a separate "pool card" in the widget — visually not like a regular disk (layers icon, accent, disk counter)
 function poolRow(u,ndata,nparity){
  const pct=u.total?Math.max(u.pct,.6):0;
