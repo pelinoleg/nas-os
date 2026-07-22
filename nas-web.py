@@ -6201,7 +6201,8 @@ def nb_profile_delete(pid, confirm=""):
     _nb_write_profiles([x for x in profs if x["id"] != pid])
     for f in (nb_status_file(pid), nb_run_log(pid), nb_run_state(pid),
               nb_run_cancel(pid), nb_history_file(pid), nb_health_file(pid),
-              nb_compare_state_file(pid), nb_compare_cancel(pid)):
+              nb_compare_state_file(pid), nb_compare_cancel(pid),
+              _nb_changes_file(pid), _nb_drill_file(pid)):
         try: os.remove(f)
         except OSError: pass
     log_event("action", "NAS backup: profile «%s» deleted" % p["name"],
@@ -6694,6 +6695,11 @@ def nb_build_cmd(cfg, job, dry, prev_files=0, mkpath=False, allow_delete=False, 
                 "--no-owner", "--no-group", "--no-perms"] + rsh
         if not _nb_dest_ssh(cfg):   # local receiver — store files under the panel owner
             args.append("--chown=%s:%s" % (owner, owner))
+    # Itemize every change so the run can record WHAT moved (added/changed/deleted) for the
+    # History "what changed" view. Prints one line per changed/deleted item only (never per
+    # unchanged file), so it's bounded by the change count; the runner captures these lines
+    # separately and keeps them OUT of the human log. Does not alter what rsync copies.
+    args.append("--out-format=%i %n")
     dm = cfg.get("delete_mode", "archive")
     if dm in ("archive", "mirror"):
         args.append("--delete")
@@ -7308,6 +7314,7 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None, allow_delete=Fal
                "will ABORT with «File too large». Reformat the destination to ext4 (or exfat, "
                "if the disk is also needed on Windows/Mac)" % dest_fs)
     results = []
+    chg_manifest = {}          # per-job file-change lists for the History "what changed" view
     def emit(r):
         # keep the --max-delete guard baseline armed even when a job is SKIPPED: a skip with
         # no "files" key would reset prev_files to 0 next run and disarm the deletion cap.
@@ -7405,9 +7412,21 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None, allow_delete=Fal
                     return
         threading.Thread(target=_watch_cancel, daemon=True).start()
         err_lines, errs, fs_bad, fs_files = [], 0, 0, []
+        chg = {"a": [], "c": [], "d": [], "an": 0, "cn": 0, "dn": 0}
         try:
             for line in iter(p.stdout.readline, ""):
                 line = line.rstrip("\n")
+                # itemized change lines (--out-format='%i %n') — record what moved and keep
+                # them OUT of the human log; they never look like a stat/progress/error line
+                if line.startswith("*deleting") or (len(line) >= 12 and line[0] in "<>ch." and line[11] == " "):
+                    k, name = _nb_itemize(line)
+                    if k and name:
+                        chg[k + "n"] += 1
+                        if len(chg[k]) < NB_CHG_CAP:
+                            chg[k].append(name)
+                    if cancel():
+                        p.kill(); break
+                    continue
                 writer(line)
                 if "Number of" in line or "Total transferred" in line or "Total file size" in line:
                     stat_lines.append(line)
@@ -7458,7 +7477,10 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None, allow_delete=Fal
                 _safe(lambda: _nb_owner_access(j["dest"]))
         res = {"src": j["src"], "dest": j["dest"], "ok": ok, "code": p.returncode, "size": sz,
                "files": stt.get("files", prevf.get(j["src"], 0)), "xfer": stt.get("xfer", 0),
-               "xfer_bytes": stt.get("xfer_bytes", 0), "deleted": stt.get("deleted", 0)}
+               "xfer_bytes": stt.get("xfer_bytes", 0), "deleted": stt.get("deleted", 0),
+               "added": chg["an"], "changed": chg["cn"]}
+        if chg["an"] or chg["cn"] or chg["dn"]:      # detailed lists → separate manifest, not the hot history
+            chg_manifest[j["src"]] = chg
         if p.returncode == 25:      # the UI shows the threshold that applied and offers to allow deletion
             res["guard_limit"] = stt.get("guard_limit", 0)
             res["guard_pct"] = stt.get("guard_pct", 0)
@@ -7496,9 +7518,12 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None, allow_delete=Fal
         except Exception: pruned = 0
         if pruned: writer("old deleted-files snapshots cleaned: %d" % pruned)
         _nb_write_status(pid, results)
-        try: _nb_history_add(pid, {"ts": int(time.time()), "dur": int(time.time() - t0),
+        run_ts = int(time.time())
+        try: _nb_history_add(pid, {"ts": run_ts, "dur": int(time.time() - t0),
                               "result": "stopped" if stopped else ("ok" if allok else "warn"),
                               "jobs": results})
+        except Exception: pass
+        try: _nb_changes_write(pid, run_ts, chg_manifest)   # per-file "what changed" for this run
         except Exception: pass
         # A backup that was written but never proven-restorable is just hope. After a clean run,
         # auto-fire the restore drill so "restore verified" stays fresh on its own. Read-only,
@@ -7597,6 +7622,36 @@ def _nb_prune_remote(cfg, writer, shell_fs=None):
                 writer("could not remove old snapshot %s: %s" % (p, (rr.get("log") or "").strip()[-120:]))
     return removed
 
+NB_CHG_CAP = 400              # keep at most this many paths per category per job
+
+def _nb_itemize(line):
+    """Classify one rsync --out-format='%i %n' line → ('a'|'c'|'d', name) or (None, None).
+    Files only (dir/symlink noise skipped). See the design test: added = '>f+++…',
+    changed = '>f.st…', deleted = '*deleting <name>'."""
+    if line.startswith("*deleting"):
+        return ("d", line[9:].strip())
+    if len(line) >= 12 and line[0] in "<>ch." and line[11] == " ":
+        if line[1] != "f":            # skip directories / symlinks / devices — just noise here
+            return (None, None)
+        return (("a" if line[2] == "+" else "c"), line[12:])
+    return (None, None)
+
+def _nb_changes_file(pid): return _nb_f(pid, "changes", "json")
+
+def _nb_changes_write(pid, run_ts, per_job):
+    """Store one run's per-file change manifest keyed by its history ts, kept lean
+    (last runs only) and OUT of the hot history file so paintStatus stays cheap."""
+    if not per_job:
+        return
+    data = _json_load_strict(_nb_changes_file(pid), {})
+    if not isinstance(data, dict):
+        data = {}
+    data[str(int(run_ts))] = per_job
+    for k in sorted(data, key=lambda s: int(s) if s.isdigit() else 0)[:-30]:
+        data.pop(k, None)             # keep the 30 most recent runs
+    try: _json_save(_nb_changes_file(pid), data, indent=None)
+    except OSError: pass
+
 def _nb_parse_stats(lines):
     """Extract numbers from the rsync --stats block."""
     out = {}
@@ -7633,6 +7688,14 @@ def _nb_history_add(pid, entry):
         _json_save(nb_history_file(pid), hist)
     except OSError:
         pass
+
+def nb_changes(pid, ts):
+    """The per-file change manifest for one run (by its history ts): {job: {a,c,d,an,cn,dn}}.
+    Empty if that run predates the feature or kept no changes."""
+    data = _json_load_strict(_nb_changes_file(_nb_pid(pid)), {})
+    if not isinstance(data, dict):
+        return {}
+    return data.get(str(int(ts)), {}) if ts else {}
 
 def _nb_run_bytes(run):
     """Transferred bytes of one history entry: the run itself carries no totals,
@@ -17316,6 +17379,9 @@ class H(BaseHTTPRequestHandler):
                                     "drill_every": int(_b.get("every") or 0)}, _nb_bpid(_b)))
             elif p == "/api/backup/drill/cancel":
                 self._json(nb_drill_cancel(_nb_bpid(self._body())))
+            elif p == "/api/backup/changes":
+                _b = self._body()
+                self._json({"jobs": nb_changes(_nb_bpid(_b), int(_b.get("ts") or 0)), "cap": NB_CHG_CAP})
             elif p == "/api/backup/cancel":
                 b = self._body()
                 pid = nb_load(_nb_bpid(b))["id"]

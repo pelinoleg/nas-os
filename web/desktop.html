@@ -1011,7 +1011,22 @@
   .nb-hrun:hover .nb-hdel{opacity:1}.nb-hdel:hover{color:var(--danger)}
   .set-titrow{display:flex;align-items:center;justify-content:space-between;gap:12px}
   .nb-hjob{display:flex;align-items:center;gap:8px;padding:3px 0 3px 16px;font-size:12px}
-  .nb-hjm{margin-left:auto;color:var(--mut);font-size:11px;white-space:nowrap}
+  .nb-hjob.has-chg{cursor:pointer;border-radius:6px}
+  .nb-hjob.has-chg:hover{background:var(--glass)}
+  .nb-hjm{margin-left:auto;color:var(--mut);font-size:11px;white-space:nowrap;display:flex;align-items:center;gap:8px}
+  .nb-hchg{font-family:var(--mono)}
+  .nb-hchg .a{color:var(--good)}.nb-hchg .c{color:var(--accent)}.nb-hchg .d{color:var(--danger)}
+  /* per-run "what changed" — added/changed/deleted file lists, lazy-loaded on click */
+  .nb-chg{margin:1px 0 6px 24px;padding:8px 11px;background:var(--glass);border:1px solid var(--line);border-radius:var(--r-md);max-height:440px;overflow:auto}
+  .nb-chg-sec{margin-bottom:7px}.nb-chg-sec:last-child{margin-bottom:0}
+  .nb-chg-h{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);margin-bottom:3px}
+  .nb-chg-f{font-family:var(--mono);font-size:11px;line-height:1.55;word-break:break-all;padding-left:15px;position:relative;color:var(--dim)}
+  .nb-chg-f::before{position:absolute;left:0;font-weight:700}
+  .nb-chg-f.a::before{content:"+";color:var(--good)}
+  .nb-chg-f.c::before{content:"~";color:var(--accent)}
+  .nb-chg-f.d::before{content:"\2212";color:var(--danger)}
+  .nb-chg-more{color:var(--mut);font-size:10.5px;padding-left:15px;margin-top:2px}
+  .nb-chg-more[data-more]{cursor:pointer}.nb-chg-more[data-more]:hover{color:var(--accent)}
   .nb-help{display:flex;flex-direction:column;gap:3px;background:var(--card);border:1px solid var(--line);border-radius:var(--r-md);padding:11px 13px;margin:10px 0 4px;font-size:12.5px;line-height:1.5}
   .nb-help b{font-weight:640;color:var(--text)}.nb-help span{color:var(--dim)}
   .nb-testr{margin:2px 0 0}
@@ -8071,8 +8086,21 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
      head.querySelector(".nb-hdel").onclick=async()=>{const r=await nbP("/api/backup/history-del",{ts:run.ts});draw((r&&r.history)||[]);};
      box.appendChild(head);
      (run.jobs||[]).forEach(j=>{const line=(j.code===25)?"stopped by guard":((j.xfer||0)+" files · "+fmtB(j.xfer_bytes||0)+(j.deleted?(" · deleted "+j.deleted):"")+(j.verify_err?" · verification failed":j.verify_bad?(" · verification: ≠ "+j.verify_bad):j.verify_bad===0?" · verification OK":""));
-      box.appendChild(el(`<div class="nb-hjob"><span class="ovh-dot" style="background:${j.ok?"var(--good)":"var(--danger)"};flex:none"></span><span class="nb-src mono" title="${att(j.src)}">${esc(j.src)}</span><span class="nb-hjm mono">${esc(line)}</span></div>`));});
+      const a=+j.added||0,c=+j.changed||0,d=+j.deleted||0,hasChg=a||c||d;
+      const badge=hasChg?`<span class="nb-hchg">${a?`<span class="a">+${a}</span> `:""}${c?`<span class="c">~${c}</span> `:""}${d?`<span class="d">−${d}</span>`:""}</span>`:"";
+      const jrow=el(`<div class="nb-hjob${hasChg?" has-chg":""}"><span class="ovh-dot" style="background:${j.ok?"var(--good)":"var(--danger)"};flex:none"></span><span class="nb-src mono" title="${att(j.src)}">${esc(j.src)}</span><span class="nb-hjm mono">${esc(line)}${badge?" ":""}${badge}${hasChg?svg("chev",12):""}</span></div>`);
+      if(hasChg)jrow.onclick=async()=>{const nx=jrow.nextElementSibling;if(nx&&nx.classList.contains("nb-chg-wrap")){nx.remove();return;}
+        const man=await loadChg(run.ts),jm=(man.jobs||{})[j.src];const wrap=el(`<div class="nb-chg-wrap"></div>`);
+        const fill=full=>{wrap.innerHTML=chgPanel(jm,full);wrap.querySelectorAll(".nb-chg-more[data-more]").forEach(mo=>mo.onclick=()=>fill(true));};
+        fill(false);jrow.after(wrap);};
+      box.appendChild(jrow);});
     });};
+   const chgCache={};
+   const loadChg=async ts=>chgCache[ts]||(chgCache[ts]=await nbP("/api/backup/changes",{ts})||{});
+   const chgSec=(cls,label,arr,total,full)=>{if(!total)return"";const lim=full?400:25,shown=(arr||[]).slice(0,lim);
+     return `<div class="nb-chg-sec"><div class="nb-chg-h">${label} · ${total}</div>${shown.map(p=>`<div class="nb-chg-f ${cls}">${esc(p)}</div>`).join("")}${total>shown.length?`<div class="nb-chg-more" data-more="1">…and ${total-shown.length} more — show all</div>`:""}</div>`;};
+   const chgPanel=(jm,full)=>!jm?`<div class="nb-chg"><div class="nb-chg-more">no file details for this run (it ran before this feature)</div></div>`
+     :`<div class="nb-chg">${chgSec("a","Added",jm.a,jm.an,full)}${chgSec("c","Changed",jm.c,jm.cn,full)}${chgSec("d","Deleted",jm.d,jm.dn,full)}</div>`;
    const cb=tc.querySelector("#hClear");if(cb)cb.onclick=()=>confirmDlg("Clear history?","All history entries for this profile will be removed. The backups themselves are untouched.",async()=>{const r=await nbP("/api/backup/history-del",{all:true});draw((r&&r.history)||[]);},true);
    nbG("/api/backup/history").then(r=>draw((r&&r.history)||[]));}
  const TABS={overview:tabOverview,conn:tabConn,sources:tabSources,deleted:tabDeleted,sched:tabSched,compare:tabCompare,history:tabHistory};
