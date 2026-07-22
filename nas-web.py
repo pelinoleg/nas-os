@@ -5840,6 +5840,8 @@ def nb_save(patch, pid=None):
         cur["direction"] = patch["direction"]
     if "verify" in patch:
         cur["verify"] = bool(patch["verify"])
+    if "drill_auto" in patch:                    # auto-run the restore drill after each clean backup
+        cur["drill_auto"] = bool(patch["drill_auto"])
     # first-run wizard flags — pure UI state, persisted with the profile:
     # setup_started = the wizard was shown at least once (profile stays "unconfigured"
     # until Finish, even if connection+folders are already filled in);
@@ -7495,6 +7497,14 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None, allow_delete=Fal
                               "result": "stopped" if stopped else ("ok" if allok else "warn"),
                               "jobs": results})
         except Exception: pass
+        # A backup that was written but never proven-restorable is just hope. After a clean run,
+        # auto-fire the restore drill so "restore verified" stays fresh on its own. Read-only,
+        # its own transient unit — it can't disturb this run. Opt out with drill_auto:false.
+        if allok and not stopped and cfg.get("drill_auto", True):
+            _s, _d = _nb_sides(cfg)
+            if _d.get("kind") in ("local", "rclone"):
+                try: nb_drill_start(pid)
+                except Exception: pass
     return {"ok": allok, "jobs": results, "verify_bad": vbad, "verify_err": verr,
             "stopped": stopped}
 
@@ -8011,10 +8021,52 @@ def nb_drill_cancel(pid=NB_MAIN):
     _json_save(_nb_drill_file(pid), st, indent=None)
     return {"ok": True}
 
-def _nb_drill_sample_local(dirs):
+def _nb_src_hash(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for b in iter(lambda: f.read(262144), b""): h.update(b)
+    return h.hexdigest()
+
+def _nb_src_meta(side, spath):
+    """(size, mtime, sha256hex) of a file on the SOURCE side, or None if it can't be read.
+    Used by the restore drill to prove a restored copy still matches its origin (bit-rot check).
+    READ-ONLY on the source — never writes there. For SSH we pull the one file with rsync over
+    the SAME transport the backup uses (incl. `sudo rsync` when the profile needs it, and
+    --protect-args so paths with spaces survive), so a source we can back up we can also re-read.
+    A failure falls to None → reported as "not checked", never a false corruption alarm."""
+    kind = (side or {}).get("kind") or "local"
+    try:
+        if kind == "local":
+            stt = os.stat(spath)
+            return (stt.st_size, int(stt.st_mtime), _nb_src_hash(spath))
+        if kind == "ssh":
+            import tempfile
+            prefix, env, extra = _nb_side_env(side)          # ("user@host:", env, ["-e","ssh …"])
+            fd, tmpf = tempfile.mkstemp(prefix="drillsrc-")
+            os.close(fd)
+            try:
+                argv = ["rsync", "-t", "--no-motd", "--protect-args"] + extra
+                if side.get("sudo"):
+                    argv.append("--rsync-path=sudo rsync")
+                argv += ["--", prefix + spath, tmpf]
+                r = subprocess.run(argv, capture_output=True, text=True, timeout=300, env=env)
+                if r.returncode != 0 or not os.path.exists(tmpf):
+                    return None
+                return (os.path.getsize(tmpf), int(os.path.getmtime(tmpf)), _nb_src_hash(tmpf))
+            finally:
+                try: os.unlink(tmpf)
+                except OSError: pass
+    except (OSError, ValueError, IndexError, subprocess.SubprocessError):
+        return None
+    return None
+
+def _nb_drill_sample_local(jobs):
+    """Pick a small random sample of real files across the backup's job folders,
+    carrying the owning job so the drill can map each back to its source."""
     import random
     pool = []
-    for d in dirs:
+    for j in jobs:
+        d = j.get("dest")
         if not d or not os.path.isdir(d):
             continue
         cnt = 0
@@ -8023,19 +8075,19 @@ def _nb_drill_sample_local(dirs):
                 p = os.path.join(root, fn)
                 try: sz = os.path.getsize(p)
                 except OSError: continue
-                pool.append((p, sz)); cnt += 1
+                pool.append((p, sz, j)); cnt += 1
             if cnt > 20000:
                 break
     random.shuffle(pool)
     out, total = [], 0
-    for p, sz in pool:
+    for p, sz, j in pool:
         if len(out) >= NB_DRILL_SAMPLE:
             break
         if sz > NB_DRILL_MAXBYTES:
             continue
         if total + sz > NB_DRILL_MAXBYTES and out:
             break
-        out.append((p, sz)); total += sz
+        out.append((p, sz, j)); total += sz
     return out
 
 def _sha256_read(path, restore_to):
@@ -8047,14 +8099,16 @@ def _sha256_read(path, restore_to):
     return h.digest()
 
 def _nb_drill_local(cfg, tmp, st, save):
-    dirs = [j["dest"] for j in (cfg.get("jobs") or []) if j.get("dest") and os.path.isabs(j["dest"])]
-    if not dirs and cfg.get("dest_base"):
-        dirs = [cfg["dest_base"]]
-    sample = _nb_drill_sample_local(dirs)
+    src = _nb_sides(cfg)[0]
+    jobs = [j for j in (cfg.get("jobs") or []) if j.get("dest") and os.path.isabs(j["dest"])]
+    if not jobs and cfg.get("dest_base"):
+        jobs = [{"dest": cfg["dest_base"], "src": None}]
+    sample = _nb_drill_sample_local(jobs)
     st["sampled"] = len(sample); st["line"] = "restoring %d files…" % len(sample); save()
     if not sample:
         st["result"] = "empty"; st["line"] = "nothing to test — the backup is empty or its disk isn't mounted"; return
-    for i, (p, sz) in enumerate(sample):
+    can_src = src.get("kind") in ("local", "ssh")            # can we reach the origin to cross-check?
+    for i, (p, sz, j) in enumerate(sample):
         st["line"] = "restoring %d/%d · %s" % (i + 1, len(sample), os.path.basename(p)); save()
         out = os.path.join(tmp, "f%d" % i)
         try:
@@ -8062,10 +8116,30 @@ def _nb_drill_local(cfg, tmp, st, save):
             b = hashlib.sha256()
             with open(out, "rb") as fr:
                 for chunk in iter(lambda: fr.read(262144), b""): b.update(chunk)
-            if a == b.digest():
-                st["ok"] += 1; st["bytes"] += sz
-            else:
+            if a != b.digest():
                 st["fail"] += 1; st["failures"].append({"path": p, "why": "restored copy did not match (read error)"})
+                save(); continue
+            # Readable. Now compare against the SOURCE to catch silent bit-rot on the backup
+            # disk (bytes flipped while size/mtime stayed put — the one thing a plain file copy
+            # can't notice). A file the user edited AFTER the backup differs legitimately: its
+            # source size/mtime won't match the backup's, so we skip it rather than cry corruption.
+            if can_src and j.get("src") is not None:
+                rel = os.path.relpath(p, j["dest"])
+                spath = os.path.join(j["src"], rel) if src["kind"] == "local" \
+                    else j["src"].rstrip("/") + "/" + rel
+                meta = _nb_src_meta(src, spath)
+                if meta is None:
+                    st["src_unchecked"] = st.get("src_unchecked", 0) + 1
+                elif meta[0] != sz or abs(meta[1] - int(os.path.getmtime(p))) > 2:
+                    st["src_changed"] = st.get("src_changed", 0) + 1   # edited after backup — expected
+                elif meta[2] != a.hex():
+                    st["fail"] += 1
+                    st["failures"].append({"path": p, "bitrot": True,
+                                           "why": "differs from source — possible bit-rot on the backup disk"})
+                    save(); continue
+                else:
+                    st["matched"] = st.get("matched", 0) + 1
+            st["ok"] += 1; st["bytes"] += sz
         except OSError as e:
             st["fail"] += 1; st["failures"].append({"path": p, "why": str(e)[:120]})
         save()
@@ -8110,6 +8184,7 @@ def _nb_drill_rclone(cfg, dst, tmp, st, save):
 def _nb_drill_cli(pid):
     cfg = nb_load(pid); pid = cfg["id"]
     st = {"running": True, "started": int(time.time()), "sampled": 0, "ok": 0, "fail": 0,
+          "matched": 0, "src_changed": 0, "src_unchecked": 0,
           "failures": [], "bytes": 0, "result": None, "line": "sampling…", "pid_": os.getpid()}
     def save(): _json_save(_nb_drill_file(pid), st, indent=None)
     save()
@@ -8136,10 +8211,19 @@ def _nb_drill_cli(pid):
         save()
         if st.get("result") == "warn" and st.get("fail"):
             try:
-                push_notify("Restore drill failed",
-                            "%s — %d of %d sampled files could not be restored" % (cfg.get("name", pid), st["fail"], st["sampled"]), 1)
-                log_event("nb_drill", "Restore drill failed",
-                          "%s: %d/%d files unrecoverable" % (cfg.get("name", pid), st["fail"], st["sampled"]), lvl="warn", kind="backup")
+                nbr = sum(1 for f in (st.get("failures") or []) if f.get("bitrot"))
+                if nbr:
+                    push_notify("Backup bit-rot detected",
+                                "%s — %d of %d sampled files differ from the source (silent corruption on the backup)"
+                                % (cfg.get("name", pid), nbr, st["sampled"]), 1)
+                    log_event("nb_drill", "Backup bit-rot detected",
+                              "%s: %d/%d sampled files no longer match the source" % (cfg.get("name", pid), nbr, st["sampled"]),
+                              lvl="warn", kind="backup")
+                else:
+                    push_notify("Restore drill failed",
+                                "%s — %d of %d sampled files could not be restored" % (cfg.get("name", pid), st["fail"], st["sampled"]), 1)
+                    log_event("nb_drill", "Restore drill failed",
+                              "%s: %d/%d files unrecoverable" % (cfg.get("name", pid), st["fail"], st["sampled"]), lvl="warn", kind="backup")
             except Exception:
                 pass
 
@@ -17198,7 +17282,12 @@ class H(BaseHTTPRequestHandler):
             elif p == "/api/backup/drill/start":
                 self._json(nb_drill_start(_nb_bpid(self._body())))
             elif p == "/api/backup/drill/status":
-                self._json(nb_drill_status(_nb_bpid(self._body())))
+                _dp = _nb_bpid(self._body()); _ds = dict(nb_drill_status(_dp))
+                _ds["auto"] = nb_load(_dp).get("drill_auto", True)
+                self._json(_ds)
+            elif p == "/api/backup/drill/auto":
+                _b = self._body()
+                self._json(nb_save({"drill_auto": bool(_b.get("on"))}, _nb_bpid(_b)))
             elif p == "/api/backup/drill/cancel":
                 self._json(nb_drill_cancel(_nb_bpid(self._body())))
             elif p == "/api/backup/cancel":

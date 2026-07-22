@@ -7619,7 +7619,7 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
      <div class="ovh-row"><span class="ovh-dot" style="background:var(--accent)"></span><span class="ovh-n">Folders in backup</span><span class="ovh-v">${(c.jobs||[]).length||"none yet"}</span></div>
      <div class="ovh-row"><span class="ovh-dot" style="background:var(--accent-2)"></span><span class="ovh-n">Schedule</span><span class="ovh-v">${esc(sched)}${nx?` · <b>${esc(nx)}</b>`:""}</span></div>
      <div class="ovh-row"><span class="ovh-dot" style="background:var(--dim)"></span><span class="ovh-n">Deleted files</span><span class="ovh-v">${c.delete_mode==="mirror"?"mirror":c.delete_mode==="add"?"keep":"archive"}${(!isRcloneAny()&&c.verify)?" · verification on":""}</span></div>
-     <div class="ovh-row"><span class="ovh-dot" id="oDrillDot" style="background:var(--dim)"></span><span class="ovh-n">Restore drill${tipHTML("Pulls a few random files back OUT of the backup and checks they restore intact — proof the backup is actually recoverable, not just written.")}</span><span class="ovh-v" id="oDrillV">checking…</span><button class="btn sm" id="oDrillBtn" style="margin-left:8px;padding:3px 10px">Run</button></div>
+     <div class="ovh-row"><span class="ovh-dot" id="oDrillDot" style="background:var(--dim)"></span><span class="ovh-n">Restore drill${tipHTML("Pulls a few random files back OUT of the backup and checks they restore intact — and, when the source is reachable, that they still match it byte-for-byte (catches silent bit-rot on the backup disk). Proof the backup is actually recoverable, not just written.")}</span><span class="ovh-v" id="oDrillV">checking…</span><label id="oDrillAutoL" style="display:none;margin-left:8px;font-size:11px;color:var(--dim);align-items:center;gap:4px" title="Run the drill automatically after each successful backup"><input type="checkbox" id="oDrillAuto" style="width:14px;height:14px;margin:0"> auto</label><button class="btn sm" id="oDrillBtn" style="margin-left:8px;padding:3px 10px">Run</button></div>
    </div></div>
    <div class="nb-prog" id="oProg" style="display:none;margin-bottom:10px"></div>
    <div id="oGuard" class="nb-dwarn" style="display:none"></div>
@@ -7862,13 +7862,18 @@ function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
     if(d&&d.running){dot.style.background="var(--accent)";v.innerHTML=`<span style="color:var(--accent)">${esc(d.line||"running…")}</span>`;btn.textContent="Stop";return;}
     btn.textContent="Run";
     if(!d||(d.result==null&&!d.done&&!d.sampled)){dot.style.background="var(--mut)";v.innerHTML='<span style="color:var(--mut)">never tested</span>';}
-    else if(d.result==="ok"){dot.style.background="var(--good)";v.innerHTML=`✓ ${d.ok} file${d.ok!=1?"s":""} restored · ${drillAgo(d.done)}`;}
-    else if(d.result==="warn"){dot.style.background="var(--danger)";v.innerHTML=`⚠ ${d.fail} of ${d.sampled} could not be restored · ${drillAgo(d.done)}`;}
+    else if(d.result==="ok"){dot.style.background="var(--good)";const m=d.matched||0;
+     const tip=m>0?tipHTML(`${m} of ${d.ok} restored files were re-read byte-for-byte and still match the source — no drift.${d.src_unchecked?` ${d.src_unchecked} couldn't be reached on the source.`:""}${d.src_changed?` ${d.src_changed} changed since the backup (skipped).`:""}`):tipHTML("Files restored intact; the source wasn't reachable to cross-check for bit-rot.");
+     v.innerHTML=`✓ ${d.ok} file${d.ok!=1?"s":""} restored${m>0?" &amp; verified":""}${tip} · ${drillAgo(d.done)}`;}
+    else if(d.result==="warn"){dot.style.background="var(--danger)";const br=(d.failures||[]).filter(f=>f.bitrot).length;
+     v.innerHTML=br?`⚠ ${br} file${br!=1?"s":""} differ from source — bit-rot${tipHTML("A restored file no longer matches its source even though its size and date are unchanged — the classic signature of silent corruption on the backup disk. Run e2fsck on the backup volume and re-run the backup.")} · ${drillAgo(d.done)}`:`⚠ ${d.fail} of ${d.sampled} could not be restored · ${drillAgo(d.done)}`;}
     else if(d.result==="empty"){dot.style.background="var(--warn)";v.innerHTML=`<span style="color:var(--dim)">${esc(d.line||"nothing to test")}</span>`;}
     else if(d.result==="skip"){dot.style.background="var(--mut)";v.innerHTML=`<span style="color:var(--mut)">${esc(d.line||"not available for this backup type")}</span>`;}
     else{dot.style.background="var(--mut)";v.innerHTML="—";}};
    const pollDrill=()=>{clearInterval(win._drpi);win._drpi=setInterval(async()=>{const d=await nbP("/api/backup/drill/status");paintDrill(d);if(!d||!d.running){clearInterval(win._drpi);win._drpi=null;}},1500);};
-   nbP("/api/backup/drill/status").then(d=>{paintDrill(d);if(d&&d.running)pollDrill();});
+   nbP("/api/backup/drill/status").then(d=>{paintDrill(d);if(d&&d.running)pollDrill();
+    const al=g("#oDrillAutoL"),au=g("#oDrillAuto");if(al&&au&&d){al.style.display="inline-flex";au.checked=d.auto!==false;
+     au.onchange=()=>{nbP("/api/backup/drill/auto",{on:au.checked});toast(au.checked?"Drill will run after each backup":"Auto-drill off");};}});
    const db=g("#oDrillBtn");if(db)db.onclick=async()=>{const running=db.textContent==="Stop";
     if(running){await nbP("/api/backup/drill/cancel");toast("Stopping…");}
     else{const r=await nbP("/api/backup/drill/start");if(!(r&&r.ok)){toast((r&&r.log)||"could not start");return;}toast("Restore drill started");pollDrill();}
