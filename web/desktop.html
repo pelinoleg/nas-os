@@ -7045,6 +7045,7 @@ function winRclone(initTab){openWin("__rclone","Rclone",(body,win)=>{
  const render=()=>{
    body.innerHTML=`<div class="nbmain"><div class="set-nav">${CATS.map(c=>`<button data-t="${c.id}" class="${tab===c.id?"on":""}">${svg(c.ic,17)}<span>${c.name}</span></button>`).join("")}</div><div class="set-main"><div class="set-pane" id="tc"></div><div class="set-foot" id="tf"></div></div></div>`;
    body.querySelectorAll(".set-nav button").forEach(b=>b.onclick=()=>{tab=b.dataset.t;render();});
+   if(DATA===null){body.querySelector("#tc").innerHTML='<div class="set-load">loading…</div>';return;}   // draw the shell at once; fill in when rclone config finishes loading (no blank window)
    (TABS[tab]||TABS.remotes)(body.querySelector("#tc"));
    // pin any .set-savebar to the bottom footer, like the Settings app
    if(win._foot)win._foot.disconnect();
@@ -7190,7 +7191,7 @@ function winRclone(initTab){openWin("__rclone","Rclone",(body,win)=>{
  }
 
  const TABS={remotes:tabRemotes,mounts:tabMounts,tools:tabTools,config:tabConfig,opts:tabOpts};
- (async()=>{await loadCfg();render();})();
+ render();(async()=>{await loadCfg();render();})();   // shell first (nav + loading…), then data
 },{w:900,h:620});}
 
 function winBackup(){openWin("__nasbak","Backup",(body,win)=>{
