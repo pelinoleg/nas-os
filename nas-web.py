@@ -10440,7 +10440,26 @@ def resil_writes():
     out_days = [{"d": d, "sys": days[d].get(sysdev, 0), "total": sum(days[d].values()),
                  "devs": days[d]} for d in sorted(days)[-45:]]
     prev = [x["sys"] for x in out_days[:-1]][-7:]
-    avg = (sum(prev) / len(prev)) if prev else (out_days[-1]["sys"] if out_days else 0)
+    # cold start (no complete day yet): a few minutes of samples extrapolate into
+    # nonsense ("the card will live forever"). The kernel already knows the true
+    # rate — cumulative sectors-written since boot ÷ uptime.
+    est = None
+    if not prev:
+        try:
+            with open("/proc/uptime") as f:
+                up = float(f.read().split()[0])
+            with open("/proc/diskstats") as f:
+                for ln in f:
+                    p = ln.split()
+                    if len(p) >= 10 and p[2] == sysdev:
+                        if up > 3600:
+                            est = {"rate": int(int(p[9]) * 512 / (up / 86400.0)),
+                                   "days": round(up / 86400.0, 1)}
+                        break
+        except (OSError, ValueError):
+            pass
+    avg = (sum(prev) / len(prev)) if prev else \
+        (est["rate"] if est else (out_days[-1]["sys"] if out_days else 0))
     size = None
     r = _run(["lsblk", "-bdno", "SIZE,ROTA", "/dev/" + sysdev], timeout=5)
     p = (r.get("log") or "").split()
@@ -10462,7 +10481,7 @@ def resil_writes():
         for k, v in pdays[d].items():
             agg7[k] = agg7.get(k, 0) + v
     return {"ok": True, "sysdev": sysdev, "kind": kind, "size": size,
-            "avg_day": int(avg), "days": out_days,
+            "avg_day": int(avg), "days": out_days, "est": est,
             "top_today": top(pdays.get(today) or {}), "top_week": top(agg7)}
 
 # ---- boot time trend --------------------------------------------------------

@@ -7176,7 +7176,7 @@ function winResil(initTab){openWin("__resil","Resilience",(body,win)=>{
   tc.innerHTML=`<h3 class="set-title">Write load</h3>
    <p class="set-sub">How much gets written to the system disk (<b>${esc(d.kind||"?")}</b>, <span class="mono">${esc(d.sysdev)}</span>) and — more importantly — <b>by whom</b>. ${sd?"SD cards die from writes: a card rewritten end-to-end too often wears out in months, and it takes the whole system with it.":"Flash wears out from writes; a quiet system should write little."} Collected by itself, day by day.</p>
    <div class="rs-scorebox"><span class="rs-score" style="color:var(--win-${stt==="bad"?"danger":stt},var(--${stt==="bad"?"danger":stt}))">${gbTxt(d.avg_day)}</span>
-    <div><b>per day</b><div class="rs-mut">7-day average to the system disk${rewrite?` · a full ${gbTxt(d.size)} rewrite every ~${rewrite} day${rewrite>1?"s":""}`:""}</div></div></div>
+    <div><b>per day</b><div class="rs-mut">${d.est?`estimated from this boot (kernel totals over ${d.est.days} days of uptime) — precise daily figures start tomorrow`:"7-day average to the system disk"}${rewrite?` · a full ${gbTxt(d.size)} rewrite every ~${rewrite} day${rewrite>1?"s":""}`:""}</div></div></div>
    ${(d.days||[]).length>1?`<div class="rs-gl">daily writes to ${esc(d.sysdev)}, last ${d.days.length} days</div>
    <div class="rs-bars">${d.days.map(x=>`<i style="height:${Math.max(3,Math.round(x.sys/mx*54))}px" title="${x.d}: ${gbTxt(x.sys)} to the system disk, ${gbTxt(x.total)} to all disks"></i>`).join("")}</div>`
    :'<div class="rs-mut" style="margin-bottom:10px">The daily chart appears after the first full day of collecting.</div>'}
