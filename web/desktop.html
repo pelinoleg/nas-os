@@ -1602,7 +1602,8 @@
   .fm-fav-i{display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:var(--r-sm);cursor:pointer;font-size:12.5px;color:var(--dim);transition:background .12s,box-shadow .12s,opacity .12s}
   .fm-fav-i:hover{background:var(--sel);color:var(--text)}
   .fm-fav-i.on{background:var(--sel);color:var(--text);font-weight:650;box-shadow:var(--sh-sm)}
-  .fm-fav-i .fi{flex:none;color:var(--accent-2);display:flex}
+  .fm-fav-i .fi{flex:none;width:18px;height:18px;color:var(--accent-2);display:inline-flex;align-items:center;justify-content:center}
+  .fm-fav-i .fi svg{width:16px;height:16px}   /* uniform glyph box → names + icons line up regardless of each icon's own padding */
   .fm-fav-i .fn{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .fm-fav-i .fx{border:none;background:none;color:var(--mut);display:flex;visibility:hidden;padding:3px;cursor:pointer;border-radius:6px;flex:none}
   .fm-fav-i:hover .fx{visibility:visible}.fm-fav-i .fx:hover{color:var(--danger)}
