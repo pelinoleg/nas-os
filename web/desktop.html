@@ -579,14 +579,14 @@
   .lights i:hover{filter:brightness(1.12);transform:scale(1.25)}
   .win .ttl{font-size:13.5px;font-weight:650;flex:1;text-align:center;color:var(--dim);padding-right:44px;letter-spacing:-.01em}
   .win .body{padding:22px 26px;overflow:auto;flex:1}
-  /* maximize (desktop only — ≤1024 has its own fullscreen rules): reserve the
-     bottom strip only when the dock is actually at the bottom; with a side
-     dock the window gets the full height and shifts off the dock instead */
+  /* maximize (desktop only — ≤1024 has its own fullscreen rules): go edge-to-edge over the
+     menubar and dock. The window's own title bar (traffic lights) stays at the top, so the
+     green light still restores it. */
   @media(min-width:1025px){
-    .win.max{inset:56px 14px 108px 14px!important;width:auto!important;height:auto!important}
-    body.dock-left .win.max,body.dock-right .win.max{bottom:14px!important}
-    body.dock-left .win.max{left:calc(var(--dockw) + 12px)!important}
-    body.dock-right .win.max{right:calc(var(--dockw) + 12px)!important}
+    .win.max{inset:0!important;width:auto!important;height:auto!important;border-radius:0!important}
+    /* truly fullscreen: the menubar (z-index above windows) and dock would otherwise still show
+       through — hide them while any window is maximized. Restore via the window's green light. */
+    body:has(.win.max) .menubar,body:has(.win.max) .dock{display:none!important}
   }
   .win .wgrip{position:absolute;right:0;bottom:0;width:20px;height:20px;cursor:nwse-resize;z-index:6;touch-action:none}
   /* window resize from all sides/corners: invisible handle strips, cursor only */
