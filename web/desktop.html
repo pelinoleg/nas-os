@@ -394,12 +394,17 @@
   /* tablet+phone (≤1024): vertical window tabs → horizontal "pills" */
   @media(max-width:1024px){
     .body:has(.set-nav){flex-direction:column}
-    .set-nav{width:auto;flex:none;flex-direction:row;overflow-x:auto;overflow-y:hidden;
+    /* Backup/Rclone wrap the nav in .nbmain — flip that too, else the sidebar stays vertical
+       and eats half the phone width (the plain .body:has() rule only flips the outer column). */
+    .nbmain:has(.set-nav){flex-direction:column;min-height:0}
+    /* NB: the base `.set-nav{flex-direction:column}` is defined LATER in the sheet, so these
+       overrides need the extra `.body` specificity to win (equal-specificity would lose on order). */
+    .body .set-nav{width:auto;flex:none;flex-direction:row;overflow-x:auto;overflow-y:hidden;
       border-right:none;border-bottom:1px solid var(--line);padding:8px 10px;gap:6px;-webkit-overflow-scrolling:touch}
-    .set-nav::-webkit-scrollbar{height:0}
-    .set-nav button{flex:0 0 auto;width:auto;white-space:nowrap;padding:8px 13px;border-radius:999px;background:var(--sel)}
-    .set-nav .nav-sep{width:1px;height:22px;margin:auto 5px;flex:none}   /* horizontal bar: vertical divider */
-    .set-nav button.on{box-shadow:inset 0 0 0 1px var(--accent-line)}
+    .body .set-nav::-webkit-scrollbar{height:0}
+    .body .set-nav button{flex:0 0 auto;width:auto;white-space:nowrap;padding:8px 13px;border-radius:999px;background:var(--sel)}
+    .body .set-nav .nav-sep{width:1px;height:22px;margin:auto 5px;flex:none}   /* horizontal bar: vertical divider */
+    .body .set-nav button.on{box-shadow:inset 0 0 0 1px var(--accent-line)}
   }
   /* touch screens (tablet+phone): larger tap targets, more comfortable to press */
   @media(pointer:coarse){
@@ -6850,12 +6855,12 @@ function rcloneCopyDlg(remotes){
     <div class="set-titrow"><h3 style="margin:0">${svg("copy",17)} Copy between remotes</h3><button class="iconbtn" id="cpX" title="Close">${svg("x",16)}</button></div>
     <p class="set-sub" style="margin-top:4px">Copies straight from one cloud to another — no local staging. <b>Copy only:</b> the source is never changed, and nothing on the destination is deleted (files are added and updated).</p>
     <div class="set-h">From (source — only read)</div>
-    <div class="nb-field-row"><select id="cpSr" class="mono" style="max-width:210px">${opts(sr)}</select>
-      <input class="mono" id="cpSp" value="${att(sp)}" placeholder="(remote root)" style="flex:1">
+    <div class="nb-field-row" style="flex-wrap:wrap"><select id="cpSr" class="mono" style="max-width:200px">${opts(sr)}</select>
+      <input class="mono" id="cpSp" value="${att(sp)}" placeholder="(remote root)" style="flex:1 1 140px;min-width:130px">
       <button class="btn sm" id="cpSb">${svg("folder",13)} Browse</button></div>
     <div class="set-h">To (destination — receives the copies)</div>
-    <div class="nb-field-row"><select id="cpDr" class="mono" style="max-width:210px">${opts(dr)}</select>
-      <input class="mono" id="cpDp" value="${att(dp)}" placeholder="(remote root)" style="flex:1">
+    <div class="nb-field-row" style="flex-wrap:wrap"><select id="cpDr" class="mono" style="max-width:200px">${opts(dr)}</select>
+      <input class="mono" id="cpDp" value="${att(dp)}" placeholder="(remote root)" style="flex:1 1 140px;min-width:130px">
       <button class="btn sm" id="cpDb">${svg("folder",13)} Browse</button></div>
     <div class="rr-target mono">Copying <b>${esc(sr+":"+sp)}</b> → <b>${esc(dr+":"+dp)}</b></div>
     ${same?`<div class="nb-dwarn" style="margin-top:8px">Source and destination point at the same place — pick a different remote or folder.</div>`:""}
