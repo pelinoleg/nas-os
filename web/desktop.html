@@ -178,11 +178,14 @@
   .mono{font-family:var(--mono);font-variant-numeric:tabular-nums;letter-spacing:0}
   button{font-family:inherit;cursor:pointer;color:inherit}
   /* iOS Safari: with the default touch-action, WebKit holds every tap ~300 ms waiting for a
-     possible double-tap-zoom and in a dense layout often never synthesises the click — the tap
-     shows :active/:hover but the button "does nothing". touch-action:manipulation opts these
-     controls out of double-tap-zoom so the click fires immediately. No effect for mouse/scroll. */
-  button,a,summary,label,input,select,textarea,[role=button],
-  .btn,.iconbtn,.seg,.tgl,.tab,.nbtab,.tile,.chip,.di,.pill,.wb-pill{touch-action:manipulation}
+     possible double-tap-zoom and in the dense window layout frequently never synthesises the
+     click — the tap shows :active/:hover but the control "does nothing" (mouse works, finger
+     doesn't; scroll still works). touch-action:manipulation opts out of double-tap-zoom so the
+     click fires at once. Applied to * (lowest specificity) so it reaches EVERY tappable thing —
+     buttons, the <i> traffic lights, onclick divs — while any element that sets its own
+     touch-action (resize grips, custom pinch/drag surfaces via touch-action:none) still wins.
+     Panning and pinch-zoom are unaffected, so scrolling keeps working. */
+  *{touch-action:manipulation}
   ::selection{background:var(--accent-soft)}
   ::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-thumb{background:var(--line-2);border-radius:6px;border:3px solid transparent;background-clip:padding-box}
   ::-webkit-scrollbar-thumb:hover{background:var(--mut);background-clip:padding-box;border:3px solid transparent}
@@ -422,9 +425,6 @@
     .srow{padding:14px 0}
     .set-nav button{padding:11px 12px}
     input,select,textarea{font-size:16px}   /* iOS doesn't zoom on focus if ≥16px */
-    /* drag/resize are gated off on touch (see openWin) — hide the now-inert grip/edge handles
-       so a landscape iPad (>1024px, still the desktop window layout) shows no dead resize corner */
-    .win .wgrip,.win>.rz{display:none!important}
   }
   /* first start — onboarding */
   .onboard{position:fixed;inset:0;z-index:600;background:rgba(10,16,26,.62);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);display:grid;place-items:center;padding:20px;opacity:0;pointer-events:none;transition:opacity .28s}
@@ -3248,10 +3248,7 @@ function openWin(id,title,build,opts={}){
  bar.querySelector(".m").onclick=()=>{w.style.display="none";w.classList.remove("wfocus");focusTop();renderWinbar();};
  bar.querySelector(".z").onclick=()=>{w.classList.toggle("max");persistWin(w);};
  bar.querySelector(".wback").onclick=()=>goHome();          // phone: "back" → home (window in background)
- // no drag/resize on phone/tablet (windows are fullscreen) NOR on any touch device: on iPad Safari
- // the setPointerCapture in these handlers makes WebKit swallow the click on other controls, so a
- // landscape iPad (>1024px, otherwise the desktop path) would lose every button. Touch = tap only.
- if(!isPhone()&&!isTablet()&&!isTouch()){drag(w,bar);resize(w,w.querySelector(".wgrip"));resizeEdges(w);}
+ if(!isPhone()&&!isTablet()){drag(w,bar);resize(w,w.querySelector(".wgrip"));resizeEdges(w);}  // on phone/tablet windows are fullscreen — no drag/resize
  w.addEventListener("pointerdown",()=>focus(w));renderDock();renderPhoneNav();return w;
 }
 // phone: collapse all windows to the "home screen" (app grid)
@@ -11317,6 +11314,20 @@ function maybeOnboard(){let done=false;try{done=!!SET.onboarded||localStorage.ge
    }).catch(()=>{});
  }
  matchMedia("(prefers-color-scheme:light)").addEventListener("change",()=>{if(SET.theme==="auto")applySettings();});
+ /* Touch diagnostic (only with ?tdbg=1): shows a fixed log of the raw event sequence for each tap
+    so an iPad user can report exactly what fires (pointer/touch/click, target, defaultPrevented,
+    pointercancel). Completely inert without the query flag. */
+ if(/[?&]tdbg=1/.test(location.search)){
+  const box=document.createElement("div");
+  box.style.cssText="position:fixed;left:6px;right:6px;bottom:6px;z-index:99999;max-height:38vh;overflow:auto;background:rgba(0,0,0,.86);color:#0f0;font:11px/1.35 monospace;padding:8px 10px;border-radius:8px;white-space:pre-wrap;pointer-events:none";
+  box.textContent="touch-debug on — tap a button\n";document.body.appendChild(box);
+  const desc=t=>{try{return (t.tagName||"?").toLowerCase()+(t.className&&t.className.baseVal===undefined?"."+(""+t.className).trim().replace(/\s+/g,".").slice(0,26):"");}catch(e){return "?";}};
+  const log=s=>{box.textContent=(s+"\n"+box.textContent).split("\n").slice(0,40).join("\n");};
+  ["touchstart","pointerdown","pointerup","pointercancel","touchend","touchcancel","mousedown","mouseup","click"].forEach(t=>{
+   document.addEventListener(t,e=>{const p=e.defaultPrevented?" [prevented]":"";log(t+" → "+desc(e.target)+p);},true);
+  });
+  window.addEventListener("error",e=>log("JS-ERROR: "+(e.message||"")+" @"+(e.lineno||0)),true);
+ }
 })();
 })();
 </script></body></html>
