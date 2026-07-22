@@ -6388,8 +6388,11 @@ function winDiskUsage(initRoot){const existed=!!OPEN["__duscan"];const w=openWin
    {label:"Show in Files",ic:svg("folder",16),act:()=>winFiles(c.d?c.p:(c.p.replace(/\/[^/]+$/,"")||"/"))},
    ...(c.d?[{label:"Drill in",ic:svg("chartpie",16),act:()=>drill(c.p)}]:[]),
    {label:"To trash",ic:svg("trash",16),dng:1,act:()=>trashItem(c)}]);}
- function paintRoots(){roots=rootList();rootsEl.innerHTML=roots.map(r=>`<button data-r="${att(r.p)}" class="${r.p===root?"on":""}">${svg(r.ic||"disks",14)} ${esc(r.l)}</button>`).join("");
+ let _rootSig="";
+ function paintRoots(){roots=rootList();const sig=roots.map(r=>r.p+":"+r.l).join("|")+"@"+root;if(sig===_rootSig)return;_rootSig=sig;   // VOLS loads async — re-sync when it changes, but skip no-op repaints
+   rootsEl.innerHTML=roots.map(r=>`<button data-r="${att(r.p)}" class="${r.p===root?"on":""}">${svg(r.ic||"disks",14)} ${esc(r.l)}</button>`).join("");
    rootsEl.querySelectorAll("button").forEach(b=>b.onclick=()=>{root=b.dataset.r;cur=root;cache={};paintRoots();refresh();});}
+ win._paintRoots=paintRoots;   // pollApps calls this when the external-disk list (VOLS) changes
  async function refresh(){const st=await api("/api/fs/duscan/status?root="+encodeURIComponent(root));
    if(!st){mainEl.innerHTML="<div class='du-empty'>Error</div>";return;}
    if(st.status==="scanning"){renderScanning(st);pollScan();return;}
@@ -11355,7 +11358,8 @@ async function poll(){const s=await api("/api/stats");LAST=s;pushHist(s);paintTr
  syncUsbOps(s&&s.usb_import);
  if(OPEN.__sys&&OPEN.__sys._sub)OPEN.__sys._sub(s);}
 async function pollApps(){const d=await api("/api/desktop");APPS=(d&&d.apps)||[];VOLS=(d&&d.volumes)||[];if(d&&d.home)HOME_DIR=d.home;if(d&&d.user)USER_NAME=d.user;APPS_LOADED=true;renderApps();paintVols();
- if(OPEN.__files&&OPEN.__files._vols)OPEN.__files._vols();}
+ if(OPEN.__files&&OPEN.__files._vols)OPEN.__files._vols();
+ if(OPEN.__duscan&&OPEN.__duscan._paintRoots)OPEN.__duscan._paintRoots();}   // keep the analyzer's external-disk roots in sync
 async function pollDisks(){const d=await api("/api/disks");paintDiskWidget(d.disks||[]);}
 
 /* onboarding on first launch */
