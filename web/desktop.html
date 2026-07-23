@@ -1108,6 +1108,26 @@
   .kp-note.err{background:color-mix(in srgb,var(--win-danger,var(--danger)) 11%,transparent);color:var(--win-danger,var(--danger))}
   .kp-tail{grid-column:1/-1;margin:2px 0 4px;padding:9px 12px;border-radius:9px;background:rgba(8,12,20,.45);
     color:var(--win-dim,var(--dim));font-family:var(--mono);font-size:10.5px;line-height:1.5;white-space:pre-wrap;max-height:190px;overflow:auto}
+  /* Kopia dialogs: kind tiles, eyebrow labels, list wells, option rows */
+  .dialog input::placeholder,.dialog textarea::placeholder{color:var(--win-dim,var(--dim));opacity:.8}
+  .kp-kinds{display:flex;gap:10px}
+  .kp-kind{flex:1;display:flex;flex-direction:column;align-items:center;gap:7px;padding:13px 10px;border-radius:12px;
+    border:1.5px solid var(--win-line,var(--line));background:none;cursor:pointer;color:var(--win-dim,var(--dim));
+    font-size:12px;font-weight:600;transition:border-color .15s,color .15s,background .15s}
+  .kp-kind svg{width:22px;height:22px}
+  .kp-kind.on{border-color:var(--win-accent,var(--accent));color:var(--win-accent,var(--accent));background:var(--sel);box-shadow:var(--sh-sm)}
+  .kp-eyebrow{margin:15px 0 8px;font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--win-dim,var(--dim))}
+  .kp-well{border:1px solid var(--win-line,var(--line));border-radius:10px;overflow:hidden}
+  .kp-witem{display:flex;align-items:center;gap:9px;padding:8px 11px;font-size:12.5px}
+  .kp-witem+.kp-witem,.kp-witem+.kp-wadd,.kp-wadd+.kp-witem{border-top:1px solid var(--win-line,var(--line))}
+  .kp-wadd{display:flex;align-items:center;gap:7px;width:100%;padding:9px 11px;background:none;border:none;
+    color:var(--win-accent,var(--accent));font-size:12.5px;cursor:pointer;font-weight:600;font-family:inherit}
+  @media(hover:hover){.kp-wadd:hover{background:var(--sel)}}
+  .kp-opt{display:flex;align-items:center;gap:12px;padding:10px 2px}
+  .kp-opt+.kp-opt{border-top:1px solid var(--win-line,var(--line))}
+  .kp-opt .ot{font-size:12.5px;font-weight:600}
+  .kp-opt .od{font-size:11.5px;color:var(--win-dim,var(--dim));margin-top:2px;line-height:1.45}
+  .kp-opt .oc{flex:none;margin-left:auto}
   .rs-ch{display:flex;align-items:center;gap:7px;font-size:13px;margin-bottom:6px}
   .rs-ch svg{color:var(--win-accent,var(--accent));flex:none}
   .rs-ch b{flex:1}
@@ -7549,14 +7569,17 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
 
  function srcDlg(src,onDone){const s=document.getElementById("scrim");
   const folders=(src&&src.folders||[]).slice();
-  s.innerHTML=`<div class="dialog" style="width:480px;max-width:94vw"><h3>${svg("folder",16)} ${src?"Edit source":"New source"}</h3>
-   <div class="field"><label>Name</label><input id="ksN" value="${att(src&&src.name||"")}" placeholder="Photos, Configs, …"></div>
-   <div class="field"><label>Folders</label><div id="ksF"></div><button class="btn sm" id="ksAdd" style="margin-top:6px">${svg("plus",13)} Add folder…</button></div>
-   <div class="field"><label>Exclude patterns <span style="color:var(--mut);font-weight:400">(one per line, e.g. *.tmp or cache/)</span></label><textarea id="ksE" rows="3" style="resize:vertical">${esc((src&&src.excludes||[]).join("\n"))}</textarea></div>
-   <div class="r"><button class="btn" id="ksX">Cancel</button><button class="btn pri" id="ksO">Save</button></div></div>`;
+  s.innerHTML=`<div class="dialog" style="width:470px;max-width:94vw"><h3>${svg("folder",16)} ${src?"Edit source":"New source"}</h3>
+   <p style="margin:2px 0 12px;font-size:12px;color:var(--win-dim,var(--dim))">A named group of folders — pick it in any backup instead of re-choosing paths.</p>
+   <div class="field" style="margin-bottom:4px"><label>Name</label><input id="ksN" value="${att(src&&src.name||"")}" placeholder="Photos, Configs, Projects…"></div>
+   <div class="kp-eyebrow">Folders</div>
+   <div class="kp-well"><div id="ksF"></div><button class="kp-wadd" id="ksAdd">${svg("plus",14)} Add folder…</button></div>
+   <div class="kp-eyebrow">Excludes <span style="font-weight:400;text-transform:none;letter-spacing:0">— optional, one pattern per line</span></div>
+   <textarea id="ksE" rows="2" style="resize:vertical;height:64px;min-height:44px" placeholder="*.tmp&#10;cache/">${esc((src&&src.excludes||[]).join("\n"))}</textarea>
+   <div class="r" style="margin-top:12px"><button class="btn" id="ksX">Cancel</button><button class="btn pri" id="ksO">${src?"Save":"Create source"}</button></div></div>`;
   s.classList.add("show");
   const $=q=>s.querySelector(q);
-  const drawF=()=>{$("#ksF").innerHTML=folders.map((f,i)=>`<div style="display:flex;align-items:center;gap:8px;padding:3px 0"><span class="mono" style="flex:1;font-size:12px;overflow:hidden;text-overflow:ellipsis">${esc(f)}</span><button class="iconbtn" data-i="${i}" title="Remove">${svg("x",13)}</button></div>`).join("")||`<div style="color:var(--mut);font-size:12px">no folders yet</div>`;
+  const drawF=()=>{$("#ksF").innerHTML=folders.map((f,i)=>`<div class="kp-witem">${fmIcon(f.split("/").pop()||f,"dir",15)}<span class="mono" style="flex:1;font-size:12px;overflow:hidden;text-overflow:ellipsis" title="${att(f)}">${esc(f)}</span><button class="iconbtn" data-i="${i}" title="Remove from the source">${svg("x",13)}</button></div>`).join("")||`<div class="kp-witem" style="color:var(--win-dim,var(--dim))">nothing here yet — add the folders to protect</div>`;
    $("#ksF").querySelectorAll("[data-i]").forEach(b=>b.onclick=()=>{folders.splice(+b.dataset.i,1);drawF();});};
   drawF();
   $("#ksAdd").onclick=()=>kpPick(folders[0]?folders[0].replace(/^\//,""):"",p=>{if(p&&!folders.includes(p))folders.push(p);drawF();});
@@ -7568,37 +7591,52 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
    s.classList.remove("show");await load();onDone&&onDone(r.source.id);};}
 
  function destDlg(opts,onDone){const s=document.getElementById("scrim");opts=opts||{};
-  let kind="fs",path="",existing=false;
+  let kind="fs",path="";
   const rems=D.rclone_remotes||[];
-  s.innerHTML=`<div class="dialog" style="width:480px;max-width:94vw"><h3>${svg("hdd",16)} ${opts.spare?"New spare destination":"New destination"}</h3>
-   ${opts.spare?`<div class="mon-note" style="margin:0 0 8px">A spare starts <b>empty</b> — the first backup run copies the whole repository onto it (and keeps it in sync after every snapshot).</div>`:""}
-   <div class="field"><label>Name</label><input id="kdN" placeholder="USB disk, pCloud, …"></div>
-   <div class="field"><label>Where</label><div class="seg" id="kdKind"><button data-v="fs" class="on">Local disk</button><button data-v="rclone">Cloud (rclone)</button></div></div>
-   <div class="field" id="kdFs"><label>Folder for the repository</label>
-    <div style="display:flex;gap:8px;align-items:center"><span class="mono" id="kdPath" style="flex:1;font-size:12px;color:var(--mut)">not chosen</span><button class="btn sm" id="kdBr">Browse…</button></div>
-    <div style="color:var(--mut);font-size:11.5px;margin-top:4px">ext4 is best; the repository lives in its own folder</div></div>
-   <div class="field" id="kdRc" style="display:none"><label>Remote</label>
-    <select id="kdRem">${rems.map(r=>`<option>${esc(r)}</option>`).join("")||"<option value=''>no remotes — add one in the Rclone app</option>"}</select>
-    <label style="margin-top:8px">Path inside the remote</label><input id="kdRp" placeholder="kopia-repo"></div>
-   ${opts.spare?"":`<label style="display:flex;gap:8px;align-items:center;font-size:12.5px;margin:4px 0"><input type="checkbox" id="kdEx" style="width:15px">Connect to an existing repository there (after a reinstall / from a spare)</label>
-   <label style="display:flex;gap:8px;align-items:center;font-size:12.5px;margin:4px 0"><input type="checkbox" id="kdPwf" style="width:15px">Put KOPIA-PASSWORD.txt next to the data <span style="color:var(--mut)">— whoever finds the disk can read the backups</span></label>`}
-   <div class="r"><span id="kdS" style="color:var(--mut);font-size:12px;flex:1;text-align:left"></span><button class="btn" id="kdX">Cancel</button><button class="btn pri" id="kdO">${opts.spare?"Add spare":"Create"}</button></div></div>`;
+  s.innerHTML=`<div class="dialog" style="width:470px;max-width:94vw"><h3>${svg("hdd",16)} ${opts.spare?"New spare destination":"New destination"}</h3>
+   <p style="margin:2px 0 12px;font-size:12px;color:var(--win-dim,var(--dim))">${opts.spare?"A spare starts empty — the first backup run copies the whole repository onto it and keeps it in sync after every snapshot.":"One destination = one snapshot repository. Several backups can share it."}</p>
+   <div class="kp-kinds">
+    <button class="kp-kind on" data-v="fs">${svg("hdd",22)}<span>Local / USB disk</span></button>
+    <button class="kp-kind" data-v="rclone">${svg("globe",22)}<span>Cloud (rclone)</span></button></div>
+   <div class="field" style="margin:14px 0 2px"><label>Name</label><input id="kdN" placeholder="${opts.spare?"Spare USB, Cloud spare…":"USB disk, pCloud…"}"></div>
+   <div id="kdFs">
+    <div class="kp-eyebrow">Repository folder</div>
+    <div class="kp-well">
+     <div class="kp-witem" id="kdPathRow" style="display:none">${svg("folder",15)}<span class="mono" id="kdPath" style="flex:1;font-size:12px;overflow:hidden;text-overflow:ellipsis"></span><button class="iconbtn" id="kdBr2" title="Choose another folder">${svg("edit",13)}</button></div>
+     <button class="kp-wadd" id="kdBr">${svg("plus",14)} Choose a folder…</button></div>
+    <div style="color:var(--win-dim,var(--dim));font-size:11px;margin-top:5px">ext4 is best — the repository gets its own folder on the disk</div></div>
+   <div id="kdRc" style="display:none">
+    <div class="kp-eyebrow">Cloud remote</div>
+    <div style="display:flex;gap:8px"><select id="kdRem" style="flex:1">${rems.map(r=>`<option>${esc(r)}</option>`).join("")||"<option value=''>no remotes — add one in the Rclone app</option>"}</select>
+     <input id="kdRp" placeholder="folder in the cloud, e.g. kopia-repo" style="flex:1"></div></div>
+   ${opts.spare?"":`<div class="kp-eyebrow">Options</div>
+   <div class="kp-opt"><div><div class="ot">This place already holds a repository</div><div class="od">connect to it instead of creating a new one — after a reinstall, or to read a spare copy</div></div>
+    <label class="tgl oc"><input type="checkbox" id="kdEx"><span class="sl"></span></label></div>
+   <div class="kp-opt"><div><div class="ot">Keep a password file next to the data</div><div class="od">writes KOPIA-PASSWORD.txt into the repository folder, so the disk alone is enough to restore — anyone holding it can read the backups</div></div>
+    <label class="tgl oc"><input type="checkbox" id="kdPwf"><span class="sl"></span></label></div>`}
+   <div class="r" style="margin-top:14px"><span id="kdS" style="color:var(--win-dim,var(--dim));font-size:12px;flex:1;text-align:left"></span><button class="btn" id="kdX">Cancel</button><button class="btn pri" id="kdO">${opts.spare?"Add spare":"Create"}</button></div></div>`;
   s.classList.add("show");
   const $=q=>s.querySelector(q);
-  $("#kdKind").querySelectorAll("button").forEach(b=>b.onclick=()=>{kind=b.dataset.v;
-   $("#kdKind").querySelectorAll("button").forEach(x=>x.classList.toggle("on",x===b));
+  s.querySelectorAll(".kp-kind").forEach(b=>b.onclick=()=>{kind=b.dataset.v;
+   s.querySelectorAll(".kp-kind").forEach(x=>x.classList.toggle("on",x===b));
    $("#kdFs").style.display=kind==="fs"?"":"none";$("#kdRc").style.display=kind==="rclone"?"":"none";});
-  $("#kdBr").onclick=()=>kpPick("media/nas",p=>{path=p;
-   const pe=$("#kdPath");if(pe){pe.textContent=p;pe.style.color="var(--text)";}});
+  const pick=()=>kpPick(path?path.replace(/^\//,""):"media/nas",p=>{path=p;
+   $("#kdPathRow").style.display="";$("#kdBr").style.display="none";
+   const pe=$("#kdPath");if(pe)pe.textContent=p;});
+  $("#kdBr").onclick=pick;
+  $("#kdBr2").onclick=pick;
+  const ex=$("#kdEx");
+  if(ex)ex.onchange=()=>{$("#kdO").textContent=ex.checked?"Connect":"Create";};
   $("#kdX").onclick=()=>s.classList.remove("show");
   $("#kdO").onclick=async()=>{
    const bodyObj={name:$("#kdN").value,kind,path,remote:kind==="rclone"?$("#kdRem").value:"",
     remote_path:kind==="rclone"?$("#kdRp").value:"",
     pwfile:!!($("#kdPwf")&&$("#kdPwf").checked)};
    if(opts.spare)bodyObj.no_init=true;
-   const ex=$("#kdEx")&&$("#kdEx").checked;
-   $("#kdO").disabled=true;$("#kdS").textContent=opts.spare?"saving…":(ex?"connecting…":"creating the repository…");
-   const r=await kP(ex?"/api/kopia/dest/connect":"/api/kopia/dest/create",bodyObj);
+   const conn=ex&&ex.checked;
+   if(kind==="fs"&&!path){$("#kdS").textContent="choose a folder first";return;}
+   $("#kdO").disabled=true;$("#kdS").textContent=opts.spare?"saving…":(conn?"connecting…":"creating the repository…");
+   const r=await kP(conn?"/api/kopia/dest/connect":"/api/kopia/dest/create",bodyObj);
    $("#kdO").disabled=false;
    if(!(r&&r.ok)){$("#kdS").textContent=(r&&r.log)||"failed";return;}
    s.classList.remove("show");await load();onDone&&onDone(r.dest.id);};}
@@ -7876,7 +7914,8 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
      keep ${(d.retention||{}).latest||0}/${(d.retention||{}).daily||0}/${(d.retention||{}).weekly||0}/${(d.retention||{}).monthly||0}/${(d.retention||{}).annual||0} (latest/d/w/m/y)<br>
      ${d.schedule&&d.schedule.mode!=="off"?`runs ${d.schedule.mode==="weekly"?"weekly on "+DOWS[+d.schedule.dow||0]:"daily"} at ${esc(d.schedule.time||"03:30")}`:"manual runs only"}${d.usb_trigger?" · also on disk plug-in":""}</div>
     <div class="field" style="margin-top:10px"><label>Name</label><input id="kWName" value="${att(d.name||"")}" placeholder="${att(((srcOf(d)||{}).name||"Backup")+" to "+((dstOf(d.dest)||{}).name||""))}"></div>
-    <label style="display:flex;gap:8px;align-items:center;font-size:12.5px;margin-top:6px"><input type="checkbox" id="kWRun" checked style="width:15px">Run the first snapshot now</label>`;
+    <div class="kp-opt" style="margin-top:4px"><div><div class="ot">Run the first snapshot now</div><div class="od">the first run uploads everything once; later runs send only changes</div></div>
+     <label class="tgl oc"><input type="checkbox" id="kWRun" checked><span class="sl"></span></label></div>`;
   tc.innerHTML=`<div style="display:flex;gap:14px;height:100%">
    <div class="nbwiz-steps">${WSTEPS.map(([id,t],n)=>`<div class="nbwiz-step ${n===i?"on":n<i?"done":""}"><span class="nb-stepn">${n+1}</span>${t}</div>`).join("")}</div>
    <div style="flex:1;min-width:0;display:flex;flex-direction:column"><div style="flex:1;min-height:0;overflow:auto" id="kWBody">${bodyHtml}</div>
