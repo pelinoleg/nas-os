@@ -10105,6 +10105,65 @@ def kp_status():
             "backups": [dict(b, run=kp_run_state(b["id"])) for b in cfg["backups"]],
             "rclone_remotes": rclone_remotes() if rclone_installed() else []}
 
+def kp_browse(path):
+    """Local folder listing for the Source picker (path='' → filtered root)."""
+    path = str(path or "").strip().strip("/")
+    if ".." in path:
+        return {"ok": False, "log": "invalid path"}
+    base = "/" + path if path else "/"
+    entries = []
+    try:
+        with os.scandir(base) as it:
+            for e in it:
+                if _nb_is_junk(e.name):
+                    continue
+                if not path and (e.name in _NB_ROOT_SKIP or e.name.startswith(".")):
+                    continue
+                try:
+                    entries.append({"name": e.name, "dir": e.is_dir(follow_symlinks=False)})
+                except OSError:
+                    pass
+    except OSError as e:
+        return {"ok": False, "log": str(e)}
+    entries.sort(key=lambda x: (not x["dir"], x["name"].lower()))
+    return {"ok": True, "path": path, "abs": True, "entries": entries}
+
+def kp_snapshots(destid):
+    """Snapshot list of one repository, newest first, with the nasbk tag so the
+    UI can filter per backup."""
+    cfg = kp_load()
+    dest = _kp_find(cfg["dests"], str(destid or ""))
+    if not dest:
+        return {"ok": False, "log": "no such destination"}
+    c = _kp_ensure_connected(dest)
+    if not c["ok"]:
+        return c
+    r = _kp(destid, ["snapshot", "list", "--all", "--json"], timeout=120)
+    if not r["ok"]:
+        return {"ok": False, "log": _kp_err_tail(r)}
+    try:
+        raw = json.loads(r["out"] or "[]")
+    except ValueError:
+        return {"ok": False, "log": "bad snapshot list"}
+    out = []
+    for s in (raw if isinstance(raw, list) else []):
+        summ = ((s.get("rootEntry") or {}).get("summ") or {})
+        ts = 0
+        st_ = s.get("startTime") or ""
+        try:
+            tm_ = time.strptime(st_[:19], "%Y-%m-%dT%H:%M:%S")
+            ts = int(calendar.timegm(tm_)) if st_.endswith("Z") else int(time.mktime(tm_))
+        except (ValueError, OverflowError):
+            pass
+        tags = s.get("tags") or {}
+        out.append({"id": s.get("id"), "ts": ts, "path": ((s.get("source") or {}).get("path") or ""),
+                    "bytes": int(summ.get("size") or 0), "files": int(summ.get("files") or 0),
+                    "failed": int(summ.get("numFailed") or 0),
+                    "backup": str(tags.get("tag:nasbk") or tags.get("nasbk") or ""),
+                    "incomplete": bool(s.get("incomplete"))})
+    out.sort(key=lambda x: -x["ts"])
+    return {"ok": True, "snapshots": out[:500]}
+
 # ---- snapshot runner: policies, progress, 3-2-1 replication -----------------
 KP_HIST_FILE = os.path.join(NAS_CONFIG, "kopia-history.json")
 
@@ -19079,6 +19138,8 @@ class H(BaseHTTPRequestHandler):
                 self._json(kp_status())
             elif p == "/api/kopia/run/status":
                 self._json(kp_run_status((q.get("b") or [""])[0]))
+            elif p == "/api/kopia/snapshots":
+                self._json(kp_snapshots((q.get("d") or [""])[0]))
             elif p == "/api/kopia/history":
                 self._json({"history": kp_history()})
             elif p == "/api/backup/status":
@@ -19629,6 +19690,8 @@ class H(BaseHTTPRequestHandler):
                 r = engine("kopia-update")
                 self._json({"ok": r.get("ok"), "log": (r.get("log") or "").strip()[-400:],
                             "version": kopia_version(), "installed": kopia_installed()})
+            elif p == "/api/kopia/browse":
+                self._json(kp_browse(self._body().get("path", "")))
             elif p == "/api/kopia/source/save":
                 self._json(kp_source_save(self._body() or {}))
             elif p == "/api/kopia/source/delete":
