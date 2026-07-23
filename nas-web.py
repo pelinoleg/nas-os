@@ -10101,8 +10101,10 @@ def kp_status():
     return {"installed": kopia_installed(), "version": kopia_version(),
             "password": cfg.get("password") or "",
             "sources": cfg["sources"],
-            "dests": [dict(x, connected=kp_dest_connected(x["id"])) for x in cfg["dests"]],
+            "dests": [dict(x, connected=kp_dest_connected(x["id"]),
+                           mounted=os.path.ismount(_kp_mnt_mp(x["id"]))) for x in cfg["dests"]],
             "backups": [dict(b, run=kp_run_state(b["id"])) for b in cfg["backups"]],
+            "restore": kp_restore_state(),
             "rclone_remotes": rclone_remotes() if rclone_installed() else []}
 
 def kp_browse(path):
@@ -10160,6 +10162,7 @@ def kp_snapshots(destid):
                     "bytes": int(summ.get("size") or 0), "files": int(summ.get("files") or 0),
                     "failed": int(summ.get("numFailed") or 0),
                     "backup": str(tags.get("tag:nasbk") or tags.get("nasbk") or ""),
+                    "root": str((s.get("rootEntry") or {}).get("obj") or ""),
                     "incomplete": bool(s.get("incomplete"))})
     out.sort(key=lambda x: -x["ts"])
     return {"ok": True, "snapshots": out[:500]}
@@ -10355,6 +10358,295 @@ def _kp_hist_add(entry):
 def kp_history():
     h = _json_load_strict(KP_HIST_FILE, [])
     return h if isinstance(h, list) else []
+
+# ---- snapshot browse / restore / mount / delete -----------------------------
+_KP_OID_RE = re.compile(r"^k?[0-9a-f]{16,64}$")
+# "-rw-r--r--   618 2026-07-13 13:24:51 CEST 381a5b…   icon-16.png"
+_KP_LS_RE = re.compile(r"^(\S+)\s+(\d+)\s+(\S+\s+\S+\s+\S+)\s+(k?[0-9a-f]{16,64})\s{2,}(.+)$")
+
+def kp_snap_ls(destid, oid):
+    """One directory level of a snapshot. Navigation is by OBJECT ID (each dir
+    row carries its own) — no path strings to escape or mis-join."""
+    cfg = kp_load()
+    dest = _kp_find(cfg["dests"], str(destid or ""))
+    if not dest:
+        return {"ok": False, "log": "no such destination"}
+    oid = str(oid or "").strip()
+    if not _KP_OID_RE.match(oid):
+        return {"ok": False, "log": "bad object id"}
+    c = _kp_ensure_connected(dest)
+    if not c["ok"]:
+        return c
+    r = _kp(destid, ["ls", "-l", oid], timeout=120)
+    if not r["ok"]:
+        return {"ok": False, "log": _kp_err_tail(r)}
+    entries = []
+    for line in (r["out"] or "").splitlines():
+        m = _KP_LS_RE.match(line.rstrip())
+        if not m:
+            continue
+        entries.append({"name": m.group(5).strip().rstrip("/"),
+                        "dir": m.group(1).startswith("d"),
+                        "size": int(m.group(2)), "oid": m.group(4)})
+    entries.sort(key=lambda x: (not x["dir"], x["name"].lower()))
+    return {"ok": True, "entries": entries}
+
+def kp_snap_delete(destid, snapid):
+    cfg = kp_load()
+    dest = _kp_find(cfg["dests"], str(destid or ""))
+    if not dest:
+        return {"ok": False, "log": "no such destination"}
+    snapid = str(snapid or "").strip()
+    if not re.match(r"^[0-9a-f]{16,64}$", snapid):
+        return {"ok": False, "log": "bad snapshot id"}
+    r = _kp(destid, ["snapshot", "delete", snapid, "--delete"], timeout=300)
+    return {"ok": r["ok"], "log": "" if r["ok"] else _kp_err_tail(r)}
+
+# ---- restore (transient unit, one at a time, pty progress) ----
+KP_RESTORE_STATE  = os.path.join(NAS_CONFIG, "kopia-restore.json")
+KP_RESTORE_LOG    = os.path.join(NAS_CONFIG, "kopia-restore.log")
+KP_RESTORE_CANCEL = os.path.join(NAS_CONFIG, "kopia-restore.cancel")
+KP_RESTORE_UNIT   = "nas-kopia-restore"
+
+def kp_restore_state():
+    st = _json_load_strict(KP_RESTORE_STATE, {})
+    if st.get("running") and time.time() - (st.get("started") or 0) > 15 \
+            and not _systemd_active(KP_RESTORE_UNIT + ".service"):
+        st["running"] = False
+        st["result"] = st.get("result") or "aborted"
+    return st
+
+def kp_restore_status():
+    st = kp_restore_state()
+    lines = []
+    try:
+        with open(KP_RESTORE_LOG) as f:
+            lines = f.read().split("\n")
+        if lines and lines[-1] == "":
+            lines.pop()
+    except OSError:
+        pass
+    return dict(st, ok=True, log=lines[-100:])
+
+def kp_restore_start(destid, oid, target):
+    """Restore one snapshot subtree (by object id) INTO a local folder.
+    Copy-only: the repository is never written, the target only gains files."""
+    if kp_restore_state().get("running"):
+        return {"ok": False, "log": "a restore is already running"}
+    cfg = kp_load()
+    dest = _kp_find(cfg["dests"], str(destid or ""))
+    if not dest:
+        return {"ok": False, "log": "no such destination"}
+    oid = str(oid or "").strip()
+    if not _KP_OID_RE.match(oid):
+        return {"ok": False, "log": "bad object id"}
+    target = os.path.realpath(str(target or "").strip())
+    if not re.match(r"^/(mnt|media|srv|home)/", target + "/"):
+        return {"ok": False, "log": "restore target must be under /mnt, /media, /srv or /home"}
+    try:
+        os.makedirs(target, exist_ok=True)
+    except OSError as e:
+        return {"ok": False, "log": "cannot create %s: %s" % (target, e)}
+    try:
+        os.remove(KP_RESTORE_CANCEL)
+    except OSError:
+        pass
+    _json_save(KP_RESTORE_STATE, {"running": True, "started": int(time.time()),
+                                  "dest": destid, "oid": oid, "target": target, "result": None})
+    cmd = ["systemd-run", "--collect", "--quiet", "--unit", KP_RESTORE_UNIT,
+           "--setenv=SUDO_USER=" + TARGET_USER, "--setenv=HOME=" + HOME,
+           "--setenv=KPR2_DEST", "--setenv=KPR2_OID", "--setenv=KPR2_TARGET",
+           sys.executable, os.path.join(HERE, "nas-web.py"), "kopia-restore"]
+    try:
+        r = subprocess.run(cmd, env=dict(os.environ, KPR2_DEST=destid, KPR2_OID=oid,
+                                         KPR2_TARGET=target),
+                           capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError) as e:
+        _json_save(KP_RESTORE_STATE, {"running": False, "result": "error", "error": str(e)})
+        return {"ok": False, "log": str(e)}
+    if r.returncode != 0:
+        _json_save(KP_RESTORE_STATE, {"running": False, "result": "error"})
+        return {"ok": False, "log": (r.stderr or "failed to start")[:200]}
+    return {"ok": True}
+
+def kp_restore_cancel():
+    try:
+        with open(KP_RESTORE_CANCEL, "w") as f:
+            f.write("1")
+    except OSError:
+        pass
+    try:
+        subprocess.run(["systemctl", "stop", KP_RESTORE_UNIT], capture_output=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    st = _json_load_strict(KP_RESTORE_STATE, {})
+    st.update(running=False, result="stopped")
+    _json_save(KP_RESTORE_STATE, st)
+    return {"ok": True}
+
+# "Processed 12 (13.5 MB) of 128 (1.5 GB) 24.9 MB/s (0.9%) remaining 61s."
+_KP_RST_RE = re.compile(r"Processed\s+(\d+)\s+\(([^)]+)\)\s+of\s+(\d+)\s+\(([^)]+)\)"
+                        r".*?\(([\d.]+)%\)")
+
+def _kp_restore_cli(destid, oid, target):
+    """Driver for the restore unit: kopia restore under a pty (progress is
+    TTY-only, same as snapshot create)."""
+    cfg = kp_load()
+    dest = _kp_find(cfg["dests"], destid)
+    if not dest or not _KP_OID_RE.match(str(oid or "")) or not target:
+        return
+    st = {"running": True, "started": int(time.time()), "dest": destid, "oid": oid,
+          "target": target, "pct": 0, "result": None, "pid": os.getpid()}
+    _last = [0.0]
+
+    def upd(force=False, **kw):
+        st.update(kw)
+        if force or time.monotonic() - _last[0] >= 1.0:
+            _last[0] = time.monotonic()
+            _json_save(KP_RESTORE_STATE, st)
+    try:
+        logf = open(KP_RESTORE_LOG, "w", buffering=1)
+    except OSError:
+        logf = None
+
+    def w(line):
+        if logf:
+            try:
+                logf.write(line + "\n")
+            except OSError:
+                pass
+    result, err = "ok", ""
+    try:
+        upd(force=True)
+        c = _kp_ensure_connected(dest)
+        if not c["ok"]:
+            result, err = "error", c.get("log") or "connect failed"
+            return
+        w("restoring %s → %s" % (oid, target))
+        master, slave = pty.openpty()
+        proc = subprocess.Popen([_kopia_bin(), "--config-file", _kp_cfg_file(destid),
+                                 "--log-dir", os.path.join(_kp_cache_dir(destid), "logs"),
+                                 "restore", oid, target, "--skip-existing"],
+                                stdout=slave, stderr=slave, env=_kp_env(), close_fds=True)
+        os.close(slave)
+        buf = b""
+        while True:
+            r_, _, _ = select.select([master], [], [], 0.5)
+            if os.path.exists(KP_RESTORE_CANCEL):
+                try:
+                    proc.kill()
+                except OSError:
+                    pass
+                result = "stopped"
+                break
+            if not r_:
+                if proc.poll() is not None:
+                    break
+                continue
+            try:
+                d = os.read(master, 8192)
+            except OSError:
+                break
+            if not d:
+                break
+            buf += d
+            *chunks, buf = re.split(rb"[\r\n]", buf)
+            for ch in chunks:
+                line = ch.decode("utf-8", "replace").strip()
+                if not line:
+                    continue
+                m = _KP_RST_RE.search(line)
+                if m:
+                    upd(pct=float(m.group(5)), cur=line)
+                else:
+                    w(line)
+        try:
+            os.close(master)
+        except OSError:
+            pass
+        proc.wait()
+        if result != "stopped" and proc.returncode != 0:
+            result, err = "error", "restore failed (code %d) — see the log" % proc.returncode
+    except Exception as e:
+        result, err = "error", "driver crashed: %r" % e
+        w("driver crashed: %r" % e)
+    finally:
+        st.update(running=False, done=int(time.time()), result=result, error=err,
+                  pct=100 if result == "ok" else st.get("pct", 0))
+        _json_save(KP_RESTORE_STATE, st)
+        w("[%s] %s" % (result.upper(), err or "restored to " + target))
+        try:
+            os.remove(KP_RESTORE_CANCEL)
+        except OSError:
+            pass
+        if logf:
+            try:
+                logf.close()
+            except OSError:
+                pass
+
+# ---- mount a repository's snapshots as a read-only folder ----
+KP_MNT_BASE = "/mnt/kopia"
+
+def _kp_mnt_mp(destid):
+    return os.path.join(KP_MNT_BASE, destid)
+
+def _kp_mnt_unit(destid):
+    return "nas-kopia-mnt-%s" % destid
+
+def kp_mount_start(destid):
+    """Mount ALL snapshots of a repo read-only at /mnt/kopia/<dest> — its own
+    transient unit (survives panel restarts, same lesson as the sshfs mounts)."""
+    cfg = kp_load()
+    dest = _kp_find(cfg["dests"], str(destid or ""))
+    if not dest:
+        return {"ok": False, "log": "no such destination"}
+    c = _kp_ensure_connected(dest)
+    if not c["ok"]:
+        return c
+    mp = _kp_mnt_mp(destid)
+    if os.path.ismount(mp):
+        return {"ok": True, "mp": mp, "log": "already mounted"}
+    try:
+        os.makedirs(mp, exist_ok=True)
+    except OSError as e:
+        return {"ok": False, "log": str(e)}
+    cmd = ["systemd-run", "--collect", "--quiet", "--unit", _kp_mnt_unit(destid),
+           "-p", "ExecStopPost=-/bin/umount -l %s" % mp,
+           "--setenv=KOPIA_PASSWORD", "--setenv=RCLONE_CONFIG",
+           "--setenv=KOPIA_CHECK_FOR_UPDATES=false",
+           _kopia_bin(), "--config-file", _kp_cfg_file(destid),
+           "--log-dir", os.path.join(_kp_cache_dir(destid), "logs"),
+           "mount", "all", mp]
+    try:
+        r = subprocess.run(cmd, env=dict(os.environ, KOPIA_PASSWORD=kp_load().get("password") or "",
+                                         RCLONE_CONFIG=RCLONE_CONF),
+                           capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.SubprocessError) as e:
+        return {"ok": False, "log": str(e)}
+    if r.returncode != 0:
+        return {"ok": False, "log": (r.stderr or "failed to start")[:200]}
+    for _ in range(20):                      # the mount appears a moment after the unit starts
+        if os.path.ismount(mp):
+            return {"ok": True, "mp": mp}
+        time.sleep(0.5)
+    return {"ok": True, "mp": mp, "log": "mounting…"}
+
+def kp_mount_stop(destid):
+    if not _KP_ID_RE.match(str(destid or "")):
+        return {"ok": False, "log": "bad id"}
+    try:
+        subprocess.run(["systemctl", "stop", _kp_mnt_unit(destid)], capture_output=True, timeout=20)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    mp = _kp_mnt_mp(destid)
+    if os.path.ismount(mp):
+        subprocess.run(["umount", "-l", mp], capture_output=True, timeout=10)
+    try:
+        os.rmdir(mp)
+    except OSError:
+        pass
+    return {"ok": True}
 
 # ---- scheduler / maintenance / health tick ----------------------------------
 KP_STATE_FILE = os.path.join(NAS_CONFIG, "kopia-state.json")
@@ -19140,6 +19432,8 @@ class H(BaseHTTPRequestHandler):
                 self._json(kp_run_status((q.get("b") or [""])[0]))
             elif p == "/api/kopia/snapshots":
                 self._json(kp_snapshots((q.get("d") or [""])[0]))
+            elif p == "/api/kopia/restore/status":
+                self._json(kp_restore_status())
             elif p == "/api/kopia/history":
                 self._json({"history": kp_history()})
             elif p == "/api/backup/status":
@@ -19733,6 +20027,21 @@ class H(BaseHTTPRequestHandler):
                 self._json(kp_run_start(str(self._body().get("id") or "")))
             elif p == "/api/kopia/backup/cancel":
                 self._json(kp_run_cancel(str(self._body().get("id") or "")))
+            elif p == "/api/kopia/snap/ls":
+                b = self._body()
+                self._json(kp_snap_ls(str(b.get("d") or ""), b.get("oid", "")))
+            elif p == "/api/kopia/snap/delete":
+                b = self._body()
+                self._json(kp_snap_delete(str(b.get("d") or ""), b.get("id", "")))
+            elif p == "/api/kopia/snap/restore/start":
+                b = self._body()
+                self._json(kp_restore_start(str(b.get("d") or ""), b.get("oid", ""), b.get("target", "")))
+            elif p == "/api/kopia/snap/restore/cancel":
+                self._json(kp_restore_cancel())
+            elif p == "/api/kopia/mount":
+                self._json(kp_mount_start(str(self._body().get("id") or "")))
+            elif p == "/api/kopia/unmount":
+                self._json(kp_mount_stop(str(self._body().get("id") or "")))
             elif p == "/api/backup/key":
                 b = self._body()
                 act = str(b.get("action") or "")
@@ -19918,6 +20227,9 @@ if __name__ == "__main__":
         _kp_snap_cli(os.environ.get("KPS_BID", ""))
     elif len(sys.argv) > 1 and sys.argv[1] == "kopia-bg":
         _kp_bg_cli(os.environ.get("KPB_KIND", ""), os.environ.get("KPB_DEST", ""))
+    elif len(sys.argv) > 1 and sys.argv[1] == "kopia-restore":
+        _kp_restore_cli(os.environ.get("KPR2_DEST", ""), os.environ.get("KPR2_OID", ""),
+                        os.environ.get("KPR2_TARGET", ""))
     elif len(sys.argv) > 1 and sys.argv[1] == "rclone-restore":
         # paths arrive through the unit env (may contain spaces), not argv
         _rclone_restore_cli(os.environ.get("RCR_REMOTE", ""), os.environ.get("RCR_PATH", ""),

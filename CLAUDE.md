@@ -898,8 +898,24 @@ points») → Schedule (Manual/Daily/Weekly + **USB-триггер §9.3**) → 
 `tag:nasbk`, UTC-время через `calendar.timegm` — НЕ `time.timezone`, DST). ГРАБЛИ UI: иконки
 брать ТОЛЬКО из существующего словаря `P` (sliders/dots/cloud/left/up НЕ существуют — cog/
 arrowup/chev-rotate/globe); `showMenu(x,y,items)` принимает КООРДИНАТЫ и items `{label,ic,act,dng}`,
-не event. Дальше: стадия 6 (Snapshots: browse/restore/mount/delete), 7 (Options-тюнинг + disaster
-card + restore-drill + glance-плитка), 8 (аудит).
+не event. **Стадия 6 готова (2026-07-23): Snapshots — browse/restore/mount/delete.**
+Навигация по снапшоту — ПО OBJECT ID (`kp_snap_ls`: `kopia ls -l <oid>`, у каждой папки в выводе
+свой oid → никаких склеек путей; парсер `_KP_LS_RE`, имя после oid отделено 2+ пробелами;
+`kp_snapshots` отдаёт `root`-oid). Restore: `kp_restore_start/status/cancel` + драйвер
+`_kp_restore_cli` (CLI `kopia-restore`, env KPR2_*, юнит `nas-kopia-restore`, ОДИН за раз) —
+`kopia restore <oid> <target> --skip-existing` (copy-only, существующие не трогаются), приёмник
+только /mnt|/media|/srv|/home, прогресс под pty (`_KP_RST_RE` «Processed N (X) of M (Y) … (P%)»),
+стейт/лог `kopia-restore.{json,log}`. Mount: `kp_mount_start/stop` — `kopia mount all
+/mnt/kopia/<destid>` в юните `nas-kopia-mnt-<destid>` (ExecStopPost umount -l; fuse → дрель и
+`_readonly_mounts` его уже пропускают); в статусе dests есть `mounted`. Delete:
+`kopia snapshot delete --delete`. API: POST `snap/ls|delete|restore/start|restore/cancel`,
+`mount|unmount`; GET `restore/status`; `kp_status().restore` — для полосы прогресса. UI Snapshots:
+кнопка Mount/Unmount у выбранного dest (+строка «browse it in Files»), полоса Restoring…+Stop
+(рисуется из статус-поллинга), у строки снапшота Browse (диалог `kpSnapBrowse`: крошки по
+oid-стеку, клик по файлу = restore файла)/Restore…/корзинка; restore-цель выбирается kpPick →
+confirmDlg. Live-проверено: ls по oid (root+подпапка), restore папки fonts на T7 (6 файлов,
+result ok), mount → листинг снапшотов через ФС → unmount чисто, delete снапшота 6→5.
+Дальше: стадия 7 (disaster card + restore-drill + glance-плитка), 8 (аудит).
 Идеи в бэклоге: Telegram-бот, «топ самых больших файлов» в анализаторе,
 glance: спарклайны в плитках, пользовательские проверки из `~/nas-config/scripts`;
 бэкап наружу — пользователь делает сторонним сервисом в Docker (zerobyte).

@@ -7811,13 +7811,53 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
 
  /* ---------- Snapshots tab ---------- */
  let snapDest=null;
+ const kpRestoreTo=(destid,oid,what)=>kpPick("media/nas",async tgt=>{
+  confirmDlg("Restore here?",`${esc(what)} → <span class="mono">${esc(tgt)}</span><br>Copy-only: existing files are kept (--skip-existing), the repository is not touched.`,
+   async()=>{const r=await kP("/api/kopia/snap/restore/start",{d:destid,oid,target:tgt});
+    if(!(r&&r.ok))toast((r&&r.log)||"could not start");tab="snaps";await refresh();});});
+ function kpSnapBrowse(destid,snap){const s=document.getElementById("scrim");
+  let stack=[{oid:snap.root,name:snap.path.split("/").pop()||snap.path}];
+  s.innerHTML=`<div class="dialog nb-pick"><h3>${svg("clock",16)} ${esc(dts(snap.ts))}</h3>
+   <div id="kbCrumbs" style="font-size:12px;color:var(--mut);margin-bottom:6px"></div>
+   <div class="pf-list" id="kbList" style="min-height:220px"></div>
+   <div class="pf-foot"><button class="btn" id="kbX">Close</button><button class="btn pri" id="kbR">Restore this folder…</button></div></div>`;
+  s.classList.add("show");
+  const $=q=>s.querySelector(q);
+  $("#kbX").onclick=()=>s.classList.remove("show");
+  $("#kbR").onclick=()=>{const top=stack[stack.length-1];s.classList.remove("show");
+   kpRestoreTo(destid,top.oid,"folder «"+(top.name||"/")+"» from "+dts(snap.ts));};
+  const draw=async()=>{
+   $("#kbCrumbs").innerHTML=stack.map((x,i)=>`<a href="#" data-i="${i}" style="color:${i===stack.length-1?"var(--text)":"var(--accent)"}">${esc(x.name||"/")}</a>`).join(" / ");
+   $("#kbCrumbs").querySelectorAll("[data-i]").forEach(a=>a.onclick=ev=>{ev.preventDefault();stack=stack.slice(0,+a.dataset.i+1);draw();});
+   const list=$("#kbList");list.innerHTML=`<div class="pf-empty">loading…</div>`;
+   const r=await kP("/api/kopia/snap/ls",{d:destid,oid:stack[stack.length-1].oid});
+   if(!(r&&r.ok)){list.innerHTML=`<div class="pf-empty">${esc((r&&r.log)||"failed")}</div>`;return;}
+   list.innerHTML=(r.entries||[]).map(e=>`<div class="pf-row" data-oid="${att(e.oid)}" data-dir="${e.dir?1:""}" data-n="${att(e.name)}">${fmIcon(e.name,e.dir?"dir":"file",15)}<span style="flex:1">${esc(e.name)}</span><span style="color:var(--mut);font-size:11px">${e.dir?"":fmtB(e.size)}</span></div>`).join("")||`<div class="pf-empty">empty folder</div>`;
+   list.querySelectorAll("[data-oid]").forEach(n=>n.onclick=()=>{
+    if(n.dataset.dir){stack.push({oid:n.dataset.oid,name:n.dataset.n});draw();}
+    else kpRestoreTo(destid,n.dataset.oid,"file «"+n.dataset.n+"»");});};
+  draw();}
  function tabSnaps(tc){
   const dests=(D.dests||[]).filter(x=>x.connected||usedBy("dst",x.id).length);
   if(!snapDest||!dests.find(x=>x.id===snapDest))snapDest=dests[0]&&dests[0].id;
-  tc.innerHTML=`<h3 class="set-title">Snapshots</h3>
-   <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">${dests.map(x=>`<button class="fm-chip ${x.id===snapDest?"on":""}" data-c="${att(x.id)}" style="cursor:pointer${x.id===snapDest?";background:var(--sel);color:var(--accent)":""}">${esc(x.name)}</button>`).join("")||"no destinations yet"}</div>
+  const cur=dests.find(x=>x.id===snapDest);
+  const rst=D.restore||{};
+  const rstrip=rst.running?`<div class="rs-card" style="margin-bottom:10px"><div class="rs-ch">${svg("download",16)}<b>Restoring…</b><span style="flex:1"></span><button class="btn sm dng" id="kRstStop">Stop</button></div>
+    <div class="bar" style="margin-top:6px"><i class="pg" style="width:${Math.min(100,rst.pct||2)}%"></i></div>
+    <div class="rs-cl mono" style="font-size:11px;margin-top:4px">→ ${esc(rst.target||"")}${rst.pct?` · ${Math.round(rst.pct)}%`:""}</div></div>`
+   :(rst.result&&rst.done&&Date.now()/1000-rst.done<120?`<div class="rs-cl" style="margin-bottom:8px">${dot(rst.result==="ok"?"good":rst.result==="stopped"?"warn":"danger")} last restore: ${esc(rst.result)}${rst.target?` → <span class="mono">${esc(rst.target)}</span>`:""}</div>`:"");
+  tc.innerHTML=`<div style="display:flex;align-items:center;gap:10px"><h3 class="set-title" style="margin:0">Snapshots</h3><span style="flex:1"></span>
+    ${cur?`<button class="btn sm" id="kMnt">${cur.mounted?"Unmount":"Mount as folder"}</button>`:""}</div>
+   ${cur&&cur.mounted?`<div class="rs-cl" style="margin:4px 0 6px">mounted read-only at <span class="mono">/mnt/kopia/${esc(cur.id)}</span> — browse it in Files</div>`:""}
+   <div style="display:flex;gap:6px;flex-wrap:wrap;margin:8px 0 10px">${dests.map(x=>`<button class="fm-chip" data-c="${att(x.id)}" style="cursor:pointer${x.id===snapDest?";background:var(--sel);color:var(--accent)":""}">${esc(x.name)}</button>`).join("")||"no destinations yet"}</div>
+   ${rstrip}
    <div id="kSnList" class="rs-cl">${snapDest?"loading…":""}</div>`;
   tc.querySelectorAll("[data-c]").forEach(b=>b.onclick=()=>{snapDest=b.dataset.c;tabSnaps(tc);});
+  const rs=tc.querySelector("#kRstStop");if(rs)rs.onclick=async()=>{await kP("/api/kopia/snap/restore/cancel");await refresh();};
+  const mb=tc.querySelector("#kMnt");
+  if(mb)mb.onclick=async()=>{mb.disabled=true;
+   const r=await kP(cur.mounted?"/api/kopia/unmount":"/api/kopia/mount",{id:cur.id});
+   if(!(r&&r.ok))toast((r&&r.log)||"failed");await refresh();};
   if(!snapDest)return;
   api("/api/kopia/snapshots?d="+snapDest).then(r=>{
    const box=tc.querySelector("#kSnList");if(!box)return;
@@ -7825,14 +7865,22 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
    const snaps=r.snapshots||[];
    if(!snaps.length){box.innerHTML="the repository has no snapshots yet";return;}
    let day="";
-   box.innerHTML=snaps.map(s=>{const dk=dayKey(s.ts),head=dk!==day?`<div class="fm-gh" style="margin-top:8px">${dk}</div>`:"";day=dk;
+   box.innerHTML=snaps.map((s,i)=>{const dk=dayKey(s.ts),head=dk!==day?`<div class="fm-gh" style="margin-top:8px">${dk}</div>`:"";day=dk;
     const bk=(D.backups||[]).find(b=>b.id===s.backup);
     return head+`<div style="display:flex;gap:8px;align-items:center;padding:3px 0;font-size:12.5px">
-     <span style="width:60px;color:var(--mut)">${new Date(s.ts*1000).toLocaleTimeString().slice(0,5)}</span>
+     <span style="width:44px;color:var(--mut)">${new Date(s.ts*1000).toLocaleTimeString().slice(0,5)}</span>
      <span class="mono" style="flex:1;overflow:hidden;text-overflow:ellipsis">${esc(s.path)}</span>
      ${bk?`<span class="fm-chip" style="font-size:10.5px">${esc(bk.name||s.backup)}</span>`:""}
-     <span style="width:140px;text-align:right;color:var(--mut)">${s.files} files · ${fmtB(s.bytes)}</span>
-     ${s.failed?`<span style="color:var(--warn)" title="${s.failed} files failed">⚠</span>`:""}${s.incomplete?`<span class="fm-chip" style="font-size:10.5px">partial</span>`:""}</div>`;}).join("");});}
+     <span style="width:126px;text-align:right;color:var(--mut)">${s.files} files · ${fmtB(s.bytes)}</span>
+     ${s.failed?`<span style="color:var(--warn)" title="${s.failed} files failed">⚠</span>`:""}${s.incomplete?`<span class="fm-chip" style="font-size:10.5px">partial</span>`:""}
+     <button class="btn sm" data-br="${i}">Browse</button><button class="btn sm" data-rst="${i}">Restore…</button><button class="iconbtn" data-del="${i}" title="Delete snapshot">${svg("trash",13)}</button></div>`;}).join("");
+   box.querySelectorAll("[data-br]").forEach(b=>b.onclick=()=>kpSnapBrowse(snapDest,snaps[+b.dataset.br]));
+   box.querySelectorAll("[data-rst]").forEach(b=>b.onclick=()=>{const s2=snaps[+b.dataset.rst];
+    kpRestoreTo(snapDest,s2.root,"snapshot of "+s2.path+" ("+dts(s2.ts)+")");});
+   box.querySelectorAll("[data-del]").forEach(b=>b.onclick=()=>{const s2=snaps[+b.dataset.del];
+    confirmDlg("Delete snapshot?",`${esc(s2.path)} · ${esc(dts(s2.ts))} — this restore point disappears from the repository. Files on the source are not touched.`,
+     async()=>{const r2=await kP("/api/kopia/snap/delete",{d:snapDest,id:s2.id});
+      if(!(r2&&r2.ok))toast((r2&&r2.log)||"failed");tabSnaps(tc);},1);});});}
 
  /* ---------- History tab ---------- */
  function tabHist(tc){
