@@ -1698,6 +1698,7 @@ GLANCE_TILES = [
     ("pool",     "Pool",             "Pool"),
     ("backup",   "Backup (all)",     "Backup (all)"),
     ("nbnext",   "Next backup",      "Next backup"),
+    ("kopia",    "Kopia",            "Kopia"),
     ("avail",    "Uptime · 24h",     "Uptime 24h"),
     ("avail30",  "Uptime · 30d",     "Uptime 30d"),
     ("cputemp",  "CPU temp",         "CPU temp"),
@@ -2196,6 +2197,31 @@ def _glance_tile(tid, en):
         return _gl_backup_tile(max((_nb_last_ok(pr["id"]) for pr in nb_profiles()), default=0), en)
     if tid.startswith("nb:"):
         return _gl_backup_tile(_nb_last_ok(tid[3:]), en)
+    if tid == "kopia":
+        kcfg = _safe(kp_load, None)
+        if not kcfg or not kcfg.get("backups"):
+            return None
+        running, bad, last_ok = False, 0, 0
+        hist = _safe(kp_history, []) or []
+        for b in kcfg["backups"]:
+            st_ = _safe(lambda: kp_run_state(b["id"]), {}) or {}
+            if st_.get("running"):
+                running = True
+            if st_.get("result") == "error":
+                bad += 1
+            oks = [h.get("ts") or 0 for h in hist
+                   if h.get("backup") == b["id"] and h.get("result") in ("ok", "warn")]
+            if oks:
+                last_ok = max(last_ok, max(oks))
+        if running:
+            return {"value": "running", "unit": "", "state": "ok", "raw": {"running": True}}
+        if not last_ok:
+            return {"value": "—", "unit": "", "state": "warn", "note": "never ran", "raw": None}
+        age = time.time() - last_ok
+        st_ = "danger" if bad else ("warn" if age > 2 * 86400 else "ok")
+        return {"value": _gl_ago(age, en), "unit": "ago", "state": st_,
+                "note": ("%d failing" % bad) if bad else "",
+                "raw": {"ts": int(last_ok), "age_s": int(age), "failing": bad}}
     if tid == "nbnext":
         best, name = None, ""
         for pr in nb_profiles():
@@ -10826,6 +10852,93 @@ def _kopia_tick():
     if dirty:
         _json_save(KP_STATE_FILE, stt)
 
+def _kp_drill_pick(destid, oid, rng, depth=0):
+    """Random descent through a snapshot to one file: (rel_path, oid, size)."""
+    r = kp_snap_ls(destid, oid)
+    ents = (r.get("entries") or []) if r.get("ok") else []
+    if not ents:
+        return None
+    for _ in range(4):
+        e = rng.choice(ents)
+        if not e["dir"]:
+            if e["size"] <= 200 * 1024 * 1024:      # don't re-download huge files for a spot check
+                return (e["name"], e["oid"], e["size"])
+            continue
+        if depth < 6:
+            sub = _kp_drill_pick(destid, e["oid"], rng, depth + 1)
+            if sub:
+                return (e["name"] + "/" + sub[0], sub[1], sub[2])
+    return None
+
+def _kp_drill(destid, manifests, w):
+    """Restore-drill after a run: pull up to 3 random files BACK from the fresh
+    snapshot and sha256-compare with the source. A backup that was written but
+    never proven restorable is hope, not a backup. Same-size-different-hash on
+    an unchanged source = silent corruption → kp_err."""
+    import random
+    rng = random.Random()
+    tmpd = os.path.join(NAS_CONFIG, "kopia-drill")
+    checked = matched = 0
+    rot = []
+    try:
+        os.makedirs(tmpd, exist_ok=True)
+        pairs = [(((mf.get("source") or {}).get("path") or ""),
+                  ((mf.get("rootEntry") or {}).get("obj") or "")) for mf in manifests]
+        pairs = [p for p in pairs if p[0] and p[1]]
+        rng.shuffle(pairs)
+        for src_path, root in pairs:
+            if checked >= 3:
+                break
+            for _ in range(3 - checked):
+                pick = _kp_drill_pick(destid, root, rng)
+                if not pick:
+                    break
+                rel, oid, size = pick
+                srcf = os.path.join(src_path, rel)
+                try:
+                    if not os.path.isfile(srcf) or os.path.getsize(srcf) != size:
+                        continue        # changed after the snapshot — not a verification target
+                except OSError:
+                    continue
+                tmpf = os.path.join(tmpd, "drill-%d.bin" % checked)
+                r = _kp(destid, ["restore", oid, tmpf], timeout=600)
+                if not r["ok"]:
+                    continue
+                def _sha(p):
+                    h = hashlib.sha256()
+                    with open(p, "rb") as f:
+                        for ch in iter(lambda: f.read(1 << 20), b""):
+                            h.update(ch)
+                    return h.hexdigest()
+                try:
+                    same = _sha(tmpf) == _sha(srcf)
+                except OSError:
+                    continue
+                checked += 1
+                if same:
+                    matched += 1
+                else:
+                    rot.append(rel)
+    except Exception as e:
+        w("drill skipped: %r" % e)
+    finally:
+        try:
+            shutil.rmtree(tmpd, ignore_errors=True)
+        except OSError:
+            pass
+    if checked:
+        w("restore drill: %d/%d random file(s) restored and byte-identical" % (matched, checked))
+    if rot:
+        w("DRILL MISMATCH: " + ", ".join(rot[:3]))
+        try:
+            notify_event("kp_err", "kp_drill:" + destid, "Kopia: restore drill mismatch",
+                         "restored copies differ from unchanged source files (%s) — possible "
+                         "silent corruption; check the destination disk" % ", ".join(rot[:3]),
+                         cooldown=6 * 3600)
+        except Exception:
+            pass
+    return {"checked": checked, "ok": matched, "rot": len(rot)}
+
 def _kp_snap_cli(bid):
     """Driver (transient unit nas-kopia-<id>): apply policies, snapshot every
     source folder, then replicate to the spare destination (3-2-1).
@@ -10986,6 +11099,15 @@ def _kp_snap_cli(bid):
             err = "%d file(s) could not be read" % failed_files if failed_files else "snapshot finished with errors"
         w("snapshot done: %d files, %s%s" % (snap_files, fmt_bytes(snap_bytes),
                                              (", %d failed" % failed_files) if failed_files else ""))
+        if manifests and result in ("ok", "warn"):
+            upd(phase="drill", force=True)
+            t_drill = time.time()
+            drill = _kp_drill(dst["id"], manifests, w)
+            if drill.get("checked"):
+                phases["drill"] = dict(drill, dur=int(time.time() - t_drill))
+            if drill.get("rot"):
+                result = "warn" if result == "ok" else result
+                err = (err + "; " if err else "") + "restore drill found mismatched files"
         if skipped:
             result = result if result != "ok" else "warn"
             err = (err + "; " if err else "") + "missing folders skipped: " + ", ".join(skipped[:3])
@@ -11808,6 +11930,33 @@ def disaster_build():
                     % (p.get("name") or p.get("id"), ", ".join(bits)))
     if rows:
         L += ["## Backup profiles on this box", ""] + rows + [""]
+    # Kopia snapshot repositories: without the password the backups are unreadable —
+    # that is exactly what this card is for.
+    kcfg = _safe(kp_load, None)
+    if kcfg and (kcfg.get("dests") or kcfg.get("backups")):
+        L += ["## Kopia snapshot backups", "",
+              "Repository password (ALL repositories): `%s`" % (kcfg.get("password") or "?"), ""]
+        for x in kcfg.get("dests") or []:
+            spec = x.get("path") if x.get("kind") == "fs" else \
+                "%s:%s (rclone)" % (x.get("remote"), x.get("remote_path") or "")
+            L.append("- **%s** — `%s`" % (x.get("name") or x["id"], spec))
+        L += ["",
+              "Read any repository on any Linux box (a SPARE is a full repository too):", "",
+              "```",
+              "kopia repository connect filesystem --path /path/to/repo   # or:",
+              "kopia repository connect rclone --remote-path remote:path",
+              "kopia snapshot list --all",
+              "kopia restore <snapshot-id> /where/to/put/it",
+              "```", ""]
+        for b in kcfg.get("backups") or []:
+            src = _kp_find(kcfg.get("sources") or [], b.get("source") or "") or {}
+            d1 = _kp_find(kcfg.get("dests") or [], b.get("dest") or "") or {}
+            d2 = _kp_find(kcfg.get("dests") or [], b.get("dest2") or "") or {}
+            L.append("- **%s**: %s → %s%s" % (b.get("name") or b["id"],
+                     ", ".join((src.get("folders") or ["?"])),
+                     d1.get("name") or "?",
+                     (" (+ spare %s)" % d2.get("name")) if d2 else ""))
+        L.append("")
     md = "\n".join(L) + "\n"
     tmp = DISASTER_MD + ".tmp"
     try:
