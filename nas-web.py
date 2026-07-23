@@ -9955,6 +9955,18 @@ def kp_dest_create(d, connect_only=False):
                 and not glob.glob(os.path.join(nd["path"], "kopia.repository*")):
             return {"ok": False, "log": "the folder is not empty — a spare must start empty "
                                         "(or already be a kopia repository)"}
+        if nd["kind"] == "rclone":
+            try:
+                spec = nd["remote"] + ":" + (nd.get("remote_path") or "")
+                r = subprocess.run([_rclone_bin(), "--config", RCLONE_CONF, "lsf", spec,
+                                    "--max-depth", "1", "--timeout", "30s", "--retries", "1"],
+                                   capture_output=True, text=True, timeout=60)
+                names = [x.strip().rstrip("/") for x in (r.stdout or "").splitlines() if x.strip()]
+                if names and not any(n.startswith("kopia.repository") for n in names):
+                    return {"ok": False, "log": "that cloud folder is not empty — a spare must start "
+                            "empty (or already be a kopia repository)"}
+            except (OSError, subprocess.SubprocessError):
+                pass
         with _KP_CFG_LOCK:
             cfg = kp_load()
             cfg["dests"].append(nd)
@@ -10220,10 +10232,14 @@ def kp_backup_save(d):
     if d2 and (d2 == dst["id"] or not _kp_find(cfg["dests"], d2)):
         return {"ok": False, "log": "spare destination is invalid"}
     d2mode = d.get("dest2_mode") if d.get("dest2_mode") in ("sync", "independent") else "sync"
+    kid0 = str(d.get("id") or "")
+    for b in cfg["backups"]:
+        if b["id"] != kid0 and b.get("dest2") == dst["id"] and b.get("dest2_mode", "sync") == "sync":
+            return {"ok": False, "log": "«%s» mirrors that destination as its spare — pick another "
+                    "destination, or that backup's snapshots would be overwritten" % (b.get("name") or b["id"])}
     if d2 and d2mode == "sync":
         # sync-to --delete makes the spare an exact replica of THIS backup's primary
         # repo — pointing it at a repository other backups rely on would wipe them
-        kid0 = str(d.get("id") or "")
         for b in cfg["backups"]:
             if b["id"] == kid0:
                 continue
@@ -10284,7 +10300,7 @@ def kp_status():
                            mounted=os.path.ismount(_kp_mnt_mp(x["id"]))) for x in cfg["dests"]],
             "backups": [dict(b, run=kp_run_state(b["id"])) for b in cfg["backups"]],
             "restore": kp_restore_state(),
-            "update": kp_update_info() if kopia_installed() else {},
+            "update": kp_update_info(net=False) if kopia_installed() else {},
             "rclone_remotes": rclone_remotes() if rclone_installed() else []}
 
 def kp_browse(path):
@@ -10615,22 +10631,42 @@ def kp_snap_find(destid, oid, query, cap=200):
     c = _kp_ensure_connected(dest)
     if not c["ok"]:
         return c
-    r = _kp(destid, ["ls", "-lr", oid], timeout=300)
-    if not r["ok"]:
-        return {"ok": False, "log": _kp_err_tail(r)}
-    out, more = [], False
-    for line in (r["out"] or "").splitlines():
-        m = _KP_LS_RE.match(line.rstrip())
-        if not m:
-            continue
-        name = m.group(5).strip()
-        if q not in name.lower():
-            continue
-        if len(out) >= cap:
-            more = True
-            break
-        out.append({"path": name, "name": name.rstrip("/").split("/")[-1],
-                    "dir": m.group(1).startswith("d"), "size": int(m.group(2)), "oid": m.group(4)})
+    # stream the recursive listing line-by-line: a huge snapshot (a photo library) would
+    # otherwise buffer the whole tree into the panel's RAM. Stop at `cap` matches OR after
+    # scanning a hard line budget, whichever comes first, so memory/time stay bounded.
+    SCAN_MAX = 400_000
+    cmd = [_kopia_bin(), "--config-file", _kp_cfg_file(destid),
+           "--log-dir", os.path.join(_kp_cache_dir(destid), "logs"), "ls", "-lr", oid]
+    out, more, scanned = [], False, 0
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                text=True, env=_kp_env())
+    except (OSError, subprocess.SubprocessError) as e:
+        return {"ok": False, "log": str(e)[:200]}
+    try:
+        for line in proc.stdout:
+            scanned += 1
+            if scanned > SCAN_MAX:
+                more = True
+                break
+            mm = _KP_LS_RE.match(line.rstrip())
+            if not mm:
+                continue
+            name = mm.group(5).strip()
+            if q not in name.lower():
+                continue
+            out.append({"path": name, "name": name.rstrip("/").split("/")[-1],
+                        "dir": mm.group(1).startswith("d"), "size": int(mm.group(2)), "oid": mm.group(4)})
+            if len(out) >= cap:
+                more = True
+                break
+    finally:
+        try:
+            proc.stdout.close()
+            proc.kill()   # stop the (possibly still-listing) child once we've decided
+            proc.wait(timeout=10)
+        except (OSError, subprocess.SubprocessError):
+            pass
     return {"ok": True, "matches": out, "more": more}
 
 def kp_snap_delete(destid, snapid):
@@ -10983,6 +11019,8 @@ def _kp_health(cfg, now):
             notify_event("kp_err", "kp_dest:" + b["id"], "Kopia: destination missing",
                          "«%s»: destination folder %s does not exist — is the disk plugged in?"
                          % (b.get("name") or b["id"], dst.get("path") or ""), cooldown=86400)
+        if b.get("usb_trigger"):
+            continue   # a rotated USB disk is plugged in on its own cadence — not "stale"
         st_ = kp_run_state(b["id"])
         last = (st_.get("done") or 0) if st_.get("result") in ("ok", "warn") else 0
         if not last:
@@ -11072,10 +11110,14 @@ def _kopia_tick():
         elif now - vv[destid] >= 30 * 86400:
             if _kp_bg_start("verify", destid):
                 vv[destid] = int(now); dirty = True
-    # 4) health — every 30 min
+    # 4) health — every 30 min; also refresh the update cache from GitHub (cheap, 24h TTL)
     if now - _kp_last_health >= 1800:
         _kp_last_health = now
         _kp_health(cfg, now)
+        try:
+            kp_update_info(net=True)
+        except Exception:
+            pass
     if dirty:
         _json_save(KP_STATE_FILE, stt)
 
@@ -11465,6 +11507,10 @@ def kp_set_password(newpw):
         old = cfg.get("password") or ""
         if newpw == old:
             return {"ok": True}
+        if any(kp_run_state(b["id"]).get("running") for b in cfg["backups"]) \
+                or kp_restore_state().get("running") \
+                or any(_kp_dest_busy(x["id"], cfg) for x in cfg["dests"]):
+            return {"ok": False, "log": "a backup or maintenance is running — try again once it finishes"}
         connected = [d for d in cfg["dests"] if kp_dest_connected(d["id"])]
         if not connected:
             cfg["password"] = newpw
@@ -11483,10 +11529,17 @@ def kp_set_password(newpw):
             if r["ok"]:
                 changed.append(d)
             else:
-                # roll the already-changed repos back to the old password
+                stuck = []
                 for d2 in changed:
-                    _kp(d2["id"], ["repository", "change-password"], timeout=180,
-                        extra_env={"KOPIA_PASSWORD": newpw, "KOPIA_NEW_PASSWORD": old})
+                    rb = _kp(d2["id"], ["repository", "change-password"], timeout=180,
+                             extra_env={"KOPIA_PASSWORD": newpw, "KOPIA_NEW_PASSWORD": old})
+                    if not rb["ok"]:
+                        stuck.append(d2.get("name") or d2["id"])
+                if stuck:
+                    cfg2 = kp_load(); cfg2["password"] = newpw; kp_save(cfg2)
+                    return {"ok": False, "log": "password change failed on «%s»; could not roll back "
+                            "«%s» — its password is now the NEW one. Fix that repo, then retry."
+                            % (d.get("name") or d["id"], ", ".join(stuck))}
                 return {"ok": False, "log": "«%s»: %s (no changes kept)"
                         % (d.get("name") or d["id"], _kp_err_tail(r))}
         cfg = kp_load()
@@ -11501,15 +11554,18 @@ _KP_UPD_TTL = 24 * 3600
 def _kp_ver_tuple(s):
     return tuple(int(x) for x in re.findall(r"\d+", str(s or ""))[:4]) or (0,)
 
-def kp_update_info(force=False):
-    """{current, latest, available}. Hits GitHub at most once a day (cached),
-    so it never slows the status poll."""
+def kp_update_info(force=False, net=True):
+    """{current, latest, available}. Cached ~24h. net=False -> cache only (kp_status
+    uses this so a status poll never blocks; the tick refreshes with net=True)."""
     cur = kopia_version()
     cache = _json_load_strict(KP_UPD_FILE, {})
     now = time.time()
-    if not force and isinstance(cache, dict) and now - (cache.get("ts") or 0) < _KP_UPD_TTL             and cache.get("current") == cur:
-        return {"current": cur, "latest": cache.get("latest") or "",
-                "available": bool(cache.get("available"))}
+    fresh = isinstance(cache, dict) and now - (cache.get("ts") or 0) < _KP_UPD_TTL and cache.get("current") == cur
+    if force:
+        fresh = False
+    if fresh or not net:
+        return {"current": cur, "latest": (cache.get("latest") or "") if isinstance(cache, dict) else "",
+                "available": bool(cache.get("available")) if isinstance(cache, dict) else False}
     latest = ""
     try:
         req = urllib.request.Request("https://api.github.com/repos/kopia/kopia/releases/latest",

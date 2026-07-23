@@ -1077,8 +1077,8 @@
   @media(hover:hover){.rs-card:hover{background:var(--sel)}}
   /* Kopia: cards that are NOT clickable must not pretend to be */
   .kp-static{cursor:default}
-  .kp-bk.kp-static{cursor:default}
-  @media(hover:hover){.kp-static:hover{background:var(--card)}.kp-bk.kp-static:hover{background:var(--card)}}
+  .kp-bk.kp-static,.kp-bk.kp-wide.kp-static{cursor:default}
+  @media(hover:hover){.kp-static:hover{background:var(--card)}.kp-bk.kp-static:hover,.kp-bk.kp-wide.kp-static:hover{background:var(--card)}}
   .kp-on{background:var(--sel)!important;color:var(--win-accent,var(--accent))!important;border-color:transparent!important;box-shadow:var(--sh-sm)}
   .kp-quiet{background:none;border:none;padding:0;color:var(--win-accent,var(--accent));cursor:pointer;font-size:11.5px}
   .kp-row{display:flex;gap:8px;align-items:center;padding:5px 6px;font-size:12.5px;border-radius:8px;cursor:pointer}
@@ -2973,7 +2973,7 @@ const I=new Proxy({},{get:(_,n)=>svg(n,22)});
 const AP={
  sys:'<rect x="8.3" y="1.0" width="1.8" height="3.4" rx=".9" fill="#8593A8"/><rect x="8.3" y="19.6" width="1.8" height="3.4" rx=".9" fill="#8593A8"/><rect x="1.0" y="8.3" width="3.4" height="1.8" rx=".9" fill="#8593A8"/><rect x="19.6" y="8.3" width="3.4" height="1.8" rx=".9" fill="#8593A8"/><rect x="11.1" y="1.0" width="1.8" height="3.4" rx=".9" fill="#8593A8"/><rect x="11.1" y="19.6" width="1.8" height="3.4" rx=".9" fill="#8593A8"/><rect x="1.0" y="11.1" width="3.4" height="1.8" rx=".9" fill="#8593A8"/><rect x="19.6" y="11.1" width="3.4" height="1.8" rx=".9" fill="#8593A8"/><rect x="13.9" y="1.0" width="1.8" height="3.4" rx=".9" fill="#8593A8"/><rect x="13.9" y="19.6" width="1.8" height="3.4" rx=".9" fill="#8593A8"/><rect x="1.0" y="13.9" width="3.4" height="1.8" rx=".9" fill="#8593A8"/><rect x="19.6" y="13.9" width="3.4" height="1.8" rx=".9" fill="#8593A8"/><rect x="3.6" y="3.6" width="16.8" height="16.8" rx="3.6" fill="#2E3949"/><path fill="#FFFFFF" opacity=".07" d="M3.6 7.2A3.6 3.6 0 0 1 7.2 3.6h9.6a3.6 3.6 0 0 1 3.6 3.6v1.1H3.6V7.2Z"/><rect x="8.3" y="8.3" width="7.4" height="7.4" rx="1.9" fill="#34C6BE"/>',
  disks:'<path fill="#B93B36" d="M3.6 15.6v2.7c0 1.75 3.76 3.15 8.4 3.15s8.4-1.4 8.4-3.15V15.6Z"/><ellipse cx="12" cy="15.6" rx="8.4" ry="3.15" fill="#E5544E"/><path fill="#C2403A" d="M3.6 10.9v2.7c0 1.75 3.76 3.15 8.4 3.15s8.4-1.4 8.4-3.15V10.9Z"/><ellipse cx="12" cy="10.9" rx="8.4" ry="3.15" fill="#EA605A"/><path fill="#C94A44" d="M3.6 6.2v2.7c0 1.75 3.76 3.15 8.4 3.15s8.4-1.4 8.4-3.15V6.2Z"/><ellipse cx="12" cy="6.2" rx="8.4" ry="3.15" fill="#F0736D"/>',
- whale:'<g transform="translate(-1.55,-1.55) scale(1.13)"><path fill="#2496ED" d="M13.983 11.078h2.119a.186.186 0 00.186-.185V9.006a.186.186 0 00-.186-.186h-2.119a.185.185 0 00-.185.185v1.888c0 .102.083.185.185.185m-2.954-5.43h2.118a.186.186 0 00.186-.186V3.574a.186.186 0 00-.186-.185h-2.118a.185.185 0 00-.185.185v1.888c0 .102.082.185.185.185m0 2.716h2.118a.187.187 0 00.186-.186V6.29a.186.186 0 00-.186-.185h-2.118a.185.185 0 00-.185.185v1.887c0 .102.082.185.185.186m-2.93 0h2.12a.186.186 0 00.184-.186V6.29a.185.185 0 00-.185-.185H8.1a.185.185 0 00-.185.185v1.887c0 .102.083.185.185.186m-2.964 0h2.119a.186.186 0 00.185-.186V6.29a.185.185 0 00-.185-.185H5.136a.186.186 0 00-.186.185v1.887c0 .102.084.185.186.186m5.893 2.715h2.118a.186.186 0 00.186-.185V9.006a.186.186 0 00-.186-.186h-2.118a.185.185 0 00-.185.185v1.888c0 .102.082.185.185.185m-2.93 0h2.12a.185.185 0 00.184-.185V9.006a.185.185 0 00-.184-.186h-2.12a.185.185 0 00-.184.185v1.888c0 .102.083.185.185.185m-2.964 0h2.119a.185.185 0 00.185-.185V9.006a.185.185 0 00-.184-.186h-2.12a.186.186 0 00-.186.186v1.887c0 .102.084.185.186.185m-2.92 0h2.12a.185.185 0 00.184-.185V9.006a.185.185 0 00-.184-.186h-2.12a.185.185 0 00-.184.185v1.888c0 .102.082.185.185.185M23.763 9.89c-.065-.051-.672-.51-1.954-.51-.338.001-.676.03-1.01.087-.248-1.7-1.653-2.53-1.716-2.566l-.344-.199-.226.327c-.284.438-.49.922-.612 1.43-.23.97-.09 1.882.403 2.661-.595.332-1.55.413-1.744.42H.751a.751.751 0 00-.75.748 11.376 11.376 0 00.692 4.062c.545 1.428 1.355 2.48 2.41 3.124 1.18.723 3.1 1.137 5.275 1.137.983.003 1.963-.086 2.93-.266a12.248 12.248 0 003.823-1.389c.98-.567 1.86-1.288 2.61-2.136 1.252-1.418 1.998-2.997 2.553-4.4h.221c1.372 0 2.215-.549 2.68-1.009.309-.293.55-.65.707-1.046l.098-.288Z"/></g>',
+ whale:'<g transform="translate(-2.65,-2.65) scale(1.22)"><path fill="#2496ED" d="M13.983 11.078h2.119a.186.186 0 00.186-.185V9.006a.186.186 0 00-.186-.186h-2.119a.185.185 0 00-.185.185v1.888c0 .102.083.185.185.185m-2.954-5.43h2.118a.186.186 0 00.186-.186V3.574a.186.186 0 00-.186-.185h-2.118a.185.185 0 00-.185.185v1.888c0 .102.082.185.185.185m0 2.716h2.118a.187.187 0 00.186-.186V6.29a.186.186 0 00-.186-.185h-2.118a.185.185 0 00-.185.185v1.887c0 .102.082.185.185.186m-2.93 0h2.12a.186.186 0 00.184-.186V6.29a.185.185 0 00-.185-.185H8.1a.185.185 0 00-.185.185v1.887c0 .102.083.185.185.186m-2.964 0h2.119a.186.186 0 00.185-.186V6.29a.185.185 0 00-.185-.185H5.136a.186.186 0 00-.186.185v1.887c0 .102.084.185.186.186m5.893 2.715h2.118a.186.186 0 00.186-.185V9.006a.186.186 0 00-.186-.186h-2.118a.185.185 0 00-.185.185v1.888c0 .102.082.185.185.185m-2.93 0h2.12a.185.185 0 00.184-.185V9.006a.185.185 0 00-.184-.186h-2.12a.185.185 0 00-.184.185v1.888c0 .102.083.185.185.185m-2.964 0h2.119a.185.185 0 00.185-.185V9.006a.185.185 0 00-.184-.186h-2.12a.186.186 0 00-.186.186v1.887c0 .102.084.185.186.185m-2.92 0h2.12a.185.185 0 00.184-.185V9.006a.185.185 0 00-.184-.186h-2.12a.185.185 0 00-.184.185v1.888c0 .102.082.185.185.185M23.763 9.89c-.065-.051-.672-.51-1.954-.51-.338.001-.676.03-1.01.087-.248-1.7-1.653-2.53-1.716-2.566l-.344-.199-.226.327c-.284.438-.49.922-.612 1.43-.23.97-.09 1.882.403 2.661-.595.332-1.55.413-1.744.42H.751a.751.751 0 00-.75.748 11.376 11.376 0 00.692 4.062c.545 1.428 1.355 2.48 2.41 3.124 1.18.723 3.1 1.137 5.275 1.137.983.003 1.963-.086 2.93-.266a12.248 12.248 0 003.823-1.389c.98-.567 1.86-1.288 2.61-2.136 1.252-1.418 1.998-2.997 2.553-4.4h.221c1.372 0 2.215-.549 2.68-1.009.309-.293.55-.65.707-1.046l.098-.288Z"/></g>',
  clockf:'<circle cx="12" cy="12" r="10.6" fill="#5A67E8"/><circle cx="12" cy="12" r="8.2" fill="#EEF0FF"/><path fill="#39429C" d="M12 6.5a1.1 1.1 0 0 1 1.1 1.1v4l2.8 1.7a1.1 1.1 0 1 1-1.1 1.9l-3.4-2a1.1 1.1 0 0 1-.5-1V7.6A1.1 1.1 0 0 1 12 6.5Z"/>',
  termc:'<rect x=".8" y=".8" width="22.4" height="22.4" rx="7.4" fill="#232C3B"/><path fill="#FFFFFF" opacity=".07" d="M.8 8.2A7.4 7.4 0 0 1 8.2.8h7.6a7.4 7.4 0 0 1 7.4 7.4Z"/><circle cx="5.4" cy="4.9" r=".85" fill="#FF5F57"/><circle cx="8.1" cy="4.9" r=".85" fill="#FEBC2E"/><circle cx="10.8" cy="4.9" r=".85" fill="#28C840"/><path fill="#E9EFF7" d="M5.6 11.6a1.25 1.25 0 0 1 1.77 0l2.6 2.6a1.25 1.25 0 0 1 0 1.77l-2.6 2.6a1.25 1.25 0 1 1-1.77-1.77l1.72-1.72-1.72-1.72a1.25 1.25 0 0 1 0-1.76Z"/><rect x="11.6" y="16.7" width="6.2" height="2.1" rx="1.05" fill="#35C9C0"/>',
  folderc:'<path fill="#D98E1F" d="M1.4 6.1a2.7 2.7 0 0 1 2.7-2.7h5.3a2.3 2.3 0 0 1 1.9.95l1.65 2.25h7a2.7 2.7 0 0 1 2.7 2.7v9.4a2.7 2.7 0 0 1-2.7 2.7H4.1a2.7 2.7 0 0 1-2.7-2.7V6.1Z"/><path fill="#FFC24B" d="M4.3 8.7h15.4a2.5 2.5 0 0 1 2.5 2.5v7.3a2.7 2.7 0 0 1-2.7 2.7H4.5a2.7 2.7 0 0 1-2.7-2.7v-7.3a2.5 2.5 0 0 1 2.5-2.5Z"/><path fill="#FFFFFF" opacity=".22" d="M4.3 8.7h15.4a2.5 2.5 0 0 1 2.5 2.5v.55a2.5 2.5 0 0 0-2.5-2.5H4.3a2.5 2.5 0 0 0-2.5 2.5v-.55a2.5 2.5 0 0 1 2.5-2.5Z"/>',
@@ -3472,11 +3472,15 @@ function closeMenu(){document.querySelectorAll(".menu").forEach(m=>{if(m._off)do
 // Global dialog keyboard: Enter triggers the primary button, Escape the cancel/close.
 // Skips when focus is in a textarea/select or a multiline context. Attached once.
 (function(){document.addEventListener("keydown",ev=>{
- const s=document.getElementById("scrim");if(!s||!s.classList.contains("show"))return;
+ // topmost overlay: pickFolder(overlay) appends its own .scrim after #scrim, so the LAST
+ // visible one is the active dialog. Acting on the underlying #scrim would submit/cancel it.
+ const scrims=[...document.querySelectorAll(".scrim.show")];
+ const s=scrims[scrims.length-1];if(!s)return;
  const dlg=s.querySelector(".dialog");if(!dlg)return;
  const ae=document.activeElement;
  if(ev.key==="Enter"){
   if(ae&&(ae.tagName==="TEXTAREA"||ae.tagName==="SELECT"))return;
+  if(ae&&ae.hasAttribute&&ae.hasAttribute("data-noenter"))return;  // search / self-handled fields
   const pri=dlg.querySelector("button.pri:not(:disabled),button.btn.pri:not(:disabled)");
   if(pri){ev.preventDefault();pri.click();}
  }else if(ev.key==="Escape"){
@@ -6882,7 +6886,7 @@ function pickFolder(opts){
       <div class="pf-main">
         <div class="pf-bar">
           <button class="iconbtn" id="pfUp" title="Up">${svg("arrowup",15)}</button>
-          <input class="mono" id="pfPath" spellcheck="false">
+          <input class="mono" id="pfPath" spellcheck="false" data-noenter>
           <button class="btn sm" id="pfMk" title="Create a folder here">${svg("plus",13)} Folder</button>
         </div>
         <div class="pf-list" id="pfList"></div>
@@ -7694,11 +7698,12 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
   if(!b){detail=null;paint();return;}
   const r=b.run||{};
   if(detailWasRunning&&!r.running){paint();return;}  // run finished → full repaint (history, verdict)
-  if(!r.running)return;
-  const tc=body.querySelector("#tc"),pr=tc&&tc.querySelector("#kdProg");
-  if(pr)pr.innerHTML=kdProgHTML(r);
-  const sl=tc&&tc.querySelector("#kdStLine"),st=bkState(b);
-  if(sl)sl.textContent=st.txt;};
+  if(r.running){detailWasRunning=true;   // remember, even if the run began from elsewhere
+   const tc=body.querySelector("#tc"),pr=tc&&tc.querySelector("#kdProg");
+   if(pr)pr.innerHTML=kdProgHTML(r);
+   const sl=tc&&tc.querySelector("#kdStLine"),st=bkState(b);
+   if(sl)sl.textContent=st.txt;return;}
+  if(detailWasRunning){detailWasRunning=false;paint();}};   // run just finished → full repaint
 
  function paintInstall(tc){
   tc.innerHTML=`<h3 class="set-title">Kopia</h3>
@@ -7834,7 +7839,7 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
   // problem banner: worst issue across all backups (failing > stale/missing)
   const failing=bks.filter(b=>bkState(b).st==="bad"),attn=bks.filter(b=>bkState(b).st==="warn");
   let prob="";
-  if(failing.length){const b0=failing[0];prob=`<div class="kp-banner err" data-goto="${att(b0.id)}"><span class="bi">${svg("warn",17)}</span><div class="bt"><b>${failing.length>1?failing.length+" backups need attention":esc(b0.name||b0.id)+" is failing</b> — "+esc(bkState(b0).txt)}</div><button class="btn sm" data-goto="${att(b0.id)}">Open</button></div>`;}
+  if(failing.length){const b0=failing[0];prob=`<div class="kp-banner err" data-goto="${att(b0.id)}"><span class="bi">${svg("warn",17)}</span><div class="bt">${failing.length>1?`<b>${failing.length} backups need attention</b>`:`<b>${esc(b0.name||b0.id)} is failing</b> — ${esc(bkState(b0).txt)}`}</div><button class="btn sm" data-goto="${att(b0.id)}">Open</button></div>`;}
   else if(attn.length){const b0=attn[0];prob=`<div class="kp-banner warn" data-goto="${att(b0.id)}"><span class="bi">${svg("warn",17)}</span><div class="bt">${attn.length>1?attn.length+" backups need a look":"<b>"+esc(b0.name||b0.id)+"</b> — "+esc(bkState(b0).txt)}</div><button class="btn sm" data-goto="${att(b0.id)}">Open</button></div>`;}
   // onboarding steps (only until the first backup exists)
   const hasPw=!!D.password,hasDest=(D.dests||[]).length>0,hasSrc=(D.sources||[]).length>0;
@@ -7923,8 +7928,7 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
   const i=s.querySelector("#kpNm");i.focus();i.select();
   const go=()=>{const v=i.value.trim();s.classList.remove("show");if(v&&v!==cur)cb(v);};
   s.querySelector("#kpNmX").onclick=()=>s.classList.remove("show");
-  s.querySelector("#kpNmO").onclick=go;
-  i.onkeydown=ev=>{if(ev.key==="Enter"){ev.preventDefault();go();}};}
+  s.querySelector("#kpNmO").onclick=go;}   // Enter handled by the global scrim keydown (no double-submit)
 
  /* ---------- backup detail ---------- */
  const kdProgHTML=r=>`<div style="margin:10px 0"><div style="font-size:12px;color:var(--mut);margin-bottom:4px">${esc(r.phase==="replicate"?"replicating the repository to the spare…":r.phase==="drill"?"restore drill — spot-checking files…":r.phase==="waiting"?("waiting for backup «"+(r.waiting_for||"")+"» to finish"):r.phase==="policy"?"applying policies…":"snapshotting…")}${r.pct?` · ${Math.round(r.pct)}%${r.eta?" · "+esc(r.eta)+" left":""}`:""}</div>
@@ -8065,7 +8069,11 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
    <div class="srow"><div class="srow-l"><div class="srow-t">Enabled</div><div class="srow-d">scheduling and plug-in triggers</div></div>
     <div class="srow-c"><label class="tgl"><input type="checkbox" id="kEn"${draft.enabled!==false?" checked":""}><span class="sl"></span></label></div></div></div>
    <div class="r" style="margin-top:2px"><button class="btn pri" id="kSave">Save settings</button></div>`;
-  wireSecs(box,draft,()=>{readRet(box,draft);readSched(box,draft);draw();});
+  const readFlags=()=>{const g=id=>box.querySelector(id);
+   if(g("#kNok"))draft.notify_ok=g("#kNok").checked;
+   if(g("#kNerr"))draft.notify_err=g("#kNerr").checked;
+   if(g("#kEn"))draft.enabled=g("#kEn").checked;};
+  wireSecs(box,draft,()=>{readRet(box,draft);readSched(box,draft);readFlags();draw();});
   box.querySelector("#kSave").onclick=async()=>{
    draft.notify_ok=box.querySelector("#kNok").checked;
    draft.notify_err=box.querySelector("#kNerr").checked;
@@ -8186,7 +8194,8 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
      <button class="btn pri" id="kWNext">${i===WSTEPS.length-1?"Finish":"Next"}</button></div></div></div>`;
   wireSecs(tc.querySelector("#kWBody"),d,()=>paintWizard(tc));
   const savePos=()=>{if(d.id){win._kpWizPos=win._kpWizPos||{};win._kpWizPos[d.id]=wiz.step;}};
-  const readStep=()=>{if(sid==="ret")readRet(tc,d);if(sid==="sched")readSched(tc,d);};
+  const readStep=()=>{if(sid==="ret")readRet(tc,d);if(sid==="sched")readSched(tc,d);
+   if(sid==="fin"){const nm=tc.querySelector("#kWName");if(nm&&nm.value.trim())d.name=nm.value.trim();}};
   tc.querySelector("#kWLater").onclick=async()=>{readStep();
    if(d.source&&d.dest)await wizPersist(true);
    else toast("Backup not created — it needs at least a source and a destination");
@@ -8307,7 +8316,7 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
  function kpSnapBrowse(destid,snap,onChange){const s=document.getElementById("scrim");
   let stack=[{oid:snap.root,name:snap.path.split("/").pop()||snap.path}];
   s.innerHTML=`<div class="dialog" style="width:min(620px,94vw)"><h3>${svg("clock",16)} ${esc(dts(snap.ts))} <span style="font-weight:400;color:var(--mut);font-size:12px">· ${snap.files} files · ${fmtB(snap.bytes)}</span></h3>
-   <div class="kp-search"><span>${svg("search",14)}</span><input id="kbSearch" placeholder="Search files in this snapshot…"><span id="kbSearchX" class="kp-quiet" style="display:none;font-size:11px">clear</span></div>
+   <div class="kp-search"><span>${svg("search",14)}</span><input id="kbSearch" placeholder="Search files in this snapshot…" data-noenter><span id="kbSearchX" class="kp-quiet" style="display:none;font-size:11px">clear</span></div>
    <div id="kbCrumbs" style="font-size:12px;color:var(--mut);margin-bottom:6px"></div>
    <div class="pf-list" id="kbList" style="height:min(52vh,420px)"></div>
    <div class="pf-foot"><button class="iconbtn" id="kbDel" title="Delete this snapshot">${svg("trash",15)}</button><span style="flex:1"></span><button class="btn" id="kbX">Close</button><button class="btn pri" id="kbR">Restore this folder…</button></div></div>`;
@@ -8355,6 +8364,7 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
     <div class="rs-cl mono" style="font-size:11px;margin-top:4px">→ ${esc(rst.target||"")}${rst.pct?` · ${Math.round(rst.pct)}%`:""}</div></div>`
    :(rst.result&&rst.done&&Date.now()/1000-rst.done<120?`<div class="rs-cl" style="margin-bottom:8px">${dot(rst.result==="ok"?"good":rst.result==="stopped"?"warn":"danger")} last restore: ${esc(rst.result)}${rst.target?` → <span class="mono">${esc(rst.target)}</span>`:""}</div>`:"");
   const bkChips=(D.backups||[]).filter(b=>b.dest===snapDest||b.dest2===snapDest);
+  if(snapBk&&!bkChips.some(b=>b.id===snapBk))snapBk="";   // filtered backup no longer here → clear
   tc.innerHTML=`<div style="display:flex;align-items:center;gap:10px"><h3 class="set-title" style="margin:0">Snapshots</h3><span style="flex:1"></span>
     ${cur?`<button class="btn sm" id="kMnt">${cur.mounted?`${svg("eject",13)} Unmount`:`${svg("hdd",13)} Mount as folder`}</button>`:""}</div>
    <p class="set-sub" style="margin-bottom:10px">Every restore point in the selected repository. Click one to browse it, restore files or delete it${cur?`; «Mount as folder» shows the whole history in Files`:""}.</p>
