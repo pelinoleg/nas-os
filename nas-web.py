@@ -9830,7 +9830,10 @@ def _kp_ensure_password(supplied=""):
 
 def kp_dest_create(d, connect_only=False):
     """Create (or connect to an existing) kopia repository and register it as a
-    Destination entity. Long: rclone create can take ~30-60s."""
+    Destination entity. Long: rclone create can take ~30-60s.
+    d["no_init"] registers the entity WITHOUT touching the storage — for a spare
+    (3-2-1 sync) destination, which must start empty: `repository sync-to`
+    populates it on the first run, and until then there is nothing to connect to."""
     if not kopia_installed():
         return {"ok": False, "log": "kopia is not installed"}
     try:
@@ -9854,6 +9857,11 @@ def kp_dest_create(d, connect_only=False):
                     and (x.get("remote_path") or "") == (nd.get("remote_path") or ""):
                 return {"ok": False, "log": "this remote path is already a destination (%s)" % (x.get("name") or x["id"])}
     nd["id"] = _kp_new_id({x["id"] for x in cfg["dests"]})
+    if d.get("no_init"):
+        cfg = kp_load()
+        cfg["dests"].append(nd)
+        kp_save(cfg)
+        return {"ok": True, "dest": nd}
     os.makedirs(KOPIA_CFG_DIR, exist_ok=True)
     try:
         os.chmod(KOPIA_CFG_DIR, 0o700)
@@ -10089,8 +10097,425 @@ def kp_status():
             "password": cfg.get("password") or "",
             "sources": cfg["sources"],
             "dests": [dict(x, connected=kp_dest_connected(x["id"])) for x in cfg["dests"]],
-            "backups": cfg["backups"],
+            "backups": [dict(b, run=kp_run_state(b["id"])) for b in cfg["backups"]],
             "rclone_remotes": rclone_remotes() if rclone_installed() else []}
+
+# ---- snapshot runner: policies, progress, 3-2-1 replication -----------------
+KP_HIST_FILE = os.path.join(NAS_CONFIG, "kopia-history.json")
+
+def _kp_runf(bid, ext):
+    return os.path.join(NAS_CONFIG, "kopia-run-%s.%s" % (bid, ext))
+
+def _kp_unit(bid):
+    return "nas-kopia-%s" % bid
+
+def _kp_hsize(s):
+    """'469.5 MB' → bytes (kopia prints decimal units)."""
+    m = re.match(r"^([\d.]+)\s*([KMGTP]?)i?B?$", str(s or "").strip(), re.I)
+    if not m:
+        return 0
+    return int(float(m.group(1)) * {"": 1, "K": 1e3, "M": 1e6, "G": 1e9,
+                                    "T": 1e12, "P": 1e15}[m.group(2).upper()])
+
+# " - 4 hashing, 3700 hashed (51 MB), 0 cached (0 B), uploaded 42.3 MB, estimated 557.2 MB (9.2%) 58s left"
+_KP_PROG_RE = re.compile(r"(\d+)\s+hashed\s+\(([^)]+)\).*?uploaded\s+([\d.]+\s*\w?i?B)"
+                         r"(?:.*?\(([\d.]+)%\))?(?:\s+([\w ]+?)\s+left)?")
+
+def _kp_policy_apply(destid, bk, src):
+    """Set retention/compression/ignores on every source folder in this repo.
+    Kopia then enforces retention by itself after each snapshot — no separate
+    prune step. NOTE: --clear-ignore in the SAME command as --add-ignore clears
+    AFTER adding (verified live) — the reset must be a separate call."""
+    ret = bk.get("retention") or {}
+    for folder in src.get("folders") or []:
+        r = _kp(destid, ["policy", "set", folder, "--clear-ignore"], timeout=60)
+        if not r["ok"]:
+            return {"ok": False, "log": _kp_err_tail(r)}
+        args = ["policy", "set", folder,
+                "--keep-latest", str(ret.get("latest", 10)), "--keep-hourly", "0",
+                "--keep-daily", str(ret.get("daily", 7)),
+                "--keep-weekly", str(ret.get("weekly", 4)),
+                "--keep-monthly", str(ret.get("monthly", 6)),
+                "--keep-annual", str(ret.get("annual", 0)),
+                "--compression", ("zstd" if bk.get("compression", True) else "none")]
+        for pat in (src.get("excludes") or []):
+            args += ["--add-ignore", pat]
+        r = _kp(destid, args, timeout=60)
+        if not r["ok"]:
+            return {"ok": False, "log": _kp_err_tail(r)}
+    return {"ok": True}
+
+def _kp_sync_args(dest2):
+    """argv for replicating the main repo onto the spare (3-2-1). --delete keeps
+    the replica byte-identical (retention deletions propagate); the first sync
+    populates an empty location, no --must-exist."""
+    if dest2.get("kind") == "fs":
+        return ["repository", "sync-to", "filesystem", "--path", dest2["path"],
+                "--delete", "--parallel", "4"]
+    # cloud spare: parallel=1 — concurrent MkdirAll through `rclone serve webdav`
+    # races on shared parent dirs and pcloud answers 423 Locked (verified live)
+    return ["repository", "sync-to", "rclone",
+            "--remote-path", dest2["remote"] + ":" + (dest2.get("remote_path") or ""),
+            "--rclone-exe", _rclone_bin(), "--delete", "--parallel", "1"]
+
+def _kp_rsync_busy(folders):
+    """§9.2 guard: a folder that a RUNNING rsync («Backup» app) job is reading
+    from or writing into must not be snapshotted mid-run — the copy would be a
+    torn mix. Returns the offending profile name or ''."""
+    try:
+        profs = nb_profiles()
+    except Exception:
+        return ""
+    for p in profs:
+        try:
+            if not _nb_run_state_read(p["id"]).get("running"):
+                continue
+        except Exception:
+            continue
+        paths = []
+        for j in (p.get("jobs") or []):
+            for key in ("src", "dest"):
+                v = str(j.get(key) or "")
+                if v.startswith("/"):
+                    paths.append(v.rstrip("/"))
+        for f in (folders or []):
+            f = f.rstrip("/")
+            for q in paths:
+                if f == q or f.startswith(q + "/") or q.startswith(f + "/"):
+                    return p.get("name") or p["id"]
+    return ""
+
+def kp_run_state(bid):
+    st = _json_load_strict(_kp_runf(bid, "json"), {})
+    if st.get("running") and time.time() - (st.get("started") or 0) > 15 \
+            and not _systemd_active(_kp_unit(bid) + ".service"):
+        st["running"] = False
+        st["result"] = st.get("result") or "aborted"
+        st["done"] = st.get("done") or int(time.time())
+    return st
+
+def kp_run_status(bid):
+    if not _KP_ID_RE.match(str(bid or "")):
+        return {"ok": False, "log": "bad id"}
+    st = kp_run_state(bid)
+    lines = []
+    try:
+        with open(_kp_runf(bid, "log")) as f:
+            lines = f.read().split("\n")
+        if lines and lines[-1] == "":
+            lines.pop()
+    except OSError:
+        pass
+    return dict(st, ok=True, log=lines[-200:])
+
+def kp_run_start(bid):
+    cfg = kp_load()
+    bk = _kp_find(cfg["backups"], str(bid or ""))
+    if not bk:
+        return {"ok": False, "log": "no such backup"}
+    if not kopia_installed():
+        return {"ok": False, "log": "kopia is not installed"}
+    src = _kp_find(cfg["sources"], bk.get("source") or "")
+    dst = _kp_find(cfg["dests"], bk.get("dest") or "")
+    if not src or not dst:
+        return {"ok": False, "log": "backup is not fully configured"}
+    with _NbStartLock():                       # same cross-process start lock as the rsync app
+        if kp_run_state(bk["id"]).get("running"):
+            return {"ok": False, "log": "already running"}
+        mine = {bk.get("dest"), bk.get("dest2")} - {"", None}
+        for b in cfg["backups"]:               # one run per destination at a time
+            if b["id"] != bk["id"] and kp_run_state(b["id"]).get("running") \
+                    and ({b.get("dest"), b.get("dest2")} & mine):
+                return {"ok": False, "log": "destination is busy — «%s» is running"
+                        % (b.get("name") or b["id"])}
+        missing = [f for f in src["folders"] if not os.path.isdir(f)]
+        if len(missing) == len(src["folders"]):
+            return {"ok": False, "log": "source folders do not exist: " + ", ".join(missing[:3])}
+        if dst.get("kind") == "fs":
+            if not os.path.isdir(dst.get("path") or ""):
+                return {"ok": False, "log": "destination path does not exist — is the disk plugged in?"}
+            try:
+                sv = os.statvfs(dst["path"])   # statvfs, not /proc/mounts — catches dead FUSE too
+                if sv.f_bavail * sv.f_frsize < 200 * 1024 * 1024:
+                    return {"ok": False, "log": "destination has less than 200 MB free"}
+            except OSError as e:
+                return {"ok": False, "log": "destination not accessible: %s" % e}
+        try:
+            os.remove(_kp_runf(bk["id"], "cancel"))
+        except OSError:
+            pass
+        _json_save(_kp_runf(bk["id"], "json"),
+                   {"running": True, "started": int(time.time()), "phase": "starting",
+                    "backup": bk["id"], "result": None})
+        # SUDO_USER/HOME must travel into the unit: NAS_CONFIG (state/log paths) is
+        # derived from them at import time — without them the driver writes to /root
+        cmd = ["systemd-run", "--collect", "--quiet", "--unit", _kp_unit(bk["id"]),
+               "--setenv=SUDO_USER=" + TARGET_USER, "--setenv=HOME=" + HOME,
+               "--setenv=KPS_BID",
+               sys.executable, os.path.join(HERE, "nas-web.py"), "kopia-snap"]
+        try:
+            r = subprocess.run(cmd, env=dict(os.environ, KPS_BID=bk["id"]),
+                               capture_output=True, text=True, timeout=15)
+        except (OSError, subprocess.SubprocessError) as e:
+            _json_save(_kp_runf(bk["id"], "json"), {"running": False, "result": "error", "error": str(e)})
+            return {"ok": False, "log": str(e)}
+        if r.returncode != 0:
+            _json_save(_kp_runf(bk["id"], "json"), {"running": False, "result": "error"})
+            return {"ok": False, "log": (r.stderr or "failed to start")[:200]}
+    return {"ok": True, "log": "started"}
+
+def kp_run_cancel(bid):
+    if not _KP_ID_RE.match(str(bid or "")):
+        return {"ok": False, "log": "bad id"}
+    try:
+        with open(_kp_runf(bid, "cancel"), "w") as f:
+            f.write("1")
+    except OSError:
+        pass
+    try:
+        subprocess.run(["systemctl", "stop", _kp_unit(bid)], capture_output=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    st = _json_load_strict(_kp_runf(bid, "json"), {})
+    st.update(running=False, stopped=True, result="stopped", done=int(time.time()))
+    _json_save(_kp_runf(bid, "json"), st)
+    return {"ok": True}
+
+def _kp_hist_add(entry):
+    h = _json_load_strict(KP_HIST_FILE, [])
+    if not isinstance(h, list):
+        h = []
+    h.append(entry)
+    _json_save(KP_HIST_FILE, h[-100:])
+
+def kp_history():
+    h = _json_load_strict(KP_HIST_FILE, [])
+    return h if isinstance(h, list) else []
+
+def _kp_snap_cli(bid):
+    """Driver (transient unit nas-kopia-<id>): apply policies, snapshot every
+    source folder, then replicate to the spare destination (3-2-1).
+    Progress: kopia only prints live counters on a TTY, so the snapshot runs
+    with its stderr on a pty and we parse the \\r-separated counter lines."""
+    cfg = kp_load()
+    bk = _kp_find(cfg["backups"], bid)
+    if not bk:
+        return
+    src = _kp_find(cfg["sources"], bk.get("source") or "") or {"folders": []}
+    dst = _kp_find(cfg["dests"], bk.get("dest") or "")
+    d2 = _kp_find(cfg["dests"], bk.get("dest2") or "")
+    started = int(time.time())
+    st = {"running": True, "started": started, "phase": "starting", "backup": bid,
+          "pct": 0, "hashed_bytes": 0, "uploaded_bytes": 0, "result": None, "pid": os.getpid()}
+    _last_w = [0.0]
+
+    def upd(force=False, **kw):
+        st.update(kw)
+        now = time.monotonic()
+        if force or now - _last_w[0] >= 1.0:       # throttle state writes to 1/s
+            _last_w[0] = now
+            _json_save(_kp_runf(bid, "json"), st)
+    try:
+        logf = open(_kp_runf(bid, "log"), "w", buffering=1)
+    except OSError:
+        logf = None
+
+    def w(line):
+        if logf:
+            try:
+                logf.write(line + "\n")
+            except OSError:
+                pass
+
+    def cancelled():
+        return os.path.exists(_kp_runf(bid, "cancel"))
+
+    phases, result, err = {}, "ok", ""
+    snap_bytes = snap_files = failed_files = 0
+    try:
+        upd(force=True)
+        folders = [f for f in src.get("folders") or [] if os.path.isdir(f)]
+        skipped = [f for f in src.get("folders") or [] if f not in folders]
+        for f in skipped:
+            w("skipping missing folder: %s" % f)
+        if not folders:
+            result, err = "error", "no source folders exist"
+            return
+        # §9.2: wait out a running rsync backup that overlaps our folders (torn copy
+        # otherwise). Poll up to 2h, then give up loudly.
+        t0 = time.time()
+        while True:
+            who = _kp_rsync_busy(folders)
+            if not who:
+                break
+            if cancelled():
+                result, err = "stopped", ""
+                return
+            if time.time() - t0 > 2 * 3600:
+                result, err = "error", "gave up after 2h waiting for backup «%s»" % who
+                return
+            upd(phase="waiting", waiting_for=who)
+            w("waiting for backup «%s» to finish (folders overlap)" % who)
+            time.sleep(20)
+        st.pop("waiting_for", None)
+        c = _kp_ensure_connected(dst)
+        if not c["ok"]:
+            result, err = "error", "destination: " + (c.get("log") or "connect failed")
+            return
+        upd(phase="policy", force=True)
+        p = _kp_policy_apply(dst["id"], bk, src)
+        if not p["ok"]:
+            result, err = "error", "policy: " + (p.get("log") or "")
+            return
+        # ---- snapshot (stderr on a pty for live counters) ----
+        upd(phase="snapshot", force=True)
+        t_snap = time.time()
+        master, slave = pty.openpty()
+        args = [_kopia_bin(), "--config-file", _kp_cfg_file(dst["id"]),
+                "--log-dir", os.path.join(_kp_cache_dir(dst["id"]), "logs"),
+                "snapshot", "create"] + folders + \
+               ["--json", "--progress-update-interval=2s", "--tags", "nasbk:" + bid]
+        proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=slave,
+                                env=_kp_env(), close_fds=True)
+        os.close(slave)
+        out_buf = []
+
+        def _read_stdout():
+            try:
+                out_buf.append(proc.stdout.read())
+            except OSError:
+                pass
+        t_out = threading.Thread(target=_read_stdout, daemon=True)
+        t_out.start()
+        buf = b""
+        while True:
+            r_, _, _ = select.select([master], [], [], 0.5)
+            if cancelled():
+                try:
+                    proc.kill()
+                except OSError:
+                    pass
+                result, err = "stopped", ""
+                break
+            if not r_:
+                if proc.poll() is not None:
+                    break
+                continue
+            try:
+                d = os.read(master, 8192)
+            except OSError:
+                break
+            if not d:
+                break
+            buf += d
+            *chunks, buf = re.split(rb"[\r\n]", buf)
+            for ch in chunks:
+                line = ch.decode("utf-8", "replace").strip()
+                if not line:
+                    continue
+                m = _KP_PROG_RE.search(line)
+                if m:
+                    upd(hashed_files=int(m.group(1)), hashed_bytes=_kp_hsize(m.group(2)),
+                        uploaded_bytes=_kp_hsize(m.group(3)),
+                        pct=float(m.group(4) or 0), eta=(m.group(5) or "").strip(),
+                        cur=line.lstrip("-|/\\* "))
+                else:
+                    w(line)
+        try:
+            os.close(master)
+        except OSError:
+            pass
+        proc.wait()
+        t_out.join(timeout=5)
+        if result == "stopped":
+            return
+        manifests = []
+        for line in (out_buf[0].decode("utf-8", "replace") if out_buf and out_buf[0] else "").splitlines():
+            line = line.strip()
+            if line.startswith("{"):
+                try:
+                    manifests.append(json.loads(line))
+                except ValueError:
+                    pass
+        for mf in manifests:
+            summ = ((mf.get("rootEntry") or {}).get("summ") or {})
+            snap_bytes += int(summ.get("size") or 0)
+            snap_files += int(summ.get("files") or 0)
+            failed_files += int(summ.get("numFailed") or 0)
+        phases["snapshot"] = {"dur": int(time.time() - t_snap), "bytes": snap_bytes,
+                              "files": snap_files, "failed": failed_files}
+        if proc.returncode != 0 and not manifests:
+            result, err = "error", "snapshot failed (code %d) — see the log" % proc.returncode
+            return
+        if proc.returncode != 0 or failed_files:
+            result = "warn"
+            err = "%d file(s) could not be read" % failed_files if failed_files else "snapshot finished with errors"
+        w("snapshot done: %d files, %s%s" % (snap_files, fmt_bytes(snap_bytes),
+                                             (", %d failed" % failed_files) if failed_files else ""))
+        if skipped:
+            result = result if result != "ok" else "warn"
+            err = (err + "; " if err else "") + "missing folders skipped: " + ", ".join(skipped[:3])
+        # ---- spare copy (3-2-1) ----
+        if d2 and bk.get("dest2_mode", "sync") == "sync":
+            upd(phase="replicate", pct=0, cur="", force=True)
+            t_sync = time.time()
+            if d2.get("kind") == "fs":
+                try:
+                    os.makedirs(d2["path"], exist_ok=True)
+                except OSError:
+                    pass
+            w("replicating repository to spare «%s»…" % (d2.get("name") or d2["id"]))
+            rs = _kp(dst["id"], _kp_sync_args(d2), timeout=6 * 3600)
+            phases["replicate"] = {"dur": int(time.time() - t_sync)}
+            for line in ((rs["out"] + rs["err"]).strip().splitlines())[-6:]:
+                w(line)
+            if not rs["ok"]:
+                # per plan §6.16: the MAIN copy is fine — say exactly that
+                result = "warn" if result == "ok" else result
+                err = (err + "; " if err else "") + "main copy OK, spare copy failed: " + _kp_err_tail(rs)
+            else:
+                w("spare copy is in sync")
+        elif d2:                                   # independent second run
+            upd(phase="replicate", pct=0, cur="", force=True)
+            t_sync = time.time()
+            c2 = _kp_ensure_connected(d2)
+            p2 = _kp_policy_apply(d2["id"], bk, src) if c2["ok"] else c2
+            if not p2["ok"]:
+                result = "warn" if result == "ok" else result
+                err = (err + "; " if err else "") + "main copy OK, spare copy failed: " \
+                    + (p2.get("log") or "")
+            else:
+                r2 = _kp(d2["id"], ["snapshot", "create"] + folders +
+                         ["--json", "--no-progress", "--tags", "nasbk:" + bid], timeout=12 * 3600)
+                phases["replicate"] = {"dur": int(time.time() - t_sync)}
+                if not r2["ok"]:
+                    result = "warn" if result == "ok" else result
+                    err = (err + "; " if err else "") + "main copy OK, spare snapshot failed: " + _kp_err_tail(r2)
+                else:
+                    w("independent spare snapshot done")
+    except Exception as e:
+        result, err = "error", "driver crashed: %r" % e
+        w("driver crashed: %r" % e)
+    finally:
+        stopped = cancelled() or result == "stopped"
+        st.update(running=False, done=int(time.time()), phase="done",
+                  result=("stopped" if stopped else result),
+                  error=err, bytes=snap_bytes, files=snap_files)
+        _json_save(_kp_runf(bid, "json"), st)
+        _kp_hist_add({"ts": started, "backup": bid, "name": bk.get("name") or bid,
+                      "dur": int(time.time() - started),
+                      "result": ("stopped" if stopped else result), "error": err,
+                      "bytes": snap_bytes, "files": snap_files, "phases": phases})
+        w("[%s] %s" % (("STOPPED" if stopped else result.upper()), err or "all good"))
+        try:
+            os.remove(_kp_runf(bid, "cancel"))
+        except OSError:
+            pass
+        if logf:
+            try:
+                logf.close()
+            except OSError:
+                pass
 
 # Signal file: udev hooks (USB mount/eject) touch it, the watcher wakes
 # monitor_loop immediately — disk insertion is detected in ~1-2s, not on the 60s tick.
@@ -18453,6 +18878,10 @@ class H(BaseHTTPRequestHandler):
                 self._json({"ok": True, "opts": rclone_opts_get()})
             elif p == "/api/kopia/status":
                 self._json(kp_status())
+            elif p == "/api/kopia/run/status":
+                self._json(kp_run_status((q.get("b") or [""])[0]))
+            elif p == "/api/kopia/history":
+                self._json({"history": kp_history()})
             elif p == "/api/backup/status":
                 self._json(nb_status(_nb_qpid(q)))
             elif p == "/api/backup/dest-state":
@@ -19019,6 +19448,10 @@ class H(BaseHTTPRequestHandler):
                 self._json(kp_backup_save(self._body() or {}))
             elif p == "/api/kopia/backup/delete":
                 self._json(kp_backup_delete(str(self._body().get("id") or "")))
+            elif p == "/api/kopia/backup/run":
+                self._json(kp_run_start(str(self._body().get("id") or "")))
+            elif p == "/api/kopia/backup/cancel":
+                self._json(kp_run_cancel(str(self._body().get("id") or "")))
             elif p == "/api/backup/key":
                 b = self._body()
                 act = str(b.get("action") or "")
@@ -19199,6 +19632,9 @@ if __name__ == "__main__":
         nb_compare_run(_pid, deep=("deep" in _args))
     elif len(sys.argv) > 1 and sys.argv[1] == "backup-drill":
         _nb_drill_cli(sys.argv[2] if len(sys.argv) > 2 else NB_MAIN)
+    elif len(sys.argv) > 1 and sys.argv[1] == "kopia-snap":
+        # backup id arrives through the unit env (uniform with the other drivers)
+        _kp_snap_cli(os.environ.get("KPS_BID", ""))
     elif len(sys.argv) > 1 and sys.argv[1] == "rclone-restore":
         # paths arrive through the unit env (may contain spaces), not argv
         _rclone_restore_cli(os.environ.get("RCR_REMOTE", ""), os.environ.get("RCR_PATH", ""),
