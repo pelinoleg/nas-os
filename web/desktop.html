@@ -1128,6 +1128,45 @@
   .kp-opt .ot{font-size:12.5px;font-weight:600}
   .kp-opt .od{font-size:11.5px;color:var(--win-dim,var(--dim));margin-top:2px;line-height:1.45}
   .kp-opt .oc{flex:none;margin-left:auto}
+  /* Kopia v2: hero, status-striped backup cards, run ticks, route line, stat chips, flow strip */
+  .kp-hero{display:flex;align-items:center;gap:14px;margin:2px 0 16px}
+  .kp-hero-ic{width:44px;height:44px;border-radius:13px;display:grid;place-items:center;flex:none;
+    background:color-mix(in srgb,var(--kp-hc,var(--win-accent,var(--accent))) 16%,transparent);color:var(--kp-hc,var(--win-accent,var(--accent)))}
+  .kp-big{font-size:19px;font-weight:750;letter-spacing:-.015em;line-height:1.2}
+  .kp-sub2{font-size:12px;color:var(--win-dim,var(--dim));margin-top:3px;line-height:1.45}
+  .kp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
+  .kp-bk{position:relative;background:var(--card);border:1px solid var(--win-line,var(--line));border-radius:14px;
+    padding:13px 15px 12px 19px;cursor:pointer;overflow:hidden;transition:background .15s;text-align:left;font-family:inherit;color:inherit}
+  @media(hover:hover){.kp-bk:hover{background:var(--sel)}}
+  .kp-bk::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--kp-st,transparent)}
+  .kp-bk-top{display:flex;align-items:center;gap:8px;margin-bottom:7px}
+  .kp-bk-top b{font-size:13px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .kp-verdict{font-size:14px;font-weight:650;margin-bottom:8px}
+  .kp-ticks{display:flex;gap:3px;margin-bottom:9px;min-height:16px;align-items:flex-end}
+  .kp-ticks i{width:6px;height:16px;border-radius:2.5px;background:var(--track,rgba(128,128,128,.25))}
+  .kp-ticks i.ok{background:var(--win-good,var(--good))}
+  .kp-ticks i.warn{background:var(--win-warn,var(--warn))}
+  .kp-ticks i.err{background:var(--win-danger,var(--danger))}
+  .kp-route{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--win-dim,var(--dim));flex-wrap:wrap;min-width:0}
+  .kp-route svg{flex:none;opacity:.85}
+  .kp-route .arr{opacity:.5}
+  .kp-route .rn{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:130px}
+  .kp-next{font-size:11px;color:var(--win-dim,var(--dim));margin-top:7px}
+  .kp-chips{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px}
+  .kp-chip2{background:none;border:1px solid var(--win-line,var(--line));border-radius:10px;padding:7px 12px;min-width:72px}
+  .kp-chip2 .v{font-size:13.5px;font-weight:650;font-variant-numeric:tabular-nums;white-space:nowrap}
+  .kp-chip2 .l{font-size:9.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--win-dim,var(--dim));margin-top:2px;white-space:nowrap}
+  .kp-flow{display:flex;align-items:stretch;margin:0 0 12px;background:var(--card);border:1px solid var(--win-line,var(--line));border-radius:14px;overflow:hidden}
+  .kp-seg{flex:1;padding:11px 14px;min-width:0}
+  .kp-seg+.kp-seg{border-left:1px solid var(--win-line,var(--line))}
+  .kp-seg .se{font-size:9.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--win-dim,var(--dim));display:flex;align-items:center;gap:5px;margin-bottom:6px}
+  .kp-seg .se svg{color:var(--win-accent,var(--accent))}
+  .kp-seg .sv{font-size:13px;font-weight:650;display:flex;align-items:center;gap:7px;min-width:0}
+  .kp-seg .sv>span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .kp-seg .sd{font-size:10.5px;color:var(--win-dim,var(--dim));margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .kp-new{display:flex;align-items:center;justify-content:center;gap:8px;border:1.5px dashed var(--win-line,var(--line));
+    border-radius:14px;min-height:128px;color:var(--win-dim,var(--dim));cursor:pointer;font-size:12.5px;font-weight:600;background:none;font-family:inherit}
+  @media(hover:hover){.kp-new:hover{color:var(--win-accent,var(--accent));border-color:var(--win-accent,var(--accent))}}
   .rs-ch{display:flex;align-items:center;gap:7px;font-size:13px;margin-bottom:6px}
   .rs-ch svg{color:var(--win-accent,var(--accent));flex:none}
   .rs-ch b{flex:1}
@@ -7531,7 +7570,7 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
   const tc=body.querySelector("#tc"),pr=tc&&tc.querySelector("#kdProg");
   if(pr)pr.innerHTML=kdProgHTML(r);
   const sl=tc&&tc.querySelector("#kdStLine"),st=bkState(b);
-  if(sl)sl.innerHTML=`${dot(st.st==="bad"?"danger":st.st)} ${esc(st.txt)}`;};
+  if(sl)sl.textContent=st.txt;};
 
  function paintInstall(tc){
   tc.innerHTML=`<h3 class="set-title">Kopia</h3>
@@ -7666,29 +7705,51 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
   if(wiz){paintWizard(tc);return;}
   if(detail){paintDetail(tc);return;}
   const bks=D.backups||[];
-  let hero,heroSt;
   const running=bks.filter(b=>b.run&&b.run.running);
-  if(running.length){hero=`Backing up: ${running.map(b=>esc(b.name||b.id)).join(", ")}…`;heroSt="good";}
-  else if(!bks.length){hero="Snapshot backups with history and a spare copy — create the first one.";heroSt="warn";}
-  else{const bad=bks.filter(b=>bkState(b).st==="bad"),warn=bks.filter(b=>bkState(b).st==="warn");
-   hero=bad.length?`${bad.length} backup${bad.length>1?"s":""} failing`:warn.length?`${warn.length} backup${warn.length>1?"s":""} need${warn.length>1?"":"s"} attention`:"All backups are fresh.";
-   heroSt=bad.length?"bad":warn.length?"warn":"good";}
-  tc.innerHTML=`<h3 class="set-title" style="display:flex;align-items:center;gap:8px">${dot(heroSt==="bad"?"danger":heroSt)}<span>${hero}</span></h3>
-   <p class="set-sub">Every backup keeps versioned, deduplicated snapshots at its destination${bks.some(b=>b.dest2)?" — and mirrors the whole repository to a spare (3-2-1)":""}.</p>
-   <div class="rs-grid">${bks.map(b=>{const st=bkState(b),d1=dstOf(b.dest),d2=dstOf(b.dest2),src=srcOf(b);
-    const prog=st.run&&b.run.pct?`<div class="bar" style="margin-top:6px"><i class="pg" style="width:${Math.min(100,b.run.pct)}%"></i></div>`:"";
-    return`<div class="rs-card" data-bk="${att(b.id)}"><div class="rs-ch">${svg("shield",18)}<b>${esc(b.name||b.id)}</b>${dot(st.st==="bad"?"danger":st.st)}<span style="flex:1"></span>${st.run?"":`<button class="btn sm" data-run="${att(b.id)}" title="Back up now">${svg("play",12)}</button>`}</div>
-     <div class="rs-cv">${esc(st.txt)}${st.run&&b.run.pct?` · ${Math.round(b.run.pct)}%`:""}</div>
-     <div class="rs-cl">${esc(src&&src.name||"?")} → ${esc(d1&&d1.name||"?")}${b.dest2?` <span title="spare copy${b.dest2_mode==="independent"?" (independent)":" (synced replica)"}">+ ${esc(d2&&d2.name||"spare")}</span>`:""}${b.schedule&&b.schedule.mode!=="off"?`<br>${esc(nextRun(b))}`:""}</div>${prog}</div>`;}).join("")}
-   <div class="rs-card" id="kpNew" style="display:flex;align-items:center;justify-content:center;min-height:92px;cursor:pointer"><div style="text-align:center;color:var(--mut)">${svg("plus",22)}<div style="font-size:12px;margin-top:4px">New backup</div></div></div></div>`;
+  const bad=bks.filter(b=>bkState(b).st==="bad"),warn=bks.filter(b=>bkState(b).st==="warn");
+  let big,sub,hc,hic;
+  if(!bks.length){big="Your files, versioned.";hc="var(--win-accent,var(--accent))";hic="shield";
+   sub="Every run keeps a browsable point-in-time copy; identical data is stored once. Add a spare destination and you have classic 3-2-1.";}
+  else if(running.length){big="Backing up…";hc="var(--win-accent,var(--accent))";hic="refresh";
+   sub=running.map(b=>esc(b.name||b.id)).join(", ");}
+  else if(bad.length){big="Attention needed";hc="var(--win-danger,var(--danger))";hic="warn";
+   sub=`${bad.length} of ${bks.length} backup${bks.length>1?"s":""} failing — open the red card`;}
+  else if(warn.length){big="Mostly protected";hc="var(--win-warn,var(--warn))";hic="shield";
+   sub=`${warn.length} backup${warn.length>1?"s":""} need${warn.length>1?"":"s"} a look`;}
+  else{big="You're protected.";hc="var(--win-good,var(--good))";hic="shield";
+   const nx=bks.map(nextRun).filter(Boolean)[0];
+   sub=`${bks.length} backup${bks.length>1?"s":""} fresh${nx?` · ${esc(nx)}`:""}`;}
+  tc.innerHTML=`<div class="kp-hero"><div class="kp-hero-ic" style="--kp-hc:${hc}">${svg(hic,22)}</div>
+    <div><div class="kp-big">${big}</div><div class="kp-sub2">${sub}</div></div></div>
+   ${bks.length?`<div class="kp-grid">${bks.map(b=>{
+    const st=bkState(b),d1=dstOf(b.dest),d2=dstOf(b.dest2),src=srcOf(b);
+    const col=st.st==="bad"?"danger":st.st;
+    const badge=b.run&&b.run.running?`<span class="kp-badge ok">running</span>`
+     :st.st==="bad"?`<span class="kp-badge err">problem</span>`
+     :st.st==="warn"?`<span class="kp-badge warn">check</span>`:`<span class="kp-badge ok">ok</span>`;
+    const prog=st.run&&b.run.pct?`<div class="bar" style="margin-top:8px"><i class="pg" style="width:${Math.min(100,b.run.pct)}%"></i></div>`:"";
+    return`<button class="kp-bk" data-bk="${att(b.id)}" style="--kp-st:var(--win-${col},var(--${col}))">
+     <div class="kp-bk-top"><b>${esc(b.name||b.id)}</b>${badge}${st.run?"":`<span class="iconbtn" data-run="${att(b.id)}" title="Back up now" role="button">${svg("play",13)}</span>`}</div>
+     <div class="kp-verdict">${esc(st.txt)}${st.run&&b.run.pct?` · ${Math.round(b.run.pct)}%`:""}</div>
+     <div class="kp-ticks" data-ticks="${att(b.id)}"></div>
+     <div class="kp-route">${svg("folder",13)}<span class="rn">${esc(src&&src.name||"?")}</span><span class="arr">→</span>${svg(d1&&d1.kind==="rclone"?"globe":"hdd",13)}<span class="rn">${esc(d1&&d1.name||"?")}</span>${b.dest2?`<span class="arr">→</span>${svg(d2&&d2.kind==="rclone"?"globe":"hdd",13)}<span class="rn" title="spare copy (${b.dest2_mode==="independent"?"independent":"synced replica"})">${esc(d2&&d2.name||"spare")}</span>`:""}</div>
+     ${b.schedule&&b.schedule.mode!=="off"?`<div class="kp-next">${esc(nextRun(b))}</div>`:""}${prog}</button>`;}).join("")}
+   <button class="kp-new" id="kpNew">${svg("plus",18)} New backup</button></div>`
+   :`<button class="kp-new" id="kpNew" style="min-height:150px;font-size:13.5px">${svg("plus",20)} Create your first backup</button>`}`;
+  api("/api/kopia/history").then(hh=>{
+   const runs=((hh&&hh.history)||[]);
+   tc.querySelectorAll("[data-ticks]").forEach(el2=>{
+    const mine=runs.filter(x=>x.backup===el2.dataset.ticks).slice(-14);
+    el2.innerHTML=mine.map(x=>`<i class="${x.result==="ok"?"ok":x.result==="error"?"err":"warn"}" title="${att(dtShort(x.ts))} · ${att(x.result)}"></i>`).join("")||`<span style="font-size:10.5px;color:var(--win-dim,var(--dim))">no runs yet</span>`;});});
   tc.querySelectorAll("[data-run]").forEach(b=>b.onclick=async ev=>{ev.stopPropagation();
-   b.disabled=true;const r=await kP("/api/kopia/backup/run",{id:b.dataset.run});
+   const r=await kP("/api/kopia/backup/run",{id:b.dataset.run});
    if(!(r&&r.ok))toast((r&&r.log)||"could not start");await refresh();});
   tc.querySelectorAll("[data-bk]").forEach(c=>c.onclick=()=>{
    const b=(D.backups||[]).find(x=>x.id===c.dataset.bk);if(!b)return;
    if(b.setup_started&&!b.setup_done){wiz={step:win._kpWizPos&&win._kpWizPos[b.id]||0,draft:JSON.parse(JSON.stringify(b))};paint();}
    else{detail=b.id;paint();}});
-  tc.querySelector("#kpNew").onclick=()=>{wiz={step:0,draft:{name:"",source:"",dest:"",dest2:"",dest2_mode:"sync",
+  const nb=tc.querySelector("#kpNew");
+  if(nb)nb.onclick=()=>{wiz={step:0,draft:{name:"",source:"",dest:"",dest2:"",dest2_mode:"sync",
    retention:{latest:10,daily:7,weekly:4,monthly:12,annual:0},schedule:{mode:"daily",time:"03:30",dow:0},
    compression:true,usb_trigger:false,notify_ok:false,notify_err:true,enabled:true}};paint();};}
 
@@ -7731,28 +7792,34 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
   const st=bkState(b),r=b.run||{},src=srcOf(b),d1=dstOf(b.dest),d2=dstOf(b.dest2);
   detailWasRunning=!!r.running;
   const runrow=`<div id="kdProg">${r.running?kdProgHTML(r):""}</div>`;
-  tc.innerHTML=`<div style="display:flex;align-items:center;gap:10px;margin-bottom:2px">
+  const col=st.st==="bad"?"danger":st.st;
+  tc.innerHTML=`<div class="kp-hero" style="margin-bottom:12px">
     <button class="iconbtn" id="kdBack" title="Back" style="transform:rotate(180deg)">${svg("chev",16)}</button>
-    <h3 class="set-title" style="margin:0">${esc(b.name||b.id)}</h3>
-    <span style="flex:1"></span>
+    <div class="kp-hero-ic" style="--kp-hc:var(--win-${col},var(--${col}))">${svg("shield",21)}</div>
+    <div style="flex:1;min-width:0"><div class="kp-big" style="font-size:17px">${esc(b.name||b.id)}</div>
+     <div class="kp-sub2" id="kdStLine">${esc(st.txt)}${b.schedule&&b.schedule.mode!=="off"?` · ${esc(nextRun(b))}`:""}</div></div>
     ${r.running?`<button class="btn dng sm" id="kdStop">${svg("stop",13)} Stop</button>`:`<button class="btn pri sm" id="kdRun">${svg("play",13)} Back up now</button>`}
     <button class="iconbtn" id="kdMenu" title="More">${svg("cog",16)}</button></div>
-   <div class="rs-cl" id="kdStLine" style="margin:0 0 8px 34px">${dot(st.st==="bad"?"danger":st.st)} ${esc(st.txt)}${b.schedule&&b.schedule.mode!=="off"?` · ${esc(nextRun(b))}`:""}</div>
    ${runrow}
-   <div class="nb-flow" style="display:flex;gap:10px;flex-wrap:wrap;margin:8px 0 14px">
-    <div class="rs-card" style="flex:1;min-width:180px"><div class="rs-ch">${svg("folder",16)}<b>From</b></div>
-     <div class="rs-cv">${esc(src&&src.name||"—")}</div><div class="rs-cl">${src?src.folders.map(f=>`<div class="mono" style="font-size:11px">${esc(f)}</div>`).join(""):"pick a source below"}</div></div>
-    <div class="rs-card" style="flex:1;min-width:180px"><div class="rs-ch">${svg("hdd",16)}<b>To</b></div>
-     <div class="rs-cv">${esc(d1&&d1.name||"—")} ${d1?dot(d1.missing?"danger":d1.connected?"good":"warn"):""}</div>
-     ${d1&&d1.missing?`<div class="rs-cl" style="color:var(--danger)">destination folder is gone — is the disk plugged in?</div>`:""}
-     <div class="rs-cl mono" style="font-size:11px">${esc(d1?(d1.kind==="fs"?d1.path:(d1.remote+":"+(d1.remote_path||""))):"")}</div></div>
-    ${b.dest2?`<div class="rs-card" style="flex:1;min-width:180px"><div class="rs-ch">${svg("copy",16)}<b>Spare</b></div>
-     <div class="rs-cv">${esc(d2&&d2.name||"—")}</div><div class="rs-cl">${b.dest2_mode==="independent"?"independent second run":"synced replica of the whole repository"}<span id="kdSpareAgo"></span></div></div>`:""}
+   <div class="kp-chips" id="kdChips">
+    ${r.done?`<div class="kp-chip2"><div class="v">${fmtB(r.bytes||0)}</div><div class="l">last run</div></div>
+    <div class="kp-chip2"><div class="v">${r.files||0}</div><div class="l">files</div></div>`:""}
+    <div class="kp-chip2" id="kdDrill"><div class="v">—</div><div class="l">restore drill</div></div>
+    ${b.dest2?`<div class="kp-chip2" id="kdSpareChip"><div class="v">—</div><div class="l">spare copy</div></div>`:""}</div>
+   <div class="kp-flow">
+    <div class="kp-seg"><div class="se">${svg("folder",12)} From</div>
+     <div class="sv"><span>${esc(src&&src.name||"—")}</span></div>
+     <div class="sd">${src?`${src.folders.length} folder${src.folders.length>1?"s":""} · ${esc(src.folders[0]||"")}${src.folders.length>1?" …":""}`:"pick a source in Settings"}</div></div>
+    <div class="kp-seg"><div class="se">${svg(d1&&d1.kind==="rclone"?"globe":"hdd",12)} To</div>
+     <div class="sv">${d1?dot(d1.missing?"danger":d1.connected?"good":"warn"):""}<span>${esc(d1&&d1.name||"—")}</span></div>
+     <div class="sd">${d1&&d1.missing?`<span style="color:var(--win-danger,var(--danger))">folder is gone — is the disk plugged in?</span>`:esc(d1?(d1.kind==="fs"?d1.path:(d1.remote+":"+(d1.remote_path||""))):"")}</div></div>
+    ${b.dest2?`<div class="kp-seg"><div class="se">${svg("copy",12)} Spare</div>
+     <div class="sv"><span>${esc(d2&&d2.name||"—")}</span></div>
+     <div class="sd" id="kdSpareAgo">${b.dest2_mode==="independent"?"independent second run":"synced replica"}</div></div>`:""}
    </div>
-   <div class="rs-cl" style="margin:0 0 10px;display:flex;gap:14px;flex-wrap:wrap;align-items:center">
-    <span id="kdDrill"></span>
-    <a href="#" id="kdSnaps" style="color:var(--accent)">View snapshots →</a>
-    <a href="#" id="kdStats" style="color:var(--accent)">Repository stats</a><span id="kdStatsV"></span></div>
+   <div style="margin:0 0 12px;display:flex;gap:16px;flex-wrap:wrap;align-items:center">
+    <a href="#" id="kdSnaps" class="kp-quiet" style="font-size:12px">View snapshots →</a>
+    <a href="#" id="kdStats" class="kp-quiet" style="font-size:12px">Repository stats</a><span id="kdStatsV" style="font-size:11.5px;color:var(--win-dim,var(--dim))"></span></div>
    <div class="kp-sec" style="margin-top:4px"><h4>${svg("clock",13)} Recent runs</h4><div id="kdHist"><div class="set-load" style="padding:4px 0">loading…</div></div></div>
    <h3 class="set-title kp-disc${win._kpSetOpen?" open":""}" id="kdSetHead" style="margin-top:14px">${svg("chev",15)} Settings</h3>
    <div id="kdSet" style="${win._kpSetOpen?"":"display:none"}"></div>`;
@@ -7778,11 +7845,14 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
    const all=((h&&h.history)||[]).filter(x=>x.backup===b.id);
    const lastRep=all.slice().reverse().find(x=>x.phases&&x.phases.replicate);
    const sa=tc.querySelector("#kdSpareAgo");
-   if(sa&&lastRep)sa.innerHTML=`<br>last replicated ${esc(ago(lastRep.ts))}`;
+   if(sa&&lastRep)sa.textContent=(b.dest2_mode==="independent"?"independent · ":"synced · ")+"updated "+ago(lastRep.ts);
+   const sc2=tc.querySelector("#kdSpareChip");
+   if(sc2&&lastRep)sc2.innerHTML=`<div class="v" style="color:var(--win-good,var(--good))">${esc(ago(lastRep.ts))}</div><div class="l">spare updated</div>`;
    const lastDrill=all.slice().reverse().find(x=>x.phases&&x.phases.drill);
    const dr=tc.querySelector("#kdDrill");
    if(dr){const d0=lastDrill&&lastDrill.phases.drill;
-    dr.innerHTML=d0?`${dot(d0.rot?"danger":"good")} restore drill: ${d0.ok}/${d0.checked} files verified (${esc(ago(lastDrill.ts))})`:`${dot("warn")} restore drill: not run yet`;}
+    dr.innerHTML=d0?`<div class="v" style="color:var(--win-${d0.rot?"danger":"good"},var(--${d0.rot?"danger":"good"}))">${d0.ok}/${d0.checked} ✓</div><div class="l">restore drill</div>`
+     :`<div class="v">—</div><div class="l">restore drill</div>`;}
    const runs=all.slice(-8).reverse();
    box.innerHTML=runs.length?runs.map(x=>kpRunRow(x,false)).join(""):
     `<div style="color:var(--win-dim,var(--dim));font-size:12px;padding:2px 0">no runs yet — press «Back up now»</div>`;
