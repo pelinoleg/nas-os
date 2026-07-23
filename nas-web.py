@@ -3155,6 +3155,11 @@ def _def_monitor():
         "thermal_guard":{"on": True, "priority": 1, "desk": True},
         # --- daily status summary (silent; weekly is the heartbeat) ---
         "daily_summary":{"on": False, "priority": -1, "desk": False},
+        # --- Kopia app (snapshot backups) ---
+        "kp_run":      {"on": False, "priority": 0, "desk": True},     # routine run result → desk
+        "kp_err":      {"on": True,  "priority": 1, "desk": True},     # snapshot / spare copy / destination problem
+        "kp_stale":    {"on": True,  "priority": 1, "threshold": 7, "desk": True},   # newest snapshot older than N days
+        "kp_maint":    {"on": True,  "priority": 1, "desk": True},     # repo maintenance / verification failed
         # --- Resilience app ---
         "dirty_boot":  {"on": True,  "priority": 1},                   # power loss / crash detected on boot
         "resil_drill": {"on": True,  "priority": 0, "desk": True},     # weekly readiness audit found blockers
@@ -10292,6 +10297,184 @@ def kp_history():
     h = _json_load_strict(KP_HIST_FILE, [])
     return h if isinstance(h, list) else []
 
+# ---- scheduler / maintenance / health tick ----------------------------------
+KP_STATE_FILE = os.path.join(NAS_CONFIG, "kopia-state.json")
+_kp_last_sched = ""
+_kp_last_health = 0.0
+
+def _kp_state_load():
+    d = _json_load_strict(KP_STATE_FILE, {})
+    return d if isinstance(d, dict) else {}
+
+def _kp_dest_busy(destid, cfg=None):
+    cfg = cfg or kp_load()
+    for b in cfg["backups"]:
+        if destid in (b.get("dest"), b.get("dest2")) and kp_run_state(b["id"]).get("running"):
+            return True
+    for u in ("nas-kopia-maint-%s" % destid, "nas-kopia-vfy-%s" % destid):
+        if _systemd_active(u + ".service"):
+            return True
+    return False
+
+def _kp_bg_state_file(kind, destid):
+    return os.path.join(NAS_CONFIG, "kopia-%s-%s.json" % (kind, destid))
+
+def kp_bg_state(kind, destid):
+    st = _json_load_strict(_kp_bg_state_file(kind, destid), {})
+    unit = "nas-kopia-%s-%s" % ("maint" if kind == "maint" else "vfy", destid)
+    if st.get("running") and time.time() - (st.get("started") or 0) > 15 \
+            and not _systemd_active(unit + ".service"):
+        st["running"] = False
+        st["result"] = st.get("result") or "aborted"
+    return st
+
+def _kp_bg_start(kind, destid):
+    """Long repo housekeeping (maintenance / percent-verify) in its own transient
+    unit — never inline in the monitor thread."""
+    unit = "nas-kopia-%s-%s" % ("maint" if kind == "maint" else "vfy", destid)
+    cmd = ["systemd-run", "--collect", "--quiet", "--unit", unit,
+           "--setenv=SUDO_USER=" + TARGET_USER, "--setenv=HOME=" + HOME,
+           "--setenv=KPB_KIND", "--setenv=KPB_DEST",
+           sys.executable, os.path.join(HERE, "nas-web.py"), "kopia-bg"]
+    try:
+        r = subprocess.run(cmd, env=dict(os.environ, KPB_KIND=kind, KPB_DEST=destid),
+                           capture_output=True, text=True, timeout=15)
+        return r.returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
+
+def _kp_bg_cli(kind, destid):
+    """Driver: repository maintenance (weekly) or 1% file verification (monthly)."""
+    if kind not in ("maint", "verify") or not _KP_ID_RE.match(str(destid or "")):
+        return
+    cfg = kp_load()
+    dest = _kp_find(cfg["dests"], destid)
+    if not dest:
+        return
+    _json_save(_kp_bg_state_file(kind, destid), {"running": True, "started": int(time.time())})
+    c = _kp_ensure_connected(dest)
+    if not c["ok"]:
+        r = {"ok": False, "out": "", "err": c.get("log") or "connect failed"}
+    elif kind == "maint":
+        r = _kp(destid, ["maintenance", "run", "--full"], timeout=4 * 3600)
+    else:
+        r = _kp(destid, ["snapshot", "verify", "--verify-files-percent=1"], timeout=12 * 3600)
+    _json_save(_kp_bg_state_file(kind, destid),
+               {"running": False, "started": int(time.time()), "done": int(time.time()),
+                "result": "ok" if r["ok"] else "error",
+                "error": "" if r["ok"] else _kp_err_tail(r)})
+    if not r["ok"]:
+        try:
+            notify_event("kp_maint", "kp_maint:%s:%s" % (kind, destid),
+                         "Kopia: %s failed" % ("maintenance" if kind == "maint" else "verification"),
+                         "repository «%s»: %s" % (dest.get("name") or destid, _kp_err_tail(r)),
+                         cooldown=6 * 3600)
+        except Exception:
+            pass
+
+def _kp_health(cfg, now):
+    """Cheap periodic checks (no network): destination folder gone, backups stale."""
+    thr = int((load_monitor().get("events", {}).get("kp_stale") or {}).get("threshold") or 7)
+    hist = kp_history()
+    for b in cfg["backups"]:
+        if not b.get("enabled", True):
+            continue
+        dst = _kp_find(cfg["dests"], b.get("dest") or "")
+        if dst and dst.get("kind") == "fs" and not os.path.isdir(dst.get("path") or "") \
+                and not b.get("usb_trigger"):
+            # usb_trigger backups EXPECT their disk to be absent between plug-ins — no alarm
+            notify_event("kp_err", "kp_dest:" + b["id"], "Kopia: destination missing",
+                         "«%s»: destination folder %s does not exist — is the disk plugged in?"
+                         % (b.get("name") or b["id"], dst.get("path") or ""), cooldown=86400)
+        ok_runs = [h.get("ts") or 0 for h in hist
+                   if h.get("backup") == b["id"] and h.get("result") in ("ok", "warn")]
+        last = max(ok_runs) if ok_runs else 0
+        if last and now - last > thr * 86400:
+            notify_event("kp_stale", "kp_stale:" + b["id"], "Kopia: backup is stale",
+                         "«%s»: newest snapshot is %d days old (threshold %d)"
+                         % (b.get("name") or b["id"], int((now - last) / 86400), thr),
+                         cooldown=86400)
+
+def _kopia_tick():
+    """monitor_loop: minute-slot schedules (+ retry while the destination is busy),
+    run-on-plug-in for removable destinations, weekly maintenance / monthly verify
+    per primary destination, 30-min health checks."""
+    global _kp_last_sched, _kp_last_health
+    if not kopia_installed():
+        return
+    cfg = kp_load()
+    if not cfg["backups"] and not cfg["dests"]:
+        return
+    now = time.time()
+    stt = _kp_state_load()
+    dirty = False
+    # 1) schedules — one shot per minute-slot (same pattern as _nb_sched_tick)
+    slot = time.strftime("%Y-%m-%d %H:%M", time.localtime(now))
+    if slot != _kp_last_sched:
+        _kp_last_sched = slot
+        hhmm = time.strftime("%H:%M", time.localtime(now))
+        wday = time.localtime(now).tm_wday
+        for b in cfg["backups"]:
+            s = b.get("schedule") or {}
+            if not b.get("enabled", True) or s.get("mode") not in ("daily", "weekly"):
+                continue
+            if s.get("time") != hhmm or (s.get("mode") == "weekly" and int(s.get("dow", 0)) != wday):
+                continue
+            r = kp_run_start(b["id"])
+            if not r.get("ok") and "busy" in (r.get("log") or ""):
+                stt.setdefault("pending", {})[b["id"]] = int(now)   # queued: retry below
+                dirty = True
+    # queued starts: the destination was busy at the scheduled minute — keep trying for 6h
+    for bid, ts in list((stt.get("pending") or {}).items()):
+        b = _kp_find(cfg["backups"], bid)
+        if not b or now - ts > 6 * 3600:
+            stt["pending"].pop(bid, None); dirty = True
+            continue
+        r = kp_run_start(bid)
+        if r.get("ok") or "busy" not in (r.get("log") or ""):
+            stt["pending"].pop(bid, None); dirty = True
+    # 2) §9.3 run-on-plug-in: an fs destination just became present again
+    pres = stt.setdefault("present", {})
+    for dst in cfg["dests"]:
+        if dst.get("kind") != "fs":
+            continue
+        here = os.path.isdir(dst.get("path") or "")
+        was = pres.get(dst["id"])
+        if was is not here:
+            pres[dst["id"]] = here; dirty = True
+        if here and was is False:
+            for b in cfg["backups"]:
+                if b.get("enabled", True) and b.get("usb_trigger") and b.get("dest") == dst["id"]:
+                    st = kp_run_state(b["id"])
+                    if now - (st.get("done") or st.get("started") or 0) > 1800:   # flap guard
+                        kp_run_start(b["id"])
+    # 3) weekly maintenance / monthly 1% verify — primary destinations only
+    #    (a sync spare is a byte replica: it inherits the main repo's maintenance)
+    prim = {b.get("dest") for b in cfg["backups"] if b.get("enabled", True)} - {None, ""}
+    mm, vv = stt.setdefault("maint", {}), stt.setdefault("verify", {})
+    for destid in sorted(prim):
+        dst = _kp_find(cfg["dests"], destid)
+        if not dst or (dst.get("kind") == "fs" and not os.path.isdir(dst.get("path") or "")):
+            continue
+        if destid not in mm or destid not in vv:
+            # first sight: stamp now, so a fresh install doesn't verify a huge repo at once
+            mm.setdefault(destid, int(now)); vv.setdefault(destid, int(now)); dirty = True
+            continue
+        if _kp_dest_busy(destid, cfg):
+            continue
+        if now - mm[destid] >= 7 * 86400:
+            if _kp_bg_start("maint", destid):
+                mm[destid] = int(now); dirty = True
+        elif now - vv[destid] >= 30 * 86400:
+            if _kp_bg_start("verify", destid):
+                vv[destid] = int(now); dirty = True
+    # 4) health — every 30 min
+    if now - _kp_last_health >= 1800:
+        _kp_last_health = now
+        _kp_health(cfg, now)
+    if dirty:
+        _json_save(KP_STATE_FILE, stt)
+
 def _kp_snap_cli(bid):
     """Driver (transient unit nas-kopia-<id>): apply policies, snapshot every
     source folder, then replicate to the spare destination (3-2-1).
@@ -10506,6 +10689,22 @@ def _kp_snap_cli(bid):
                       "dur": int(time.time() - started),
                       "result": ("stopped" if stopped else result), "error": err,
                       "bytes": snap_bytes, "files": snap_files, "phases": phases})
+        if not stopped:
+            # §9.5: per-backup overrides gate the events; the global catalog decides push
+            try:
+                nm = bk.get("name") or bid
+                if result in ("error", "warn") and bk.get("notify_err", True):
+                    notify_event("kp_err", "kp_run:" + bid,
+                                 "Kopia: backup " + ("failed" if result == "error" else "problem"),
+                                 "«%s»: %s" % (nm, err or "finished with errors"), cooldown=60)
+                elif result == "ok" and bk.get("notify_ok"):
+                    dur = int(time.time() - started)
+                    notify_event("kp_run", "kp_run:" + bid, "Kopia: backup finished",
+                                 "«%s»: %d files, %s in %dm %ds"
+                                 % (nm, snap_files, fmt_bytes(snap_bytes), dur // 60, dur % 60),
+                                 cooldown=60)
+            except Exception:
+                pass
         w("[%s] %s" % (("STOPPED" if stopped else result.upper()), err or "all good"))
         try:
             os.remove(_kp_runf(bid, "cancel"))
@@ -11722,7 +11921,7 @@ def monitor_loop():
         funcs = ((history_sample, monitor_tick, maintenance_daily, _smart_selftest_tick,
                   _nb_sched_tick, _nb_drill_sched_tick, _automount_tick, _summary_tick, _thermal_tick, usb_ops_sync,
                   _fsw_tick, _replica_tick, _remotes_tick, _rclone_mounts_tick, _screen_tick,
-                  _resil_tick) if full else
+                  _resil_tick, _kopia_tick) if full else
                  (monitor_tick, _automount_tick, usb_ops_sync))
         for fn in funcs:
             try:
@@ -19444,6 +19643,25 @@ class H(BaseHTTPRequestHandler):
                 self._json(kp_dest_stats(str(self._body().get("id") or "")))
             elif p == "/api/kopia/dest/delete":
                 self._json(kp_dest_forget(str(self._body().get("id") or "")))
+            elif p in ("/api/kopia/dest/maintenance", "/api/kopia/dest/verify"):
+                kind = "maint" if p.endswith("maintenance") else "verify"
+                did = str(self._body().get("id") or "")
+                if not _KP_ID_RE.match(did) or not _kp_find(kp_load()["dests"], did):
+                    self._json({"ok": False, "log": "no such destination"})
+                elif _kp_dest_busy(did):
+                    self._json({"ok": False, "log": "destination is busy"})
+                elif kp_bg_state(kind, did).get("running"):
+                    self._json({"ok": False, "log": "already running"})
+                else:
+                    self._json({"ok": _kp_bg_start(kind, did)})
+            elif p == "/api/kopia/dest/bg-status":
+                b = self._body()
+                did = str(b.get("id") or "")
+                if not _KP_ID_RE.match(did):
+                    self._json({"ok": False, "log": "bad id"})
+                else:
+                    self._json({"ok": True, "maint": kp_bg_state("maint", did),
+                                "verify": kp_bg_state("verify", did)})
             elif p == "/api/kopia/backup/save":
                 self._json(kp_backup_save(self._body() or {}))
             elif p == "/api/kopia/backup/delete":
@@ -19635,6 +19853,8 @@ if __name__ == "__main__":
     elif len(sys.argv) > 1 and sys.argv[1] == "kopia-snap":
         # backup id arrives through the unit env (uniform with the other drivers)
         _kp_snap_cli(os.environ.get("KPS_BID", ""))
+    elif len(sys.argv) > 1 and sys.argv[1] == "kopia-bg":
+        _kp_bg_cli(os.environ.get("KPB_KIND", ""), os.environ.get("KPB_DEST", ""))
     elif len(sys.argv) > 1 and sys.argv[1] == "rclone-restore":
         # paths arrive through the unit env (may contain spaces), not argv
         _rclone_restore_cli(os.environ.get("RCR_REMOTE", ""), os.environ.get("RCR_PATH", ""),

@@ -861,8 +861,23 @@ NAS_CONFIG в драйвере уезжает в /root/nas-config (state «не 
 (10 ретраев впустую); fs-приёмник — parallel 4; (5) sync-to запускает `rclone serve webdav`
 как дочку kopia — жив только на время команды. E2E доказано: snapshot 43 файла → реплика
 на pcloud → **spare = полноценный репо** (Connect с тем же паролем, тот же uniqueIDHex, все
-снапшоты читаются — §6.17); отмена посреди реплики работает. Дальше: стадия 3 (tick/расписания/
-maintenance/события/usb-триггер), 4-7 (UI), 8 (аудит).
+снапшоты читаются — §6.17); отмена посреди реплики работает. **Стадия 3 готова (2026-07-23):
+`_kopia_tick` в monitor_loop** (слот-паттерн `_nb_sched_tick`): расписания daily/weekly с
+**pending-очередью** (dest занят в слот → ретраи до 6ч в `kopia-state.json`); **USB-триггер §9.3**
+(`present`-переходы fs-dest absent→present + `usb_trigger` бэкапа → автозапуск, флап-guard 30 мин);
+weekly `maintenance run --full` + monthly `snapshot verify --verify-files-percent=1` на PRIMARY
+dest'ы (sync-spare — байт-реплика, наследует maintenance главного; **first-sight штампы** — свежая
+установка не молотит верификацию огромного репо сразу); долгое — ТОЛЬКО транзиент-юниты
+`nas-kopia-{maint,vfy}-<destid>` (CLI `kopia-bg`, env KPB_KIND/KPB_DEST, стейт
+`kopia-{maint,verify}-<destid>.json`), не в monitor-нити. Health раз в 30 мин: kp_stale (свежайший
+ok/warn-прогон старше threshold дней), fs-dest пропал (кроме usb_trigger-бэкапов — их диску
+ПОЛОЖЕНО отсутствовать). События каталога: `kp_run` (off/desk, гейт per-backup notify_ok),
+`kp_err` (prio 1, notify_err), `kp_stale` (threshold 7), `kp_maint` (prio 1) + лейблы в notifyTab
+(группа «Kopia (snapshot backups)»); раннер шлёт notify_event сам (как nb-драйвер), «spare failed»
+идёт kp_err'ом при result=warn. API: POST `dest/maintenance|verify|bg-status`. Юнит-тесты: слот-дедуп,
+pending queue/drain, first-sight, weekly-due, usb-триггер, stale — все зелёные; live maintenance
+через юнит ok. Дальше: стадии 4-7 (UI: каркас+Overview+визард, Sources/Destinations, Snapshots
+(browse/restore/mount/delete)+History, Options+disaster card+drill+glance), 8 (аудит).
 Идеи в бэклоге: Telegram-бот, «топ самых больших файлов» в анализаторе,
 glance: спарклайны в плитках, пользовательские проверки из `~/nas-config/scripts`;
 бэкап наружу — пользователь делает сторонним сервисом в Docker (zerobyte).
