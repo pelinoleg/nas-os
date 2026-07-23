@@ -10600,6 +10600,39 @@ def kp_snap_ls(destid, oid):
     entries.sort(key=lambda x: (not x["dir"], x["name"].lower()))
     return {"ok": True, "entries": entries}
 
+def kp_snap_find(destid, oid, query, cap=200):
+    """Search a snapshot's whole tree for a filename substring — «which snapshot
+    had photo.jpg». Recursive ls, filtered server-side; capped."""
+    cfg = kp_load()
+    dest = _kp_find(cfg["dests"], str(destid or ""))
+    if not dest:
+        return {"ok": False, "log": "no such destination"}
+    if not _KP_OID_RE.match(str(oid or "")):
+        return {"ok": False, "log": "bad object id"}
+    q = str(query or "").strip().lower()
+    if len(q) < 2:
+        return {"ok": False, "log": "type at least 2 characters"}
+    c = _kp_ensure_connected(dest)
+    if not c["ok"]:
+        return c
+    r = _kp(destid, ["ls", "-lr", oid], timeout=300)
+    if not r["ok"]:
+        return {"ok": False, "log": _kp_err_tail(r)}
+    out, more = [], False
+    for line in (r["out"] or "").splitlines():
+        m = _KP_LS_RE.match(line.rstrip())
+        if not m:
+            continue
+        name = m.group(5).strip()
+        if q not in name.lower():
+            continue
+        if len(out) >= cap:
+            more = True
+            break
+        out.append({"path": name, "name": name.rstrip("/").split("/")[-1],
+                    "dir": m.group(1).startswith("d"), "size": int(m.group(2)), "oid": m.group(4)})
+    return {"ok": True, "matches": out, "more": more}
+
 def kp_snap_delete(destid, snapid):
     cfg = kp_load()
     dest = _kp_find(cfg["dests"], str(destid or ""))
@@ -20500,6 +20533,9 @@ class H(BaseHTTPRequestHandler):
             elif p == "/api/kopia/snap/ls":
                 b = self._body()
                 self._json(kp_snap_ls(str(b.get("d") or ""), b.get("oid", "")))
+            elif p == "/api/kopia/snap/find":
+                b = self._body()
+                self._json(kp_snap_find(str(b.get("d") or ""), b.get("oid", ""), b.get("q", "")))
             elif p == "/api/kopia/snap/delete":
                 b = self._body()
                 self._json(kp_snap_delete(str(b.get("d") or ""), b.get("id", "")))
