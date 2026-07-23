@@ -1259,11 +1259,18 @@
   .set-pane.kpx-pane{display:flex;flex-direction:column;overflow:hidden}
   .kpx{display:flex;flex-direction:column;gap:9px;flex:1;min-height:0}
   .kpx-top{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
-  .kpx-body{display:flex;gap:9px;flex:1;min-height:0}
-  .kpx-side{flex:1 1 200px;max-width:250px;min-width:150px;overflow:auto;background:var(--card);
-    border:1px solid var(--win-line,var(--line));border-radius:12px;padding:7px 6px}
-  .kpx-main{flex:3 1 340px;min-width:0;display:flex;flex-direction:column;background:var(--card);
-    border:1px solid var(--win-line,var(--line));border-radius:12px;overflow:hidden}
+  /* ONE content panel (Finder-style): a recessed navigation rail beside the file table,
+     divided by a line — so the two read as rail+content, not two separate cards */
+  .kpx-body{display:flex;flex:1;min-height:0;background:var(--card);
+    border:1px solid var(--win-line,var(--line));border-radius:13px;overflow:hidden}
+  /* recessed rail: a neutral dark veil that reads the same way in both themes
+     (light theme has no fill contrast — card and window bg are both solid white —
+     so the recess must come from an explicit tint, not from elevation tokens) */
+  .kpx-side{flex:0 0 210px;min-width:0;overflow:auto;padding:9px 8px;
+    border-right:1px solid var(--win-line,var(--line));background:rgba(8,13,23,.05)}
+  :root[data-theme="light"] .kpx-side{background:rgba(8,13,23,.045)}
+  @media(prefers-color-scheme:light){:root:not([data-theme="dark"]) .kpx-side{background:rgba(8,13,23,.045)}}
+  .kpx-main{flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden}
   .kpx-eyebrow{font-size:9.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;
     color:var(--win-dim,var(--dim));margin:4px 6px 6px}
   .kpx-srow{display:flex;align-items:center;gap:7px;padding:6px 7px;border-radius:9px;cursor:pointer;font-size:12.5px}
@@ -1291,10 +1298,11 @@
   .kpx-sel{font-size:11px;color:var(--win-dim,var(--dim));white-space:nowrap;max-width:170px;overflow:hidden;
     text-overflow:ellipsis;background:var(--glass);border-radius:999px;padding:3px 9px}
   .kpx-sel:empty{display:none}
-  .kpx-list{flex:1;min-height:0;overflow:auto}
+  .kpx-list{flex:1;min-height:0;overflow:auto;outline:none}
   /* the table keeps its columns and scrolls INSIDE .kpx-list rather than squashing them */
   .kpx-h,.kpx-r{display:grid;grid-template-columns:minmax(120px,1fr) 88px 104px 128px;gap:9px;
     align-items:center;padding:6px 11px;min-width:450px}
+  .kpx-list .kpx-r:last-child{border-bottom:none}
   .kpx-h{position:sticky;top:0;z-index:2;background:var(--card);border-bottom:1px solid var(--win-line,var(--line));
     font-size:9.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--win-dim,var(--dim))}
   .kpx-h span{cursor:pointer;user-select:none;display:flex;align-items:center;gap:3px}
@@ -1308,17 +1316,27 @@
   .kpx-open{background:none;border:none;padding:0 2px;color:var(--win-dim,var(--dim));cursor:pointer;flex:none;display:grid;place-items:center}
   .kpx-num{text-align:right;font-variant-numeric:tabular-nums;color:var(--win-dim,var(--dim));font-size:11.5px}
   .kpx-cell{color:var(--win-dim,var(--dim));font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .kpx-tlbar{display:flex;align-items:center;gap:8px;background:var(--card);
-    border:1px solid var(--win-line,var(--line));border-radius:12px;padding:6px 9px}
-  .kpx-track{flex:1;min-width:0;overflow-x:auto;overflow-y:hidden;padding:2px 0}
-  .kpx-inner{display:flex;align-items:flex-start;position:relative;padding:0 4px;width:max-content;min-width:100%}
-  .kpx-inner::before{content:"";position:absolute;left:14px;right:14px;top:9px;height:2px;background:var(--win-line,var(--line))}
+  /* the time scrubber — a control strip, deliberately UNLIKE the content panel:
+     a tinted bar with an inset groove the restore-point dots ride along */
+  .kpx-tlbar{display:flex;align-items:center;gap:10px;padding:7px 11px;border-radius:12px;
+    background:color-mix(in srgb,var(--win-accent,var(--accent)) 11%,var(--card));
+    border:1px solid color-mix(in srgb,var(--win-accent,var(--accent)) 30%,transparent)}
+  .kpx-tllab{flex:none;display:flex;align-items:center;gap:6px;font-size:9.5px;font-weight:700;
+    letter-spacing:.06em;text-transform:uppercase;color:var(--win-dim,var(--dim))}
+  .kpx-tllab svg{color:var(--win-accent,var(--accent))}
+  .kpx-track{flex:1;min-width:0;overflow-x:auto;overflow-y:hidden;padding:3px 0;
+    border-radius:9px;background:color-mix(in srgb,var(--win-line,var(--line)) 22%,transparent)}
+  .kpx-inner{display:flex;align-items:flex-start;position:relative;padding:2px 8px;width:max-content;min-width:100%}
+  .kpx-inner::before{content:"";position:absolute;left:16px;right:16px;top:11px;height:2px;
+    background:color-mix(in srgb,var(--win-accent,var(--accent)) 30%,var(--win-line,var(--line)))}
+  .kpx-tldiv{flex:none;width:1px;align-self:stretch;margin:2px 0;
+    background:color-mix(in srgb,var(--win-line,var(--line)) 60%,transparent)}
   /* ticks spread over the axis while there is room, and scroll once there are many */
   .kpx-tick{position:relative;flex:1 0 34px;max-width:110px;background:none;border:none;padding:0 2px;
     display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;
     color:var(--win-dim,var(--dim));font-size:9.5px;font-family:inherit}
-  .kpx-tick i{width:10px;height:10px;border-radius:50%;background:var(--card);
-    border:2px solid var(--win-dim,var(--dim));display:block;margin-top:4px}
+  .kpx-tick i{width:10px;height:10px;border-radius:50%;background:var(--glass);
+    border:2px solid color-mix(in srgb,var(--win-accent,var(--accent)) 55%,var(--win-dim,var(--dim)));display:block;margin-top:4px}
   .kpx-tick.on{color:var(--win-accent,var(--accent));font-weight:750}
   .kpx-tick.on i{background:var(--win-accent,var(--accent));border-color:var(--win-accent,var(--accent));
     box-shadow:0 0 0 3px color-mix(in srgb,var(--win-accent,var(--accent)) 28%,transparent)}
@@ -8556,7 +8574,9 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
  function exPaintRows(tc){const box=tc.querySelector("#kxRows");if(!box)return;
   const wire=list=>{EX._rows=list;
    box.querySelectorAll("[data-i]").forEach(n=>{const e=list[+n.dataset.i];
-    n.onclick=ev=>{if(ev.target.closest("[data-o]"))return;EX.sel=e;exPaintRows(tc);exPaintActs(tc);};
+    n.onclick=ev=>{if(ev.target.closest("[data-o]"))return;EX.sel=e;
+     const kl=tc.querySelector("#kxList");if(kl)kl.focus({preventScroll:true});   // arm keyboard nav
+     exPaintRows(tc);exPaintActs(tc);};
     n.ondblclick=()=>{if(e.dir)exGo(tc,e.rel);};});
    box.querySelectorAll("[data-o]").forEach(b=>b.onclick=ev=>{ev.stopPropagation();exGo(tc,list[+b.dataset.o].rel);});};
   if(!EX.snap){box.innerHTML="";return;}
@@ -8594,7 +8614,9 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
   el.style.display="";
   if(EXCAL)EXCAL();                                  // a floating calendar must not outlive its timeline
   const list=g.list,idx=list.findIndex(s=>s.id===EX.snap.id);let lastD="";
-  el.innerHTML=`<button class="iconbtn" id="kxPrev" title="Older restore point"${idx<=0?" disabled":""}><span class="kpx-rot">${svg("chev",15)}</span></button>
+  const sel=EX.snap;
+  el.innerHTML=`<div class="kpx-tllab">${svg("clock",13)}<span>${list.length} point${list.length>1?"s":""}</span></div>
+   <button class="iconbtn" id="kxPrev" title="Older restore point"${idx<=0?" disabled":""}><span class="kpx-rot">${svg("chev",15)}</span></button>
    <div class="kpx-track" id="kxTrack"><div class="kpx-inner">${list.map((s,i)=>{
     // first point of a day is labelled with the date, the rest of that day with the time
     const d=new Date(s.ts*1000),dk=d.toDateString();
@@ -8602,7 +8624,8 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
     lastD=dk;
     return `<button class="kpx-tick${i===idx?" on":""}" data-t="${att(s.id)}" title="${att(dts(s.ts)+" · "+s.files+" files · "+fmtB(s.bytes))}"><i></i><span>${esc(lbl)}</span></button>`;}).join("")}</div></div>
    <button class="iconbtn" id="kxNext" title="Newer restore point"${idx<0||idx>=list.length-1?" disabled":""}>${svg("chev",15)}</button>
-   <button class="btn sm" id="kxCal" title="Jump to a date">${svg("calendar",13)} ${esc(dts(EX.snap.ts))}</button>
+   <div class="kpx-tldiv"></div>
+   <button class="btn sm" id="kxCal" title="Pick a restore point by date">${svg("calendar",13)} ${esc(dts(sel.ts))} <span style="color:var(--win-dim,var(--dim));font-weight:400">· ${sel.files} files · ${fmtB(sel.bytes)}</span></button>
    <button class="iconbtn" id="kxDel" title="Delete this restore point">${svg("trash",14)}</button>`;
   el.querySelectorAll("[data-t]").forEach(b=>b.onclick=()=>exSelSnap(tc,list.find(s=>s.id===b.dataset.t)));
   el.querySelector("#kxPrev").onclick=()=>exSelSnap(tc,list[idx-1]);
@@ -8702,7 +8725,7 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
        <button class="btn sm" id="kxDl" title="Download to this computer (a folder comes as a zip)">${svg("download",13)} Download</button>
        <button class="btn sm" id="kxCopy" title="Copy to another folder on the NAS">${svg("copy",13)} Copy to…</button>
        <button class="btn sm pri" id="kxRestore" title="Put it back where it came from">${svg("refresh",13)} Restore</button></div></div>
-     <div class="kpx-list">
+     <div class="kpx-list" id="kxList" tabindex="0">
       <div class="kpx-h" id="kxHead"><span data-s="name">Name</span><span data-s="size" class="num">Size</span><span data-s="kind">Type</span><span data-s="mtime">Modified</span></div>
       <div id="kxRows"><div class="pf-empty">loading…</div></div></div></div></div>
    <div class="kpx-tlbar" id="kxTl"></div></div>`;
@@ -8722,6 +8745,19 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
   tc.querySelectorAll("#kxHead [data-s]").forEach(s=>s.onclick=()=>{
    const k=s.dataset.s;if(EX.sort===k)EX.asc=!EX.asc;else{EX.sort=k;EX.asc=k!=="mtime";}
    exPaintRows(tc);exPaintActs(tc);});
+  // keyboard navigation over the file table (a real file-manager touch): arrows move the
+  // selection, Enter/→ opens a folder, ←/Backspace goes up. Typing goes to the filter.
+  const kl=tc.querySelector("#kxList");
+  kl.onkeydown=ev=>{const rows=EX._rows||[];
+   if(ev.key==="ArrowDown"||ev.key==="ArrowUp"){ev.preventDefault();
+    if(!rows.length)return;
+    let i=EX.sel?rows.findIndex(r=>r.rel===EX.sel.rel):-1;
+    i=ev.key==="ArrowDown"?Math.min(rows.length-1,i+1):Math.max(0,i<0?0:i-1);
+    EX.sel=rows[i];exPaintRows(tc);exPaintActs(tc);
+    const on=tc.querySelector("#kxRows .kpx-r.on");if(on)on.scrollIntoView({block:"nearest"});}
+   else if((ev.key==="Enter"||ev.key==="ArrowRight")&&EX.sel&&EX.sel.dir){ev.preventDefault();exGo(tc,EX.sel.rel);}
+   else if(ev.key==="ArrowLeft"||ev.key==="Backspace"){if(EX.rel){ev.preventDefault();exGo(tc,EX.rel.split("/").slice(0,-1).join("/"));}}
+   else if(ev.key.length===1&&!ev.ctrlKey&&!ev.metaKey){qi.focus();}};
   tc.querySelector("#kxRestore").onclick=()=>exRestore(tc);
   tc.querySelector("#kxCopy").onclick=()=>exCopy(tc);
   tc.querySelector("#kxDl").onclick=()=>exDownload();
