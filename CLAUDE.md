@@ -1044,7 +1044,26 @@ Overview: hero-вердикт («You're protected.» / «Attention needed» / «
 винRESIL (подстрока!) — вырезало чужой код; спасло `git checkout --`. ПРАВИЛО для скриптовых
 правок desktop.html: якорить поиск от УНИКАЛЬНОГО комментария секции приложения, резать до
 СЛЕДУЮЩЕГО известного определения и ASSERT'ить, что в вырезаемом куске ровно ожидаемое число
-`function` и нет чужих маркеров (winResil/winRclone…). Kopia app: ГОТОВО.
+`function` и нет чужих маркеров (winResil/winRclone…).
+**Kopia UX-доводка по фидбэку (2026-07-23, шестой заход):** (1) **kopia-маунты в сайдбаре ФМ** —
+секция «Snapshots» (после «Cloud»), паттерн 1:1 с rclone-маунтами: сервер `GET /api/kopia/mounts`
+(ismount по dests), `renderKopiaMounts` в ФМ (иконка `kopia`, клик→`load(mp)`, извлечение→
+`/api/kopia/unmount`), в цепочке `renderRcloneMounts()`; kopia-app после mount/unmount дёргает
+`OPEN.__files._kopiaMounts()`; кнопка Mount на вкладке Snapshots подписана и с иконкой, плашка
+«mounted read-only — see Snapshots in the Files sidebar». (2) **Overview: полноширинные карточки**
+(`.kp-grid.wide`→1 колонка, `.kp-bk.kp-wide` flex: слева вердикт+маршрут+прогресс, справа тики+
+«last run 3.1 MB · 43 files · 32s»+next, кнопка «Back up» в торце), **«New backup» — крупная
+кнопка в hero** (справа от вердикта), пустое состояние — большая пунктирная карточка. (3)
+**Snapshots: подписи к фильтрам** — группы «Repository» и «Show only backup» (`.kp-filt`
+UPPERCASE-метки; раньше были голые пилюли без пояснения) + сабтайтл-объяснение. (4) **History:
+сегмент «By day / By backup»** (`histMode`) — by-backup группирует все прогоны под заголовком
+задания «TEST 321 · 8 runs» (иконка-щит, скрывает имя в строках). (5) **Пикер папок переписан с
+сайдбаром** (`kpPick(...,opts)`): колонка `.kp-pick-side` (Places: Root/Home/Mounts + Disks из
+`/media/nas` одним `browse`) + `.kp-pick-ctx` — синяя контекстная полоса «что → куда» на каждом
+вызове (source: «protected by <source>», dest: «Snapshots written into», restore: «Restoring
+<folder> — copied into»), заголовок/кнопка/иконка тоже из opts. Всё проверено CDP-скриншотами
+(широкие карточки, ФМ-сайдбар «SNAPSHOTS → T7 repo», пикер с Places/Disks+контекст, history
+by-backup, mount live). Kopia app: ГОТОВО.
 Идеи в бэклоге: Telegram-бот, «топ самых больших файлов» в анализаторе,
 glance: спарклайны в плитках, пользовательские проверки из `~/nas-config/scripts`;
 бэкап наружу — пользователь делает сторонним сервисом в Docker (zerobyte).

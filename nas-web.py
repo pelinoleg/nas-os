@@ -19805,6 +19805,13 @@ class H(BaseHTTPRequestHandler):
                 self._json(kp_snapshots((q.get("d") or [""])[0]))
             elif p == "/api/kopia/restore/status":
                 self._json(kp_restore_status())
+            elif p == "/api/kopia/mounts":
+                # FM sidebar: mounted snapshot repositories (cheap — ismount only)
+                cfg = kp_load()
+                self._json({"mounts": [{"id": x["id"], "name": x.get("name") or x["id"],
+                                        "mount": _kp_mnt_mp(x["id"])}
+                                       for x in cfg["dests"]
+                                       if os.path.ismount(_kp_mnt_mp(x["id"]))]})
             elif p == "/api/kopia/opts":
                 self._json({"ok": True, "opts": kp_opts_get()})
             elif p == "/api/kopia/history":
