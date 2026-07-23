@@ -1081,7 +1081,24 @@ target) → `pickFolder({overlay:true,start,title,note,onPick})`, контекс
 media. (4) **Destinations — плашки на всю ширину** (тот же зон-кит): главная (иконка+имя+путь+
 used-by+статус-полоса) | «REPOSITORY» (ленивый Check → `N snapshots · X of data in Y · Z× dedup`,
 ссылка refresh) | действия (Mount/Unmount прямо на карточке + шестерёнка-меню: Browse snapshots/
-Check/Maintenance/Clear cache/Remove). Всё сверено CDP-скриншотами. Kopia app: ГОТОВО.
+Check/Maintenance/Clear cache/Remove). Всё сверено CDP-скриншотами.
+**Kopia UX-доводка №3 — деталь бэкапа переорганизована (2026-07-23, восьмой заход, «самая важная
+страница, всё вперемешку»):** сверху вниз чёткие зоны: (1) hero (имя+статус+Back up+шестерёнка);
+(2) **«WHAT THIS BACKUP PROTECTS»** — панель `.kp-prot` КРУПНО: From (source+все папки-пути) →
+To (dest+путь+статус-точка) → Spare (реплика, «updated Nh ago»), кнопка Edit (разворачивает+
+скроллит к Settings), «edit folders» у source (открывает srcDlg); (3) **4 крупных стат-плитки**
+`.kp-stat` (21px значение): Snapshots (счётчик + «restore points kept»), In the repository (размер
+свежайшего снапшота), **First backup** (дата+год+«N runs» — отвечает «когда начал, сколько всего»),
+Restore drill (x/y ✓); данные из истории (первый ts, счётчики) + `/api/kopia/snapshots?d=` (кол-во
+снапшотов по тегу бэкапа); (4) **«RECENT RUNS»** с внятной ЛЕНТОЙ `.kp-tl` (до 24 столбиков,
+высота ∝ записанным байтам, цвет=результат) + **ЛЕГЕНДА** («ok/warning/failed · bar height = data
+written») — раньше были безымянные полоски с враньём «14» при 8 прогонах; ниже список последних 6
++ «View all →»; (5) Settings-аккордеон (retention/schedule/notifications) как было. Destinations:
+**курсор-pointer убран** с некликабельных `.kp-bk.kp-static` (визуально «нажимались», но нет);
+действия ВЫНЕСЕНЫ НА КАРТОЧКУ кнопками (Snapshots/Mount/Maintain), в шестерёнке остались только
+Check/Clear cache/Remove (used → «In use — can't remove»). ПРАВИЛО дизайна детали: важное и крупное
+сверху (что бэкапим), метрики плитками, история — с легендой и понятной единицей; настройки —
+свёрнуты. Сверено скриншотами. Kopia app: ГОТОВО.
 Идеи в бэклоге: Telegram-бот, «топ самых больших файлов» в анализаторе,
 glance: спарклайны в плитках, пользовательские проверки из `~/nas-config/scripts`;
 бэкап наружу — пользователь делает сторонним сервисом в Docker (zerobyte).
