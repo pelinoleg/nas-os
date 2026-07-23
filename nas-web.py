@@ -9735,6 +9735,20 @@ def kp_load():
         if not isinstance(d.get(k), list):
             d[k] = []
         d[k] = [x for x in d[k] if isinstance(x, dict) and _KP_ID_RE.match(str(x.get("id") or ""))]
+    # per-field coercion: a hand-edited config with `schedule:"daily"` or `retention:5`
+    # would otherwise crash _kopia_tick (s.get on a str) every minute and stop all automation
+    for b in d["backups"]:
+        if not isinstance(b.get("schedule"), dict):
+            b["schedule"] = {}
+        if not isinstance(b.get("retention"), dict):
+            b["retention"] = {}
+        if not isinstance(b.get("folders", []), list):
+            b["folders"] = []
+    for s in d["sources"]:
+        if not isinstance(s.get("folders"), list):
+            s["folders"] = []
+        if not isinstance(s.get("excludes"), list):
+            s["excludes"] = []
     return d
 
 _KP_CFG_LOCK = threading.Lock()   # serialize load-modify-save of kopia.json across panel threads
@@ -10006,8 +10020,13 @@ def _kp_write_pwfile(dest):
            "Restore: kopia repository connect filesystem --path <this folder>\n" % pw)
     try:
         if dest.get("kind") == "fs":
-            with open(os.path.join(dest["path"], "KOPIA-PASSWORD.txt"), "w") as f:
+            pf = os.path.join(dest["path"], "KOPIA-PASSWORD.txt")
+            with open(pf, "w") as f:
                 f.write(txt)
+            try:
+                os.chmod(pf, 0o600)   # the global repo password — not world-readable
+            except OSError:
+                pass
         else:
             subprocess.run([_rclone_bin(), "--config", RCLONE_CONF, "rcat",
                             "%s:%s/KOPIA-PASSWORD.txt" % (dest["remote"], dest.get("remote_path") or "")],
@@ -10151,7 +10170,7 @@ def kp_source_save(d):
     excludes = []
     for e in (d.get("excludes") or [])[:200]:
         e = str(e or "").strip()
-        if e and "\n" not in e and len(e) < 200:
+        if e and "\n" not in e and len(e) < 200 and not e.startswith("-"):
             excludes.append(e)
     kid = str(d.get("id") or "")
     with _KP_CFG_LOCK:
@@ -10643,10 +10662,11 @@ def kp_snap_find(destid, oid, query, cap=200):
                                 text=True, env=_kp_env())
     except (OSError, subprocess.SubprocessError) as e:
         return {"ok": False, "log": str(e)[:200]}
+    deadline = time.monotonic() + 300   # hard wall-clock cap: a wedged repo can't pin the thread
     try:
         for line in proc.stdout:
             scanned += 1
-            if scanned > SCAN_MAX:
+            if scanned > SCAN_MAX or time.monotonic() > deadline:
                 more = True
                 break
             mm = _KP_LS_RE.match(line.rstrip())
@@ -11320,6 +11340,8 @@ def _kp_snap_cli(bid):
         t_out = threading.Thread(target=_read_stdout, daemon=True)
         t_out.start()
         buf = b""
+        STALL = 20 * 60          # kill a snapshot that emits nothing for this long (disk gone / kopia wedged)
+        last_out = time.monotonic()
         while True:
             r_, _, _ = select.select([master], [], [], 0.5)
             if cancelled():
@@ -11332,7 +11354,16 @@ def _kp_snap_cli(bid):
             if not r_:
                 if proc.poll() is not None:
                     break
+                if time.monotonic() - last_out > STALL:
+                    try:
+                        proc.kill()
+                    except OSError:
+                        pass
+                    result, err = "error", "no progress for %d min — destination may be unreachable" % (STALL // 60)
+                    w(err)
+                    break
                 continue
+            last_out = time.monotonic()
             try:
                 d = os.read(master, 8192)
             except OSError:
@@ -11502,11 +11533,16 @@ def kp_set_password(newpw):
         return {"ok": False, "log": "password too short (minimum 4 characters)"}
     if len(newpw) > 128:
         return {"ok": False, "log": "password too long"}
+    # A guard flag serialises the actual re-key work WITHOUT holding _KP_CFG_LOCK across
+    # minutes of network I/O (which would block every other config write). The lock is
+    # taken only for the fast snapshot at the start and the persist at the end.
     with _KP_CFG_LOCK:
         cfg = kp_load()
         old = cfg.get("password") or ""
         if newpw == old:
             return {"ok": True}
+        if getattr(kp_set_password, "_busy", False):
+            return {"ok": False, "log": "a password change is already in progress"}
         if any(kp_run_state(b["id"]).get("running") for b in cfg["backups"]) \
                 or kp_restore_state().get("running") \
                 or any(_kp_dest_busy(x["id"], cfg) for x in cfg["dests"]):
@@ -11516,7 +11552,9 @@ def kp_set_password(newpw):
             cfg["password"] = newpw
             kp_save(cfg)
             return {"ok": True, "changed": 0}
-        # pre-flight: every connected repo must be reachable with the OLD password
+        kp_set_password._busy = True
+    try:
+        # ---- slow CLI work, OUTSIDE the config lock ----
         for d in connected:
             r = _kp(d["id"], ["repository", "status"], timeout=240)  # cloud repos are slow to open (rclone startup)
             if not r["ok"]:
@@ -11536,16 +11574,20 @@ def kp_set_password(newpw):
                     if not rb["ok"]:
                         stuck.append(d2.get("name") or d2["id"])
                 if stuck:
-                    cfg2 = kp_load(); cfg2["password"] = newpw; kp_save(cfg2)
+                    with _KP_CFG_LOCK:
+                        cfg2 = kp_load(); cfg2["password"] = newpw; kp_save(cfg2)
                     return {"ok": False, "log": "password change failed on «%s»; could not roll back "
                             "«%s» — its password is now the NEW one. Fix that repo, then retry."
                             % (d.get("name") or d["id"], ", ".join(stuck))}
                 return {"ok": False, "log": "«%s»: %s (no changes kept)"
                         % (d.get("name") or d["id"], _kp_err_tail(r))}
-        cfg = kp_load()
-        cfg["password"] = newpw
-        kp_save(cfg)
+        with _KP_CFG_LOCK:
+            cfg = kp_load()
+            cfg["password"] = newpw
+            kp_save(cfg)
         return {"ok": True, "changed": len(changed)}
+    finally:
+        kp_set_password._busy = False
 
 # ---- kopia self-update availability (checked at most once a day) ----
 KP_UPD_FILE = os.path.join(NAS_CONFIG, "kopia-update.json")
@@ -12354,6 +12396,10 @@ def disaster_build():
             f.write(md)
         os.replace(tmp, DISASTER_MD)
         shutil.chown(DISASTER_MD, TARGET_USER, TARGET_USER)
+        try:
+            os.chmod(DISASTER_MD, 0o600)   # embeds the repo password — owner-only
+        except OSError:
+            pass
     except (OSError, LookupError):
         pass
     return {"ok": True, "ts": int(time.time()), "md": md}
@@ -19191,9 +19237,12 @@ class H(BaseHTTPRequestHandler):
             return {}
         raw = self.rfile.read(n)
         try:
-            return json.loads(raw or b"{}")
+            v = json.loads(raw or b"{}")
         except json.JSONDecodeError:
             return {}
+        # handlers do self._body().get(...) — a valid non-object body ([], 5, "x")
+        # would otherwise AttributeError into a 500. Coerce to an empty object.
+        return v if isinstance(v, dict) else {}
 
     def _static(self, path):
         if path == "/" or path == "":
