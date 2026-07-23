@@ -19836,9 +19836,12 @@ class H(BaseHTTPRequestHandler):
         if not r.get("ok"):
             fail(r.get("log") or "failed"); return
         proc = r["proc"]
+        # inline=1 (QuickLook preview): render in the browser instead of forcing a download
+        inline = (q.get("inline") or [""])[0] == "1"
         self.send_response(200)
         self.send_header("Content-Type", mimetypes.guess_type(name)[0] or "application/octet-stream")
-        self.send_header("Content-Disposition", 'attachment; filename="%s"' % name)
+        self.send_header("Content-Disposition",
+                         '%s; filename="%s"' % ("inline" if inline else "attachment", name))
         self.send_header("Cache-Control", "no-store")
         self.end_headers()
         try:

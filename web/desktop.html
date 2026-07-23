@@ -1303,6 +1303,21 @@
   .kpx-h,.kpx-r{display:grid;grid-template-columns:minmax(120px,1fr) 88px 104px 128px;gap:9px;
     align-items:center;padding:6px 11px;min-width:450px}
   .kpx-list .kpx-r:last-child{border-bottom:none}
+  /* «what changed» vs the previous restore point: a badge on added/changed rows,
+     and dimmed ghost rows for files that were deleted (still restorable — by object id) */
+  .kpx-chg{font-size:8.5px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;
+    padding:1px 5px;border-radius:5px;flex:none;line-height:1.55}
+  .kpx-chg.added{color:var(--win-good,var(--good));background:color-mix(in srgb,var(--win-good,var(--good)) 16%,transparent)}
+  .kpx-chg.changed{color:var(--win-accent,var(--accent));background:color-mix(in srgb,var(--win-accent,var(--accent)) 16%,transparent)}
+  .kpx-chg.deleted{color:var(--win-danger,var(--danger));background:color-mix(in srgb,var(--win-danger,var(--danger)) 16%,transparent)}
+  .kpx-r.del .nm{opacity:.62;text-decoration:line-through;text-decoration-color:color-mix(in srgb,var(--win-danger,var(--danger)) 60%,transparent)}
+  .kpx-r.del .fmico,.kpx-r.del .kpx-num,.kpx-r.del .kpx-cell{opacity:.5}
+  .kpx-chgtog{flex:none;display:inline-flex;align-items:center;gap:5px;font-size:11px;padding:4px 9px;
+    border-radius:999px;cursor:pointer;border:1px solid var(--win-line,var(--line));background:var(--card);color:var(--win-dim,var(--dim))}
+  @media(hover:hover){.kpx-chgtog:hover{background:var(--glass)}}
+  .kpx-chgtog.on{background:var(--sel);color:var(--win-accent,var(--accent));box-shadow:var(--sh-sm);border-color:transparent}
+  .kpx-chgtog b{font-weight:750;color:var(--text)}
+  .kpx-chgtog.on b{color:inherit}
   .kpx-h{position:sticky;top:0;z-index:2;background:var(--card);border-bottom:1px solid var(--win-line,var(--line));
     font-size:9.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--win-dim,var(--dim))}
   .kpx-h span{cursor:pointer;user-select:none;display:flex;align-items:center;gap:3px}
@@ -1342,6 +1357,33 @@
     box-shadow:0 0 0 3px color-mix(in srgb,var(--win-accent,var(--accent)) 28%,transparent)}
   @media(hover:hover){.kpx-tick:hover i{border-color:var(--win-accent,var(--accent))}}
   .kpx-rot{display:grid;place-items:center;transform:rotate(180deg)}
+  /* QuickLook preview overlay (spacebar / double-click a file) */
+  .kpx-pv{position:fixed;inset:0;z-index:640;display:flex;flex-direction:column;outline:none;
+    background:color-mix(in srgb,#05070c 66%,transparent);backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px)}
+  .kpx-pv-top{display:flex;align-items:center;gap:12px;padding:13px 18px;color:#fff;flex:none}
+  .kpx-pv-top .fmico{flex:none}
+  .kpx-pv-top .t{flex:1;min-width:0;font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .kpx-pv-top .meta{font-size:12px;opacity:.72;flex:none}
+  .kpx-pv-top .x{flex:none;background:rgba(255,255,255,.12);border:none;color:#fff;width:30px;height:30px;
+    border-radius:8px;cursor:pointer;display:grid;place-items:center}
+  .kpx-pv-top .x:hover{background:rgba(255,255,255,.22)}
+  .kpx-pv-body{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;position:relative;padding:0 56px 8px}
+  .kpx-pv-body img{max-width:100%;max-height:100%;object-fit:contain;border-radius:8px;box-shadow:0 10px 50px rgba(0,0,0,.55)}
+  .kpx-pv-body iframe{width:min(940px,100%);height:100%;border:none;border-radius:8px;background:#fff}
+  .kpx-pv-body video,.kpx-pv-body audio{max-width:100%;max-height:100%;border-radius:8px}
+  .kpx-pv-body audio{width:min(560px,90%)}
+  .kpx-pv-body pre{max-width:min(940px,100%);max-height:100%;overflow:auto;width:100%;margin:0;
+    background:var(--code-bg,#12151b);color:var(--code-fg,#e6e6e6);padding:16px 18px;border-radius:10px;
+    font-size:12.5px;line-height:1.55;font-family:ui-monospace,monospace;white-space:pre-wrap;word-break:break-word}
+  .kpx-pv-info{color:#fff;text-align:center;display:flex;flex-direction:column;align-items:center;gap:10px;opacity:.9}
+  .kpx-pv-info .pi{width:64px;height:64px;border-radius:18px;display:grid;place-items:center;background:rgba(255,255,255,.1)}
+  .kpx-pv-nav{position:absolute;top:50%;transform:translateY(-50%);background:rgba(255,255,255,.12);border:none;
+    color:#fff;width:40px;height:40px;border-radius:50%;cursor:pointer;display:grid;place-items:center}
+  .kpx-pv-nav:hover{background:rgba(255,255,255,.24)}
+  .kpx-pv-nav.pv-prev{left:10px}.kpx-pv-nav.pv-next{right:10px}
+  .kpx-pv-nav:disabled{opacity:0;pointer-events:none}
+  .kpx-pv-foot{display:flex;justify-content:center;gap:8px;padding:0 16px 16px;flex:none}
+  .kpx-pv-load{color:#fff;opacity:.7;font-size:13px}
   .kpx-cal{position:fixed;z-index:700;background:var(--glass);backdrop-filter:blur(var(--blur,14px));
     -webkit-backdrop-filter:blur(var(--blur,14px));border:1px solid var(--win-line,var(--line));
     border-radius:14px;box-shadow:var(--sh-lg);padding:11px}
@@ -8440,7 +8482,24 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
    year:d.getFullYear()===new Date().getFullYear()?undefined:"numeric"})+", "+d.toTimeString().slice(0,5);};
  const KX_ZIP_MAX=2*1024*1024*1024;                 // server refuses bigger folder archives
  const exReset=()=>{EX={dest:snapDest,bk:snapBk,path:null,snap:null,rel:"",sel:null,
-  sort:"name",asc:true,q:"",deep:null,snaps:null,kids:{},open:{},err:""};};
+  sort:"name",asc:true,q:"",deep:null,snaps:null,kids:{},open:{},err:"",
+  diffCache:{},showChg:false};};
+ /* the restore point taken just BEFORE the current one, of the same source folder —
+    the baseline for «what changed in this snapshot» */
+ const exPrevSnap=()=>{const g=exGroup();if(!g||!EX.snap)return null;
+  const i=g.list.findIndex(s=>s.id===EX.snap.id);return i>0?g.list[i-1]:null;};
+ /* one folder's listing in the previous snapshot, cached by (prev id, rel), used to
+    tag current entries added/changed (kopia's object id is a content hash → oid equal =
+    byte-identical) and to surface deleted files as restorable ghosts */
+ function exDiff(rel,cb){const prev=exPrevSnap();
+  if(!prev){cb(null);return;}
+  const key=prev.id+"|"+(rel||"");
+  if(EX.diffCache[key]){cb(EX.diffCache[key]);return;}
+  kP("/api/kopia/snap/ls",{d:snapDest,oid:prev.root,rel:rel||""}).then(r=>{
+   if(!EX||!EX.snap)return;
+   const d={ok:!!(r&&r.ok),map:{}};
+   if(r&&r.ok)(r.entries||[]).forEach(e=>d.map[e.name]=e);
+   EX.diffCache[key]=d;cb(d);});}
  /* snapshots grouped by the folder they were taken of, each list oldest → newest */
  const exPaths=()=>{const m=new Map();
   (EX&&EX.snaps||[]).forEach(s=>{const a=m.get(s.path)||[];a.push(s);m.set(s.path,a);});
@@ -8513,6 +8572,68 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
   document.body.appendChild(a);a.click();a.remove();
   if(t.dir)toast("packing "+t.name+".zip — the download starts when the archive is ready");}
 
+ /* ---- QuickLook preview (spacebar / double-click a file) ---- */
+ const kxFileURL=(e,inline)=>"/api/kopia/snap/file?d="+encodeURIComponent(snapDest)
+  +"&oid="+encodeURIComponent(e.oid)+"&name="+encodeURIComponent(e.name)+(inline?"&inline=1":"");
+ const kxPvKind=e=>{const k=fmKind(e.name,"file");
+  if(k==="image")return "image";
+  if(/\.pdf$/i.test(e.name))return "pdf";
+  if(k==="video")return "video";
+  if(k==="music")return "audio";
+  if(k==="text"||k==="code"||/\.(txt|md|log|csv|tsv|json|xml|ya?ml|ini|conf|cfg|sh|py|js|mjs|ts|css|html?|c|h|cpp|hpp|java|go|rs|rb|php|sql|toml|env|gitignore|service)$/i.test(e.name))return "text";
+  return "none";};
+ const KX_TEXT_MAX=1024*1024;                       // auto-load text preview up to 1 MB
+ let EXPV=null;                                      // the open preview's closer, if any
+ function exPreview(tc,entry){
+  if(!entry||entry.dir||!entry.oid)return;
+  const files=(EX._rows||[]).filter(e=>!e.dir&&e.oid);
+  let idx=files.findIndex(e=>e.rel===entry.rel&&e.name===entry.name);
+  if(idx<0){files.push(entry);idx=files.length-1;}
+  if(EXPV)EXPV();
+  const ov=el(`<div class="kpx-pv" tabindex="0"></div>`);document.body.appendChild(ov);
+  const close=()=>{ov.remove();EXPV=null;document.removeEventListener("keydown",onKey,true);
+   const kl=tc.querySelector("#kxList");if(kl)kl.focus({preventScroll:true});};
+  EXPV=close;
+  let seq=0;
+  const show=async i=>{const my=++seq;const e=files[i=Math.max(0,Math.min(files.length-1,i))];idx=i;
+   const kind=kxPvKind(e);
+   ov.innerHTML=`<div class="kpx-pv-top">${fmIcon(e.name,"file",20)}<span class="t" title="${att(e.name)}">${esc(e.name)}</span>
+     <span class="meta">${fmtB(e.size||0)}${e.chg?" · "+KX_CHG_LBL[e.chg]:""}${files.length>1?` · ${i+1} of ${files.length}`:""}</span>
+     <button class="x" id="pvX" title="Close (Esc)">${svg("x",16)}</button></div>
+    <div class="kpx-pv-body" id="pvBody"><div class="kpx-pv-load">loading preview…</div>
+     <button class="kpx-pv-nav pv-prev" id="pvPrev" title="Previous"${i<=0?" disabled":""}><span class="kpx-rot">${svg("chev",18)}</span></button>
+     <button class="kpx-pv-nav pv-next" id="pvNext" title="Next"${i>=files.length-1?" disabled":""}>${svg("chev",18)}</button></div>
+    <div class="kpx-pv-foot">
+     <button class="btn sm" id="pvDl">${svg("download",13)} Download</button>
+     <button class="btn sm" id="pvCopy">${svg("copy",13)} Copy to…</button>
+     <button class="btn sm pri" id="pvRst">${svg("refresh",13)} Restore</button></div>`;
+   const body=ov.querySelector("#pvBody"),put=h=>{if(my===seq)body.querySelector(".kpx-pv-load, .kpx-pv-media")?.remove(),body.insertAdjacentHTML("afterbegin",`<div class="kpx-pv-media" style="max-width:100%;max-height:100%;width:100%;display:flex;align-items:center;justify-content:center">${h}</div>`);};
+   ov.querySelector("#pvX").onclick=close;
+   ov.querySelector("#pvPrev").onclick=()=>show(i-1);
+   ov.querySelector("#pvNext").onclick=()=>show(i+1);
+   const act=fn=>()=>{EX.sel=e;close();fn(tc);};
+   ov.querySelector("#pvDl").onclick=()=>{EX.sel=e;exDownload();};
+   ov.querySelector("#pvCopy").onclick=act(exCopy);
+   ov.querySelector("#pvRst").onclick=act(exRestore);
+   if(kind==="image"){const im=new Image();im.onload=()=>put(`<img src="${att(kxFileURL(e,1))}" alt="">`);
+    im.onerror=()=>put(`<div class="kpx-pv-info"><div class="pi">${svg("image",30)}</div><div>preview unavailable</div></div>`);
+    im.src=kxFileURL(e,1);if(im.complete)im.onload();}
+   else if(kind==="pdf")put(`<iframe src="${att(kxFileURL(e,1))}"></iframe>`);
+   else if(kind==="video")put(`<video controls src="${att(kxFileURL(e,1))}"></video>`);
+   else if(kind==="audio")put(`<div class="kpx-pv-info"><div class="pi">${svg("music",30)}</div><audio controls src="${att(kxFileURL(e,1))}"></audio></div>`);
+   else if(kind==="text"){
+    if((e.size||0)>KX_TEXT_MAX){put(kxPvInfo(e,"file is large — download to open"));}
+    else{try{const r=await fetch(kxFileURL(e,1));const t=await r.text();if(my!==seq)return;
+      put(`<pre>${esc(t.slice(0,KX_TEXT_MAX))}</pre>`);}catch(x){if(my===seq)put(kxPvInfo(e,"could not load"));}}}
+   else put(kxPvInfo(e,"no inline preview for this type"));};
+  const kxPvInfo=(e,msg)=>`<div class="kpx-pv-info"><div class="pi">${fmIcon(e.name,"file",30)}</div><div>${esc(msg)}</div><div style="opacity:.6;font-size:12px">${esc(kxKind(e))} · ${fmtB(e.size||0)}</div></div>`;
+  const onKey=ev=>{if(!ov.isConnected)return;
+   if(ev.key==="Escape"||ev.key===" "){ev.preventDefault();ev.stopPropagation();close();}
+   else if(ev.key==="ArrowLeft"){ev.preventDefault();ev.stopPropagation();if(idx>0)show(idx-1);}
+   else if(ev.key==="ArrowRight"){ev.preventDefault();ev.stopPropagation();if(idx<files.length-1)show(idx+1);}};
+  document.addEventListener("keydown",onKey,true);
+  show(idx);ov.focus();}
+
  async function exDeep(tc){const q=(EX.q||"").trim();
   if(q.length<2){toast("type at least 2 characters to search");return;}
   EX.deep={q,loading:true,list:[]};exPaintRows(tc);
@@ -8562,11 +8683,14 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
    s==="kind"?k*kxKind(a).localeCompare(kxKind(b)):
    k*a.name.localeCompare(b.name,undefined,{numeric:true,sensitivity:"base"}));}
 
+ const exIsSel=e=>EX.sel&&EX.sel.rel===e.rel;
+ const KX_CHG_LBL={added:"new",changed:"changed",deleted:"deleted"};
  function exRowHTML(e,i,path){
-  return `<div class="kpx-r${EX.sel&&EX.sel.rel===e.rel?" on":""}" data-i="${i}">
+  const sel=exIsSel(e),badge=e.chg?`<span class="kpx-chg ${e.chg}" title="${e.chg==="added"?"not in the previous restore point":e.chg==="changed"?"changed since the previous restore point":"was deleted after this — restore brings it back"}">${KX_CHG_LBL[e.chg]}</span>`:"";
+  return `<div class="kpx-r${sel?" on":""}${e._ghost?" del":""}" data-i="${i}">
    <span class="kpx-n">${fmIcon(e.name,e.dir?"dir":"file",17)}
     <span style="flex:1;min-width:0"><span class="nm" style="display:block" title="${att(e.name)}">${esc(e.name)}</span>${path?`<span class="pp" style="display:block">${esc(path)}</span>`:""}</span>
-    ${e.dir?`<button class="kpx-open" data-o="${i}" title="Open this folder">${svg("chev",14)}</button>`:""}</span>
+    ${badge}${e.dir&&!e._ghost?`<button class="kpx-open" data-o="${i}" title="Open this folder">${svg("chev",14)}</button>`:""}</span>
    <span class="kpx-num">${fmtB(e.size||0)}</span>
    <span class="kpx-cell">${esc(kxKind(e))}</span>
    <span class="kpx-cell">${esc(kxDate(e.mtime))}</span></div>`;}
@@ -8577,7 +8701,7 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
     n.onclick=ev=>{if(ev.target.closest("[data-o]"))return;EX.sel=e;
      const kl=tc.querySelector("#kxList");if(kl)kl.focus({preventScroll:true});   // arm keyboard nav
      exPaintRows(tc);exPaintActs(tc);};
-    n.ondblclick=()=>{if(e.dir)exGo(tc,e.rel);};});
+    n.ondblclick=()=>{if(e.dir&&!e._ghost)exGo(tc,e.rel);else if(!e.dir)exPreview(tc,e);};});
    box.querySelectorAll("[data-o]").forEach(b=>b.onclick=ev=>{ev.stopPropagation();exGo(tc,list[+b.dataset.o].rel);});};
   if(!EX.snap){box.innerHTML="";return;}
   if(EX.deep){const d=EX.deep;
@@ -8592,12 +8716,30 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
   if(!cache){box.innerHTML=`<div class="pf-empty">reading this restore point…</div>`;return;}
   if(cache.err){box.innerHTML=`<div class="pf-empty">${esc(cache.err)}${EX.rel?` · <a href="#" id="kxTop">this folder is not in this restore point — go to the top</a>`:""}</div>`;
    const t=box.querySelector("#kxTop");if(t)t.onclick=ev=>{ev.preventDefault();exGo(tc,"");};return;}
-  let list=cache.entries||[];
+  // «what changed» vs the previous restore point (lazy — repaint once the diff lands)
+  const prev=exPrevSnap(),dkey=prev?prev.id+"|"+(EX.rel||""):null;
+  const diff=dkey?EX.diffCache[dkey]:null;
+  if(prev&&!diff)exDiff(EX.rel,()=>exPaintRows(tc));
+  const pre=(EX.rel?EX.rel+"/":"");
+  let list=(cache.entries||[]).map(e=>{let chg=null;
+   if(diff&&diff.ok){const pe=diff.map[e.name];chg=!pe?"added":(pe.oid!==e.oid?"changed":null);}
+   return Object.assign({},e,{rel:pre+e.name,chg});});
+  if(diff&&diff.ok){const curn=new Set((cache.entries||[]).map(e=>e.name));   // deleted → restorable ghosts
+   Object.keys(diff.map).forEach(nm=>{if(!curn.has(nm)){const pe=diff.map[nm];
+    list.push(Object.assign({},pe,{rel:pre+pe.name,chg:"deleted",_ghost:true}));}});}
+  const nChg=list.filter(e=>e.chg).length;
+  exPaintChgTog(tc,nChg,!!prev);
   if(EX.q)list=list.filter(e=>e.name.toLowerCase().includes(EX.q.toLowerCase()));
-  list=exSort(list).map(e=>Object.assign({},e,{rel:(EX.rel?EX.rel+"/":"")+e.name}));
-  if(!list.length){box.innerHTML=`<div class="pf-empty">${EX.q?`nothing here matches “${esc(EX.q)}” — press Enter to search the whole restore point`:"this folder is empty"}</div>`;return;}
+  if(EX.showChg)list=list.filter(e=>e.chg);
+  list=exSort(list);
+  if(!list.length){box.innerHTML=`<div class="pf-empty">${EX.showChg?"nothing changed in this folder since the previous restore point":EX.q?`nothing here matches “${esc(EX.q)}” — press Enter to search the whole restore point`:"this folder is empty"}</div>`;wire([]);return;}
   box.innerHTML=list.map((e,i)=>exRowHTML(e,i,"")).join("");
   wire(list);}
+ function exPaintChgTog(tc,n,hasPrev){const b=tc.querySelector("#kxChg");if(!b)return;
+  if(!hasPrev||(!n&&!EX.showChg)){b.style.display="none";return;}
+  b.style.display="";b.classList.toggle("on",EX.showChg);
+  b.innerHTML=`${svg("activity",13)} <b>${n}</b> change${n===1?"":"s"}`;
+  b.title=EX.showChg?"Showing only what changed — click to show everything":"Show only what changed since the previous restore point";}
 
  function exPaintActs(tc){const has=!!(EX.snap&&EX.snap.root);
   const t=has?exTarget():null;
@@ -8718,6 +8860,7 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
      <div class="kpx-bar">
       <button class="iconbtn" id="kxUp" title="Up one folder"><span class="kpx-rot">${svg("chev",15)}</span></button>
       <div class="kpx-crumbs" id="kxCrumbs"></div>
+      <button class="kpx-chgtog" id="kxChg" style="display:none"></button>
       <div class="kp-search kpx-q"><span>${svg("search",13)}</span>
        <input id="kxQ" placeholder="Filter — Enter searches all" title="Filters this folder; press Enter to search the whole restore point"></div>
       <span class="kpx-sel" id="kxSelLbl"></span>
@@ -8738,6 +8881,7 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
    try{const fm=OPEN&&OPEN.__files;if(fm&&fm._kopiaMounts)fm._kopiaMounts();}catch(e){}
    await refresh();};
   tc.querySelector("#kxUp").onclick=()=>{if(EX.rel)exGo(tc,EX.rel.split("/").slice(0,-1).join("/"));};
+  tc.querySelector("#kxChg").onclick=()=>{EX.showChg=!EX.showChg;EX.sel=null;exPaintRows(tc);exPaintActs(tc);};
   const qi=tc.querySelector("#kxQ");
   qi.oninput=()=>{EX.q=qi.value;if(EX.deep)EX.deep=null;exPaintRows(tc);};
   qi.onkeydown=ev=>{if(ev.key==="Enter"){ev.preventDefault();exDeep(tc);}
@@ -8755,9 +8899,10 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
     i=ev.key==="ArrowDown"?Math.min(rows.length-1,i+1):Math.max(0,i<0?0:i-1);
     EX.sel=rows[i];exPaintRows(tc);exPaintActs(tc);
     const on=tc.querySelector("#kxRows .kpx-r.on");if(on)on.scrollIntoView({block:"nearest"});}
-   else if((ev.key==="Enter"||ev.key==="ArrowRight")&&EX.sel&&EX.sel.dir){ev.preventDefault();exGo(tc,EX.sel.rel);}
+   else if(ev.key===" "&&EX.sel&&!EX.sel.dir){ev.preventDefault();exPreview(tc,EX.sel);}
+   else if((ev.key==="Enter"||ev.key==="ArrowRight")&&EX.sel&&EX.sel.dir&&!EX.sel._ghost){ev.preventDefault();exGo(tc,EX.sel.rel);}
    else if(ev.key==="ArrowLeft"||ev.key==="Backspace"){if(EX.rel){ev.preventDefault();exGo(tc,EX.rel.split("/").slice(0,-1).join("/"));}}
-   else if(ev.key.length===1&&!ev.ctrlKey&&!ev.metaKey){qi.focus();}};
+   else if(ev.key.length===1&&ev.key!==" "&&!ev.ctrlKey&&!ev.metaKey){qi.focus();}};
   tc.querySelector("#kxRestore").onclick=()=>exRestore(tc);
   tc.querySelector("#kxCopy").onclick=()=>exCopy(tc);
   tc.querySelector("#kxDl").onclick=()=>exDownload();
