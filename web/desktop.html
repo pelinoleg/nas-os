@@ -1217,6 +1217,22 @@
   .kp-retf input{width:100%;font-size:15px;font-weight:600;font-family:var(--mono)}
   .kp-retf .h{font-size:10px;color:var(--win-dim,var(--dim));margin-top:4px;line-height:1.3}
   .kp-help{font-size:11.5px;color:var(--win-dim,var(--dim));margin:0 0 4px;line-height:1.5}
+  .kp-src{display:flex;align-items:stretch;gap:0;background:var(--card);border:1px solid var(--win-line,var(--line));border-radius:14px;overflow:hidden;cursor:pointer;transition:background .15s}
+  @media(hover:hover){.kp-src:hover{background:var(--sel)}}
+  .kp-src .ic{flex:none;width:74px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+    background:color-mix(in srgb,var(--win-accent,var(--accent)) 12%,transparent);color:var(--win-accent,var(--accent))}
+  .kp-src .ic .n{font-size:19px;font-weight:750;line-height:1}
+  .kp-src .ic .u{font-size:8.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;opacity:.8}
+  .kp-src .bd{flex:1;min-width:0;padding:12px 15px;display:flex;flex-direction:column;justify-content:center;gap:5px}
+  .kp-src .bd .t{font-size:14px;font-weight:650}
+  .kp-src .bd .pp{font-size:11px;color:var(--win-dim,var(--dim));font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .kp-src .bd .meta{font-size:11px;color:var(--win-dim,var(--dim));display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:1px}
+  .kp-src .act{flex:none;display:flex;flex-direction:column;justify-content:center;gap:6px;padding:0 12px;border-left:1px solid var(--win-line,var(--line))}
+  .kp-banner{display:flex;align-items:center;gap:11px;padding:11px 15px;border-radius:12px;margin:0 0 14px;
+    background:color-mix(in srgb,var(--win-accent,var(--accent)) 12%,transparent);border:1px solid color-mix(in srgb,var(--win-accent,var(--accent)) 35%,transparent)}
+  .kp-banner .bi{flex:none;color:var(--win-accent,var(--accent))}
+  .kp-banner .bt{flex:1;min-width:0;font-size:12.5px}
+  .kp-banner .bt b{font-weight:650}
   .rs-ch{display:flex;align-items:center;gap:7px;font-size:13px;margin-bottom:6px}
   .rs-ch svg{color:var(--win-accent,var(--accent));flex:none}
   .rs-ch b{flex:1}
@@ -7691,6 +7707,7 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
     <button class="kp-kind on" data-v="fs">${svg("hdd",22)}<span>Local / USB disk</span></button>
     <button class="kp-kind" data-v="rclone">${svg("globe",22)}<span>Cloud (rclone)</span></button></div>
    <div class="field" style="margin:14px 0 2px"><label>Name</label><input id="kdN" placeholder="${opts.spare?"Spare USB, Cloud spare…":"USB disk, pCloud…"}"></div>
+   ${(!D.password&&!opts.spare)?`<div class="field" style="margin-bottom:2px"><label>Repository password ${tipHTML("One password protects every repository. Set your own here or keep the suggested one — just don't lose it, or the backups can't be read.")}</label><input id="kdPw" class="mono" value="kp-${Math.random().toString(36).slice(2,8)}${Math.random().toString(36).slice(2,6)}" maxlength="128"><div style="font-size:11px;color:var(--win-dim,var(--dim));margin-top:4px">Shared by all repositories. Write it down — it can't be recovered.</div></div>`:""}
    <div id="kdFs">
     <div class="kp-eyebrow">Repository folder</div>
     <div class="kp-well">
@@ -7725,6 +7742,7 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
   $("#kdO").onclick=async()=>{
    const bodyObj={name:$("#kdN").value,kind,path,remote:kind==="rclone"?$("#kdRem").value:"",
     remote_path:kind==="rclone"?$("#kdRp").value:"",
+    password:($("#kdPw")&&$("#kdPw").value.trim())||"",
     pwfile:!!($("#kdPwf")&&$("#kdPwf").checked)};
    if(opts.spare)bodyObj.no_init=true;
    const conn=ex&&ex.checked;
@@ -7774,7 +7792,9 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
   else{big="You're protected.";hc="var(--win-good,var(--good))";hic="shield";
    const nx=bks.map(nextRun).filter(Boolean)[0];
    sub=`${bks.length} backup${bks.length>1?"s":""} fresh${nx?` · ${esc(nx)}`:""}`;}
-  tc.innerHTML=`<div class="kp-hero"><div class="kp-hero-ic" style="--kp-hc:${hc}">${svg(hic,22)}</div>
+  const upd=D.update&&D.update.available&&!win._kpUpdHid;
+  tc.innerHTML=`${upd?`<div class="kp-banner"><span class="bi">${svg("download",17)}</span><div class="bt"><b>Kopia ${esc(D.update.latest)} is available</b> — you have ${esc(D.update.current||"?")}. Update in Options.</div><button class="btn sm" id="kpUpdGo">Update</button><button class="iconbtn" id="kpUpdX" title="Dismiss">${svg("x",14)}</button></div>`:""}
+   <div class="kp-hero"><div class="kp-hero-ic" style="--kp-hc:${hc}">${svg(hic,22)}</div>
     <div style="flex:1;min-width:0"><div class="kp-big">${big}</div><div class="kp-sub2">${sub}</div></div>
     ${bks.length?`<button class="btn pri" id="kpNew" style="flex:none">${svg("plus",14)} New backup</button>`:""}</div>
    ${bks.length?`<div class="kp-grid wide">${bks.map(b=>{
@@ -7815,7 +7835,9 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
   const nb=tc.querySelector("#kpNew");
   if(nb)nb.onclick=()=>{wiz={step:0,draft:{name:"",source:"",dest:"",dest2:"",dest2_mode:"sync",
    retention:{latest:10,daily:7,weekly:4,monthly:12,annual:0},schedule:{mode:"daily",time:"03:30",dow:0},
-   compression:true,usb_trigger:false,notify_ok:false,notify_err:true,enabled:true}};paint();};}
+   compression:true,usb_trigger:false,notify_ok:false,notify_err:true,enabled:true}};paint();};
+  const ux=tc.querySelector("#kpUpdX");if(ux)ux.onclick=()=>{win._kpUpdHid=true;paint();};
+  const ug=tc.querySelector("#kpUpdGo");if(ug)ug.onclick=()=>{tab="opts";syncNav();paint();};}
 
  const kpRunRow=(x,withName)=>{
   const res=x.result==="ok"?["ok","ok"]:x.result==="stopped"?["stopped","warn"]:
@@ -8122,24 +8144,34 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
  /* ---------- Sources tab ---------- */
  function tabSources(tc){
   const list=D.sources||[];
-  tc.innerHTML=`<div style="display:flex;align-items:center;gap:10px"><h3 class="set-title" style="margin:0">Sources</h3><span style="flex:1"></span><button class="btn sm pri" id="kSrcAdd">${svg("plus",13)} New source</button></div>
-   <p class="set-sub">Named groups of folders. Excludes live here too — they're a property of the data, not of a backup.</p>
-   <div class="rs-grid">${list.map(s=>{const used=usedBy("src",s.id);
-    return`<div class="rs-card" data-src="${att(s.id)}" title="Click to edit"><div class="rs-ch">${svg("folder",18)}<b>${esc(s.name)}</b></div>
-     <div class="rs-cl">${s.folders.map(f=>`<div class="mono" style="font-size:11px">${esc(f)}</div>`).join("")}
-      ${s.excludes&&s.excludes.length?`<div style="margin-top:4px">${s.excludes.map(x=>`<span class="fm-chip" style="font-size:10.5px">${esc(x)}</span>`).join(" ")}</div>`:""}
-      <div style="margin-top:6px;color:var(--mut)">${used.length?"used by: "+esc(used.join(", ")):"not used yet"}</div></div>
-     <div class="r" style="margin-top:8px;align-items:center"><button class="kp-quiet" data-sz="${att(s.id)}">measure size</button><span class="kpSz" style="color:var(--mut);font-size:11.5px;margin-right:auto"></span><button class="iconbtn" data-rm="${att(s.id)}" title="${used.length?"in use by: "+att(used.join(", ")):"Delete source"}" ${used.length?"disabled":""}>${svg("trash",14)}</button></div></div>`;}).join("")||`<div class="set-load">No sources yet — create the first one.</div>`}</div>`;
-  tc.querySelector("#kSrcAdd").onclick=()=>srcDlg(null,()=>paint());
-  tc.querySelectorAll(".rs-card[data-src]").forEach(cd=>cd.onclick=ev=>{
-   if(ev.target.closest("button"))return;                 // footer actions are their own targets
+  tc.innerHTML=`<div style="display:flex;align-items:center;gap:10px"><h3 class="set-title" style="margin:0">Sources</h3><span style="flex:1"></span><button class="btn pri" id="kSrcAdd">${svg("plus",14)} New source</button></div>
+   <p class="set-sub">A source is a reusable group of folders. Excludes live here too — they're a property of the data, not of one backup. Click a card to edit.</p>
+   ${list.length?`<div class="kp-grid wide">${list.map(s=>{const used=usedBy("src",s.id);const n=s.folders.length;
+    return`<div class="kp-src" data-src="${att(s.id)}">
+     <div class="ic">${svg("folder",20)}<span class="n">${n}</span><span class="u">folder${n===1?"":"s"}</span></div>
+     <div class="bd">
+      <div class="t">${esc(s.name)}</div>
+      ${s.folders.slice(0,2).map(f=>`<div class="pp" title="${att(f)}">${esc(f)}</div>`).join("")}${n>2?`<div class="pp" style="opacity:.7">+${n-2} more</div>`:""}
+      <div class="meta"><span class="kpSz" data-szv="${att(s.id)}">${svg("gauge",11)} <span class="kp-quiet" data-sz="${att(s.id)}" style="font-size:11px">measure size</span></span>
+       ${s.excludes&&s.excludes.length?`<span>·</span>${s.excludes.slice(0,3).map(x=>`<span class="fm-chip" style="font-size:10px">${esc(x)}</span>`).join(" ")}${s.excludes.length>3?` +${s.excludes.length-3}`:""}`:""}</div>
+      <div class="meta">${used.length?`${svg("shield",11)} used by ${esc(used.join(", "))}`:`<span style="opacity:.7">not used by any backup yet</span>`}</div></div>
+     <div class="act"><button class="iconbtn" data-ed="${att(s.id)}" title="Edit source">${svg("edit",15)}</button>
+      <button class="iconbtn ${used.length?"":"dng"}" data-rm="${att(s.id)}" title="${used.length?"In use by "+att(used.join(", "))+" — can't delete":"Delete source"}" ${used.length?"disabled":""}>${svg("trash",15)}</button></div>
+    </div>`;}).join("")}</div>`
+   :`<button class="kp-new" id="kSrcAdd2" style="min-height:150px">${svg("plus",18)} Create your first source</button>`}`;
+  const add=tc.querySelector("#kSrcAdd")||tc.querySelector("#kSrcAdd2");
+  if(add)add.onclick=()=>srcDlg(null,()=>paint());
+  tc.querySelectorAll(".kp-src[data-src]").forEach(cd=>cd.onclick=ev=>{
+   if(ev.target.closest("button"))return;
    const s=list.find(x=>x.id===cd.dataset.src);if(s)srcDlg(s,()=>paint());});
-  tc.querySelectorAll("[data-sz]").forEach(b=>b.onclick=async()=>{b.disabled=true;
-   const sp=b.parentElement.querySelector(".kpSz");sp.textContent="measuring…";
-   const r=await kP("/api/kopia/source/size",{id:b.dataset.sz});b.disabled=false;
-   sp.textContent=r&&r.ok?fmtB(r.bytes)+(r.partial?" (some folders unreadable)":""):((r&&r.log)||"failed");});
-  tc.querySelectorAll("[data-rm]").forEach(b=>b.onclick=()=>confirmDlg("Delete source?","Only the named group is removed — files on disk are not touched.",
-   async()=>{const r=await kP("/api/kopia/source/delete",{id:b.dataset.rm});if(!(r&&r.ok))toast((r&&r.log)||"failed");await refresh();},1));}
+  tc.querySelectorAll("[data-ed]").forEach(b=>b.onclick=()=>{const s=list.find(x=>x.id===b.dataset.ed);if(s)srcDlg(s,()=>paint());});
+  tc.querySelectorAll("[data-sz]").forEach(b=>b.onclick=async ev=>{ev.stopPropagation();
+   const wrap=tc.querySelector(`[data-szv="${b.dataset.sz}"]`);if(wrap)wrap.innerHTML=`${svg("gauge",11)} measuring…`;
+   const r=await kP("/api/kopia/source/size",{id:b.dataset.sz});
+   if(wrap)wrap.innerHTML=`${svg("gauge",11)} ${r&&r.ok?fmtB(r.bytes)+(r.partial?" (partial)":""):"failed"}`;});
+  tc.querySelectorAll("[data-rm]").forEach(b=>b.onclick=ev=>{ev.stopPropagation();if(b.disabled)return;
+   confirmDlg("Delete source?","Only the named group is removed — files on disk are not touched.",
+   async()=>{const r=await kP("/api/kopia/source/delete",{id:b.dataset.rm});if(!(r&&r.ok))toast((r&&r.log)||"failed");await refresh();},1);});}
 
  /* ---------- Destinations tab ---------- */
  function tabDests(tc){
@@ -8315,9 +8347,10 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
    <p class="set-sub">Engine-wide settings for every repository. Per-backup schedule and retention live on each backup's own page.</p>
    <div class="kp-sec"><h4>${svg("key",13)} Repository password</h4>
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-     <code class="mono" style="font-size:14px;background:var(--card);padding:6px 11px;border-radius:8px;border:1px solid var(--win-line,var(--line))">${esc(D.password||"— created with the first destination")}</code>
-     ${D.password?`<button class="btn sm" id="kPwC">${svg("copy",12)} Copy</button>`:""}</div>
-    <p style="font-size:11.5px;color:var(--win-dim,var(--dim));margin:9px 0 0;line-height:1.5">One password unlocks every repository. It is shown openly on purpose — it must never be lost, or the backups become unreadable. A copy travels inside every settings backup and in the disaster card, so you don't have to memorize it.</p></div>
+     <code class="mono" style="font-size:14px;background:var(--card);padding:6px 11px;border-radius:8px;border:1px solid var(--win-line,var(--line))">${esc(D.password||"— not set yet")}</code>
+     ${D.password?`<button class="btn sm" id="kPwC">${svg("copy",12)} Copy</button>`:""}
+     <button class="btn sm" id="kPwSet">${D.dests&&D.dests.length?"Change…":"Set my own"}</button></div>
+    <p style="font-size:11.5px;color:var(--win-dim,var(--dim));margin:9px 0 0;line-height:1.5">One password unlocks <b>every</b> repository — there is only this one, nothing hidden elsewhere. It is shown openly on purpose: it must never be lost, or the backups become unreadable. A copy travels inside every settings backup and in the disaster card, so you don't have to memorize it.${D.dests&&D.dests.length?" Changing it re-keys every connected repository — they must all be reachable.":""}</p></div>
    <div class="kp-sec"><h4>${svg("gauge",13)} Performance</h4>
     <div class="srow"><div class="srow-l"><div class="srow-t">Parallel uploads</div><div class="srow-d">How many files kopia hashes and sends at once. Higher is faster on big machines, but uses more CPU and memory — 2 suits a Raspberry Pi.</div></div>
      <div class="srow-c"><input id="kO_par" type="number" min="1" max="16" class="mono" style="width:70px"></div></div>
@@ -8330,8 +8363,10 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
     <div class="srow"><div class="srow-l"><div class="srow-t">Metadata cache limit</div><div class="srow-d">Directory listings and indexes — small.</div></div>
      <div class="srow-c"><input id="kO_mc" type="number" min="0" class="mono" style="width:90px"><span style="font-size:11.5px;color:var(--win-dim,var(--dim))">MB</span></div></div></div>
    <div class="kp-sec"><h4>${svg("cube",13)} Engine</h4>
-    <div class="srow"><div class="srow-l"><div class="srow-t">Kopia version</div><div class="srow-d">The backup engine binary. Update pulls the latest official release.</div></div>
-     <div class="srow-c"><span class="mono" style="font-size:12.5px">${esc(D.version||"?")}</span><button class="btn sm" id="kUpd">Update</button><span id="kUpdS" style="color:var(--win-dim,var(--dim));font-size:12px"></span></div></div></div>
+    <div class="srow"><div class="srow-l"><div class="srow-t">Kopia version</div><div class="srow-d">The backup engine binary. The panel checks for a newer release once a day; you can update whenever you like.</div></div>
+     <div class="srow-c" id="kVerBox"><span class="mono" style="font-size:12.5px">${esc(D.version||"?")}</span>
+      ${(D.update&&D.update.available)?`<span class="kp-badge warn">${esc(D.update.latest)} available</span>`:`<span style="font-size:11.5px;color:var(--win-good,var(--good))">up to date</span>`}
+      <button class="btn sm" id="kUpd">Update</button><span id="kUpdS" style="color:var(--win-dim,var(--dim));font-size:12px"></span></div></div></div>
    <div class="r" style="margin-top:2px"><button class="btn pri" id="kO_save">Save options</button><span id="kO_st" style="color:var(--win-dim,var(--dim));font-size:12px;margin-left:10px"></span></div>`;
   api("/api/kopia/opts").then(r=>{const o=(r&&r.opts)||{};
    const set=(id,v)=>{const e=tc.querySelector(id);if(e)e.value=v;};
@@ -8343,8 +8378,23 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
     cache_content_mb:g("#kO_cc"),cache_meta_mb:g("#kO_mc")});
    st.textContent=r&&r.ok?"Saved — applies from the next run":"Failed";};
   const c=tc.querySelector("#kPwC");if(c)c.onclick=()=>{navigator.clipboard&&navigator.clipboard.writeText(D.password||"");toast("Copied");};
+  const ps=tc.querySelector("#kPwSet");if(ps)ps.onclick=()=>kpPwDlg();
   tc.querySelector("#kUpd").onclick=async()=>{const s=tc.querySelector("#kUpdS");s.textContent="updating…";
-   const r=await kP("/api/kopia/update");s.textContent=r&&r.ok?("now "+(r.version||"?")):((r&&r.log)||"failed");};}
+   const r=await kP("/api/kopia/update");if(r&&r.ok){await refresh();}else s.textContent=(r&&r.log)||"failed";};}
+ function kpPwDlg(){const s=document.getElementById("scrim");const has=D.dests&&D.dests.length;
+  s.innerHTML=`<div class="dialog" style="width:400px"><h3>${svg("key",16)} ${has?"Change repository password":"Set repository password"}</h3>
+   <p style="margin:2px 0 12px;font-size:12px;color:var(--win-dim,var(--dim))">${has?"This re-keys every connected repository — they must all be reachable, and it may take a minute for cloud repositories.":"One password protects every repository you create. Write it down — without it the backups can't be read."}</p>
+   <div class="field"><label>Password</label><input id="kpPw" value="${att(D.password||"")}" maxlength="128" placeholder="at least 4 characters"></div>
+   <div class="r"><span id="kpPwS" style="flex:1;text-align:left;font-size:12px;color:var(--win-dim,var(--dim))"></span><button class="btn" id="kpPwX">Cancel</button><button class="btn pri" id="kpPwO">${has?"Change":"Set"}</button></div></div>`;
+  s.classList.add("show");
+  s.querySelector("#kpPwX").onclick=()=>s.classList.remove("show");
+  s.querySelector("#kpPwO").onclick=async()=>{const v=s.querySelector("#kpPw").value.trim();
+   if(v.length<4){s.querySelector("#kpPwS").textContent="at least 4 characters";return;}
+   s.querySelector("#kpPwO").disabled=true;s.querySelector("#kpPwS").textContent=has?"re-keying repositories…":"saving…";
+   const r=await kP("/api/kopia/password",{password:v});
+   s.querySelector("#kpPwO").disabled=false;
+   if(r&&r.ok){s.classList.remove("show");toast("Password saved");await refresh();}
+   else s.querySelector("#kpPwS").textContent=(r&&r.log)||"failed";};}
 
 
  load().then(()=>{lastJson=JSON.stringify(D);render();});

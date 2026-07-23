@@ -9826,7 +9826,7 @@ def _kp_env():
         env["RCLONE_BWLIMIT"] = "%dk" % bw   # the rclone child (cloud repos) honors this; fs repos ignore it
     return env
 
-def _kp(destid, args, timeout=120):
+def _kp(destid, args, timeout=120, extra_env=None):
     """Run one kopia command against a destination's repository.
     Returns {ok, code, out, err}."""
     if not kopia_installed():
@@ -9835,8 +9835,11 @@ def _kp(destid, args, timeout=120):
     # rotates them itself, this only picks WHERE they live
     cmd = [_kopia_bin(), "--config-file", _kp_cfg_file(destid),
            "--log-dir", os.path.join(_kp_cache_dir(destid), "logs")] + list(args)
+    env = _kp_env()
+    if extra_env:
+        env.update(extra_env)
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=_kp_env())
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=env)
         return {"ok": r.returncode == 0, "code": r.returncode,
                 "out": r.stdout or "", "err": r.stderr or ""}
     except subprocess.TimeoutExpired:
@@ -10281,6 +10284,7 @@ def kp_status():
                            mounted=os.path.ismount(_kp_mnt_mp(x["id"]))) for x in cfg["dests"]],
             "backups": [dict(b, run=kp_run_state(b["id"])) for b in cfg["backups"]],
             "restore": kp_restore_state(),
+            "update": kp_update_info() if kopia_installed() else {},
             "rclone_remotes": rclone_remotes() if rclone_installed() else []}
 
 def kp_browse(path):
@@ -11410,6 +11414,81 @@ def _kp_snap_cli(bid):
                 logf.close()
             except OSError:
                 pass
+
+# ---- repository password: user-settable, propagated to every repo ----
+def kp_set_password(newpw):
+    """Set or change the ONE repository password. With no connected repos it is
+    just stored (future repos use it). With connected repos, `change-password`
+    re-keys each; all must be reachable first, and a mid-way failure rolls the
+    already-changed repos back — the stored password only advances if every
+    repo now uses it."""
+    newpw = str(newpw or "").strip()
+    if len(newpw) < 4:
+        return {"ok": False, "log": "password too short (minimum 4 characters)"}
+    if len(newpw) > 128:
+        return {"ok": False, "log": "password too long"}
+    with _KP_CFG_LOCK:
+        cfg = kp_load()
+        old = cfg.get("password") or ""
+        if newpw == old:
+            return {"ok": True}
+        connected = [d for d in cfg["dests"] if kp_dest_connected(d["id"])]
+        if not connected:
+            cfg["password"] = newpw
+            kp_save(cfg)
+            return {"ok": True, "changed": 0}
+        # pre-flight: every connected repo must be reachable with the OLD password
+        for d in connected:
+            r = _kp(d["id"], ["repository", "status"], timeout=240)  # cloud repos are slow to open (rclone startup)
+            if not r["ok"]:
+                return {"ok": False, "log": "«%s» is not reachable — fix it before "
+                        "changing the password" % (d.get("name") or d["id"])}
+        changed = []
+        for d in connected:
+            r = _kp(d["id"], ["repository", "change-password"], timeout=180,
+                    extra_env={"KOPIA_NEW_PASSWORD": newpw})
+            if r["ok"]:
+                changed.append(d)
+            else:
+                # roll the already-changed repos back to the old password
+                for d2 in changed:
+                    _kp(d2["id"], ["repository", "change-password"], timeout=180,
+                        extra_env={"KOPIA_PASSWORD": newpw, "KOPIA_NEW_PASSWORD": old})
+                return {"ok": False, "log": "«%s»: %s (no changes kept)"
+                        % (d.get("name") or d["id"], _kp_err_tail(r))}
+        cfg = kp_load()
+        cfg["password"] = newpw
+        kp_save(cfg)
+        return {"ok": True, "changed": len(changed)}
+
+# ---- kopia self-update availability (checked at most once a day) ----
+KP_UPD_FILE = os.path.join(NAS_CONFIG, "kopia-update.json")
+_KP_UPD_TTL = 24 * 3600
+
+def _kp_ver_tuple(s):
+    return tuple(int(x) for x in re.findall(r"\d+", str(s or ""))[:4]) or (0,)
+
+def kp_update_info(force=False):
+    """{current, latest, available}. Hits GitHub at most once a day (cached),
+    so it never slows the status poll."""
+    cur = kopia_version()
+    cache = _json_load_strict(KP_UPD_FILE, {})
+    now = time.time()
+    if not force and isinstance(cache, dict) and now - (cache.get("ts") or 0) < _KP_UPD_TTL             and cache.get("current") == cur:
+        return {"current": cur, "latest": cache.get("latest") or "",
+                "available": bool(cache.get("available"))}
+    latest = ""
+    try:
+        req = urllib.request.Request("https://api.github.com/repos/kopia/kopia/releases/latest",
+                                     headers={"Accept": "application/vnd.github+json",
+                                              "User-Agent": "nas-os"})
+        with urllib.request.urlopen(req, timeout=12) as f:
+            latest = str((json.load(f) or {}).get("tag_name") or "").lstrip("v")
+    except (OSError, ValueError, urllib.error.URLError):
+        latest = cache.get("latest") or ""      # network down — keep the last known
+    avail = bool(cur and latest and _kp_ver_tuple(latest) > _kp_ver_tuple(cur))
+    _json_save(KP_UPD_FILE, {"ts": int(now), "current": cur, "latest": latest, "available": avail})
+    return {"current": cur, "latest": latest, "available": avail}
 
 # Signal file: udev hooks (USB mount/eject) touch it, the watcher wakes
 # monitor_loop immediately — disk insertion is detected in ~1-2s, not on the 60s tick.
@@ -20368,6 +20447,10 @@ class H(BaseHTTPRequestHandler):
                 self._json(kp_browse(self._body().get("path", "")))
             elif p == "/api/kopia/opts":
                 self._json({"ok": True, "opts": kp_opts_set(self._body() or {})})
+            elif p == "/api/kopia/password":
+                self._json(kp_set_password(self._body().get("password", "")))
+            elif p == "/api/kopia/update-check":
+                self._json({"ok": True, "update": kp_update_info(force=True)})
             elif p == "/api/kopia/source/size":
                 self._json(kp_source_size(str(self._body().get("id") or "")))
             elif p == "/api/kopia/dest/cache":
