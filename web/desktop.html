@@ -1254,6 +1254,94 @@
   .kp-step .st{font-size:13px;font-weight:600}
   .kp-step .sd{font-size:11.5px;color:var(--win-dim,var(--dim));margin-top:1px}
   .kp-step .btn{flex:none}
+  /* ---- Backup Explorer: folder tree | file table | restore-point timeline ----
+     The pane itself becomes the frame (.kpx-pane), so only the inner lists scroll. */
+  .set-pane.kpx-pane{display:flex;flex-direction:column;overflow:hidden}
+  .kpx{display:flex;flex-direction:column;gap:9px;flex:1;min-height:0}
+  .kpx-top{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  .kpx-body{display:flex;gap:9px;flex:1;min-height:0}
+  .kpx-side{flex:1 1 200px;max-width:250px;min-width:150px;overflow:auto;background:var(--card);
+    border:1px solid var(--win-line,var(--line));border-radius:12px;padding:7px 6px}
+  .kpx-main{flex:3 1 340px;min-width:0;display:flex;flex-direction:column;background:var(--card);
+    border:1px solid var(--win-line,var(--line));border-radius:12px;overflow:hidden}
+  .kpx-eyebrow{font-size:9.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;
+    color:var(--win-dim,var(--dim));margin:4px 6px 6px}
+  .kpx-srow{display:flex;align-items:center;gap:7px;padding:6px 7px;border-radius:9px;cursor:pointer;font-size:12.5px}
+  .kpx-srow.on{background:var(--sel);color:var(--win-accent,var(--accent));box-shadow:var(--sh-sm)}
+  @media(hover:hover){.kpx-srow:hover:not(.on){background:var(--glass)}}
+  .kpx-srow .nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .kpx-srow .ct{font-size:10px;color:var(--win-dim,var(--dim));flex:none}
+  .kpx-tn{display:flex;align-items:center;gap:5px;border-radius:8px;cursor:pointer;font-size:12px;
+    padding:4px 6px 4px calc(4px + var(--d,0)*13px)}
+  .kpx-tn.on{background:var(--sel);color:var(--win-accent,var(--accent))}
+  @media(hover:hover){.kpx-tn:hover:not(.on){background:var(--glass)}}
+  .kpx-tn span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .kpx-tc{background:none;border:none;padding:0;width:15px;height:15px;flex:none;display:grid;place-items:center;
+    color:var(--win-dim,var(--dim));cursor:pointer;transition:transform .12s}
+  .kpx-tc.op{transform:rotate(90deg)}
+  .kpx-hint{font-size:10.5px;color:var(--win-dim,var(--dim));padding:4px 8px}
+  .kpx-bar{display:flex;align-items:center;gap:8px;padding:7px 9px;flex-wrap:wrap;
+    border-bottom:1px solid var(--win-line,var(--line))}
+  .kpx-crumbs{flex:1 1 150px;min-width:0;display:flex;align-items:center;gap:2px;font-size:12px;overflow:hidden}
+  .kpx-crumbs a{color:var(--win-accent,var(--accent));text-decoration:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .kpx-crumbs a.cur{color:var(--text);font-weight:600}
+  .kpx-crumbs i{color:var(--win-dim,var(--dim));display:grid;place-items:center;flex:none}
+  .kpx-q{margin:0;flex:0 1 180px;padding:3px 9px}
+  /* what the three buttons will act on — a quiet pill, so it reads as an object, not a label */
+  .kpx-sel{font-size:11px;color:var(--win-dim,var(--dim));white-space:nowrap;max-width:170px;overflow:hidden;
+    text-overflow:ellipsis;background:var(--glass);border-radius:999px;padding:3px 9px}
+  .kpx-sel:empty{display:none}
+  .kpx-list{flex:1;min-height:0;overflow:auto}
+  /* the table keeps its columns and scrolls INSIDE .kpx-list rather than squashing them */
+  .kpx-h,.kpx-r{display:grid;grid-template-columns:minmax(120px,1fr) 88px 104px 128px;gap:9px;
+    align-items:center;padding:6px 11px;min-width:450px}
+  .kpx-h{position:sticky;top:0;z-index:2;background:var(--card);border-bottom:1px solid var(--win-line,var(--line));
+    font-size:9.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--win-dim,var(--dim))}
+  .kpx-h span{cursor:pointer;user-select:none;display:flex;align-items:center;gap:3px}
+  .kpx-h span.num{justify-content:flex-end}
+  .kpx-r{font-size:12.5px;border-bottom:1px solid color-mix(in srgb,var(--win-line,var(--line)) 55%,transparent)}
+  .kpx-r.on{background:var(--sel)}
+  @media(hover:hover){.kpx-r:hover:not(.on){background:var(--glass)}}
+  .kpx-n{display:flex;align-items:center;gap:8px;min-width:0}
+  .kpx-n .nm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .kpx-n .pp{font-size:10px;color:var(--win-dim,var(--dim));font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .kpx-open{background:none;border:none;padding:0 2px;color:var(--win-dim,var(--dim));cursor:pointer;flex:none;display:grid;place-items:center}
+  .kpx-num{text-align:right;font-variant-numeric:tabular-nums;color:var(--win-dim,var(--dim));font-size:11.5px}
+  .kpx-cell{color:var(--win-dim,var(--dim));font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .kpx-tlbar{display:flex;align-items:center;gap:8px;background:var(--card);
+    border:1px solid var(--win-line,var(--line));border-radius:12px;padding:6px 9px}
+  .kpx-track{flex:1;min-width:0;overflow-x:auto;overflow-y:hidden;padding:2px 0}
+  .kpx-inner{display:flex;align-items:flex-start;position:relative;padding:0 4px;width:max-content;min-width:100%}
+  .kpx-inner::before{content:"";position:absolute;left:14px;right:14px;top:9px;height:2px;background:var(--win-line,var(--line))}
+  /* ticks spread over the axis while there is room, and scroll once there are many */
+  .kpx-tick{position:relative;flex:1 0 34px;max-width:110px;background:none;border:none;padding:0 2px;
+    display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;
+    color:var(--win-dim,var(--dim));font-size:9.5px;font-family:inherit}
+  .kpx-tick i{width:10px;height:10px;border-radius:50%;background:var(--card);
+    border:2px solid var(--win-dim,var(--dim));display:block;margin-top:4px}
+  .kpx-tick.on{color:var(--win-accent,var(--accent));font-weight:750}
+  .kpx-tick.on i{background:var(--win-accent,var(--accent));border-color:var(--win-accent,var(--accent));
+    box-shadow:0 0 0 3px color-mix(in srgb,var(--win-accent,var(--accent)) 28%,transparent)}
+  @media(hover:hover){.kpx-tick:hover i{border-color:var(--win-accent,var(--accent))}}
+  .kpx-rot{display:grid;place-items:center;transform:rotate(180deg)}
+  .kpx-cal{position:fixed;z-index:700;background:var(--glass);backdrop-filter:blur(var(--blur,14px));
+    -webkit-backdrop-filter:blur(var(--blur,14px));border:1px solid var(--win-line,var(--line));
+    border-radius:14px;box-shadow:var(--sh-lg);padding:11px}
+  .kpx-cal .hd{display:flex;align-items:center;gap:6px;margin-bottom:8px;font-size:12.5px;font-weight:650}
+  .kpx-cal .hd b{flex:1;text-align:center}
+  .kpx-cal .g{display:grid;grid-template-columns:repeat(7,30px);gap:2px}
+  .kpx-cal .g b{font-size:9px;text-align:center;color:var(--win-dim,var(--dim));font-weight:700;padding-bottom:2px}
+  .kpx-cal .g button{width:30px;height:28px;padding:0;border:none;background:none;border-radius:8px;
+    font-size:11.5px;color:var(--win-dim,var(--dim));font-family:inherit;cursor:default}
+  .kpx-cal .g button.has{color:var(--text);font-weight:650;cursor:pointer;
+    background:color-mix(in srgb,var(--win-accent,var(--accent)) 14%,transparent)}
+  .kpx-cal .g button.on{background:var(--win-accent,var(--accent));color:#fff}
+  .kpx-cal .ft{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:9px;
+    font-size:11px;color:var(--win-dim,var(--dim))}
+  @media(max-width:640px){
+    .kpx-side{display:none}
+    .kpx-h,.kpx-r{grid-template-columns:minmax(90px,1fr) 76px;min-width:0}
+    .kpx-h span:nth-child(n+3),.kpx-r>:nth-child(n+3){display:none}}
   .rs-ch{display:flex;align-items:center;gap:7px;font-size:13px;margin-bottom:6px}
   .rs-ch svg{color:var(--win-accent,var(--accent));flex:none}
   .rs-ch b{flex:1}
@@ -2917,6 +3005,7 @@ const P={
  sd:'<path d="M18 2H9.5L4 7.5V20a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2z"/><path d="M9 8v2M12 7v3M15 8v2"/>',
  shield:'<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/>',
  clock:'<circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>',
+ calendar:'<rect width="18" height="18" x="3" y="4" rx="2"/><path d="M16 2v4"/><path d="M8 2v4"/><path d="M3 10h18"/>',
  file:'<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/>',
  "file-plus":'<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M9 15h6"/><path d="M12 18v-6"/>',
  "folder-plus":'<path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/><path d="M9 13h6"/><path d="M12 10v6"/>',
@@ -7670,6 +7759,8 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
   paint();};
  const syncNav=()=>body.querySelectorAll(".set-nav button").forEach(x=>x.classList.toggle("on",x.dataset.t===tab));
  const paint=()=>{const tc=body.querySelector("#tc");if(!tc)return;
+  // the explorer owns its own scrolling — the pane becomes its frame, everything else scrolls normally
+  tc.classList.toggle("kpx-pane",!!(D&&D.installed&&!D.offline&&tab==="snaps"));
   if(!D){tc.innerHTML='<div class="set-load">loading…</div>';return;}
   if(D.offline){tc.innerHTML='<div class="set-load">no connection to the panel — retrying…</div>';return;}
   if(!D.installed){paintInstall(tc);return;}
@@ -7689,8 +7780,10 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
   if(detail){updDetailLive();return;}                // keep the settings form intact
   if(tab==="overview"){paint();return;}
   if(tab==="snaps"){                                 // only the restore strip is live here —
-   const rj=JSON.stringify(D.restore||{});           // don't yank the list for run-pct ticks
-   if(rj!==lastRestoreJson){lastRestoreJson=rj;paint();}}
+   const rj=JSON.stringify(D.restore||{});           // never yank the explorer out from under the user
+   if(rj!==lastRestoreJson){lastRestoreJson=rj;
+    const tc=body.querySelector("#tc");
+    if(tc&&tc.querySelector("#kxRst"))exPaintRst(tc);else paint();}}
  },3000);
  let lastRestoreJson="";
  let detailWasRunning=false;
@@ -7745,7 +7838,7 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
   let kind="fs",path="";
   const rems=D.rclone_remotes||[];
   s.innerHTML=`<div class="dialog" style="width:470px;max-width:94vw"><h3>${svg("hdd",16)} ${opts.spare?"New spare destination":"New destination"}</h3>
-   <p style="margin:2px 0 12px;font-size:12px;color:var(--win-dim,var(--dim))">${opts.spare?"A spare starts empty — the first backup run copies the whole repository onto it and keeps it in sync after every snapshot.":"One destination = one snapshot repository. Several backups can share it."}</p>
+   <p style="margin:2px 0 12px;font-size:12px;color:var(--win-dim,var(--dim))">${opts.spare?"A spare starts empty — the first backup run copies the whole repository onto it and keeps it in sync after every snapshot.":"One destination = one snapshot repository, and it belongs to a single backup."}</p>
    <div class="kp-kinds">
     <button class="kp-kind on" data-v="fs">${svg("hdd",22)}<span>Local / USB disk</span></button>
     <button class="kp-kind" data-v="rclone">${svg("globe",22)}<span>Cloud (rclone)</span></button></div>
@@ -8088,13 +8181,20 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
    <div style="display:flex;gap:8px;align-items:center">
     <select id="kSrc" style="flex:1">${(D.sources||[]).map(s=>`<option value="${att(s.id)}"${d.source===s.id?" selected":""}>${esc(s.name)} (${s.folders.length} folder${s.folders.length>1?"s":""})</option>`).join("")}${d.source?"":`<option value="" selected disabled>choose…</option>`}</select>
     <button class="btn sm" id="kSrcNew">${svg("plus",13)} New…</button>${d.source?`<button class="btn sm" id="kSrcEd">Edit</button>`:""}</div></div>`;
+ /* One destination belongs to ONE backup: sharing a repository makes two backups fight over
+    the same retention, and a synced spare would delete the other one's snapshots outright.
+    So the pickers only offer repositories nobody else has taken (plus the current choice). */
+ const freeDests=d=>(D.dests||[]).filter(x=>x.id===(d&&d.dest)||x.id===(d&&d.dest2)||
+   !(D.backups||[]).some(b=>b.id!==(d&&d.id)&&(b.dest===x.id||b.dest2===x.id)));
+ const takenNote=d=>{const n=(D.dests||[]).length-freeDests(d).length;
+  return n?`<div style="color:var(--win-dim,var(--dim));font-size:11px;margin-top:5px">${n} repositor${n>1?"ies are":"y is"} not listed — each destination belongs to one backup.</div>`:"";};
  const secDest=d=>`<div class="field"><label>Destination — where snapshots live</label>
    <div style="display:flex;gap:8px;align-items:center">
-    <select id="kDst" style="flex:1">${(D.dests||[]).filter(x=>x.id!==d.dest2).map(x=>`<option value="${att(x.id)}"${d.dest===x.id?" selected":""}>${esc(x.name)} (${x.kind==="fs"?esc(x.path):esc(x.remote+":"+(x.remote_path||""))})</option>`).join("")}${d.dest?"":`<option value="" selected disabled>choose…</option>`}</select>
-    <button class="btn sm" id="kDstNew">${svg("plus",13)} New…</button></div></div>`;
+    <select id="kDst" style="flex:1">${freeDests(d).filter(x=>x.id!==d.dest2).map(x=>`<option value="${att(x.id)}"${d.dest===x.id?" selected":""}>${esc(x.name)} (${x.kind==="fs"?esc(x.path):esc(x.remote+":"+(x.remote_path||""))})</option>`).join("")}${d.dest?"":`<option value="" selected disabled>choose…</option>`}</select>
+    <button class="btn sm" id="kDstNew">${svg("plus",13)} New…</button></div>${takenNote(d)}</div>`;
  const secSpare=d=>`<div class="field"><label>Spare copy (3-2-1) — optional second destination</label>
    <div style="display:flex;gap:8px;align-items:center">
-    <select id="kDst2" style="flex:1"><option value="">no spare</option>${(D.dests||[]).filter(x=>x.id!==d.dest).map(x=>`<option value="${att(x.id)}"${d.dest2===x.id?" selected":""}>${esc(x.name)}</option>`).join("")}</select>
+    <select id="kDst2" style="flex:1"><option value="">no spare</option>${freeDests(d).filter(x=>x.id!==d.dest).map(x=>`<option value="${att(x.id)}"${d.dest2===x.id?" selected":""}>${esc(x.name)}</option>`).join("")}</select>
     <button class="btn sm" id="kDst2New">${svg("plus",13)} New…</button></div>
    <div id="kD2m" style="margin-top:8px;${d.dest2?"":"display:none"}"><div class="seg" id="kD2mode">
     <button data-v="sync"${d.dest2_mode!=="independent"?' class="on"':""}>Synced replica</button>
@@ -8304,111 +8404,333 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
    confirmDlg("Remove destination?","The repository DATA stays on the medium — only the panel's card is removed. You can «Connect existing» later.",
     async()=>{const r=await kP("/api/kopia/dest/delete",{id});if(!(r&&r.ok))toast((r&&r.log)||"failed");await refresh();},1);});}
 
- /* ---------- Snapshots tab ---------- */
- let snapDest=null,snapBk="";
- const kpRestoreTo=(destid,oid,what)=>pickFolder({overlay:true,start:"/media/nas",
-  title:"Where to restore",
-  note:"Restoring "+what+". Its files are copied into the folder you choose — nothing there is deleted, and the repository is not touched.",
-  onPick:async tgt=>{
-   confirmDlg("Restore here?",`${esc(what)} → <span class="mono">${esc(tgt)}</span><br>Copy-only: existing files are kept (--skip-existing), the repository is not touched.`,
-    async()=>{const r=await kP("/api/kopia/snap/restore/start",{d:destid,oid,target:tgt});
-     if(!(r&&r.ok))toast((r&&r.log)||"could not start");tab="snaps";await refresh();});}});
- function kpSnapBrowse(destid,snap,onChange){const s=document.getElementById("scrim");
-  let stack=[{oid:snap.root,name:snap.path.split("/").pop()||snap.path}];
-  s.innerHTML=`<div class="dialog" style="width:min(620px,94vw)"><h3>${svg("clock",16)} ${esc(dts(snap.ts))} <span style="font-weight:400;color:var(--mut);font-size:12px">· ${snap.files} files · ${fmtB(snap.bytes)}</span></h3>
-   <div class="kp-search"><span>${svg("search",14)}</span><input id="kbSearch" placeholder="Search files in this snapshot…" data-noenter><span id="kbSearchX" class="kp-quiet" style="display:none;font-size:11px">clear</span></div>
-   <div id="kbCrumbs" style="font-size:12px;color:var(--mut);margin-bottom:6px"></div>
-   <div class="pf-list" id="kbList" style="height:min(52vh,420px)"></div>
-   <div class="pf-foot"><button class="iconbtn" id="kbDel" title="Delete this snapshot">${svg("trash",15)}</button><span style="flex:1"></span><button class="btn" id="kbX">Close</button><button class="btn pri" id="kbR">Restore this folder…</button></div></div>`;
-  s.classList.add("show");
-  const $=q=>s.querySelector(q);
-  $("#kbX").onclick=()=>s.classList.remove("show");
-  $("#kbDel").onclick=()=>{s.classList.remove("show");
-   confirmDlg("Delete snapshot?",`${esc(snap.path)} · ${esc(dts(snap.ts))} — this restore point disappears from the repository. Files on the source are not touched.`,
-    async()=>{const r2=await kP("/api/kopia/snap/delete",{d:destid,id:snap.id});
-     if(!(r2&&r2.ok))toast((r2&&r2.log)||"failed");onChange&&onChange();},1);};
-  $("#kbR").onclick=()=>{const top=stack[stack.length-1];s.classList.remove("show");
-   kpRestoreTo(destid,top.oid,"folder «"+(top.name||"/")+"» from "+dts(snap.ts));};
-  const openEntry=(oid,dir,name)=>{if(dir){stack.push({oid,name});$("#kbSearch").value="";draw();}
-   else{s.classList.remove("show");kpRestoreTo(destid,oid,"file «"+name+"»");}};
-  let searchSeq=0;
-  const runSearch=async q=>{const my=++searchSeq;const list=$("#kbList");
-   $("#kbSearchX").style.display=q?"":"none";$("#kbCrumbs").style.display=q?"none":"";
-   if(!q){draw();return;}
-   list.innerHTML=`<div class="pf-empty">searching…</div>`;
-   const r=await kP("/api/kopia/snap/find",{d:destid,oid:snap.root,q});
-   if(my!==searchSeq)return;
-   if(!(r&&r.ok)){list.innerHTML=`<div class="pf-empty">${esc((r&&r.log)||"failed")}</div>`;return;}
-   const m=r.matches||[];
-   list.innerHTML=m.length?m.map(e=>`<div class="pf-row" data-oid="${att(e.oid)}" data-dir="${e.dir?1:""}" data-n="${att(e.name)}"${e.dir?"":' title="Click to restore this file"'}>${fmIcon(e.name,e.dir?"dir":"file",15)}<span style="flex:1;min-width:0"><span style="display:block;overflow:hidden;text-overflow:ellipsis">${esc(e.name)}</span><span style="font-size:10.5px;color:var(--mut);font-family:var(--mono)">${esc(e.path)}</span></span><span style="color:var(--mut);font-size:11px">${e.dir?"":fmtB(e.size)}</span></div>`).join("")+(r.more?`<div class="pf-empty" style="font-size:11px">showing first ${m.length} — narrow the search</div>`:""):`<div class="pf-empty">no files match "${esc(q)}"</div>`;
-   list.querySelectorAll("[data-oid]").forEach(n=>n.onclick=()=>openEntry(n.dataset.oid,n.dataset.dir,n.dataset.n));};
-  let sTimer=null;
-  $("#kbSearch").oninput=ev=>{clearTimeout(sTimer);const q=ev.target.value.trim();sTimer=setTimeout(()=>runSearch(q),350);};
-  $("#kbSearchX").onclick=()=>{$("#kbSearch").value="";runSearch("");};
-  const draw=async()=>{
-   $("#kbCrumbs").innerHTML=stack.map((x,i)=>`<a href="#" data-i="${i}" style="color:${i===stack.length-1?"var(--text)":"var(--accent)"}">${esc(x.name||"/")}</a>`).join(" / ");
-   $("#kbCrumbs").querySelectorAll("[data-i]").forEach(a=>a.onclick=ev=>{ev.preventDefault();stack=stack.slice(0,+a.dataset.i+1);draw();});
-   const list=$("#kbList");list.innerHTML=`<div class="pf-empty">loading…</div>`;
-   const r=await kP("/api/kopia/snap/ls",{d:destid,oid:stack[stack.length-1].oid});
-   if(!(r&&r.ok)){list.innerHTML=`<div class="pf-empty">${esc((r&&r.log)||"failed")}</div>`;return;}
-   list.innerHTML=(r.entries||[]).map(e=>`<div class="pf-row" data-oid="${att(e.oid)}" data-dir="${e.dir?1:""}" data-n="${att(e.name)}">${fmIcon(e.name,e.dir?"dir":"file",15)}<span style="flex:1">${esc(e.name)}</span><span style="color:var(--mut);font-size:11px">${e.dir?"":fmtB(e.size)}</span></div>`).join("")||`<div class="pf-empty">empty folder</div>`;
-   list.querySelectorAll("[data-oid]").forEach(n=>n.onclick=()=>openEntry(n.dataset.oid,n.dataset.dir,n.dataset.n));};
-  draw();}
+ /* ---------- Snapshots tab: the Backup Explorer ----------
+    One repository at a time. Left: the folders this repo protects, with the tree of the
+    restore point you are looking at. Middle: that folder as a file table. Bottom: the
+    timeline of restore points — pick another one and you stay in the SAME folder, because
+    everything is addressed as <snapshot root oid>/<relative path>. Acting on a file or a
+    folder never writes to the repository: Restore/Copy only add files, Download streams. */
+ let snapDest=null,snapBk="",EX=null;
+ const KX_KIND={folder:"Folder",image:"Image",video:"Video",music:"Audio",archive:"Archive",
+  pdf:"PDF",sheet:"Spreadsheet",slides:"Presentation",doc:"Document",disk:"Disk image",
+  app:"Application",font:"Font",code:"Code",text:"Text",file:"File"};
+ const kxKind=e=>{if(e.dir)return"Folder";
+  const k=fmKind(e.name,"file"),p=e.name.split(".");
+  return KX_KIND[k]||(p.length>1?p.pop().toUpperCase().slice(0,9)+" file":"File");};
+ const kxDate=t=>{if(!t)return"—";const d=new Date(t*1000);
+  return d.toLocaleDateString(undefined,{month:"short",day:"numeric",
+   year:d.getFullYear()===new Date().getFullYear()?undefined:"numeric"})+", "+d.toTimeString().slice(0,5);};
+ const KX_ZIP_MAX=2*1024*1024*1024;                 // server refuses bigger folder archives
+ const exReset=()=>{EX={dest:snapDest,bk:snapBk,path:null,snap:null,rel:"",sel:null,
+  sort:"name",asc:true,q:"",deep:null,snaps:null,kids:{},open:{},err:""};};
+ /* snapshots grouped by the folder they were taken of, each list oldest → newest */
+ const exPaths=()=>{const m=new Map();
+  (EX&&EX.snaps||[]).forEach(s=>{const a=m.get(s.path)||[];a.push(s);m.set(s.path,a);});
+  return [...m.entries()].map(([p,l])=>({path:p,list:l.slice().sort((a,b)=>a.ts-b.ts)}))
+   .sort((a,b)=>a.path.localeCompare(b.path));};
+ const exGroup=()=>exPaths().find(x=>x.path===EX.path);
+
+ async function exBoot(tc){
+  const want=snapDest;
+  const r=await api("/api/kopia/snapshots?d="+encodeURIComponent(want));
+  if(!EX||snapDest!==want)return;
+  if(!(r&&r.ok)){EX.snaps=[];EX.err=(r&&r.log)||"could not read this repository";exPaintAll(tc);return;}
+  EX.err="";
+  EX.snaps=(r.snapshots||[]).filter(s=>s.root&&(!snapBk||s.backup===snapBk));
+  const ps=exPaths();
+  if(ps.length){const g=ps.reduce((b,x)=>!b||x.list[x.list.length-1].ts>b.list[b.list.length-1].ts?x:b,null);
+   EX.path=g.path;EX.snap=g.list[g.list.length-1];}
+  exPaintAll(tc);exLoad(tc);}
+
+ /* one directory of the CURRENT restore point, cached (cache dies with the restore point) */
+ async function exLs(rel,then){
+  const key=rel||"",stamp=EX.snap.id;
+  if(EX.kids[key])return then&&then(EX.kids[key]);
+  const r=await kP("/api/kopia/snap/ls",{d:snapDest,oid:EX.snap.root,rel:key});
+  if(!EX||!EX.snap||EX.snap.id!==stamp)return;
+  EX.kids[key]=(r&&r.ok)?{entries:r.entries||[],total:r.total||{}}
+   :{entries:[],err:(r&&r.log)||"this folder could not be read"};
+  then&&then(EX.kids[key]);}
+ const exLoad=tc=>{if(EX.snap)exLs(EX.rel,()=>{exPaintRows(tc);exPaintSide(tc);exPaintActs(tc);});};
+
+ function exSelSnap(tc,s){if(!s||!EX.snap||s.id===EX.snap.id)return;
+  EX.snap=s;EX.kids={};EX.sel=null;EX.deep=null;exPaintAll(tc);exLoad(tc);}
+ function exGo(tc,rel){
+  EX.rel=rel;EX.sel=null;EX.deep=null;EX.q="";
+  const qi=tc.querySelector("#kxQ");if(qi)qi.value="";
+  let acc="";rel.split("/").filter(Boolean).forEach(p=>{acc=acc?acc+"/"+p:p;EX.open[acc]=true;});
+  exPaintCrumbs(tc);exPaintSide(tc);exPaintActs(tc);exLoad(tc);}
+ function exToggle(tc,rel){EX.open[rel]=!EX.open[rel];exPaintSide(tc);
+  if(EX.open[rel])exLs(rel,()=>exPaintSide(tc));}
+
+ /* what the toolbar acts on: the selected row, or the folder you are looking at */
+ const exTarget=()=>{const s=EX.sel;
+  if(s)return{oid:s.oid,rel:"",name:s.name,dir:!!s.dir,size:s.size||0,
+   orig:(EX.path||"")+"/"+s.rel,label:(s.dir?"folder":"file")+" «"+s.name+"»"};
+  const cur=EX.kids[EX.rel||""]||{};
+  const nm=EX.rel?EX.rel.split("/").pop():((EX.path||"").split("/").filter(Boolean).pop()||"snapshot");
+  return{oid:EX.snap&&EX.snap.root,rel:EX.rel,name:nm,dir:true,size:(cur.total||{}).size||0,
+   orig:(EX.path||"")+(EX.rel?"/"+EX.rel:""),label:"folder «"+nm+"»"};};
+
+ const exStart=async(tc,body,what)=>{const r=await kP("/api/kopia/snap/restore/start",body);
+  if(!(r&&r.ok)){toast((r&&r.log)||"could not start");return;}
+  toast(what);await refresh();};
+ function exRestore(tc){const t=exTarget();if(!t.oid)return;
+  const into=t.dir?t.orig:t.orig.split("/").slice(0,-1).join("/");
+  confirmDlg("Put it back where it came from?",
+   `${esc(t.label)} as of <b>${esc(dts(EX.snap.ts))}</b><br>→ <span class="mono">${esc(t.orig)}</span><br><br>
+    Copy-only: anything already there is left exactly as it is — nothing is overwritten or deleted.`,
+   ()=>exStart(tc,{d:snapDest,oid:t.oid,rel:t.rel,target:into,name:t.dir?"":t.name},"restoring…"));}
+ function exCopy(tc){const t=exTarget();if(!t.oid)return;
+  pickFolder({overlay:true,start:"/media/nas",title:"Copy out of this restore point",
+   note:"Copying "+t.label+" as of "+dts(EX.snap.ts)+" — the files are added to the folder you pick. Nothing there is deleted and the repository is not touched.",
+   onPick:tgt=>confirmDlg("Copy here?",
+    `${esc(t.label)} → <span class="mono">${esc(tgt+(t.dir?"":"/"+t.name))}</span><br>Files that already exist are kept.`,
+    ()=>exStart(tc,{d:snapDest,oid:t.oid,rel:t.rel,target:tgt,name:t.dir?"":t.name},"copying…"))});}
+ function exDownload(){const t=exTarget();if(!t.oid)return;
+  if(t.dir&&t.size>KX_ZIP_MAX){toast("this folder holds "+fmtB(t.size)+" — too much for one download; use «Copy to…»");return;}
+  const u="/api/kopia/snap/file?d="+encodeURIComponent(snapDest)+"&oid="+encodeURIComponent(t.oid)
+   +"&rel="+encodeURIComponent(t.rel||"")+"&name="+encodeURIComponent(t.name)+(t.dir?"&zip=1":"");
+  const a=document.createElement("a");a.href=u;a.download=t.name+(t.dir?".zip":"");
+  document.body.appendChild(a);a.click();a.remove();
+  if(t.dir)toast("packing "+t.name+".zip — the download starts when the archive is ready");}
+
+ async function exDeep(tc){const q=(EX.q||"").trim();
+  if(q.length<2){toast("type at least 2 characters to search");return;}
+  EX.deep={q,loading:true,list:[]};exPaintRows(tc);
+  const r=await kP("/api/kopia/snap/find",{d:snapDest,oid:EX.snap.root,q});
+  if(!EX||!EX.deep||EX.deep.q!==q)return;
+  EX.deep={q,loading:false,list:(r&&r.ok)?(r.matches||[]):[],more:!!(r&&r.more),
+   err:(r&&r.ok)?"":((r&&r.log)||"search failed")};
+  exPaintRows(tc);}
+
+ /* ---- painters (each owns one container, so typing/scrolling elsewhere survives) ---- */
+ function exTreeHTML(rel,depth){
+  const box=EX.kids[rel];
+  if(!box)return `<div class="kpx-hint" style="padding-left:${10+depth*13}px">loading…</div>`;
+  return (box.entries||[]).filter(e=>e.dir).map(e=>{
+   const r2=rel?rel+"/"+e.name:e.name,op=!!EX.open[r2];
+   return `<div class="kpx-tn${EX.rel===r2?" on":""}" data-tn="${att(r2)}" style="--d:${depth}" title="${att(e.name)}">
+     <button class="kpx-tc${op?" op":""}" data-tc="${att(r2)}" title="${op?"Collapse":"Expand"}">${svg("chev",12)}</button>
+     ${fmIcon(e.name,"dir",14)}<span>${esc(e.name)}</span></div>`+(op?exTreeHTML(r2,depth+1):"");}).join("");}
+
+ function exPaintSide(tc){const el=tc.querySelector("#kxSide");if(!el)return;
+  const ps=exPaths();
+  el.innerHTML=`<div class="kpx-eyebrow">Backed-up folders</div>`+(ps.length?ps.map(g=>{
+   const nm=g.path.split("/").filter(Boolean).pop()||g.path,sel=g.path===EX.path;
+   return `<div class="kpx-srow${sel&&!EX.rel?" on":""}" data-p="${att(g.path)}" title="${att(g.path)}">
+     ${fmIcon(nm,"dir",15)}<span class="nm">${esc(nm)}</span><span class="ct">${g.list.length}</span></div>`
+    +(sel?exTreeHTML("",0):"");}).join(""):`<div class="kpx-hint">nothing here yet</div>`);
+  el.querySelectorAll("[data-p]").forEach(n=>n.onclick=()=>{
+   const g=ps.find(x=>x.path===n.dataset.p);if(!g)return;
+   if(g.path!==EX.path){EX.path=g.path;EX.snap=g.list[g.list.length-1];EX.kids={};EX.open={};}
+   EX.rel="";EX.sel=null;EX.deep=null;exPaintAll(tc);exLoad(tc);});
+  el.querySelectorAll("[data-tn]").forEach(n=>n.onclick=ev=>{
+   if(ev.target.closest("[data-tc]"))return;exGo(tc,n.dataset.tn);});
+  el.querySelectorAll("[data-tc]").forEach(b=>b.onclick=ev=>{ev.stopPropagation();exToggle(tc,b.dataset.tc);});}
+
+ function exPaintCrumbs(tc){const el=tc.querySelector("#kxCrumbs");if(!el)return;
+  const parts=(EX.rel||"").split("/").filter(Boolean);
+  const root=(EX.path||"").split("/").filter(Boolean).pop()||"/";
+  el.innerHTML=[`<a href="#" data-r="" class="${parts.length?"":"cur"}" title="${att(EX.path||"")}">${esc(root)}</a>`]
+   .concat(parts.map((p,i)=>`<i>${svg("chev",11)}</i><a href="#" class="${i===parts.length-1?"cur":""}" data-r="${att(parts.slice(0,i+1).join("/"))}">${esc(p)}</a>`)).join("");
+  el.querySelectorAll("[data-r]").forEach(a=>a.onclick=ev=>{ev.preventDefault();exGo(tc,a.dataset.r);});
+  const up=tc.querySelector("#kxUp");if(up)up.disabled=!EX.rel;}
+
+ function exSort(list){const s=EX.sort,k=EX.asc?1:-1;
+  return list.slice().sort((a,b)=>a.dir!==b.dir?(a.dir?-1:1):
+   s==="size"?k*((a.size||0)-(b.size||0)):
+   s==="mtime"?k*((a.mtime||0)-(b.mtime||0)):
+   s==="kind"?k*kxKind(a).localeCompare(kxKind(b)):
+   k*a.name.localeCompare(b.name,undefined,{numeric:true,sensitivity:"base"}));}
+
+ function exRowHTML(e,i,path){
+  return `<div class="kpx-r${EX.sel&&EX.sel.rel===e.rel?" on":""}" data-i="${i}">
+   <span class="kpx-n">${fmIcon(e.name,e.dir?"dir":"file",17)}
+    <span style="flex:1;min-width:0"><span class="nm" style="display:block" title="${att(e.name)}">${esc(e.name)}</span>${path?`<span class="pp" style="display:block">${esc(path)}</span>`:""}</span>
+    ${e.dir?`<button class="kpx-open" data-o="${i}" title="Open this folder">${svg("chev",14)}</button>`:""}</span>
+   <span class="kpx-num">${fmtB(e.size||0)}</span>
+   <span class="kpx-cell">${esc(kxKind(e))}</span>
+   <span class="kpx-cell">${esc(kxDate(e.mtime))}</span></div>`;}
+
+ function exPaintRows(tc){const box=tc.querySelector("#kxRows");if(!box)return;
+  const wire=list=>{EX._rows=list;
+   box.querySelectorAll("[data-i]").forEach(n=>{const e=list[+n.dataset.i];
+    n.onclick=ev=>{if(ev.target.closest("[data-o]"))return;EX.sel=e;exPaintRows(tc);exPaintActs(tc);};
+    n.ondblclick=()=>{if(e.dir)exGo(tc,e.rel);};});
+   box.querySelectorAll("[data-o]").forEach(b=>b.onclick=ev=>{ev.stopPropagation();exGo(tc,list[+b.dataset.o].rel);});};
+  if(!EX.snap){box.innerHTML="";return;}
+  if(EX.deep){const d=EX.deep;
+   if(d.loading){box.innerHTML=`<div class="pf-empty">searching the whole restore point…</div>`;return;}
+   if(d.err){box.innerHTML=`<div class="pf-empty">${esc(d.err)}</div>`;return;}
+   if(!d.list.length){box.innerHTML=`<div class="pf-empty">nothing named like “${esc(d.q)}” in this restore point</div>`;return;}
+   const list=d.list.map(e=>({name:e.name,dir:e.dir,size:e.size,mtime:e.mtime,oid:e.oid,rel:e.path}));
+   box.innerHTML=list.map((e,i)=>exRowHTML(e,i,e.rel)).join("")
+    +(d.more?`<div class="pf-empty" style="font-size:11px">showing the first ${list.length} matches — narrow the search</div>`:"");
+   wire(list);return;}
+  const cache=EX.kids[EX.rel||""];
+  if(!cache){box.innerHTML=`<div class="pf-empty">reading this restore point…</div>`;return;}
+  if(cache.err){box.innerHTML=`<div class="pf-empty">${esc(cache.err)}${EX.rel?` · <a href="#" id="kxTop">this folder is not in this restore point — go to the top</a>`:""}</div>`;
+   const t=box.querySelector("#kxTop");if(t)t.onclick=ev=>{ev.preventDefault();exGo(tc,"");};return;}
+  let list=cache.entries||[];
+  if(EX.q)list=list.filter(e=>e.name.toLowerCase().includes(EX.q.toLowerCase()));
+  list=exSort(list).map(e=>Object.assign({},e,{rel:(EX.rel?EX.rel+"/":"")+e.name}));
+  if(!list.length){box.innerHTML=`<div class="pf-empty">${EX.q?`nothing here matches “${esc(EX.q)}” — press Enter to search the whole restore point`:"this folder is empty"}</div>`;return;}
+  box.innerHTML=list.map((e,i)=>exRowHTML(e,i,"")).join("");
+  wire(list);}
+
+ function exPaintActs(tc){const has=!!(EX.snap&&EX.snap.root);
+  const t=has?exTarget():null;
+  const lbl=tc.querySelector("#kxSelLbl");
+  if(lbl){lbl.textContent=t?(EX.sel?t.name:"this folder"):"";
+   lbl.title=t?("Restore / Copy / Download act on "+t.label):"";}
+  ["#kxRestore","#kxCopy","#kxDl"].forEach(q=>{const b=tc.querySelector(q);if(b)b.disabled=!has;});
+  const h=tc.querySelector("#kxHead");if(h)h.querySelectorAll("[data-s]").forEach(s=>
+   s.dataset.s===EX.sort?s.classList.add("on"):s.classList.remove("on"));}
+
+ function exPaintTl(tc){const el=tc.querySelector("#kxTl");if(!el)return;
+  const g=exGroup();
+  if(!g||!EX.snap){el.style.display="none";el.innerHTML="";return;}
+  el.style.display="";
+  if(EXCAL)EXCAL();                                  // a floating calendar must not outlive its timeline
+  const list=g.list,idx=list.findIndex(s=>s.id===EX.snap.id);let lastD="";
+  el.innerHTML=`<button class="iconbtn" id="kxPrev" title="Older restore point"${idx<=0?" disabled":""}><span class="kpx-rot">${svg("chev",15)}</span></button>
+   <div class="kpx-track" id="kxTrack"><div class="kpx-inner">${list.map((s,i)=>{
+    // first point of a day is labelled with the date, the rest of that day with the time
+    const d=new Date(s.ts*1000),dk=d.toDateString();
+    const lbl=dk!==lastD?d.toLocaleDateString(undefined,{month:"short",day:"numeric"}):d.toTimeString().slice(0,5);
+    lastD=dk;
+    return `<button class="kpx-tick${i===idx?" on":""}" data-t="${att(s.id)}" title="${att(dts(s.ts)+" · "+s.files+" files · "+fmtB(s.bytes))}"><i></i><span>${esc(lbl)}</span></button>`;}).join("")}</div></div>
+   <button class="iconbtn" id="kxNext" title="Newer restore point"${idx<0||idx>=list.length-1?" disabled":""}>${svg("chev",15)}</button>
+   <button class="btn sm" id="kxCal" title="Jump to a date">${svg("calendar",13)} ${esc(dts(EX.snap.ts))}</button>
+   <button class="iconbtn" id="kxDel" title="Delete this restore point">${svg("trash",14)}</button>`;
+  el.querySelectorAll("[data-t]").forEach(b=>b.onclick=()=>exSelSnap(tc,list.find(s=>s.id===b.dataset.t)));
+  el.querySelector("#kxPrev").onclick=()=>exSelSnap(tc,list[idx-1]);
+  el.querySelector("#kxNext").onclick=()=>exSelSnap(tc,list[idx+1]);
+  el.querySelector("#kxCal").onclick=ev=>exCal(tc,ev.currentTarget);
+  el.querySelector("#kxDel").onclick=()=>{const s=EX.snap;
+   confirmDlg("Delete this restore point?",
+    `${esc(dts(s.ts))} · <span class="mono">${esc(s.path)}</span><br>This point in time disappears from the repository. Files on the source are not touched, and the other restore points stay.`,
+    async()=>{const r=await kP("/api/kopia/snap/delete",{d:snapDest,id:s.id});
+     if(!(r&&r.ok)){toast((r&&r.log)||"failed");return;}
+     EX.snaps=(EX.snaps||[]).filter(x=>x.id!==s.id);
+     const g2=exGroup();
+     if(g2&&g2.list.length){EX.snap=g2.list[g2.list.length-1];}else{EX.snap=null;EX.path=null;
+      const ps=exPaths();if(ps.length){EX.path=ps[0].path;EX.snap=ps[0].list[ps[0].list.length-1];}}
+     EX.kids={};EX.sel=null;exPaintAll(tc);exLoad(tc);},1);};
+  const on=el.querySelector(".kpx-tick.on"),tr=el.querySelector("#kxTrack");
+  if(on&&tr)tr.scrollLeft=Math.max(0,on.offsetLeft-tr.clientWidth/2+on.offsetWidth/2);}
+
+ let EXCAL=null;                                     // the open calendar popover's closer, if any
+ function exCal(tc,btn){const g=exGroup();if(!g||!EX.snap)return;
+  if(EXCAL)EXCAL();
+  const key=d=>d.getFullYear()+"-"+d.getMonth()+"-"+d.getDate(),by={};
+  g.list.forEach(s=>{const k=key(new Date(s.ts*1000));(by[k]=by[k]||[]).push(s);});
+  const sd=new Date(EX.snap.ts*1000);let cur=new Date(sd.getFullYear(),sd.getMonth(),1);
+  const pop=document.createElement("div");pop.className="kpx-cal";document.body.appendChild(pop);
+  const close=()=>{pop.remove();EXCAL=null;
+   document.removeEventListener("mousedown",out,true);document.removeEventListener("keydown",esc2,true);};
+  EXCAL=close;
+  const out=ev=>{if(!pop.contains(ev.target))close();};
+  const esc2=ev=>{if(ev.key==="Escape"){ev.stopPropagation();close();}};
+  const draw=()=>{const y=cur.getFullYear(),m=cur.getMonth();
+   const first=new Date(y,m,1),lead=(first.getDay()+6)%7,days=new Date(y,m+1,0).getDate();
+   let cells="";for(let i=0;i<lead;i++)cells+="<button disabled></button>";
+   for(let d=1;d<=days;d++){const k=y+"-"+m+"-"+d,has=by[k];
+    cells+=`<button class="${has?"has":""}${has&&has.some(s=>s.id===EX.snap.id)?" on":""}"${has?` data-d="${k}" title="${att(has.length+" restore point"+(has.length>1?"s":""))}"`:" disabled"}>${d}</button>`;}
+   pop.innerHTML=`<div class="hd"><button class="iconbtn" data-mv="-1"><span class="kpx-rot">${svg("chev",14)}</span></button>
+     <b>${esc(first.toLocaleDateString(undefined,{month:"long",year:"numeric"}))}</b>
+     <button class="iconbtn" data-mv="1">${svg("chev",14)}</button></div>
+    <div class="g">${DOWS.map(d=>`<b>${d[0]}</b>`).join("")}${cells}</div>
+    <div class="ft"><span>${g.list.length} restore point${g.list.length>1?"s":""}</span><button class="kp-quiet" data-latest>Jump to the latest</button></div>`;
+   pop.querySelectorAll("[data-mv]").forEach(b=>b.onclick=()=>{cur=new Date(cur.getFullYear(),cur.getMonth()+(+b.dataset.mv),1);draw();});
+   pop.querySelectorAll("[data-d]").forEach(b=>b.onclick=()=>{const l=by[b.dataset.d];close();exSelSnap(tc,l[l.length-1]);});
+   pop.querySelector("[data-latest]").onclick=()=>{close();exSelSnap(tc,g.list[g.list.length-1]);};};
+  draw();
+  const r=btn.getBoundingClientRect();
+  pop.style.left=Math.max(8,Math.min(window.innerWidth-pop.offsetWidth-8,r.right-pop.offsetWidth))+"px";
+  pop.style.top=(r.top-pop.offsetHeight-8>8?r.top-pop.offsetHeight-8:Math.min(r.bottom+8,window.innerHeight-pop.offsetHeight-8))+"px";
+  setTimeout(()=>{document.addEventListener("mousedown",out,true);document.addEventListener("keydown",esc2,true);},0);}
+
+ function exPaintRst(tc){const el=tc.querySelector("#kxRst");if(!el)return;
+  const rst=D.restore||{};
+  el.innerHTML=rst.running?`<div class="rs-card" style="margin:0 0 4px"><div class="rs-ch">${svg("download",16)}<b>Restoring…</b><span style="flex:1"></span><button class="btn sm dng" id="kRstStop">Stop</button></div>
+    <div class="bar" style="margin-top:6px"><i class="pg" style="width:${Math.min(100,rst.pct||2)}%"></i></div>
+    <div class="rs-cl mono" style="font-size:11px;margin-top:4px">→ ${esc(rst.target||"")}${rst.pct?` · ${Math.round(rst.pct)}%`:""}</div></div>`
+   :(rst.result&&rst.done&&Date.now()/1000-rst.done<180
+     ?`<div class="rs-cl">${dot(rst.result==="ok"?"good":rst.result==="stopped"?"warn":"danger")} last restore: ${esc(rst.result)}${rst.target?` → <span class="mono">${esc(rst.target)}</span>`:""}</div>`:"");
+  const b=el.querySelector("#kRstStop");
+  if(b)b.onclick=async()=>{await kP("/api/kopia/snap/restore/cancel");await refresh();};}
+
+ function exPaintAll(tc){exPaintSide(tc);exPaintCrumbs(tc);exPaintRows(tc);exPaintTl(tc);
+  exPaintActs(tc);exPaintRst(tc);
+  const st=tc.querySelector("#kxState");
+  if(st)st.innerHTML=EX.err?`<div class="pf-empty" style="color:var(--win-danger,var(--danger))">${esc(EX.err)}</div>`:"";}
+
  function tabSnaps(tc){
   const dests=(D.dests||[]).filter(x=>x.connected||usedBy("dst",x.id).length);
   if(!snapDest||!dests.find(x=>x.id===snapDest))snapDest=dests[0]&&dests[0].id;
   const cur=dests.find(x=>x.id===snapDest);
-  const rst=D.restore||{};
-  const rstrip=rst.running?`<div class="rs-card" style="margin-bottom:10px"><div class="rs-ch">${svg("download",16)}<b>Restoring…</b><span style="flex:1"></span><button class="btn sm dng" id="kRstStop">Stop</button></div>
-    <div class="bar" style="margin-top:6px"><i class="pg" style="width:${Math.min(100,rst.pct||2)}%"></i></div>
-    <div class="rs-cl mono" style="font-size:11px;margin-top:4px">→ ${esc(rst.target||"")}${rst.pct?` · ${Math.round(rst.pct)}%`:""}</div></div>`
-   :(rst.result&&rst.done&&Date.now()/1000-rst.done<120?`<div class="rs-cl" style="margin-bottom:8px">${dot(rst.result==="ok"?"good":rst.result==="stopped"?"warn":"danger")} last restore: ${esc(rst.result)}${rst.target?` → <span class="mono">${esc(rst.target)}</span>`:""}</div>`:"");
   const bkChips=(D.backups||[]).filter(b=>b.dest===snapDest||b.dest2===snapDest);
-  if(snapBk&&!bkChips.some(b=>b.id===snapBk))snapBk="";   // filtered backup no longer here → clear
-  tc.innerHTML=`<div style="display:flex;align-items:center;gap:10px"><h3 class="set-title" style="margin:0">Snapshots</h3><span style="flex:1"></span>
-    ${cur?`<button class="btn sm" id="kMnt">${cur.mounted?`${svg("eject",13)} Unmount`:`${svg("hdd",13)} Mount as folder`}</button>`:""}</div>
-   <p class="set-sub" style="margin-bottom:10px">Every restore point in the selected repository. Click one to browse it, restore files or delete it${cur?`; «Mount as folder» shows the whole history in Files`:""}.</p>
-   ${cur&&cur.mounted?`<div class="kp-pick-ctx" style="margin-bottom:10px">${svg("kopia",14)} mounted read-only — see <b>Snapshots</b> in the Files sidebar, or at <span class="mono">/mnt/kopia/${esc(cur.id)}</span></div>`:""}
-   <div style="display:flex;gap:22px;flex-wrap:wrap;margin:0 0 12px">
-    <div><div class="kp-filt">Repository</div>
-     <div style="display:flex;gap:6px;flex-wrap:wrap">${dests.map(x=>`<button class="fm-chip${x.id===snapDest?" kp-on":""}" data-c="${att(x.id)}" style="cursor:pointer">${esc(x.name)}</button>`).join("")||"no destinations yet"}</div></div>
-    ${bkChips.length>1?`<div><div class="kp-filt">Show only backup</div>
-     <div style="display:flex;gap:6px;flex-wrap:wrap">${bkChips.map(b=>`<button class="fm-chip${snapBk===b.id?" kp-on":""}" data-bkf="${att(b.id)}" style="cursor:pointer">${esc(b.name||b.id)}</button>`).join("")}</div></div>`:""}
-   </div>
-   ${rstrip}
-   <div id="kSnList" class="rs-cl">${snapDest?"loading…":""}</div>`;
+  if(snapBk&&!bkChips.some(b=>b.id===snapBk))snapBk="";   // filtered backup no longer here
+  if(!EX||EX.dest!==snapDest||EX.bk!==snapBk)exReset();
+  if(!dests.length){tc.innerHTML=kpEmpty("clock","No repositories yet",
+    "A destination holds the restore points. Add one on the Destinations tab, run a backup, and every point in time shows up here.","");return;}
+  const chips=x=>`<button class="fm-chip${x.on?" kp-on":""}" data-${x.k}="${att(x.id)}" style="cursor:pointer">${esc(x.name)}</button>`;
+  tc.innerHTML=`<div class="kpx">
+   <div class="kpx-top">
+    <div><div class="kp-filt">Repository</div><div style="display:flex;gap:6px;flex-wrap:wrap">${
+      dests.map(x=>chips({k:"c",id:x.id,name:x.name,on:x.id===snapDest})).join("")}</div></div>
+    ${bkChips.length>1?`<div><div class="kp-filt">Show only backup</div><div style="display:flex;gap:6px;flex-wrap:wrap">${
+      bkChips.map(b=>chips({k:"bkf",id:b.id,name:b.name||b.id,on:snapBk===b.id})).join("")}</div></div>`:""}
+    <span style="flex:1"></span>
+    ${cur?`<button class="btn sm" id="kMnt" title="${cur.mounted?"Unmount the read-only snapshot folder":"See every restore point as a read-only folder in Files"}">${
+      cur.mounted?`${svg("eject",13)} Unmount`:`${svg("hdd",13)} Mount as folder`}</button>`:""}</div>
+   ${cur&&cur.mounted?`<div class="kp-pick-ctx">${svg("kopia",14)} mounted read-only — open <b>Snapshots</b> in the Files sidebar, or <span class="mono">/mnt/kopia/${esc(cur.id)}</span></div>`:""}
+   <div id="kxRst"></div>
+   <div id="kxState"></div>
+   <div class="kpx-body">
+    <div class="kpx-side" id="kxSide"></div>
+    <div class="kpx-main">
+     <div class="kpx-bar">
+      <button class="iconbtn" id="kxUp" title="Up one folder"><span class="kpx-rot">${svg("chev",15)}</span></button>
+      <div class="kpx-crumbs" id="kxCrumbs"></div>
+      <div class="kp-search kpx-q"><span>${svg("search",13)}</span>
+       <input id="kxQ" placeholder="Filter — Enter searches all" title="Filters this folder; press Enter to search the whole restore point"></div>
+      <span class="kpx-sel" id="kxSelLbl"></span>
+      <div class="kpx-acts">
+       <button class="btn sm" id="kxDl" title="Download to this computer (a folder comes as a zip)">${svg("download",13)} Download</button>
+       <button class="btn sm" id="kxCopy" title="Copy to another folder on the NAS">${svg("copy",13)} Copy to…</button>
+       <button class="btn sm pri" id="kxRestore" title="Put it back where it came from">${svg("refresh",13)} Restore</button></div></div>
+     <div class="kpx-list">
+      <div class="kpx-h" id="kxHead"><span data-s="name">Name</span><span data-s="size" class="num">Size</span><span data-s="kind">Type</span><span data-s="mtime">Modified</span></div>
+      <div id="kxRows"><div class="pf-empty">loading…</div></div></div></div></div>
+   <div class="kpx-tlbar" id="kxTl"></div></div>`;
   tc.querySelectorAll("[data-c]").forEach(b=>b.onclick=()=>{snapDest=b.dataset.c;snapBk="";tabSnaps(tc);});
   tc.querySelectorAll("[data-bkf]").forEach(b=>b.onclick=()=>{snapBk=snapBk===b.dataset.bkf?"":b.dataset.bkf;tabSnaps(tc);});
-  const rs=tc.querySelector("#kRstStop");if(rs)rs.onclick=async()=>{await kP("/api/kopia/snap/restore/cancel");await refresh();};
   const mb=tc.querySelector("#kMnt");
   if(mb)mb.onclick=async()=>{mb.disabled=true;
    const r=await kP(cur.mounted?"/api/kopia/unmount":"/api/kopia/mount",{id:cur.id});
    if(!(r&&r.ok))toast((r&&r.log)||"failed");
    try{const fm=OPEN&&OPEN.__files;if(fm&&fm._kopiaMounts)fm._kopiaMounts();}catch(e){}
    await refresh();};
-  if(!snapDest)return;
-  const want=snapDest;
-  api("/api/kopia/snapshots?d="+want).then(r=>{
-   if(snapDest!==want)return;                        // user switched chips while we were loading
-   const box=tc.querySelector("#kSnList");if(!box)return;
-   if(!(r&&r.ok)){box.innerHTML=`<span style="color:var(--danger)">${esc((r&&r.log)||"failed to read")}</span>`;return;}
-   let snaps=r.snapshots||[];
-   if(snapBk)snaps=snaps.filter(s=>s.backup===snapBk);
-   if(!snaps.length){box.innerHTML=snapBk?kpEmpty("clock","No snapshots from this backup here","This repository holds no restore points from the selected backup yet.",""):kpEmpty("clock","No snapshots yet","Run a backup that targets this destination and its restore points will appear here.","");return;}
-   // size delta vs the PREVIOUS snapshot of the same source path (list is newest-first)
-   const prevSz={};
-   for(let i=snaps.length-1;i>=0;i--){const s=snaps[i];s._d=prevSz[s.path]==null?null:s.bytes-prevSz[s.path];prevSz[s.path]=s.bytes;}
-   let day="";
-   box.innerHTML=snaps.map((s,i)=>{const dk=dayKey(s.ts),head=dk!==day?`<div class="fm-gh" style="margin-top:8px">${dk}</div>`:"";day=dk;
-    const bk=(D.backups||[]).find(b=>b.id===s.backup);
-    return head+`<div class="kp-row" data-br="${i}" title="Open this restore point">
-     <span style="width:44px;color:var(--mut)">${new Date(s.ts*1000).toLocaleTimeString().slice(0,5)}</span>
-     <span class="mono" style="flex:1;overflow:hidden;text-overflow:ellipsis">${esc(s.path)}</span>
-     ${bk?`<span class="fm-chip" style="font-size:10.5px">${esc(bk.name||s.backup)}</span>`:""}
-     <span style="width:170px;text-align:right;color:var(--mut)">${s.files} files · ${fmtB(s.bytes)}${s._d?` <span style="color:var(--${s._d>0?"good":"dim"})">${s._d>0?"+":"−"}${fmtB(Math.abs(s._d))}</span>`:""}</span>
-     ${s.failed?`<span style="color:var(--warn)" title="${s.failed} files failed">⚠</span>`:""}${s.incomplete?`<span class="fm-chip" style="font-size:10.5px">partial</span>`:""}
-     <span style="color:var(--dim);flex:none">${svg("chev",14)}</span></div>`;}).join("");
-   box.querySelectorAll("[data-br]").forEach(r2=>r2.onclick=()=>kpSnapBrowse(snapDest,snaps[+r2.dataset.br],()=>tabSnaps(tc)));});}
+  tc.querySelector("#kxUp").onclick=()=>{if(EX.rel)exGo(tc,EX.rel.split("/").slice(0,-1).join("/"));};
+  const qi=tc.querySelector("#kxQ");
+  qi.oninput=()=>{EX.q=qi.value;if(EX.deep)EX.deep=null;exPaintRows(tc);};
+  qi.onkeydown=ev=>{if(ev.key==="Enter"){ev.preventDefault();exDeep(tc);}
+   if(ev.key==="Escape"&&EX.q){ev.stopPropagation();qi.value="";EX.q="";EX.deep=null;exPaintRows(tc);}};
+  tc.querySelectorAll("#kxHead [data-s]").forEach(s=>s.onclick=()=>{
+   const k=s.dataset.s;if(EX.sort===k)EX.asc=!EX.asc;else{EX.sort=k;EX.asc=k!=="mtime";}
+   exPaintRows(tc);exPaintActs(tc);});
+  tc.querySelector("#kxRestore").onclick=()=>exRestore(tc);
+  tc.querySelector("#kxCopy").onclick=()=>exCopy(tc);
+  tc.querySelector("#kxDl").onclick=()=>exDownload();
+  exPaintRst(tc);
+  if(EX.snaps===null){EX.snaps=null;exBoot(tc);}
+  else{exPaintAll(tc);exLoad(tc);}
+  if(EX.snaps&&!EX.snaps.length&&!EX.err){
+   tc.querySelector("#kxState").innerHTML=kpEmpty("clock",snapBk?"No restore points from this backup here":"No restore points yet",
+    snapBk?"This repository holds nothing from the selected backup yet.":"Run a backup that writes into this repository and every point in time shows up here.","");}}
 
  /* ---------- History tab ---------- */
  let histMode="day";

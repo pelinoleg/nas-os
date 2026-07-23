@@ -10252,6 +10252,22 @@ def kp_backup_save(d):
         return {"ok": False, "log": "spare destination is invalid"}
     d2mode = d.get("dest2_mode") if d.get("dest2_mode") in ("sync", "independent") else "sync"
     kid0 = str(d.get("id") or "")
+    # One destination belongs to ONE backup. Kopia itself would happily share a
+    # repository, but then two backups fight over the same retention and one
+    # backup's «what's in this repo» stops being answerable — and a synced spare
+    # would delete the other's snapshots outright.
+    for b in cfg["backups"]:
+        if b["id"] == kid0:
+            continue
+        for used, what in ((b.get("dest"), "destination"), (b.get("dest2"), "spare")):
+            if not used:
+                continue
+            if used == dst["id"]:
+                return {"ok": False, "log": "«%s» already uses that repository as its %s — "
+                        "each destination belongs to one backup" % (b.get("name") or b["id"], what)}
+            if d2 and used == d2:
+                return {"ok": False, "log": "«%s» already uses that repository as its %s — "
+                        "pick another spare" % (b.get("name") or b["id"], what)}
     for b in cfg["backups"]:
         if b["id"] != kid0 and b.get("dest2") == dst["id"] and b.get("dest2_mode", "sync") == "sync":
             return {"ok": False, "log": "«%s» mirrors that destination as its spare — pick another "
@@ -10604,36 +10620,133 @@ def kp_history():
     return h if isinstance(h, list) else []
 
 # ---- snapshot browse / restore / mount / delete -----------------------------
-_KP_OID_RE = re.compile(r"^k?[0-9a-f]{16,64}$")
-# "-rw-r--r--   618 2026-07-13 13:24:51 CEST 381a5b…   icon-16.png"
-_KP_LS_RE = re.compile(r"^(\S+)\s+(\d+)\s+(\S+\s+\S+\s+\S+)\s+(k?[0-9a-f]{16,64})\s{2,}(.+)$")
+# Object ids come in three shapes: a bare content id, one with a single-letter kind
+# prefix ('k' = directory), and an INDIRECT id ('Ix…') for every object kopia had to
+# split into parts — i.e. every file above a few megabytes. The old regex accepted
+# only 'k?[0-9a-f]+', so large files were silently dropped from the browser.
+_KP_OID_RE = re.compile(r"^(?:I(?:\d+,)?)?[a-z]?[0-9a-f]{16,64}$")
+# recursive listing rows: "-rw-r--r--  618 2026-07-13 13:24:51 CEST 381a5b… icon-16.png"
+# (the object-id column is padded to a fixed width, so one space can be all there is)
+_KP_LS_RE = re.compile(r"^([dlrwxsStT-]{10})\s+(\d+)\s+(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)\s+"
+                       r"(\S+)\s+(\S+)\s+(.+)$")
+_KP_DIR_MAGIC = b'{"stream":"kopia:directory"'
+KP_DIR_MAX = 64 << 20     # cap on one directory manifest (~half a million entries)
+KP_ZIP_MAX = 2 << 30      # a folder download is materialised as a temp zip first
 
-def kp_snap_ls(destid, oid):
-    """One directory level of a snapshot. Navigation is by OBJECT ID (each dir
-    row carries its own) — no path strings to escape or mis-join."""
+def _kp_relpath(rel):
+    """Snapshot-relative path → 'a/b'. kopia addresses subtrees as '<oid>/a/b', so
+    this is all the escaping needed — '..' is rejected outright."""
+    parts = [p for p in str(rel or "").replace("\\", "/").split("/") if p not in ("", ".")]
+    for p in parts:
+        if p == ".." or "\n" in p or "\x00" in p:
+            raise ValueError("bad path")
+    return "/".join(parts)
+
+def _kp_obj_arg(oid, rel=""):
+    """'<oid>' or '<oid>/sub/dir' — validated. Raises ValueError."""
+    oid = str(oid or "").strip()
+    if not _KP_OID_RE.match(oid):
+        raise ValueError("bad object id")
+    rel = _kp_relpath(rel)
+    return oid + ("/" + rel if rel else "")
+
+def _kp_iso(s):
+    """kopia manifest timestamp ('2026-07-23T16:30:54.5Z' / '…+02:00') → epoch."""
+    s = str(s or "")
+    try:
+        base = int(calendar.timegm(time.strptime(s[:19], "%Y-%m-%dT%H:%M:%S")))
+    except (ValueError, OverflowError):
+        return 0
+    m = re.search(r"([+-])(\d\d):(\d\d)$", s)
+    if m:   # written with an explicit offset → back to UTC
+        off = (int(m.group(2)) * 3600 + int(m.group(3)) * 60) * (1 if m.group(1) == "+" else -1)
+        base -= off
+    return base
+
+def _kp_show_dir(destid, arg, timeout=180):
+    """Read one directory manifest. `kopia show` on a directory object prints JSON:
+    every entry with its own object id, size, mtime — and for a subdirectory the
+    RECURSIVE size and file count, which plain `ls` does not give. Read is capped and
+    the stream is checked to actually BE a directory (a file oid would dump content)."""
+    cmd = [_kopia_bin(), "--config-file", _kp_cfg_file(destid),
+           "--log-dir", os.path.join(_kp_cache_dir(destid), "logs"), "show", arg]
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                env=_kp_env())
+    except (OSError, subprocess.SubprocessError) as e:
+        return {"ok": False, "log": str(e)[:200]}
+    buf, bad, deadline = b"", "", time.monotonic() + timeout
+    try:
+        while True:
+            chunk = proc.stdout.read(262144)
+            if not chunk:
+                break
+            buf += chunk
+            if not _KP_DIR_MAGIC.startswith(buf[:len(_KP_DIR_MAGIC)]):
+                bad = "not a folder"
+                break
+            if len(buf) > KP_DIR_MAX:
+                bad = "folder listing is too large to open"
+                break
+            if time.monotonic() > deadline:
+                bad = "timed out reading the folder"
+                break
+    except OSError as e:
+        bad = str(e)[:200]
+    err = b""
+    try:
+        proc.stdout.close()
+        if bad:
+            proc.kill()
+        err = proc.stderr.read() or b""
+        proc.stderr.close()
+        proc.wait(timeout=15)
+    except (OSError, subprocess.SubprocessError):
+        pass
+    if bad:
+        return {"ok": False, "log": bad}
+    if proc.returncode not in (0, None) and not buf:
+        tail = (err.decode("utf-8", "replace").strip().splitlines() or ["command failed"])[-1]
+        return {"ok": False, "log": tail[:240]}
+    try:
+        return {"ok": True, "dir": json.loads(buf.decode("utf-8", "replace"))}
+    except ValueError:
+        return {"ok": False, "log": "unreadable folder listing"}
+
+def _kp_entry(e):
+    """One manifest entry → the shape the explorer draws."""
+    typ = str(e.get("type") or "f")
+    summ = e.get("summ") or {}
+    isdir = typ == "d"
+    return {"name": str(e.get("name") or ""), "dir": isdir, "link": typ == "s",
+            "oid": str(e.get("obj") or ""),
+            "size": int((summ.get("size") if isdir else e.get("size")) or 0),
+            "files": int(summ.get("files") or 0) if isdir else 0,
+            "mtime": _kp_iso(e.get("mtime"))}
+
+def kp_snap_ls(destid, oid, rel=""):
+    """One directory level of a snapshot, addressed as <snapshot root>/<rel>."""
     cfg = kp_load()
     dest = _kp_find(cfg["dests"], str(destid or ""))
     if not dest:
         return {"ok": False, "log": "no such destination"}
-    oid = str(oid or "").strip()
-    if not _KP_OID_RE.match(oid):
-        return {"ok": False, "log": "bad object id"}
+    try:
+        arg = _kp_obj_arg(oid, rel)
+    except ValueError as e:
+        return {"ok": False, "log": str(e)}
     c = _kp_ensure_connected(dest)
     if not c["ok"]:
         return c
-    r = _kp(destid, ["ls", "-l", oid], timeout=120)
+    r = _kp_show_dir(destid, arg)
     if not r["ok"]:
-        return {"ok": False, "log": _kp_err_tail(r)}
-    entries = []
-    for line in (r["out"] or "").splitlines():
-        m = _KP_LS_RE.match(line.rstrip())
-        if not m:
-            continue
-        entries.append({"name": m.group(5).strip().rstrip("/"),
-                        "dir": m.group(1).startswith("d"),
-                        "size": int(m.group(2)), "oid": m.group(4)})
+        return r
+    d = r["dir"] if isinstance(r["dir"], dict) else {}
+    entries = [_kp_entry(e) for e in (d.get("entries") or []) if isinstance(e, dict)]
+    entries = [e for e in entries if e["oid"] and e["name"]]
     entries.sort(key=lambda x: (not x["dir"], x["name"].lower()))
-    return {"ok": True, "entries": entries}
+    summ = d.get("summary") or {}
+    return {"ok": True, "entries": entries, "rel": _kp_relpath(rel),
+            "total": {"size": int(summ.get("size") or 0), "files": int(summ.get("files") or 0)}}
 
 def kp_snap_find(destid, oid, query, cap=200):
     """Search a snapshot's whole tree for a filename substring — «which snapshot
@@ -10670,13 +10783,18 @@ def kp_snap_find(destid, oid, query, cap=200):
                 more = True
                 break
             mm = _KP_LS_RE.match(line.rstrip())
-            if not mm:
+            if not mm or not _KP_OID_RE.match(mm.group(5)):
                 continue
-            name = mm.group(5).strip()
+            name = mm.group(6).strip()
             if q not in name.lower():
                 continue
-            out.append({"path": name, "name": name.rstrip("/").split("/")[-1],
-                        "dir": mm.group(1).startswith("d"), "size": int(mm.group(2)), "oid": mm.group(4)})
+            try:
+                mt = int(time.mktime(time.strptime(mm.group(3), "%Y-%m-%d %H:%M:%S")))
+            except (ValueError, OverflowError):
+                mt = 0   # `ls` prints local time; the manifest is the authority elsewhere
+            out.append({"path": name.rstrip("/"), "name": name.rstrip("/").split("/")[-1],
+                        "dir": mm.group(1).startswith("d"), "size": int(mm.group(2)),
+                        "oid": mm.group(5), "mtime": mt})
             if len(out) >= cap:
                 more = True
                 break
@@ -10688,6 +10806,76 @@ def kp_snap_find(destid, oid, query, cap=200):
         except (OSError, subprocess.SubprocessError):
             pass
     return {"ok": True, "matches": out, "more": more}
+
+def _kp_dl_name(name, fallback="download"):
+    """Filename for Content-Disposition — basename only, control chars stripped."""
+    n = os.path.basename(str(name or "").replace("\\", "/")).strip()
+    n = re.sub(r'[\x00-\x1f"\\]', "", n)
+    return n[:180] or fallback
+
+def kp_dl_open(destid, oid, rel=""):
+    """Start streaming ONE FILE out of a snapshot: `kopia show` writes its exact bytes
+    to stdout, so nothing is staged on disk. Returns the live process; the caller pipes
+    it to the socket and reaps it."""
+    cfg = kp_load()
+    dest = _kp_find(cfg["dests"], str(destid or ""))
+    if not dest:
+        return {"ok": False, "log": "no such destination"}
+    try:
+        arg = _kp_obj_arg(oid, rel)
+    except ValueError as e:
+        return {"ok": False, "log": str(e)}
+    c = _kp_ensure_connected(dest)
+    if not c["ok"]:
+        return c
+    cmd = [_kopia_bin(), "--config-file", _kp_cfg_file(destid),
+           "--log-dir", os.path.join(_kp_cache_dir(destid), "logs"), "show", arg]
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                env=_kp_env())
+    except (OSError, subprocess.SubprocessError) as e:
+        return {"ok": False, "log": str(e)[:200]}
+    return {"ok": True, "proc": proc}
+
+def kp_dl_zip(destid, oid, rel=""):
+    """Pack a snapshot FOLDER into a temp zip — kopia writes the archive itself when the
+    restore target ends in .zip. Capped by the folder's recorded size (the archive is a
+    real file on disk) and by free space; the caller removes it after sending."""
+    cfg = kp_load()
+    dest = _kp_find(cfg["dests"], str(destid or ""))
+    if not dest:
+        return {"ok": False, "log": "no such destination"}
+    try:
+        arg = _kp_obj_arg(oid, rel)
+    except ValueError as e:
+        return {"ok": False, "log": str(e)}
+    c = _kp_ensure_connected(dest)
+    if not c["ok"]:
+        return c
+    r = _kp_show_dir(destid, arg)
+    if not r["ok"]:
+        return r
+    size = int(((r["dir"] or {}).get("summary") or {}).get("size") or 0)
+    if size > KP_ZIP_MAX:
+        return {"ok": False, "log": "this folder is %s — too big to download as one file. "
+                "Use «Copy to…» to restore it onto the NAS instead." % fmt_bytes(size)}
+    tmpdir = os.path.join(_kp_cache_dir(destid), "dl")
+    try:
+        os.makedirs(tmpdir, exist_ok=True)
+        st = os.statvfs(tmpdir)
+        if st.f_bavail * st.f_frsize < size + (64 << 20):
+            return {"ok": False, "log": "not enough free space to build the archive"}
+    except OSError as e:
+        return {"ok": False, "log": str(e)[:200]}
+    path = os.path.join(tmpdir, "dl-%d-%d.zip" % (os.getpid(), int(time.time())))
+    rr = _kp(destid, ["restore", arg, path, "--parallel", "4"], timeout=3600)
+    if not rr["ok"] or not os.path.isfile(path):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        return {"ok": False, "log": _kp_err_tail(rr)}
+    return {"ok": True, "path": path}
 
 def kp_snap_delete(destid, snapid):
     cfg = kp_load()
@@ -10726,23 +10914,43 @@ def kp_restore_status():
         pass
     return dict(st, ok=True, log=lines[-100:])
 
-def kp_restore_start(destid, oid, target):
-    """Restore one snapshot subtree (by object id) INTO a local folder.
-    Copy-only: the repository is never written, the target only gains files."""
+def _kp_obj_ok(arg):
+    """True for '<oid>' and '<oid>/sub/path' — what the restore driver accepts."""
+    a = str(arg or "").split("/", 1)
+    try:
+        _kp_obj_arg(a[0], a[1] if len(a) > 1 else "")
+        return True
+    except ValueError:
+        return False
+
+def kp_restore_start(destid, oid, target, rel="", name=""):
+    """Restore one snapshot subtree (by object id, optionally plus a path inside it)
+    INTO a local folder. Copy-only: the repository is never written, the target only
+    gains files."""
     cfg = kp_load()
     dest = _kp_find(cfg["dests"], str(destid or ""))
     if not dest:
         return {"ok": False, "log": "no such destination"}
-    oid = str(oid or "").strip()
-    if not _KP_OID_RE.match(oid):
-        return {"ok": False, "log": "bad object id"}
+    try:
+        oid = _kp_obj_arg(oid, rel)
+    except ValueError as e:
+        return {"ok": False, "log": str(e)}
     target = os.path.realpath(str(target or "").strip())
     if not re.match(r"^/(mnt|media|srv|home)/", target + "/"):
         return {"ok": False, "log": "restore target must be under /mnt, /media, /srv or /home"}
+    # Restoring a FILE object needs a file path as the target — kopia refuses to write
+    # one onto a directory ("is a directory"). `name` turns the chosen folder into that
+    # path; without it the target is a folder and gets the subtree's contents.
+    leaf = os.path.basename(str(name or "").replace("\\", "/")).strip()
+    if leaf in (".", ".."):
+        return {"ok": False, "log": "bad file name"}
+    parent = target
+    if leaf:
+        target = os.path.join(parent, leaf)
     try:
-        os.makedirs(target, exist_ok=True)
+        os.makedirs(parent, exist_ok=True)
     except OSError as e:
-        return {"ok": False, "log": "cannot create %s: %s" % (target, e)}
+        return {"ok": False, "log": "cannot create %s: %s" % (parent, e)}
     with _NbStartLock():
         if kp_restore_state().get("running"):
             return {"ok": False, "log": "a restore is already running"}
@@ -10795,7 +11003,7 @@ def _kp_restore_cli(destid, oid, target):
     TTY-only, same as snapshot create)."""
     cfg = kp_load()
     dest = _kp_find(cfg["dests"], destid)
-    if not dest or not _KP_OID_RE.match(str(oid or "")) or not target:
+    if not dest or not _kp_obj_ok(oid) or not target:
         return
     st = {"running": True, "started": int(time.time()), "dest": destid, "oid": oid,
           "target": target, "pct": 0, "result": None, "pid": os.getpid()}
@@ -19574,6 +19782,83 @@ class H(BaseHTTPRequestHandler):
             except OSError:
                 pass
 
+    def _send_kopia_file(self, q):
+        """Download straight out of a snapshot: one file is streamed from `kopia show`
+        (nothing staged on disk), a folder is packed into a temp zip first. The server
+        speaks HTTP/1.0, so a close-delimited body without Content-Length is fine."""
+        destid = (q.get("d") or [""])[0]
+        oid = (q.get("oid") or [""])[0]
+        rel = (q.get("rel") or [""])[0]
+        name = _kp_dl_name((q.get("name") or [""])[0], "snapshot-file")
+
+        def fail(msg):
+            body = ("Download failed: %s\n" % msg).encode("utf-8", "replace")
+            self.send_response(400)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            try:
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+
+        if (q.get("zip") or [""])[0] == "1":
+            r = kp_dl_zip(destid, oid, rel)
+            if not r.get("ok"):
+                fail(r.get("log") or "failed"); return
+            path = r["path"]
+            if not name.endswith(".zip"):
+                name += ".zip"
+            try:
+                size = os.path.getsize(path)
+                self.send_response(200)
+                self.send_header("Content-Type", "application/zip")
+                self.send_header("Content-Disposition", 'attachment; filename="%s"' % name)
+                self.send_header("Content-Length", str(size))
+                self.end_headers()
+                with open(path, "rb") as f:
+                    while True:
+                        chunk = f.read(262144)
+                        if not chunk:
+                            break
+                        self.wfile.write(chunk)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            except OSError:
+                pass
+            finally:
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+            return
+        r = kp_dl_open(destid, oid, rel)
+        if not r.get("ok"):
+            fail(r.get("log") or "failed"); return
+        proc = r["proc"]
+        self.send_response(200)
+        self.send_header("Content-Type", mimetypes.guess_type(name)[0] or "application/octet-stream")
+        self.send_header("Content-Disposition", 'attachment; filename="%s"' % name)
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        try:
+            while True:
+                chunk = proc.stdout.read(262144)
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+        except (BrokenPipeError, ConnectionResetError):
+            pass   # browser cancelled — kill the reader below
+        except OSError:
+            pass
+        finally:
+            try:
+                proc.stdout.close()
+                proc.kill()
+                proc.wait(timeout=10)
+            except (OSError, subprocess.SubprocessError):
+                pass
+
     def _ws_terminal(self):
         key = self.headers.get("Sec-WebSocket-Key")
         if not key:
@@ -20022,6 +20307,9 @@ class H(BaseHTTPRequestHandler):
                 self._json(kp_snapshots((q.get("d") or [""])[0]))
             elif p == "/api/kopia/restore/status":
                 self._json(kp_restore_status())
+            elif p == "/api/kopia/snap/file":
+                # browser download (navigation, not fetch) — file stream or folder zip
+                self._send_kopia_file(q); return
             elif p == "/api/kopia/mounts":
                 # FM sidebar: mounted snapshot repositories (cheap — ismount only)
                 cfg = kp_load()
@@ -20637,7 +20925,7 @@ class H(BaseHTTPRequestHandler):
                 self._json(kp_run_cancel(str(self._body().get("id") or "")))
             elif p == "/api/kopia/snap/ls":
                 b = self._body()
-                self._json(kp_snap_ls(str(b.get("d") or ""), b.get("oid", "")))
+                self._json(kp_snap_ls(str(b.get("d") or ""), b.get("oid", ""), b.get("rel", "")))
             elif p == "/api/kopia/snap/find":
                 b = self._body()
                 self._json(kp_snap_find(str(b.get("d") or ""), b.get("oid", ""), b.get("q", "")))
@@ -20646,7 +20934,9 @@ class H(BaseHTTPRequestHandler):
                 self._json(kp_snap_delete(str(b.get("d") or ""), b.get("id", "")))
             elif p == "/api/kopia/snap/restore/start":
                 b = self._body()
-                self._json(kp_restore_start(str(b.get("d") or ""), b.get("oid", ""), b.get("target", "")))
+                self._json(kp_restore_start(str(b.get("d") or ""), b.get("oid", ""),
+                                            b.get("target", ""), b.get("rel", ""),
+                                            b.get("name", "")))
             elif p == "/api/kopia/snap/restore/cancel":
                 self._json(kp_restore_cancel())
             elif p == "/api/kopia/mount":
