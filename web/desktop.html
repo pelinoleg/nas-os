@@ -3702,7 +3702,7 @@ const INTERNAL=[
  {id:"__files",name:"Files",color:"linear-gradient(135deg,#FFC24B,#F0A128)",ic:"folderc",bare:1,fn:()=>winFiles()},
  {id:"__duscan",name:"Disk usage",color:"linear-gradient(135deg,#33BE86,#2a9d6e)",ic:"donut",bare:1,fn:()=>winDiskUsage()},
  {id:"__fsw",name:"File history",color:"linear-gradient(135deg,#7c6cf2,#5847d6)",ic:"histf",bare:1,fn:()=>winFsHistory()},
- {id:"__nasbak",name:"Sync",color:"linear-gradient(135deg,#2f9d70,#1f7d78)",ic:"backup",bare:1,fn:()=>winBackup()},
+ {id:"__nasbak",name:"Mirror",color:"linear-gradient(135deg,#2f9d70,#1f7d78)",ic:"backup",bare:1,fn:()=>winBackup()},
  {id:"__rclone",name:"Rclone",color:"linear-gradient(135deg,#3aa0f0,#5a6cf0)",ic:"rclone",bare:1,fn:()=>winRclone()},
  {id:"__kopia",name:"Kopia",color:"linear-gradient(135deg,#3b82f6,#1d4ed8)",ic:"kopia",bare:1,fn:()=>winKopia()},
  {id:"__resil",name:"Resilience",color:"linear-gradient(135deg,#F08C4B,#D9603B)",ic:"lifef",bare:1,fn:()=>winResil()},
@@ -3763,7 +3763,7 @@ async function nbDockMenu(x,y){
  const bp=(path,obj)=>api(path,{method:"POST",body:JSON.stringify(obj||{})});
  const r=await api("/api/backup/config").catch(()=>null);
  const profs=(r&&r.profiles)||[];
- const it=[{label:"Open Sync",ic:svg("sync",16),act:()=>winBackup()}];
+ const it=[{label:"Open Mirror",ic:svg("sync",16),act:()=>winBackup()}];
  // one profile — menu as before; several — each on its own line, otherwise it's unclear
  // which backup exactly is being started
  const one=profs.length<2;
@@ -8642,7 +8642,7 @@ function winRclone(initTab){openWin("__rclone","Rclone",(body,win)=>{
  render();(async()=>{await loadCfg();render();})();   // shell first (nav + loading…), then data
 },{w:900,h:620});}
 
-function winBackup(){openWin("__nasbak","Sync",(body,win)=>{
+function winBackup(){openWin("__nasbak","Mirror",(body,win)=>{
  body.style.display="flex";body.style.flexDirection="column";body.style.padding="0";
  let tab="overview",CFG={},JOBS=[],PROFS=[],nbFootMo=null,wizStep=0,wizOn=null,RCLONE=null;
  // window opened → show the profile that matters now: a running run (or one waiting
