@@ -9737,6 +9737,8 @@ def kp_load():
         d[k] = [x for x in d[k] if isinstance(x, dict) and _KP_ID_RE.match(str(x.get("id") or ""))]
     return d
 
+_KP_CFG_LOCK = threading.Lock()   # serialize load-modify-save of kopia.json across panel threads
+
 def kp_save(d):
     os.makedirs(os.path.dirname(KOPIA_CONF), exist_ok=True)
     tmp = KOPIA_CONF + ".tmp.%d" % os.getpid()
@@ -9855,8 +9857,12 @@ def _kp_ensure_password(supplied=""):
     if cfg.get("password"):
         return cfg["password"]
     pw = (str(supplied or "").strip() or ("nas-" + secrets.token_hex(4)))[:128]
-    cfg["password"] = pw
-    kp_save(cfg)
+    with _KP_CFG_LOCK:
+        cfg = kp_load()
+        if cfg.get("password"):
+            return cfg["password"]
+        cfg["password"] = pw
+        kp_save(cfg)
     return pw
 
 def kp_dest_create(d, connect_only=False):
@@ -9874,6 +9880,11 @@ def kp_dest_create(d, connect_only=False):
     cfg = kp_load()
     _kp_ensure_password(d.get("password"))
     if nd["kind"] == "fs":
+        # only the LEAF may be created: if the parent (the mounted disk) is gone,
+        # makedirs would silently rebuild the tree on the SD rootfs
+        parent = os.path.dirname(nd["path"].rstrip("/"))
+        if not os.path.isdir(parent):
+            return {"ok": False, "log": "parent folder %s does not exist — is the disk mounted?" % parent}
         try:
             os.makedirs(nd["path"], exist_ok=True)
         except OSError as e:
@@ -9889,9 +9900,16 @@ def kp_dest_create(d, connect_only=False):
                 return {"ok": False, "log": "this remote path is already a destination (%s)" % (x.get("name") or x["id"])}
     nd["id"] = _kp_new_id({x["id"] for x in cfg["dests"]})
     if d.get("no_init"):
-        cfg = kp_load()
-        cfg["dests"].append(nd)
-        kp_save(cfg)
+        # a sync spare must start EMPTY: sync-to --delete would otherwise chew
+        # through whatever already lives there (user folder, foreign repo)
+        if nd["kind"] == "fs" and os.path.isdir(nd["path"]) and os.listdir(nd["path"]) \
+                and not glob.glob(os.path.join(nd["path"], "kopia.repository*")):
+            return {"ok": False, "log": "the folder is not empty — a spare must start empty "
+                                        "(or already be a kopia repository)"}
+        with _KP_CFG_LOCK:
+            cfg = kp_load()
+            cfg["dests"].append(nd)
+            kp_save(cfg)
         return {"ok": True, "dest": nd}
     os.makedirs(KOPIA_CFG_DIR, exist_ok=True)
     try:
@@ -9911,9 +9929,10 @@ def kp_dest_create(d, connect_only=False):
         except OSError:
             pass
         return {"ok": False, "log": _kp_err_tail(r)}
-    cfg = kp_load()
-    cfg["dests"].append(nd)
-    kp_save(cfg)
+    with _KP_CFG_LOCK:
+        cfg = kp_load()
+        cfg["dests"].append(nd)
+        kp_save(cfg)
     return {"ok": True, "dest": nd}
 
 def _kp_ensure_connected(dest):
@@ -9998,13 +10017,19 @@ def kp_dest_forget(destid):
             if b.get("dest") == destid or b.get("dest2") == destid]
     if used:
         return {"ok": False, "log": "in use by: " + ", ".join(used)}
+    if _kp_dest_busy(destid, cfg):
+        return {"ok": False, "log": "destination is busy (run or maintenance in progress)"}
+    if os.path.ismount(_kp_mnt_mp(destid)):
+        kp_mount_stop(destid)
     _kp(destid, ["repository", "disconnect"], timeout=30)
     try:
         os.remove(_kp_cfg_file(destid))
     except OSError:
         pass
-    cfg["dests"] = [x for x in cfg["dests"] if x["id"] != destid]
-    kp_save(cfg)
+    with _KP_CFG_LOCK:
+        cfg = kp_load()
+        cfg["dests"] = [x for x in cfg["dests"] if x["id"] != destid]
+        kp_save(cfg)
     return {"ok": True}
 
 # ---- sources + backups (pure config CRUD) -----------------------------------
@@ -10029,16 +10054,18 @@ def kp_source_save(d):
         if e and "\n" not in e and len(e) < 200:
             excludes.append(e)
     kid = str(d.get("id") or "")
-    if kid:
-        src = _kp_find(cfg["sources"], kid)
-        if not src:
-            return {"ok": False, "log": "no such source"}
-        src.update({"name": name, "folders": folders, "excludes": excludes})
-    else:
-        src = {"id": _kp_new_id({x["id"] for x in cfg["sources"]}),
-               "name": name, "folders": folders, "excludes": excludes}
-        cfg["sources"].append(src)
-    kp_save(cfg)
+    with _KP_CFG_LOCK:
+        cfg = kp_load()
+        if kid:
+            src = _kp_find(cfg["sources"], kid)
+            if not src:
+                return {"ok": False, "log": "no such source"}
+            src.update({"name": name, "folders": folders, "excludes": excludes})
+        else:
+            src = {"id": _kp_new_id({x["id"] for x in cfg["sources"]}),
+                   "name": name, "folders": folders, "excludes": excludes}
+            cfg["sources"].append(src)
+        kp_save(cfg)
     return {"ok": True, "source": src}
 
 def kp_source_delete(kid):
@@ -10048,8 +10075,10 @@ def kp_source_delete(kid):
     used = [b.get("name") or b["id"] for b in cfg["backups"] if b.get("source") == kid]
     if used:
         return {"ok": False, "log": "in use by: " + ", ".join(used)}
-    cfg["sources"] = [x for x in cfg["sources"] if x["id"] != kid]
-    kp_save(cfg)
+    with _KP_CFG_LOCK:
+        cfg = kp_load()
+        cfg["sources"] = [x for x in cfg["sources"] if x["id"] != kid]
+        kp_save(cfg)
     return {"ok": True}
 
 def _kp_norm_retention(d):
@@ -10059,6 +10088,8 @@ def _kp_norm_retention(d):
             out[k] = max(0, min(9999, int((d or {}).get(k, out[k]))))
         except (TypeError, ValueError):
             pass
+    if not any(out.values()):
+        out["latest"] = 1        # all-zero would make kopia delete EVERY snapshot on the next run
     return out
 
 def _kp_norm_schedule(d):
@@ -10085,6 +10116,20 @@ def kp_backup_save(d):
     d2 = str(d.get("dest2") or "")
     if d2 and (d2 == dst["id"] or not _kp_find(cfg["dests"], d2)):
         return {"ok": False, "log": "spare destination is invalid"}
+    d2mode = d.get("dest2_mode") if d.get("dest2_mode") in ("sync", "independent") else "sync"
+    if d2 and d2mode == "sync":
+        # sync-to --delete makes the spare an exact replica of THIS backup's primary
+        # repo — pointing it at a repository other backups rely on would wipe them
+        kid0 = str(d.get("id") or "")
+        for b in cfg["backups"]:
+            if b["id"] == kid0:
+                continue
+            if b.get("dest") == d2:
+                return {"ok": False, "log": "«%s» uses that destination as its PRIMARY — "
+                        "a synced spare would overwrite it" % (b.get("name") or b["id"])}
+            if b.get("dest2") == d2 and b.get("dest") != dst["id"]:
+                return {"ok": False, "log": "«%s» already syncs a different repository onto that "
+                        "spare — they would overwrite each other" % (b.get("name") or b["id"])}
     nb = {"name": name, "source": src["id"], "dest": dst["id"], "dest2": d2,
           "dest2_mode": d.get("dest2_mode") if d.get("dest2_mode") in ("sync", "independent") else "sync",
           "retention": _kp_norm_retention(d.get("retention")),
@@ -10095,29 +10140,33 @@ def kp_backup_save(d):
           "notify_err": bool(d.get("notify_err", True)),
           "enabled": bool(d.get("enabled", True))}
     kid = str(d.get("id") or "")
-    if kid:
-        cur = _kp_find(cfg["backups"], kid)
-        if not cur:
-            return {"ok": False, "log": "no such backup"}
-        for k in ("setup_started", "setup_done"):
-            nb[k] = bool(d.get(k, cur.get(k)))
-        cur.update(nb)
-        bk = cur
-    else:
-        nb["id"] = _kp_new_id({x["id"] for x in cfg["backups"]})
-        nb["setup_started"] = bool(d.get("setup_started"))
-        nb["setup_done"] = bool(d.get("setup_done"))
-        cfg["backups"].append(nb)
-        bk = nb
-    kp_save(cfg)
+    with _KP_CFG_LOCK:
+        cfg = kp_load()
+        if kid:
+            cur = _kp_find(cfg["backups"], kid)
+            if not cur:
+                return {"ok": False, "log": "no such backup"}
+            for k in ("setup_started", "setup_done"):
+                nb[k] = bool(d.get(k, cur.get(k)))
+            cur.update(nb)
+            bk = cur
+        else:
+            nb["id"] = _kp_new_id({x["id"] for x in cfg["backups"]})
+            nb["setup_started"] = bool(d.get("setup_started"))
+            nb["setup_done"] = bool(d.get("setup_done"))
+            cfg["backups"].append(nb)
+            bk = nb
+        kp_save(cfg)
     return {"ok": True, "backup": bk}
 
 def kp_backup_delete(kid):
     cfg = kp_load()
     if not _kp_find(cfg["backups"], kid):
         return {"ok": False, "log": "no such backup"}
-    cfg["backups"] = [x for x in cfg["backups"] if x["id"] != kid]
-    kp_save(cfg)
+    with _KP_CFG_LOCK:
+        cfg = kp_load()
+        cfg["backups"] = [x for x in cfg["backups"] if x["id"] != kid]
+        kp_save(cfg)
     return {"ok": True}
 
 def kp_status():
@@ -10321,6 +10370,11 @@ def kp_run_start(bid):
                     and ({b.get("dest"), b.get("dest2")} & mine):
                 return {"ok": False, "log": "destination is busy — «%s» is running"
                         % (b.get("name") or b["id"])}
+        for did in mine:                       # ...and never concurrently with maintenance/verify
+            for u in ("nas-kopia-maint-%s" % did, "nas-kopia-vfy-%s" % did):
+                if _systemd_active(u + ".service"):
+                    return {"ok": False, "log": "destination is busy — maintenance/verification "
+                                                "is running on it"}
         missing = [f for f in src["folders"] if not os.path.isdir(f)]
         if len(missing) == len(src["folders"]):
             return {"ok": False, "log": "source folders do not exist: " + ", ".join(missing[:3])}
@@ -10360,26 +10414,50 @@ def kp_run_start(bid):
 def kp_run_cancel(bid):
     if not _KP_ID_RE.match(str(bid or "")):
         return {"ok": False, "log": "bad id"}
+    if not _json_load_strict(_kp_runf(bid, "json"), {}).get("running"):
+        return {"ok": True}                    # nothing to cancel — don't relabel a finished run
     try:
         with open(_kp_runf(bid, "cancel"), "w") as f:
             f.write("1")
     except OSError:
         pass
+    # the driver polls the cancel file every 0.5s and then finalizes (history entry,
+    # log tail) — give it a moment before systemd kills the whole cgroup
+    for _ in range(6):
+        time.sleep(0.5)
+        if not _json_load_strict(_kp_runf(bid, "json"), {}).get("running"):
+            return {"ok": True}
     try:
         subprocess.run(["systemctl", "stop", _kp_unit(bid)], capture_output=True, timeout=10)
     except (OSError, subprocess.SubprocessError):
         pass
     st = _json_load_strict(_kp_runf(bid, "json"), {})
-    st.update(running=False, stopped=True, result="stopped", done=int(time.time()))
-    _json_save(_kp_runf(bid, "json"), st)
+    if st.get("running"):
+        st.update(running=False, stopped=True, result="stopped", done=int(time.time()))
+        _json_save(_kp_runf(bid, "json"), st)
     return {"ok": True}
 
 def _kp_hist_add(entry):
-    h = _json_load_strict(KP_HIST_FILE, [])
-    if not isinstance(h, list):
-        h = []
-    h.append(entry)
-    _json_save(KP_HIST_FILE, h[-100:])
+    # drivers are separate processes: flock the append or a near-simultaneous
+    # finish of two backups silently drops one history entry
+    try:
+        os.makedirs(NAS_CONFIG, exist_ok=True)
+        lockf = open(KP_HIST_FILE + ".lock", "a")
+        fcntl.flock(lockf, fcntl.LOCK_EX)
+    except OSError:
+        lockf = None
+    try:
+        h = _json_load_strict(KP_HIST_FILE, [])
+        if not isinstance(h, list):
+            h = []
+        h.append(entry)
+        _json_save(KP_HIST_FILE, h[-200:])
+    finally:
+        if lockf:
+            try:
+                fcntl.flock(lockf, fcntl.LOCK_UN); lockf.close()
+            except OSError:
+                pass
 
 def kp_history():
     h = _json_load_strict(KP_HIST_FILE, [])
@@ -10457,8 +10535,6 @@ def kp_restore_status():
 def kp_restore_start(destid, oid, target):
     """Restore one snapshot subtree (by object id) INTO a local folder.
     Copy-only: the repository is never written, the target only gains files."""
-    if kp_restore_state().get("running"):
-        return {"ok": False, "log": "a restore is already running"}
     cfg = kp_load()
     dest = _kp_find(cfg["dests"], str(destid or ""))
     if not dest:
@@ -10473,12 +10549,18 @@ def kp_restore_start(destid, oid, target):
         os.makedirs(target, exist_ok=True)
     except OSError as e:
         return {"ok": False, "log": "cannot create %s: %s" % (target, e)}
-    try:
-        os.remove(KP_RESTORE_CANCEL)
-    except OSError:
-        pass
-    _json_save(KP_RESTORE_STATE, {"running": True, "started": int(time.time()),
-                                  "dest": destid, "oid": oid, "target": target, "result": None})
+    with _NbStartLock():
+        if kp_restore_state().get("running"):
+            return {"ok": False, "log": "a restore is already running"}
+        try:
+            os.remove(KP_RESTORE_CANCEL)
+        except OSError:
+            pass
+        _json_save(KP_RESTORE_STATE, {"running": True, "started": int(time.time()),
+                                      "dest": destid, "oid": oid, "target": target, "result": None})
+        return _kp_restore_spawn(destid, oid, target)
+
+def _kp_restore_spawn(destid, oid, target):
     cmd = ["systemd-run", "--collect", "--quiet", "--unit", KP_RESTORE_UNIT,
            "--setenv=SUDO_USER=" + TARGET_USER, "--setenv=HOME=" + HOME,
            "--setenv=KPR2_DEST", "--setenv=KPR2_OID", "--setenv=KPR2_TARGET",
@@ -10763,9 +10845,12 @@ def _kp_health(cfg, now):
             notify_event("kp_err", "kp_dest:" + b["id"], "Kopia: destination missing",
                          "«%s»: destination folder %s does not exist — is the disk plugged in?"
                          % (b.get("name") or b["id"], dst.get("path") or ""), cooldown=86400)
-        ok_runs = [h.get("ts") or 0 for h in hist
-                   if h.get("backup") == b["id"] and h.get("result") in ("ok", "warn")]
-        last = max(ok_runs) if ok_runs else 0
+        st_ = kp_run_state(b["id"])
+        last = (st_.get("done") or 0) if st_.get("result") in ("ok", "warn") else 0
+        if not last:
+            ok_runs = [h.get("ts") or 0 for h in hist
+                       if h.get("backup") == b["id"] and h.get("result") in ("ok", "warn")]
+            last = max(ok_runs) if ok_runs else 0
         if last and now - last > thr * 86400:
             notify_event("kp_stale", "kp_stale:" + b["id"], "Kopia: backup is stale",
                          "«%s»: newest snapshot is %d days old (threshold %d)"
@@ -10787,8 +10872,9 @@ def _kopia_tick():
     dirty = False
     # 1) schedules — one shot per minute-slot (same pattern as _nb_sched_tick)
     slot = time.strftime("%Y-%m-%d %H:%M", time.localtime(now))
-    if slot != _kp_last_sched:
+    if slot != _kp_last_sched and slot != stt.get("slot"):
         _kp_last_sched = slot
+        stt["slot"] = slot; dirty = True
         hhmm = time.strftime("%H:%M", time.localtime(now))
         wday = time.localtime(now).tm_wday
         for b in cfg["backups"]:
@@ -10827,7 +10913,10 @@ def _kopia_tick():
                         kp_run_start(b["id"])
     # 3) weekly maintenance / monthly 1% verify — primary destinations only
     #    (a sync spare is a byte replica: it inherits the main repo's maintenance)
-    prim = {b.get("dest") for b in cfg["backups"] if b.get("enabled", True)} - {None, ""}
+    prim = ({b.get("dest") for b in cfg["backups"] if b.get("enabled", True)} |
+            {b.get("dest2") for b in cfg["backups"]
+             if b.get("enabled", True) and b.get("dest2") and b.get("dest2_mode") == "independent"}) \
+        - {None, ""}
     mm, vv = stt.setdefault("maint", {}), stt.setdefault("verify", {})
     for destid in sorted(prim):
         dst = _kp_find(cfg["dests"], destid)
@@ -10877,7 +10966,7 @@ def _kp_drill(destid, manifests, w):
     an unchanged source = silent corruption → kp_err."""
     import random
     rng = random.Random()
-    tmpd = os.path.join(NAS_CONFIG, "kopia-drill")
+    tmpd = os.path.join(NAS_CONFIG, "kopia-drill.%d" % os.getpid())
     checked = matched = 0
     rot = []
     try:
@@ -10981,12 +11070,21 @@ def _kp_snap_cli(bid):
     snap_bytes = snap_files = failed_files = 0
     try:
         upd(force=True)
-        folders = [f for f in src.get("folders") or [] if os.path.isdir(f)]
-        skipped = [f for f in src.get("folders") or [] if f not in folders]
+        folders, skipped = [], []
+        for f in src.get("folders") or []:
+            try:
+                # empty dir = almost always an unmounted mountpoint; snapshotting it as
+                # "0 files, ok" would let retention age the REAL snapshots out (rsync-app lesson)
+                if os.path.isdir(f) and os.listdir(f):
+                    folders.append(f)
+                else:
+                    skipped.append(f)
+            except OSError:
+                skipped.append(f)
         for f in skipped:
-            w("skipping missing folder: %s" % f)
+            w("skipping missing or EMPTY folder: %s" % f)
         if not folders:
-            result, err = "error", "no source folders exist"
+            result, err = "error", "no source folder exists (or they are all empty — disk not mounted?)"
             return
         # §9.2: wait out a running rsync backup that overlaps our folders (torn copy
         # otherwise). Poll up to 2h, then give up loudly.
@@ -11112,14 +11210,28 @@ def _kp_snap_cli(bid):
             result = result if result != "ok" else "warn"
             err = (err + "; " if err else "") + "missing folders skipped: " + ", ".join(skipped[:3])
         # ---- spare copy (3-2-1) ----
-        if d2 and bk.get("dest2_mode", "sync") == "sync":
-            upd(phase="replicate", pct=0, cur="", force=True)
-            t_sync = time.time()
-            if d2.get("kind") == "fs":
+        d2_err = ""
+        if d2 and d2.get("kind") == "fs":
+            # only the LEAF may be created: with the spare disk unplugged, makedirs
+            # would rebuild the tree on the SD rootfs and replicate gigabytes onto it
+            parent = os.path.dirname((d2.get("path") or "").rstrip("/"))
+            if not os.path.isdir(parent):
+                d2_err = "spare folder %s is gone — is the spare disk plugged in?" % parent
+            else:
                 try:
                     os.makedirs(d2["path"], exist_ok=True)
-                except OSError:
-                    pass
+                    sv = os.statvfs(d2["path"])
+                    if sv.f_bavail * sv.f_frsize < 200 * 1024 * 1024:
+                        d2_err = "spare destination has less than 200 MB free"
+                except OSError as e:
+                    d2_err = "spare destination not accessible: %s" % e
+        if d2 and d2_err:
+            result = "warn" if result == "ok" else result
+            err = (err + "; " if err else "") + "main copy OK, spare copy failed: " + d2_err
+            w("spare skipped: " + d2_err)
+        elif d2 and bk.get("dest2_mode", "sync") == "sync":
+            upd(phase="replicate", pct=0, cur="", force=True)
+            t_sync = time.time()
             w("replicating repository to spare «%s»…" % (d2.get("name") or d2["id"]))
             rs = _kp(dst["id"], _kp_sync_args(d2), timeout=6 * 3600)
             phases["replicate"] = {"dur": int(time.time() - t_sync)}

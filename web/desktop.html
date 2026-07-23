@@ -7432,7 +7432,9 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
  const DOWS=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
  const removable=d=>d&&d.kind==="fs"&&/^\/media\//.test(d.path||"");
  const kP=(path,bodyObj)=>api(path,{method:"POST",body:JSON.stringify(bodyObj||{})});
- const load=async()=>{D=await api("/api/kopia/status");if(!D.backups)D={installed:false,sources:[],dests:[],backups:[],password:"",rclone_remotes:[]};};
+ const load=async()=>{const d=await api("/api/kopia/status");
+  if(d&&!d._mock&&d.backups!==undefined)D=d;
+  else if(!D)D={installed:false,offline:true,sources:[],dests:[],backups:[],password:"",rclone_remotes:[]};};
 
  const render=()=>{
   body.innerHTML=`<div class="nbmain"><div class="set-nav">${CATS.map(c=>`<button data-t="${c.id}" class="${tab===c.id?"on":""}">${svg(c.ic,17)}<span>${c.name}</span></button>`).join("")}</div><div class="set-main"><div class="set-pane" id="tc"></div></div></div>`;
@@ -7440,6 +7442,7 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
   paint();};
  const paint=()=>{const tc=body.querySelector("#tc");if(!tc)return;
   if(!D){tc.innerHTML='<div class="set-load">loading…</div>';return;}
+  if(D.offline){tc.innerHTML='<div class="set-load">no connection to the panel — retrying…</div>';return;}
   if(!D.installed){paintInstall(tc);return;}
   ({overview:tabOverview,sources:tabSources,dests:tabDests,snaps:tabSnaps,hist:tabHist,opts:tabOpts}[tab]||tabOverview)(tc);};
  const refresh=async()=>{await load();paint();};
@@ -7449,10 +7452,26 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
   if(!body.isConnected){clearInterval(t);return;}
   if(wiz)return;                                     // don't repaint under the wizard
   const d=await api("/api/kopia/status");
-  if(!d||d._mock)return;
+  if(!d||d._mock||d.backups===undefined)return;
   const j=JSON.stringify(d);
-  if(j!==lastJson){lastJson=j;D=d;paint();}
+  if(j===lastJson)return;
+  lastJson=j;const wasOffline=D&&D.offline;D=d;
+  if(wasOffline){paint();return;}
+  if(detail){updDetailLive();return;}                // keep the settings form intact
+  if(tab==="overview"){paint();return;}
+  if(tab==="snaps"){                                 // only the restore strip is live here —
+   const rj=JSON.stringify(D.restore||{});           // don't yank the list for run-pct ticks
+   if(rj!==lastRestoreJson){lastRestoreJson=rj;paint();}}
  },3000);
+ let lastRestoreJson="";
+ let detailWasRunning=false;
+ const updDetailLive=()=>{const b=(D.backups||[]).find(x=>x.id===detail);
+  if(!b){detail=null;paint();return;}
+  const r=b.run||{};
+  if(detailWasRunning&&!r.running){paint();return;}  // run finished → full repaint (history, verdict)
+  if(!r.running)return;
+  const tc=body.querySelector("#tc"),pr=tc&&tc.querySelector("#kdProg");
+  if(pr)pr.innerHTML=kdProgHTML(r);};
 
  function paintInstall(tc){
   tc.innerHTML=`<h3 class="set-title">Kopia</h3>
@@ -7464,15 +7483,16 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
    if(r&&r.installed){await refresh();}else{b.disabled=false;tc.querySelector("#kpInstS").textContent=(r&&r.log)||"install failed";}};}
 
  /* ---------- shared pickers / dialogs ---------- */
- function kpPick(start,onPick){const s=document.getElementById("scrim");let cur=start||"",busy=false;
-  s.innerHTML=`<div class="dialog nb-pick"><h3>${svg("folder",16)} Choose a folder</h3>
+ function kpPick(start,onPick){let cur=start||"",busy=false;
+  // own overlay ABOVE #scrim: dialogs that open the picker keep their markup and state
+  const s=el(`<div class="scrim show" style="z-index:600"><div class="dialog nb-pick"><h3>${svg("folder",16)} Choose a folder</h3>
    <div class="pf-bar"><button class="iconbtn" id="kpUp" title="Up">${svg("arrowup",15)}</button><input id="kpPath" value="${att(cur)}" placeholder="/"></div>
    <div class="pf-list" id="kpList"></div>
-   <div class="pf-foot"><span class="pf-cur" id="kpCur"></span><button class="btn" id="kpX">Cancel</button><button class="btn pri" id="kpO">Choose this folder</button></div></div>`;
-  s.classList.add("show");
+   <div class="pf-foot"><span class="pf-cur" id="kpCur"></span><button class="btn" id="kpX">Cancel</button><button class="btn pri" id="kpO">Choose this folder</button></div></div></div>`);
+  document.body.appendChild(s);
   const $=q=>s.querySelector(q);
-  $("#kpX").onclick=()=>s.classList.remove("show");
-  $("#kpO").onclick=()=>{s.classList.remove("show");onPick("/"+($("#kpPath").value||cur).trim().replace(/^\/+|\/+$/g,""));};
+  $("#kpX").onclick=()=>s.remove();
+  $("#kpO").onclick=()=>{s.remove();onPick("/"+($("#kpPath").value||cur).trim().replace(/^\/+|\/+$/g,""));};
   $("#kpUp").onclick=()=>{if(cur){cur=cur.split("/").slice(0,-1).join("/");draw();}};
   $("#kpPath").onkeydown=ev=>{if(ev.key==="Enter"){ev.preventDefault();cur=$("#kpPath").value.trim().replace(/^\/+|\/+$/g,"");draw();}};
   const draw=async()=>{if(busy)return;busy=true;
@@ -7499,7 +7519,7 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
   const drawF=()=>{$("#ksF").innerHTML=folders.map((f,i)=>`<div style="display:flex;align-items:center;gap:8px;padding:3px 0"><span class="mono" style="flex:1;font-size:12px;overflow:hidden;text-overflow:ellipsis">${esc(f)}</span><button class="iconbtn" data-i="${i}" title="Remove">${svg("x",13)}</button></div>`).join("")||`<div style="color:var(--mut);font-size:12px">no folders yet</div>`;
    $("#ksF").querySelectorAll("[data-i]").forEach(b=>b.onclick=()=>{folders.splice(+b.dataset.i,1);drawF();});};
   drawF();
-  $("#ksAdd").onclick=()=>kpPick(folders[0]?folders[0].replace(/^\//,""):"",p=>{if(p&&!folders.includes(p))folders.push(p);s.classList.add("show");drawF();});
+  $("#ksAdd").onclick=()=>kpPick(folders[0]?folders[0].replace(/^\//,""):"",p=>{if(p&&!folders.includes(p))folders.push(p);drawF();});
   $("#ksX").onclick=()=>s.classList.remove("show");
   $("#ksO").onclick=async()=>{
    const r=await kP("/api/kopia/source/save",{id:src&&src.id||"",name:$("#ksN").value,
@@ -7527,7 +7547,7 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
   $("#kdKind").querySelectorAll("button").forEach(b=>b.onclick=()=>{kind=b.dataset.v;
    $("#kdKind").querySelectorAll("button").forEach(x=>x.classList.toggle("on",x===b));
    $("#kdFs").style.display=kind==="fs"?"":"none";$("#kdRc").style.display=kind==="rclone"?"":"none";});
-  $("#kdBr").onclick=()=>kpPick("media/nas",p=>{path=p;s.classList.add("show");
+  $("#kdBr").onclick=()=>kpPick("media/nas",p=>{path=p;
    const pe=$("#kdPath");if(pe){pe.textContent=p;pe.style.color="var(--text)";}});
   $("#kdX").onclick=()=>s.classList.remove("show");
   $("#kdO").onclick=async()=>{
@@ -7588,13 +7608,15 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
    compression:true,usb_trigger:false,notify_ok:false,notify_err:true,enabled:true}};paint();};}
 
  /* ---------- backup detail ---------- */
+ const kdProgHTML=r=>`<div style="margin:10px 0"><div style="font-size:12px;color:var(--mut);margin-bottom:4px">${esc(r.phase==="replicate"?"replicating the repository to the spare…":r.phase==="drill"?"restore drill — spot-checking files…":r.phase==="waiting"?("waiting for backup «"+(r.waiting_for||"")+"» to finish"):r.phase==="policy"?"applying policies…":"snapshotting…")}${r.pct?` · ${Math.round(r.pct)}%${r.eta?" · "+esc(r.eta)+" left":""}`:""}</div>
+    <div class="bar"><i class="pg" style="width:${Math.min(100,r.pct||2)}%"></i></div>
+    <div style="font-size:11.5px;color:var(--mut);margin-top:4px">${r.uploaded_bytes?`uploaded ${fmtB(r.uploaded_bytes)} · hashed ${fmtB(r.hashed_bytes||0)}`:""}</div></div>`;
  function paintDetail(tc){
   const b=(D.backups||[]).find(x=>x.id===detail);
   if(!b){detail=null;tabOverview(tc);return;}
   const st=bkState(b),r=b.run||{},src=srcOf(b),d1=dstOf(b.dest),d2=dstOf(b.dest2);
-  const runrow=r.running?`<div style="margin:10px 0"><div style="font-size:12px;color:var(--mut);margin-bottom:4px">${esc(r.phase==="replicate"?"replicating the repository to the spare…":r.phase==="waiting"?("waiting for backup «"+(r.waiting_for||"")+"» to finish"):r.phase==="policy"?"applying policies…":"snapshotting…")}${r.pct?` · ${Math.round(r.pct)}%${r.eta?" · "+esc(r.eta)+" left":""}`:""}</div>
-    <div class="bar"><i class="pg" style="width:${Math.min(100,r.pct||2)}%"></i></div>
-    <div style="font-size:11.5px;color:var(--mut);margin-top:4px">${r.uploaded_bytes?`uploaded ${fmtB(r.uploaded_bytes)} · hashed ${fmtB(r.hashed_bytes||0)}`:""}</div></div>`:"";
+  detailWasRunning=!!r.running;
+  const runrow=`<div id="kdProg">${r.running?kdProgHTML(r):""}</div>`;
   tc.innerHTML=`<div style="display:flex;align-items:center;gap:10px;margin-bottom:2px">
     <button class="iconbtn" id="kdBack" title="Back" style="transform:rotate(180deg)">${svg("chev",16)}</button>
     <h3 class="set-title" style="margin:0;display:flex;align-items:center;gap:8px">${esc(b.name||b.id)}<button class="iconbtn" id="kdRen" title="Rename">${svg("edit",14)}</button></h3>
@@ -7635,6 +7657,7 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
 
  function paintBkSettings(box,b){
   const draft=JSON.parse(JSON.stringify(b));
+  const draw=()=>{
   box.innerHTML=`${secSource(draft)}${secDest(draft)}${secSpare(draft)}${secRetention(draft)}${secSchedule(draft)}
    <div class="srow"><div class="srow-l"><div class="srow-t">Notify on success</div><div class="srow-d">problems always notify (toggle per the catalog in Settings → Notifications)</div></div>
     <div class="srow-c"><label class="tgl"><input type="checkbox" id="kNok"${draft.notify_ok?" checked":""}><span class="sl"></span></label></div></div>
@@ -7643,14 +7666,15 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
    <div class="srow"><div class="srow-l"><div class="srow-t">Enabled</div><div class="srow-d">scheduling and plug-in triggers</div></div>
     <div class="srow-c"><label class="tgl"><input type="checkbox" id="kEn"${draft.enabled!==false?" checked":""}><span class="sl"></span></label></div></div>
    <div class="r" style="margin-top:10px"><button class="btn pri" id="kSave">Save settings</button></div>`;
-  wireSecs(box,draft);
+  wireSecs(box,draft,()=>{readRet(box,draft);readSched(box,draft);draw();});
   box.querySelector("#kSave").onclick=async()=>{
    draft.notify_ok=box.querySelector("#kNok").checked;
    draft.notify_err=box.querySelector("#kNerr").checked;
    draft.enabled=box.querySelector("#kEn").checked;
    readRet(box,draft);readSched(box,draft);
    const r=await kP("/api/kopia/backup/save",draft);
-   toast(r&&r.ok?"Saved":"Save failed: "+((r&&r.log)||""));await refresh();};}
+   toast(r&&r.ok?"Saved":"Save failed: "+((r&&r.log)||""));await refresh();};};
+  draw();}
 
  /* ---------- shared form sections (wizard + detail settings) ---------- */
  const secSource=d=>`<div class="field"><label>Source — what to back up</label>
@@ -7751,13 +7775,16 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
      <button class="btn pri" id="kWNext">${i===WSTEPS.length-1?"Finish":"Next"}</button></div></div></div>`;
   wireSecs(tc.querySelector("#kWBody"),d,()=>paintWizard(tc));
   const savePos=()=>{if(d.id){win._kpWizPos=win._kpWizPos||{};win._kpWizPos[d.id]=wiz.step;}};
-  tc.querySelector("#kWLater").onclick=async()=>{if(d.source&&d.dest)await wizPersist(true);wiz=null;await refresh();};
-  const bb=tc.querySelector("#kWBack");if(bb)bb.onclick=()=>{wiz.step=Math.max(0,i-1);savePos();paintWizard(tc);};
+  const readStep=()=>{if(sid==="ret")readRet(tc,d);if(sid==="sched")readSched(tc,d);};
+  tc.querySelector("#kWLater").onclick=async()=>{readStep();
+   if(d.source&&d.dest)await wizPersist(true);
+   else toast("Backup not created — it needs at least a source and a destination");
+   wiz=null;await refresh();};
+  const bb=tc.querySelector("#kWBack");if(bb)bb.onclick=()=>{readStep();wiz.step=Math.max(0,i-1);savePos();paintWizard(tc);};
   tc.querySelector("#kWNext").onclick=async()=>{
    if(sid==="what"&&!d.source){toast("pick or create a source first");return;}
    if(sid==="where"&&!d.dest){toast("pick or create a destination first");return;}
-   if(sid==="ret")readRet(tc,d);
-   if(sid==="sched")readSched(tc,d);
+   readStep();
    if(sid==="fin"){
     d.name=(tc.querySelector("#kWName").value||"").trim()||(((srcOf(d)||{}).name||"Backup")+" to "+((dstOf(d.dest)||{}).name||"")).trim();
     if(!await wizPersist(true))return;
@@ -7835,7 +7862,7 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
    list.innerHTML=(r.entries||[]).map(e=>`<div class="pf-row" data-oid="${att(e.oid)}" data-dir="${e.dir?1:""}" data-n="${att(e.name)}">${fmIcon(e.name,e.dir?"dir":"file",15)}<span style="flex:1">${esc(e.name)}</span><span style="color:var(--mut);font-size:11px">${e.dir?"":fmtB(e.size)}</span></div>`).join("")||`<div class="pf-empty">empty folder</div>`;
    list.querySelectorAll("[data-oid]").forEach(n=>n.onclick=()=>{
     if(n.dataset.dir){stack.push({oid:n.dataset.oid,name:n.dataset.n});draw();}
-    else kpRestoreTo(destid,n.dataset.oid,"file «"+n.dataset.n+"»");});};
+    else{s.classList.remove("show");kpRestoreTo(destid,n.dataset.oid,"file «"+n.dataset.n+"»");}});};
   draw();}
  function tabSnaps(tc){
   const dests=(D.dests||[]).filter(x=>x.connected||usedBy("dst",x.id).length);
@@ -7859,7 +7886,9 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
    const r=await kP(cur.mounted?"/api/kopia/unmount":"/api/kopia/mount",{id:cur.id});
    if(!(r&&r.ok))toast((r&&r.log)||"failed");await refresh();};
   if(!snapDest)return;
-  api("/api/kopia/snapshots?d="+snapDest).then(r=>{
+  const want=snapDest;
+  api("/api/kopia/snapshots?d="+want).then(r=>{
+   if(snapDest!==want)return;                        // user switched chips while we were loading
    const box=tc.querySelector("#kSnList");if(!box)return;
    if(!(r&&r.ok)){box.innerHTML=`<span style="color:var(--danger)">${esc((r&&r.log)||"failed to read")}</span>`;return;}
    const snaps=r.snapshots||[];
