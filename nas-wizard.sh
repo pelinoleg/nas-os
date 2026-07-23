@@ -3458,6 +3458,55 @@ install_rclone() {
     command -v rclone >/dev/null 2>&1 && info "rclone installed: $(rclone version 2>/dev/null | head -1)"
 }
 
+# Kopia — the snapshot-backup engine for the panel's «Kopia» app (deduplicated
+# snapshots, 3-2-1 spare copies via `repository sync-to`). Debian has no kopia
+# package, so we install the OFFICIAL GitHub release binary. Kopia has no
+# selfupdate — `update` simply re-downloads the latest release over the binary.
+# NOT part of auto-base: installed on demand by the app's «Install kopia» button
+# (api kopia) — a box that never opens the app should not carry the binary.
+# install_kopia [ensure|update]:
+#   ensure (default) — install only if missing;
+#   update (api kopia-update) — replace with the latest release.
+install_kopia() {
+    local mode="${1:-ensure}"
+    if command -v kopia >/dev/null 2>&1 && [ "$mode" != update ]; then
+        info "kopia: $(kopia --version 2>/dev/null | head -1)"
+        return 0
+    fi
+    local arch
+    case "$(uname -m)" in
+        aarch64|arm64) arch=arm64 ;;
+        armv7l|armv6l) arch=arm ;;
+        x86_64|amd64)  arch=x64 ;;
+        *)             arch=arm64 ;;
+    esac
+    # resolve the latest release tag via the GitHub API (unauthenticated is fine here)
+    local tag
+    tag="$(wget -qO- https://api.github.com/repos/kopia/kopia/releases/latest 2>/dev/null \
+        | grep -m1 '"tag_name"' | sed 's/.*"tag_name"[^"]*"//;s/".*//')"
+    if [ -z "$tag" ]; then
+        warn "could not resolve the latest kopia release (no network?) — retry from the panel"
+        return 1
+    fi
+    local ver="${tag#v}"
+    info "Installing kopia $tag (official binary)"
+    local tmp; tmp="$(mktemp -d)" || return 1
+    local tgz="$tmp/kopia.tgz"
+    if run wget -qO "$tgz" "https://github.com/kopia/kopia/releases/download/${tag}/kopia-${ver}-linux-${arch}.tar.gz"; then
+        run tar -xzf "$tgz" -C "$tmp"
+        local bin; bin="$(find "$tmp" -type f -name kopia 2>/dev/null | head -1)"
+        if [ -n "$bin" ]; then
+            run install -m0755 "$bin" /usr/bin/kopia
+        else
+            warn "kopia binary not found in the downloaded archive"
+        fi
+    else
+        warn "could not download kopia — retry from the panel («Update kopia»)"
+    fi
+    rm -rf "$tmp"
+    command -v kopia >/dev/null 2>&1 && info "kopia installed: $(kopia --version 2>/dev/null | head -1)"
+}
+
 # ---------------------------------------------------------------------------
 # Non-interactive apply wrappers for the API (reuse proven functions)
 # ---------------------------------------------------------------------------
@@ -3902,6 +3951,8 @@ run_api() {
         netguard)       install_netguard ;;
         blackbox)       install_blackbox ;;
         rclone-update)  install_rclone update ;;
+        kopia)          install_kopia ;;
+        kopia-update)   install_kopia update ;;
         motd)           install_motd ;;
         tailscale)      mod_tailscale ;;
         staticip)       mod_staticip ;;

@@ -8975,6 +8975,8 @@ _BK_SECTIONS = (
                                                        "nas-config/credentials.json",
                                                        # rclone.conf holds cloud keys → secret section
                                                        "etc/nas-os/rclone.conf",
+                                                       # kopia.json holds the repository password (deliberately open)
+                                                       "etc/nas-os/kopia.json",
                                                        "root/.ssh/nas-backup")),
     ("smbpw",     "SMB passwords (cleartext)",  True,  ("etc/nas-os/smb-users.json",)),
     ("network",   "Network (Wi-Fi, IP)",       True,  ("reference/etc/netplan/",)),   # Wi-Fi password → secret; restore by hand (reference)
@@ -9082,6 +9084,7 @@ def _bk_sources():
                    ("/etc/samba/nas-shares.conf", "etc/samba/nas-shares.conf"),   # panel-managed shares
                    ("/etc/nas-os/smb-users.json", "etc/nas-os/smb-users.json"),   # cleartext SMB passwords → secret section
                    (RCLONE_CONF, "etc/nas-os/rclone.conf"),                       # rclone remotes (cloud keys) → secret section
+                   (KOPIA_CONF, "etc/nas-os/kopia.json"),                         # kopia entities + repo password → secret section
                    ("/var/lib/samba/private/passdb.tdb", "var/lib/samba/private/passdb.tdb"),
                    # SSH key of the «Backup» app (key-based push to servers): without it
                    # key-based push profiles stop authenticating after a reinstall
@@ -9653,6 +9656,441 @@ def _container_cpus(name):
         return round(int((r.get("log") or "0").strip()) / 1e9, 2) or 0
     except (ValueError, TypeError):
         return 0
+
+# --------------------------------------------------------------------------- #
+#  Kopia app — versioned snapshot backups with dedup, 3-2-1 spare copies.
+#  Three engine-agnostic entities (the UI/config never mention kopia specifics):
+#    * Source      — a named group of folders + excludes ("what to back up")
+#    * Destination — a named storage = one kopia repository (fs path or rclone
+#                    remote), connected once, reused by many backups
+#    * Backup      — the link card: source → dest (+ optional spare dest2 for
+#                    3-2-1, replicated with `kopia repository sync-to`), with
+#                    retention/schedule of its own
+#  Everything lives in /etc/nas-os/kopia.json (root 600, travels with the
+#  settings backup — including the repository password, which is deliberately
+#  stored and shown in the OPEN: it must be un-losable, not secret).
+#  Each Destination gets its own kopia config file (/etc/nas-os/kopia/<id>.config)
+#  and its own cache dir; every command runs with --config-file + KOPIA_PASSWORD
+#  in the environment (never in argv).
+# --------------------------------------------------------------------------- #
+KOPIA_CONF    = "/etc/nas-os/kopia.json"
+KOPIA_CFG_DIR = "/etc/nas-os/kopia"
+_KP_ID_RE     = re.compile(r"^[0-9a-f]{6,12}$")
+_KP_RETENTION = {"latest": 10, "daily": 7, "weekly": 4, "monthly": 6, "annual": 0}
+
+def _kopia_bin():
+    return shutil.which("kopia") or "/usr/bin/kopia"
+
+def kopia_installed():
+    return bool(shutil.which("kopia")) or os.path.exists("/usr/bin/kopia")
+
+def kopia_version():
+    if not kopia_installed():
+        return ""
+    try:
+        r = subprocess.run([_kopia_bin(), "--version"], capture_output=True, text=True, timeout=10)
+        m = re.search(r"([\d]+\.[\d.]+)", r.stdout or "")
+        return m.group(1) if m else ""
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+def kp_load():
+    d = _json_load_strict(KOPIA_CONF, {})
+    if not isinstance(d, dict):
+        d = {}
+    if not isinstance(d.get("password"), str):
+        d["password"] = ""
+    for k in ("sources", "dests", "backups"):
+        if not isinstance(d.get(k), list):
+            d[k] = []
+        d[k] = [x for x in d[k] if isinstance(x, dict) and _KP_ID_RE.match(str(x.get("id") or ""))]
+    return d
+
+def kp_save(d):
+    os.makedirs(os.path.dirname(KOPIA_CONF), exist_ok=True)
+    tmp = KOPIA_CONF + ".tmp.%d" % os.getpid()
+    with open(tmp, "w") as f:
+        json.dump(d, f, ensure_ascii=False)
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, KOPIA_CONF)
+
+def _kp_new_id(existing):
+    while True:
+        i = secrets.token_hex(3)
+        if i not in existing:
+            return i
+
+def _kp_find(lst, kid):
+    for x in lst:
+        if x.get("id") == kid:
+            return x
+    return None
+
+def _kp_cfg_file(destid):
+    return os.path.join(KOPIA_CFG_DIR, "%s.config" % destid)
+
+def kp_dest_connected(destid):
+    return os.path.exists(_kp_cfg_file(destid))
+
+def _kp_cache_dir(destid):
+    """Kopia cache must NOT live on the SD card if we can help it: content cache
+    can grow to gigabytes and the card is the box's most wear-prone medium."""
+    root = storage_root()
+    if root:
+        return os.path.join(root, ".kopia-cache", destid)
+    return os.path.join("/var/cache/kopia", destid)
+
+def _kp_env():
+    env = dict(os.environ)
+    env["KOPIA_PASSWORD"] = kp_load().get("password") or ""
+    env["KOPIA_CHECK_FOR_UPDATES"] = "false"
+    env["RCLONE_CONFIG"] = RCLONE_CONF       # kopia's rclone child inherits this; harmless for fs repos
+    env["HOME"] = "/root"                    # kopia keeps per-repo state under $HOME/.config on some paths
+    return env
+
+def _kp(destid, args, timeout=120):
+    """Run one kopia command against a destination's repository.
+    Returns {ok, code, out, err}."""
+    if not kopia_installed():
+        return {"ok": False, "code": -1, "out": "", "err": "kopia is not installed"}
+    # logs go next to the cache (off the SD card when storage is mounted); kopia
+    # rotates them itself, this only picks WHERE they live
+    cmd = [_kopia_bin(), "--config-file", _kp_cfg_file(destid),
+           "--log-dir", os.path.join(_kp_cache_dir(destid), "logs")] + list(args)
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=_kp_env())
+        return {"ok": r.returncode == 0, "code": r.returncode,
+                "out": r.stdout or "", "err": r.stderr or ""}
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "code": -1, "out": "", "err": "timed out after %ds" % timeout}
+    except (OSError, subprocess.SubprocessError) as e:
+        return {"ok": False, "code": -1, "out": "", "err": str(e)[:300]}
+
+def _kp_err_tail(r, n=240):
+    t = (r.get("err") or r.get("out") or "").strip().splitlines()
+    return (t[-1] if t else "command failed")[:n]
+
+# ---- destination validation + repo args -------------------------------------
+
+def _kp_dest_norm(d):
+    """Validate/normalize a destination dict from the UI. Raises ValueError."""
+    kind = str(d.get("kind") or "")
+    name = (str(d.get("name") or "").strip() or "Destination")[:48]
+    out = {"kind": kind, "name": name}
+    if kind == "fs":
+        path = os.path.realpath(str(d.get("path") or "").strip())
+        # a repository belongs on real storage, never on the system card's rootfs dirs
+        if not re.match(r"^/(mnt|media|srv)/", path + "/"):
+            raise ValueError("repository path must be under /mnt, /media or /srv")
+        out["path"] = path
+    elif kind == "rclone":
+        remote = str(d.get("remote") or "").strip().rstrip(":")
+        if not _RCLONE_REMOTE_RE.match(remote):
+            raise ValueError("invalid rclone remote name")
+        if remote not in rclone_remotes():
+            raise ValueError("no such remote in rclone.conf — add it in the Rclone app first")
+        rpath = str(d.get("remote_path") or "").strip().strip("/")
+        if "\n" in rpath or rpath.startswith("-"):
+            raise ValueError("invalid remote path")
+        out["remote"] = remote
+        out["remote_path"] = rpath
+    else:
+        raise ValueError("unknown destination kind")
+    return out
+
+def _kp_repo_args(dest, op):
+    """argv for `repository create|connect` for this destination entity."""
+    a = ["repository", op]
+    if dest.get("kind") == "fs":
+        a += ["filesystem", "--path", dest["path"]]
+    else:
+        spec = dest["remote"] + ":" + (dest.get("remote_path") or "")
+        a += ["rclone", "--remote-path", spec, "--rclone-exe", _rclone_bin()]
+    cache = _kp_cache_dir(dest["id"])
+    try:
+        os.makedirs(cache, exist_ok=True)
+    except OSError:
+        pass
+    a += ["--cache-directory", cache]
+    if cache.startswith("/var/cache/"):
+        # falling back to the SD card — cap the cache hard (content 2G / metadata 1G)
+        a += ["--content-cache-size-mb", "2000", "--metadata-cache-size-mb", "1000"]
+    return a
+
+def _kp_ensure_password(supplied=""):
+    """The repo password: ONE for all destinations (created with the first one,
+    shown openly in Options, saved with every settings backup). Returns it."""
+    cfg = kp_load()
+    if cfg.get("password"):
+        return cfg["password"]
+    pw = (str(supplied or "").strip() or ("nas-" + secrets.token_hex(4)))[:128]
+    cfg["password"] = pw
+    kp_save(cfg)
+    return pw
+
+def kp_dest_create(d, connect_only=False):
+    """Create (or connect to an existing) kopia repository and register it as a
+    Destination entity. Long: rclone create can take ~30-60s."""
+    if not kopia_installed():
+        return {"ok": False, "log": "kopia is not installed"}
+    try:
+        nd = _kp_dest_norm(d)
+    except ValueError as e:
+        return {"ok": False, "log": str(e)}
+    cfg = kp_load()
+    _kp_ensure_password(d.get("password"))
+    if nd["kind"] == "fs":
+        try:
+            os.makedirs(nd["path"], exist_ok=True)
+        except OSError as e:
+            return {"ok": False, "log": "cannot create %s: %s" % (nd["path"], e)}
+        # guard: the same path must not already be registered
+        for x in cfg["dests"]:
+            if x.get("kind") == "fs" and x.get("path") == nd["path"]:
+                return {"ok": False, "log": "this path is already a destination (%s)" % (x.get("name") or x["id"])}
+    else:
+        for x in cfg["dests"]:
+            if x.get("kind") == "rclone" and x.get("remote") == nd["remote"] \
+                    and (x.get("remote_path") or "") == (nd.get("remote_path") or ""):
+                return {"ok": False, "log": "this remote path is already a destination (%s)" % (x.get("name") or x["id"])}
+    nd["id"] = _kp_new_id({x["id"] for x in cfg["dests"]})
+    os.makedirs(KOPIA_CFG_DIR, exist_ok=True)
+    try:
+        os.chmod(KOPIA_CFG_DIR, 0o700)
+    except OSError:
+        pass
+    op = "connect" if connect_only else "create"
+    r = _kp(nd["id"], _kp_repo_args(nd, op), timeout=300)
+    if not r["ok"] and not connect_only and re.search(r"(found existing data|already.*(initialized|exists))",
+                                                     (r["err"] + r["out"]), re.I):
+        return {"ok": False, "log": "a repository already exists there — use «Connect existing» instead",
+                "exists": True}
+    if not r["ok"]:
+        # don't leave a half-written config behind a failed create/connect
+        try:
+            os.remove(_kp_cfg_file(nd["id"]))
+        except OSError:
+            pass
+        return {"ok": False, "log": _kp_err_tail(r)}
+    cfg = kp_load()
+    cfg["dests"].append(nd)
+    kp_save(cfg)
+    return {"ok": True, "dest": nd}
+
+def _kp_ensure_connected(dest):
+    """Self-healing connect: the per-dest kopia config lives in /etc and may be
+    missing after a reinstall (kopia.json is restored by the settings backup, the
+    derived .config files are not) — rebuild it from the entity on first use."""
+    if kp_dest_connected(dest["id"]):
+        return {"ok": True}
+    os.makedirs(KOPIA_CFG_DIR, exist_ok=True)
+    r = _kp(dest["id"], _kp_repo_args(dest, "connect"), timeout=300)
+    if not r["ok"]:
+        try:
+            os.remove(_kp_cfg_file(dest["id"]))
+        except OSError:
+            pass
+        return {"ok": False, "log": _kp_err_tail(r)}
+    return {"ok": True}
+
+def kp_dest_test(destid):
+    """Deep reachability probe: open the repository and read its status."""
+    cfg = kp_load()
+    dest = _kp_find(cfg["dests"], destid)
+    if not dest:
+        return {"ok": False, "log": "no such destination"}
+    if dest.get("kind") == "fs" and not os.path.isdir(dest.get("path") or ""):
+        return {"ok": False, "log": "path does not exist — is the disk plugged in?"}
+    c = _kp_ensure_connected(dest)
+    if not c["ok"]:
+        return c
+    r = _kp(destid, ["repository", "status", "--json"], timeout=90)
+    if not r["ok"]:
+        return {"ok": False, "log": _kp_err_tail(r)}
+    try:
+        st = json.loads(r["out"] or "{}")
+    except ValueError:
+        st = {}
+    return {"ok": True, "log": "repository is reachable", "status": st}
+
+def kp_dest_stats(destid):
+    """Occupancy + dedup for the card: how much source data the snapshots
+    reference vs. how much the repository actually stores."""
+    cfg = kp_load()
+    dest = _kp_find(cfg["dests"], destid)
+    if not dest:
+        return {"ok": False, "log": "no such destination"}
+    c = _kp_ensure_connected(dest)
+    if not c["ok"]:
+        return c
+    out = {"ok": True}
+    # `content stats` has no --json; --raw prints plain integers ("Total Bytes: 647")
+    r = _kp(destid, ["content", "stats", "--raw"], timeout=120)
+    if r["ok"]:
+        mm = re.search(r"Total Bytes:\s*(\d+)", r["out"])
+        if mm:
+            out["stored_bytes"] = int(mm.group(1))
+        mm = re.search(r"Count:\s*(\d+)", r["out"])
+        if mm:
+            out["content_count"] = int(mm.group(1))
+    rs = _kp(destid, ["snapshot", "list", "--all", "--json"], timeout=120)
+    if rs["ok"]:
+        try:
+            snaps = json.loads(rs["out"] or "[]")
+            out["snapshots"] = len(snaps) if isinstance(snaps, list) else 0
+            latest = {}
+            for s in (snaps if isinstance(snaps, list) else []):
+                src = ((s.get("source") or {}).get("path") or "")
+                sz = int(((s.get("stats") or {}).get("totalSize") or 0))
+                latest[src] = sz
+            out["data_bytes"] = sum(latest.values())
+        except (ValueError, TypeError):
+            pass
+    return out
+
+def kp_dest_forget(destid):
+    """Remove the Destination entity (repository DATA is left intact on the
+    medium — deleting actual data is a manual, deliberate act)."""
+    cfg = kp_load()
+    dest = _kp_find(cfg["dests"], destid)
+    if not dest:
+        return {"ok": False, "log": "no such destination"}
+    used = [b.get("name") or b["id"] for b in cfg["backups"]
+            if b.get("dest") == destid or b.get("dest2") == destid]
+    if used:
+        return {"ok": False, "log": "in use by: " + ", ".join(used)}
+    _kp(destid, ["repository", "disconnect"], timeout=30)
+    try:
+        os.remove(_kp_cfg_file(destid))
+    except OSError:
+        pass
+    cfg["dests"] = [x for x in cfg["dests"] if x["id"] != destid]
+    kp_save(cfg)
+    return {"ok": True}
+
+# ---- sources + backups (pure config CRUD) -----------------------------------
+
+def kp_source_save(d):
+    cfg = kp_load()
+    name = (str(d.get("name") or "").strip() or "Source")[:48]
+    folders, seen = [], set()
+    for f in (d.get("folders") or [])[:100]:
+        p = os.path.realpath(str(f or "").strip())
+        if not p.startswith("/") or p == "/" or "\n" in p:
+            continue
+        if not re.match(r"^/(mnt|media|srv|home|opt|etc|var)/", p + "/"):
+            continue                       # data lives on storage/system dirs, not /proc etc.
+        if p not in seen:
+            seen.add(p); folders.append(p)
+    if not folders:
+        return {"ok": False, "log": "pick at least one folder"}
+    excludes = []
+    for e in (d.get("excludes") or [])[:200]:
+        e = str(e or "").strip()
+        if e and "\n" not in e and len(e) < 200:
+            excludes.append(e)
+    kid = str(d.get("id") or "")
+    if kid:
+        src = _kp_find(cfg["sources"], kid)
+        if not src:
+            return {"ok": False, "log": "no such source"}
+        src.update({"name": name, "folders": folders, "excludes": excludes})
+    else:
+        src = {"id": _kp_new_id({x["id"] for x in cfg["sources"]}),
+               "name": name, "folders": folders, "excludes": excludes}
+        cfg["sources"].append(src)
+    kp_save(cfg)
+    return {"ok": True, "source": src}
+
+def kp_source_delete(kid):
+    cfg = kp_load()
+    if not _kp_find(cfg["sources"], kid):
+        return {"ok": False, "log": "no such source"}
+    used = [b.get("name") or b["id"] for b in cfg["backups"] if b.get("source") == kid]
+    if used:
+        return {"ok": False, "log": "in use by: " + ", ".join(used)}
+    cfg["sources"] = [x for x in cfg["sources"] if x["id"] != kid]
+    kp_save(cfg)
+    return {"ok": True}
+
+def _kp_norm_retention(d):
+    out = dict(_KP_RETENTION)
+    for k in out:
+        try:
+            out[k] = max(0, min(9999, int((d or {}).get(k, out[k]))))
+        except (TypeError, ValueError):
+            pass
+    return out
+
+def _kp_norm_schedule(d):
+    d = d if isinstance(d, dict) else {}
+    mode = d.get("mode") if d.get("mode") in ("off", "daily", "weekly") else "daily"
+    t = str(d.get("time") or "03:30")
+    if not re.match(r"^([01]\d|2[0-3]):[0-5]\d$", t):
+        t = "03:30"
+    try:
+        dow = max(0, min(6, int(d.get("dow", 0))))
+    except (TypeError, ValueError):
+        dow = 0
+    return {"mode": mode, "time": t, "dow": dow}
+
+def kp_backup_save(d):
+    cfg = kp_load()
+    name = (str(d.get("name") or "").strip() or "Backup")[:48]
+    src = _kp_find(cfg["sources"], str(d.get("source") or ""))
+    dst = _kp_find(cfg["dests"], str(d.get("dest") or ""))
+    if not src:
+        return {"ok": False, "log": "pick a source"}
+    if not dst:
+        return {"ok": False, "log": "pick a destination"}
+    d2 = str(d.get("dest2") or "")
+    if d2 and (d2 == dst["id"] or not _kp_find(cfg["dests"], d2)):
+        return {"ok": False, "log": "spare destination is invalid"}
+    nb = {"name": name, "source": src["id"], "dest": dst["id"], "dest2": d2,
+          "dest2_mode": d.get("dest2_mode") if d.get("dest2_mode") in ("sync", "independent") else "sync",
+          "retention": _kp_norm_retention(d.get("retention")),
+          "schedule": _kp_norm_schedule(d.get("schedule")),
+          "compression": bool(d.get("compression", True)),
+          "usb_trigger": bool(d.get("usb_trigger")),
+          "notify_ok": bool(d.get("notify_ok")),
+          "notify_err": bool(d.get("notify_err", True)),
+          "enabled": bool(d.get("enabled", True))}
+    kid = str(d.get("id") or "")
+    if kid:
+        cur = _kp_find(cfg["backups"], kid)
+        if not cur:
+            return {"ok": False, "log": "no such backup"}
+        for k in ("setup_started", "setup_done"):
+            nb[k] = bool(d.get(k, cur.get(k)))
+        cur.update(nb)
+        bk = cur
+    else:
+        nb["id"] = _kp_new_id({x["id"] for x in cfg["backups"]})
+        nb["setup_started"] = bool(d.get("setup_started"))
+        nb["setup_done"] = bool(d.get("setup_done"))
+        cfg["backups"].append(nb)
+        bk = nb
+    kp_save(cfg)
+    return {"ok": True, "backup": bk}
+
+def kp_backup_delete(kid):
+    cfg = kp_load()
+    if not _kp_find(cfg["backups"], kid):
+        return {"ok": False, "log": "no such backup"}
+    cfg["backups"] = [x for x in cfg["backups"] if x["id"] != kid]
+    kp_save(cfg)
+    return {"ok": True}
+
+def kp_status():
+    """Everything the Kopia window needs in one request (cheap: no network,
+    no repo opens — deep per-dest probes are separate POSTs)."""
+    cfg = kp_load()
+    return {"installed": kopia_installed(), "version": kopia_version(),
+            "password": cfg.get("password") or "",
+            "sources": cfg["sources"],
+            "dests": [dict(x, connected=kp_dest_connected(x["id"])) for x in cfg["dests"]],
+            "backups": cfg["backups"],
+            "rclone_remotes": rclone_remotes() if rclone_installed() else []}
 
 # Signal file: udev hooks (USB mount/eject) touch it, the watcher wakes
 # monitor_loop immediately — disk insertion is detected in ~1-2s, not on the 60s tick.
@@ -18013,6 +18451,8 @@ class H(BaseHTTPRequestHandler):
                 self._json(rclone_mounts_list())
             elif p == "/api/backup/rclone/opts":
                 self._json({"ok": True, "opts": rclone_opts_get()})
+            elif p == "/api/kopia/status":
+                self._json(kp_status())
             elif p == "/api/backup/status":
                 self._json(nb_status(_nb_qpid(q)))
             elif p == "/api/backup/dest-state":
@@ -18553,6 +18993,32 @@ class H(BaseHTTPRequestHandler):
                 self._json(rclone_check_start(b.get("local", ""), b.get("remote", ""), b.get("path", "")))
             elif p == "/api/backup/rclone/check/cancel":
                 self._json(rclone_check_cancel())
+            elif p == "/api/kopia/install":
+                r = engine("kopia")
+                self._json({"ok": r.get("ok"), "log": (r.get("log") or "").strip()[-400:],
+                            "version": kopia_version(), "installed": kopia_installed()})
+            elif p == "/api/kopia/update":
+                r = engine("kopia-update")
+                self._json({"ok": r.get("ok"), "log": (r.get("log") or "").strip()[-400:],
+                            "version": kopia_version(), "installed": kopia_installed()})
+            elif p == "/api/kopia/source/save":
+                self._json(kp_source_save(self._body() or {}))
+            elif p == "/api/kopia/source/delete":
+                self._json(kp_source_delete(str(self._body().get("id") or "")))
+            elif p == "/api/kopia/dest/create":
+                self._json(kp_dest_create(self._body() or {}))
+            elif p == "/api/kopia/dest/connect":
+                self._json(kp_dest_create(self._body() or {}, connect_only=True))
+            elif p == "/api/kopia/dest/test":
+                self._json(kp_dest_test(str(self._body().get("id") or "")))
+            elif p == "/api/kopia/dest/stats":
+                self._json(kp_dest_stats(str(self._body().get("id") or "")))
+            elif p == "/api/kopia/dest/delete":
+                self._json(kp_dest_forget(str(self._body().get("id") or "")))
+            elif p == "/api/kopia/backup/save":
+                self._json(kp_backup_save(self._body() or {}))
+            elif p == "/api/kopia/backup/delete":
+                self._json(kp_backup_delete(str(self._body().get("id") or "")))
             elif p == "/api/backup/key":
                 b = self._body()
                 act = str(b.get("action") or "")
