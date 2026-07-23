@@ -1085,6 +1085,29 @@
   .kp-disc{cursor:pointer;user-select:none;display:flex;align-items:center;gap:6px}
   .kp-disc svg{transition:transform .15s;color:var(--dim)}
   .kp-disc.open svg{transform:rotate(90deg)}
+  /* Kopia design kit: section cards, run rows, result badges, notes */
+  .kp-sec{background:var(--card);border:1px solid var(--win-line,var(--line));border-radius:var(--r-md);padding:13px 15px 12px;margin:0 0 12px}
+  .kp-sec>h4{margin:0 0 12px;font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--win-dim,var(--dim));display:flex;align-items:center;gap:7px}
+  .kp-sec>h4 svg{color:var(--win-accent,var(--accent))}
+  .kp-sec .field{margin-bottom:12px}
+  .kp-sec .field:last-child{margin-bottom:2px}
+  .kp-sec .srow+.srow{border-top:1px solid var(--win-line,var(--line))}
+  .kp-run{display:grid;grid-template-columns:auto auto 1fr auto;gap:4px 12px;align-items:center;padding:9px 6px;font-size:12.5px}
+  .kp-run+.kp-run{border-top:1px solid var(--win-line,var(--line))}
+  .kp-run .t{color:var(--win-dim,var(--dim));font-variant-numeric:tabular-nums;white-space:nowrap;font-size:11.5px}
+  .kp-run .nm{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+  .kp-run .m{justify-self:end;color:var(--win-dim,var(--dim));font-variant-numeric:tabular-nums;white-space:nowrap;font-size:11.5px}
+  .kp-run.has-tail{cursor:pointer}
+  @media(hover:hover){.kp-run.has-tail:hover{background:var(--sel);border-radius:10px}}
+  .kp-badge{display:inline-flex;align-items:center;font-size:10px;font-weight:700;letter-spacing:.03em;padding:2.5px 9px;border-radius:999px;text-transform:uppercase}
+  .kp-badge.ok{color:var(--win-good,var(--good));background:color-mix(in srgb,var(--win-good,var(--good)) 15%,transparent)}
+  .kp-badge.warn{color:var(--win-warn,var(--warn));background:color-mix(in srgb,var(--win-warn,var(--warn)) 15%,transparent)}
+  .kp-badge.err{color:var(--win-danger,var(--danger));background:color-mix(in srgb,var(--win-danger,var(--danger)) 15%,transparent)}
+  .kp-note{grid-column:1/-1;font-size:11.5px;line-height:1.45;padding:7px 11px;border-radius:9px;margin:2px 0 3px;
+    background:color-mix(in srgb,var(--win-warn,var(--warn)) 11%,transparent);color:var(--win-warn,var(--warn))}
+  .kp-note.err{background:color-mix(in srgb,var(--win-danger,var(--danger)) 11%,transparent);color:var(--win-danger,var(--danger))}
+  .kp-tail{grid-column:1/-1;margin:2px 0 4px;padding:9px 12px;border-radius:9px;background:rgba(8,12,20,.45);
+    color:var(--win-dim,var(--dim));font-family:var(--mono);font-size:10.5px;line-height:1.5;white-space:pre-wrap;max-height:190px;overflow:auto}
   .rs-ch{display:flex;align-items:center;gap:7px;font-size:13px;margin-bottom:6px}
   .rs-ch svg{color:var(--win-accent,var(--accent));flex:none}
   .rs-ch b{flex:1}
@@ -7631,6 +7654,24 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
    retention:{latest:10,daily:7,weekly:4,monthly:12,annual:0},schedule:{mode:"daily",time:"03:30",dow:0},
    compression:true,usb_trigger:false,notify_ok:false,notify_err:true,enabled:true}};paint();};}
 
+ const kpRunRow=(x,withName)=>{
+  const res=x.result==="ok"?["ok","ok"]:x.result==="stopped"?["stopped","warn"]:
+            x.result==="error"?["failed","err"]:["warning","warn"];
+  const bits=[`${x.files||0} files`,fmtB(x.bytes||0),`${x.dur||0}s`];
+  if(x.phases&&x.phases.replicate)bits.push(`spare ${x.phases.replicate.dur}s`);
+  if(x.phases&&x.phases.drill)bits.push(`drill ${x.phases.drill.ok}/${x.phases.drill.checked}`);
+  const hasTail=x.tail&&x.tail.length;
+  return`<div class="kp-run${hasTail?" has-tail":""}"${hasTail?' title="Click for the run log"':""}>
+    <span class="t">${withName?new Date(x.ts*1000).toTimeString().slice(0,5):esc(dtShort(x.ts))}</span>
+    <span class="kp-badge ${res[1]}">${res[0]}</span>
+    <span class="nm"${withName?"":' style="font-weight:400;color:var(--win-dim,var(--dim))"'}>${withName?esc(x.name||x.backup):""}</span>
+    <span class="m">${bits.join(" · ")}</span>
+    ${x.error?`<div class="kp-note ${x.result==="error"?"err":""}">${esc(x.error)}</div>`:""}
+    ${hasTail?`<pre class="kp-tail" style="display:none">${esc(x.tail.join("\n"))}</pre>`:""}</div>`;};
+ const kpWireTails=box=>box.querySelectorAll(".kp-run.has-tail").forEach(r2=>r2.onclick=()=>{
+  const pre=r2.querySelector(".kp-tail");
+  if(pre)pre.style.display=pre.style.display==="none"?"block":"none";});
+
  function kpAskName(title,cur,cb){const s=document.getElementById("scrim");
   s.innerHTML=`<div class="dialog" style="width:340px"><h3>${esc(title)}</h3>
    <div class="field"><input id="kpNm" value="${att(cur)}" maxlength="48"></div>
@@ -7674,7 +7715,7 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
     <span id="kdDrill"></span>
     <a href="#" id="kdSnaps" style="color:var(--accent)">View snapshots →</a>
     <a href="#" id="kdStats" style="color:var(--accent)">Repository stats</a><span id="kdStatsV"></span></div>
-   <h3 class="set-title">Recent runs</h3><div id="kdHist" class="rs-cl">loading…</div>
+   <div class="kp-sec" style="margin-top:4px"><h4>${svg("clock",13)} Recent runs</h4><div id="kdHist"><div class="set-load" style="padding:4px 0">loading…</div></div></div>
    <h3 class="set-title kp-disc${win._kpSetOpen?" open":""}" id="kdSetHead" style="margin-top:14px">${svg("chev",15)} Settings</h3>
    <div id="kdSet" style="${win._kpSetOpen?"":"display:none"}"></div>`;
   tc.querySelector("#kdBack").onclick=()=>{detail=null;paint();};
@@ -7705,10 +7746,9 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
    if(dr){const d0=lastDrill&&lastDrill.phases.drill;
     dr.innerHTML=d0?`${dot(d0.rot?"danger":"good")} restore drill: ${d0.ok}/${d0.checked} files verified (${esc(ago(lastDrill.ts))})`:`${dot("warn")} restore drill: not run yet`;}
    const runs=all.slice(-8).reverse();
-   box.innerHTML=runs.length?runs.map(x=>`<div style="display:flex;gap:8px;align-items:center;padding:3px 0">
-     ${dot(x.result==="ok"?"good":x.result==="error"?"danger":"warn")}<span style="width:110px">${esc(dtShort(x.ts))}</span>
-     <span>${x.files||0} files · ${fmtB(x.bytes||0)} · ${x.dur||0}s${x.phases&&x.phases.replicate?` (+${x.phases.replicate.dur}s spare)`:""}</span>
-     ${x.error?`<span style="color:var(--warn);font-size:11.5px">${esc(x.error)}</span>`:""}</div>`).join(""):"no runs yet";});
+   box.innerHTML=runs.length?runs.map(x=>kpRunRow(x,false)).join(""):
+    `<div style="color:var(--win-dim,var(--dim));font-size:12px;padding:2px 0">no runs yet — press «Back up now»</div>`;
+   kpWireTails(box);});
   const setHead=tc.querySelector("#kdSetHead"),setBox=tc.querySelector("#kdSet");
   let setPainted=!!win._kpSetOpen;
   setHead.onclick=()=>{win._kpSetOpen=!win._kpSetOpen;
@@ -7720,14 +7760,18 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
  function paintBkSettings(box,b){
   const draft=JSON.parse(JSON.stringify(b));
   const draw=()=>{
-  box.innerHTML=`${secSource(draft)}${secDest(draft)}${secSpare(draft)}${secRetention(draft)}${secSchedule(draft)}
+  box.innerHTML=`
+   <div class="kp-sec"><h4>${svg("folder",13)} Data — what goes where</h4>${secSource(draft)}${secDest(draft)}${secSpare(draft)}</div>
+   <div class="kp-sec"><h4>${svg("archive",13)} History — how much to keep</h4>${secRetention(draft)}</div>
+   <div class="kp-sec"><h4>${svg("refresh",13)} Schedule</h4>${secSchedule(draft)}</div>
+   <div class="kp-sec"><h4>${svg("bell",13)} Notifications</h4>
    <div class="srow"><div class="srow-l"><div class="srow-t">Notify on success</div><div class="srow-d">problems always notify (toggle per the catalog in Settings → Notifications)</div></div>
     <div class="srow-c"><label class="tgl"><input type="checkbox" id="kNok"${draft.notify_ok?" checked":""}><span class="sl"></span></label></div></div>
    <div class="srow"><div class="srow-l"><div class="srow-t">Notify on problems</div><div class="srow-d">snapshot or spare-copy failures</div></div>
     <div class="srow-c"><label class="tgl"><input type="checkbox" id="kNerr"${draft.notify_err!==false?" checked":""}><span class="sl"></span></label></div></div>
    <div class="srow"><div class="srow-l"><div class="srow-t">Enabled</div><div class="srow-d">scheduling and plug-in triggers</div></div>
-    <div class="srow-c"><label class="tgl"><input type="checkbox" id="kEn"${draft.enabled!==false?" checked":""}><span class="sl"></span></label></div></div>
-   <div class="r" style="margin-top:10px"><button class="btn pri" id="kSave">Save settings</button></div>`;
+    <div class="srow-c"><label class="tgl"><input type="checkbox" id="kEn"${draft.enabled!==false?" checked":""}><span class="sl"></span></label></div></div></div>
+   <div class="r" style="margin-top:2px"><button class="btn pri" id="kSave">Save settings</button></div>`;
   wireSecs(box,draft,()=>{readRet(box,draft);readSched(box,draft);draw();});
   box.querySelector("#kSave").onclick=async()=>{
    draft.notify_ok=box.querySelector("#kNok").checked;
@@ -7821,12 +7865,12 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
  function paintWizard(tc){
   const d=wiz.draft,i=wiz.step,[sid]=WSTEPS[i];
   const bodyHtml=
-   sid==="what"?`<h3 class="set-title">What to back up</h3><p class="set-sub">A source is a named group of folders — reusable by several backups.</p>${secSource(d)}${d.source?`<div class="rs-cl">${(srcOf(d)||{folders:[]}).folders.map(f=>`<div class="mono" style="font-size:11.5px">${esc(f)}</div>`).join("")}</div>`:""}`
-   :sid==="where"?`<h3 class="set-title">Where the snapshots go</h3><p class="set-sub">A destination is a repository on a disk or in the cloud. Snapshots from several backups can share one.</p>${secDest(d)}`
-   :sid==="spare"?`<h3 class="set-title">Spare copy (3-2-1)</h3><p class="set-sub">A second, independent place with the same data — the classic “two media” rule. Optional but recommended.</p>${secSpare(d)}`
-   :sid==="ret"?`<h3 class="set-title">How much history to keep</h3><p class="set-sub">Old snapshots are thinned out automatically: recent ones stay dense, older ones sparse.</p>${secRetention(d)}`
-   :sid==="sched"?`<h3 class="set-title">Schedule</h3>${secSchedule(d)}`
-   :`<h3 class="set-title">Ready</h3><div class="rs-cl" style="font-size:12.5px;line-height:1.8">
+   sid==="what"?`<h3 class="set-title">What to back up</h3><p class="set-sub">A source is a named group of folders — reusable by several backups.</p><div class="kp-sec">${secSource(d)}${d.source?`<div class="rs-cl" style="margin-top:8px">${(srcOf(d)||{folders:[]}).folders.map(f=>`<div class="mono" style="font-size:11.5px">${esc(f)}</div>`).join("")}</div>`:""}</div>`
+   :sid==="where"?`<h3 class="set-title">Where the snapshots go</h3><p class="set-sub">A destination is a repository on a disk or in the cloud. Snapshots from several backups can share one.</p><div class="kp-sec">${secDest(d)}</div>`
+   :sid==="spare"?`<h3 class="set-title">Spare copy (3-2-1)</h3><p class="set-sub">A second, independent place with the same data — the classic “two media” rule. Optional but recommended.</p><div class="kp-sec">${secSpare(d)}</div>`
+   :sid==="ret"?`<h3 class="set-title">How much history to keep</h3><p class="set-sub">Old snapshots are thinned out automatically: recent ones stay dense, older ones sparse.</p><div class="kp-sec">${secRetention(d)}</div>`
+   :sid==="sched"?`<h3 class="set-title">Schedule</h3><div class="kp-sec" style="margin-top:8px">${secSchedule(d)}</div>`
+   :`<h3 class="set-title">Ready</h3><div class="kp-sec" style="font-size:12.5px;line-height:1.8">
      <b>${esc(d.name||"Backup")}</b><br>
      ${esc((srcOf(d)||{}).name||"?")} → ${esc((dstOf(d.dest)||{}).name||"?")}${d.dest2?` → spare ${esc((dstOf(d.dest2)||{}).name||"")} (${d.dest2_mode==="independent"?"independent":"synced"})`:""}<br>
      keep ${(d.retention||{}).latest||0}/${(d.retention||{}).daily||0}/${(d.retention||{}).weekly||0}/${(d.retention||{}).monthly||0}/${(d.retention||{}).annual||0} (latest/d/w/m/y)<br>
@@ -8002,23 +8046,20 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
 
  /* ---------- History tab ---------- */
  function tabHist(tc){
-  tc.innerHTML=`<h3 class="set-title">History</h3><div id="kH" class="rs-cl">loading…</div>`;
+  tc.innerHTML=`<h3 class="set-title">History</h3>
+   <p class="set-sub">Every run of every backup, newest first. Click a row to see its log.</p>
+   <div id="kH"><div class="set-load">loading…</div></div>`;
   api("/api/kopia/history").then(h=>{
    const box=tc.querySelector("#kH");if(!box)return;
    const runs=((h&&h.history)||[]).slice().reverse();
-   if(!runs.length){box.innerHTML="no runs yet";return;}
-   let day="";
-   box.innerHTML=runs.map((x,i)=>{const dk=dayKey(x.ts),head=dk!==day?`<div class="fm-gh" style="margin-top:8px">${dk}</div>`:"";day=dk;
-    return head+`<div data-h="${i}" style="display:flex;gap:8px;align-items:center;padding:3px 0;font-size:12.5px;cursor:${x.tail&&x.tail.length?"pointer":"default"}">
-     ${dot(x.result==="ok"?"good":x.result==="error"?"danger":"warn")}
-     <span style="width:52px;color:var(--mut)">${new Date(x.ts*1000).toLocaleTimeString().slice(0,5)}</span>
-     <span style="width:160px;overflow:hidden;text-overflow:ellipsis"><b>${esc(x.name||x.backup)}</b></span>
-     <span style="color:var(--mut)">${x.files||0} files · ${fmtB(x.bytes||0)} · ${x.dur||0}s${x.phases&&x.phases.replicate?` (snapshot ${x.phases.snapshot?x.phases.snapshot.dur:"?"}s + spare ${x.phases.replicate.dur}s)`:""}${x.phases&&x.phases.drill?` · drill ${x.phases.drill.ok}/${x.phases.drill.checked}`:""}</span>
-     ${x.error?`<span style="color:var(--warn);font-size:11.5px;flex:1;overflow:hidden;text-overflow:ellipsis" title="${att(x.error)}">${esc(x.error)}</span>`:""}</div>
-     <pre data-tail="${i}" style="display:none;margin:2px 0 6px 24px;font-size:10.5px;color:var(--mut);white-space:pre-wrap;max-height:180px;overflow:auto">${esc((x.tail||[]).join("\n"))}</pre>`;}).join("");
-   box.querySelectorAll("[data-h]").forEach(r2=>r2.onclick=()=>{
-    const pre=box.querySelector(`[data-tail="${r2.dataset.h}"]`);
-    if(pre&&pre.textContent.trim())pre.style.display=pre.style.display==="none"?"block":"none";});});}
+   if(!runs.length){box.innerHTML=`<div class="set-load">No runs yet — press «Back up now» on a backup card.</div>`;return;}
+   const days=[];
+   runs.forEach(x=>{const dk=dayKey(x.ts);
+    if(!days.length||days[days.length-1].k!==dk)days.push({k:dk,items:[]});
+    days[days.length-1].items.push(x);});
+   box.innerHTML=days.map(d=>`<div class="kp-sec"><h4>${svg("clock",13)} ${esc(d.k)}</h4>
+    ${d.items.map(x=>kpRunRow(x,true)).join("")}</div>`).join("");
+   kpWireTails(box);});}
 
  /* ---------- Options tab ---------- */
  function tabOpts(tc){
