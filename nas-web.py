@@ -9773,12 +9773,57 @@ def _kp_cache_dir(destid):
         return os.path.join(root, ".kopia-cache", destid)
     return os.path.join("/var/cache/kopia", destid)
 
+# Global engine options: parallelism for snapshot uploads, an upload speed cap
+# (kopia has no throttle of its own — for CLOUD repos the cap rides on the rclone
+# child via RCLONE_BWLIMIT; local disks are never throttled), and cache limits.
+KP_OPTS_FILE = os.path.join(NAS_CONFIG, "kopia-opts.json")
+
+def kp_opts_get():
+    d = _json_load_strict(KP_OPTS_FILE, {})
+    if not isinstance(d, dict):
+        d = {}
+    def _i(k, dv, lo, hi):
+        try:
+            return max(lo, min(hi, int(d.get(k, dv))))
+        except (TypeError, ValueError):
+            return dv
+    return {"parallel": _i("parallel", 2, 1, 16),
+            "bwlimit_kb": _i("bwlimit_kb", 0, 0, 10_000_000),        # KB/s, 0 = unlimited (cloud only)
+            "cache_content_mb": _i("cache_content_mb", 0, 0, 100_000),   # 0 = kopia default
+            "cache_meta_mb": _i("cache_meta_mb", 0, 0, 100_000)}
+
+def kp_opts_set(d):
+    cur = kp_opts_get()
+    for k in cur:
+        if k in (d or {}):
+            try:
+                cur[k] = int(d[k])
+            except (TypeError, ValueError):
+                pass
+    _json_save(KP_OPTS_FILE, cur)
+    out = kp_opts_get()          # re-read → clamped
+    # cache limits apply per connected repo via `kopia cache set`
+    if out["cache_content_mb"] or out["cache_meta_mb"]:
+        for x in kp_load().get("dests") or []:
+            if not kp_dest_connected(x["id"]):
+                continue
+            a = ["cache", "set"]
+            if out["cache_content_mb"]:
+                a += ["--content-cache-size-limit-mb", str(out["cache_content_mb"])]
+            if out["cache_meta_mb"]:
+                a += ["--metadata-cache-size-limit-mb", str(out["cache_meta_mb"])]
+            _kp(x["id"], a, timeout=30)
+    return out
+
 def _kp_env():
     env = dict(os.environ)
     env["KOPIA_PASSWORD"] = kp_load().get("password") or ""
     env["KOPIA_CHECK_FOR_UPDATES"] = "false"
     env["RCLONE_CONFIG"] = RCLONE_CONF       # kopia's rclone child inherits this; harmless for fs repos
     env["HOME"] = "/root"                    # kopia keeps per-repo state under $HOME/.config on some paths
+    bw = kp_opts_get().get("bwlimit_kb") or 0
+    if bw:
+        env["RCLONE_BWLIMIT"] = "%dk" % bw   # the rclone child (cloud repos) honors this; fs repos ignore it
     return env
 
 def _kp(destid, args, timeout=120):
@@ -9879,6 +9924,7 @@ def kp_dest_create(d, connect_only=False):
         return {"ok": False, "log": str(e)}
     cfg = kp_load()
     _kp_ensure_password(d.get("password"))
+    pwfile = bool(d.get("pwfile"))       # §2: optional, default OFF — password file next to the data
     if nd["kind"] == "fs":
         # only the LEAF may be created: if the parent (the mounted disk) is gone,
         # makedirs would silently rebuild the tree on the SD rootfs
@@ -9929,11 +9975,31 @@ def kp_dest_create(d, connect_only=False):
         except OSError:
             pass
         return {"ok": False, "log": _kp_err_tail(r)}
+    if pwfile and not connect_only:
+        _kp_write_pwfile(nd)
     with _KP_CFG_LOCK:
         cfg = kp_load()
         cfg["dests"].append(nd)
         kp_save(cfg)
     return {"ok": True, "dest": nd}
+
+def _kp_write_pwfile(dest):
+    """Drop KOPIA-PASSWORD.txt next to the repository data (per-destination opt-in):
+    whoever finds the disk years later can open the backups without the panel."""
+    pw = kp_load().get("password") or ""
+    txt = ("Kopia repository password: %s\n"
+           "Restore: kopia repository connect filesystem --path <this folder>\n" % pw)
+    try:
+        if dest.get("kind") == "fs":
+            with open(os.path.join(dest["path"], "KOPIA-PASSWORD.txt"), "w") as f:
+                f.write(txt)
+        else:
+            subprocess.run([_rclone_bin(), "--config", RCLONE_CONF, "rcat",
+                            "%s:%s/KOPIA-PASSWORD.txt" % (dest["remote"], dest.get("remote_path") or "")],
+                           input=txt, text=True, capture_output=True, timeout=60)
+        return True
+    except (OSError, subprocess.SubprocessError):
+        return False
 
 def _kp_ensure_connected(dest):
     """Self-healing connect: the per-dest kopia config lives in /etc and may be
@@ -10006,6 +10072,25 @@ def kp_dest_stats(destid):
             pass
     return out
 
+def kp_dest_cache(destid, clear=False):
+    cfg = kp_load()
+    if not _kp_find(cfg["dests"], str(destid or "")):
+        return {"ok": False, "log": "no such destination"}
+    cd = _kp_cache_dir(destid)
+    if clear:
+        shutil.rmtree(cd, ignore_errors=True)   # kopia recreates the cache on next use
+        try:
+            os.makedirs(cd, exist_ok=True)
+        except OSError:
+            pass
+    size = 0
+    try:
+        r = subprocess.run(["du", "-sb", cd], capture_output=True, text=True, timeout=60)
+        size = int((r.stdout or "0").split()[0])
+    except (OSError, subprocess.SubprocessError, ValueError, IndexError):
+        pass
+    return {"ok": True, "bytes": size, "path": cd}
+
 def kp_dest_forget(destid):
     """Remove the Destination entity (repository DATA is left intact on the
     medium — deleting actual data is a manual, deliberate act)."""
@@ -10067,6 +10152,21 @@ def kp_source_save(d):
             cfg["sources"].append(src)
         kp_save(cfg)
     return {"ok": True, "source": src}
+
+def kp_source_size(kid):
+    """du -sb of every folder in the source — on demand only (can be slow)."""
+    src = _kp_find(kp_load()["sources"], str(kid or ""))
+    if not src:
+        return {"ok": False, "log": "no such source"}
+    total = 0
+    partial = False
+    for f in src.get("folders") or []:
+        try:
+            r = subprocess.run(["du", "-sb", "-x", f], capture_output=True, text=True, timeout=120)
+            total += int((r.stdout or "0").split()[0])
+        except (OSError, subprocess.SubprocessError, ValueError, IndexError):
+            partial = True
+    return {"ok": True, "bytes": total, "partial": partial}
 
 def kp_source_delete(kid):
     cfg = kp_load()
@@ -10177,6 +10277,7 @@ def kp_status():
             "password": cfg.get("password") or "",
             "sources": cfg["sources"],
             "dests": [dict(x, connected=kp_dest_connected(x["id"]),
+                           missing=(x.get("kind") == "fs" and not os.path.isdir(x.get("path") or "")),
                            mounted=os.path.ismount(_kp_mnt_mp(x["id"]))) for x in cfg["dests"]],
             "backups": [dict(b, run=kp_run_state(b["id"])) for b in cfg["backups"]],
             "restore": kp_restore_state(),
@@ -11068,6 +11169,12 @@ def _kp_snap_cli(bid):
 
     phases, result, err = {}, "ok", ""
     snap_bytes = snap_files = failed_files = 0
+    tail = []
+    _w0 = w
+    def w(line):
+        tail.append(line)
+        del tail[:-25]
+        _w0(line)
     try:
         upd(force=True)
         folders, skipped = [], []
@@ -11119,7 +11226,8 @@ def _kp_snap_cli(bid):
         args = [_kopia_bin(), "--config-file", _kp_cfg_file(dst["id"]),
                 "--log-dir", os.path.join(_kp_cache_dir(dst["id"]), "logs"),
                 "snapshot", "create"] + folders + \
-               ["--json", "--progress-update-interval=2s", "--tags", "nasbk:" + bid]
+               ["--json", "--progress-update-interval=2s", "--tags", "nasbk:" + bid,
+                "--parallel", str(kp_opts_get()["parallel"])]
         proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=slave,
                                 env=_kp_env(), close_fds=True)
         os.close(slave)
@@ -11254,7 +11362,8 @@ def _kp_snap_cli(bid):
                     + (p2.get("log") or "")
             else:
                 r2 = _kp(d2["id"], ["snapshot", "create"] + folders +
-                         ["--json", "--no-progress", "--tags", "nasbk:" + bid], timeout=12 * 3600)
+                         ["--json", "--no-progress", "--tags", "nasbk:" + bid,
+                          "--parallel", str(kp_opts_get()["parallel"])], timeout=12 * 3600)
                 phases["replicate"] = {"dur": int(time.time() - t_sync)}
                 if not r2["ok"]:
                     result = "warn" if result == "ok" else result
@@ -11273,7 +11382,8 @@ def _kp_snap_cli(bid):
         _kp_hist_add({"ts": started, "backup": bid, "name": bk.get("name") or bid,
                       "dur": int(time.time() - started),
                       "result": ("stopped" if stopped else result), "error": err,
-                      "bytes": snap_bytes, "files": snap_files, "phases": phases})
+                      "bytes": snap_bytes, "files": snap_files, "phases": phases,
+                      "tail": tail[-25:]})
         if not stopped:
             # §9.5: per-backup overrides gate the events; the global catalog decides push
             try:
@@ -19695,6 +19805,8 @@ class H(BaseHTTPRequestHandler):
                 self._json(kp_snapshots((q.get("d") or [""])[0]))
             elif p == "/api/kopia/restore/status":
                 self._json(kp_restore_status())
+            elif p == "/api/kopia/opts":
+                self._json({"ok": True, "opts": kp_opts_get()})
             elif p == "/api/kopia/history":
                 self._json({"history": kp_history()})
             elif p == "/api/backup/status":
@@ -20247,6 +20359,13 @@ class H(BaseHTTPRequestHandler):
                             "version": kopia_version(), "installed": kopia_installed()})
             elif p == "/api/kopia/browse":
                 self._json(kp_browse(self._body().get("path", "")))
+            elif p == "/api/kopia/opts":
+                self._json({"ok": True, "opts": kp_opts_set(self._body() or {})})
+            elif p == "/api/kopia/source/size":
+                self._json(kp_source_size(str(self._body().get("id") or "")))
+            elif p == "/api/kopia/dest/cache":
+                b = self._body()
+                self._json(kp_dest_cache(str(b.get("id") or ""), clear=bool(b.get("clear"))))
             elif p == "/api/kopia/source/save":
                 self._json(kp_source_save(self._body() or {}))
             elif p == "/api/kopia/source/delete":

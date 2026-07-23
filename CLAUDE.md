@@ -956,7 +956,36 @@ Back/«Set up later» читают поля текущего шага (readStep)
 говорит «not created»; (7) файл-restore из браузера снапшота закрывает диалог перед пикером.
 Принятые допущения: `_systemd_active` под нагрузкой может дать ложный «aborted» (общий с nb
 паттерн); минутный слот, пропущенный из-за >60с тика — пропуск дня (pending-очередь покрывает
-только «dest busy»). Kopia app: ГОТОВО и в проде.
+только «dest busy»). **Аудит №2 (2026-07-23, по заметке-плану V3 + живой UI-прогон).**
+(1) Сверка плана пункт-в-пункт → добраны пробелы: kp_opts (`kopia-opts.json`: parallel→`--parallel`
+снапшотов, cloud bwlimit→env `RCLONE_BWLIMIT` дочернему rclone (у kopia НЕТ своего тротлинга —
+локальные диски не ограничиваются, честно написано в UI), кэш-капы→`kopia cache set`; API
+GET/POST `/api/kopia/opts`, UI в Options); лог-хвост (25 строк) в записях истории + разворачивание
+кликом в History; кнопка Run на карточке Overview; деталка: «last replicated N ago» на Spare,
+вердикт drill (`x/y files verified`), «View snapshots →» (переход с фильтром по бэкапу),
+«Repository stats» on-demand; Snapshots: чипы-фильтр ПО БЭКАПУ поверх dest-чипов + дельта размера
+к предыдущему снапшоту того же пути; тумблер компрессии (секция Retention визарда/настроек);
+Finish: чекбокс «Run the first snapshot now» (вкл. по умолчанию); destDlg: опция
+«KOPIA-PASSWORD.txt рядом с данными» (`_kp_write_pwfile`, fs=файл/rclone=rcat, дефолт ВЫКЛ, §2);
+Sources: кнопка Size (ленивый `du -sb -x`, POST source/size); Destinations: кнопка Cache
+(размер + clear, POST dest/cache). Осознанные отклонения от заметки: «двойное подтверждение»
+удаления dest = один confirmDlg (данные не трогаются вообще); GET verify/status = POST
+dest/bg-status; плитка НАСТЕННОГО экрана не делалась (открытый вопрос §8 заметки); compression —
+свойство БЭКАПА (kopia policy per-folder), не dest. (2) **Живой UI-прогон через CDP** (chromium
+--headless + python3-websockets (apt) + Runtime.evaluate; сессия панели минтится записью токена в
+`/etc/nas-os/sessions.json` + restart — и ОБЯЗАТЕЛЬНО отзывается после; ГРАБЛЯ: весь JS desktop
+в IIFE — функции не глобальны, драйвить только ДОМ-кликами, `[data-did="__kopia"]` в доке);
+50 скриншотов: все табы, деталка, визард все 6 шагов, вложенные диалоги, пустое приложение,
+not-installed, repo-gone, empty-source. Найдено+исправлено: подсветка активного таба в `.set-nav`
+не обновлялась (paint() не трогает nav → `syncNav()`); fs-dest `missing` (папка пропала = диск
+вынут) не был виден — теперь красная точка+текст на карточке dests, в деталке (To-карта) и
+СТАТУС КАРТОЧКИ Overview «destination disk is not plugged in» (usb_trigger-бэкапы не краснеют);
+«Set up later» давал имя «Backup» (теперь выводится «Source to Dest» как в Finish). Подтверждено
+скриншотами: nested-диалоги живут (kpPick-оверлей поверх «New source»), guard'ы Next в визарде,
+Test у пропавшего dest («path does not exist»), empty-app/not-installed экраны, отказ прогона при
+maintenance на dest (тост) и при пустом источнике (result error «all empty — disk not mounted?»).
+Регресс 8/8. ГРАБЛЯ теста: не забывать чинить данные, которые сам тест и портил (stale-тест
+переписал ts всей kopia-history — в UI даты уехали на 9 дней; восстановлено). Kopia app: ГОТОВО.
 Идеи в бэклоге: Telegram-бот, «топ самых больших файлов» в анализаторе,
 glance: спарклайны в плитках, пользовательские проверки из `~/nas-config/scripts`;
 бэкап наружу — пользователь делает сторонним сервисом в Docker (zerobyte).
