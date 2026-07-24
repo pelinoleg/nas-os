@@ -63,6 +63,7 @@ UTIL_PACKAGES=(
   tree ncdu
   jq unzip zip p7zip-full
   lsof net-tools bind9-dnsutils iproute2 nmap
+  psmisc              # fuser — «what holds this mountpoint» when a disk refuses to unmount
   bash-completion
   parted gdisk dosfstools e2fsprogs xfsprogs exfatprogs ntfs-3g btrfs-progs udisks2
   hdparm nvme-cli sysstat

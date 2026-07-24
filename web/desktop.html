@@ -4769,13 +4769,46 @@ function loadXterm(cb){
 }
 function copyText(t){try{if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(t);return;}}catch(e){}
  const ta=document.createElement("textarea");ta.value=t;ta.style.position="fixed";ta.style.opacity="0";document.body.appendChild(ta);ta.select();try{document.execCommand("copy");}catch(e){}ta.remove();}
+/* Snippets earn their place by being what the panel CANNOT show. The first set was
+   df / lsblk / free / uptime / docker ps / du — every one of those is already a widget
+   or an app, so the list was nineteen ways to read what was on screen anyway. These
+   are the commands you reach for when something is wrong: the ones whose exact syntax
+   nobody remembers, and the ones that answer this box's known failure modes. */
 const DEFAULT_SNIPS=[
- ["Disks",[["Free","df -h"],["Disks","lsblk -f"],["SMART NVMe","sudo smartctl -a /dev/nvme0n1"],["Temperatures","sudo smartctl -a /dev/sda | grep -i temp"]]],
- ["Docker",[["Containers","docker ps"],["Stacks","docker compose ls"],["Load","docker stats --no-stream"],["Logs (recent)","docker logs --tail 50 -f"]]],
- ["SnapRAID",[["Status","sudo snapraid status"],["Diff","sudo snapraid diff"],["Sync","sudo snapraid sync"]]],
- ["System",[["htop","htop"],["Memory","free -h"],["Pi temperature","vcgencmd measure_temp"],["Timers","systemctl list-timers"],["Uptime","uptime"]]],
- ["Pool",[["Folder sizes","du -sh /mnt/storage/* 2>/dev/null | sort -h"]]],
+ ["Services",[
+  ["Restart the panel","sudo systemctl restart nas-web"],
+  // testparm first: restarting on a broken smb.conf leaves the shares down
+  ["Restart Samba","sudo testparm -s >/dev/null && sudo systemctl restart smbd"],
+  ["Restart Syncthing","sudo systemctl restart nas-syncthing"],
+  ["Fix .local (restart avahi)","sudo systemctl restart avahi-daemon"]]],
+ ["What happened",[
+  // the first thing to read when a disk drops, a backup breaks or a filesystem
+  // goes read-only — this is how the UAS and SMR-timeout failures were found
+  ["Kernel errors","sudo dmesg -T --level=err,warn | tail -40"],
+  ["Failed services","systemctl --failed"],
+  ["Journal of a service","sudo journalctl -u {unit} -n 100 --no-pager"],
+  // was there a voltage dip since boot — what killed pi5 under load
+  ["Pi power & throttling","vcgencmd get_throttled; vcgencmd measure_volts; vcgencmd measure_temp"]]],
+ ["Disks",[
+  // TRAN is the column that matters here: it says which disk sits behind a USB bridge
+  ["Disks: labels, fs, bus","lsblk -o NAME,LABEL,FSTYPE,SIZE,TRAN,MOUNTPOINT"],
+  ["What holds this mountpoint","sudo fuser -vm {path}"],
+  // read-only check: after an emergency remount, see the damage before repairing
+  ["Check a filesystem (read-only)","sudo e2fsck -fn /dev/{partition}"]]],
+ ["Network",[
+  // ip neigh is what exposed the hidden router that kept dropping the link
+  ["Addresses, routes, neighbours","ip -br a; ip r; ip neigh"],
+  ["Who holds a port","sudo ss -ltnp | grep :{port}"],
+  ["Rescan the USB bus","echo '- - -' | sudo tee /sys/class/scsi_host/host*/scan"],
+  ["Trim the journals","sudo journalctl --vacuum-time=7d"]]],
 ];
+/* The retired set. Kept only to recognise and remove them once: a snippet the user
+   never touched is dead weight, but anything they wrote or edited stays. */
+const LEGACY_SNIPS=["df -h","lsblk -f","sudo smartctl -a /dev/nvme0n1",
+ "sudo smartctl -a /dev/sda | grep -i temp","docker ps","docker compose ls",
+ "docker stats --no-stream","docker logs --tail 50 -f","sudo snapraid status",
+ "sudo snapraid diff","sudo snapraid sync","htop","free -h","vcgencmd measure_temp",
+ "systemctl list-timers","uptime","du -sh /mnt/storage/* 2>/dev/null | sort -h"];
 let SNIPS=[],SNIPCOL={};
 try{SNIPCOL=SET.snipCol||JSON.parse(localStorage.getItem("nassnipcol")||"{}");}catch(e){}
 function saveCol(){SET.snipCol=SNIPCOL;saveSettings();}
@@ -14137,6 +14170,13 @@ function maybeOnboard(){let done=false;try{done=!!SET.onboarded||localStorage.ge
  let snInit=!!SET.snipSeeded;
  try{if(!snInit)snInit=localStorage.getItem("nassnipinit")==="1";}catch(e){}   // legacy pre-server flag
  if(!snInit){seedSnips();saveSnips();}
+ // one-time sweep of the retired defaults, then seed the new set. Matched by exact
+ // command, so an edited or hand-written snippet is never touched.
+ if(!SET.snipV2){
+  SNIPS=SNIPS.filter(x=>!LEGACY_SNIPS.includes((x.cmd||"").trim()));
+  seedSnips();
+  SET.snipV2=true;saveSettings();saveSnips();
+ }
  if(!SET.snipSeeded){SET.snipSeeded=true;saveSettings();}   // seed flag lives on the server (desktop.json) now
  document.querySelectorAll("[title]").forEach(n=>{if(n.title)n.title=nasTr(n.title);});   // static titles from HTML
  renderRail();renderApps();renderDock();renderWinbar();renderPhoneNav();tickClock();
