@@ -357,6 +357,13 @@
     .dm2-side::-webkit-scrollbar{height:0}
     .dm2-side-h,.dm2-slots{display:none}
     .dm2-item{flex:0 0 auto;width:auto;min-width:132px;max-width:220px}
+    /* Docker rail → a strip of pills on top; cards go one per row */
+    .dk-nav{width:auto;flex:none;flex-direction:row;overflow-x:auto;overflow-y:hidden;gap:6px;padding:8px 10px;
+      border-right:none;border-bottom:1px solid var(--line);-webkit-overflow-scrolling:touch}
+    .dk-nav::-webkit-scrollbar{height:0}
+    .dk-nav .sep{display:none}
+    .dk-nav button{flex:0 0 auto;width:auto;padding:8px 13px;border-radius:999px;background:var(--sel)}
+    .dk-grid,.dk-store{grid-template-columns:1fr}
   }
   .wback{display:none;align-items:center;justify-content:center;width:30px;height:30px;margin-right:2px;border:none;background:none;color:var(--text);cursor:pointer;font-size:26px;line-height:1;flex:none}
   /* phone: collapse master-detail (sidebar+panel don't fit side by side) */
@@ -376,6 +383,9 @@
     .dm2-side-h,.dm2-slots{display:none}
     .dm2-item{flex:0 0 auto;width:auto;min-width:132px;max-width:200px}
     .dm2-detail{padding:16px 16px}
+    .dk-page{padding:14px 14px}
+    .dk-card{flex-direction:column;align-items:stretch}
+    .dk-act{border-left:none;border-top:1px solid var(--line);padding:9px 12px;justify-content:flex-end}
     /* menubar: hide extra buttons (status — in the health popover) */
     #expoBtn,#themeBtn,#lpBtn,.tray{display:none}
     .menubar .mb-sep{display:none}.menubar{gap:5px}
@@ -769,6 +779,72 @@
   .dp-cap{flex:none;text-align:right}
   .dp-cap .capbar{height:8px;border-radius:999px}
   .dp-lbl{font-size:11px;color:var(--dim);font-family:var(--mono);margin-top:4px}
+  /* ── Docker app. The old layout put fourteen two-line rows into a 250px rail and
+     left the 1200px main area holding four buttons — dense where there is no room,
+     empty where there is. Now the rail carries only sections, and the apps live in
+     the main area as wide cards: same language as the Kopia/Resilience cards
+     (status stripe on the left, zones split by hairlines, actions on the card). ── */
+  .dk-nav{width:206px;flex:none;border-right:1px solid var(--line);padding:14px 10px;display:flex;flex-direction:column;gap:3px;overflow-y:auto}
+  .dk-nav button{display:flex;align-items:center;gap:11px;width:100%;border:none;background:none;color:var(--dim);
+    padding:10px 11px;border-radius:var(--r-sm);font-size:13.5px;font-weight:550;text-align:left;white-space:nowrap;transition:.12s}
+  .dk-nav button svg{flex:none;opacity:.9;color:var(--accent-2)}
+  .dk-nav button .n{margin-left:auto;font-size:11px;color:var(--mut);font-family:var(--mono)}
+  @media(hover:hover){.dk-nav button:hover:not(.on){background:var(--sel);color:var(--text)}}
+  .dk-nav button.on{background:var(--sel);color:var(--accent);box-shadow:var(--sh-sm)}
+  .dk-nav button.on svg,.dk-nav button.on .n{color:inherit}
+  .dk-nav .sep{height:1px;background:var(--line);margin:9px 4px;flex:none}
+  .dk-page{flex:1;min-width:0;overflow-y:auto;padding:18px 20px}
+  .dk-ph{display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+  .dk-ph h3{margin:0;font-size:18px;font-weight:700;letter-spacing:-.01em}
+  .dk-ph .sub{font-size:12px;color:var(--dim)}
+  .dk-strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(146px,1fr));gap:10px;margin-bottom:16px}
+  .dk-t{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:11px 13px;min-width:0}
+  .dk-t b{display:block;font-size:19px;font-weight:750;line-height:1.15;font-variant-numeric:tabular-nums}
+  .dk-t span{font-size:11px;color:var(--dim)}
+  .dk-t small{display:block;font-size:10.5px;color:var(--mut);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .dk-t.skel b{color:var(--mut)}
+  .dk-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(410px,1fr));gap:12px;align-items:start}
+  .dk-card{position:relative;display:flex;align-items:stretch;background:var(--card);border:1px solid var(--line);
+    border-radius:14px;overflow:hidden;--dk-st:var(--mut)}
+  .dk-card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--dk-st)}
+  .dk-card .main{flex:1;min-width:0;padding:13px 14px 13px 17px;display:flex;gap:12px;align-items:center;
+    cursor:pointer;background:none;border:none;text-align:left;color:inherit;font:inherit}
+  @media(hover:hover){.dk-card .main:hover{background:var(--sel)}}
+  .dk-ico{width:40px;height:40px;flex:none;border-radius:11px;display:grid;place-items:center;background:var(--sel);color:var(--dim)}
+  .dk-ico img{width:28px;height:28px;object-fit:contain;border-radius:6px}
+  .dk-cmain{flex:1;min-width:0}
+  .dk-card .nm{font-size:14.5px;font-weight:650;display:flex;align-items:center;gap:8px;min-width:0}
+  .dk-card .nm em{font-style:normal;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .dk-card .sub{font-size:11.5px;color:var(--dim);margin-top:3px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}
+  .dk-card .sub .mono{font-size:11px}
+  .dk-act{flex:none;display:flex;align-items:center;gap:6px;padding:0 11px;border-left:1px solid var(--line)}
+  .dk-new{border:1px dashed var(--line-2);background:none;border-radius:14px;padding:16px;display:flex;align-items:center;
+    gap:11px;cursor:pointer;color:var(--dim);font:inherit;font-size:13px;text-align:left;width:100%}
+  @media(hover:hover){.dk-new:hover{background:var(--sel);color:var(--text)}}
+  /* catalog: a storefront of tiles, not seven greyed rows competing with real stacks */
+  .dk-store{display:grid;grid-template-columns:repeat(auto-fill,minmax(212px,1fr));gap:12px}
+  .dk-tile{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;display:flex;
+    flex-direction:column;gap:9px;cursor:pointer;text-align:left;color:inherit;font:inherit;transition:.12s}
+  @media(hover:hover){.dk-tile:hover{background:var(--sel);transform:translateY(-1px)}}
+  .dk-tile .t{font-size:13.5px;font-weight:650}
+  .dk-tile .d{font-size:11.5px;color:var(--dim);line-height:1.45;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+  .dk-tile .c{font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);font-family:var(--mono)}
+  /* stack detail */
+  .dk-dh{display:flex;align-items:center;gap:12px;margin-bottom:6px}
+  .dk-dh .dk-ico{width:46px;height:46px}
+  .dk-dh .t{font-size:19px;font-weight:700;display:flex;align-items:center;gap:9px;min-width:0}
+  .dk-dh .s{font-size:12px;color:var(--dim);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .dk-chips{display:grid;grid-template-columns:repeat(auto-fit,minmax(128px,1fr));gap:10px;margin:14px 0 16px}
+  .dk-chip{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px;min-width:0}
+  .dk-chip b{display:block;font-size:16.5px;font-weight:700;font-variant-numeric:tabular-nums;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .dk-chip span{font-size:9.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--mut);font-weight:700}
+  .dk-sec{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--mut);font-family:var(--mono);margin:0 0 8px;display:flex;align-items:center;gap:8px}
+  .dk-conts{border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--card)}
+  .dk-crow{display:flex;align-items:center;gap:10px;padding:11px 13px;font-size:12.5px;min-width:0}
+  .dk-crow+.dk-crow{border-top:1px solid var(--line)}
+  .dk-crow .cn{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+  .dk-crow .im{font-size:11px;color:var(--mut);font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
+  .dk-crow .cstat{font-size:11px;color:var(--dim);font-family:var(--mono);flex:none}
   .dm2{display:flex;flex:1;min-height:0}
   .dm2-side{width:250px;flex:none;border-right:1px solid var(--line);padding:8px 8px 12px;overflow-y:auto}
   .dm2-side-h{font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:var(--mut);font-family:var(--mono);padding:6px 8px 8px}
@@ -5082,15 +5158,20 @@ function editUnit(name,after){openWin("unit:"+name,"Unit · "+name,body=>{
 },{w:720,h:600});}
 /* ===== Docker stack manager (create/edit/manage in GUI) ===== */
 const STACK_SKELETON="services:\n  app:\n    image: \n    container_name: app\n    restart: unless-stopped\n    ports:\n      - \"8080:80\"\n    labels:\n      - \"web-desktop.name=App\"\n      - \"web-desktop.url=http://localhost:8080\"\n      # shortcut icon: replace app with the app slug from selfhst.st (or drop this line)\n      - \"web-desktop.icon=https://cdn.jsdelivr.net/gh/selfhst/icons@main/svg/app.svg\"\n";
-let DK_SEL="overview";   // selected item: overview | stack:<name> | images | volumes
+let DK_SEL="apps";   // apps | store | images | volumes | stack:<name> | avail:<id>
 function winServices(initTab){openWin("__services","Docker",(body,win)=>{
  body.style.padding="0";
  if(initTab==="images"||initTab==="volumes")DK_SEL=initTab;
+ if(!/^(apps|store|images|volumes|stack:|avail:)/.test(DK_SEL))DK_SEL="apps";   // value from an older build
  body.innerHTML="";
- const root=el(`<div class="dmroot"><div class="dm2"><aside class="dm2-side" id="dkSide"></aside><section class="dm2-detail" id="dkDetail"></section></div></div>`);
+ const root=el(`<div class="dmroot"><div class="dm2"><aside class="dk-nav" id="dkSide"></aside><section class="dk-page" id="dkDetail"></section></div></div>`);
  body.appendChild(root);
  const side=root.querySelector("#dkSide"),detail=root.querySelector("#dkDetail");
  let stacks=[],catalog=[],ok=true,sig="";
+ // the df numbers (images/volumes/reclaimable) come from `docker system df`, which takes
+ // seconds on a busy box. They are kept here so switching pages doesn't blank them, and
+ // the page renders without waiting: the counts we already have appear at once.
+ const ctx={df:null,dfAt:0,reload:()=>load(true),go:id=>{DK_SEL=id;paintSide();paintDetail();}};
  const load=async force=>{
   const d=await api("/api/stacks");if(!document.body.contains(body))return;
   ok=!!(d&&d.ok);stacks=(d&&d.stacks)||[];
@@ -5098,61 +5179,41 @@ function winServices(initTab){openWin("__services","Docker",(body,win)=>{
   if(force||!catalog.length){const cs=await api("/api/store");catalog=(cs&&cs.apps)||[];}
   const byId={};catalog.forEach(a=>byId[a.id]=a);
   stacks.forEach(s=>{const a=byId[s.name];if(a&&a.replica)s.recipe=a;});   // Replica button on the stack
-  await refreshWud();      // map of image updates for dots in the sidebar/stacks
+  await refreshWud();      // map of image updates for the badges on the cards
   // running first (has active containers), then alphabetically
   stacks.sort((a,b)=>((b.running>0)-(a.running>0))||(a.name||"").localeCompare(b.name||"",undefined,{sensitivity:"base",numeric:true}));
-  if(DK_SEL.startsWith("stack:")&&!stacks.find(y=>"stack:"+y.name===DK_SEL))DK_SEL="overview";
-  if(DK_SEL.startsWith("avail:")&&!catalog.find(a=>"avail:"+a.id===DK_SEL&&!a.installed))DK_SEL="overview";
-  const ns=JSON.stringify([ok,DK_SEL,catalog.map(a=>[a.id,a.installed]),stacks.map(s=>[s.name,s.running,s.total,s.note,(s.containers||[]).map(c=>[c.name,c.state,c.health])])]);
+  if(DK_SEL.startsWith("stack:")&&!stacks.find(y=>"stack:"+y.name===DK_SEL))DK_SEL="apps";
+  if(DK_SEL.startsWith("avail:")&&!catalog.find(a=>"avail:"+a.id===DK_SEL&&!a.installed))DK_SEL="store";
+  ctx.stacks=stacks;ctx.catalog=catalog;
+  const ns=JSON.stringify([ok,DK_SEL,catalog.map(a=>[a.id,a.installed]),stacks.map(s=>[s.name,s.running,s.total,s.note,s.url,(s.containers||[]).map(c=>[c.name,c.state,c.health])])]);
   if(force||ns!==sig){sig=ns;paintSide();paintDetail();}
   else if(DK_SEL.startsWith("stack:")){const sd=await api("/api/docker/stats");applyStats(detail,(sd&&sd.stats)||{});}
  };
  const reload=()=>load(true);
- const item=(id,ic,name,sub,dot)=>{
-  const mark=dot!==undefined?`<span class="dot" style="background:${dot};${dot==="transparent"?"box-shadow:inset 0 0 0 1.5px var(--mut)":""}"></span>`:`<span style="display:flex;color:var(--dim);flex:none">${svg(ic,15)}</span>`;
-  const it=el(`<button class="dm2-item${DK_SEL===id?" on":""}">${mark}<span class="li-main"><span class="li-name">${esc(name)}</span>${sub?`<span class="li-sub">${esc(sub)}</span>`:""}</span></button>`);
-  it.onclick=()=>{DK_SEL=id;paintSide();paintDetail();};return it;};
  function paintSide(){
+  const avail=catalog.filter(a=>!a.installed&&!stacks.find(s=>s.name===a.id)).length;
+  const on=id=>(id==="apps"?(DK_SEL==="apps"||DK_SEL.startsWith("stack:"))
+              :id==="store"?(DK_SEL==="store"||DK_SEL.startsWith("avail:")):DK_SEL===id);
   side.innerHTML="";
-  side.appendChild(item("overview","gauge","Overview","statistics and cleanup"));
-  const h=el(`<div class="dm2-side-h" style="display:flex;align-items:center;gap:6px">Stacks · ${stacks.length}<span class="grow"></span><button class="mbp-hb" title="New stack" style="padding:2px 4px">${svg("plus",13)}</button></div>`);
-  h.querySelector("button").onclick=()=>editStack(null,reload);
-  side.appendChild(h);
-  stacks.forEach(s=>{
-   const full=s.total>0&&s.running===s.total,part=s.running>0&&!full;
-   const dot=s.orphan?"var(--warn)":s.total?(full?"var(--good)":part?"var(--warn)":"var(--mut)"):"transparent";
-   const it=item("stack:"+s.name,null,s.name,s.orphan?"folder deleted":s.total?`${s.running} of ${s.total} running`:"no containers",dot);
-   // app icon (web-desktop.icon label / recipe meta.json), cube as fallback
-   const ico=el(`<span class="li-ico">${svg("cube",14)}${s.icon?`<img src="${att(iconSrc(s.icon))}" alt="" onload="this.previousElementSibling.style.display='none'" onerror="this.remove()">`:""}</span>`);
-   it.querySelector(".dot").after(ico);
-   const nu=(s.containers||[]).filter(c=>WUD[c.name]).length;   // "has update" dot on the stack
-   if(nu){const lm=it.querySelector(".li-main");if(lm)lm.insertAdjacentHTML("beforeend",`<span class="cupd" title="${att(nu+" image updates in the stack")}">${svg("arrowup",10)} ${nu}</span>`);}
-   side.appendChild(it);});
-  if(!stacks.length&&ok)side.appendChild(el(`<div class="dm2-slots">${svg("cube",13)} Empty so far — click "+"</div>`));
-  // available recipes (services/ not yet installed) — bring up in one click
-  const avail=catalog.filter(a=>!a.installed&&!stacks.find(s=>s.name===a.id));
-  if(avail.length){
-   side.appendChild(el(`<div class="dm2-side-h">Available · ${avail.length}</div>`));
-   avail.forEach(a=>{
-    const it=item("avail:"+a.id,null,a.name,"not installed · tap to set up","transparent");
-    it.style.opacity=".62";
-    const ico=el(`<span class="li-ico">${svg("download",13)}${a.icon?`<img src="${att(iconSrc(a.icon))}" alt="" onload="this.previousElementSibling.style.display='none'" onerror="this.remove()">`:""}</span>`);
-    it.querySelector(".dot").after(ico);
-    side.appendChild(it);});
-  }
-  side.appendChild(el(`<div class="dm2-side-h">Resources</div>`));
-  side.appendChild(item("images","hdd","Images","image storage"));
-  side.appendChild(item("volumes","disks","Volumes","container data"));
+  const nav=(id,ic,label,count)=>{
+   const b=el(`<button class="${on(id)?"on":""}">${svg(ic,17)}<span>${esc(label)}</span>${count!==undefined?`<span class="n">${count}</span>`:""}</button>`);
+   b.onclick=()=>ctx.go(id);side.appendChild(b);return b;};
+  nav("apps","cube","Apps",stacks.length);
+  nav("store","download","Add app",avail||undefined);
+  side.appendChild(el(`<div class="sep"></div>`));
+  nav("images","hdd","Images");
+  nav("volumes","disks","Volumes");
  }
  function paintDetail(){
   detail.innerHTML="";
   if(!ok){detail.innerHTML=`<div class="dempty">${svg("cube",16)} Docker is not installed or unavailable.<br>Complete the «System» stage in the Wizard.</div>`;return;}
-  if(DK_SEL==="overview")dkOverview(detail,reload);
-  else if(DK_SEL==="images")imagesTab(detail);
-  else if(DK_SEL==="volumes")volumesTab(detail);
-  else if(DK_SEL.startsWith("avail:")){const a=catalog.find(x=>"avail:"+x.id===DK_SEL);if(a)dkAvailPane(detail,a,reload);else detail.innerHTML="";}
+  if(DK_SEL==="apps")dkAppsPage(detail,stacks,ctx);
+  else if(DK_SEL==="store")dkStorePage(detail,catalog,stacks,ctx);
+  else if(DK_SEL==="images")dkResPage(detail,"images");
+  else if(DK_SEL==="volumes")dkResPage(detail,"volumes");
+  else if(DK_SEL.startsWith("avail:")){const a=catalog.find(x=>"avail:"+x.id===DK_SEL);if(a)dkAvailPane(detail,a,reload,ctx);else detail.innerHTML="";}
   else{const s=stacks.find(y=>"stack:"+y.name===DK_SEL);
-   if(s)dkStackPane(detail,s,reload);}
+   if(s)dkStackPane(detail,s,reload,ctx);}
  }
  load(true);
  clearInterval(win._pi);win._pi=setInterval(()=>{
@@ -5162,53 +5223,128 @@ function winServices(initTab){openWin("__services","Docker",(body,win)=>{
   const ae=document.activeElement;
   if(ae&&body.contains(ae)&&/INPUT|TEXTAREA|SELECT/.test(ae.tagName))return;
   load();},5000);
-},{w:840,h:640});}
-/* Docker dashboard: summary + cleanup */
-async function dkOverview(tc,reload){
- tc.innerHTML=`<div class="dd">
-  <div class="dd-head"><div class="dd-ic" style="background:linear-gradient(135deg,#4C8DF6,#2563eb)">${svg("cube",20)}</div>
-   <div class="dd-hmain"><div class="dd-name">Docker</div><div class="dd-sub" id="dkVer">gathering summary…</div></div>
-   <a href="http://${host()}:5001" target="_blank" rel="noopener" class="portlink" style="flex:none">Dockge ↗</a></div>
-  <div class="dk-tiles" id="dkTiles"></div>
-  <div class="dd-grp">Cleanup</div>
-  <div class="dd-acts" style="border:none;padding-top:2px;flex-wrap:wrap" id="dkPrune"></div>
-  <div class="mon-note">Cleanup removes only unused items: running containers and their data are not touched. «Unused images» are all images without containers (they will be re-downloaded on next start).</div></div>`;
+},{w:1020,h:680});}
+
+/* One stack = one card. Colour stripe says the state at a glance, the body opens the
+   stack, the right-hand zone carries the two actions worth having in a list (open the
+   app, start/stop) — everything else lives one click deeper, on the stack page. */
+function dkStackIcon(s,size){
+ return `<span class="dk-ico"${size?` style="width:${size}px;height:${size}px"`:""}>${svg("cube",Math.round((size||40)*0.45))}${s.icon?`<img src="${att(iconSrc(s.icon))}" alt="" onload="this.previousElementSibling.style.display='none'" onerror="this.remove()">`:""}</span>`;}
+function dkState(s){
+ if(s.orphan)return{st:"warn",txt:"folder deleted"};
+ if(!s.total)return{st:"mut",txt:"no containers"};
+ if(s.running===s.total)return{st:"good",txt:s.total===1?"running":`${s.running} of ${s.total} running`};
+ if(s.running>0)return{st:"warn",txt:`${s.running} of ${s.total} running`};
+ return{st:"mut",txt:"stopped"};}
+
+function dkAppsPage(tc,stacks,ctx){
+ tc.innerHTML=`<div class="dk-ph"><h3>Apps</h3><span style="flex:1"></span>
+   <button class="btn sm" id="dkNew">${svg("plus",13)} New stack</button>
+   <button class="btn pri sm" id="dkAdd">${svg("download",13)} Add app</button></div>
+  <div class="dk-strip" id="dkStrip"></div>
+  <div class="dk-grid" id="dkGrid"></div>`;
+ tc.querySelector("#dkNew").onclick=()=>editStack(null,ctx.reload);
+ tc.querySelector("#dkAdd").onclick=()=>ctx.go("store");
+ dkStrip(tc.querySelector("#dkStrip"),stacks,ctx);
+ const grid=tc.querySelector("#dkGrid");
+ if(!stacks.length){
+  grid.innerHTML="";
+  const e=el(`<button class="dk-new" style="padding:26px">${svg("cube",22)}<span><b style="display:block;font-size:14px;color:var(--text)">No apps yet</b>Pick one from the catalogue — compose and settings are prepared for you.</span></button>`);
+  e.onclick=()=>ctx.go("store");grid.appendChild(e);return;}
+ stacks.forEach(s=>{
+  const st=dkState(s),run=s.running>0;
+  const upd=(s.containers||[]).filter(c=>WUD[c.name]).length;
+  const ports=[...new Set([...String((s.containers||[]).map(c=>c.ports).join(",")).matchAll(/:(\d+)->/g)].map(m=>m[1]))];
+  const card=el(`<div class="dk-card" style="--dk-st:var(--${st.st==="mut"?"mut":st.st})">
+    <button class="main">${dkStackIcon(s)}
+     <span class="dk-cmain">
+      <span class="nm"><em>${esc(s.name)}</em>${upd?`<span class="cupd" title="${att(upd+" image update"+(upd>1?"s":"")+" available")}">${svg("arrowup",10)} ${upd}</span>`:""}</span>
+      <span class="sub"><span style="color:var(--${st.st==="mut"?"mut":st.st})">${esc(st.txt)}</span>${ports.length?`<span class="mono">:${ports.slice(0,3).join(" :")}</span>`:""}${s.note?`<span title="${att(s.note)}">${svg("file",11)}</span>`:""}</span>
+     </span></button>
+    <span class="dk-act"></span></div>`);
+  card.querySelector(".main").onclick=()=>ctx.go("stack:"+s.name);
+  const act=card.querySelector(".dk-act");
+  const mk=(ic,title,fn,cls)=>{const b=el(`<button class="iconbtn ${cls||""}" title="${att(title)}">${svg(ic,15)}</button>`);b.onclick=e=>{e.stopPropagation();fn();};act.appendChild(b);};
+  if(run&&s.url)mk("globe","Open the app",()=>window.open(s.url,"_blank"));
+  mk("edit","Edit compose & .env",()=>editStack(s.name,ctx.reload));
+  const busy=()=>{card.style.opacity=".55";card.style.pointerEvents="none";};
+  if(s.orphan)mk("trash","Remove the orphaned containers",()=>confirmDlg("Remove orphaned stack?",`«${esc(s.name)}»: the stack's containers and networks will be stopped and removed. Volumes will remain.`,()=>stackDelete(s.name,ctx.reload),true),"dng");
+  else if(run)mk("power","Stop the stack",()=>{busy();stackAct(s.name,"down",ctx.reload);},"warn");
+  else if(s.has_compose)mk("play","Start the stack",()=>{busy();stackAct(s.name,"up",ctx.reload);});
+  mk("cog","More",ev=>dkStackMenu(ev,s,ctx));
+  grid.appendChild(card);});
+}
+
+/* The four numbers worth having above the apps. The container counts are already in
+   hand, so they paint at once; images/volumes/reclaimable come from `docker system df`
+   and arrive a few seconds later — the box must not sit empty meanwhile. */
+function dkStrip(box,stacks,ctx){
+ const conts=stacks.reduce((a,s)=>a+(s.total||0),0),run=stacks.reduce((a,s)=>a+(s.running||0),0);
+ const upd=stacks.reduce((a,s)=>a+(s.containers||[]).filter(c=>WUD[c.name]).length,0);
+ const tile=(v,l,sub,col,skel)=>`<div class="dk-t${skel?" skel":""}"><b style="color:${col||"var(--text)"}">${v}</b><span>${esc(l)}</span>${sub?`<small>${esc(sub)}</small>`:""}</div>`;
+ const paint=d=>{
+  const df=(d&&d.df)||{},im=df.images||{},vo=df.volumes||{},ca=df.cache||{};
+  box.innerHTML=
+   tile(`${run} <span style="font-size:12px;font-weight:600;color:var(--mut)">of ${conts}</span>`,"containers running",
+        stacks.filter(s=>s.total&&!s.running).length?`${stacks.filter(s=>s.total&&!s.running).length} stacks stopped`:"",
+        run?"var(--good)":"var(--mut)")
+   +tile(d?(im.count||"0"):"·","images",d?(im.size?"taking up "+im.size:""):"reading…",null,!d)
+   +tile(d?(vo.count||"0"):"·","volumes",d?(vo.size?"taking up "+vo.size:""):"reading…",null,!d)
+   +(upd?tile(upd,"image updates",(d&&d.wud&&(d.wud.updates||[]).map(u=>u.name).slice(0,2).join(", "))||"","var(--warn)")
+        :tile(d?((im.reclaim&&im.reclaim!=="0B")?im.reclaim:"0"):"·","reclaimable",
+              d?(ca.size&&ca.size!=="0B"?"+ build cache "+ca.size:""):"reading…",
+              d&&!(im.reclaim||"").startsWith("0")?"var(--warn)":"var(--mut)",!d));};
+ paint(ctx.df);
+ // refresh at most once a minute — system df is expensive
+ if(ctx.df&&Date.now()-ctx.dfAt<60000)return;
+ api("/api/docker/overview").then(d=>{if(!document.body.contains(box))return;
+  if(d&&d.ok){ctx.df=d;ctx.dfAt=Date.now();paint(d);}else paint(null);});
+}
+
+/* The catalogue is a storefront, not seven greyed-out rows pretending to be my stacks. */
+function dkStorePage(tc,catalog,stacks,ctx){
+ const avail=catalog.filter(a=>!a.installed&&!stacks.find(s=>s.name===a.id));
+ tc.innerHTML=`<div class="dk-ph"><h3>Add app</h3><span style="flex:1"></span>
+   <button class="btn sm" id="dkNew2">${svg("plus",13)} Blank stack</button></div>
+  <p class="set-sub" style="margin:-6px 0 14px">Ready-made recipes from this panel: compose and settings are filled in for you, and installing brings the app up right away.</p>
+  <div class="dk-store" id="dkStore"></div>`;
+ tc.querySelector("#dkNew2").onclick=()=>editStack(null,ctx.reload);
+ const box=tc.querySelector("#dkStore");
+ if(!avail.length){box.innerHTML=`<div class="dempty">${svg("cube",16)} Everything from the catalogue is already installed.</div>`;return;}
+ avail.forEach(a=>{
+  const t=el(`<button class="dk-tile">
+    <span class="dk-ico">${svg("download",18)}${a.icon?`<img src="${att(iconSrc(a.icon))}" alt="" onload="this.previousElementSibling.style.display='none'" onerror="this.remove()">`:""}</span>
+    <span class="t">${esc(a.name)}</span>
+    <span class="d">${esc(a.desc||"")}</span>
+    ${a.category?`<span class="c">${esc(a.category)}</span>`:""}</button>`);
+  t.onclick=()=>ctx.go("avail:"+a.id);box.appendChild(t);});
+}
+
+/* Images / volumes: the same lists as before, but with the page header and the
+   cleanup that used to sit on a near-empty Overview — pruning belongs where the
+   thing being pruned is listed. */
+function dkResPage(tc,kind){
+ const img=kind==="images";
+ tc.innerHTML=`<div class="dk-ph"><h3>${img?"Images":"Volumes"}</h3><span class="sub">${img?"downloaded image layers":"container data that outlives containers"}</span></div>
+   <div id="dkResBody"></div>
+   <div class="dk-sec" style="margin-top:18px">Cleanup</div>
+   <div class="dd-acts" style="border:none;padding-top:0;flex-wrap:wrap" id="dkPrune"></div>
+   <div class="mon-note">Cleanup removes only unused items: running containers and their data are not touched.${img?" «Unused images» are all images without containers — they will be re-downloaded on next start.":" A volume without a container still holds its data: removing it deletes that data."}</div>`;
+ (img?imagesTab:volumesTab)(tc.querySelector("#dkResBody"));
  const pbox=tc.querySelector("#dkPrune");
  const pr=(label,what,q,dng)=>{const b=el(`<button class="btn sm ${dng?"dng":""}">${svg(dng?"trash":"eraser",13)} ${label}</button>`);
   b.onclick=()=>confirmDlg(label+"?",q,async()=>{const o=opAdd("Docker: "+label.toLowerCase());
    const r=await api("/api/docker/prune",{method:"POST",body:JSON.stringify({what})});
    opEnd(o,!!(r&&r.ok),r&&r.ok?"":((r&&r.log)||"error"));toast(LIVE?(r&&r.ok?"Done":"Error"):"Demo");
-   if(document.body.contains(tc))dkOverview(tc,reload);},dng);
+   if(document.body.contains(tc))dkResPage(tc,kind);},dng);
   pbox.appendChild(b);};
- pr("Dangling images","images","Only dangling (untagged) images will be removed — safe.");
- pr("Unused images","images-all","All images not attached to any container will be removed.",true);
- pr("Unused volumes","volumes","Volumes without containers will be removed — their data will be lost.",true);
- pr("Build cache","builder","The docker build cache will be removed — safe, builds will take longer.");
- const d=await api("/api/docker/overview");
- if(!document.body.contains(tc))return;
- const tiles=tc.querySelector("#dkTiles"),ver=tc.querySelector("#dkVer");
- if(!tiles)return;   // tab re-rendered (another sub-tab wrote tc.innerHTML) while the overview request was in flight — skeleton is gone
- if(!d||!d.ok){tiles.innerHTML=`<div class="dempty">${svg("cube",16)} ${esc((d&&d.log)||"Docker unavailable")}</div>`;if(ver)ver.textContent="—";return;}
- if(ver)ver.textContent=nasTr("version ")+(d.version||"?");
- const c=d.containers||{},df=d.df||{},im=df.images||{},vo=df.volumes||{},ca=df.cache||{};
- const tile=(v,l,sub,col)=>`<div class="dk-tile"><b style="color:${col||"var(--text)"}">${v}</b><span>${l}</span>${sub?`<small>${sub}</small>`:""}</div>`;
- const wud=d.wud||{};
- const wtile=(wud.ok&&wud.count)?tile(wud.count,"image updates",(wud.updates||[]).map(u=>u.name).slice(0,3).join(", "),"var(--warn)"):"";
- tiles.innerHTML=
-  tile(`${c.running||0} <span style="font-size:12px;font-weight:600;color:var(--mut)">of ${c.total||0}</span>`,"containers running",(c.exited?`${c.exited} stopped`:"")+(c.restarting?` · ${c.restarting} in restart loop`:""),c.restarting?"var(--danger)":c.running?"var(--good)":"var(--mut)")
-  +tile(im.count||"0","images",im.size?`taking up ${im.size}`:"")
-  +tile(vo.count||"0","volumes",vo.size?`taking up ${vo.size}`:"")
-  +tile(im.reclaim&&im.reclaim!=="0B"?im.reclaim:"0","reclaimable",ca.size&&ca.size!=="0B"?`+ build cache ${ca.size}`:"", (im.reclaim||"").startsWith("0")?"var(--mut)":"var(--warn)")
-  +wtile;
- // WUD not installed → unobtrusive reminder (image updates are a nice bonus)
- let wh=tc.querySelector("#dkWudHint");if(wh)wh.remove();
- if(wud.ok===false){
-  const dk=(APPS||[]).find(a=>/dockge/i.test(a.name||"")||/:5001(\/|$)/.test(a.url||""));
-  const h=el(`<div class="svc-hint" id="dkWudHint">${svg("cube",15)}<div class="svc-hint-t"><b>Install What's Up Docker</b> — the panel will show when image updates are available for your containers. Compose is ready in <span class="mono">/opt/stacks/wud</span>.</div>${dk?`<button class="btn sm" id="wudDk">Open Dockge →</button>`:""}</div>`);
-  const b=h.querySelector("#wudDk");if(b)b.onclick=()=>window.open(dk.url,"_blank");
-  tiles.parentNode.insertBefore(h,tiles.nextSibling);
- }
+ if(img){
+  pr("Dangling images","images","Only dangling (untagged) images will be removed — safe.");
+  pr("Unused images","images-all","All images not attached to any container will be removed.",true);
+  pr("Build cache","builder","The docker build cache will be removed — safe, builds will take longer.");
+ }else pr("Unused volumes","volumes","Volumes without containers will be removed — their data will be lost.",true);
 }
+
 function applyStats(box,stats){box.querySelectorAll("[data-cname]").forEach(n=>{const st=stats[n.dataset.cname];if(st)n.textContent=`${st.cpu} · ${st.mem}`;});}
 function imagesTab(tc){
  tc.innerHTML=`<div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap"><button class="btn sm" id="imRef">${svg("refresh",14)} Refresh</button><button class="btn sm warn" id="imPrune">Prune dangling</button><button class="btn sm dng" id="imPruneA">Remove unused</button></div><div id="imBox"></div>`;
@@ -5239,10 +5375,13 @@ function portLinks(ports){const set=[...new Set([...String(ports||"").matchAll(/
 const STK_ACT_LABEL={up:"start",down:"stop",stop:"stop",start:"start",restart:"restart",pull:"pulling images",build:"build",rebuild:"rebuild",recreate:"recreate","rebuild-nocache":"rebuild without cache"};
 /* stack details in the right panel of the Docker window */
 /* available recipe: install + bring up, streamed inline (no stuck modal) */
-function dkAvailPane(tc,a,reload){
+function dkAvailPane(tc,a,reload,ctx){
  const box=el(`<div class="dd"></div>`);
- box.appendChild(el(`<div class="dd-head"><div class="dd-ic" style="background:linear-gradient(135deg,#7183a0,#55647d)">${a.icon?`<img src="${att(iconSrc(a.icon))}" alt="" style="width:100%;height:100%;object-fit:contain;border-radius:8px" onerror="this.remove()">`:svg("download",19)}</div>
-   <div class="dd-hmain"><div class="dd-name">${esc(a.name)} <span class="stbadge dead">not installed</span></div><div class="dd-sub">${esc(a.desc||"")}</div></div></div>`));
+ const head=el(`<div class="dd-head">${ctx?`<button class="iconbtn" id="dkAvBack" title="Back to the catalogue" style="transform:rotate(180deg);flex:none">${svg("chev",16)}</button>`:""}
+   <div class="dd-ic" style="background:linear-gradient(135deg,#7183a0,#55647d)">${a.icon?`<img src="${att(iconSrc(a.icon))}" alt="" style="width:100%;height:100%;object-fit:contain;border-radius:8px" onerror="this.remove()">`:svg("download",19)}</div>
+   <div class="dd-hmain"><div class="dd-name">${esc(a.name)} <span class="stbadge dead">not installed</span></div><div class="dd-sub">${esc(a.desc||"")}</div></div></div>`);
+ const bk=head.querySelector("#dkAvBack");if(bk)bk.onclick=()=>ctx.go("store");
+ box.appendChild(head);
  const flds=(a.fields||[]),main=flds.filter(f=>!f.adv),adv=flds.filter(f=>f.adv);
  const rowH=f=>`<div class="field"><label>${esc(f.label||f.key)}${f.hint?` <span style="color:var(--mut);font-weight:400">— ${esc(f.hint)}</span>`:""}</label><input data-k="${att(f.key)}"${f.secret?' type="password"':""} value="${att(f.secret?"":(f.default||""))}" placeholder="${att(f.secret&&f.has_value?"•••••• (set; empty = keep)":"")}" autocomplete="off" spellcheck="false"></div>`;
  const form=el(`<div style="max-width:560px">${main.map(rowH).join("")}${adv.length?`<details><summary style="cursor:pointer;color:var(--mut);font-size:13px;margin:6px 0">Advanced (${adv.length})</summary>${adv.map(rowH).join("")}</details>`:""}</div>`);
@@ -5323,69 +5462,93 @@ function stReplicaDlg(a,reload){
  s.querySelector("#rpSync").onclick=()=>run("sync");
  s.querySelector("#rpRestore").onclick=()=>confirmDlg("Update replica","The database on this NAS will be overwritten with the dump from the source. The app will restart pinned to the source's version.",()=>run("restore"),true);
 }
-function dkStackPane(tc,s,reload){
- const running=s.running>0,partial=running&&s.running<s.total;
- const col=running?"linear-gradient(135deg,#46B98A,#2f9d70)":"linear-gradient(135deg,#7183a0,#55647d)";
- const health=s.total?(partial?`<span class="stbadge dead">partial ${s.running}/${s.total}</span>`:running?`<span class="stbadge run">running</span>`:`<span class="stbadge dead">stopped</span>`):`<span class="stbadge dead">no containers</span>`;
- const box=el(`<div class="dd"></div>`);
- const hasNote=!!(s.note&&s.note.trim());
- box.appendChild(el(`<div class="dd-head"><div class="dd-ic" style="background:${col}">${svg("cube",19)}</div>
-   <div class="dd-hmain"><div class="dd-name">${esc(s.name)} ${health}</div><div class="dd-sub"><span class="mono">${esc(s.path||"/opt/stacks/"+s.name)}</span>${s.orphan?" · folder deleted":s.has_compose?"":" · no compose"}</div></div>
-   ${running&&s.url?`<button class="btn sm" data-a="open" style="flex:none">${svg("globe",13)} Open</button>`:""}
-   <button class="mbp-hb" data-a="note" title="${hasNote?att(s.note):"Add note"}"${hasNote?' style="color:var(--accent)"':""}>${svg("file",15)}</button></div>`));
- const busy=()=>{box.style.opacity=".55";box.style.pointerEvents="none";};
- const A=a=>async()=>{busy();await stackAct(s.name,a,null);reload();};
- // stack actions
- const acts=el(`<div class="dd-acts" style="border:none;padding-top:0"></div>`);
- const mk=(l,ic,fn,cls)=>{const b=el(`<button class="btn sm ${cls||""}">${svg(ic,13)} ${l}</button>`);b.onclick=fn;acts.appendChild(b);};
+/* Everything that is not one of the two headline actions. Shared by the card in the
+   list and the header of the stack page, so both offer exactly the same set. */
+function dkStackMenu(ev,s,ctx){
+ const A=a=>()=>{stackAct(s.name,a,ctx.reload);};
+ const items=[];
  if(s.orphan){
-  // orphaned project: compose actions need the (deleted) folder — offer cleanup only,
-  // per-container menus below still work (plain docker, no compose)
-  box.appendChild(el(`<div class="mon-note" style="margin:0 0 10px">${svg("warn",13)} The stack folder was deleted, but docker still keeps its containers — the folder is only needed at start time. If the stack is no longer needed, stop and remove the containers; named volumes with data are not deleted.</div>`));
-  mk("Stop and remove containers","trash",()=>confirmDlg("Remove orphaned stack?",`«${esc(s.name)}»: the stack's containers and networks will be stopped and removed. Volumes will remain.`,()=>stackDelete(s.name,reload),true),"dng");
-  box.appendChild(acts);
- }else{
- if(running){mk("Stop","stop",A("down"),"warn");mk("Restart","refresh",A("restart"));}
- else if(s.has_compose)mk("Start","play",A("up"),"ok");
- const more=el(`<button class="btn sm">${svg("cog",13)} More ▾</button>`);
- more.onclick=ev=>showMenu(ev.clientX,ev.clientY,[
+  items.push({label:"Stop and remove containers",ic:svg("trash",16),dng:1,
+    act:()=>confirmDlg("Remove orphaned stack?",`«${esc(s.name)}»: the stack's containers and networks will be stopped and removed. Volumes will remain.`,()=>stackDelete(s.name,ctx.reload),true)});
+  return showMenu(ev.clientX,ev.clientY,items);}
+ items.push({label:"Logs",ic:svg("logs",16),act:()=>stackLogs(s.name)},
+   {label:"Edit compose & .env",ic:svg("edit",16),act:()=>editStack(s.name,ctx.reload)},
+   {label:"Open the folder",ic:svg("folder",16),act:()=>winFiles(s.path||("/opt/stacks/"+s.name))},
+   {label:s.note?"Edit note":"Add a note",ic:svg("file",16),act:()=>stackNoteDlg(s,ctx.reload)},
+   {sep:1},
    {label:"Pull images",ic:svg("download",16),act:A("pull")},
-   {label:"Rebuild (build+up)",ic:svg("refresh",16),act:A("rebuild")},
-   {label:"Rebuild without cache",ic:svg("refresh",16),act:()=>confirmDlg("Rebuild without cache?","Full rebuild of the stack's images — may take a while.",A("rebuild-nocache"))},
    {label:"Recreate containers",ic:svg("cube",16),act:A("recreate")},
+   {label:"Rebuild (build + up)",ic:svg("refresh",16),act:A("rebuild")},
+   {label:"Rebuild without cache",ic:svg("refresh",16),
+    act:()=>confirmDlg("Rebuild without cache?","Full rebuild of the stack's images — may take a while.",A("rebuild-nocache"))},
    {label:"Build only",ic:svg("cube",16),act:A("build")},
    {sep:1},
-   {label:"Stop (stop)",ic:svg("stop",16),act:A("stop")},
-   {label:"Remove containers (down)",ic:svg("stop",16),act:A("down")}]);
- acts.appendChild(more);
- mk("Logs","logs",()=>stackLogs(s.name));
- mk("Edit","edit",()=>editStack(s.name,reload));
- mk("Folder","folder",()=>winFiles(s.path||("/opt/stacks/"+s.name)));
- if(s.recipe&&s.recipe.replica)mk("Replica…","sync",()=>stReplicaDlg(s.recipe,reload));
- acts.appendChild(el(`<span class="grow"></span>`));
- mk("Delete","trash",()=>confirmDlg("Delete stack?",`«${esc(s.name)}» will be stopped and removed from /opt/stacks.`,()=>stackDelete(s.name,reload),true),"dng");
- box.appendChild(acts);
- }
- if(hasNote)box.appendChild(el(`<div class="stk-note">${esc(s.note)}</div>`));
- // containers
- box.appendChild(el(`<div class="dd-grp">Containers${s.total?` · ${s.total}`:""}</div>`));
- const cbox=el(`<div class="stk-conts" style="margin:0;border:none;padding:0"></div>`);
- if(!(s.containers||[]).length)cbox.appendChild(el(`<div class="dempty">${svg("cube",16)} No containers — the stack is not running</div>`));
- (s.containers||[]).forEach(c=>{const run=c.state==="running";let cls=run?"run":"dead",txt=run?"running":esc(c.state||"—");
+   {label:"Stop containers (stop)",ic:svg("stop",16),act:A("stop")},
+   {label:"Remove containers (down)",ic:svg("stop",16),act:A("down")});
+ if(s.recipe&&s.recipe.replica)items.push({sep:1},{label:"Replica…",ic:svg("sync",16),act:()=>stReplicaDlg(s.recipe,ctx.reload)});
+ items.push({sep:1},{label:"Delete the stack",ic:svg("trash",16),dng:1,
+   act:()=>confirmDlg("Delete stack?",`«${esc(s.name)}» will be stopped and removed from /opt/stacks.`,()=>stackDelete(s.name,ctx.reload),true)});
+ showMenu(ev.clientX,ev.clientY,items);
+}
+
+/* The stack page: what it is and how it is doing at the top, one headline action,
+   the containers below. Everything rarer is behind the gear — the old wall of nine
+   equal-weight buttons made the important two impossible to find. */
+function dkStackPane(tc,s,reload,ctx){
+ ctx=ctx||{reload,go:()=>{}};
+ const st=dkState(s),run=s.running>0;
+ const upd=(s.containers||[]).filter(c=>WUD[c.name]).length;
+ const ports=[...new Set([...String((s.containers||[]).map(c=>c.ports).join(",")).matchAll(/:(\d+)->/g)].map(m=>m[1]))];
+ const up=(s.containers||[]).map(c=>((c.status||"").match(/^Up\s+(.+?)(?:\s+\(|$)/)||[])[1]).find(Boolean)||"";
+ const box=el(`<div>
+   <div class="dk-dh">
+    <button class="iconbtn" id="dkBack" title="Back to apps" style="transform:rotate(180deg);flex:none">${svg("chev",16)}</button>
+    ${dkStackIcon(s,46)}
+    <div style="flex:1;min-width:0">
+     <div class="t"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(s.name)}</span>
+      <span class="stbadge ${st.st==="good"?"run":"dead"}">${esc(st.txt)}</span></div>
+     <div class="s mono">${esc(s.path||"/opt/stacks/"+s.name)}${s.orphan?" · folder deleted":s.has_compose?"":" · no compose"}</div></div>
+    ${run&&s.url?`<button class="btn sm" id="dkOpen" style="flex:none">${svg("globe",13)} Open</button>`:""}
+    <button class="btn sm" id="dkEdit" style="flex:none">${svg("edit",13)} Edit</button>
+    <button class="btn sm ${run?"warn":"pri"}" id="dkMain" style="flex:none">${svg(run?"power":"play",13)} ${run?"Stop":"Start"}</button>
+    <button class="iconbtn" id="dkGear" title="More" style="flex:none">${svg("cog",16)}</button></div>
+   ${s.orphan?`<div class="mon-note" style="margin:10px 0 0">${svg("warn",13)} The stack folder was deleted, but docker still keeps its containers — the folder is only needed at start time. If the stack is no longer needed, stop and remove the containers; named volumes with data are not deleted.</div>`:""}
+   <div class="dk-chips">
+    <div class="dk-chip"><b>${s.total?`${s.running}<span style="font-size:12px;color:var(--mut)"> of ${s.total}</span>`:"—"}</b><span>containers</span></div>
+    <div class="dk-chip"><b>${esc(up||"—")}</b><span>uptime</span></div>
+    <div class="dk-chip"><b style="color:${upd?"var(--warn)":"inherit"}">${upd||"—"}</b><span>image updates</span></div>
+    <div class="dk-chip"><b>${ports.length?esc(":"+ports.slice(0,2).join(" :")):"—"}</b><span>ports</span></div></div>
+   ${s.note?`<div class="stk-note" style="margin-bottom:14px">${esc(s.note)}</div>`:""}
+   <div class="dk-sec">Containers${s.total?` · ${s.total}`:""}<span style="flex:1"></span><button class="kp-quiet" id="dkLogs" style="font-size:11px">${svg("logs",12)} logs</button></div>
+   <div class="dk-conts" id="dkConts"></div></div>`);
+ const busy=()=>{box.style.opacity=".55";box.style.pointerEvents="none";};
+ box.querySelector("#dkBack").onclick=()=>ctx.go("apps");
+ box.querySelector("#dkGear").onclick=ev=>dkStackMenu(ev,s,ctx);
+ box.querySelector("#dkLogs").onclick=()=>stackLogs(s.name);
+ box.querySelector("#dkEdit").onclick=()=>editStack(s.name,reload);
+ const ob=box.querySelector("#dkOpen");if(ob)ob.onclick=()=>window.open(s.url,"_blank");
+ const mb=box.querySelector("#dkMain");
+ if(s.orphan||(!run&&!s.has_compose))mb.disabled=true;
+ else mb.onclick=()=>{busy();stackAct(s.name,run?"down":"up",reload);};
+ const cbox=box.querySelector("#dkConts");
+ if(!(s.containers||[]).length)cbox.innerHTML=`<div class="dempty" style="border:none;background:none">${svg("cube",16)} No containers — the stack is not running</div>`;
+ (s.containers||[]).forEach(c=>{const cr=c.state==="running";let cls=cr?"run":"dead",txt=cr?"running":esc(c.state||"—");
    if(c.health==="unhealthy"){cls="fail";txt="unhealthy";}else if(c.health==="starting"){txt="starting…";}else if((c.health||"").indexOf("exit:")===0){txt="exited ("+c.health.slice(5)+")";}
-   const upd=WUD[c.name];
-   const row=el(`<div class="stk-cont"><span class="stbadge ${cls}" title="${att(c.status||'')}">${txt}</span><span class="cn" title="${att(c.image)}">${esc(c.name)}</span>${wudChip(c.name,true)}<span class="cstat" data-cname="${att(c.name)}"></span><span style="flex:none;display:flex;gap:6px">${portLinks(c.ports)}</span><button class="iconbtn" data-c="menu" title="Container actions">${svg("cog",14)}</button></div>`);
-   const uc=row.querySelector(".cupd");if(uc&&upd){uc.style.cursor="pointer";uc.onclick=e=>{e.stopPropagation();updateInfoDlg(c.name,upd);};}
-   const menu=[{label:run?"Stop":"Start",ic:svg(run?"stop":"play",16),act:()=>contAct(c.name,run?"stop":"start",reload)},
+   const u=WUD[c.name];
+   const row=el(`<div class="dk-crow"><span class="stbadge ${cls}" title="${att(c.status||'')}">${txt}</span>
+     <span class="cn">${esc(c.name)}</span>${wudChip(c.name,true)}
+     <span class="im" title="${att(c.image)}">${esc(c.image)}</span>
+     <span class="cstat" data-cname="${att(c.name)}"></span>
+     <span style="flex:none;display:flex;gap:6px">${portLinks(c.ports)}</span>
+     <button class="iconbtn" data-c="menu" title="Container actions">${svg("cog",14)}</button></div>`);
+   const uc=row.querySelector(".cupd");if(uc&&u){uc.style.cursor="pointer";uc.onclick=e=>{e.stopPropagation();updateInfoDlg(c.name,u);};}
+   const menu=[{label:cr?"Stop":"Start",ic:svg(cr?"stop":"play",16),act:()=>contAct(c.name,cr?"stop":"start",reload)},
      {label:"Restart",ic:svg("refresh",16),act:()=>contAct(c.name,"restart",reload)}];
-   if(upd)menu.unshift({label:`Update: ${upd.current||"?"} → ${upd.latest||"?"}${upd.diff?" ("+upd.diff+")":""}`,ic:svg("arrowup",16),act:()=>updateInfoDlg(c.name,upd)},{sep:1});
-   if(run)menu.push({label:"Terminal in container",ic:svg("term",16),act:()=>execContainer(c.name)});
+   if(u)menu.unshift({label:`Update: ${u.current||"?"} → ${u.latest||"?"}${u.diff?" ("+u.diff+")":""}`,ic:svg("arrowup",16),act:()=>updateInfoDlg(c.name,u)},{sep:1});
+   if(cr)menu.push({label:"Terminal in container",ic:svg("term",16),act:()=>execContainer(c.name)});
    menu.push({sep:1},{label:"Remove container",ic:svg("trash",16),dng:1,act:()=>contAct(c.name,"rm",reload)});
    row.querySelector('[data-c="menu"]').onclick=ev=>showMenu(ev.clientX,ev.clientY,menu);
    cbox.appendChild(row);});
- box.appendChild(cbox);
- const ob=box.querySelector('[data-a="open"]');if(ob)ob.onclick=()=>window.open(s.url,"_blank");
- box.querySelector('[data-a="note"]').onclick=()=>stackNoteDlg(s,reload);
  tc.appendChild(box);
  api("/api/docker/stats").then(sd=>{if(document.body.contains(box))applyStats(box,(sd&&sd.stats)||{});});}
 function stackNoteDlg(s,reload){const sc=document.getElementById("scrim");
