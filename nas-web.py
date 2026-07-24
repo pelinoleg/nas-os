@@ -14795,6 +14795,12 @@ _ST_SKIP_REQ = {"host", "connection", "keep-alive", "proxy-authorization", "te",
                 "content-length"}
 _ST_SKIP_RESP = {"connection", "keep-alive", "transfer-encoding", "content-length",
                  "content-encoding", "trailers", "upgrade"}
+# The theme's own files: EVERY theme serves them under the SAME url, and Syncthing
+# validates them by file mtime — so a browser holding the light theme.css asks
+# "modified since?", the dark file (copied in the same second) is not newer, and the
+# answer is 304: the theme in the config changes and the page stays as it was.
+# Different files behind one url cannot be validated by date — never cache these two.
+_ST_NOCACHE = re.compile(r"^/assets/(css/theme\.css|img/logo-horizontal\.svg)(\?|$)")
 
 def st_proxy(method, path, headers, body, timeout=180):
     """One request to the Syncthing GUI. Returns (status, [(k,v)…], body) or None
@@ -14807,26 +14813,41 @@ def st_proxy(method, path, headers, body, timeout=180):
         # authenticate for the SPA as well as the REST calls: whoever got past the
         # panel's login is the box's admin, and this also skips Syncthing's CSRF
         hdrs["X-API-Key"] = c["apikey"]
-    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
-    try:
-        conn.request(method, path, body=body, headers=hdrs)
-        r = conn.getresponse()
-        data = r.read()
-        out = []
-        for k, v in r.getheaders():
-            if k.lower() in _ST_SKIP_RESP:
-                continue
-            if k.lower() == "location" and v.startswith("/"):
-                v = ST_PREFIX + v          # keep redirects inside the proxied prefix
-            out.append((k, v))
-        return r.status, out, data
-    except (OSError, http.client.HTTPException):
-        return None
-    finally:
+    theme_file = bool(_ST_NOCACHE.match(path))
+    if theme_file:
+        for k in [k for k in hdrs if k.lower() in ("if-modified-since", "if-none-match")]:
+            hdrs.pop(k)
+    # one retry: changing anything in the gui config makes Syncthing bounce its own
+    # listener, and a request landing in that gap would otherwise show "not answering"
+    for attempt in (0, 1):
+        conn = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
         try:
-            conn.close()
-        except Exception:
-            pass
+            conn.request(method, path, body=body, headers=hdrs)
+            r = conn.getresponse()
+            data = r.read()
+            out = []
+            for k, v in r.getheaders():
+                lk = k.lower()
+                if lk in _ST_SKIP_RESP:
+                    continue
+                if lk == "location" and v.startswith("/"):
+                    v = ST_PREFIX + v      # keep redirects inside the proxied prefix
+                if theme_file and lk in ("cache-control", "last-modified", "etag"):
+                    continue               # see _ST_NOCACHE
+                out.append((k, v))
+            if theme_file:
+                out.append(("Cache-Control", "no-store"))
+            return r.status, out, data
+        except (OSError, http.client.HTTPException):
+            if attempt or body is not None:   # a body can only be sent once
+                return None
+            time.sleep(0.8)
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
+    return None
 
 # --------------------------------------------------------------------------- #
 #  File manager (native, running as root — the whole FS). A LAN admin tool.
