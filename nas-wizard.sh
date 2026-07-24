@@ -3509,6 +3509,27 @@ install_kopia() {
 }
 
 # ---------------------------------------------------------------------------
+# The Pi has no RTC. Without a saved timestamp the clock comes up at whatever floor
+# systemd finds — on this box that was a leftover /var/lib/systemd/timesync/clock
+# from a timesyncd that is no longer installed, so EVERY boot started on 13 July and
+# chrony then stepped the clock forward by ten days. Anything that stamps a file in
+# those first seconds — the availability log, the black box, schedulers — writes a
+# time from the past, and comparing «now» against a stored mark stops working.
+# fake-hwclock (the Raspberry Pi OS standard) saves the time hourly and at shutdown
+# and restores it at boot, so the clock starts minutes off instead of days.
+# ---------------------------------------------------------------------------
+install_fake_hwclock() {
+    install_packages "clock" fake-hwclock
+    command -v fake-hwclock >/dev/null 2>&1 || return 0
+    run fake-hwclock save
+    enable_service fake-hwclock-save.timer
+    # the load/save pair is enabled by the package; make sure a stale floor file
+    # cannot drag the clock backwards if timesyncd was removed at some point
+    [ -f /var/lib/systemd/timesync/clock ] && run touch /var/lib/systemd/timesync/clock
+    info "fake-hwclock: clock saved ($(cat /etc/fake-hwclock.data 2>/dev/null))"
+}
+
+# ---------------------------------------------------------------------------
 # Syncthing — continuous file sync with laptops/phones/other boxes. A SYSTEM
 # service, not a container: it must come up with the box, independently of docker.
 # Debian ships 1.29 (a whole major behind 2.x), so we take the OFFICIAL Syncthing
@@ -3680,6 +3701,7 @@ stage_system_apply() {
     # recovery resets the whole device and takes a running backup down with it. See install_uas_off().
     install_uas_off
     install_usb_timeout      # 180s USB SCSI timeout — always on, independent of automount
+    install_fake_hwclock     # a Pi has no RTC: without this the clock boots days in the past
     # Time Machine target: rebuild the SMB share + Avahi advert if it was configured
     # before (settings backup restores /etc/nas-wizard/timemachine.conf).
     tm_reapply_if_configured

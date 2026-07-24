@@ -8070,8 +8070,13 @@ def _nb_health_one(cfg, many, fire, ev, pri, thr, now):
             ts = 0
         if days > 0 and not nb_run_active(pid):
             if not ts:
-                fire_p("nb_stale", "NAS backup: never run yet",
-                     "The backup is configured, but there hasn't been a single run", pri("nb_stale"), ev_name="nb_stale", lvl="warn")
+                # ...but only if it was meant to run by itself. A profile with the
+                # schedule switched off is a manual one (or a draft): never having
+                # run is the owner's choice, not an anomaly, and repeating the
+                # warning every cooldown teaches people to ignore warnings.
+                if (cfg.get("schedule") or {}).get("enabled"):
+                    fire_p("nb_stale", "NAS backup: never run yet",
+                         "Scheduled, but there hasn't been a single run yet", pri("nb_stale"), ev_name="nb_stale", lvl="warn")
             elif now - ts > days * 86400:
                 fire_p("nb_stale", "NAS backup: not updated for a long time",
                      "Last run %d days ago (threshold %d)" % (int((now - ts) / 86400), days),
