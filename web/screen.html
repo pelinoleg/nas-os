@@ -207,7 +207,11 @@
   #dots{display:flex;gap:7px;flex:none;padding-left:6px}
   .d{width:8px;height:8px;border-radius:50%;background:rgba(255,255,255,.25)}
   .d.on{background:var(--accent)}
-  #r2a{flex:none;height:134px;display:grid;grid-template-columns:1.75fr 1fr;gap:7px}
+  /* Disks moved here from the first page: it needs four rows with fill bars, so the row is
+     a touch taller than Time Machine's was and the rows are as tight as in #row2 */
+  #r2a{flex:none;height:156px;display:grid;grid-template-columns:1.35fr 1fr;gap:7px}
+  #r2a .prow{padding:3px 0}
+  #r2a .r2{padding:3px 0;font-size:14px}
   #r2b{flex:1;display:grid;grid-template-columns:2.2fr 1fr;gap:7px;min-height:0}
   .big{font-size:22px;font-weight:700;font-variant-numeric:tabular-nums;line-height:1.15}
   .big small{font-size:11px;color:var(--dim);font-weight:600;margin-left:3px}
@@ -239,8 +243,6 @@
   .chart .ymax,.chart .ymin,.chart .pk{position:absolute;font-size:9.5px;color:var(--mut);
     font-variant-numeric:tabular-nums;pointer-events:none}
   .chart .ymax{top:0;left:2px} .chart .ymin{bottom:0;left:2px} .chart .pk{top:0;right:2px}
-  .tmb{display:grid;grid-template-columns:1fr 1.15fr;gap:12px;align-items:start}
-  .tmcol{min-width:0}
   .gline{display:flex;flex-direction:column;gap:1px;margin-bottom:4px}
   .gline .gh{display:flex;font-size:11px;color:var(--dim)}
   .gline .gh b{margin-left:auto;color:var(--ink);font-size:12px}
@@ -361,17 +363,17 @@
     <div id="gs"></div>
     <div id="row">
       <div class="card g" id="c_bk" data-sheet="backups"></div>
-      <div class="card g" id="c_usb" data-sheet="usb"></div>
+      <div class="card g" id="c_kp" data-sheet="kopia"></div>
     </div>
     <div id="row2">
       <div class="card g" id="c_ev" data-sheet="events"></div>
-      <div class="card g" id="c_ds" data-sheet="disks"></div>
+      <div class="card g" id="c_usb" data-sheet="usb"></div>
     </div>
   </div>
 
   <div class="page" id="p1">
     <div id="r2a">
-      <div class="card g" id="c_tm" data-sheet="tm"></div>
+      <div class="card g" id="c_ds" data-sheet="disks"></div>
       <div class="card g" id="c_tr" data-sheet="traffic"></div>
     </div>
     <div id="r2b">
@@ -684,11 +686,11 @@ function renderCards(d){
         <span class="ago">${esc(x.size||"")}${p!=null?" · "+Math.round(p)+"%":""}${x.temp?" · "+x.temp+"°":""}</span></div>
         ${p!=null?bar(p):""}</div>`;}).join(""):`<div class="empty">no disks</div>`}</div>`;
 
-  // --- Backups: a run in progress -> progress; idle -> history (profile + date + dot)
+  // --- Mirror (rsync copies): a run in progress -> progress; idle -> history
   const bk=d.backups||[], act=bk.find(b=>b.running);
   if(act){
     const L=act.live||{}, armed=Date.now()-BKSTOP<5000;   // fuller info in the card's own cell (other cards stay)
-    $("#c_bk").innerHTML=`<h2>Backup running<span class="r">${esc(act.name)}</span></h2>
+    $("#c_bk").innerHTML=`<h2>Mirror running<span class="r">${esc(act.name)}</span></h2>
       <div class="body bkbig">
         <div class="bk-top">
           <div class="bk-pct">${L.pct!=null?L.pct:"—"}<small>%</small></div>
@@ -710,10 +712,55 @@ function renderCards(d){
     const off=bk.filter(b=>b.dest_off);
     const bwarn=off.length?`<div class="wrn">${off.length===bk.length?"Destination disk unplugged"
       :"Destination disk unplugged: "+esc(off.map(b=>b.name).join(", "))}</div>`:"";
-    $("#c_bk").innerHTML=`<h2>Backups<span class="r ${off.length?"wn":""}">${off.length?"no destination":(bk.length||"—")}</span></h2>
+    $("#c_bk").innerHTML=`<h2>Mirror<span class="r ${off.length?"wn":""}">${off.length?"no destination":(bk.length||"—")}</span></h2>
       <div class="body">${bwarn}${bk.length?bk.slice(0,bwarn?3:4).map(b=>bkRow(b,"r2")).join("")
         :`<div class="empty">no profiles</div>`}</div>`;
   }
+  renderKopia(d);
+}
+
+/* --- Kopia (snapshot backups): the same language as the Mirror card, so the top row
+   reads as one thing — "are my copies fine?" — with two engines under it. A run in
+   progress takes over the cell (percentage, phase, Stop); at rest it is one row per
+   backup: dot + name + "size · when". */
+function kpRow(k,box,tail){
+  const cls=k.last==="ok"?"ok":k.last==="warn"?"wn":k.last?"bd":"no";
+  const w=k.last_ts?sized(k.last_bytes?fmtB(k.last_bytes):"",k.last_ts):"never";
+  return hrow(cls,k.name,w,box,tail);
+}
+const KP_PHASE={snapshot:"snapshotting",replicate:"copying to the spare",
+                drill:"verifying a restore",waiting:"waiting for the disk",starting:"starting"};
+function renderKopia(d){
+  const kp=d.kopia||[], act=kp.find(k=>k.running);
+  if(act){
+    const L=act.live||{}, armed=Date.now()-KPSTOP<5000;
+    $("#c_kp").innerHTML=`<h2>Kopia running<span class="r">${esc(act.name)}</span></h2>
+      <div class="body bkbig">
+        <div class="bk-top">
+          <div class="bk-pct">${L.pct!=null?Math.round(L.pct):"—"}<small>%</small></div>
+          <div class="bk-side">
+            <div class="bk-kv"><span>Phase</span><b>${esc(KP_PHASE[L.phase]||L.phase||"—")}</b></div>
+            <div class="bk-kv"><span>Files</span><b>${L.files||"—"}</b></div>
+            <div class="bk-kv"><span>Left</span><b>${esc(L.eta||"—")}</b></div>
+          </div>
+        </div>
+        ${bar(L.pct||0,"pg")}
+        <div class="bk-foot">
+          <div class="bk-cur">${esc(L.bytes?fmtB(L.bytes)+" written":(L.cur||"starting"))}<i class="bkdots" style="animation-delay:${-(Date.now()%1200)}ms">...</i></div>
+          <button class="bk-stop${armed?" armed":""}" data-kpstop="${esc(act.id)}">${armed?"Really?":"Stop"}</button>
+        </div>
+      </div>`;
+    return;
+  }
+  // the repository disk is unplugged — the scheduled snapshot will NOT happen, and that
+  // has to be readable now (a backup that runs on plug-in is not counted: for it the
+  // disk being away is the normal state)
+  const off=kp.filter(k=>k.dest_off);
+  const kwarn=off.length?`<div class="wrn">${off.length===kp.length?"Repository disk unplugged"
+    :"Repository disk unplugged: "+esc(off.map(k=>k.name).join(", "))}</div>`:"";
+  $("#c_kp").innerHTML=`<h2>Kopia<span class="r ${off.length?"wn":""}">${off.length?"no repository":(kp.length||"—")}</span></h2>
+    <div class="body">${kwarn}${kp.length?kp.slice(0,kwarn?3:4).map(k=>kpRow(k,"r2")).join("")
+      :`<div class="empty">no snapshot backups</div>`}</div>`;
 }
 function renderRow2(d){
   const ev=(d.events||[]).slice(0,3);
@@ -811,22 +858,9 @@ const iofmt=b=>{ const r=iorate(b); return r[0]+" "+r[1]; };
 
 function renderP1(d){
   const P=d.p2; if(!P) return;
-
-  // Time Machine — wider and more detailed
-  const tm=P.tm||{};
-  $("#c_tm").innerHTML=`<h2>Time Machine<span class="r" style="color:${tm.enabled?"var(--good)":"var(--mut)"}">${tm.enabled?"enabled":"disabled"}</span></h2>
-    <div class="body tmb">${tm.installed?`
-      <div class="tmcol">
-        <div class="big">${tm.size!=null?gb(tm.size):"—"}<small>used</small></div>
-        <div class="run">${esc(tm.path||"")}</div>
-      </div>
-      <div class="tmcol">
-        <div class="r2"><span class="nm">Free</span><span class="ago">${tm.free!=null?gb(tm.free):"—"}</span></div>
-        <div class="r2"><span class="nm">Quota</span><span class="ago">${tm.quota_gb?tm.quota_gb+" GB":"no quota"}</span></div>
-        <div class="r2"><span class="nm">Last backup</span><span class="ago">${tm.mtime?esc(ago(tm.mtime)):"never"}</span></div>
-        <div class="r2"><span class="nm">Backups</span><span class="ago">${(tm.backups||[]).length}</span></div>
-      </div>`
-      :`<div class="empty">not configured</div>`}</div>`;
+  // Disks live on this page now — they are telemetry, and the first page belongs to the
+  // two backup engines. The card itself is painted by renderCards (its data comes with
+  // every poll, not with the page-two payload).
 
   // Traffic
   const tr=P.traffic||{}, t=tr.today||{}, mo=tr.month||{};
@@ -982,9 +1016,9 @@ const SHEETS={
         ${on?`<span class="sbtn" data-stack="${esc(x.name)}" data-op="stop">Stop</span>`:""}
       </div>`;}).join(""):`<div class="empty">Docker is not installed</div>`, ""];},
 
-  /* Backups: all profiles, progress of the running one, launch any of them */
+  /* Mirror: all rsync profiles, progress of the running one, launch any of them */
   backups:d=>{const bk=d.backups||[];
-    return ["Backups", bk.length?bk.map(b=>{
+    return ["Mirror", bk.length?bk.map(b=>{
       if(b.running){ const L=b.live||{};
         return `<div class="prow"><div class="t"><span class="nm">${esc(b.name)}</span>
           <span class="ago">${L.pct!=null?L.pct+"% · ":""}${esc(L.speed||"running")}</span></div>
@@ -993,6 +1027,24 @@ const SHEETS={
       }
       return bkRow(b,"srow2",`<span class="sbtn" data-run="${esc(b.id)}">Start</span>`);
     }).join(""):`<div class="empty">no profiles</div>`, ""];},
+
+  /* Kopia: every snapshot backup — what it protects, where it lands, when it last ran
+     and when it runs next; the running one shows its progress, the rest can be started */
+  kopia:d=>{const kp=d.kopia||[];
+    return ["Snapshot backups", kp.length?kp.map(k=>{
+      if(k.running){ const L=k.live||{};
+        return `<div class="prow"><div class="t"><span class="nm">${esc(k.name)}</span>
+          <span class="ago">${L.pct!=null?Math.round(L.pct)+"% · ":""}${esc(KP_PHASE[L.phase]||L.phase||"running")}</span></div>
+          ${bar(L.pct||0,"pg")}
+          <div class="run">${esc(L.bytes?fmtB(L.bytes)+" written":(L.cur||""))}${L.eta?" · "+esc(L.eta)+" left":""}</div></div>`;
+      }
+      const to=[k.dest||"repository", k.spare?"+ spare copy":""].filter(Boolean).join(" ");
+      return `<div class="prow">
+        ${kpRow(k,"t",`<span class="sbtn" data-kprun="${esc(k.id)}">Start</span>`)}
+        <div class="run">${esc(k.src||"")} → ${esc(to)}${k.dest_off?" · disk unplugged":""}${
+          k.next?" · next "+esc(fmtIn(k.next))+" ("+esc(tat(k.next))+")":k.enabled===false?" · disabled":" · manual only"}</div>
+        ${k.last==="error"&&k.error?`<div class="run" style="color:var(--bad)">${esc(k.error)}</div>`:""}</div>`;
+    }).join(""):`<div class="empty">no snapshot backups yet</div>`, ""];},
 
   /* USB import: an in-progress copy on top, history below (survives a reboot) */
   usb:d=>{const jobs=(d.usb||[]).filter(j=>j.status==="running"), hist=d.usbhist||[];
@@ -1019,14 +1071,6 @@ const SHEETS={
         <span class="ago">${esc(ago(e.t))}</span></div>`;
     }).join(""):`<div class="empty">no events</div>`, ""],
 
-  tm:d=>{const t=(d.p2||{}).tm||{};
-    return ["Time Machine", t.installed?
-      KV("Status",t.enabled?"enabled":"disabled")+KV("Folder",t.path)
-      +KV("Used",t.size!=null?gb(t.size):"—")+KV("Free",t.free!=null?gb(t.free):"—")
-      +KV("Quota",t.quota_gb?t.quota_gb+" GB":"no quota")
-      +KV("Last backup",t.mtime?ago(t.mtime):"never")
-      +(t.backups||[]).map(b=>KV(b.name||"backup",b.size!=null?gb(b.size):"")).join("")
-      :`<div class="empty">Time Machine is not configured</div>`, ""];},
   traffic:d=>{const tr=(d.p2||{}).traffic||{};
     const panel=(title,o)=>{const rx=o.rx||0,tx=o.tx||0;
       return `<div class="trs-col">
@@ -1071,7 +1115,7 @@ const SHEETS={
     +KV("Green","panel was answering")+KV("Amber","box alive, no network")+KV("Red","box was down"),
     `<div class="go warnbtn" data-act="poweroff">Power off NAS</div>`],
 };
-let CUR_SHEET=null, EJ={dev:"",t:0}, BKSTOP=0;   // BKSTOP: timestamp the Stop button was armed (double-tap confirm)
+let CUR_SHEET=null, EJ={dev:"",t:0}, BKSTOP=0, KPSTOP=0;   // *STOP: timestamp the Stop button was armed (double-tap confirm)
 let UPD={op:"",t:0};   // update buttons: which op is armed + when (double-tap confirm)
 function sheet(name,keepScroll){
   const f=SHEETS[name]; if(!f) return;
@@ -1112,6 +1156,15 @@ document.addEventListener("click",e=>{
     if(Date.now()-BKSTOP>=5000){ BKSTOP=Date.now(); renderCards(D); return; }   // first tap — arm the confirm
     BKSTOP=0; toast("Stopping backup…");
     act({a:"backup_stop",p:pid}).then(x=>{ toast(x.ok?"Backup stopping…":(x.log||"failed")); poll(); });
+    return; }
+  const kr=e.target.closest("[data-kprun]");
+  if(kr){ closeSheet();
+    act({a:"kopia",id:kr.dataset.kprun}).then(x=>{toast(x.ok?"Snapshot started":(x.log||"failed")); poll();}); return; }
+  const ks=e.target.closest("[data-kpstop]");
+  if(ks){ const id=ks.dataset.kpstop;
+    if(Date.now()-KPSTOP>=5000){ KPSTOP=Date.now(); renderKopia(D); return; }   // first tap — arm the confirm
+    KPSTOP=0; toast("Stopping the snapshot…");
+    act({a:"kopia_stop",id:id}).then(x=>{ toast(x.ok?"Stopping…":(x.log||"failed")); poll(); });
     return; }
   const wd=e.target.closest("[data-warndismiss]");
   if(wd){ const warns=(D.problems||[]).filter(p=>p.lvl==="warn");

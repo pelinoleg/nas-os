@@ -18952,7 +18952,6 @@ def _screen_page2():
     now = time.time()
     if now - _SCR_P2["t"] < 30 and _SCR_P2["d"]:
         return _SCR_P2["d"]
-    tm = _safe(tm_status, {}) or {}
     vn = _safe(vnstat_state, {}) or {}
     ap = _safe(apt_updates, {}) or {}
     wd = _safe(wud_state, {}) or {}
@@ -18969,15 +18968,12 @@ def _screen_page2():
         pc = _safe(lambda pid=p["id"]: nb_load(pid), {}) or {}
         t = _safe(lambda: _nb_next_run(pc))
         if t:
-            sched.append({"name": p["name"], "next": int(t), "kind": "backup"})
+            sched.append({"name": p["name"], "next": int(t), "kind": "mirror"})
+    for k in (_safe(_screen_kopia, []) or []):
+        if k.get("next"):
+            sched.append({"name": k["name"], "next": k["next"], "kind": "snapshot"})
     hist.sort(key=lambda x: -x["ts"])
     d = {
-        # Time Machine: the service may not be configured — then just empty
-        "tm": {"enabled": bool(tm.get("enabled")), "installed": bool(tm.get("installed")),
-               "path": tm.get("path") or "", "size": tm.get("size"),
-               "free": (tm.get("space") or {}).get("free") if isinstance(tm.get("space"), dict) else tm.get("free"),
-               "backups": tm.get("backups"), "mtime": tm.get("mtime") or 0,
-               "quota_gb": tm.get("quota_gb")},
         # vnstat: no service -> ok:false, the tile is simply not drawn
         "traffic": {"ok": bool(vn.get("ok")), "today": vn.get("today") or {},
                     "month": vn.get("month") or {}, "total": vn.get("total") or {}},
@@ -19002,6 +18998,77 @@ def _screen_page2():
     _SCR_P2["d"] = d
     _SCR_P2["t"] = now
     return d
+
+
+def _kp_next_run(bk):
+    """Next scheduled snapshot (epoch) of one kopia backup, None if it only runs by hand.
+    Same minute-slot rules the ticker uses, so the wall and the ticker never disagree."""
+    s = (bk or {}).get("schedule") or {}
+    if not bk.get("enabled", True) or s.get("mode") not in ("daily", "weekly"):
+        return None
+    try:
+        hh, mm = map(int, str(s.get("time") or "").split(":"))
+    except ValueError:
+        return None
+    now = time.localtime()
+    base = time.mktime((now.tm_year, now.tm_mon, now.tm_mday, hh, mm, 0, 0, 0, -1))
+    for d in range(8):
+        t = base + d * 86400
+        if t <= time.time():
+            continue
+        if s.get("mode") == "weekly" and time.localtime(t).tm_wday != int(s.get("dow") or 0):
+            continue
+        return t
+    return None
+
+
+# Kopia for the wall. Every field is read from files already on disk (config, run state,
+# history) — no repository is opened and nothing goes to the network, so this is cheap
+# enough for the fast poll; still cached, because the poll is every 1.5 s.
+_SCR_KP = {"t": 0, "d": []}
+
+
+def _screen_kopia():
+    now = time.time()
+    if now - _SCR_KP["t"] < 8:
+        return _SCR_KP["d"]
+    out = []
+    if kopia_installed():
+        cfg = _safe(kp_load, None) or {}
+        hist = _safe(kp_history, []) or []
+        dests = {x["id"]: x for x in (cfg.get("dests") or [])}
+        srcs = {x["id"]: x for x in (cfg.get("sources") or [])}
+        for b in (cfg.get("backups") or []):
+            st = _safe(lambda i=b["id"]: kp_run_state(i), {}) or {}
+            hs = [h for h in hist if h.get("backup") == b["id"]]
+            last = hs[-1] if hs else {}          # history is appended, newest last
+            dest = dests.get(b.get("dest")) or {}
+            # an fs repository on a disk that is not plugged in: the run will NOT happen and
+            # the wall has to say so now. For a backup that runs ON plug-in the disk being
+            # away IS the normal state — no warning there.
+            off = bool(dest.get("kind") == "fs" and dest.get("path")
+                       and not os.path.isdir(dest["path"]) and not b.get("usb_trigger"))
+            e = {"id": b["id"], "name": b.get("name") or "backup",
+                 "running": bool(st.get("running")),
+                 "last": last.get("result") or ("" if not st.get("result") else st["result"]),
+                 "last_ts": int(last.get("ts") or st.get("done") or 0),
+                 "last_bytes": int(last.get("bytes") or 0),
+                 "last_files": int(last.get("files") or 0),
+                 "error": (last.get("error") or "")[:200],
+                 "dest": dest.get("name") or "", "dest_kind": dest.get("kind") or "",
+                 "dest_off": off, "spare": bool(b.get("dest2")),
+                 "src": (srcs.get(b.get("source")) or {}).get("name") or "",
+                 "enabled": bool(b.get("enabled", True)),
+                 "next": int(_safe(lambda x=b: _kp_next_run(x)) or 0)}
+            if e["running"]:
+                e["live"] = {"pct": st.get("pct"), "phase": st.get("phase") or "",
+                             "eta": st.get("eta") or "", "cur": st.get("cur") or "",
+                             "files": st.get("hashed_files") or 0,
+                             "bytes": st.get("uploaded_bytes") or st.get("hashed_bytes") or 0}
+            out.append(e)
+    _SCR_KP["d"] = out
+    _SCR_KP["t"] = now
+    return out
 
 
 def _screen_usb_cfg():
@@ -19128,6 +19195,8 @@ def screen_payload(lang="", p2=False):
             "mem": st.get("mem") or {}, "pool": st.get("disk_pool"),
             "root": st.get("disk_root"), "overall": hp.get("overall") or "ok",
             "tiles": tiles, "problems": problems, "events": events, "backups": bks,
+            # snapshot backups (Kopia) — its own card next to Mirror on the first page
+            "kopia": _safe(_screen_kopia, []) or [],
             "avail": {"bars": av.get("bars") or [], "frac": av.get("frac") or [],
                       "pct": av.get("pct")},
             "avail30": {"bars": av30.get("bars") or [], "frac": av30.get("frac") or [],
@@ -19271,6 +19340,14 @@ def screen_action(b):
         except OSError:
             pass
         return {"ok": True}
+    if a == "kopia":
+        r = kp_run_start(str(b.get("id") or ""))
+        _SCR_KP["t"] = 0                    # the card must show "running" on the very next poll
+        return r
+    if a == "kopia_stop":
+        r = kp_run_cancel(str(b.get("id") or ""))
+        _SCR_KP["t"] = 0
+        return r
     if a == "eject":
         # disk_eject sam refuses system/pool disks; the screen only offers the
         # button for mounted USB drives, but the server must not trust that
