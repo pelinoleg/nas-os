@@ -9014,6 +9014,9 @@ _BK_SECTIONS = (
                                                        "etc/nas-os/kopia.json",
                                                        "root/.ssh/nas-backup")),
     ("smbpw",     "SMB passwords (cleartext)",  True,  ("etc/nas-os/smb-users.json",)),
+    # Syncthing's identity IS key.pem: lose it and the box comes back as a stranger
+    # that every peer has to accept again. Secret — it is a private key.
+    ("syncthing", "Syncthing identity + folders", True, ("var/lib/syncthing/",)),
     ("network",   "Network (Wi-Fi, IP)",       True,  ("reference/etc/netplan/",)),   # Wi-Fi password → secret; restore by hand (reference)
     ("other",     "Other",                     False, ()),      # everything not matched above
 )
@@ -9029,6 +9032,8 @@ _BK_DESC = {
     "webauth":   "the web-panel login password",
     "nasbackup": "«Backup» app profiles, SSH passwords and key",
     "smbpw":     "cleartext SMB user passwords (so the panel can show them)",
+    "syncthing": "Syncthing's device identity and its folder/device list — restoring it "
+                 "brings the box back under the SAME device ID, so peers keep syncing",
     "network":   "netplan network profiles: Wi-Fi and static IP (placed alongside, applied manually)",
     "other":     "external screen token, main storage choice, operation history",
 }
@@ -9121,6 +9126,12 @@ def _bk_sources():
                    (RCLONE_CONF, "etc/nas-os/rclone.conf"),                       # rclone remotes (cloud keys) → secret section
                    (KOPIA_CONF, "etc/nas-os/kopia.json"),                         # kopia entities + repo password → secret section
                    ("/var/lib/samba/private/passdb.tdb", "var/lib/samba/private/passdb.tdb"),
+                   # Syncthing: the device identity (cert+key = the device ID other
+                   # machines trust) and the folder/device list. The database is NOT
+                   # backed up — it is an index, rebuilt from the files themselves.
+                   (os.path.join(ST_HOME, "config.xml"), "var/lib/syncthing/config.xml"),
+                   (os.path.join(ST_HOME, "cert.pem"), "var/lib/syncthing/cert.pem"),
+                   (os.path.join(ST_HOME, "key.pem"), "var/lib/syncthing/key.pem"),
                    # SSH key of the «Backup» app (key-based push to servers): without it
                    # key-based push profiles stop authenticating after a reinstall
                    (NB_KEY, "root/.ssh/nas-backup"),
@@ -9219,6 +9230,7 @@ def settings_backup_restore(path, sections=None):
                    ("etc/nas-os/nas-backup.json", "/etc/nas-os/nas-backup.json"),
                    ("etc/samba/smb.conf", "/etc/samba/smb.conf"),
                    ("var/lib/samba/private/passdb.tdb", "/var/lib/samba/private/passdb.tdb"),
+                   ("var/lib/syncthing/", ST_HOME),
                    ("opt/stacks/", STACKS_DIR),
                    ("root/.ssh/nas-backup", "/root/.ssh/nas-backup"),
                    ("root/.ssh/nas-backup.pub", "/root/.ssh/nas-backup.pub")]
@@ -9260,6 +9272,12 @@ def settings_backup_restore(path, sections=None):
                 if any(x in dest for x in ("webauth", "notify.conf", "nas-backup.json",
                                            "store.json", "remotes.json", "credentials.json")):
                     os.chmod(dest, 0o600)
+                # Syncthing's identity: private key 0600 in a 0700 directory —
+                # syncthing refuses to start on a world-readable key
+                if dest.startswith(ST_HOME + "/"):
+                    _safe(lambda: os.chmod(ST_HOME, 0o700))
+                    if dest.endswith(("key.pem", "config.xml")):
+                        _safe(lambda: os.chmod(dest, 0o600))
                 # push-backup SSH key: private key 0600, its dir 0700 (else ssh refuses it)
                 if dest.startswith("/root/.ssh/"):
                     _safe(lambda: os.chmod(os.path.dirname(dest), 0o700))
@@ -9280,6 +9298,12 @@ def settings_backup_restore(path, sections=None):
         apply_spindown_all()
     except Exception:
         pass
+    # a running Syncthing holds its config in memory and would write the old one
+    # back over what we just restored — restart it onto the restored identity
+    if any(n.startswith("var/lib/syncthing/") for n in restored):
+        _ST_CACHE["mtime"] = 0.0
+        _safe(lambda: subprocess.run(["systemctl", "restart", ST_UNIT],
+                                     capture_output=True, timeout=45))
     titles = dict((k, t) for k, t, _s, _p in _BK_SECTIONS)
     what = ("sections: " + ", ".join(titles[k] for k, _t, _s, _p in _BK_SECTIONS if k in sel)) \
         if sel is not None else "all sections"
@@ -14602,6 +14626,207 @@ def cron_logs(run_id, offset=0, max_lines=500):
     q = "runId=%s&offset=%d&maxLines=%d" % (quote(str(run_id)), offset, max_lines)
     r = _cron("GET", "/api/logs/stream?" + q)
     return {"ok": True, **r["data"]} if r.get("ok") and isinstance(r.get("data"), dict) else r
+
+# --------------------------------------------------------------------------- #
+#  Syncthing — a SYSTEM service (not a container), installed from the official
+#  apt repository by the wizard (install_syncthing). Its GUI listens on LOOPBACK
+#  and the panel reverse-proxies it at /syncthing/ behind its own login, so the
+#  LAN never faces an unauthenticated admin interface and the app opens as an
+#  ordinary desktop window (same origin → the GUI's X-Frame-Options is satisfied).
+#  There is no second copy of the settings: everything is read from — and written
+#  to — Syncthing's own config, through its REST API.
+# --------------------------------------------------------------------------- #
+ST_HOME = "/var/lib/syncthing"
+ST_CONF = os.path.join(ST_HOME, "config.xml")
+ST_UNIT = "nas-syncthing"
+ST_PREFIX = "/syncthing"
+_ST_CACHE = {"mtime": 0.0, "val": {}}
+_ST_LOCK = threading.Lock()
+
+def st_installed():
+    return bool(shutil.which("syncthing"))
+
+def st_local():
+    """apikey / port / theme / lan straight out of config.xml, cached by mtime.
+    Regex, not an XML parser: this runs on every proxied request and the three
+    fields we need are single-line elements of the <gui> block."""
+    try:
+        mt = os.path.getmtime(ST_CONF)
+    except OSError:
+        return {}
+    with _ST_LOCK:
+        if _ST_CACHE["mtime"] == mt and _ST_CACHE["val"]:
+            return _ST_CACHE["val"]
+        try:
+            with open(ST_CONF, "r", errors="replace") as f:
+                raw = f.read()
+        except OSError:
+            return {}
+        gui = re.search(r"<gui\b.*?</gui>", raw, re.S)
+        gui = gui.group(0) if gui else ""
+        one = lambda tag: (re.search(r"<%s>([^<]*)</%s>" % (tag, tag), gui) or [None, ""])[1]
+        addr = one("address") or "127.0.0.1:8384"
+        try:
+            port = int(addr.rsplit(":", 1)[1])
+        except (IndexError, ValueError):
+            port = 8384
+        val = {"apikey": one("apikey"), "port": port, "addr": addr,
+               "theme": one("theme") or "default",
+               # bound to something other than loopback = reachable from the LAN
+               "lan": not addr.split(":")[0].strip() in ("127.0.0.1", "localhost", "::1")}
+        _ST_CACHE.update({"mtime": mt, "val": val})
+        return val
+
+def _st_rest(method, path, body=None, timeout=15):
+    """Syncthing's own REST API over loopback, authenticated with the config's
+    API key (header, never argv). Returns {ok, data} / {ok:False, log}."""
+    c = st_local()
+    if not c.get("apikey"):
+        return {"ok": False, "log": "syncthing is not configured"}
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request("http://127.0.0.1:%d%s" % (c["port"], path),
+                                 data=data, method=method,
+                                 headers={"X-API-Key": c["apikey"],
+                                          "Content-Type": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            txt = r.read().decode("utf-8", "replace")
+        try:
+            return {"ok": True, "data": json.loads(txt) if txt.strip() else {}}
+        except json.JSONDecodeError:
+            return {"ok": True, "data": txt}
+    except urllib.error.HTTPError as e:
+        return {"ok": False, "log": e.read().decode("utf-8", "replace")[:300] or str(e)}
+    except (urllib.error.URLError, OSError, ValueError):
+        return {"ok": False, "offline": True, "log": "syncthing is not running"}
+
+def st_version():
+    try:
+        r = subprocess.run(["syncthing", "--version"], capture_output=True, text=True, timeout=8)
+        m = re.search(r"v[\d.]+", r.stdout or "")
+        return m.group(0) if m else ""
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+def st_status():
+    """Everything the Settings tab and the app window need, in one call."""
+    if not st_installed():
+        return {"ok": True, "installed": False}
+    c = st_local()
+    active = _systemd_active(ST_UNIT)
+    out = {"ok": True, "installed": True, "running": active, "version": st_version(),
+           "lan": bool(c.get("lan")), "port": c.get("port") or 8384,
+           "theme": c.get("theme") or "default", "configured": bool(c.get("apikey")),
+           "themes": sorted(os.path.basename(p) for p in glob.glob(ST_HOME + "/gui/*")
+                            if os.path.isdir(p))}
+    st = _st_rest("GET", "/rest/system/status", timeout=8)
+    if st.get("ok") and isinstance(st.get("data"), dict):
+        out["device_id"] = st["data"].get("myID") or ""
+        out["uptime"] = st["data"].get("uptime") or 0
+    cf = _st_rest("GET", "/rest/config", timeout=8)
+    if cf.get("ok") and isinstance(cf.get("data"), dict):
+        out["folders"] = len(cf["data"].get("folders") or [])
+        out["devices"] = max(0, len(cf["data"].get("devices") or []) - 1)   # minus ourselves
+    return out
+
+def _st_ufw_gui(allow):
+    """The GUI port in the firewall — open only while it is exposed on purpose."""
+    port = "%d/tcp" % (st_local().get("port") or 8384)
+    argv = ["ufw", "allow", port] if allow else ["ufw", "delete", "allow", port]
+    try:
+        if "active" not in subprocess.run(["ufw", "status"], capture_output=True,
+                                          text=True, timeout=10).stdout.lower():
+            return
+        subprocess.run(argv, capture_output=True, timeout=20)
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+def st_set_lan(on):
+    """Expose the GUI to the LAN, or take it back to loopback. Written through
+    Syncthing's REST API, never by editing config.xml under a running service —
+    it rewrites that file itself and our edit would be lost (or worse, half-read)."""
+    on = bool(on)
+    g = _st_rest("GET", "/rest/config/gui")
+    if not g.get("ok"):
+        return g
+    gui = g["data"] if isinstance(g["data"], dict) else {}
+    port = st_local().get("port") or 8384
+    gui["address"] = ("0.0.0.0:%d" if on else "127.0.0.1:%d") % port
+    r = _st_rest("PUT", "/rest/config/gui", gui)
+    if not r.get("ok"):
+        return r
+    _ST_CACHE["mtime"] = 0.0            # config.xml changed under us
+    _st_ufw_gui(on)
+    return {"ok": True, "lan": on,
+            "log": ("The Syncthing GUI is now reachable at http://%s:%d — it has no password "
+                    "of its own, set one in Syncthing → Actions → Settings → GUI."
+                    % (socket.gethostname(), port)) if on else
+                   "The Syncthing GUI is back on loopback — reachable through this panel only."}
+
+def st_set_theme(name):
+    name = str(name or "").strip()
+    if not re.match(r"^[a-zA-Z0-9_-]{1,40}$", name):
+        return {"ok": False, "log": "bad theme name"}
+    g = _st_rest("GET", "/rest/config/gui")
+    if not g.get("ok"):
+        return g
+    gui = g["data"] if isinstance(g["data"], dict) else {}
+    # already wearing it: say so and write nothing. The panel calls this on every
+    # load to keep Syncthing in step with its own light/dark, and a config rewrite
+    # per page load would be pure churn.
+    if gui.get("theme") == name:
+        return {"ok": True, "theme": name, "unchanged": True}
+    gui["theme"] = name
+    r = _st_rest("PUT", "/rest/config/gui", gui)
+    if r.get("ok"):
+        _ST_CACHE["mtime"] = 0.0
+    return r if not r.get("ok") else {"ok": True, "theme": name}
+
+def st_service(action):
+    if action not in ("start", "stop", "restart"):
+        return {"ok": False, "log": "bad action"}
+    r = _run(["systemctl", action, ST_UNIT], timeout=45)
+    return {"ok": r["ok"], "log": (r.get("log") or "").strip()[-300:]}
+
+# hop-by-hop headers plus the ones we must recompute ourselves; Accept-Encoding is
+# dropped on the way up so the answer comes back identity and Content-Length is ours
+_ST_SKIP_REQ = {"host", "connection", "keep-alive", "proxy-authorization", "te",
+                "trailers", "transfer-encoding", "upgrade", "accept-encoding",
+                "content-length"}
+_ST_SKIP_RESP = {"connection", "keep-alive", "transfer-encoding", "content-length",
+                 "content-encoding", "trailers", "upgrade"}
+
+def st_proxy(method, path, headers, body, timeout=180):
+    """One request to the Syncthing GUI. Returns (status, [(k,v)…], body) or None
+    when Syncthing is not answering."""
+    import http.client
+    c = st_local()
+    port = c.get("port") or 8384
+    hdrs = {k: v for k, v in headers.items() if k.lower() not in _ST_SKIP_REQ}
+    if c.get("apikey"):
+        # authenticate for the SPA as well as the REST calls: whoever got past the
+        # panel's login is the box's admin, and this also skips Syncthing's CSRF
+        hdrs["X-API-Key"] = c["apikey"]
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
+    try:
+        conn.request(method, path, body=body, headers=hdrs)
+        r = conn.getresponse()
+        data = r.read()
+        out = []
+        for k, v in r.getheaders():
+            if k.lower() in _ST_SKIP_RESP:
+                continue
+            if k.lower() == "location" and v.startswith("/"):
+                v = ST_PREFIX + v          # keep redirects inside the proxied prefix
+            out.append((k, v))
+        return r.status, out, data
+    except (OSError, http.client.HTTPException):
+        return None
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 # --------------------------------------------------------------------------- #
 #  File manager (native, running as root — the whole FS). A LAN admin tool.
@@ -20399,10 +20624,81 @@ class H(BaseHTTPRequestHandler):
             try: os.kill(pid, signal.SIGKILL); os.waitpid(pid, 0)
             except OSError: pass
 
+    # ---- Syncthing GUI reverse proxy ----
+    def _st_is(self, p):
+        return p == ST_PREFIX or p.startswith(ST_PREFIX + "/")
+
+    def _st_serve(self):
+        """Proxy one request to the Syncthing GUI. Behind the panel's own login:
+        Syncthing itself listens on loopback with no password, so this gate IS the
+        authentication. Everything is relative inside its SPA (urlbase = 'rest',
+        assets/…), which is why serving it under a prefix works at all."""
+        if not self._authed():
+            # a browser opening the window should land on the panel's login page,
+            # an XHR should get a clean 401 instead of a login page as "JSON"
+            if "text/html" in (self.headers.get("Accept") or ""):
+                self.send_response(302)
+                self.send_header("Location", "/?next=" + quote(self.path))
+                self.end_headers()
+            else:
+                self._json({"error": "auth", "configured": auth_configured()}, 401)
+            return
+        if not self._origin_ok():
+            self.send_error(403); return
+        rest = self.path[len(ST_PREFIX):]
+        if not rest:
+            self.send_response(302)
+            self.send_header("Location", ST_PREFIX + "/")
+            self.end_headers(); return
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            length = 0
+        body = self.rfile.read(length) if length > 0 else None
+        r = st_proxy(self.command, rest, self.headers, body)
+        if r is None:
+            msg = ("Syncthing is not answering on this box. It is a system service — "
+                   "check Settings → Syncthing.")
+            self.send_response(502)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(msg.encode())))
+            self.end_headers()
+            self.wfile.write(msg.encode()); return
+        status, headers, data = r
+        self.send_response(status)
+        for k, v in headers:
+            self.send_header(k, v)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(data)
+
+    def do_PUT(self):
+        self._st_only()
+
+    def do_DELETE(self):
+        self._st_only()
+
+    def do_PATCH(self):
+        self._st_only()
+
+    def do_HEAD(self):
+        self._st_only()
+
+    def _st_only(self):
+        """PUT/DELETE/PATCH/HEAD exist for the Syncthing proxy alone — the panel's
+        own API speaks GET and POST."""
+        if self._st_is(urlparse(self.path).path):
+            self._st_serve()
+        else:
+            self.send_error(405)
+
     # ---- GET ----
     def do_GET(self):
         u = urlparse(self.path); q = parse_qs(u.query)
         p = u.path
+        if self._st_is(p):
+            self._st_serve(); return
         if p == "/ws/term" and self.headers.get("Upgrade", "").lower() == "websocket":
             if not (self._origin_ok() and self._authed()):
                 self.send_error(403); return
@@ -20760,6 +21056,8 @@ class H(BaseHTTPRequestHandler):
                 self._json(rclone_mounts_list())
             elif p == "/api/backup/rclone/opts":
                 self._json({"ok": True, "opts": rclone_opts_get()})
+            elif p == "/api/syncthing/status":
+                self._json(st_status())
             elif p == "/api/kopia/status":
                 self._json(kp_status())
             elif p == "/api/kopia/run/status":
@@ -20818,6 +21116,8 @@ class H(BaseHTTPRequestHandler):
     # ---- POST ----
     def do_POST(self):
         p = urlparse(self.path).path
+        if self._st_is(p):
+            self._st_serve(); return
         if not self._origin_ok():
             self._json({"error": "origin mismatch"}, 403); return
         if p.startswith("/api/auth/"):
@@ -21322,6 +21622,20 @@ class H(BaseHTTPRequestHandler):
                 self._json(rclone_check_start(b.get("local", ""), b.get("remote", ""), b.get("path", "")))
             elif p == "/api/backup/rclone/check/cancel":
                 self._json(rclone_check_cancel())
+            elif p == "/api/syncthing/install":
+                r = engine("syncthing")
+                self._json({"ok": r.get("ok"), "log": (r.get("log") or "").strip()[-400:],
+                            **st_status()})
+            elif p == "/api/syncthing/update":
+                r = engine("syncthing-update")
+                self._json({"ok": r.get("ok"), "log": (r.get("log") or "").strip()[-400:],
+                            **st_status()})
+            elif p == "/api/syncthing/lan":
+                self._json(st_set_lan(self._body().get("on")))
+            elif p == "/api/syncthing/theme":
+                self._json(st_set_theme(self._body().get("theme")))
+            elif p == "/api/syncthing/service":
+                self._json(st_service(str(self._body().get("action") or "")))
             elif p == "/api/kopia/install":
                 r = engine("kopia")
                 self._json({"ok": r.get("ok"), "log": (r.get("log") or "").strip()[-400:],

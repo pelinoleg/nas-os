@@ -3508,6 +3508,138 @@ install_kopia() {
 }
 
 # ---------------------------------------------------------------------------
+# Syncthing — continuous file sync with laptops/phones/other boxes. A SYSTEM
+# service, not a container: it must come up with the box, independently of docker.
+# Debian ships 1.29 (a whole major behind 2.x), so we take the OFFICIAL Syncthing
+# apt repository — which also means apt keeps it updated from then on.
+# The GUI stays on LOOPBACK: the panel proxies it at /syncthing/ behind its own
+# password, so the LAN never sees an unauthenticated admin interface. The sync
+# ports (22000, 21027) are the ones that must be reachable.
+# ---------------------------------------------------------------------------
+SYNCTHING_HOME=/var/lib/syncthing
+SYNCTHING_UNIT=/etc/systemd/system/nas-syncthing.service
+
+ensure_syncthing_repo() {
+    local keyring=/etc/apt/keyrings/syncthing.gpg
+    local list=/etc/apt/sources.list.d/syncthing.list
+    local arch; arch="$(dpkg --print-architecture)"
+    install_packages "Syncthing: dependencies" ca-certificates curl
+    run install -m 0755 -d /etc/apt/keyrings
+    if [ ! -s "$keyring" ]; then
+        run curl -fsSL https://syncthing.net/release-key.gpg -o "$keyring" \
+            || { warn "Syncthing: could not download the release key (no network?)"; return 1; }
+        run chmod a+r "$keyring"
+    fi
+    # arch= matters: RPi OS 64-bit keeps armhf as a foreign architecture, and without
+    # the pin apt fetches an armhf index it will never install from
+    local want="deb [arch=${arch} signed-by=${keyring}] https://apt.syncthing.net/ syncthing stable-v2"
+    if [ "$(cat "$list" 2>/dev/null)" != "$want" ]; then
+        printf '%s\n' "$want" | write_file "$list"
+        run apt-get update
+    fi
+}
+
+# The Vellum theme (github.com/pelinoleg/syncthing-vellum) — Syncthing loads themes
+# from <config>/gui/<name>/. Both variants are installed; light is made the active
+# one, but ONLY while the config still says "default" — a user who later picks dark
+# (or the stock look) keeps their choice across reinstalls.
+install_syncthing_theme() {
+    local gui="$SYNCTHING_HOME/gui" tmp root
+    tmp="$(mktemp -d)" || return 1
+    if run wget -qO "$tmp/vellum.tar.gz" \
+        "https://codeload.github.com/pelinoleg/syncthing-vellum/tar.gz/refs/heads/main"; then
+        run tar -xzf "$tmp/vellum.tar.gz" -C "$tmp"
+        root="$(find "$tmp" -maxdepth 1 -type d -name 'syncthing-vellum-*' 2>/dev/null | head -1)"
+        if [ -n "$root" ] && [ -d "$root/vellum-light" ]; then
+            run mkdir -p "$gui"
+            run rm -rf "$gui/vellum-light" "$gui/vellum-dark"
+            run cp -r "$root/vellum-light" "$root/vellum-dark" "$gui/"
+            info "Syncthing: Vellum themes installed (light + dark)"
+        else
+            warn "Syncthing: the theme archive did not contain vellum-light"
+        fi
+    else
+        warn "Syncthing: could not download the Vellum theme — the stock look is used"
+    fi
+    rm -rf "$tmp"
+    if [ "$DRY_RUN" -eq 0 ] && [ -d "$gui/vellum-light" ] \
+        && grep -q '<theme>default</theme>' "$SYNCTHING_HOME/config.xml" 2>/dev/null; then
+        sed -i 's|<theme>default</theme>|<theme>vellum-light</theme>|' "$SYNCTHING_HOME/config.xml"
+        info "Syncthing: theme set to vellum-light"
+    fi
+}
+
+install_syncthing_unit() {
+    write_file "$SYNCTHING_UNIT" <<EOF
+[Unit]
+Description=Syncthing (NAS-OS)
+Documentation=man:syncthing(1)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Syncthing PANICS on start when \$HOME is undefined — it resolves the user home
+# directory in package init, before --home is even parsed, and a systemd unit has
+# no HOME of its own ("panic: Failed to get user home dir").
+Environment=HOME=/root
+Environment=STNODEFAULTFOLDER=1
+# root on purpose: it syncs folders anywhere in the pool, owned by anyone — the
+# same reasoning as Samba's force user = root on every share.
+ExecStart=/usr/bin/syncthing serve --home=${SYNCTHING_HOME} --no-browser --no-restart
+Restart=on-failure
+RestartSec=5
+# 3 = restart requested from the GUI, 4 = upgrade; systemd does the restarting
+SuccessExitStatus=3 4
+RestartForceExitStatus=3 4
+Nice=5
+ProtectSystem=full
+ProtectHome=false
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    run systemctl daemon-reload
+}
+
+# install_syncthing [ensure|update]
+#   ensure (default, auto-base) — repo + package + config + theme + unit;
+#   update — pull the newest package from the Syncthing repo.
+install_syncthing() {
+    local mode="${1:-ensure}"
+    ensure_syncthing_repo || return 1
+    if [ "$mode" = update ]; then
+        run apt-get update
+        run apt-get install -y --only-upgrade syncthing
+    else
+        install_packages "Syncthing" syncthing
+    fi
+    if ! command -v syncthing >/dev/null 2>&1; then
+        warn "Syncthing did not install — the panel can retry from Settings → Syncthing"
+        return 1
+    fi
+    run mkdir -p "$SYNCTHING_HOME"
+    run chmod 700 "$SYNCTHING_HOME"
+    # generate once; after that the config belongs to the user (devices, folders, theme)
+    if [ ! -f "$SYNCTHING_HOME/config.xml" ]; then
+        run syncthing generate --home="$SYNCTHING_HOME"
+    fi
+    install_syncthing_theme
+    install_syncthing_unit
+    # the packaged units would run a second instance from another config directory
+    systemctl disable --now syncthing@root.service >/dev/null 2>&1 || true
+    # firewall: sync ports only. The GUI keeps to loopback — the panel proxies it.
+    if command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -qi active; then
+        run ufw allow 22000/tcp    # sync (TCP)
+        run ufw allow 22000/udp    # sync (QUIC)
+        run ufw allow 21027/udp    # local discovery
+    fi
+    enable_service nas-syncthing
+    info "syncthing: $(syncthing --version 2>/dev/null | head -1)"
+}
+
+# ---------------------------------------------------------------------------
 # Non-interactive apply wrappers for the API (reuse proven functions)
 # ---------------------------------------------------------------------------
 stage_system_apply() {
@@ -3531,6 +3663,7 @@ stage_system_apply() {
     ensure_docker_repo   # docker-ce + compose-plugin from the official Docker repo
     ensure_gh            # GitHub CLI (to push panel code from the box)
     install_rclone       # cloud engine for the «Backup» app (latest official binary; selfupdate-able)
+    install_syncthing    # file sync with other machines — a system service, GUI proxied by the panel
     # Automatic security updates are part of the base: a box that nobody touches for
     # a year must not sit on unpatched CVEs. Security-only channel (Debian default
     # origins), so nothing feature-breaking arrives; panel Settings can toggle it off.
@@ -3953,6 +4086,8 @@ run_api() {
         rclone-update)  install_rclone update ;;
         kopia)          install_kopia ;;
         kopia-update)   install_kopia update ;;
+        syncthing)         install_syncthing ;;
+        syncthing-update)  install_syncthing update ;;
         motd)           install_motd ;;
         tailscale)      mod_tailscale ;;
         staticip)       mod_staticip ;;
