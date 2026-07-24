@@ -1119,7 +1119,20 @@
   .kp-kind.on{border-color:var(--win-accent,var(--accent));color:var(--win-accent,var(--accent));background:var(--sel);box-shadow:var(--sh-sm)}
   .kp-eyebrow{margin:15px 0 8px;font-size:10.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--win-dim,var(--dim))}
   .kp-well{border:1px solid var(--win-line,var(--line));border-radius:10px;overflow:hidden}
-  .kp-witem{display:flex;align-items:center;gap:9px;padding:8px 11px;font-size:12.5px}
+  /* a long path must ellipsize, not push the row (or the dialog) wider: the flex child
+     needs min-width:0 AND nowrap, or text-overflow never kicks in and the path wraps */
+  .kp-witem{display:flex;align-items:center;gap:9px;padding:8px 11px;font-size:12.5px;min-width:0}
+  .kp-witem .mono{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* a long path truncates at the end, so the folder's own NAME goes on the line above it —
+     that is the bit that identifies it, and it is exactly what an ellipsis would eat */
+  .kp-wpath{display:flex;flex-direction:column;gap:1px;min-width:0;flex:1}
+  .kp-wpath b{font-size:12.5px;font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .kp-wpath .mono{font-size:11px;color:var(--win-dim,var(--dim))}
+  .kp-wlist{max-height:min(34vh,240px);overflow:auto}
+  /* the wizard footer lives OUTSIDE a dialog, where `.r` has no styling at all — that is
+     why Back/Next sat glued together. It gets its own row instead of borrowing one. */
+  .kp-wfoot{display:flex;align-items:center;gap:10px;justify-content:flex-end;margin-top:12px;
+    flex:none;padding-top:10px;border-top:1px solid var(--win-line,var(--line))}
   .kp-witem+.kp-witem,.kp-witem+.kp-wadd,.kp-wadd+.kp-witem{border-top:1px solid var(--win-line,var(--line))}
   .kp-wadd{display:flex;align-items:center;gap:7px;width:100%;padding:9px 11px;background:none;border:none;
     color:var(--win-accent,var(--accent));font-size:12.5px;cursor:pointer;font-weight:600;font-family:inherit}
@@ -1249,6 +1262,32 @@
   .kp-src.kp-idle .ic{background:color-mix(in srgb,var(--win-warn,var(--warn)) 12%,transparent);color:var(--win-warn,var(--warn))}
   .kp-badge.idle{color:var(--win-warn,var(--warn));background:transparent;
     border:1px dashed color-mix(in srgb,var(--win-warn,var(--warn)) 55%,transparent);padding:1.5px 8px}
+  /* Picking a source / destination: option cards, not a native <select>. A repository
+     another backup already owns is SHOWN but greyed and unpickable — hiding it made the
+     list look wrong ("where did my disk go?"), this says outright why it can't be reused. */
+  .kp-picks{display:flex;flex-direction:column;gap:6px;margin-top:3px}
+  .kp-pk{display:flex;align-items:center;gap:11px;width:100%;text-align:left;padding:9px 12px;
+    border-radius:11px;border:1px solid var(--win-line,var(--line));background:var(--card);color:inherit;cursor:pointer}
+  @media(hover:hover){.kp-pk:not(.off):not(.on):hover{background:var(--glass)}}
+  .kp-pk.on{background:var(--sel);border-color:transparent;box-shadow:var(--sh-sm)}
+  .kp-pk.on .pk-n{color:var(--win-accent,var(--accent))}
+  .kp-pk .pk-ic{flex:none;color:var(--win-accent,var(--accent));display:grid;place-items:center}
+  .kp-pk .pk-b{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+  .kp-pk .pk-n{font-size:13px;font-weight:650;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+  .kp-pk .pk-m{font-size:11px;color:var(--win-dim,var(--dim));font-family:var(--mono);
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .kp-pk .pk-ck{flex:none;color:var(--win-accent,var(--accent));opacity:0}
+  .kp-pk.on .pk-ck{opacity:1}
+  .kp-pk.off{cursor:not-allowed;background:transparent;border-style:dashed;opacity:.7}
+  .kp-pk.off .pk-ic,.kp-pk.off .pk-n{color:var(--win-dim,var(--dim))}
+  .kp-pk.add{justify-content:center;border-style:dashed;color:var(--win-accent,var(--accent));
+    font-weight:650;font-size:12.5px;gap:7px}
+  .pk-tag{font-size:9.5px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;
+    padding:1.5px 7px;border-radius:999px;color:var(--win-dim,var(--dim));
+    background:color-mix(in srgb,var(--win-line,var(--line)) 45%,transparent);white-space:nowrap}
+  .pk-tag.taken{color:var(--win-warn,var(--warn));background:transparent;
+    border:1px dashed color-mix(in srgb,var(--win-warn,var(--warn)) 55%,transparent)}
+  .pk-tag.gone{color:var(--win-danger,var(--danger));background:color-mix(in srgb,var(--win-danger,var(--danger)) 14%,transparent)}
   .kp-banner{display:flex;align-items:center;gap:11px;padding:11px 15px;border-radius:12px;margin:0 0 14px;
     background:color-mix(in srgb,var(--win-accent,var(--accent)) 12%,transparent);border:1px solid color-mix(in srgb,var(--win-accent,var(--accent)) 35%,transparent)}
   .kp-banner .bi{flex:none;color:var(--win-accent,var(--accent))}
@@ -7910,13 +7949,17 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
    <p style="margin:2px 0 12px;font-size:12px;color:var(--win-dim,var(--dim))">A named group of folders — pick it in any backup instead of re-choosing paths.</p>
    <div class="field" style="margin-bottom:4px"><label>Name</label><input id="ksN" value="${att(src&&src.name||"")}" placeholder="Photos, Configs, Projects…"></div>
    <div class="kp-eyebrow">Folders</div>
-   <div class="kp-well"><div id="ksF"></div><button class="kp-wadd" id="ksAdd">${svg("plus",14)} Add folder…</button></div>
+   <div class="kp-well"><div id="ksF" class="kp-wlist"></div><button class="kp-wadd" id="ksAdd">${svg("plus",14)} Add folder…</button></div>
    <div class="kp-eyebrow">Excludes <span style="font-weight:400;text-transform:none;letter-spacing:0">— optional, one pattern per line</span></div>
    <textarea id="ksE" rows="2" style="resize:vertical;height:64px;min-height:44px" placeholder="*.tmp&#10;cache/">${esc((src&&src.excludes||[]).join("\n"))}</textarea>
    <div class="r" style="margin-top:12px"><button class="btn" id="ksX">Cancel</button><button class="btn pri" id="ksO">${src?"Save":"Create source"}</button></div></div>`;
   s.classList.add("show");
   const $=q=>s.querySelector(q);
-  const drawF=()=>{$("#ksF").innerHTML=folders.map((f,i)=>`<div class="kp-witem">${fmIcon(f.split("/").pop()||f,"dir",15)}<span class="mono" style="flex:1;font-size:12px;overflow:hidden;text-overflow:ellipsis" title="${att(f)}">${esc(f)}</span><button class="iconbtn" data-i="${i}" title="Remove from the source">${svg("x",13)}</button></div>`).join("")||`<div class="kp-witem" style="color:var(--win-dim,var(--dim))">nothing here yet — add the folders to protect</div>`;
+  const drawF=()=>{$("#ksF").innerHTML=folders.map((f,i)=>{const leaf=f.split("/").filter(Boolean).pop()||f;
+    return`<div class="kp-witem">${fmIcon(leaf,"dir",15)}
+     <span class="kp-wpath" title="${att(f)}"><b>${esc(leaf)}</b><span class="mono">${esc(f)}</span></span>
+     <button class="iconbtn" data-i="${i}" title="Remove from the source">${svg("x",13)}</button></div>`;}).join("")
+   ||`<div class="kp-witem" style="color:var(--win-dim,var(--dim))">nothing here yet — add the folders to protect</div>`;
    $("#ksF").querySelectorAll("[data-i]").forEach(b=>b.onclick=()=>{folders.splice(+b.dataset.i,1);drawF();});};
   drawF();
   $("#ksAdd").onclick=()=>pickFolder({overlay:true,start:folders[0]||"/mnt/storage",
@@ -8290,25 +8333,47 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
   draw();}
 
  /* ---------- shared form sections (wizard + detail settings) ---------- */
+ /* one option row: [icon] name + tags / meta line [✓] — `off` renders it unpickable */
+ const pkRow=(o)=>`<button class="kp-pk${o.on?" on":""}${o.off?" off":""}" data-pick="${att(o.kind)}" data-v="${att(o.id)}"${o.off?" disabled":""}${o.title?` title="${att(o.title)}"`:""}>
+   <span class="pk-ic">${svg(o.ic,17)}</span>
+   <span class="pk-b"><span class="pk-n">${esc(o.name)}${(o.tags||[]).map(t=>`<span class="pk-tag${t[1]?" "+t[1]:""}">${esc(t[0])}</span>`).join("")}</span>
+    ${o.meta?`<span class="pk-m" title="${att(o.meta)}">${esc(o.meta)}</span>`:""}</span>
+   <span class="pk-ck">${svg("check",16)}</span></button>`;
+ /* who else already uses this thing — the answer to "did I set this up twice?" */
+ const usedByOther=(d,pred)=>(D.backups||[]).filter(b=>b.id!==(d&&d.id)&&pred(b)).map(b=>b.name||b.id);
  const secSource=d=>`<div class="field"><label>Source — what to back up</label>
-   <div style="display:flex;gap:8px;align-items:center">
-    <select id="kSrc" style="flex:1">${(D.sources||[]).map(s=>`<option value="${att(s.id)}"${d.source===s.id?" selected":""}>${esc(s.name)} (${s.folders.length} folder${s.folders.length>1?"s":""})</option>`).join("")}${d.source?"":`<option value="" selected disabled>choose…</option>`}</select>
-    <button class="btn sm" id="kSrcNew">${svg("plus",13)} New…</button>${d.source?`<button class="btn sm" id="kSrcEd">Edit</button>`:""}</div></div>`;
+   <div class="kp-picks">${(D.sources||[]).map(s=>{const u=usedByOther(d,b=>b.source===s.id);
+     return pkRow({kind:"src",id:s.id,on:d.source===s.id,ic:"folder",name:s.name,
+      tags:u.length?[["in "+u.join(", ")]]:[],
+      meta:s.folders.slice(0,2).join("  ·  ")+(s.folders.length>2?"  +"+(s.folders.length-2)+" more":"")});}).join("")}
+    <button class="kp-pk add" id="kSrcNew">${svg("plus",14)} New source…</button></div>
+   ${d.source?`<div style="margin-top:7px"><span class="kp-quiet" id="kSrcEd" style="font-size:11.5px">edit the selected source →</span></div>`:""}</div>`;
  /* One destination belongs to ONE backup: sharing a repository makes two backups fight over
-    the same retention, and a synced spare would delete the other one's snapshots outright.
-    So the pickers only offer repositories nobody else has taken (plus the current choice). */
- const freeDests=d=>(D.dests||[]).filter(x=>x.id===(d&&d.dest)||x.id===(d&&d.dest2)||
-   !(D.backups||[]).some(b=>b.id!==(d&&d.id)&&(b.dest===x.id||b.dest2===x.id)));
- const takenNote=d=>{const n=(D.dests||[]).length-freeDests(d).length;
-  return n?`<div style="color:var(--win-dim,var(--dim));font-size:11px;margin-top:5px">${n} repositor${n>1?"ies are":"y is"} not listed — each destination belongs to one backup.</div>`:"";};
+    the same retention, and a synced spare would delete the other one's snapshots outright. */
+ const dstPath=x=>x.kind==="fs"?x.path:(x.remote+":"+(x.remote_path||""));
+ /* Destination rows: a repository owned by another backup stays visible but is disabled —
+    picking it would set two backups fighting over one retention (and a synced spare would
+    wipe the other one's snapshots), so the UI refuses it before the server has to. */
+ const dstRows=(d,which)=>(D.dests||[]).map(x=>{
+   const other=usedByOther(d,b=>b.dest===x.id||b.dest2===x.id);
+   const isMain=which==="spare"&&d.dest===x.id, isSpare=which==="dest"&&d.dest2===x.id;
+   const off=!!(other.length||isMain||isSpare);
+   const tags=[];
+   if(other.length)tags.push(["used by "+other.join(", "),"taken"]);
+   if(isMain)tags.push(["already the destination","taken"]);
+   if(isSpare)tags.push(["already the spare copy","taken"]);
+   if(x.missing)tags.push(["disk not plugged in","gone"]);
+   return pkRow({kind:which,id:x.id,on:(which==="dest"?d.dest:d.dest2)===x.id,off,
+    ic:x.kind==="fs"?"hdd":"globe",name:x.name,tags,meta:dstPath(x),
+    title:other.length?"Each repository belongs to one backup — this one is taken by "+other.join(", "):""});}).join("");
  const secDest=d=>`<div class="field"><label>Destination — where snapshots live</label>
-   <div style="display:flex;gap:8px;align-items:center">
-    <select id="kDst" style="flex:1">${freeDests(d).filter(x=>x.id!==d.dest2).map(x=>`<option value="${att(x.id)}"${d.dest===x.id?" selected":""}>${esc(x.name)} (${x.kind==="fs"?esc(x.path):esc(x.remote+":"+(x.remote_path||""))})</option>`).join("")}${d.dest?"":`<option value="" selected disabled>choose…</option>`}</select>
-    <button class="btn sm" id="kDstNew">${svg("plus",13)} New…</button></div>${takenNote(d)}</div>`;
+   <div class="kp-picks">${dstRows(d,"dest")}
+    <button class="kp-pk add" id="kDstNew">${svg("plus",14)} New destination…</button></div>
+   <div style="color:var(--win-dim,var(--dim));font-size:11px;margin-top:6px">Each repository belongs to one backup — the ones another backup already uses are shown greyed out.</div></div>`;
  const secSpare=d=>`<div class="field"><label>Spare copy (3-2-1) — optional second destination</label>
-   <div style="display:flex;gap:8px;align-items:center">
-    <select id="kDst2" style="flex:1"><option value="">no spare</option>${freeDests(d).filter(x=>x.id!==d.dest).map(x=>`<option value="${att(x.id)}"${d.dest2===x.id?" selected":""}>${esc(x.name)}</option>`).join("")}</select>
-    <button class="btn sm" id="kDst2New">${svg("plus",13)} New…</button></div>
+   <div class="kp-picks">${pkRow({kind:"spare",id:"",on:!d.dest2,ic:"x",name:"No spare copy",meta:"one destination only"})}
+    ${dstRows(d,"spare")}
+    <button class="kp-pk add" id="kDst2New">${svg("plus",14)} New spare destination…</button></div>
    <div id="kD2m" style="margin-top:8px;${d.dest2?"":"display:none"}"><div class="seg" id="kD2mode">
     <button data-v="sync"${d.dest2_mode!=="independent"?' class="on"':""}>Synced replica</button>
     <button data-v="independent"${d.dest2_mode==="independent"?' class="on"':""}>Independent run</button></div>
@@ -8347,13 +8412,16 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
  function wireSecs(root,d,onChange){
   const ch=()=>{onChange&&onChange();};
   const q=s=>root.querySelector(s);
-  if(q("#kSrc"))q("#kSrc").onchange=()=>{d.source=q("#kSrc").value;ch();};
+  root.querySelectorAll("[data-pick]").forEach(b=>b.onclick=()=>{
+   if(b.disabled)return;                                   // taken repository — not selectable
+   const k=b.dataset.pick,v=b.dataset.v;
+   if(k==="src")d.source=v;
+   else if(k==="dest")d.dest=v;
+   else{d.dest2=v;const m=q("#kD2m");if(m)m.style.display=v?"":"none";}
+   ch();});
   if(q("#kSrcNew"))q("#kSrcNew").onclick=()=>srcDlg(null,id=>{d.source=id;ch();});
   if(q("#kSrcEd"))q("#kSrcEd").onclick=()=>{const s=srcOf(d);if(s)srcDlg(s,()=>ch());};
-  if(q("#kDst"))q("#kDst").onchange=()=>{d.dest=q("#kDst").value;ch();};
   if(q("#kDstNew"))q("#kDstNew").onclick=()=>destDlg({},id=>{d.dest=id;ch();});
-  if(q("#kDst2"))q("#kDst2").onchange=()=>{d.dest2=q("#kDst2").value;
-   const m=q("#kD2m");if(m)m.style.display=d.dest2?"":"none";ch();};
   if(q("#kDst2New"))q("#kDst2New").onclick=()=>destDlg({spare:true},id=>{d.dest2=id;ch();});
   if(q("#kD2mode"))q("#kD2mode").querySelectorAll("button").forEach(b=>b.onclick=()=>{
    d.dest2_mode=b.dataset.v;q("#kD2mode").querySelectorAll("button").forEach(x=>x.classList.toggle("on",x===b));ch();});
@@ -8385,7 +8453,7 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
  function paintWizard(tc){
   const d=wiz.draft,i=wiz.step,[sid]=WSTEPS[i];
   const bodyHtml=
-   sid==="what"?`<h3 class="set-title">What to back up</h3><p class="set-sub">A source is a named group of folders — reusable by several backups.</p><div class="kp-sec">${secSource(d)}${d.source?`<div class="rs-cl" style="margin-top:8px">${(srcOf(d)||{folders:[]}).folders.map(f=>`<div class="mono" style="font-size:11.5px">${esc(f)}</div>`).join("")}</div>`:""}</div>`
+   sid==="what"?`<h3 class="set-title">What to back up</h3><p class="set-sub">A source is a named group of folders — reusable by several backups.</p><div class="kp-sec">${secSource(d)}</div>`
    :sid==="where"?`<h3 class="set-title">Where the snapshots go</h3><p class="set-sub">A destination is a repository on a disk or in the cloud. Snapshots from several backups can share one.</p><div class="kp-sec">${secDest(d)}</div>`
    :sid==="spare"?`<h3 class="set-title">Spare copy (3-2-1)</h3><p class="set-sub">A second, independent place with the same data — the classic “two media” rule. Optional but recommended.</p><div class="kp-sec">${secSpare(d)}</div>`
    :sid==="ret"?`<h3 class="set-title">How much history to keep</h3><p class="set-sub">Old snapshots are thinned out automatically: recent ones stay dense, older ones sparse.</p><div class="kp-sec">${secRetention(d)}</div>`
@@ -8401,7 +8469,7 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
   tc.innerHTML=`<div style="display:flex;gap:14px;height:100%">
    <div class="nbwiz-steps">${WSTEPS.map(([id,t],n)=>`<div class="nbwiz-step ${n===i?"on":n<i?"done":""}"><span class="nb-stepn">${n+1}</span>${t}</div>`).join("")}</div>
    <div style="flex:1;min-width:0;display:flex;flex-direction:column"><div style="flex:1;min-height:0;overflow:auto" id="kWBody">${bodyHtml}</div>
-    <div class="r" style="margin-top:10px;flex:none">
+    <div class="kp-wfoot">
      <button class="kp-quiet" id="kWLater" style="margin-right:auto">Set up later</button>
      ${i?`<button class="btn" id="kWBack">Back</button>`:""}
      <button class="btn pri" id="kWNext">${i===WSTEPS.length-1?"Finish":"Next"}</button></div></div></div>`;
