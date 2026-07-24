@@ -5264,7 +5264,8 @@ function dkAppsPage(tc,stacks,ctx){
     <span class="dk-act"></span></div>`);
   card.querySelector(".main").onclick=()=>ctx.go("stack:"+s.name);
   const act=card.querySelector(".dk-act");
-  const mk=(ic,title,fn,cls)=>{const b=el(`<button class="iconbtn ${cls||""}" title="${att(title)}">${svg(ic,15)}</button>`);b.onclick=e=>{e.stopPropagation();fn();};act.appendChild(b);};
+  // pass the event on: the gear opens a menu, and a menu needs the click coordinates
+  const mk=(ic,title,fn,cls)=>{const b=el(`<button class="iconbtn ${cls||""}" title="${att(title)}">${svg(ic,15)}</button>`);b.onclick=e=>{e.stopPropagation();fn(e);};act.appendChild(b);};
   if(run&&s.url)mk("globe","Open the app",()=>window.open(s.url,"_blank"));
   mk("edit","Edit compose & .env",()=>editStack(s.name,ctx.reload));
   const busy=()=>{card.style.opacity=".55";card.style.pointerEvents="none";};
@@ -5464,31 +5465,49 @@ function stReplicaDlg(a,reload){
 }
 /* Everything that is not one of the two headline actions. Shared by the card in the
    list and the header of the stack page, so both offer exactly the same set. */
-function dkStackMenu(ev,s,ctx){
+function dkStackMenu(ev,s,ctx,slim){
+ // slim = called from the stack page, where logs/edit/folder and the maintenance row
+ // are already on screen — a menu that repeats what is visible is just noise
  const A=a=>()=>{stackAct(s.name,a,ctx.reload);};
  const items=[];
  if(s.orphan){
   items.push({label:"Stop and remove containers",ic:svg("trash",16),dng:1,
     act:()=>confirmDlg("Remove orphaned stack?",`«${esc(s.name)}»: the stack's containers and networks will be stopped and removed. Volumes will remain.`,()=>stackDelete(s.name,ctx.reload),true)});
   return showMenu(ev.clientX,ev.clientY,items);}
- items.push({label:"Logs",ic:svg("logs",16),act:()=>stackLogs(s.name)},
+ if(!slim)items.push({label:"Logs",ic:svg("logs",16),act:()=>stackLogs(s.name)},
    {label:"Edit compose & .env",ic:svg("edit",16),act:()=>editStack(s.name,ctx.reload)},
-   {label:"Open the folder",ic:svg("folder",16),act:()=>winFiles(s.path||("/opt/stacks/"+s.name))},
-   {label:s.note?"Edit note":"Add a note",ic:svg("file",16),act:()=>stackNoteDlg(s,ctx.reload)},
-   {sep:1},
+   {label:"Open the folder",ic:svg("folder",16),act:()=>winFiles(s.path||("/opt/stacks/"+s.name))});
+ items.push({label:s.note?"Edit note":"Add a note",ic:svg("file",16),act:()=>stackNoteDlg(s,ctx.reload)},{sep:1});
+ if(!slim)items.push({label:"Update (pull + re-create)",ic:svg("arrowup",16),act:()=>dkUpdate(s,ctx.reload)},
+   {label:"Restart",ic:svg("refresh",16),act:A("restart")},
    {label:"Pull images",ic:svg("download",16),act:A("pull")},
    {label:"Recreate containers",ic:svg("cube",16),act:A("recreate")},
    {label:"Rebuild (build + up)",ic:svg("refresh",16),act:A("rebuild")},
    {label:"Rebuild without cache",ic:svg("refresh",16),
     act:()=>confirmDlg("Rebuild without cache?","Full rebuild of the stack's images — may take a while.",A("rebuild-nocache"))},
-   {label:"Build only",ic:svg("cube",16),act:A("build")},
-   {sep:1},
+   {sep:1});
+ items.push({label:"Build only",ic:svg("cube",16),act:A("build")},
    {label:"Stop containers (stop)",ic:svg("stop",16),act:A("stop")},
    {label:"Remove containers (down)",ic:svg("stop",16),act:A("down")});
  if(s.recipe&&s.recipe.replica)items.push({sep:1},{label:"Replica…",ic:svg("sync",16),act:()=>stReplicaDlg(s.recipe,ctx.reload)});
  items.push({sep:1},{label:"Delete the stack",ic:svg("trash",16),dng:1,
    act:()=>confirmDlg("Delete stack?",`«${esc(s.name)}» will be stopped and removed from /opt/stacks.`,()=>stackDelete(s.name,ctx.reload),true)});
  showMenu(ev.clientX,ev.clientY,items);
+}
+
+/* «Update» = pull, then up. Two steps on purpose: pulling alone changes nothing on a
+   running stack — the containers keep the image they started from — and that is the
+   single most confusing thing about updating a compose app. `up` then swaps every
+   container whose image moved, and leaves the rest alone. */
+async function dkUpdate(s,after){
+ const P=(action)=>api("/api/stack/action",{method:"POST",body:JSON.stringify({name:s.name,action})});
+ toast("Pulling images…");
+ const r1=await P("pull");
+ if(!(r1&&r1.ok)){toast("Pull failed: "+((r1&&r1.log)||"").slice(0,90));after&&after();return;}
+ toast("Re-creating on the new images…");
+ const r2=await P("up");
+ toast(r2&&r2.ok?`«${s.name}» updated`:"Error: "+((r2&&r2.log)||"").slice(0,90));
+ after&&after();
 }
 
 /* The stack page: what it is and how it is doing at the top, one headline action,
@@ -5519,13 +5538,33 @@ function dkStackPane(tc,s,reload,ctx){
     <div class="dk-chip"><b style="color:${upd?"var(--warn)":"inherit"}">${upd||"—"}</b><span>image updates</span></div>
     <div class="dk-chip"><b>${ports.length?esc(":"+ports.slice(0,2).join(" :")):"—"}</b><span>ports</span></div></div>
    ${s.note?`<div class="stk-note" style="margin-bottom:14px">${esc(s.note)}</div>`:""}
+   ${s.orphan?"":`<div class="dk-sec">Actions</div>
+   <div class="dd-acts" style="border:none;padding:0 0 16px;flex-wrap:wrap" id="dkActs"></div>`}
    <div class="dk-sec">Containers${s.total?` · ${s.total}`:""}<span style="flex:1"></span><button class="kp-quiet" id="dkLogs" style="font-size:11px">${svg("logs",12)} logs</button></div>
    <div class="dk-conts" id="dkConts"></div></div>`);
  const busy=()=>{box.style.opacity=".55";box.style.pointerEvents="none";};
  box.querySelector("#dkBack").onclick=()=>ctx.go("apps");
- box.querySelector("#dkGear").onclick=ev=>dkStackMenu(ev,s,ctx);
+ box.querySelector("#dkGear").onclick=ev=>dkStackMenu(ev,s,ctx,true);
  box.querySelector("#dkLogs").onclick=()=>stackLogs(s.name);
  box.querySelector("#dkEdit").onclick=()=>editStack(s.name,reload);
+ // The maintenance actions, spelled out. They differ in ways the verbs alone don't
+ // convey, so every one of them says in its tooltip what it actually does.
+ const ab=box.querySelector("#dkActs");
+ if(ab){
+  const act=(label,ic,tip,fn,cls)=>{const b=el(`<button class="btn sm ${cls||""}" title="${att(tip)}">${svg(ic,13)} ${esc(label)}</button>`);
+   b.onclick=()=>{busy();fn();};ab.appendChild(b);};
+  const A=a=>()=>stackAct(s.name,a,reload);
+  act("Update","arrowup","Fetch newer images and re-create the containers on them — this is what applies an available image update.",
+      ()=>dkUpdate(s,reload));
+  act("Restart","refresh","Stop and start the containers again. Nothing is re-read: the compose file and .env stay as they were when the stack came up.",A("restart"));
+  act("Pull images","download","Download newer images, but keep the running containers as they are — apply them later with Update or Re-create.",A("pull"));
+  act("Re-create","cube","Throw the containers away and make them again from the current compose and .env — this is how edits to those files take effect.",A("recreate"));
+  act("Rebuild","refresh","For stacks that build their own image: build it and bring the stack up on the result.",A("rebuild"));
+  act("Rebuild · no cache","refresh","The same build, ignoring every cached layer. Slow — for when a build keeps picking up something stale.",
+      ()=>confirmDlg("Rebuild without cache?","Full rebuild of the stack's images — may take a while.",A("rebuild-nocache")));
+  ab.appendChild(el(`<span class="grow"></span>`));
+  act("Folder","folder","Open /opt/stacks/"+s.name+" in Files.",()=>{box.style.opacity="";box.style.pointerEvents="";winFiles(s.path||("/opt/stacks/"+s.name));});
+ }
  const ob=box.querySelector("#dkOpen");if(ob)ob.onclick=()=>window.open(s.url,"_blank");
  const mb=box.querySelector("#dkMain");
  if(s.orphan||(!run&&!s.has_compose))mb.disabled=true;
