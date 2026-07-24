@@ -8967,6 +8967,10 @@ def maintenance_daily():
     except Exception:
         pass
     try:
+        _kp_gc()
+    except Exception:
+        pass
+    try:
         _settings_backup_auto()
     except Exception:
         pass
@@ -10149,6 +10153,20 @@ def kp_dest_forget(destid):
         cfg = kp_load()
         cfg["dests"] = [x for x in cfg["dests"] if x["id"] != destid]
         kp_save(cfg)
+    # the destination is gone — so are its maintenance/verify stamps and bg-op states,
+    # otherwise a destination created later could inherit them through a reused id
+    for p in (os.path.join(NAS_CONFIG, "kopia-maint-%s.json" % destid),
+              os.path.join(NAS_CONFIG, "kopia-verify-%s.json" % destid)):
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+    with _KP_CFG_LOCK:
+        stt = _kp_state_load()
+        # list, not a generator: `any` would stop at the first hit and leave the rest behind
+        if any([(stt.get(k) or {}).pop(destid, None) is not None
+                for k in ("present", "maint", "verify")]):
+            _json_save(KP_STATE_FILE, stt)
     return {"ok": True}
 
 # ---- sources + backups (pure config CRUD) -----------------------------------
@@ -10317,11 +10335,109 @@ def kp_backup_delete(kid):
     cfg = kp_load()
     if not _kp_find(cfg["backups"], kid):
         return {"ok": False, "log": "no such backup"}
+    if kp_run_state(kid).get("running"):
+        return {"ok": False, "log": "this backup is running — stop it first"}
     with _KP_CFG_LOCK:
         cfg = kp_load()
         cfg["backups"] = [x for x in cfg["backups"] if x["id"] != kid]
         kp_save(cfg)
+    _kp_forget_runs(kid)
     return {"ok": True}
+
+
+def _kp_gc():
+    """Daily housekeeping: history rows and state files of backups/destinations that no
+    longer exist. Deleting through the panel already cleans up after itself — this catches
+    what an older version, a hand-edited config or a restored settings backup left behind."""
+    if not os.path.isfile(KOPIA_CONF):      # no config at all → nothing is "orphaned"
+        return {"hist": 0, "files": 0}
+    cfg = kp_load()
+    bids = {b["id"] for b in cfg["backups"]}
+    dids = {d["id"] for d in cfg["dests"]}
+    n_h = 0
+    try:
+        lockf = open(KP_HIST_FILE + ".lock", "a")
+        fcntl.flock(lockf, fcntl.LOCK_EX)
+    except OSError:
+        lockf = None
+    try:
+        h = _json_load_strict(KP_HIST_FILE, [])
+        if isinstance(h, list):
+            keep = [x for x in h if isinstance(x, dict) and x.get("backup") in bids]
+            n_h = len(h) - len(keep)
+            if n_h:
+                _json_save(KP_HIST_FILE, keep)
+    finally:
+        if lockf:
+            try:
+                fcntl.flock(lockf, fcntl.LOCK_UN); lockf.close()
+            except OSError:
+                pass
+    n_f = 0
+    try:
+        for f in os.listdir(NAS_CONFIG):
+            # a restore drill that was killed mid-way leaves its per-PID scratch dir behind
+            if re.match(r"^kopia-drill\.\d+$", f):
+                p = os.path.join(NAS_CONFIG, f)
+                try:
+                    if time.time() - os.path.getmtime(p) > 86400:
+                        shutil.rmtree(p, ignore_errors=True); n_f += 1
+                except OSError:
+                    pass
+                continue
+            m_ = re.match(r"^kopia-(run|maint|verify)-([0-9a-f]+)\.(json|log|cancel)$", f)
+            if not m_:
+                continue
+            if m_.group(2) in (bids if m_.group(1) == "run" else dids):
+                continue
+            try:
+                os.remove(os.path.join(NAS_CONFIG, f)); n_f += 1
+            except OSError:
+                pass
+    except OSError:
+        pass
+    with _KP_CFG_LOCK:
+        stt = _kp_state_load()
+        drop = [(k, i) for k in ("present", "maint", "verify")
+                for i in list(stt.get(k) or {}) if i not in dids]
+        drop += [("pending", i) for i in list(stt.get("pending") or {}) if i not in bids]
+        for k, i in drop:
+            stt[k].pop(i, None)
+        if drop:
+            _json_save(KP_STATE_FILE, stt)
+    return {"hist": n_h, "files": n_f, "state": len(drop)}
+
+
+def _kp_forget_runs(kid):
+    """Wipe everything the deleted backup left behind: its runs in the shared history,
+    its run state and log, and its slot in the scheduler queue. Snapshots in the
+    repository are NOT touched — those are data, this is only the panel's paperwork."""
+    try:                                        # history is appended by separate driver
+        lockf = open(KP_HIST_FILE + ".lock", "a")   # processes — take the same lock
+        fcntl.flock(lockf, fcntl.LOCK_EX)
+    except OSError:
+        lockf = None
+    try:
+        h = _json_load_strict(KP_HIST_FILE, [])
+        if isinstance(h, list):
+            keep = [x for x in h if not (isinstance(x, dict) and x.get("backup") == kid)]
+            if len(keep) != len(h):
+                _json_save(KP_HIST_FILE, keep)
+    finally:
+        if lockf:
+            try:
+                fcntl.flock(lockf, fcntl.LOCK_UN); lockf.close()
+            except OSError:
+                pass
+    for p in (_kp_runf(kid, "json"), _kp_runf(kid, "log"), _kp_runf(kid, "cancel")):
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+    with _KP_CFG_LOCK:
+        stt = _kp_state_load()
+        if (stt.get("pending") or {}).pop(kid, None) is not None:
+            _json_save(KP_STATE_FILE, stt)
 
 def kp_status():
     """Everything the Kopia window needs in one request (cheap: no network,

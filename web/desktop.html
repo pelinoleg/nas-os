@@ -1232,6 +1232,23 @@
   .kp-src .bd .pp{font-size:11px;color:var(--win-dim,var(--dim));font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .kp-src .bd .meta{font-size:11px;color:var(--win-dim,var(--dim));display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:1px}
   .kp-src .act{flex:none;display:flex;flex-direction:column;justify-content:center;gap:6px;padding:0 12px;border-left:1px solid var(--win-line,var(--line))}
+  /* Sources and destinations are split into "in use" and "not used". A forgotten
+     definition is not a failure, so it gets a dashed, faintly amber card instead of a red
+     one — grouping and the dashed edge do the finding, nothing has to shout. */
+  .kp-grp{display:flex;align-items:center;gap:8px;margin:17px 0 9px;font-size:10.5px;font-weight:700;
+    letter-spacing:.07em;text-transform:uppercase;color:var(--win-dim,var(--dim))}
+  .kp-grp:first-of-type{margin-top:12px}
+  .kp-grp svg{color:var(--win-good,var(--good))}
+  .kp-grp .n{font-size:10px;font-weight:800;padding:1px 7px;border-radius:999px;
+    color:var(--win-good,var(--good));background:color-mix(in srgb,var(--win-good,var(--good)) 15%,transparent)}
+  .kp-grp .hint{font-weight:600;letter-spacing:0;text-transform:none;font-size:11px;color:var(--win-dim,var(--dim))}
+  .kp-grp.idle,.kp-grp.idle svg{color:var(--win-warn,var(--warn))}
+  .kp-grp.idle .n{color:var(--win-warn,var(--warn));background:color-mix(in srgb,var(--win-warn,var(--warn)) 15%,transparent)}
+  .kp-idle{border-style:dashed;border-color:color-mix(in srgb,var(--win-warn,var(--warn)) 40%,var(--win-line,var(--line)));
+    background:color-mix(in srgb,var(--win-warn,var(--warn)) 5%,var(--card))}
+  .kp-src.kp-idle .ic{background:color-mix(in srgb,var(--win-warn,var(--warn)) 12%,transparent);color:var(--win-warn,var(--warn))}
+  .kp-badge.idle{color:var(--win-warn,var(--warn));background:transparent;
+    border:1px dashed color-mix(in srgb,var(--win-warn,var(--warn)) 55%,transparent);padding:1.5px 8px}
   .kp-banner{display:flex;align-items:center;gap:11px;padding:11px 15px;border-radius:12px;margin:0 0 14px;
     background:color-mix(in srgb,var(--win-accent,var(--accent)) 12%,transparent);border:1px solid color-mix(in srgb,var(--win-accent,var(--accent)) 35%,transparent)}
   .kp-banner .bi{flex:none;color:var(--win-accent,var(--accent))}
@@ -7266,29 +7283,37 @@ function rcloneRestoreDlg(remote){
 
 /* Remote folder picker — same look as the local pickFolder (.pf-dlg), read-only browse
    PLUS "＋ Folder" (rclone mkdir) so you can create a destination while copying to the cloud. */
-function rcloneRemotePicker(remote,onPick,onClose){
- const s=document.getElementById("scrim");
- let path="",entries=null,mk=false,busy=false;
+function rcloneRemotePicker(remote,onPick,onClose,opts){
+ opts=opts||{};
+ // overlay mode: our own layer above #scrim, so this picker can be opened FROM another
+ // dialog without wiping its markup (same rule as pickFolder — one #scrim, one dialog)
+ const own=opts.overlay;
+ const s=own?el(`<div class="scrim" style="z-index:600"></div>`):document.getElementById("scrim");
+ if(own)document.body.appendChild(s);
+ const showS=()=>s.classList.add("show");
+ const hideS=()=>{if(own)s.remove();else s.classList.remove("show");};
+ let path=(opts.start||"").replace(/^\/+|\/+$/g,""),entries=null,mk=false,busy=false;
  const $=q=>s.querySelector(q);
  const spec=p=>remote+":"+(p||"");
  const build=()=>{
-  s.innerHTML=`<div class="dialog pf-dlg"><h3>${svg("net",16)} Cloud remote — ${esc(remote)}</h3>
+  s.innerHTML=`<div class="dialog pf-dlg"><h3>${svg("net",16)} ${esc(opts.title||"Cloud remote — "+remote)}</h3>
+    ${opts.note?`<div class="mon-note" style="margin:0 0 10px">${esc(opts.note)}</div>`:""}
     <div class="pf-body"><div class="pf-main" style="flex:1">
       <div class="pf-bar">
         <button class="iconbtn" id="pfUp" title="Up">${svg("arrowup",15)}</button>
         <span class="pf-remote mono" title="You are browsing this cloud remote">${esc(remote)}:</span>
-        <input class="mono" id="pfPath" spellcheck="false" placeholder="(remote root)">
+        <input class="mono" id="pfPath" spellcheck="false" placeholder="(remote root)" data-noenter="1">
         <button class="btn sm" id="pfMk" title="Create a folder here">${svg("plus",13)} Folder</button>
       </div>
       <div class="pf-list" id="pfList"></div>
     </div></div>
     <div class="pf-foot"><span class="pf-cur" id="pfCur"></span>
       <button class="btn" id="pfX">Cancel</button>
-      <button class="btn pri" id="pfO">Choose this folder</button></div></div>`;
-  s.classList.add("show");
+      <button class="btn pri" id="pfO">${esc(opts.okLabel||"Choose this folder")}</button></div></div>`;
+  showS();
   $("#pfUp").onclick=()=>{if(path){path=path.replace(/\/[^/]+$/,"").replace(/^\/+/,"");mk=false;draw();}};
-  $("#pfX").onclick=()=>{s.classList.remove("show");onClose&&onClose();};
-  $("#pfO").onclick=()=>{s.classList.remove("show");onPick(path);onClose&&onClose();};
+  $("#pfX").onclick=()=>{hideS();onClose&&onClose();};
+  $("#pfO").onclick=()=>{hideS();onPick(path);onClose&&onClose();};
   $("#pfMk").onclick=()=>{mk=!mk;paintList();if(mk)focusMk();};
   const pi=$("#pfPath");
   pi.onkeydown=ev=>{if(ev.key==="Enter"){ev.preventDefault();path=pi.value.trim().replace(/^\/+|\/+$/g,"");mk=false;draw();}};
@@ -7310,7 +7335,9 @@ function rcloneRemotePicker(remote,onPick,onClose){
        ||(mk?"":`<div class="pf-empty">No subfolders here — you can pick this one, or ＋ create one</div>`)));
   box.querySelectorAll("[data-n]").forEach(n=>n.onclick=()=>{path=(path?path+"/":"")+n.dataset.n;mk=false;draw();});};
  const chrome=()=>{const pi=$("#pfPath");if(pi&&document.activeElement!==pi)pi.value=path;
-  const cu=$("#pfCur");if(cu){cu.textContent="Selected: "+spec(path);cu.title=spec(path);}
+  // a trailing colon on its own reads as a stray glyph (bidi puts it before the name) —
+  // at the root of a remote say so in words
+  const cu=$("#pfCur");if(cu){cu.textContent="Selected: "+(path?spec(path):remote+": (remote root)");cu.title=spec(path);}
   const up=$("#pfUp");if(up)up.disabled=!path;};
  const draw=async()=>{if(busy)return;busy=true;entries=null;paintList();
   const r=await rcloneP("/api/backup/rclone/ls",{remote,path});busy=false;
@@ -7902,7 +7929,7 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
    s.classList.remove("show");await load();onDone&&onDone(r.source.id);};}
 
  function destDlg(opts,onDone){const s=document.getElementById("scrim");opts=opts||{};
-  let kind="fs",path="";
+  let kind="fs",path="",rpath="";
   const rems=D.rclone_remotes||[];
   s.innerHTML=`<div class="dialog" style="width:470px;max-width:94vw"><h3>${svg("hdd",16)} ${opts.spare?"New spare destination":"New destination"}</h3>
    <p style="margin:2px 0 12px;font-size:12px;color:var(--win-dim,var(--dim))">${opts.spare?"A spare starts empty — the first backup run copies the whole repository onto it and keeps it in sync after every snapshot.":"One destination = one snapshot repository, and it belongs to a single backup."}</p>
@@ -7919,8 +7946,12 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
     <div style="color:var(--win-dim,var(--dim));font-size:11px;margin-top:5px">ext4 is best — the repository gets its own folder on the disk</div></div>
    <div id="kdRc" style="display:none">
     <div class="kp-eyebrow">Cloud remote</div>
-    <div style="display:flex;gap:8px"><select id="kdRem" style="flex:1">${rems.map(r=>`<option>${esc(r)}</option>`).join("")||"<option value=''>no remotes — add one in the Rclone app</option>"}</select>
-     <input id="kdRp" placeholder="folder in the cloud, e.g. kopia-repo" style="flex:1"></div></div>
+    <select id="kdRem">${rems.map(r=>`<option>${esc(r)}</option>`).join("")||"<option value=''>no remotes — add one in the Rclone app</option>"}</select>
+    <div class="kp-eyebrow">Folder in the cloud</div>
+    <div class="kp-well">
+     <div class="kp-witem" id="kdRpRow" style="display:none">${svg("globe",15)}<span class="mono" id="kdRpV" style="flex:1;font-size:12px;overflow:hidden;text-overflow:ellipsis"></span><button class="iconbtn" id="kdRbr2" title="Choose another folder">${svg("edit",13)}</button></div>
+     <button class="kp-wadd" id="kdRbr">${svg("plus",14)} Browse the remote…</button></div>
+    <div style="color:var(--win-dim,var(--dim));font-size:11px;margin-top:5px">The repository gets its own folder — browse to it, or create one right in the picker</div></div>
    ${opts.spare?"":`<div class="kp-eyebrow">Options</div>
    <div class="kp-opt"><div><div class="ot">This place already holds a repository</div><div class="od">connect to it instead of creating a new one — after a reinstall, or to read a spare copy</div></div>
     <label class="tgl oc"><input type="checkbox" id="kdEx"><span class="sl"></span></label></div>
@@ -7939,17 +7970,30 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
      const pe=$("#kdPath");if(pe)pe.textContent=p;}});
   $("#kdBr").onclick=pick;
   $("#kdBr2").onclick=pick;
+  // the cloud side gets the same treatment — browsing the remote beats typing a path by hand
+  const rpick=()=>{const rem=$("#kdRem").value;
+   if(!rem){$("#kdS").textContent="no rclone remotes yet — add one in the Rclone app";return;}
+   rcloneRemotePicker(rem,p=>{rpath=p;$("#kdRpRow").style.display="";$("#kdRbr").style.display="none";
+     const v=$("#kdRpV");if(v)v.textContent=rem+":"+(p||"");},null,
+    {overlay:true,start:rpath,title:"Where the repository will live — "+rem,
+     okLabel:"Put the repository here",
+     note:"Snapshots are written into this folder of "+rem+". Pick an empty one, or create a folder here."});};
+  $("#kdRbr").onclick=rpick;
+  $("#kdRbr2").onclick=rpick;
+  $("#kdRem").onchange=()=>{rpath="";$("#kdRpRow").style.display="none";$("#kdRbr").style.display="";};
   const ex=$("#kdEx");
   if(ex)ex.onchange=()=>{$("#kdO").textContent=ex.checked?"Connect":"Create";};
   $("#kdX").onclick=()=>s.classList.remove("show");
   $("#kdO").onclick=async()=>{
    const bodyObj={name:$("#kdN").value,kind,path,remote:kind==="rclone"?$("#kdRem").value:"",
-    remote_path:kind==="rclone"?$("#kdRp").value:"",
+    remote_path:kind==="rclone"?rpath:"",
     password:($("#kdPw")&&$("#kdPw").value.trim())||"",
     pwfile:!!($("#kdPwf")&&$("#kdPwf").checked)};
    if(opts.spare)bodyObj.no_init=true;
    const conn=ex&&ex.checked;
    if(kind==="fs"&&!path){$("#kdS").textContent="choose a folder first";return;}
+   if(kind==="rclone"&&!bodyObj.remote){$("#kdS").textContent="no rclone remotes yet — add one in the Rclone app";return;}
+   if(kind==="rclone"&&!rpath){$("#kdS").textContent="browse the remote and pick a folder first";return;}
    $("#kdO").disabled=true;$("#kdS").textContent=opts.spare?"saving…":(conn?"connecting…":"creating the repository…");
    const r=await kP(conn?"/api/kopia/dest/connect":"/api/kopia/dest/create",bodyObj);
    $("#kdO").disabled=false;
@@ -8051,9 +8095,7 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
    if(b.setup_started&&!b.setup_done){wiz={step:win._kpWizPos&&win._kpWizPos[b.id]||0,draft:JSON.parse(JSON.stringify(b))};paint();}
    else{detail=b.id;paint();}});
   const nb=tc.querySelector("#kpNew");
-  if(nb)nb.onclick=()=>{wiz={step:0,draft:{name:"",source:"",dest:"",dest2:"",dest2_mode:"sync",
-   retention:{latest:10,daily:7,weekly:4,monthly:12,annual:0},schedule:{mode:"daily",time:"03:30",dow:0},
-   compression:true,usb_trigger:false,notify_ok:false,notify_err:true,enabled:true}};paint();};
+  if(nb)nb.onclick=()=>kpNewWiz();
   const ux=tc.querySelector("#kpUpdX");if(ux)ux.onclick=()=>{win._kpUpdHid=true;paint();};
   const ug=tc.querySelector("#kpUpdGo");if(ug)ug.onclick=()=>{tab="opts";syncNav();paint();};
   tc.querySelectorAll("[data-goto]").forEach(el2=>el2.onclick=ev=>{ev.stopPropagation();detail=el2.dataset.goto;paint();});
@@ -8146,8 +8188,10 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
     kP("/api/kopia/backup/save",Object.assign({},b,{name:nm})).then(refresh))},
    {sep:1},
    {label:"Delete backup",ic:svg("trash",16),dng:1,act:()=>confirmDlg("Delete backup?",
-   `«${esc(b.name||b.id)}» — only the backup card is removed; sources, destinations and all snapshots stay.`,
-   async()=>{await kP("/api/kopia/backup/delete",{id:b.id});detail=null;await refresh();},1)}]);
+   `«${esc(b.name||b.id)}» — the backup card and its run history are removed; sources, destinations and all snapshots stay.`,
+   async()=>{const r=await kP("/api/kopia/backup/delete",{id:b.id});
+    if(!(r&&r.ok)){toast((r&&r.log)||"could not delete");return;}   // e.g. a run is in progress
+    detail=null;await refresh();},1)}]);
   const rb=tc.querySelector("#kdRun");if(rb)rb.onclick=async()=>{const r=await kP("/api/kopia/backup/run",{id:b.id});
    if(!(r&&r.ok))toast((r&&r.log)||"could not start");await refresh();};
   const sb=tc.querySelector("#kdStop");if(sb)sb.onclick=async()=>{await kP("/api/kopia/backup/cancel",{id:b.id});await refresh();};
@@ -8382,23 +8426,36 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
    await wizPersist(false);
    wiz.step=i+1;savePos();paintWizard(tc);};}
 
+ /* A group heading over a set of cards: "protected / not used", with the count. The
+    question both tabs must answer at a glance is "is anything actually using this?" */
+ const kpGrp=(ic,label,count,hint,idle)=>`<div class="kp-grp${idle?" idle":""}">${svg(ic,13)}
+   <span>${esc(label)}</span><span class="n">${count}</span>${hint?`<span class="hint">${esc(hint)}</span>`:""}</div>`;
+
  /* ---------- Sources tab ---------- */
  function tabSources(tc){
   const list=D.sources||[];
-  tc.innerHTML=`<div style="display:flex;align-items:center;gap:10px"><h3 class="set-title" style="margin:0">Sources</h3><span style="flex:1"></span><button class="btn pri" id="kSrcAdd">${svg("plus",14)} New source</button></div>
-   <p class="set-sub">A source is a reusable group of folders. Excludes live here too — they're a property of the data, not of one backup. Click a card to edit.</p>
-   ${list.length?`<div class="kp-grid wide">${list.map(s=>{const used=usedBy("src",s.id);const n=s.folders.length;
-    return`<div class="kp-src" data-src="${att(s.id)}">
+  const card=s=>{const used=usedBy("src",s.id),n=s.folders.length,idle=!used.length;
+   return`<div class="kp-src${idle?" kp-idle":""}" data-src="${att(s.id)}">
      <div class="ic">${svg("folder",20)}<span class="n">${n}</span><span class="u">folder${n===1?"":"s"}</span></div>
      <div class="bd">
-      <div class="t">${esc(s.name)}</div>
+      <div class="t" style="display:flex;align-items:center;gap:8px">${esc(s.name)}${idle?`<span class="kp-badge idle">not used</span>`:""}</div>
       ${s.folders.slice(0,2).map(f=>`<div class="pp" title="${att(f)}">${esc(f)}</div>`).join("")}${n>2?`<div class="pp" style="opacity:.7">+${n-2} more</div>`:""}
       <div class="meta"><span class="kpSz" data-szv="${att(s.id)}">${svg("gauge",11)} <span class="kp-quiet" data-sz="${att(s.id)}" style="font-size:11px">measure size</span></span>
        ${s.excludes&&s.excludes.length?`<span>·</span>${s.excludes.slice(0,3).map(x=>`<span class="fm-chip" style="font-size:10px">${esc(x)}</span>`).join(" ")}${s.excludes.length>3?` +${s.excludes.length-3}`:""}`:""}</div>
-      <div class="meta">${used.length?`${svg("shield",11)} used by ${esc(used.join(", "))}`:`<span style="opacity:.7">not used by any backup yet</span>`}</div></div>
+      <div class="meta">${idle
+        ?`${svg("warn",11)} <span>Nothing backs these folders up</span> · <span class="kp-quiet" data-use="${att(s.id)}" style="font-size:11px">back it up →</span>`
+        :`<span style="color:var(--win-good,var(--good));display:inline-flex;align-items:center;gap:5px">${svg("shield",11)} Backed up by ${esc(used.join(", "))}</span>`}</div></div>
      <div class="act"><button class="iconbtn" data-ed="${att(s.id)}" title="Edit source">${svg("edit",15)}</button>
-      <button class="iconbtn ${used.length?"":"dng"}" data-rm="${att(s.id)}" title="${used.length?"In use by "+att(used.join(", "))+" — can't delete":"Delete source"}" ${used.length?"disabled":""}>${svg("trash",15)}</button></div>
-    </div>`;}).join("")}</div>`
+      <button class="iconbtn ${idle?"dng":""}" data-rm="${att(s.id)}" title="${idle?"Delete source":"In use by "+att(used.join(", "))+" — can't delete"}" ${idle?"":"disabled"}>${svg("trash",15)}</button></div>
+    </div>`;};
+  const on=list.filter(s=>usedBy("src",s.id).length), off=list.filter(s=>!usedBy("src",s.id).length);
+  tc.innerHTML=`<div style="display:flex;align-items:center;gap:10px"><h3 class="set-title" style="margin:0">Sources</h3><span style="flex:1"></span><button class="btn pri" id="kSrcAdd">${svg("plus",14)} New source</button></div>
+   <p class="set-sub">A source is a reusable group of folders. Excludes live here too — they're a property of the data, not of one backup. Click a card to edit.</p>
+   ${list.length?
+     (off.length?kpGrp("warn","Not used",off.length,"— no backup copies these folders anywhere",1)
+       +`<div class="kp-grid wide">${off.map(card).join("")}</div>`:"")
+     +(on.length?kpGrp("shield","Backed up",on.length,off.length?"":"— every source is used by a backup")
+       +`<div class="kp-grid wide">${on.map(card).join("")}</div>`:"")
    :`<button class="kp-new" id="kSrcAdd2" style="min-height:150px">${svg("plus",18)} Create your first source</button>`}`;
   const add=tc.querySelector("#kSrcAdd")||tc.querySelector("#kSrcAdd2");
   if(add)add.onclick=()=>srcDlg(null,()=>paint());
@@ -8410,24 +8467,33 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
    const wrap=tc.querySelector(`[data-szv="${b.dataset.sz}"]`);if(wrap)wrap.innerHTML=`${svg("gauge",11)} measuring…`;
    const r=await kP("/api/kopia/source/size",{id:b.dataset.sz});
    if(wrap)wrap.innerHTML=`${svg("gauge",11)} ${r&&r.ok?fmtB(r.bytes)+(r.partial?" (partial)":""):"failed"}`;});
+  tc.querySelectorAll("[data-use]").forEach(b=>b.onclick=ev=>{ev.stopPropagation();
+   kpNewWiz({source:b.dataset.use});});
   tc.querySelectorAll("[data-rm]").forEach(b=>b.onclick=ev=>{ev.stopPropagation();if(b.disabled)return;
    confirmDlg("Delete source?","Only the named group is removed — files on disk are not touched.",
    async()=>{const r=await kP("/api/kopia/source/delete",{id:b.dataset.rm});if(!(r&&r.ok))toast((r&&r.log)||"failed");await refresh();},1);});}
 
+ /* Start the new-backup wizard, optionally with one side already chosen — that is what
+    "back it up →" on an unused source (or destination) does. */
+ function kpNewWiz(pre){
+  wiz={step:0,draft:Object.assign({name:"",source:"",dest:"",dest2:"",dest2_mode:"sync",
+   retention:{latest:10,daily:7,weekly:4,monthly:12,annual:0},schedule:{mode:"daily",time:"03:30",dow:0},
+   compression:true,usb_trigger:false,notify_ok:false,notify_err:true,enabled:true},pre||{})};
+  tab="overview";syncNav();paint();}
+
  /* ---------- Destinations tab ---------- */
  function tabDests(tc){
   const list=D.dests||[];
-  tc.innerHTML=`<div style="display:flex;align-items:center;gap:10px"><h3 class="set-title" style="margin:0">Destinations</h3><span style="flex:1"></span><button class="btn pri" id="kDAdd">${svg("plus",14)} New destination</button></div>
-   <p class="set-sub">Each destination is one snapshot repository — on a local/USB disk or in the cloud through rclone. The repository password is in Options.</p>
-   ${list.length?`<div class="kp-grid wide">${list.map(x=>{const used=usedBy("dst",x.id);
+  const card=x=>{const used=usedBy("dst",x.id),idle=!used.length;
     const stCol=x.missing?"danger":x.connected?"good":"warn";
     const state=x.missing?`<span style="color:var(--win-danger,var(--danger))">disk not plugged in</span>`
-     :used.length?`used by ${esc(used.join(", "))}`:(x.connected?"connected · no backup uses it yet":"not initialized — becomes a repository on first use");
-    return`<div class="kp-bk kp-wide kp-static" data-d="${att(x.id)}" style="--kp-st:var(--win-${stCol},var(--${stCol}))">
+     :idle?`${svg("warn",11)} Nothing is written here${x.connected?"":" — not initialized yet"} · <span class="kp-quiet" data-use="${att(x.id)}" style="font-size:11px">back something up to it →</span>`
+     :`<span style="color:var(--win-good,var(--good));display:inline-flex;align-items:center;gap:5px">${svg("shield",11)} Receives ${esc(used.join(", "))}</span>`;
+    return`<div class="kp-bk kp-wide kp-static${idle?" kp-idle":""}" data-d="${att(x.id)}" style="--kp-st:var(--win-${stCol},var(--${stCol}))">
      <div class="kp-zone kp-z-main">
-      <div class="kp-bk-top">${svg(x.kind==="fs"?"hdd":"globe",16)}<b style="font-size:14px">${esc(x.name)}</b>${x.mounted?`<span class="kp-badge ok">mounted</span>`:""}</div>
+      <div class="kp-bk-top">${svg(x.kind==="fs"?"hdd":"globe",16)}<b style="font-size:14px">${esc(x.name)}</b>${x.mounted?`<span class="kp-badge ok">mounted</span>`:""}${idle?`<span class="kp-badge idle">not used</span>`:""}</div>
       <div class="kp-route" style="margin-top:2px"><span class="mono" style="font-size:11px;max-width:none">${esc(x.kind==="fs"?x.path:(x.remote+":"+(x.remote_path||"")))}</span></div>
-      <div style="font-size:11.5px;color:var(--win-dim,var(--dim));margin-top:5px">${state}</div></div>
+      <div style="font-size:11.5px;color:var(--win-dim,var(--dim));margin-top:5px;display:flex;align-items:center;gap:5px;flex-wrap:wrap">${state}</div></div>
      <div class="kp-zone kp-z-runs" style="flex:1 1 190px">
       <div class="kp-zlbl">Repository</div>
       <div class="kpStats" style="font-size:12px;color:var(--win-dim,var(--dim))">${x.missing?"—":`<span class="kp-quiet" data-check="${att(x.id)}">check now →</span>`}</div></div>
@@ -8437,8 +8503,16 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
        <button class="btn sm" data-mnt="${att(x.id)}" title="${x.mounted?"Unmount from /mnt/kopia":"Mount read-only so you can open it in Files"}">${x.mounted?`${svg("eject",13)} Unmount`:`${svg("hdd",13)} Mount`}</button>`:""}
        <button class="iconbtn" data-maint="${att(x.id)}" title="Run maintenance now — compact and clean the repository">${svg("wand",15)}</button>
        <button class="iconbtn" data-cache="${att(x.id)}" title="Clear the local cache (rebuilds on next use)">${svg("eraser",15)}</button>
-       <button class="iconbtn ${used.length?"":"dng"}" data-rm="${att(x.id)}" title="${used.length?"In use by "+att(used.join(", "))+" — can't remove":"Remove this destination from the panel (repository data is kept)"}"${used.length?" disabled":""}>${svg("trash",15)}</button></div></div>
-    </div>`;}).join("")}</div>`
+       <button class="iconbtn ${idle?"dng":""}" data-rm="${att(x.id)}" title="${idle?"Remove this destination from the panel (repository data is kept)":"In use by "+att(used.join(", "))+" — can't remove"}"${idle?"":" disabled"}>${svg("trash",15)}</button></div></div>
+    </div>`;};
+  const on=list.filter(x=>usedBy("dst",x.id).length), off=list.filter(x=>!usedBy("dst",x.id).length);
+  tc.innerHTML=`<div style="display:flex;align-items:center;gap:10px"><h3 class="set-title" style="margin:0">Destinations</h3><span style="flex:1"></span><button class="btn pri" id="kDAdd">${svg("plus",14)} New destination</button></div>
+   <p class="set-sub">Each destination is one snapshot repository — on a local/USB disk or in the cloud through rclone. The repository password is in Options.</p>
+   ${list.length?
+     (off.length?kpGrp("warn","Not used",off.length,"— no backup writes into these repositories",1)
+       +`<div class="kp-grid wide">${off.map(card).join("")}</div>`:"")
+     +(on.length?kpGrp("shield","In use",on.length,off.length?"":"— every repository receives a backup")
+       +`<div class="kp-grid wide">${on.map(card).join("")}</div>`:"")
    :`<button class="kp-new" id="kDAdd2" style="min-height:150px">${svg("plus",18)} Add the first destination</button>`}`;
   const addBtn=tc.querySelector("#kDAdd")||tc.querySelector("#kDAdd2");
   if(addBtn)addBtn.onclick=()=>destDlg({},()=>paint());
@@ -8454,6 +8528,7 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
     +`<div style="margin-top:3px"><span class="kp-quiet" data-check="${att(id)}">refresh</span></div>`);
    const rf=tc.querySelector(`[data-d="${id}"] [data-check]`);if(rf)rf.onclick=()=>runCheck(id);};
   tc.querySelectorAll("[data-check]").forEach(b=>b.onclick=()=>runCheck(b.dataset.check));
+  tc.querySelectorAll("[data-use]").forEach(b=>b.onclick=ev=>{ev.stopPropagation();kpNewWiz({dest:b.dataset.use});});
   tc.querySelectorAll("[data-browse]").forEach(b=>b.onclick=()=>{snapDest=b.dataset.browse;snapBk="";tab="snaps";syncNav();paint();});
   tc.querySelectorAll("[data-mnt]").forEach(b=>b.onclick=async()=>{b.disabled=true;const id=b.dataset.mnt,x=list.find(v=>v.id===id);
    const r=await kP(x&&x.mounted?"/api/kopia/unmount":"/api/kopia/mount",{id});
