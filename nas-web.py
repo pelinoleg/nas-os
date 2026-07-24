@@ -10171,6 +10171,20 @@ def kp_dest_forget(destid):
 
 # ---- sources + backups (pure config CRUD) -----------------------------------
 
+def _kp_unnest(folders):
+    """Drop folders that live INSIDE another folder of the same source: kopia would walk
+    that data twice and the snapshot would carry it twice over. The ancestor wins — it
+    already covers the child. Returns (kept, dropped-as-[(child, parent)])."""
+    keep, nested = [], []
+    for p in sorted(folders, key=len):          # shortest first → a parent is seen before its child
+        anc = next((k for k in keep if p == k or p.startswith(k.rstrip("/") + "/")), None)
+        if anc:
+            nested.append((p, anc))
+        else:
+            keep.append(p)
+    return keep, nested
+
+
 def kp_source_save(d):
     cfg = kp_load()
     name = (str(d.get("name") or "").strip() or "Source")[:48]
@@ -10185,6 +10199,7 @@ def kp_source_save(d):
             seen.add(p); folders.append(p)
     if not folders:
         return {"ok": False, "log": "pick at least one folder"}
+    folders, nested = _kp_unnest(folders)
     excludes = []
     for e in (d.get("excludes") or [])[:200]:
         e = str(e or "").strip()
@@ -10203,7 +10218,9 @@ def kp_source_save(d):
                    "name": name, "folders": folders, "excludes": excludes}
             cfg["sources"].append(src)
         kp_save(cfg)
-    return {"ok": True, "source": src}
+    return {"ok": True, "source": src,
+            # the UI says which folders were folded away, so a silent drop never surprises
+            "nested": [{"path": c, "inside": a} for c, a in nested]}
 
 def kp_source_size(kid):
     """du -sb of every folder in the source — on demand only (can be slow)."""
@@ -10302,7 +10319,11 @@ def kp_backup_save(d):
             if b.get("dest2") == d2 and b.get("dest") != dst["id"]:
                 return {"ok": False, "log": "«%s» already syncs a different repository onto that "
                         "spare — they would overwrite each other" % (b.get("name") or b["id"])}
-    nb = {"name": name, "source": src["id"], "dest": dst["id"], "dest2": d2,
+    nb = {"name": name,
+          # free-form note the owner writes for themselves ("why this exists, what to
+          # check first, who to tell") — the panel only stores and shows it
+          "description": str(d.get("description") or "").strip()[:2000],
+          "source": src["id"], "dest": dst["id"], "dest2": d2,
           "dest2_mode": d.get("dest2_mode") if d.get("dest2_mode") in ("sync", "independent") else "sync",
           "retention": _kp_norm_retention(d.get("retention")),
           "schedule": _kp_norm_schedule(d.get("schedule")),

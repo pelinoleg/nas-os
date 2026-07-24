@@ -618,7 +618,7 @@ function tat(ts){
   const t=new Date(ts*1000), n=new Date();
   const hm=("0"+t.getHours()).slice(-2)+":"+("0"+t.getMinutes()).slice(-2);
   if(t.toDateString()===n.toDateString()) return hm;
-  return t.toLocaleDateString(window.NAS_LANG==="ru"?"ru-RU":"en-GB",{weekday:"short"})+" "+hm;
+  return t.toLocaleDateString("en-GB",{weekday:"short"})+" "+hm;
 }
 const hrsFmt=h=>h>=17520?(h/8760).toFixed(1)+" yr":h>=72?Math.round(h/24)+" d":h+" h";
 function renderP3(d){
@@ -661,7 +661,7 @@ function clkTick(){
   }
   const t=new Date();
   $("#ctime").textContent=("0"+t.getHours()).slice(-2)+":"+("0"+t.getMinutes()).slice(-2);
-  $("#cdate").textContent=t.toLocaleDateString(D.lang==="ru"?"ru-RU":"en-GB",
+  $("#cdate").textContent=t.toLocaleDateString("en-GB",
     {weekday:"long",day:"numeric",month:"long"});
   const cc=Math.round((((D.tiles||{}).cpu||{}).raw||{}).pct||D.cpu||0),
         tp=Math.round(D.temp||0), mm=Math.round((D.mem||{}).pct||0);
@@ -995,7 +995,7 @@ const SHEETS={
         <div class="dh-h"><span class="st2 ${st}">●</span><b>${esc(x.name)}</b>${x.model?`<span class="dh-mod">${esc(x.model)}</span>`:""}</div>
         ${KV("SMART",verdict)}
         ${KV("Temperature",x.temp?x.temp+" °C":"—")}
-        ${KV("Power-on time",x.hours!=null?hrsFmt(x.hours)+(x.hours>=72?" ("+x.hours.toLocaleString()+" h)":""):"—")}
+        ${KV("Power-on time",x.hours!=null?hrsFmt(x.hours)+(x.hours>=72?" ("+x.hours.toLocaleString("en-GB")+" h)":""):"—")}
         ${KV("Size",x.size||"—")}
         ${KV("Interface",(x.tran||"").toUpperCase()||"—")}
         ${KV("Usage",use)}

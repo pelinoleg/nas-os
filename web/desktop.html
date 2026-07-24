@@ -1288,6 +1288,13 @@
   .pk-tag.taken{color:var(--win-warn,var(--warn));background:transparent;
     border:1px dashed color-mix(in srgb,var(--win-warn,var(--warn)) 55%,transparent)}
   .pk-tag.gone{color:var(--win-danger,var(--danger));background:color-mix(in srgb,var(--win-danger,var(--danger)) 14%,transparent)}
+  /* the owner's own note: one quiet line on the card, the whole thing in the detail view */
+  .kp-desc1{font-size:11.5px;color:var(--win-dim,var(--dim));margin:3px 0 1px;
+    overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+  .kp-note2{display:flex;gap:9px;align-items:flex-start;padding:10px 13px;border-radius:12px;margin:0 0 12px;
+    background:var(--card);border:1px solid var(--win-line,var(--line));font-size:12.5px;line-height:1.55}
+  .kp-note2 svg{flex:none;color:var(--win-accent,var(--accent));margin-top:1px}
+  .kp-note2 span{white-space:pre-wrap;min-width:0}
   .kp-banner{display:flex;align-items:center;gap:11px;padding:11px 15px;border-radius:12px;margin:0 0 14px;
     background:color-mix(in srgb,var(--win-accent,var(--accent)) 12%,transparent);border:1px solid color-mix(in srgb,var(--win-accent,var(--accent)) 35%,transparent)}
   .kp-banner .bi{flex:none;color:var(--win-accent,var(--accent))}
@@ -2330,6 +2337,12 @@
   .field{display:flex;flex-direction:column;gap:7px;margin-bottom:14px}.field label{font-size:12px;font-weight:600;color:var(--dim)}
   input,textarea,select{font-family:var(--font);background:var(--card-2);border:1px solid transparent;border-radius:var(--r-sm);color:var(--text);padding:10px 13px;font-size:13px;width:100%;transition:.13s}
   input:hover,textarea:hover,select:hover{border-color:var(--line-2)}
+  /* …but a checkbox/radio must stay out of that: the text-field padding and border make Blink
+     drop the native widget for a styled box, and it changes SIZE — hovering a file row in the
+     snapshot browser grew the row by 5px and the whole list jumped under the cursor. */
+  input[type=checkbox],input[type=radio]{padding:0;border:none;background:none;
+    box-shadow:none;width:auto;transition:none}
+  input[type=checkbox]:hover,input[type=radio]:hover{border-color:transparent}
   textarea{font-family:var(--mono);font-size:12.5px;line-height:1.65;resize:vertical;min-height:300px;white-space:pre;tab-size:2}
   /* NAS backup: profile bar. The active tab is a "white chip" per the design system */
   .nbtabs{display:flex;align-items:center;gap:6px;padding:8px 10px;overflow-x:auto;flex:none;
@@ -5239,7 +5252,7 @@ function dkAvailPane(tc,a,reload){
 function stReplicaDlg(a,reload){
  const rp=a.replica||{},cfg=rp.cfg||{},stt=rp.state||{};
  const s=document.getElementById("scrim");
- const last=stt.synced?new Date(stt.synced*1000).toLocaleString()+(stt.version?" · "+stt.version.split("/").pop():"")+(stt.dump_mb?" · dump "+stt.dump_mb+" MB":""):"not yet";
+ const last=stt.synced?new Date(stt.synced*1000).toLocaleString(LOC)+(stt.version?" · "+stt.version.split("/").pop():"")+(stt.dump_mb?" · dump "+stt.dump_mb+" MB":""):"not yet";
  s.innerHTML=`<div class="dialog" style="max-width:640px;width:92vw"><h3>${svg("sync",16)} Replica: ${esc(a.name)}</h3>
   <p style="color:var(--mut);font-size:13px;margin:4px 0 10px">${esc(rp.desc||"")}</p>
   <div class="field"><label>Source (main NAS address)</label><input id="rpHost" value="${att(cfg.host||"")}" placeholder="192.168.1.95" autocomplete="off"></div>
@@ -5451,6 +5464,10 @@ function editStack(name,after){const isNew=!name,wid=isNew?"snew":"sed:"+name;op
 },{w:820,h:640,geoKey:"stack-edit"});}
 
 /* Cron — manages the cronmaster service through our proxy /api/cron/* */
+/* The panel is English-only, but toLocale*() follows the BROWSER locale — on a Russian
+   system that painted Russian month names and Russian digit grouping into an English UI.
+   Every locale-aware format goes through LOC instead of the browser default. */
+const LOC="en-GB";
 const esc=s=>(""+(s==null?"":s)).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 const att=s=>(""+(s==null?"":s)).replace(/"/g,"&quot;");
 const cronURL=()=>`http://${host()}:8123`;
@@ -7400,11 +7417,11 @@ function rcloneDuDlg(remote){
   const crumbs=`<a data-p="">${esc(remote)}:</a>`+parts.map(seg=>{acc=acc?acc+"/"+seg:seg;return ` / <a data-p="${att(acc)}">${esc(seg)}</a>`;}).join("");
   let inner;
   if(!tree){
-   inner=`<div class="set-load" id="duScan">${st.running?`Scanning «${esc(remote)}»… ${(st.scanned||0).toLocaleString()} files · ${fmtB(st.bytes)}`:(st.error?esc(st.error):"starting…")}</div>`;
+   inner=`<div class="set-load" id="duScan">${st.running?`Scanning «${esc(remote)}»… ${(st.scanned||0).toLocaleString(LOC)} files · ${fmtB(st.bytes)}`:(st.error?esc(st.error):"starting…")}</div>`;
   }else{
    const kids=Object.entries((node&&node.ch)||{}).sort((a,b)=>b[1].sz-a[1].sz);
    const rows=kids.length?kids.map(([name,ch])=>{const pct=node.sz?Math.round(ch.sz*100/node.sz):0,hasCh=ch.ch&&Object.keys(ch.ch).length;
-     return `<div class="du-row${hasCh?" du-nav":""}"${hasCh?` data-in="${att(cur?cur+"/"+name:name)}"`:""}><div class="du-bar"><i style="width:${pct}%"></i></div><span class="du-nm">${svg(name==="…other"?"file":"folder",13)} ${esc(name)}</span><span class="du-sz mono">${fmtB(ch.sz)}</span><span class="du-n">${(ch.n||0).toLocaleString()}</span>${hasCh?`<span class="du-arr">›</span>`:""}</div>`;
+     return `<div class="du-row${hasCh?" du-nav":""}"${hasCh?` data-in="${att(cur?cur+"/"+name:name)}"`:""}><div class="du-bar"><i style="width:${pct}%"></i></div><span class="du-nm">${svg(name==="…other"?"file":"folder",13)} ${esc(name)}</span><span class="du-sz mono">${fmtB(ch.sz)}</span><span class="du-n">${(ch.n||0).toLocaleString(LOC)}</span>${hasCh?`<span class="du-arr">›</span>`:""}</div>`;
    }).join(""):`<div class="set-sub" style="padding:8px 2px">No subfolders here — ${fmtB(node?node.sz:0)} in files.</div>`;
    const age=(!st.running&&st.done)?` · <span class="du-mut">scanned ${duAgo(st.done)}</span>`:"";
    inner=`<div class="du-tot">Total <b>${fmtB(total)}</b>${st.capped?` · <span style="color:var(--win-warn,var(--warn))">capped — remote is very large</span>`:""}${st.running?` · <span style="color:var(--win-accent,var(--accent))">still scanning…</span>`:age}</div>
@@ -7425,7 +7442,7 @@ function rcloneDuDlg(remote){
  const tick=async()=>{const st=await rcloneP("/api/backup/rclone/du/status",{remote});lastSt=st||{};
   if(st&&st.tree){tree=st.tree;stop();draw();return;}                 // tree ready → render once
   const sc=s.querySelector("#duScan");                                 // still scanning: update in place
-  const txt=st&&st.running?`Scanning «${esc(remote)}»… ${(st.scanned||0).toLocaleString()} files · ${fmtB(st.bytes)}`:(st&&st.error?esc(st.error):"starting…");
+  const txt=st&&st.running?`Scanning «${esc(remote)}»… ${(st.scanned||0).toLocaleString(LOC)} files · ${fmtB(st.bytes)}`:(st&&st.error?esc(st.error):"starting…");
   if(sc)sc.innerHTML=txt;else draw();                                  // no flicker — only redraw if the line is gone
   poll=setTimeout(tick,1500);};
  const begin=async(force)=>{draw();await rcloneP("/api/backup/rclone/du/start",{remote,force:!!force});tick();};
@@ -7569,9 +7586,9 @@ function winResil(initTab){openWin("__resil","Resilience",(body,win)=>{
   {id:"card",name:"Disaster card",ic:"note"},{id:"sentry",name:"Log sentry",ic:"search"}];
  const ago=t=>{if(!t)return"never";const s=Math.max(0,Math.floor(Date.now()/1000-t));if(s<90)return"just now";
   const m=Math.floor(s/60),h=Math.floor(m/60),d=Math.floor(h/24);return d?d+"d ago":h?h+"h ago":m+"m ago";};
- const dts=t=>t?new Date(t*1000).toLocaleString():"—";
+ const dts=t=>t?new Date(t*1000).toLocaleString(LOC):"—";
  const dtShort=t=>{if(!t)return"—";const d=new Date(t*1000);
-  return d.toLocaleDateString(undefined,{month:"short",day:"numeric"})+", "+d.toTimeString().slice(0,5);};
+  return d.toLocaleDateString(LOC,{month:"short",day:"numeric"})+", "+d.toTimeString().slice(0,5);};
  const spark=(vals,col)=>{const v=vals.filter(x=>typeof x==="number");if(v.length<2)return"";
   const mx=Math.max(...v),mn=Math.min(...v),sp=(mx-mn)||1,W=260,H=36;
   const pts=v.map((x,i)=>`${(i/(v.length-1)*W).toFixed(1)},${(H-1-(x-mn)/sp*(H-2)).toFixed(1)}`).join(" ");
@@ -7868,10 +7885,10 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
   {id:"hist",name:"History",ic:"list"},{id:"opts",name:"Options",ic:"cog"}];
  const ago=t=>{if(!t)return"never";const s=Math.max(0,Math.floor(Date.now()/1000-t));if(s<90)return"just now";
   const m=Math.floor(s/60),h=Math.floor(m/60),d=Math.floor(h/24);return d?d+"d ago":h?h+"h ago":m+"m ago";};
- const dts=t=>t?new Date(t*1000).toLocaleString():"—";
+ const dts=t=>t?new Date(t*1000).toLocaleString(LOC):"—";
  const dtShort=t=>{if(!t)return"—";const d=new Date(t*1000);
-  return d.toLocaleDateString(undefined,{month:"short",day:"numeric"})+", "+d.toTimeString().slice(0,5);};
- const dayKey=t=>new Date(t*1000).toLocaleDateString();
+  return d.toLocaleDateString(LOC,{month:"short",day:"numeric"})+", "+d.toTimeString().slice(0,5);};
+ const dayKey=t=>new Date(t*1000).toLocaleDateString(LOC);
  const srcOf=b=>(D.sources||[]).find(s=>s.id===b.source);
  const dstOf=id=>(D.dests||[]).find(d=>d.id===id);
  const usedBy=(kind,id)=>(D.backups||[]).filter(b=>kind==="src"?b.source===id:(b.dest===id||b.dest2===id)).map(b=>b.name||b.id);
@@ -7944,7 +7961,7 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
 
  /* ---------- shared pickers / dialogs ---------- */
   function srcDlg(src,onDone){const s=document.getElementById("scrim");
-  const folders=(src&&src.folders||[]).slice();
+  let folders=(src&&src.folders||[]).slice();   // reassigned when a parent folds its children in
   s.innerHTML=`<div class="dialog" style="width:470px;max-width:94vw"><h3>${svg("folder",16)} ${src?"Edit source":"New source"}</h3>
    <p style="margin:2px 0 12px;font-size:12px;color:var(--win-dim,var(--dim))">A named group of folders — pick it in any backup instead of re-choosing paths.</p>
    <div class="field" style="margin-bottom:4px"><label>Name</label><input id="ksN" value="${att(src&&src.name||"")}" placeholder="Photos, Configs, Projects…"></div>
@@ -7962,10 +7979,20 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
    ||`<div class="kp-witem" style="color:var(--win-dim,var(--dim))">nothing here yet — add the folders to protect</div>`;
    $("#ksF").querySelectorAll("[data-i]").forEach(b=>b.onclick=()=>{folders.splice(+b.dataset.i,1);drawF();});};
   drawF();
+  // A folder inside another one would be walked and stored twice, so the nested pair is
+  // resolved right here: the ancestor wins, the children it covers are folded into it.
+  const inside=(a,b)=>a===b||a.startsWith(b.replace(/\/+$/,"")+"/");
+  const addFolder=p=>{p=(p||"").replace(/\/+$/,"")||"/";
+   const anc=folders.find(f=>inside(p,f));
+   if(anc){toast(anc===p?"already in this source":"already covered by "+anc);return;}
+   const kids=folders.filter(f=>inside(f,p));
+   if(kids.length){folders=folders.filter(f=>!inside(f,p));
+    toast(kids.length+" folder"+(kids.length>1?"s":"")+" inside it folded in");}
+   folders.push(p);drawF();};
   $("#ksAdd").onclick=()=>pickFolder({overlay:true,start:folders[0]||"/mnt/storage",
     title:"Add a folder to back up",
-    note:"This folder becomes part of the source — every backup that uses it will protect this folder.",
-    onPick:p=>{if(p&&!folders.includes(p))folders.push(p);drawF();}});
+    note:"This folder becomes part of the source — every backup that uses it will protect this folder. A folder already inside one of these is not added twice.",
+    onPick:addFolder});
   $("#ksX").onclick=()=>s.classList.remove("show");
   $("#ksO").onclick=async()=>{
    const r=await kP("/api/kopia/source/save",{id:src&&src.id||"",name:$("#ksN").value,
@@ -8117,6 +8144,7 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
      <div class="kp-zone kp-z-main">
       <div class="kp-bk-top"><b style="font-size:14px">${esc(b.name||b.id)}</b>${badge}</div>
       <div class="kp-verdict">${esc(st.txt)}${st.run&&r2.pct?` · ${Math.round(r2.pct)}%`:""}</div>
+      ${b.description?`<div class="kp-desc1" title="${att(b.description)}">${esc(b.description.split("\n")[0])}</div>`:""}
       <div class="kp-route">${svg("folder",13)}<span class="rn">${esc(src&&src.name||"?")}</span><span class="arr">→</span>${svg(d1&&d1.kind==="rclone"?"globe":"hdd",13)}<span class="rn">${esc(d1&&d1.name||"?")}</span>${b.dest2?`<span class="arr">→</span>${svg(d2&&d2.kind==="rclone"?"globe":"hdd",13)}<span class="rn" title="spare copy">${esc(d2&&d2.name||"spare")}</span>`:""}</div>
       ${b.schedule&&b.schedule.mode!=="off"?`<div class="kp-next" style="margin:0">${esc(nextRun(b))}</div>`:""}${prog}</div>
      <div class="kp-zone kp-z-runs">
@@ -8211,6 +8239,7 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
     ${r.running?`<button class="btn dng sm" id="kdStop">${svg("stop",13)} Stop</button>`:`<button class="btn pri sm" id="kdRun">${svg("play",13)} Back up now</button>`}
     <button class="iconbtn" id="kdMenu" title="More">${svg("cog",16)}</button></div>
    ${runrow}
+   ${b.description?`<div class="kp-note2">${svg("note",13)}<span>${esc(b.description)}</span></div>`:""}
    <div class="kp-sec"><h4>${svg("shield",13)} What this backup protects<span style="flex:1"></span><button class="kp-quiet" id="kdEdit" style="font-size:11px">${svg("edit",12)} Edit</button></h4>
     <div class="kp-prot">${srcRow}${toRow}${spareRow}</div></div>
    <div class="kp-stats" id="kdStats">
@@ -8249,7 +8278,7 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
    const ok=all.filter(x=>x.result==="ok"||x.result==="warn");
    const set=(id,v)=>{const e=tc.querySelector(id);if(e)e.innerHTML=v;};
    // First backup
-   if(all.length){const first=all[0];set("#stFirst",new Date(first.ts*1000).toLocaleDateString(undefined,{month:"short",day:"numeric"}));
+   if(all.length){const first=all[0];set("#stFirst",new Date(first.ts*1000).toLocaleDateString(LOC,{month:"short",day:"numeric"}));
     set("#stFirstS",new Date(first.ts*1000).getFullYear()+" · "+all.length+" run"+(all.length>1?"s":""));}
    else{set("#stFirst","—");set("#stFirstS","never run");}
    // Restore drill
@@ -8310,6 +8339,9 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
    <div class="kp-sec"><h4>${svg("folder",13)} Data — what goes where</h4>${secSource(draft)}${secDest(draft)}${secSpare(draft)}</div>
    <div class="kp-sec"><h4>${svg("archive",13)} History — how much to keep</h4>${secRetention(draft)}</div>
    <div class="kp-sec"><h4>${svg("refresh",13)} Schedule</h4>${secSchedule(draft)}</div>
+   <div class="kp-sec"><h4>${svg("note",13)} Notes</h4>
+   <p class="kp-help">Your own words about this backup — why it exists, what to check first, anything future-you will want. Shown on the backup card.</p>
+   <textarea id="kDesc" rows="3" style="resize:vertical;min-height:64px" placeholder="e.g. Docker volumes from the Ugreen NAS. Restore paperless first — its database dump lives in dumps/daily.">${esc(draft.description||"")}</textarea></div>
    <div class="kp-sec"><h4>${svg("bell",13)} Notifications</h4>
    <div class="srow"><div class="srow-l"><div class="srow-t">Notify on success</div><div class="srow-d">problems always notify (toggle per the catalog in Settings → Notifications)</div></div>
     <div class="srow-c"><label class="tgl"><input type="checkbox" id="kNok"${draft.notify_ok?" checked":""}><span class="sl"></span></label></div></div>
@@ -8319,15 +8351,13 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
     <div class="srow-c"><label class="tgl"><input type="checkbox" id="kEn"${draft.enabled!==false?" checked":""}><span class="sl"></span></label></div></div></div>
    <div class="r" style="margin-top:2px"><button class="btn pri" id="kSave">Save settings</button></div>`;
   const readFlags=()=>{const g=id=>box.querySelector(id);
+   if(g("#kDesc"))draft.description=g("#kDesc").value;
    if(g("#kNok"))draft.notify_ok=g("#kNok").checked;
    if(g("#kNerr"))draft.notify_err=g("#kNerr").checked;
    if(g("#kEn"))draft.enabled=g("#kEn").checked;};
   wireSecs(box,draft,()=>{readRet(box,draft);readSched(box,draft);readFlags();draw();});
   box.querySelector("#kSave").onclick=async()=>{
-   draft.notify_ok=box.querySelector("#kNok").checked;
-   draft.notify_err=box.querySelector("#kNerr").checked;
-   draft.enabled=box.querySelector("#kEn").checked;
-   readRet(box,draft);readSched(box,draft);
+   readFlags();readRet(box,draft);readSched(box,draft);
    const r=await kP("/api/kopia/backup/save",draft);
    toast(r&&r.ok?"Saved":"Save failed: "+((r&&r.log)||""));await refresh();};};
   draw();}
@@ -8464,6 +8494,7 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
      keep ${(d.retention||{}).latest||0}/${(d.retention||{}).daily||0}/${(d.retention||{}).weekly||0}/${(d.retention||{}).monthly||0}/${(d.retention||{}).annual||0} (latest/d/w/m/y)<br>
      ${d.schedule&&d.schedule.mode!=="off"?`runs ${d.schedule.mode==="weekly"?"weekly on "+DOWS[+d.schedule.dow||0]:"daily"} at ${esc(d.schedule.time||"03:30")}`:"manual runs only"}${d.usb_trigger?" · also on disk plug-in":""}</div>
     <div class="field" style="margin-top:10px"><label>Name</label><input id="kWName" value="${att(d.name||"")}" placeholder="${att(((srcOf(d)||{}).name||"Backup")+" to "+((dstOf(d.dest)||{}).name||""))}"></div>
+    <div class="field"><label>Notes — optional</label><textarea id="kWDesc" rows="2" style="resize:vertical;min-height:52px" placeholder="What this backup is for, what to restore first, anything worth remembering.">${esc(d.description||"")}</textarea></div>
     <div class="kp-opt" style="margin-top:4px"><div><div class="ot">Run the first snapshot now</div><div class="od">the first run uploads everything once; later runs send only changes</div></div>
      <label class="tgl oc"><input type="checkbox" id="kWRun" checked><span class="sl"></span></label></div>`;
   tc.innerHTML=`<div style="display:flex;gap:14px;height:100%">
@@ -8476,7 +8507,8 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
   wireSecs(tc.querySelector("#kWBody"),d,()=>paintWizard(tc));
   const savePos=()=>{if(d.id){win._kpWizPos=win._kpWizPos||{};win._kpWizPos[d.id]=wiz.step;}};
   const readStep=()=>{if(sid==="ret")readRet(tc,d);if(sid==="sched")readSched(tc,d);
-   if(sid==="fin"){const nm=tc.querySelector("#kWName");if(nm&&nm.value.trim())d.name=nm.value.trim();}};
+   if(sid==="fin"){const nm=tc.querySelector("#kWName");if(nm&&nm.value.trim())d.name=nm.value.trim();
+    const ds=tc.querySelector("#kWDesc");if(ds)d.description=ds.value;}};
   tc.querySelector("#kWLater").onclick=async()=>{readStep();
    if(d.source&&d.dest)await wizPersist(true);
    else toast("Backup not created — it needs at least a source and a destination");
@@ -8630,7 +8662,7 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
   const k=fmKind(e.name,"file"),p=e.name.split(".");
   return KX_KIND[k]||(p.length>1?p.pop().toUpperCase().slice(0,9)+" file":"File");};
  const kxDate=t=>{if(!t)return"—";const d=new Date(t*1000);
-  return d.toLocaleDateString(undefined,{month:"short",day:"numeric",
+  return d.toLocaleDateString(LOC,{month:"short",day:"numeric",
    year:d.getFullYear()===new Date().getFullYear()?undefined:"numeric"})+", "+d.toTimeString().slice(0,5);};
  const KX_ZIP_MAX=2*1024*1024*1024;                 // server refuses bigger folder archives
  const exReset=()=>{EX={dest:snapDest,bk:snapBk,path:null,snap:null,rel:"",sel:null,selMulti:null,focus:null,
@@ -8976,7 +9008,7 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
    <div class="kpx-track" id="kxTrack"><div class="kpx-inner">${list.map((s,i)=>{
     // first point of a day is labelled with the date, the rest of that day with the time
     const d=new Date(s.ts*1000),dk=d.toDateString();
-    const lbl=dk!==lastD?d.toLocaleDateString(undefined,{month:"short",day:"numeric"}):d.toTimeString().slice(0,5);
+    const lbl=dk!==lastD?d.toLocaleDateString(LOC,{month:"short",day:"numeric"}):d.toTimeString().slice(0,5);
     lastD=dk;
     return `<button class="kpx-tick${i===idx?" on":""}" data-t="${att(s.id)}" title="${att(dts(s.ts)+" · "+s.files+" files · "+fmtB(s.bytes))}"><i></i><span>${esc(lbl)}</span></button>`;}).join("")}</div></div>
    <button class="iconbtn" id="kxNext" title="Newer restore point"${idx<0||idx>=list.length-1?" disabled":""}>${svg("chev",15)}</button>
@@ -9018,7 +9050,7 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
    for(let d=1;d<=days;d++){const k=y+"-"+m+"-"+d,has=by[k];
     cells+=`<button class="${has?"has":""}${has&&has.some(s=>s.id===EX.snap.id)?" on":""}"${has?` data-d="${k}" title="${att(has.length+" restore point"+(has.length>1?"s":""))}"`:" disabled"}>${d}</button>`;}
    pop.innerHTML=`<div class="hd"><button class="iconbtn" data-mv="-1"><span class="kpx-rot">${svg("chev",14)}</span></button>
-     <b>${esc(first.toLocaleDateString(undefined,{month:"long",year:"numeric"}))}</b>
+     <b>${esc(first.toLocaleDateString(LOC,{month:"long",year:"numeric"}))}</b>
      <button class="iconbtn" data-mv="1">${svg("chev",14)}</button></div>
     <div class="g">${DOWS.map(d=>`<b>${d[0]}</b>`).join("")}${cells}</div>
     <div class="ft"><span>${g.list.length} restore point${g.list.length>1?"s":""}</span><button class="kp-quiet" data-latest>Jump to the latest</button></div>`;
@@ -10484,7 +10516,7 @@ function tabCompare(tc){
     const nm=x[0],k=x[1],s=x[2]||0;
     const b=k==="n"?`<b class="cmp-new">+ new${s?" · "+bytes(s):""}</b>`:k==="c"?`<b class="cmp-chg">✎ changed${s?" · "+bytes(s):""}</b>`:`<b class="cmp-del">✗ removed</b>`;
     return `<div class="cmp-row cmp-file"><span class="cmp-nm">${svg("file",13)} ${esc(nm)}</span><span class="cmp-badge">${b}</span></div>`;}).join("");
-  return rows+(node.fo?`<div class="cmp-more">+ ${node.fo.toLocaleString()} more files…</div>`:"");
+  return rows+(node.fo?`<div class="cmp-more">+ ${node.fo.toLocaleString(LOC)} more files…</div>`:"");
  };
  const sub=(name,node,path)=>{
   const diff=(node.n||0)+(node.c||0)+(node.d||0);
@@ -10519,9 +10551,9 @@ function tabCompare(tc){
  const render=()=>{if(!document.body.contains(tc)){stop();return;}
   const st=LAST,run=st.running,sum=st.summary||{},diffs=(sum.new||0)+(sum.changed||0)+(sum.deleted||0),good=!run&&(st.done||st.shares)&&diffs===0;
   let head="";
-  if(run) head=`<div class="cmp-run"><span class="cmp-spin">${svg("sync",16)}</span><div><b>Comparing…</b>${st.cur?" · "+esc(st.cur):""}<div class="set-sub" style="margin:1px 0 0">${st.deep?(rcl?"deep · byte-for-byte":"deep (checksums)"):(rcl?"checksum compare":"quick (size + date)")} · ${ago(st.started)}${st.scanned?" · "+st.scanned.toLocaleString()+" differences so far":""}</div></div><button class="btn sm dng" id="cmpCancel" style="margin-left:auto">Stop</button></div>`;
-  else if(st.done||st.shares){const toCopy=(sum.new_bytes||0)+(sum.changed_bytes||0);head=`<div class="cmp-verdict ${good?"good":"warn"}">${svg(good?"check":"shield",20)}<div><b>${good?(rcl?"Destination matches the source":"Backup matches the server"):`${diffs.toLocaleString()} differences${toCopy?" · "+bytes(toCopy)+" to copy":""}`}</b><div class="set-sub">${st.done?"Last compared: "+fmDate(st.done*1000):""}${st.deep?" · deep":" · quick"}${st.stopped?" · stopped early":""}</div></div></div>`
-    +`<div class="cmp-chips"><span class="cmp-chip ok">✓ identical ${(sum.identical||0).toLocaleString()}</span><span class="cmp-chip new">＋ new ${(sum.new||0).toLocaleString()}${sum.new_bytes?" · "+bytes(sum.new_bytes):""}</span><span class="cmp-chip chg">✎ changed ${(sum.changed||0).toLocaleString()}</span><span class="cmp-chip del">✗ extra ${(sum.deleted||0).toLocaleString()}</span></div>`;}
+  if(run) head=`<div class="cmp-run"><span class="cmp-spin">${svg("sync",16)}</span><div><b>Comparing…</b>${st.cur?" · "+esc(st.cur):""}<div class="set-sub" style="margin:1px 0 0">${st.deep?(rcl?"deep · byte-for-byte":"deep (checksums)"):(rcl?"checksum compare":"quick (size + date)")} · ${ago(st.started)}${st.scanned?" · "+st.scanned.toLocaleString(LOC)+" differences so far":""}</div></div><button class="btn sm dng" id="cmpCancel" style="margin-left:auto">Stop</button></div>`;
+  else if(st.done||st.shares){const toCopy=(sum.new_bytes||0)+(sum.changed_bytes||0);head=`<div class="cmp-verdict ${good?"good":"warn"}">${svg(good?"check":"shield",20)}<div><b>${good?(rcl?"Destination matches the source":"Backup matches the server"):`${diffs.toLocaleString(LOC)} differences${toCopy?" · "+bytes(toCopy)+" to copy":""}`}</b><div class="set-sub">${st.done?"Last compared: "+fmDate(st.done*1000):""}${st.deep?" · deep":" · quick"}${st.stopped?" · stopped early":""}</div></div></div>`
+    +`<div class="cmp-chips"><span class="cmp-chip ok">✓ identical ${(sum.identical||0).toLocaleString(LOC)}</span><span class="cmp-chip new">＋ new ${(sum.new||0).toLocaleString(LOC)}${sum.new_bytes?" · "+bytes(sum.new_bytes):""}</span><span class="cmp-chip chg">✎ changed ${(sum.changed||0).toLocaleString(LOC)}</span><span class="cmp-chip del">✗ extra ${(sum.deleted||0).toLocaleString(LOC)}</span></div>`;}
   else head=`<div class="set-sub" style="margin:0 0 4px">${rcl?"Check the destination matches the source, by checksum.":"Check that the backup is identical to the server."} Runs in the background — you can close this window and come back; it remembers when it last ran.</div>`;
   const filters=(st.shares&&st.shares.length)?`<span class="cmp-filters"><label class="cmp-tgl"><input type="checkbox" id="cmpAll"${showAll?" checked":""}> show identical</label><input class="mono" id="cmpFind" placeholder="filter folders…" value="${att(filt)}"></span>`:"";
   tc.innerHTML=`<div class="cmp-wrap"><h3 class="set-title" style="margin:0 0 3px">Compare with the server</h3>${head}
@@ -10704,7 +10736,7 @@ function winFsHistory(){openWin("__fsw","File history",(body,win)=>{
  const hm=ts=>{const d=new Date(ts*1000);return String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0");};
  const dayLbl=ts=>{const d=new Date(ts*1000),t=new Date(),y=new Date(Date.now()-864e5);
   const same=(a,b)=>a.toDateString()===b.toDateString();
-  return same(d,t)?"today":same(d,y)?"yesterday":d.toLocaleDateString();};
+  return same(d,t)?"today":same(d,y)?"yesterday":d.toLocaleDateString(LOC);};
  const ago=ts=>{if(!ts)return "—";const s=(Date.now()/1000-ts);
   if(s<90)return "just now";if(s<5400)return Math.round(s/60)+" min ago";
   if(s<172800)return Math.round(s/3600)+" h ago";return Math.round(s/86400)+" d ago";};
@@ -10824,7 +10856,7 @@ function winFsHistory(){openWin("__fsw","File history",(body,win)=>{
    <div class="set-sub mono" style="word-break:break-all;margin-top:2px">${esc(path)}</div>
    ${f?`<div class="fsw-stats" style="margin:12px 0 6px">
      <div class="fsw-st"><div><b>${fmtB(f.size)}</b><span>size</span></div></div>
-     <div class="fsw-st"><div><b>${new Date(f.mtime*1000).toLocaleString()}</b><span>modified</span></div></div>
+     <div class="fsw-st"><div><b>${new Date(f.mtime*1000).toLocaleString(LOC)}</b><span>modified</span></div></div>
      <div class="fsw-st"><div><b>${f.verified?ago(f.verified):"—"}</b><span>content verified</span></div></div></div>
     <div class="set-sub mono" style="word-break:break-all">BLAKE2: ${esc(f.hash||"—")}</div>`
     :`<div class="set-sub" style="margin-top:10px">The file is not in the index right now — deleted or not watched.</div>`}
@@ -11523,7 +11555,7 @@ function winNotes(){openWin("__notes","Notes",async body=>{
   q("#ntTags").querySelectorAll(".nt-tag").forEach(el2=>{const t=decodeURIComponent(el2.dataset.t);
    el2.querySelector(".t").textContent="#"+t;
    el2.onclick=()=>{tag=tag===t?null:t;paintSide();paintList();};});};
- const fmtD=t=>{const d=new Date(t*1000),n=new Date();return d.toDateString()===n.toDateString()?d.toTimeString().slice(0,5):d.toLocaleDateString();};
+ const fmtD=t=>{const d=new Date(t*1000),n=new Date();return d.toDateString()===n.toDateString()?d.toTimeString().slice(0,5):d.toLocaleDateString(LOC);};
  const paintList=async()=>{
   let items;
   if(qstr){const r=await api("/api/notes/search?q="+encodeURIComponent(qstr));items=(r&&r.hits)||[];}
