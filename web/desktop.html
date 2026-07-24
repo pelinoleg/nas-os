@@ -935,7 +935,8 @@
   .nb-tree{max-height:min(64vh,620px);overflow:auto;border:1px solid var(--line-2);border-radius:var(--r-md);padding:4px;background:var(--card)}
   .nb-selc{margin-right:auto;font-size:12px;color:var(--mut)}
   .nb-trow{display:flex;align-items:center;gap:7px;padding:6px 10px;cursor:pointer;font-size:12.5px;border-radius:7px}
-  .nb-trow:hover{background:var(--sel)}
+  /* hover only where there IS a pointer — on touch the highlight would stick after a tap */
+  @media(hover:hover){.nb-trow:hover{background:var(--sel)}}
   .nb-trow.checked>.nb-tn,.nb-trow.covered>.nb-tn{color:var(--accent);font-weight:600}
   .nb-trow.indet>.nb-tn{color:var(--text);font-weight:600}
   /* excluded nested folder (unchecked inside a selected parent) — struck through and slightly dimmed */
@@ -1129,6 +1130,13 @@
   .kp-wpath b{font-size:12.5px;font-weight:650;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .kp-wpath .mono{font-size:11px;color:var(--win-dim,var(--dim))}
   .kp-wlist{max-height:min(34vh,240px);overflow:auto}
+  /* what the tree unticked, listed under the folder it was taken out of — struck through,
+     so "protected" and "left out" read differently at a glance */
+  .kp-wexc{display:flex;flex-wrap:wrap;gap:5px;padding:0 11px 9px 35px}
+  .kp-wexc .x{display:inline-flex;align-items:center;gap:5px;max-width:100%;font-size:11px;
+    background:var(--sel);border-radius:6px;padding:2px 5px 2px 7px;color:var(--win-dim,var(--dim))}
+  .kp-wexc .x span{text-decoration:line-through;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .kp-wexc .x button{border:none;background:none;padding:0;display:flex;cursor:pointer;color:inherit}
   /* the wizard footer lives OUTSIDE a dialog, where `.r` has no styling at all — that is
      why Back/Next sat glued together. It gets its own row instead of borrowing one. */
   .kp-wfoot{display:flex;align-items:center;gap:10px;justify-content:flex-end;margin-top:12px;
@@ -7270,6 +7278,80 @@ function nbPickSource(preselected,preExcl,onPick,opts){const s=document.getEleme
    for(const p of [...anc].sort((a,b)=>a.split("/").length-b.split("/").length)){expanded.add(p);if(kids[p]===undefined)await browse(p);}
    refresh();})();}
 
+/* Kopia source picker — the same checkbox tree as nbPickSource, with the same meaning:
+   a tick on a folder protects the whole folder (including whatever appears in it later),
+   unticking something inside excludes only that one. Two differences: it walks THIS box's
+   filesystem (absolute paths, /api/kopia/browse) and it always renders in its OWN overlay
+   layer, because it is opened from the source dialog — which must survive underneath. */
+function kpPickSource(preselected,preExcl,onPick){
+ const s=el(`<div class="scrim" style="z-index:600"></div>`);document.body.appendChild(s);
+ const sel=new Set(preselected||[]),excl=new Set(preExcl||[]),expanded=new Set(),kids={};
+ // kids[""] is the filtered root; deeper keys are absolute paths
+ const state=full=>{if(sel.has(full))return"checked";
+   if(excl.has(full))return"excluded";
+   for(const x of excl){if(full.startsWith(x+"/"))return"exout";}
+   for(const x of sel){if(full.startsWith(x+"/"))return"covered";}
+   for(const x of sel){if(x.startsWith(full+"/"))return"indet";}return"none";};
+ s.innerHTML=`<div class="dialog nb-pick"><h3>${svg("folder",16)} Choose folders to back up</h3>
+   <div class="mon-note" style="margin:0 0 8px">Expand folders ▸ and tick what to protect at any level. A check on a folder takes the whole folder, including whatever appears in it later. Unticking something nested leaves it out — new folders next to it are still backed up.</div>
+   <div class="nb-tree" id="kpTree"><div class="nb-load">Reading folders…</div></div>
+   <div class="r"><span class="nb-selc" id="kpSelInfo"></span><button class="btn" id="kpsX">Cancel</button><button class="btn pri" id="kpsO">Use these folders</button></div></div>`;
+ s.classList.add("show");
+ const close=()=>s.remove();
+ const treeEl=s.querySelector("#kpTree");
+ const child=(path,name)=>(path==="/"||path==="")?("/"+name):(path+"/"+name);
+ const browse=async path=>{if(kids[path]!==undefined)return kids[path];
+   const r=await api("/api/kopia/browse",{method:"POST",body:JSON.stringify({path})});
+   kids[path]=(r&&r.ok)?(r.entries||[]):null;return kids[path];};
+ const buildRows=(path,depth,out)=>{const list=kids[path];
+   if(list===null){out.push({err:1,depth});return;}
+   if(!list)return;
+   list.forEach(e=>{const full=child(path,e.name);out.push({e,full,depth});
+     if(e.dir&&expanded.has(full))buildRows(full,depth+1,out);});};
+ function refresh(){
+   const info=s.querySelector("#kpSelInfo");
+   if(info)info.textContent=(sel.size===1?"1 folder":sel.size+" folders")+(excl.size?(" · "+excl.size+" excluded"):"");
+   if(kids[""]===null){treeEl.innerHTML=`<div class="er" style="padding:10px">cannot read the filesystem</div>`;return;}
+   const out=[];buildRows("",0,out);
+   if(!out.length){treeEl.innerHTML='<div style="color:var(--mut);padding:10px">empty</div>';return;}
+   treeEl.innerHTML="";
+   out.forEach(row=>{
+     if(row.err){treeEl.appendChild(el(`<div class="nb-trow locked" style="padding-left:${row.depth*18+34}px;font-size:11.5px;color:var(--mut)">access denied</div>`));return;}
+     const {e,full,depth}=row,st=state(full),exp=expanded.has(full);
+     const n=el(`<div class="nb-trow ${st}" style="padding-left:${depth*18+10}px"><span class="nb-tw">${e.dir?`<button class="nb-tchev ${exp?"open":""}" title="Expand">${svg("chev",14)}</button>`:""}</span><input type="checkbox" class="nb-tck" style="pointer-events:none">${fmIcon(e.name,e.dir?"dir":"file",15)}<span class="nb-tn">${esc(e.name)}</span></div>`);
+     const ck=n.querySelector(".nb-tck");ck.checked=(st==="checked"||st==="covered");ck.indeterminate=(st==="indet");
+     if(st==="covered")n.title="protected by a folder above — untick to leave just this one out";
+     else if(st==="excluded")n.title="left out of the backup — click to put it back";
+     else if(st==="exout")n.title="inside a folder that is left out — restore that one first";
+     else if(st==="none"&&!e.dir)n.title="a backup starts from a folder — tick the folder around this file";
+     const chev=n.querySelector(".nb-tchev");
+     if(chev)chev.onclick=async ev=>{ev.stopPropagation();
+       if(expanded.has(full))expanded.delete(full);
+       else{expanded.add(full);if(kids[full]===undefined){chev.classList.add("busy");await browse(full);}}
+       refresh();};
+     n.onclick=ev=>{if(ev.target.closest(".nb-tchev"))return;
+       const cs=state(full);
+       if(cs==="checked"){sel.delete(full);[...excl].forEach(x=>{if(x===full||x.startsWith(full+"/"))excl.delete(x);});}
+       else if(cs==="covered")excl.add(full);                 // leave this one out
+       else if(cs==="excluded")excl.delete(full);             // put it back
+       else if(cs==="exout")return;                           // under an excluded ancestor — restore that first
+       else if(!e.dir)return;                                 // a source folder it is, not a lone file
+       else{[...sel].forEach(x=>{if(x.startsWith(full+"/"))sel.delete(x);});[...excl].forEach(x=>{if(x===full||x.startsWith(full+"/"))excl.delete(x);});sel.add(full);}
+       refresh();};
+     treeEl.appendChild(n);});}
+ s.querySelector("#kpsX").onclick=close;
+ s.querySelector("#kpsO").onclick=()=>{close();onPick([...sel],[...excl]);};
+ (async()=>{await browse("");
+   // open the branches down to what is already picked (and to the exclusions), so the
+   // current selection is visible without hunting for it
+   const anc=new Set();[...sel,...excl].forEach(p=>{const pr=p.split("/").filter(Boolean);let acc="";
+     for(let i=0;i<pr.length-1;i++){acc=acc+"/"+pr[i];anc.add(acc);}});
+   // nothing picked yet: open where the data actually lives, so the disks are one click away
+   // (a path that doesn't exist here is simply never drawn — its parent doesn't list it)
+   if(!anc.size)["/mnt","/mnt/storage","/media","/media/nas"].forEach(p=>anc.add(p));
+   for(const p of [...anc].sort((a,b)=>a.split("/").length-b.split("/").length)){expanded.add(p);if(kids[p]===undefined)await browse(p);}
+   refresh();})();}
+
 /* ═══ Cloud (rclone) — a dedicated, centralized app. Everything rclone lives here:
    remote connections, the rclone.conf editor + install/update, mounting a remote as a
    local folder, read-only utilities (quota/size/verify) and global options. Backup
@@ -7962,41 +8044,47 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
  /* ---------- shared pickers / dialogs ---------- */
   function srcDlg(src,onDone){const s=document.getElementById("scrim");
   let folders=(src&&src.folders||[]).slice();   // reassigned when a parent folds its children in
+  let xpaths=(src&&src.exclude_paths||[]).slice();
   s.innerHTML=`<div class="dialog" style="width:470px;max-width:94vw"><h3>${svg("folder",16)} ${src?"Edit source":"New source"}</h3>
    <p style="margin:2px 0 12px;font-size:12px;color:var(--win-dim,var(--dim))">A named group of folders — pick it in any backup instead of re-choosing paths.</p>
    <div class="field" style="margin-bottom:4px"><label>Name</label><input id="ksN" value="${att(src&&src.name||"")}" placeholder="Photos, Configs, Projects…"></div>
-   <div class="kp-eyebrow">Folders</div>
-   <div class="kp-well"><div id="ksF" class="kp-wlist"></div><button class="kp-wadd" id="ksAdd">${svg("plus",14)} Add folder…</button></div>
+   <div class="kp-eyebrow">Folders <span id="ksCnt" style="font-weight:400;text-transform:none;letter-spacing:0"></span></div>
+   <div class="kp-well"><div id="ksF" class="kp-wlist"></div><button class="kp-wadd" id="ksAdd">${svg("folder",14)} Choose folders…</button></div>
    <div class="kp-eyebrow">Excludes <span style="font-weight:400;text-transform:none;letter-spacing:0">— optional, one pattern per line</span></div>
    <textarea id="ksE" rows="2" style="resize:vertical;height:64px;min-height:44px" placeholder="*.tmp&#10;cache/">${esc((src&&src.excludes||[]).join("\n"))}</textarea>
    <div class="r" style="margin-top:12px"><button class="btn" id="ksX">Cancel</button><button class="btn pri" id="ksO">${src?"Save":"Create source"}</button></div></div>`;
   s.classList.add("show");
   const $=q=>s.querySelector(q);
-  const drawF=()=>{$("#ksF").innerHTML=folders.map((f,i)=>{const leaf=f.split("/").filter(Boolean).pop()||f;
+  const inside=(a,b)=>a===b||a.startsWith(b.replace(/\/+$/,"")+"/");
+  const drawF=()=>{
+   const cnt=$("#ksCnt");
+   if(cnt)cnt.textContent=folders.length?("— "+folders.length+" folder"+(folders.length>1?"s":"")+(xpaths.length?(", "+xpaths.length+" excluded"):"")):"";
+   $("#ksF").innerHTML=folders.map((f,i)=>{const leaf=f.split("/").filter(Boolean).pop()||f;
+    const out=xpaths.filter(x=>inside(x,f));
     return`<div class="kp-witem">${fmIcon(leaf,"dir",15)}
      <span class="kp-wpath" title="${att(f)}"><b>${esc(leaf)}</b><span class="mono">${esc(f)}</span></span>
-     <button class="iconbtn" data-i="${i}" title="Remove from the source">${svg("x",13)}</button></div>`;}).join("")
-   ||`<div class="kp-witem" style="color:var(--win-dim,var(--dim))">nothing here yet — add the folders to protect</div>`;
-   $("#ksF").querySelectorAll("[data-i]").forEach(b=>b.onclick=()=>{folders.splice(+b.dataset.i,1);drawF();});};
+     <button class="iconbtn" data-i="${i}" title="Remove from the source">${svg("x",13)}</button></div>`
+    +(out.length?`<div class="kp-wexc">`+out.map(x=>`<span class="x" title="${att(x)}"><span>${esc(x.slice(f.replace(/\/+$/,"").length+1))}</span><button data-x="${att(x)}" title="Put it back into the backup">${svg("x",11)}</button></span>`).join("")+`</div>`:"");}).join("")
+   ||`<div class="kp-witem" style="color:var(--win-dim,var(--dim))">nothing here yet — choose the folders to protect</div>`;
+   $("#ksF").querySelectorAll("[data-i]").forEach(b=>b.onclick=()=>{
+    const gone=folders.splice(+b.dataset.i,1)[0];
+    xpaths=xpaths.filter(x=>!inside(x,gone));   // its exclusions have nothing left to sit in
+    drawF();});
+   $("#ksF").querySelectorAll("[data-x]").forEach(b=>b.onclick=()=>{
+    xpaths=xpaths.filter(x=>x!==b.dataset.x);drawF();});};
   drawF();
-  // A folder inside another one would be walked and stored twice, so the nested pair is
-  // resolved right here: the ancestor wins, the children it covers are folded into it.
-  const inside=(a,b)=>a===b||a.startsWith(b.replace(/\/+$/,"")+"/");
-  const addFolder=p=>{p=(p||"").replace(/\/+$/,"")||"/";
-   const anc=folders.find(f=>inside(p,f));
-   if(anc){toast(anc===p?"already in this source":"already covered by "+anc);return;}
-   const kids=folders.filter(f=>inside(f,p));
-   if(kids.length){folders=folders.filter(f=>!inside(f,p));
-    toast(kids.length+" folder"+(kids.length>1?"s":"")+" inside it folded in");}
-   folders.push(p);drawF();};
-  $("#ksAdd").onclick=()=>pickFolder({overlay:true,start:folders[0]||"/mnt/storage",
-    title:"Add a folder to back up",
-    note:"This folder becomes part of the source — every backup that uses it will protect this folder. A folder already inside one of these is not added twice.",
-    onPick:addFolder});
+  // The tree already keeps a folder and its children from both being picked, but a source
+  // saved by an older version can still carry a nested pair — fold it in on the way out.
+  $("#ksAdd").onclick=()=>kpPickSource(folders,xpaths,(list,excl)=>{
+   const keep=[];
+   list.slice().sort((a,b)=>a.length-b.length).forEach(p=>{if(!keep.some(k=>inside(p,k)))keep.push(p);});
+   folders=keep;xpaths=excl.filter(x=>folders.some(f=>inside(x,f)&&x!==f));
+   drawF();});
   $("#ksX").onclick=()=>s.classList.remove("show");
   $("#ksO").onclick=async()=>{
    const r=await kP("/api/kopia/source/save",{id:src&&src.id||"",name:$("#ksN").value,
-    folders,excludes:$("#ksE").value.split("\n").map(x=>x.trim()).filter(Boolean)});
+    folders,exclude_paths:xpaths,
+    excludes:$("#ksE").value.split("\n").map(x=>x.trim()).filter(Boolean)});
    if(!(r&&r.ok)){toast((r&&r.log)||"save failed");return;}
    s.classList.remove("show");await load();onDone&&onDone(r.source.id);};}
 
@@ -8221,7 +8309,8 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
   const srcRow=`<div class="row"><div class="rl">From</div>
     <div class="ic">${svg("folder",15)}</div>
     <div class="bd"><div class="nm">${esc(src&&src.name||"no source")}${src?`<button class="kp-quiet" id="kdEditSrc" style="font-size:11px">edit folders</button>`:""}</div>
-     ${src?src.folders.map(f=>`<div class="pp" title="${att(f)}">${esc(f)}</div>`).join(""):`<div class="pp">choose what to back up in Settings</div>`}</div></div>`;
+     ${src?src.folders.map(f=>`<div class="pp" title="${att(f)}">${esc(f)}</div>`).join(""):`<div class="pp">choose what to back up in Settings</div>`}
+     ${src&&src.exclude_paths&&src.exclude_paths.length?`<div class="pp" style="opacity:.75" title="${att(src.exclude_paths.join("\n"))}">${src.exclude_paths.length} folder${src.exclude_paths.length>1?"s":""} inside left out</div>`:""}</div></div>`;
   const toRow=`<div class="row"><div class="rl">To</div>
     <div class="ic">${svg(d1&&d1.kind==="rclone"?"globe":"hdd",15)}</div>
     <div class="bd"><div class="nm">${esc(d1&&d1.name||"no destination")} ${d1?dot(d1.missing?"danger":d1.connected?"good":"warn"):""}</div>
@@ -8543,6 +8632,7 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
       <div class="t" style="display:flex;align-items:center;gap:8px">${esc(s.name)}${idle?`<span class="kp-badge idle">not used</span>`:""}</div>
       ${s.folders.slice(0,2).map(f=>`<div class="pp" title="${att(f)}">${esc(f)}</div>`).join("")}${n>2?`<div class="pp" style="opacity:.7">+${n-2} more</div>`:""}
       <div class="meta"><span class="kpSz" data-szv="${att(s.id)}">${svg("gauge",11)} <span class="kp-quiet" data-sz="${att(s.id)}" style="font-size:11px">measure size</span></span>
+       ${s.exclude_paths&&s.exclude_paths.length?`<span>·</span><span title="${att(s.exclude_paths.join("\n"))}">${s.exclude_paths.length} folder${s.exclude_paths.length>1?"s":""} left out</span>`:""}
        ${s.excludes&&s.excludes.length?`<span>·</span>${s.excludes.slice(0,3).map(x=>`<span class="fm-chip" style="font-size:10px">${esc(x)}</span>`).join(" ")}${s.excludes.length>3?` +${s.excludes.length-3}`:""}`:""}</div>
       <div class="meta">${idle
         ?`${svg("warn",11)} <span>Nothing backs these folders up</span> · <span class="kp-quiet" data-use="${att(s.id)}" style="font-size:11px">back it up →</span>`

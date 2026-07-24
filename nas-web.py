@@ -9753,6 +9753,8 @@ def kp_load():
             s["folders"] = []
         if not isinstance(s.get("excludes"), list):
             s["excludes"] = []
+        if not isinstance(s.get("exclude_paths"), list):
+            s["exclude_paths"] = []
     return d
 
 _KP_CFG_LOCK = threading.Lock()   # serialize load-modify-save of kopia.json across panel threads
@@ -10185,6 +10187,37 @@ def _kp_unnest(folders):
     return keep, nested
 
 
+def _kp_excl_paths(folders, raw):
+    """Validate the folder-tree exclusions: absolute paths that must live INSIDE one of
+    the source folders. Kept literal (normpath, no realpath — the rule is matched by path,
+    and resolving a symlink would point it somewhere kopia never walks). Returns
+    (kept, dropped) — dropped ones are the leftovers of a folder that is no longer in the
+    source, so the caller can just forget them. Nested exclusions collapse to the topmost:
+    once a folder is out, everything under it is out anyway."""
+    keep, dropped = [], []
+    roots = [f.rstrip("/") for f in folders]
+    seen = set()
+    for x in (raw or [])[:400]:
+        p = str(x or "").strip()
+        if not p.startswith("/") or "\n" in p:
+            continue
+        p = os.path.normpath(p)
+        if p in seen or p == "/":
+            continue
+        seen.add(p)
+        if not any(p.startswith(r + "/") for r in roots):
+            dropped.append(p)               # outside the source — the folder was removed
+            continue
+        keep.append(p)
+    keep.sort(key=len)                      # a parent is seen before its children
+    out = []
+    for p in keep:
+        if any(p.startswith(k + "/") for k in out):
+            continue                        # already inside an excluded folder
+        out.append(p)
+    return out[:200], dropped
+
+
 def kp_source_save(d):
     cfg = kp_load()
     name = (str(d.get("name") or "").strip() or "Source")[:48]
@@ -10205,22 +10238,25 @@ def kp_source_save(d):
         e = str(e or "").strip()
         if e and "\n" not in e and len(e) < 200 and not e.startswith("-"):
             excludes.append(e)
+    xpaths, xdrop = _kp_excl_paths(folders, d.get("exclude_paths"))
     kid = str(d.get("id") or "")
     with _KP_CFG_LOCK:
         cfg = kp_load()
+        upd = {"name": name, "folders": folders, "excludes": excludes,
+               "exclude_paths": xpaths}
         if kid:
             src = _kp_find(cfg["sources"], kid)
             if not src:
                 return {"ok": False, "log": "no such source"}
-            src.update({"name": name, "folders": folders, "excludes": excludes})
+            src.update(upd)
         else:
-            src = {"id": _kp_new_id({x["id"] for x in cfg["sources"]}),
-                   "name": name, "folders": folders, "excludes": excludes}
+            src = dict(upd, id=_kp_new_id({x["id"] for x in cfg["sources"]}))
             cfg["sources"].append(src)
         kp_save(cfg)
     return {"ok": True, "source": src,
             # the UI says which folders were folded away, so a silent drop never surprises
-            "nested": [{"path": c, "inside": a} for c, a in nested]}
+            "nested": [{"path": c, "inside": a} for c, a in nested],
+            "dropped_excludes": xdrop}
 
 def kp_source_size(kid):
     """du -sb of every folder in the source — on demand only (can be slow)."""
@@ -10229,13 +10265,23 @@ def kp_source_size(kid):
         return {"ok": False, "log": "no such source"}
     total = 0
     partial = False
+
+    def _du(p):
+        r = subprocess.run(["du", "-sb", "-x", p], capture_output=True, text=True, timeout=120)
+        return int((r.stdout or "0").split()[0])
+
     for f in src.get("folders") or []:
         try:
-            r = subprocess.run(["du", "-sb", "-x", f], capture_output=True, text=True, timeout=120)
-            total += int((r.stdout or "0").split()[0])
+            total += _du(f)
         except (OSError, subprocess.SubprocessError, ValueError, IndexError):
             partial = True
-    return {"ok": True, "bytes": total, "partial": partial}
+    # what the tree unticked is not backed up — count it out, or the figure lies
+    for xp in src.get("exclude_paths") or []:
+        try:
+            total -= _du(xp)
+        except (OSError, subprocess.SubprocessError, ValueError, IndexError):
+            partial = True
+    return {"ok": True, "bytes": max(0, total), "partial": partial}
 
 def kp_source_delete(kid):
     cfg = kp_load()
@@ -10567,6 +10613,19 @@ def _proc_cpu_time(pid):
 _KP_PROG_RE = re.compile(r"(\d+)\s+hashed\s+\(([^)]+)\).*?uploaded\s+([\d.]+\s*\w?i?B)"
                          r"(?:.*?\(([\d.]+)%\))?(?:\s+([\w ]+?)\s+left)?")
 
+def _kp_ignore_rule(folder, path):
+    """Folder-tree exclusion → kopia ignore rule for the policy of `folder`. A LEADING
+    SLASH anchors the rule to the policy root (gitignore-like), so excluding
+    /x/docker/bytestash under /x/docker gives "/bytestash" — which takes out that one
+    folder and leaves the sibling /x/docker/bytestash2 and the deeper /x/docker/a/bytestash
+    alone (verified live). No trailing slash: the same form matches a file too.
+    Returns "" when the path is not inside the folder."""
+    root = folder.rstrip("/")
+    if not path.startswith(root + "/"):
+        return ""
+    return path[len(root):].rstrip("/")
+
+
 def _kp_policy_apply(destid, bk, src):
     """Set retention/compression/ignores on every source folder in this repo.
     Kopia then enforces retention by itself after each snapshot — no separate
@@ -10585,7 +10644,11 @@ def _kp_policy_apply(destid, bk, src):
                 "--keep-annual", str(ret.get("annual", 0)),
                 "--compression", ("zstd" if bk.get("compression", True) else "none")]
         for pat in (src.get("excludes") or []):
-            args += ["--add-ignore", pat]
+            args += ["--add-ignore", pat]       # text patterns apply to every folder
+        for xp in (src.get("exclude_paths") or []):
+            rule = _kp_ignore_rule(folder, xp)  # path exclusions belong to THEIR folder only
+            if rule:
+                args += ["--add-ignore", rule]
         r = _kp(destid, args, timeout=60)
         if not r["ok"]:
             return {"ok": False, "log": _kp_err_tail(r)}
@@ -12867,10 +12930,14 @@ def disaster_build():
             src = _kp_find(kcfg.get("sources") or [], b.get("source") or "") or {}
             d1 = _kp_find(kcfg.get("dests") or [], b.get("dest") or "") or {}
             d2 = _kp_find(kcfg.get("dests") or [], b.get("dest2") or "") or {}
-            L.append("- **%s**: %s → %s%s" % (b.get("name") or b["id"],
+            # the exclusions belong here too: they are the folders that were never
+            # written anywhere, and after a disaster that is exactly what you must know
+            xp = src.get("exclude_paths") or []
+            L.append("- **%s**: %s → %s%s%s" % (b.get("name") or b["id"],
                      ", ".join((src.get("folders") or ["?"])),
                      d1.get("name") or "?",
-                     (" (+ spare %s)" % d2.get("name")) if d2 else ""))
+                     (" (+ spare %s)" % d2.get("name")) if d2 else "",
+                     ("\n  - NOT backed up (left out): %s" % ", ".join(xp)) if xp else ""))
         L.append("")
     md = "\n".join(L) + "\n"
     tmp = DISASTER_MD + ".tmp"
