@@ -1285,6 +1285,100 @@ def load_snippets():
 def save_snippets(d):
     _json_save(SNIPPETS_FILE, d, indent=2)
 
+def snip_choices(kind):
+    """Values to offer for a {placeholder} instead of making the user type them.
+    Grouped, because «which unit» is really two questions: ours or the system's."""
+    kind = str(kind or "")
+    grp = []
+    if kind == "unit":
+        try:
+            r = subprocess.run(["systemctl", "list-units", "--type=service,timer", "--all",
+                                "--no-legend", "--plain", "--no-pager"],
+                               capture_output=True, text=True, timeout=15)
+        except (OSError, subprocess.SubprocessError):
+            return {"ok": False, "log": "cannot list units"}
+        ours, act, idle = [], [], []
+        for ln in (r.stdout or "").splitlines():
+            f = ln.split()
+            if len(f) < 4 or not f[0].endswith((".service", ".timer")):
+                continue
+            name, load, active, sub = f[0], f[1], f[2], f[3]
+            if load == "not-found":
+                continue
+            item = {"value": name, "label": "%s · %s" % (name, sub)}
+            # anything this project installs starts with nas- (plus docker itself,
+            # which is ours in spirit — the stacks live and die by it)
+            (ours if name.startswith(("nas-", "docker.", "containerd.")) else
+             act if active == "active" else idle).append(item)
+        # inside «ours», the nas-* units come first — docker/containerd are ours only
+        # by association, and the list should open on what this project installed
+        for title, items in (("NAS-OS", ours), ("Running", act), ("Stopped", idle)):
+            if items:
+                grp.append({"name": title,
+                            "items": sorted(items, key=lambda x: (not x["value"].startswith("nas-"),
+                                                                  x["value"]))})
+    elif kind == "path":
+        seen = []
+        try:
+            with open("/proc/mounts") as f:
+                for ln in f:
+                    p = ln.split()
+                    if len(p) < 3 or p[2] in ("proc", "sysfs", "devtmpfs", "devpts", "cgroup2",
+                                              "securityfs", "pstore", "bpf", "tracefs",
+                                              "debugfs", "configfs", "fusectl", "mqueue",
+                                              "autofs", "ramfs", "efivarfs", "squashfs"):
+                        continue
+                    mp = p[1].replace("\\040", " ")
+                    if mp not in seen and (mp == "/" or not mp.startswith(("/proc", "/sys", "/dev", "/run"))):
+                        seen.append(mp)
+        except OSError:
+            pass
+        data = [m for m in seen if m.startswith(("/mnt", "/media", "/srv"))]
+        rest = [m for m in seen if m not in data]
+        for title, items in (("Storage", data), ("System", rest)):
+            if items:
+                grp.append({"name": title, "items": [{"value": m, "label": m} for m in sorted(items)]})
+    elif kind == "partition":
+        try:
+            r = subprocess.run(["lsblk", "-J", "-o", "NAME,PATH,SIZE,FSTYPE,LABEL,MOUNTPOINT,TYPE"],
+                               capture_output=True, text=True, timeout=15)
+            tree = json.loads(r.stdout or "{}").get("blockdevices") or []
+        except (OSError, subprocess.SubprocessError, ValueError):
+            return {"ok": False, "log": "cannot list block devices"}
+        items = []
+
+        def walk(nodes):
+            for n in nodes:
+                if n.get("type") in ("part", "disk") and n.get("fstype"):
+                    lbl = "%s · %s%s%s" % (n.get("path"), n.get("fstype"),
+                                           " · " + n["label"] if n.get("label") else "",
+                                           " · " + n["size"] if n.get("size") else "")
+                    items.append({"value": (n.get("path") or "").replace("/dev/", ""),
+                                  "label": lbl + (" · mounted" if n.get("mountpoint") else "")})
+                walk(n.get("children") or [])
+        walk(tree)
+        if items:
+            grp.append({"name": "Filesystems", "items": items})
+    elif kind == "port":
+        try:
+            r = subprocess.run(["ss", "-ltnp"], capture_output=True, text=True, timeout=15)
+        except (OSError, subprocess.SubprocessError):
+            return {"ok": False, "log": "cannot list ports"}
+        seen = {}
+        for ln in (r.stdout or "").splitlines()[1:]:
+            m = re.search(r":(\d+)\s", ln)
+            if not m:
+                continue
+            proc = re.search(r'"([^"]+)"', ln)
+            seen.setdefault(int(m.group(1)), proc.group(1) if proc else "")
+        if seen:
+            grp.append({"name": "Listening", "items": [
+                {"value": str(p), "label": "%d%s" % (p, " · " + n if n else "")}
+                for p, n in sorted(seen.items())]})
+    else:
+        return {"ok": False, "log": "unknown kind"}
+    return {"ok": True, "groups": grp}
+
 # --------------------------------------------------------------------------- #
 #  Operation history (uploads, copies, USB import).
 #  It used to live only in the browser's localStorage: the phone had its own,
@@ -21117,6 +21211,8 @@ class H(BaseHTTPRequestHandler):
                 self._json({"winpos": load_winpos()})
             elif p == "/api/snippets":
                 self._json({"snippets": load_snippets()})
+            elif p == "/api/snippets/choices":
+                self._json(snip_choices((q.get("kind") or [""])[0]))
             elif p == "/api/creds":
                 self._json({"creds": load_creds()})
             elif p == "/api/setup/state":

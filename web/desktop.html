@@ -4845,12 +4845,31 @@ function moveSnipToCat(from,cat){const it=SNIPS[from];it.cat=cat;SNIPS.splice(fr
  let last=-1;SNIPS.forEach((s,i)=>{if((s.cat||"My")===cat)last=i;});SNIPS.splice(last+1,0,it);saveSnips();}
 const SNIP_DANGER=/(^|[\s;|&])(sudo\s+)?(rm\s+-\S*[rf]|rm\s+-\S*\s+\/|mkfs|dd\s+(if|of)=|shutdown|reboot|poweroff|chmod\s+-R|chown\s+-R|snapraid\s+(sync|fix)|>\s*\/dev\/)/i;
 function snipGuard(cmd,cb){if(SNIP_DANGER.test(cmd)){confirmDlg("Dangerous command — run it?",`<span class="mono" style="word-break:break-all;color:var(--danger)">${esc(cmd)}</span>`,()=>cb(cmd),true);}else cb(cmd);}
+// Placeholders the box can answer itself: no reason to type a unit name from memory
+// when systemd knows every one of them — and "ours or the system's" is a real question,
+// so the list comes back grouped. Anything else stays a plain text field.
+const SNIP_KINDS={unit:"unit",path:"path",partition:"partition",part:"partition",port:"port"};
 function snipPlaceholders(cmd,cb){const ph=[...new Set([...cmd.matchAll(/\{([^{}]+)\}/g)].map(m=>m[1]))];
  if(!ph.length){cb(cmd);return;}const s=document.getElementById("scrim");
- s.innerHTML=`<div class="dialog"><h3>Command parameters</h3><p class="mono" style="color:var(--mut);font-size:11px;word-break:break-all">${esc(cmd)}</p>${ph.map((p,i)=>`<div class="field"><label>${esc(p)}</label><input id="ph${i}" placeholder="${att(p)}"></div>`).join("")}<div class="r"><button class="btn" id="phx">Cancel</button><button class="btn pri" id="pho">Run</button></div></div>`;
+ s.innerHTML=`<div class="dialog"><h3>Command parameters</h3><p class="mono" style="color:var(--mut);font-size:11px;word-break:break-all">${esc(cmd)}</p>${ph.map((p,i)=>`<div class="field"><label>${esc(p)}</label><div id="phw${i}"><input id="ph${i}" placeholder="${att(p)}"></div></div>`).join("")}<div class="r"><button class="btn" id="phx">Cancel</button><button class="btn pri" id="pho">Run</button></div></div>`;
  s.classList.add("show");const f=s.querySelector("#ph0");if(f)f.focus();
  s.querySelector("#phx").onclick=()=>s.classList.remove("show");
- s.querySelector("#pho").onclick=()=>{let out=cmd;ph.forEach((p,i)=>{out=out.split("{"+p+"}").join(s.querySelector("#ph"+i).value);});s.classList.remove("show");cb(out);};}
+ s.querySelector("#pho").onclick=()=>{let out=cmd;ph.forEach((p,i)=>{const n=s.querySelector("#ph"+i);out=out.split("{"+p+"}").join(n?n.value:"");});s.classList.remove("show");cb(out);};
+ // swap the field for a picker where we can offer real values (async — the dialog is
+ // usable the whole time, and a failed lookup simply leaves the text field alone)
+ ph.forEach(async(p,i)=>{
+  const kind=SNIP_KINDS[p.toLowerCase()];if(!kind)return;
+  const r=await api("/api/snippets/choices?kind="+encodeURIComponent(kind));
+  const groups=(r&&r.ok&&r.groups)||[];
+  if(!groups.length||!s.classList.contains("show"))return;
+  const w=s.querySelector("#phw"+i);if(!w||!w.querySelector("#ph"+i))return;
+  const cur=w.querySelector("#ph"+i).value;
+  w.innerHTML=`<select id="ph${i}">${groups.map(g=>`<optgroup label="${att(g.name)}">${
+    g.items.map(it=>`<option value="${att(it.value)}"${it.value===cur?" selected":""}>${esc(it.label)}</option>`).join("")}</optgroup>`).join("")
+   }<optgroup label="—"><option value="">type it by hand…</option></optgroup></select>`;
+  const sel=w.querySelector("#ph"+i);
+  sel.onchange=()=>{if(sel.value==="")w.innerHTML=`<input id="ph${i}" placeholder="${att(p)}">`,w.querySelector("input").focus();};
+ });}
 function snipDialog(idx,after,presetCat){const s=document.getElementById("scrim");const ex=(idx!=null)?SNIPS[idx]:null;
  const cats=snipCats();let cat=ex?(ex.cat||"My"):(presetCat||cats[0]||"My");
  s.innerHTML=`<div class="dialog"><h3>${ex?"Edit snippet":"New snippet"}</h3>
