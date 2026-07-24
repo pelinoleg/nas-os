@@ -1325,6 +1325,13 @@
   .kpx-r{font-size:12.5px;border-bottom:1px solid color-mix(in srgb,var(--win-line,var(--line)) 55%,transparent)}
   .kpx-r.on{background:var(--sel)}
   @media(hover:hover){.kpx-r:hover:not(.on){background:var(--glass)}}
+  /* multi-select box — out of the way until you hover or select a row. Touch has no
+     modifier keys at all, so there it is always visible (the only way to pick several). */
+  .kpx-ck{width:15px;height:15px;flex:none;margin:0;accent-color:var(--accent);cursor:pointer;opacity:0}
+  @media(hover:hover){.kpx-r:hover .kpx-ck{opacity:1}}
+  @media(hover:none){.kpx-ck{opacity:.8}}
+  .kpx-r.on .kpx-ck,.kpx-ck:focus-visible{opacity:1}
+  .kpx-sel.clr{cursor:pointer}
   .kpx-n{display:flex;align-items:center;gap:8px;min-width:0}
   .kpx-n .nm{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .kpx-n .pp{font-size:10px;color:var(--win-dim,var(--dim));font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -8481,9 +8488,27 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
   return d.toLocaleDateString(undefined,{month:"short",day:"numeric",
    year:d.getFullYear()===new Date().getFullYear()?undefined:"numeric"})+", "+d.toTimeString().slice(0,5);};
  const KX_ZIP_MAX=2*1024*1024*1024;                 // server refuses bigger folder archives
- const exReset=()=>{EX={dest:snapDest,bk:snapBk,path:null,snap:null,rel:"",sel:null,
+ const exReset=()=>{EX={dest:snapDest,bk:snapBk,path:null,snap:null,rel:"",sel:null,selMulti:null,focus:null,
   sort:"name",asc:true,q:"",deep:null,snaps:null,kids:{},open:{},err:"",
   diffCache:{},showChg:false};};
+ const exClearSel=()=>{EX.sel=null;EX.selMulti=null;EX.focus=null;};
+ const exSelList=()=>EX.selMulti?[...EX.selMulti.values()]:[];
+ const exSelOne=e=>{EX.sel=e;EX.selMulti=new Map([[e.rel,e]]);EX.focus=e.rel;};
+ const exSelAll=list=>{if(!list.length)return;EX.selMulti=new Map(list.map(e=>[e.rel,e]));
+  EX.sel=EX.sel&&EX.selMulti.has(EX.sel.rel)?EX.sel:list[0];EX.focus=EX.sel.rel;};
+ /* click = pick one, Ctrl/Cmd+click (or the row checkbox) = add or remove,
+    Shift+click = range from the anchor. EX.sel is the anchor, EX.focus the caret. */
+ function exSelectRow(e,ev,list){
+  EX.focus=e.rel;
+  if(ev&&ev.shiftKey&&EX.sel){
+   const a=list.findIndex(x=>x.rel===EX.sel.rel),b=list.findIndex(x=>x.rel===e.rel);
+   if(a>=0&&b>=0){const lo=Math.min(a,b),hi=Math.max(a,b);EX.selMulti=new Map();
+    for(let i=lo;i<=hi;i++)EX.selMulti.set(list[i].rel,list[i]);return;}}
+  if(ev&&(ev.ctrlKey||ev.metaKey)){
+   if(!EX.selMulti)EX.selMulti=new Map();
+   if(EX.selMulti.has(e.rel))EX.selMulti.delete(e.rel);else EX.selMulti.set(e.rel,e);
+   EX.sel=e;return;}
+  exSelOne(e);}
  /* the restore point taken just BEFORE the current one, of the same source folder —
     the baseline for «what changed in this snapshot» */
  const exPrevSnap=()=>{const g=exGroup();if(!g||!EX.snap)return null;
@@ -8531,19 +8556,26 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
  const exLoad=tc=>{if(EX.snap)exLs(EX.rel,()=>{exPaintRows(tc);exPaintSide(tc);exPaintActs(tc);});};
 
  function exSelSnap(tc,s){if(!s||!EX.snap||s.id===EX.snap.id)return;
-  EX.snap=s;EX.kids={};EX.sel=null;EX.deep=null;exPaintAll(tc);exLoad(tc);}
+  EX.snap=s;EX.kids={};exClearSel();EX.deep=null;exPaintAll(tc);exLoad(tc);}
  function exGo(tc,rel){
-  EX.rel=rel;EX.sel=null;EX.deep=null;EX.q="";
+  EX.rel=rel;exClearSel();EX.deep=null;EX.q="";
   const qi=tc.querySelector("#kxQ");if(qi)qi.value="";
   let acc="";rel.split("/").filter(Boolean).forEach(p=>{acc=acc?acc+"/"+p:p;EX.open[acc]=true;});
   exPaintCrumbs(tc);exPaintSide(tc);exPaintActs(tc);exLoad(tc);}
  function exToggle(tc,rel){EX.open[rel]=!EX.open[rel];exPaintSide(tc);
   if(EX.open[rel])exLs(rel,()=>exPaintSide(tc));}
 
- /* what the toolbar acts on: the selected row, or the folder you are looking at */
- const exTarget=()=>{const s=EX.sel;
-  if(s)return{oid:s.oid,rel:"",name:s.name,dir:!!s.dir,size:s.size||0,
-   orig:(EX.path||"")+"/"+s.rel,label:(s.dir?"folder":"file")+" «"+s.name+"»"};
+ /* what an action targets. One selected row → that object; a selected row that is a
+    folder → its subtree; nothing selected → the folder you are looking at. */
+ /* Address by <snapshot root>/<path>, not by the bare object id: a file's mtime and mode
+    live in its PARENT manifest, so a bare-oid restore lands with a 1970 timestamp.
+    A deleted ghost is addressed inside the previous restore point, where it still exists. */
+ const exItemFor=e=>{const root=e._ghost?((exPrevSnap()||{}).root):((EX.snap||{}).root);
+  const addr=root?{oid:root,rel:e.rel}:{oid:e.oid,rel:""};
+  return Object.assign(addr,{name:e.name,dir:!!e.dir,size:e.size||0,
+   orig:(EX.path||"")+"/"+e.rel,label:(e.dir?"folder":"file")+" «"+e.name+"»"});};
+ const exTarget=()=>{const list=exSelList();
+  if(list.length===1)return exItemFor(list[0]);
   const cur=EX.kids[EX.rel||""]||{};
   const nm=EX.rel?EX.rel.split("/").pop():((EX.path||"").split("/").filter(Boolean).pop()||"snapshot");
   return{oid:EX.snap&&EX.snap.root,rel:EX.rel,name:nm,dir:true,size:(cur.total||{}).size||0,
@@ -8552,19 +8584,42 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
  const exStart=async(tc,body,what)=>{const r=await kP("/api/kopia/snap/restore/start",body);
   if(!(r&&r.ok)){toast((r&&r.log)||"could not start");return;}
   toast(what);await refresh();};
- function exRestore(tc){const t=exTarget();if(!t.oid)return;
+ function exRestore(tc){const list=exSelList();
+  if(list.length>1){const items=list.map(e=>{const it=exItemFor(e);
+    return{oid:it.oid,rel:it.rel,name:it.dir?"":it.name,target:it.dir?it.orig:it.orig.split("/").slice(0,-1).join("/")};});
+   confirmDlg("Put "+list.length+" items back?",
+    `<b>${list.length}</b> selected items are restored to their original places, as of <b>${esc(dts(EX.snap.ts))}</b>.<br>Copy-only: nothing already there is overwritten or deleted.`,
+    ()=>exStart(tc,{d:snapDest,items},"restoring "+list.length+" items…"));return;}
+  const t=exTarget();if(!t.oid)return;
   const into=t.dir?t.orig:t.orig.split("/").slice(0,-1).join("/");
   confirmDlg("Put it back where it came from?",
    `${esc(t.label)} as of <b>${esc(dts(EX.snap.ts))}</b><br>→ <span class="mono">${esc(t.orig)}</span><br><br>
     Copy-only: anything already there is left exactly as it is — nothing is overwritten or deleted.`,
    ()=>exStart(tc,{d:snapDest,oid:t.oid,rel:t.rel,target:into,name:t.dir?"":t.name},"restoring…"));}
- function exCopy(tc){const t=exTarget();if(!t.oid)return;
+ function exCopy(tc){const list=exSelList();
+  if(list.length>1){pickFolder({overlay:true,start:"/media/nas",title:"Copy "+list.length+" items to…",
+    note:"Copying "+list.length+" selected items as of "+dts(EX.snap.ts)+" into the folder you pick. Nothing there is deleted.",
+    onPick:tgt=>{const items=list.map(e=>{const it=exItemFor(e);return{oid:it.oid,rel:it.rel,name:it.dir?"":it.name,target:tgt};});
+     confirmDlg("Copy "+list.length+" items here?",`→ <span class="mono">${esc(tgt)}</span><br>Files that already exist are kept.`,
+      ()=>exStart(tc,{d:snapDest,items},"copying "+list.length+" items…"));}});return;}
+  const t=exTarget();if(!t.oid)return;
   pickFolder({overlay:true,start:"/media/nas",title:"Copy out of this restore point",
    note:"Copying "+t.label+" as of "+dts(EX.snap.ts)+" — the files are added to the folder you pick. Nothing there is deleted and the repository is not touched.",
    onPick:tgt=>confirmDlg("Copy here?",
     `${esc(t.label)} → <span class="mono">${esc(tgt+(t.dir?"":"/"+t.name))}</span><br>Files that already exist are kept.`,
     ()=>exStart(tc,{d:snapDest,oid:t.oid,rel:t.rel,target:tgt,name:t.dir?"":t.name},"copying…"))});}
- function exDownload(){const t=exTarget();if(!t.oid)return;
+ async function exDownloadMany(list){
+  toast("building the archive of "+list.length+" items…");
+  try{const r=await fetch("/api/kopia/snap/zip",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({d:snapDest,items:list.map(e=>{const it=exItemFor(e);return{oid:it.oid,rel:it.rel,name:it.name,dir:it.dir};})})});
+   if(!r.ok){let m="could not build the archive";try{m=(await r.json()).log||m;}catch(e){}toast(m);return;}
+   const blob=await r.blob(),u=URL.createObjectURL(blob),a=document.createElement("a");
+   a.href=u;a.download="kopia-files.zip";document.body.appendChild(a);a.click();a.remove();
+   setTimeout(()=>URL.revokeObjectURL(u),15000);}
+  catch(e){toast("download failed");}}
+ function exDownload(){const list=exSelList();
+  if(list.length>1){exDownloadMany(list);return;}
+  const t=exTarget();if(!t.oid)return;
   if(t.dir&&t.size>KX_ZIP_MAX){toast("this folder holds "+fmtB(t.size)+" — too much for one download; use «Copy to…»");return;}
   const u="/api/kopia/snap/file?d="+encodeURIComponent(snapDest)+"&oid="+encodeURIComponent(t.oid)
    +"&rel="+encodeURIComponent(t.rel||"")+"&name="+encodeURIComponent(t.name)+(t.dir?"&zip=1":"");
@@ -8611,8 +8666,8 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
    ov.querySelector("#pvX").onclick=close;
    ov.querySelector("#pvPrev").onclick=()=>show(i-1);
    ov.querySelector("#pvNext").onclick=()=>show(i+1);
-   const act=fn=>()=>{EX.sel=e;close();fn(tc);};
-   ov.querySelector("#pvDl").onclick=()=>{EX.sel=e;exDownload();};
+   const act=fn=>()=>{exSelOne(e);close();fn(tc);};
+   ov.querySelector("#pvDl").onclick=()=>{exSelOne(e);exDownload();};
    ov.querySelector("#pvCopy").onclick=act(exCopy);
    ov.querySelector("#pvRst").onclick=act(exRestore);
    if(kind==="image"){const im=new Image();im.onload=()=>put(`<img src="${att(kxFileURL(e,1))}" alt="">`);
@@ -8663,7 +8718,7 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
   el.querySelectorAll("[data-p]").forEach(n=>n.onclick=()=>{
    const g=ps.find(x=>x.path===n.dataset.p);if(!g)return;
    if(g.path!==EX.path){EX.path=g.path;EX.snap=g.list[g.list.length-1];EX.kids={};EX.open={};}
-   EX.rel="";EX.sel=null;EX.deep=null;exPaintAll(tc);exLoad(tc);});
+   EX.rel="";exClearSel();EX.deep=null;exPaintAll(tc);exLoad(tc);});
   el.querySelectorAll("[data-tn]").forEach(n=>n.onclick=ev=>{
    if(ev.target.closest("[data-tc]"))return;exGo(tc,n.dataset.tn);});
   el.querySelectorAll("[data-tc]").forEach(b=>b.onclick=ev=>{ev.stopPropagation();exToggle(tc,b.dataset.tc);});}
@@ -8683,12 +8738,13 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
    s==="kind"?k*kxKind(a).localeCompare(kxKind(b)):
    k*a.name.localeCompare(b.name,undefined,{numeric:true,sensitivity:"base"}));}
 
- const exIsSel=e=>EX.sel&&EX.sel.rel===e.rel;
+ const exIsSel=e=>!!(EX.selMulti&&EX.selMulti.has(e.rel));
  const KX_CHG_LBL={added:"new",changed:"changed",deleted:"deleted"};
  function exRowHTML(e,i,path){
   const sel=exIsSel(e),badge=e.chg?`<span class="kpx-chg ${e.chg}" title="${e.chg==="added"?"not in the previous restore point":e.chg==="changed"?"changed since the previous restore point":"was deleted after this — restore brings it back"}">${KX_CHG_LBL[e.chg]}</span>`:"";
   return `<div class="kpx-r${sel?" on":""}${e._ghost?" del":""}" data-i="${i}">
-   <span class="kpx-n">${fmIcon(e.name,e.dir?"dir":"file",17)}
+   <span class="kpx-n"><input type="checkbox" class="kpx-ck" data-k="${i}"${sel?" checked":""}
+     title="Pick several — Shift-click for a range">${fmIcon(e.name,e.dir?"dir":"file",17)}
     <span style="flex:1;min-width:0"><span class="nm" style="display:block" title="${att(e.name)}">${esc(e.name)}</span>${path?`<span class="pp" style="display:block">${esc(path)}</span>`:""}</span>
     ${badge}${e.dir&&!e._ghost?`<button class="kpx-open" data-o="${i}" title="Open this folder">${svg("chev",14)}</button>`:""}</span>
    <span class="kpx-num">${fmtB(e.size||0)}</span>
@@ -8698,10 +8754,15 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
  function exPaintRows(tc){const box=tc.querySelector("#kxRows");if(!box)return;
   const wire=list=>{EX._rows=list;
    box.querySelectorAll("[data-i]").forEach(n=>{const e=list[+n.dataset.i];
-    n.onclick=ev=>{if(ev.target.closest("[data-o]"))return;EX.sel=e;
+    n.onclick=ev=>{if(ev.target.closest("[data-o],[data-k]"))return;exSelectRow(e,ev,list);
      const kl=tc.querySelector("#kxList");if(kl)kl.focus({preventScroll:true});   // arm keyboard nav
      exPaintRows(tc);exPaintActs(tc);};
-    n.ondblclick=()=>{if(e.dir&&!e._ghost)exGo(tc,e.rel);else if(!e.dir)exPreview(tc,e);};});
+    n.ondblclick=ev=>{if(ev.target.closest("[data-k]"))return;
+     if(e.dir&&!e._ghost)exGo(tc,e.rel);else if(!e.dir)exPreview(tc,e);};});
+   // the box always ADDS or REMOVES (no modifier needed — that is the point of it on touch)
+   box.querySelectorAll("[data-k]").forEach(c=>c.onclick=ev=>{ev.stopPropagation();
+    exSelectRow(list[+c.dataset.k],{ctrlKey:!ev.shiftKey,shiftKey:ev.shiftKey},list);
+    exPaintRows(tc);exPaintActs(tc);});
    box.querySelectorAll("[data-o]").forEach(b=>b.onclick=ev=>{ev.stopPropagation();exGo(tc,list[+b.dataset.o].rel);});};
   if(!EX.snap){box.innerHTML="";return;}
   if(EX.deep){const d=EX.deep;
@@ -8742,11 +8803,19 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
   b.title=EX.showChg?"Showing only what changed — click to show everything":"Show only what changed since the previous restore point";}
 
  function exPaintActs(tc){const has=!!(EX.snap&&EX.snap.root);
-  const t=has?exTarget():null;
+  const sel=exSelList(),t=has?exTarget():null;
   const lbl=tc.querySelector("#kxSelLbl");
-  if(lbl){lbl.textContent=t?(EX.sel?t.name:"this folder"):"";
-   lbl.title=t?("Restore / Copy / Download act on "+t.label):"";}
+  if(lbl){lbl.textContent=!has?"":sel.length>1?(sel.length+" items"):sel.length===1?sel[0].name:"this folder";
+   lbl.title=!has?"":sel.length?("Restore / Copy / Download act on "
+     +(sel.length>1?"the "+sel.length+" selected items":(t?t.label:""))+" — click to clear the selection")
+    :("Restore / Copy / Download act on "+(t?t.label:""));
+   lbl.classList.toggle("clr",!!sel.length);
+   lbl.onclick=sel.length?()=>{exClearSel();exPaintRows(tc);exPaintActs(tc);}:null;}
   ["#kxRestore","#kxCopy","#kxDl"].forEach(q=>{const b=tc.querySelector(q);if(b)b.disabled=!has;});
+  const n=sel.length,dl=tc.querySelector("#kxDl"),rs=tc.querySelector("#kxRestore"),cp=tc.querySelector("#kxCopy");
+  if(dl)dl.title=n>1?`Download the ${n} selected items as one zip`:"Download to this computer (a folder comes as a zip)";
+  if(rs)rs.title=n>1?`Put the ${n} selected items back where they came from`:"Put it back where it came from";
+  if(cp)cp.title=n>1?`Copy the ${n} selected items to another folder on the NAS`:"Copy to another folder on the NAS";
   const h=tc.querySelector("#kxHead");if(h)h.querySelectorAll("[data-s]").forEach(s=>
    s.dataset.s===EX.sort?s.classList.add("on"):s.classList.remove("on"));}
 
@@ -8782,7 +8851,7 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
      const g2=exGroup();
      if(g2&&g2.list.length){EX.snap=g2.list[g2.list.length-1];}else{EX.snap=null;EX.path=null;
       const ps=exPaths();if(ps.length){EX.path=ps[0].path;EX.snap=ps[0].list[ps[0].list.length-1];}}
-     EX.kids={};EX.sel=null;exPaintAll(tc);exLoad(tc);},1);};
+     EX.kids={};exClearSel();exPaintAll(tc);exLoad(tc);},1);};
   const on=el.querySelector(".kpx-tick.on"),tr=el.querySelector("#kxTrack");
   if(on&&tr)tr.scrollLeft=Math.max(0,on.offsetLeft-tr.clientWidth/2+on.offsetWidth/2);}
 
@@ -8821,7 +8890,7 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
   const rst=D.restore||{};
   el.innerHTML=rst.running?`<div class="rs-card" style="margin:0 0 4px"><div class="rs-ch">${svg("download",16)}<b>Restoring…</b><span style="flex:1"></span><button class="btn sm dng" id="kRstStop">Stop</button></div>
     <div class="bar" style="margin-top:6px"><i class="pg" style="width:${Math.min(100,rst.pct||2)}%"></i></div>
-    <div class="rs-cl mono" style="font-size:11px;margin-top:4px">→ ${esc(rst.target||"")}${rst.pct?` · ${Math.round(rst.pct)}%`:""}</div></div>`
+    <div class="rs-cl mono" style="font-size:11px;margin-top:4px">→ ${esc(rst.target||"")}${rst.pct?` · ${Math.round(rst.pct)}%`:""}${(rst.total>1&&rst.cur)?` · ${esc(String(rst.cur).split("  ")[0])}`:""}</div></div>`
    :(rst.result&&rst.done&&Date.now()/1000-rst.done<180
      ?`<div class="rs-cl">${dot(rst.result==="ok"?"good":rst.result==="stopped"?"warn":"danger")} last restore: ${esc(rst.result)}${rst.target?` → <span class="mono">${esc(rst.target)}</span>`:""}</div>`:"");
   const b=el.querySelector("#kRstStop");
@@ -8881,7 +8950,7 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
    try{const fm=OPEN&&OPEN.__files;if(fm&&fm._kopiaMounts)fm._kopiaMounts();}catch(e){}
    await refresh();};
   tc.querySelector("#kxUp").onclick=()=>{if(EX.rel)exGo(tc,EX.rel.split("/").slice(0,-1).join("/"));};
-  tc.querySelector("#kxChg").onclick=()=>{EX.showChg=!EX.showChg;EX.sel=null;exPaintRows(tc);exPaintActs(tc);};
+  tc.querySelector("#kxChg").onclick=()=>{EX.showChg=!EX.showChg;exClearSel();exPaintRows(tc);exPaintActs(tc);};
   const qi=tc.querySelector("#kxQ");
   qi.oninput=()=>{EX.q=qi.value;if(EX.deep)EX.deep=null;exPaintRows(tc);};
   qi.onkeydown=ev=>{if(ev.key==="Enter"){ev.preventDefault();exDeep(tc);}
@@ -8893,12 +8962,19 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
   // selection, Enter/→ opens a folder, ←/Backspace goes up. Typing goes to the filter.
   const kl=tc.querySelector("#kxList");
   kl.onkeydown=ev=>{const rows=EX._rows||[];
-   if(ev.key==="ArrowDown"||ev.key==="ArrowUp"){ev.preventDefault();
+   if((ev.ctrlKey||ev.metaKey)&&ev.key.toLowerCase()==="a"){ev.preventDefault();
+    exSelAll(rows);exPaintRows(tc);exPaintActs(tc);}
+   else if(ev.key==="Escape"&&exSelList().length){ev.preventDefault();
+    exClearSel();exPaintRows(tc);exPaintActs(tc);}
+   else if(ev.key==="ArrowDown"||ev.key==="ArrowUp"){ev.preventDefault();
     if(!rows.length)return;
-    let i=EX.sel?rows.findIndex(r=>r.rel===EX.sel.rel):-1;
+    const from=EX.focus||(EX.sel&&EX.sel.rel);
+    let i=from?rows.findIndex(r=>r.rel===from):-1;
     i=ev.key==="ArrowDown"?Math.min(rows.length-1,i+1):Math.max(0,i<0?0:i-1);
-    EX.sel=rows[i];exPaintRows(tc);exPaintActs(tc);
-    const on=tc.querySelector("#kxRows .kpx-r.on");if(on)on.scrollIntoView({block:"nearest"});}
+    // Shift keeps the anchor and stretches the selection, like any file list
+    if(ev.shiftKey&&EX.sel)exSelectRow(rows[i],{shiftKey:true},rows);else exSelOne(rows[i]);
+    exPaintRows(tc);exPaintActs(tc);
+    const on=tc.querySelector(`#kxRows [data-i="${i}"]`);if(on)on.scrollIntoView({block:"nearest"});}
    else if(ev.key===" "&&EX.sel&&!EX.sel.dir){ev.preventDefault();exPreview(tc,EX.sel);}
    else if((ev.key==="Enter"||ev.key==="ArrowRight")&&EX.sel&&EX.sel.dir&&!EX.sel._ghost){ev.preventDefault();exGo(tc,EX.sel.rel);}
    else if(ev.key==="ArrowLeft"||ev.key==="Backspace"){if(EX.rel){ev.preventDefault();exGo(tc,EX.rel.split("/").slice(0,-1).join("/"));}}

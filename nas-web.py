@@ -10877,6 +10877,85 @@ def kp_dl_zip(destid, oid, rel=""):
         return {"ok": False, "log": _kp_err_tail(rr)}
     return {"ok": True, "path": path}
 
+KP_MULTI_ZIP_MAX = 512 << 20   # a multi-select download is buffered by the browser as a blob
+
+def kp_zip_items(destid, items):
+    """Pack several selected objects (multi-select download) into one temp zip: each is
+    restored into a staging dir, then zipped. Copy-only; capped so a browser blob stays sane."""
+    import zipfile, tempfile
+    cfg = kp_load()
+    dest = _kp_find(cfg["dests"], str(destid or ""))
+    if not dest:
+        return {"ok": False, "log": "no such destination"}
+    if not isinstance(items, list) or not items:
+        return {"ok": False, "log": "nothing selected"}
+    if len(items) > 500:
+        return {"ok": False, "log": "too many items at once"}
+    c = _kp_ensure_connected(dest)
+    if not c["ok"]:
+        return c
+    tmpdir = os.path.join(_kp_cache_dir(destid), "dl")
+    try:
+        os.makedirs(tmpdir, exist_ok=True)
+    except OSError as e:
+        return {"ok": False, "log": str(e)[:200]}
+    stage = tempfile.mkdtemp(prefix="zip-", dir=tmpdir)
+    used = set()
+    try:
+        for it in items:
+            if not isinstance(it, dict):
+                return {"ok": False, "log": "bad item"}
+            try:
+                arg = _kp_obj_arg(it.get("oid"), it.get("rel"))
+            except ValueError as e:
+                return {"ok": False, "log": str(e)}
+            nm = _kp_dl_name(it.get("name"), "file")
+            base, i = nm, 1
+            while nm in used:   # two selected items with the same basename
+                root, ext = os.path.splitext(base)
+                nm = "%s (%d)%s" % (root, i, ext); i += 1
+            used.add(nm)
+            rr = _kp(destid, ["restore", arg, os.path.join(stage, nm),
+                              "--no-ignore-permission-errors"], timeout=3600)
+            if not rr["ok"]:
+                return {"ok": False, "log": _kp_err_tail(rr)}
+            if _dir_size(stage) > KP_MULTI_ZIP_MAX:
+                return {"ok": False, "log": "selection is over %s — download fewer items at once"
+                        % fmt_bytes(KP_MULTI_ZIP_MAX)}
+        st = os.statvfs(tmpdir)
+        if st.f_bavail * st.f_frsize < _dir_size(stage) + (64 << 20):
+            return {"ok": False, "log": "not enough free space to build the archive"}
+        path = os.path.join(tmpdir, "sel-%d-%d.zip" % (os.getpid(), int(time.time())))
+        with zipfile.ZipFile(path, "w", zipfile.ZIP_DEFLATED) as z:
+            for root, _, files in os.walk(stage):
+                for f in files:
+                    fp = os.path.join(root, f)
+                    try:
+                        stt = os.stat(fp)
+                        # a file restored by bare object id carries no mtime (metadata lives
+                        # in the parent manifest) → epoch 0, which ZIP cannot represent
+                        dt = time.localtime(max(stt.st_mtime, 315532800))   # 1980-01-01
+                        zi = zipfile.ZipInfo(os.path.relpath(fp, stage), date_time=dt[:6])
+                        zi.compress_type = zipfile.ZIP_DEFLATED
+                        zi.external_attr = (stt.st_mode & 0xFFFF) << 16
+                        with open(fp, "rb") as src, z.open(zi, "w") as out:
+                            shutil.copyfileobj(src, out, 262144)
+                    except OSError:
+                        pass
+        return {"ok": True, "path": path}
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
+
+def _dir_size(p):
+    tot = 0
+    for root, _, files in os.walk(p):
+        for f in files:
+            try:
+                tot += os.path.getsize(os.path.join(root, f))
+            except OSError:
+                pass
+    return tot
+
 def kp_snap_delete(destid, snapid):
     cfg = kp_load()
     dest = _kp_find(cfg["dests"], str(destid or ""))
@@ -10924,33 +11003,48 @@ def _kp_obj_ok(arg):
         return False
 
 def kp_restore_start(destid, oid, target, rel="", name=""):
-    """Restore one snapshot subtree (by object id, optionally plus a path inside it)
-    INTO a local folder. Copy-only: the repository is never written, the target only
-    gains files."""
+    """Restore ONE snapshot subtree (by object id, optionally plus a path inside it)
+    into a local folder — a thin wrapper over the multi-item runner, which does all
+    the validation. Copy-only: the repository is never written."""
+    return kp_restore_jobs(destid, [{"oid": oid, "rel": rel,
+                                     "target": target, "name": name}])
+
+def _kp_restore_job(j):
+    """Validate one restore item {oid,rel,target,name} → {arg,target,label}. Raises."""
+    if not isinstance(j, dict):
+        raise ValueError("bad item")
+    arg = _kp_obj_arg(j.get("oid"), j.get("rel"))
+    target = os.path.realpath(str(j.get("target") or "").strip())
+    if not re.match(r"^/(mnt|media|srv|home)/", target + "/"):
+        raise ValueError("restore target must be under /mnt, /media, /srv or /home")
+    # a FILE object needs a file-path target — kopia refuses to write one onto a
+    # directory ("is a directory"); `name` turns the chosen folder into that path.
+    leaf = os.path.basename(str(j.get("name") or "").replace("\\", "/")).strip()
+    if leaf in (".", ".."):
+        raise ValueError("bad file name")
+    parent, final = target, (os.path.join(target, leaf) if leaf else target)
+    os.makedirs(parent, exist_ok=True)
+    return {"arg": arg, "target": final, "label": leaf or os.path.basename(final) or final}
+
+def kp_restore_jobs(destid, items):
+    """Restore one OR MANY objects (multi-select) in a single transient unit, each into
+    its own target. Copy-only; the repository is never written."""
     cfg = kp_load()
     dest = _kp_find(cfg["dests"], str(destid or ""))
     if not dest:
         return {"ok": False, "log": "no such destination"}
-    try:
-        oid = _kp_obj_arg(oid, rel)
-    except ValueError as e:
-        return {"ok": False, "log": str(e)}
-    target = os.path.realpath(str(target or "").strip())
-    if not re.match(r"^/(mnt|media|srv|home)/", target + "/"):
-        return {"ok": False, "log": "restore target must be under /mnt, /media, /srv or /home"}
-    # Restoring a FILE object needs a file path as the target — kopia refuses to write
-    # one onto a directory ("is a directory"). `name` turns the chosen folder into that
-    # path; without it the target is a folder and gets the subtree's contents.
-    leaf = os.path.basename(str(name or "").replace("\\", "/")).strip()
-    if leaf in (".", ".."):
-        return {"ok": False, "log": "bad file name"}
-    parent = target
-    if leaf:
-        target = os.path.join(parent, leaf)
-    try:
-        os.makedirs(parent, exist_ok=True)
-    except OSError as e:
-        return {"ok": False, "log": "cannot create %s: %s" % (parent, e)}
+    if not isinstance(items, list) or not items:
+        return {"ok": False, "log": "nothing to restore"}
+    if len(items) > 500:
+        return {"ok": False, "log": "too many items at once"}
+    jobs = []
+    for it in items:
+        try:
+            jobs.append(_kp_restore_job(it))
+        except ValueError as e:
+            return {"ok": False, "log": str(e)}
+        except OSError as e:
+            return {"ok": False, "log": str(e)}
     with _NbStartLock():
         if kp_restore_state().get("running"):
             return {"ok": False, "log": "a restore is already running"}
@@ -10959,17 +11053,19 @@ def kp_restore_start(destid, oid, target, rel="", name=""):
         except OSError:
             pass
         _json_save(KP_RESTORE_STATE, {"running": True, "started": int(time.time()),
-                                      "dest": destid, "oid": oid, "target": target, "result": None})
-        return _kp_restore_spawn(destid, oid, target)
+                                      "dest": destid, "jobs": jobs, "total": len(jobs),
+                                      "idx": 0, "pct": 0, "result": None,
+                                      "target": jobs[0]["target"] if len(jobs) == 1
+                                      else "%d items" % len(jobs)})
+        return _kp_restore_spawn(destid)
 
-def _kp_restore_spawn(destid, oid, target):
+def _kp_restore_spawn(destid):
     cmd = ["systemd-run", "--collect", "--quiet", "--unit", KP_RESTORE_UNIT,
            "--setenv=SUDO_USER=" + TARGET_USER, "--setenv=HOME=" + HOME,
-           "--setenv=KPR2_DEST", "--setenv=KPR2_OID", "--setenv=KPR2_TARGET",
+           "--setenv=KPR2_DEST",
            sys.executable, os.path.join(HERE, "nas-web.py"), "kopia-restore"]
     try:
-        r = subprocess.run(cmd, env=dict(os.environ, KPR2_DEST=destid, KPR2_OID=oid,
-                                         KPR2_TARGET=target),
+        r = subprocess.run(cmd, env=dict(os.environ, KPR2_DEST=destid),
                            capture_output=True, text=True, timeout=15)
     except (OSError, subprocess.SubprocessError) as e:
         _json_save(KP_RESTORE_STATE, {"running": False, "result": "error", "error": str(e)})
@@ -10998,15 +11094,19 @@ def kp_restore_cancel():
 _KP_RST_RE = re.compile(r"Processed\s+(\d+)\s+\(([^)]+)\)\s+of\s+(\d+)\s+\(([^)]+)\)"
                         r".*?\(([\d.]+)%\)")
 
-def _kp_restore_cli(destid, oid, target):
-    """Driver for the restore unit: kopia restore under a pty (progress is
-    TTY-only, same as snapshot create)."""
+def _kp_restore_cli(destid):
+    """Driver for the restore unit: run `kopia restore` for each queued job under a pty
+    (progress is TTY-only), one after another. Copy-only via --skip-existing."""
     cfg = kp_load()
     dest = _kp_find(cfg["dests"], destid)
-    if not dest or not _kp_obj_ok(oid) or not target:
+    st = _json_load_strict(KP_RESTORE_STATE, {})
+    jobs = st.get("jobs") or []
+    if not dest or not jobs:
+        st.update(running=False, result="error", error="nothing to restore")
+        _json_save(KP_RESTORE_STATE, st)
         return
-    st = {"running": True, "started": int(time.time()), "dest": destid, "oid": oid,
-          "target": target, "pct": 0, "result": None, "pid": os.getpid()}
+    st["pid"] = os.getpid()
+    total = len(jobs)
     _last = [0.0]
 
     def upd(force=False, **kw):
@@ -11032,51 +11132,63 @@ def _kp_restore_cli(destid, oid, target):
         if not c["ok"]:
             result, err = "error", c.get("log") or "connect failed"
             return
-        w("restoring %s → %s" % (oid, target))
-        master, slave = pty.openpty()
-        proc = subprocess.Popen([_kopia_bin(), "--config-file", _kp_cfg_file(destid),
-                                 "--log-dir", os.path.join(_kp_cache_dir(destid), "logs"),
-                                 "restore", oid, target, "--skip-existing"],
-                                stdout=slave, stderr=slave, env=_kp_env(), close_fds=True)
-        os.close(slave)
-        buf = b""
-        while True:
-            r_, _, _ = select.select([master], [], [], 0.5)
+        for i, job in enumerate(jobs):
             if os.path.exists(KP_RESTORE_CANCEL):
-                try:
-                    proc.kill()
-                except OSError:
-                    pass
-                result = "stopped"
-                break
-            if not r_:
-                if proc.poll() is not None:
+                result = "stopped"; break
+            arg, target = job["arg"], job["target"]
+            label = job.get("label") or target
+            upd(force=True, idx=i, pct=round(i / total * 100, 1),
+                cur=("%d/%d  %s" % (i + 1, total, label)) if total > 1 else label)
+            w("restoring %s → %s" % (arg, target))
+            master, slave = pty.openpty()
+            proc = subprocess.Popen([_kopia_bin(), "--config-file", _kp_cfg_file(destid),
+                                     "--log-dir", os.path.join(_kp_cache_dir(destid), "logs"),
+                                     "restore", arg, target, "--skip-existing"],
+                                    stdout=slave, stderr=slave, env=_kp_env(), close_fds=True)
+            os.close(slave)
+            buf, stopped = b"", False
+            while True:
+                r_, _, _ = select.select([master], [], [], 0.5)
+                if os.path.exists(KP_RESTORE_CANCEL):
+                    try:
+                        proc.kill()
+                    except OSError:
+                        pass
+                    result, stopped = "stopped", True
                     break
-                continue
-            try:
-                d = os.read(master, 8192)
-            except OSError:
-                break
-            if not d:
-                break
-            buf += d
-            *chunks, buf = re.split(rb"[\r\n]", buf)
-            for ch in chunks:
-                line = ch.decode("utf-8", "replace").strip()
-                if not line:
+                if not r_:
+                    if proc.poll() is not None:
+                        break
                     continue
-                m = _KP_RST_RE.search(line)
-                if m:
-                    upd(pct=float(m.group(5)), cur=line)
-                else:
-                    w(line)
-        try:
-            os.close(master)
-        except OSError:
-            pass
-        proc.wait()
-        if result != "stopped" and proc.returncode != 0:
-            result, err = "error", "restore failed (code %d) — see the log" % proc.returncode
+                try:
+                    d = os.read(master, 8192)
+                except OSError:
+                    break
+                if not d:
+                    break
+                buf += d
+                *chunks, buf = re.split(rb"[\r\n]", buf)
+                for ch in chunks:
+                    line = ch.decode("utf-8", "replace").strip()
+                    if not line:
+                        continue
+                    m = _KP_RST_RE.search(line)
+                    if m:   # overall progress folds the current item's pct into how many are done
+                        upd(pct=round((i + float(m.group(5)) / 100.0) / total * 100, 1),
+                            cur=("%d/%d  %s" % (i + 1, total, label)) if total > 1 else line)
+                    else:
+                        w(line)
+            try:
+                os.close(master)
+            except OSError:
+                pass
+            proc.wait()
+            if stopped:
+                break
+            if proc.returncode != 0:
+                result, err = "error", "restore failed for %s (code %d) — see the log" % (label, proc.returncode)
+                break
+            upd(force=True, idx=i + 1, pct=round((i + 1) / total * 100, 1))
     except Exception as e:
         result, err = "error", "driver crashed: %r" % e
         w("driver crashed: %r" % e)
@@ -11084,7 +11196,7 @@ def _kp_restore_cli(destid, oid, target):
         st.update(running=False, done=int(time.time()), result=result, error=err,
                   pct=100 if result == "ok" else st.get("pct", 0))
         _json_save(KP_RESTORE_STATE, st)
-        w("[%s] %s" % (result.upper(), err or "restored to " + target))
+        w("[%s] %s" % (result.upper(), err or "restored %d item%s" % (total, "" if total == 1 else "s")))
         try:
             os.remove(KP_RESTORE_CANCEL)
         except OSError:
@@ -19782,6 +19894,45 @@ class H(BaseHTTPRequestHandler):
             except OSError:
                 pass
 
+    def _send_kopia_zip(self, body):
+        """Multi-select download: build a zip of the selected objects and stream it back
+        (the client fetches it as a blob and saves). POST because the item list is a body."""
+        r = kp_zip_items(str(body.get("d") or ""), body.get("items"))
+        if not r.get("ok"):
+            msg = json.dumps({"ok": False, "log": r.get("log") or "failed"}).encode()
+            self.send_response(400)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(msg)))
+            self.end_headers()
+            try:
+                self.wfile.write(msg)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            return
+        path = r["path"]
+        try:
+            size = os.path.getsize(path)
+            self.send_response(200)
+            self.send_header("Content-Type", "application/zip")
+            self.send_header("Content-Disposition", 'attachment; filename="kopia-files.zip"')
+            self.send_header("Content-Length", str(size))
+            self.end_headers()
+            with open(path, "rb") as f:
+                while True:
+                    chunk = f.read(262144)
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        except OSError:
+            pass
+        finally:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
     def _send_kopia_file(self, q):
         """Download straight out of a snapshot: one file is streamed from `kopia show`
         (nothing staged on disk), a folder is packed into a temp zip first. The server
@@ -20926,6 +21077,8 @@ class H(BaseHTTPRequestHandler):
                 self._json(kp_run_start(str(self._body().get("id") or "")))
             elif p == "/api/kopia/backup/cancel":
                 self._json(kp_run_cancel(str(self._body().get("id") or "")))
+            elif p == "/api/kopia/snap/zip":
+                self._send_kopia_zip(self._body() or {}); return
             elif p == "/api/kopia/snap/ls":
                 b = self._body()
                 self._json(kp_snap_ls(str(b.get("d") or ""), b.get("oid", ""), b.get("rel", "")))
@@ -20937,9 +21090,12 @@ class H(BaseHTTPRequestHandler):
                 self._json(kp_snap_delete(str(b.get("d") or ""), b.get("id", "")))
             elif p == "/api/kopia/snap/restore/start":
                 b = self._body()
-                self._json(kp_restore_start(str(b.get("d") or ""), b.get("oid", ""),
-                                            b.get("target", ""), b.get("rel", ""),
-                                            b.get("name", "")))
+                if isinstance(b.get("items"), list):
+                    self._json(kp_restore_jobs(str(b.get("d") or ""), b["items"]))
+                else:
+                    self._json(kp_restore_start(str(b.get("d") or ""), b.get("oid", ""),
+                                                b.get("target", ""), b.get("rel", ""),
+                                                b.get("name", "")))
             elif p == "/api/kopia/snap/restore/cancel":
                 self._json(kp_restore_cancel())
             elif p == "/api/kopia/mount":
@@ -21132,8 +21288,7 @@ if __name__ == "__main__":
     elif len(sys.argv) > 1 and sys.argv[1] == "kopia-bg":
         _kp_bg_cli(os.environ.get("KPB_KIND", ""), os.environ.get("KPB_DEST", ""))
     elif len(sys.argv) > 1 and sys.argv[1] == "kopia-restore":
-        _kp_restore_cli(os.environ.get("KPR2_DEST", ""), os.environ.get("KPR2_OID", ""),
-                        os.environ.get("KPR2_TARGET", ""))
+        _kp_restore_cli(os.environ.get("KPR2_DEST", ""))
     elif len(sys.argv) > 1 and sys.argv[1] == "rclone-restore":
         # paths arrive through the unit env (may contain spaces), not argv
         _rclone_restore_cli(os.environ.get("RCR_REMOTE", ""), os.environ.get("RCR_PATH", ""),
