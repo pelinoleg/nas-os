@@ -10532,6 +10532,17 @@ def _kp_hsize(s):
                                     "T": 1e12, "P": 1e15}[m.group(2).upper()])
 
 # " - 4 hashing, 3700 hashed (51 MB), 0 cached (0 B), uploaded 42.3 MB, estimated 557.2 MB (9.2%) 58s left"
+def _proc_cpu_time(pid):
+    """Seconds of CPU a process has burned (utime+stime), None if it is gone.
+    Used to tell 'quiet but working' from 'wedged' — output can lie, CPU cannot."""
+    try:
+        with open("/proc/%d/stat" % pid) as f:
+            fields = f.read().rsplit(") ", 1)[1].split()
+        return (int(fields[11]) + int(fields[12])) / os.sysconf("SC_CLK_TCK")
+    except (OSError, ValueError, IndexError):
+        return None
+
+
 _KP_PROG_RE = re.compile(r"(\d+)\s+hashed\s+\(([^)]+)\).*?uploaded\s+([\d.]+\s*\w?i?B)"
                          r"(?:.*?\(([\d.]+)%\))?(?:\s+([\w ]+?)\s+left)?")
 
@@ -11761,7 +11772,7 @@ def _kp_snap_cli(bid):
         args = [_kopia_bin(), "--config-file", _kp_cfg_file(dst["id"]),
                 "--log-dir", os.path.join(_kp_cache_dir(dst["id"]), "logs"),
                 "snapshot", "create"] + folders + \
-               ["--json", "--progress-update-interval=2s", "--tags", "nasbk:" + bid,
+               ["--json", "--progress", "--progress-update-interval=2s", "--tags", "nasbk:" + bid,
                 "--parallel", str(kp_opts_get()["parallel"])]
         proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=slave,
                                 env=_kp_env(), close_fds=True)
@@ -11778,6 +11789,17 @@ def _kp_snap_cli(bid):
         buf = b""
         STALL = 20 * 60          # kill a snapshot that emits nothing for this long (disk gone / kopia wedged)
         last_out = time.monotonic()
+        # Silence alone does NOT mean wedged: kopia prints progress only when asked for it,
+        # and one dropped flag once had a healthy 20 GB upload killed at the 20-minute mark.
+        # So before killing, ask the kernel whether the process is still burning CPU.
+        _cpu = [_proc_cpu_time(proc.pid)]
+
+        def _working():
+            c = _proc_cpu_time(proc.pid)
+            if c is None or c <= _cpu[0] + 1.0:      # under a second of CPU in 20 min = idle
+                return False
+            _cpu[0] = c
+            return True
         while True:
             r_, _, _ = select.select([master], [], [], 0.5)
             if cancelled():
@@ -11791,6 +11813,10 @@ def _kp_snap_cli(bid):
                 if proc.poll() is not None:
                     break
                 if time.monotonic() - last_out > STALL:
+                    if _working():
+                        last_out = time.monotonic()
+                        w("quiet for %d min, but kopia is still working — carrying on" % (STALL // 60))
+                        continue
                     try:
                         proc.kill()
                     except OSError:
