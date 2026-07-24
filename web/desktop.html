@@ -7091,7 +7091,7 @@ function pickFolder(opts){
   lastDirs=dirs;
   const box=$("#pfList");if(!box)return;
   box.scrollTop=0;
-  box.innerHTML=(mk?`<div class="pf-row"><span>${svg("folder",15)}</span><input class="mono" id="pfMkName" placeholder="new folder name" style="flex:1"></div>`:"")
+  box.innerHTML=(mk?`<div class="pf-row"><span>${svg("folder",15)}</span><input class="mono" id="pfMkName" placeholder="new folder name" style="flex:1" data-noenter></div>`:"")
    +(dirs.map(d=>`<div class="pf-row" data-go="${att(d.path)}">${svg("folder",15)}<span>${esc(d.name)}</span></div>`).join("")
      ||(mk?"":`<div class="pf-empty">No subfolders here — you can pick this one</div>`));
   box.querySelectorAll("[data-go]").forEach(n=>n.onclick=()=>{cur=n.dataset.go;mk=false;draw();});};
@@ -7132,7 +7132,7 @@ function nbPickDest(start,onPick){const s=document.getElementById("scrim");
  s.innerHTML=`<div class="dialog pf-dlg"><h3>${svg("net",16)} Folder on the destination</h3>
    <div class="mon-note" style="margin:0 0 10px">Pick an existing folder — or append a new one in the path field: missing folders are created on the first run.</div>
    <div class="pf-main" style="width:100%">
-     <div class="pf-bar"><button class="iconbtn" id="pdUp" title="Up">${svg("arrowup",15)}</button><input class="mono" id="pdPath" spellcheck="false"></div>
+     <div class="pf-bar"><button class="iconbtn" id="pdUp" title="Up">${svg("arrowup",15)}</button><input class="mono" id="pdPath" spellcheck="false" data-noenter></div>
      <div class="pf-list" id="pdList"></div></div>
    <div class="pf-foot"><span class="pf-cur" id="pdCur"></span><button class="btn" id="pdX">Cancel</button><button class="btn pri" id="pdO">Choose this folder</button></div></div>`;
  s.classList.add("show");
@@ -7329,7 +7329,7 @@ function rcloneRemotePicker(remote,onPick,onClose,opts){
    toast("Folder created");mk=false;path=np;draw();};};   // step straight into the new folder
  const paintList=()=>{const box=$("#pfList");if(!box)return;box.scrollTop=0;
   const dirs=(entries||[]).filter(e=>e.dir);
-  box.innerHTML=(mk?`<div class="pf-row"><span>${svg("folder",15)}</span><input class="mono" id="pfMkName" placeholder="new folder name" style="flex:1"></div>`:"")
+  box.innerHTML=(mk?`<div class="pf-row"><span>${svg("folder",15)}</span><input class="mono" id="pfMkName" placeholder="new folder name" style="flex:1" data-noenter></div>`:"")
    +(entries===null?`<div class="pf-empty">loading…</div>`
      :(dirs.map(d=>`<div class="pf-row" data-n="${att(d.name)}">${svg("folder",15)}<span>${esc(d.name)}</span></div>`).join("")
        ||(mk?"":`<div class="pf-empty">No subfolders here — you can pick this one, or ＋ create one</div>`)));
@@ -7339,7 +7339,9 @@ function rcloneRemotePicker(remote,onPick,onClose,opts){
   // at the root of a remote say so in words
   const cu=$("#pfCur");if(cu){cu.textContent="Selected: "+(path?spec(path):remote+": (remote root)");cu.title=spec(path);}
   const up=$("#pfUp");if(up)up.disabled=!path;};
- const draw=async()=>{if(busy)return;busy=true;entries=null;paintList();
+ // chrome() BEFORE the listing: a cloud ls takes seconds, and until it lands the footer
+ // would still show where you were — after "create folder" that reads as "it didn't work"
+ const draw=async()=>{if(busy)return;busy=true;entries=null;chrome();paintList();
   const r=await rcloneP("/api/backup/rclone/ls",{remote,path});busy=false;
   if(!r||!r.ok){toast((r&&r.log)||"listing failed");entries=[];}else{path=r.path;entries=r.entries;}
   chrome();paintList();if(mk)focusMk();};
