@@ -5226,6 +5226,11 @@ function winServices(initTab){openWin("__services","Docker",(body,win)=>{
  const ctx={df:null,dfAt:0,reload:()=>load(true),go:id=>{DK_SEL=id;paintSide();paintDetail();}};
  const load=async force=>{
   const d=await api("/api/stacks");if(!document.body.contains(body))return;
+  // A failed request is not «docker is gone». Under load — a big pull, a restore —
+  // `docker ps` takes longer than its timeout and the answer never arrives; wiping
+  // the screen for «Docker is not installed» is a lie that arrives exactly when the
+  // user is watching something important happen. Keep the last good picture.
+  if(d&&d._mock){if(!sig)detail.innerHTML=`<div class="dempty">${svg("cube",16)} No answer from the panel — retrying…</div>`;return;}
   ok=!!(d&&d.ok);stacks=(d&&d.stacks)||[];
   // recipes from services/ — reread on force (open/reload); cheap but not every poll
   if(force||!catalog.length){const cs=await api("/api/store");catalog=(cs&&cs.apps)||[];}
@@ -5257,6 +5262,7 @@ function winServices(initTab){openWin("__services","Docker",(body,win)=>{
   nav("volumes","disks","Volumes");
  }
  function paintDetail(){
+  detail.removeAttribute("style");   // the install pane makes this a flex column — undo it
   detail.innerHTML="";
   if(!ok){detail.innerHTML=`<div class="dempty">${svg("cube",16)} Docker is not installed or unavailable.<br>Complete the «System» stage in the Wizard.</div>`;return;}
   if(DK_SEL==="apps")dkAppsPage(detail,stacks,ctx);
@@ -5429,7 +5435,8 @@ const STK_ACT_LABEL={up:"start",down:"stop",stop:"stop",start:"start",restart:"r
 /* stack details in the right panel of the Docker window */
 /* available recipe: install + bring up, streamed inline (no stuck modal) */
 function dkAvailPane(tc,a,reload,ctx){
- const box=el(`<div class="dd"></div>`);
+ const box=el(`<div class="dd" style="display:flex;flex-direction:column;flex:1;min-height:0"></div>`);
+ tc.style.display="flex";tc.style.flexDirection="column";tc.style.overflow="hidden";
  const head=el(`<div class="dd-head">${ctx?`<button class="iconbtn" id="dkAvBack" title="Back to the catalogue" style="transform:rotate(180deg);flex:none">${svg("chev",16)}</button>`:""}
    <div class="dd-ic" style="background:linear-gradient(135deg,#7183a0,#55647d)">${a.icon?`<img src="${att(iconSrc(a.icon))}" alt="" style="width:100%;height:100%;object-fit:contain;border-radius:8px" onerror="this.remove()">`:svg("download",19)}</div>
    <div class="dd-hmain"><div class="dd-name">${esc(a.name)} <span class="stbadge dead">not installed</span></div><div class="dd-sub">${esc(a.desc||"")}</div></div></div>`);
@@ -5437,17 +5444,22 @@ function dkAvailPane(tc,a,reload,ctx){
  box.appendChild(head);
  const flds=(a.fields||[]),main=flds.filter(f=>!f.adv),adv=flds.filter(f=>f.adv);
  const rowH=f=>`<div class="field"><label>${esc(f.label||f.key)}${f.hint?` <span style="color:var(--mut);font-weight:400">— ${esc(f.hint)}</span>`:""}</label><input data-k="${att(f.key)}"${f.secret?' type="password"':""} value="${att(f.secret?"":(f.default||""))}" placeholder="${att(f.secret&&f.has_value?"•••••• (set; empty = keep)":"")}" autocomplete="off" spellcheck="false"></div>`;
- const form=el(`<div style="max-width:560px">${main.map(rowH).join("")}${adv.length?`<details><summary style="cursor:pointer;color:var(--mut);font-size:13px;margin:6px 0">Advanced (${adv.length})</summary>${adv.map(rowH).join("")}</details>`:""}</div>`);
+ const form=el(`<div style="max-width:560px;flex:none;max-height:min(250px,32vh);overflow:auto">${main.map(rowH).join("")}${adv.length?`<details><summary style="cursor:pointer;color:var(--mut);font-size:13px;margin:6px 0">Advanced (${adv.length})</summary>${adv.map(rowH).join("")}</details>`:""}</div>`);
  if(flds.length)box.appendChild(form);
  // compose + .env — the same CodeMirror editor as "Edit stack", always shown
  const lblCss="font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--mut);font-family:var(--mono);margin:10px 0 4px";
- const eds=el(`<div style="margin-top:6px">
-   <div style="${lblCss}">compose.yaml</div>
-   <div id="avC" class="ed-dark" style="height:280px;border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden"></div>
-   <div style="${lblCss}">.env${flds.length?" — mirrors the fields above; edit to override":""}</div>
-   <div id="avE" class="ed-dark" style="height:130px;border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden"></div></div>`);
+ const eds=el(`<div style="margin-top:6px;flex:1;min-height:0;display:flex;flex-direction:column">
+   <div style="${lblCss};flex:none">compose.yaml</div>
+   <div id="avC" class="ed-dark" style="flex:1;min-height:140px;border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden"></div>
+   <button class="dd-grp dd-coll" id="avEnvTog" style="width:100%;margin:8px 0 0;flex:none">${svg("cog",12)} .env${flds.length?" — mirrors the fields above":""} <span class="dd-chev">▸</span></button>
+   <div id="avEnvBox" style="display:none;flex:none;margin-top:6px">
+     <div id="avE" class="ed-dark" style="height:120px;border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden"></div></div></div>`);
  box.appendChild(eds);
+ const envTog=eds.querySelector("#avEnvTog"),envBox=eds.querySelector("#avEnvBox");
  let cmC=null,cmE=null,envDirty=false;
+ envTog.onclick=()=>{const open=envBox.style.display==="none";
+  envBox.style.display=open?"":"none";envTog.querySelector(".dd-chev").textContent=open?"▾":"▸";
+  if(open&&cmE)setTimeout(()=>{cmE.refresh();},20);};
  const envFromFields=()=>{const v=[];form.querySelectorAll("input[data-k]").forEach(i=>{if(i.value.trim())v.push(i.dataset.k+"="+i.value.trim());});return v.length?v.join("\n")+"\n":"";};
  // fields drive the .env editor until the user hand-edits it
  form.querySelectorAll("input[data-k]").forEach(i=>i.addEventListener("input",()=>{if(cmE&&!envDirty)cmE.setValue(envFromFields());}));
@@ -5461,9 +5473,9 @@ function dkAvailPane(tc,a,reload,ctx){
   if(!envDirty)cmE.setValue(envFromFields()||((r&&r.env)||""));
   setTimeout(()=>{cmC.refresh();cmE.refresh();},40);
  });
- const acts=el(`<div class="dd-acts" style="border:none;padding-top:6px"></div>`);
+ const acts=el(`<div class="dd-acts" style="border:none;padding-top:6px;flex:none"></div>`);
  const go=el(`<button class="btn pri">${svg("play",13)} Install & start</button>`);acts.appendChild(go);box.appendChild(acts);
- const con=el(`<div class="mcon" style="display:block;margin-top:10px;min-height:34px;max-height:280px;overflow:auto"></div>`);box.appendChild(con);
+ const con=el(`<div class="mcon" style="display:none;margin-top:10px;max-height:26vh;overflow:auto;flex:none"></div>`);box.appendChild(con);
  const reset=()=>{go.disabled=false;go.innerHTML=`${svg("play",13)} Install & start`;};
  go.onclick=async()=>{
   if(go.disabled)return;
@@ -5474,6 +5486,7 @@ function dkAvailPane(tc,a,reload,ctx){
    else{const values={};form.querySelectorAll("input[data-k]").forEach(i=>values[i.dataset.k]=i.value.trim());body.values=values;}   // fields → builds .env + creates path dirs
    const r=await api("/api/store/install",{method:"POST",body:JSON.stringify(body)});
    if(!(r&&r.ok)){toast("Error: "+((r&&r.log)||"?"));reset();return;}
+   con.style.display="block";
    streamPost("/api/stack/stream",con,code=>{
     toast(code?`«${a.name}» finished with warnings — check the containers`:`«${a.name}» is up`);
     DK_SEL="stack:"+a.id;reload();pollApps();   // land on the now-installed stack

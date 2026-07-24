@@ -13031,6 +13031,27 @@ def disaster_build():
                     % (p.get("name") or p.get("id"), ", ".join(bits)))
     if rows:
         L += ["## Backup profiles on this box", ""] + rows + [""]
+    # Restoring a database dump that came from ANOTHER machine is where a recovery
+    # stalls at 3am. Verified on this box against a real Immich dump: a single-database
+    # pg_dump carries no roles, so it stops at the first «OWNER TO <role>» with
+    # ERROR: role "..." does not exist — and the whole restore rolls back.
+    if rows:
+        L += ["## Restoring a Postgres dump from another box", "",
+              "A `*.sql.gz` made with **pg_dump** contains ONE database and no roles.",
+              "Restoring it into a fresh server stops at the first `OWNER TO <role>`",
+              "(`ERROR: role \"...\" does not exist`) and rolls everything back.",
+              "Create the roles the dump mentions, then load it:", "",
+              "```sh",
+              "# which roles does it expect?",
+              "gunzip -c dump.sql.gz | grep -oE 'OWNER TO [\"a-zA-Z0-9_]+' | sort -u",
+              "# create each one, then restore",
+              "docker exec -i <db-container> psql -U postgres -d postgres \\",
+              "  -c 'CREATE ROLE <role> LOGIN;'",
+              "gunzip -c dump.sql.gz | docker exec -i <db-container> \\",
+              "  psql -U postgres -d <database> -v ON_ERROR_STOP=1",
+              "```", "",
+              "Dumps written by **pg_dumpall** (what the panel's Replica feature makes)",
+              "already carry the roles — no extra step there.", ""]
     # Kopia snapshot repositories: without the password the backups are unreadable —
     # that is exactly what this card is for.
     kcfg = _safe(kp_load, None)
