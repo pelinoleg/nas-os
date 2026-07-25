@@ -9402,7 +9402,8 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
   return d.toLocaleDateString(LOC,{month:"short",day:"numeric",
    year:d.getFullYear()===new Date().getFullYear()?undefined:"numeric"})+", "+d.toTimeString().slice(0,5);};
  const KX_ZIP_MAX=2*1024*1024*1024;                 // server refuses bigger folder archives
- const exReset=()=>{EX={dest:snapDest,bk:snapBk,path:null,key:null,owner:"",own:"",snap:null,rel:"",sel:null,selMulti:null,focus:null,
+ const exReset=()=>{if(EX&&EX._bt)clearTimeout(EX._bt);
+  EX={dest:snapDest,bk:snapBk,path:null,key:null,owner:"",own:"",snap:null,rel:"",sel:null,selMulti:null,focus:null,
   sort:"name",asc:true,q:"",deep:null,snaps:null,kids:{},open:{},err:"",
   diffCache:{},showChg:false};};
  const exClearSel=()=>{EX.sel=null;EX.selMulti=null;EX.focus=null;};
@@ -9561,7 +9562,9 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
   const key=rel||"",stamp=EX.snap.id;
   if(EX.kids[key])return then&&then(EX.kids[key]);
   if(tc)exBusy(tc,true);
+  const t0=Date.now();
   const r=await kP("/api/kopia/snap/ls",{d:snapDest,oid:EX.snap.root,rel:key});
+  if(EX)EX._lastMs=Date.now()-t0;                  // tells the prefetcher how expensive this repo is
   if(tc)exBusy(tc,false);
   if(!EX||!EX.snap||EX.snap.id!==stamp)return;
   EX.kids[key]=(r&&r.ok)?{entries:r.entries||[],total:r.total||{}}
@@ -9576,23 +9579,32 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
     permanent. One request at a time, only while nothing else is loading, and never more than
     a handful — this must stay invisible, not compete with the user. */
  const exWarmed=new Set();
+ let exWarming=false;
  async function exWarmAround(tc){
-  if(!EX||!EX.snap)return;
-  const jobs=[],cur=EX.kids[EX.rel||""]||{};
-  (cur.entries||[]).filter(e=>e.dir).slice(0,6).forEach(e=>
-   jobs.push({oid:EX.snap.root,rel:e.rel}));
-  const g=exGroup();
-  if(g){const i=g.list.findIndex(x=>x.id===EX.snap.id);
-   [g.list[i-1],g.list[i+1]].forEach(n=>{if(n&&n.root)jobs.push({oid:n.root,rel:EX.rel||""});});}
-  for(const j of jobs){
-   const k=snapDest+"|"+j.oid+"|"+j.rel;
-   if(exWarmed.has(k))continue;
-   exWarmed.add(k);
-   if(exWarmed.size>4000)exWarmed.clear();
-   if(EX._busy)return;                            // the user is waiting — do not queue behind them
-   await kP("/api/kopia/snap/ls",{d:snapDest,oid:j.oid,rel:j.rel});
-   if(!EX||EX.dest!==snapDest)return;
-  }}
+  if(!EX||!EX.snap||exWarming)return;              // ONE warm loop at a time: browsing quickly
+  exWarming=true;                                  // used to start a new loop per folder, and on
+  try{                                             // a cloud repo each request costs seconds
+   const cur=EX.kids[EX.rel||""]||{};
+   // A slow repository (cloud) gets the cheap half of the job: stepping through restore points
+   // is the common move, so the neighbours matter more than the subfolders — and eight cold
+   // reads in the background would fight the user for the same connection.
+   const slow=(EX._lastMs||0)>1500;
+   const jobs=[],g=exGroup();
+   if(g){const i=g.list.findIndex(x=>x.id===EX.snap.id);
+    [g.list[i-1],g.list[i+1]].forEach(n=>{if(n&&n.root)jobs.push({oid:n.root,rel:EX.rel||""});});}
+   (cur.entries||[]).filter(e=>e.dir).slice(0,slow?2:6).forEach(e=>
+    jobs.push({oid:EX.snap.root,rel:e.rel}));
+   for(const j of jobs){
+    const k=snapDest+"|"+j.oid+"|"+j.rel;
+    if(exWarmed.has(k))continue;
+    if(EX._busy)return;                            // the user is waiting — do not queue behind them
+    const r=await kP("/api/kopia/snap/ls",{d:snapDest,oid:j.oid,rel:j.rel,warm:1});
+    if(r&&r.skipped)return;                        // the repository is busy with the user
+    if(r&&r.ok)exWarmed.add(k);                    // a failed warm may be worth retrying later
+    if(exWarmed.size>4000)exWarmed.clear();
+    if(!EX||EX.dest!==snapDest)return;
+   }
+  }finally{exWarming=false;}}
 
  function exSelSnap(tc,s){if(!s||!EX.snap||s.id===EX.snap.id)return;
   EX.snap=s;EX.kids={};exClearSel();EX.deep=null;exPaintAll(tc);exLoad(tc);}

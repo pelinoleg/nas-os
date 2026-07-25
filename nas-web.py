@@ -11469,8 +11469,24 @@ def _kp_ans_put(destid, key, value):
             except sqlite3.Error:
                 pass
 
-def kp_snap_ls(destid, oid, rel=""):
-    """One directory level of a snapshot, addressed as <snapshot root>/<rel>."""
+_KP_BUSY = {}                      # destid -> how many repository reads are in flight
+_KP_BUSY_LOCK = threading.Lock()
+
+def _kp_busy_delta(destid, d):
+    with _KP_BUSY_LOCK:
+        n = _KP_BUSY.get(destid, 0) + d
+        if n > 0:
+            _KP_BUSY[destid] = n
+        else:
+            _KP_BUSY.pop(destid, None)
+        return n
+
+def kp_snap_ls(destid, oid, rel="", warm=False):
+    """One directory level of a snapshot, addressed as <snapshot root>/<rel>.
+    `warm` marks a speculative read the panel fires in the background: it must never make a
+    real click wait, so if this repository is already being read, the warm one is dropped
+    rather than queued (each read spawns its own kopia — and for a cloud repo an rclone
+    bridge with it, which a Raspberry Pi feels)."""
     cfg = kp_load()
     dest = _kp_find(cfg["dests"], str(destid or ""))
     if not dest:
@@ -11483,10 +11499,16 @@ def kp_snap_ls(destid, oid, rel=""):
     hit = _kp_ans_get(destid, ck)
     if hit is not None:
         return hit                       # content-addressed: this answer cannot go stale
-    c = _kp_ensure_connected(dest)
-    if not c["ok"]:
-        return c
-    r = _kp_show_dir(destid, arg)
+    if warm and _KP_BUSY.get(destid):
+        return {"ok": False, "skipped": True, "log": "busy"}
+    _kp_busy_delta(destid, 1)
+    try:
+        c = _kp_ensure_connected(dest)
+        if not c["ok"]:
+            return c
+        r = _kp_show_dir(destid, arg)
+    finally:
+        _kp_busy_delta(destid, -1)
     if not r["ok"]:
         return r
     d = r["dir"] if isinstance(r["dir"], dict) else {}
@@ -23007,7 +23029,8 @@ class H(BaseHTTPRequestHandler):
                 self._send_kopia_zip(self._body() or {}); return
             elif p == "/api/kopia/snap/ls":
                 b = self._body()
-                self._json(kp_snap_ls(str(b.get("d") or ""), b.get("oid", ""), b.get("rel", "")))
+                self._json(kp_snap_ls(str(b.get("d") or ""), b.get("oid", ""), b.get("rel", ""),
+                                      warm=bool(b.get("warm"))))
             elif p == "/api/kopia/snap/find":
                 b = self._body()
                 self._json(kp_snap_find(str(b.get("d") or ""), b.get("oid", ""), b.get("q", "")))

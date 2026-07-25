@@ -50,6 +50,7 @@ STACK_PACKAGES=(mergerfs snapraid smartmontools)
 UTIL_PACKAGES=(
   vnstat              # per-interface traffic counter («Traffic» widget in the panel)
   sshfs               # «Servers» in the panel file manager: SSH mounts in /mnt/remote
+  openssl             # TLS certificate for the Kopia backup server (clients pin its fingerprint)
   dialog
   libheif-examples   # heif-convert: iPhone HEIC is sliced into tiles, ffmpeg takes only one
   eject              # soft media ejection after USB import (power-off kills the whole reader)
