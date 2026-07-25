@@ -10422,8 +10422,9 @@ def kp_dest_forget(destid):
         kp_save(cfg)
     # the destination is gone — so are its maintenance/verify stamps and bg-op states,
     # otherwise a destination created later could inherit them through a reused id
-    for p in (os.path.join(NAS_CONFIG, "kopia-maint-%s.json" % destid),
-              os.path.join(NAS_CONFIG, "kopia-verify-%s.json" % destid)):
+    shutil.rmtree(_kp_cache_dir(destid), ignore_errors=True)   # derived data + this repo's logs
+    for p in [os.path.join(NAS_CONFIG, "kopia-%s-%s.json" % (k, destid))
+              for k in KP_BG_KINDS]:
         try:
             os.remove(p)
         except OSError:
@@ -10745,6 +10746,27 @@ def kp_backup_delete(kid):
 KP_LOG_KEEP_DAYS = 14
 KP_LOG_KEEP_BYTES = 64 * 1024 * 1024     # per destination
 
+def _kp_cache_gc():
+    """Cache directories of destinations that no longer exist. A removed destination used to
+    leave its whole cache (and its kopia logs) sitting on the backup medium for ever."""
+    freed = 0
+    live = {d["id"] for d in (kp_load().get("dests") or [])}
+    for base in {os.path.dirname(_kp_cache_dir("x")), "/var/cache/kopia"}:
+        if not os.path.isdir(base):
+            continue
+        for name in os.listdir(base):
+            if name in live or not _KP_ID_RE.match(name):
+                continue
+            p = os.path.join(base, name)
+            if not os.path.isdir(p):
+                continue
+            try:
+                freed += _dir_size(p)
+                shutil.rmtree(p, ignore_errors=True)
+            except OSError:
+                pass
+    return freed
+
 def _kp_logs_gc():
     """Kopia writes a log file per invocation, and our Explorer invokes it per click:
     38 MB in two days on this box, sitting on the backup medium. Kopia sweeps its own
@@ -10784,10 +10806,11 @@ def _kp_gc():
     what an older version, a hand-edited config or a restored settings backup left behind."""
     if not os.path.isfile(KOPIA_CONF):      # no config at all → nothing is "orphaned"
         return {"hist": 0, "files": 0}
-    try:
-        _kp_logs_gc()
-    except OSError:
-        pass
+    for fn in (_kp_logs_gc, _kp_cache_gc):
+        try:
+            fn()
+        except OSError:
+            pass
     cfg = kp_load()
     bids = {b["id"] for b in cfg["backups"]}
     dids = {d["id"] for d in cfg["dests"]}
@@ -10822,7 +10845,7 @@ def _kp_gc():
                 except OSError:
                     pass
                 continue
-            m_ = re.match(r"^kopia-(run|maint|verify)-([0-9a-f]+)\.(json|log|cancel)$", f)
+            m_ = re.match(r"^kopia-(run|maint|verify|est|fix|val)-([0-9a-f]+)\.(json|log|cancel)$", f)
             if not m_:
                 continue
             if m_.group(2) in (bids if m_.group(1) == "run" else dids):
@@ -10954,7 +10977,10 @@ def kp_snapshots(destid):
                     "pins": [str(x) for x in (s.get("pins") or [])],
                     "incomplete": bool(s.get("incomplete"))})
     out.sort(key=lambda x: -x["ts"])
-    return {"ok": True, "snapshots": out[:500]}
+    # who WE are: with the backup server on, a repository also holds other machines'
+    # snapshots, and the explorer must badge those, not ours
+    return {"ok": True, "snapshots": out[:500],
+            "own": "root@" + (socket.gethostname() or "").split(".")[0]}
 
 # ---- snapshot runner: policies, progress, 3-2-1 replication -----------------
 KP_HIST_FILE = os.path.join(NAS_CONFIG, "kopia-history.json")
@@ -11129,11 +11155,11 @@ def kp_run_start(bid):
                     and ({b.get("dest"), b.get("dest2")} & mine):
                 return {"ok": False, "log": "destination is busy — «%s» is running"
                         % (b.get("name") or b["id"])}
-        for did in mine:                       # ...and never concurrently with maintenance/verify
-            for u in ("nas-kopia-maint-%s" % did, "nas-kopia-vfy-%s" % did):
-                if _systemd_active(u + ".service"):
-                    return {"ok": False, "log": "destination is busy — maintenance/verification "
-                                                "is running on it"}
+        for did in mine:                       # ...and never concurrently with repo-writing jobs
+            for k in ("maint", "verify", "fix", "val"):
+                if _systemd_active("nas-kopia-%s-%s.service" % (KP_BG_KINDS[k], did)):
+                    return {"ok": False, "log": "destination is busy — housekeeping, verification "
+                                                "or a repair is running on it"}
         missing = [f for f in src["folders"] if not os.path.isdir(f)]
         if len(missing) == len(src["folders"]):
             return {"ok": False, "log": "source folders do not exist: " + ", ".join(missing[:3])}
@@ -12469,8 +12495,13 @@ def kp_srv_user_save(name, password=""):
     c = _kp_ensure_connected(dest)
     if not c["ok"]:
         return c
-    have = [u["name"] for u in (kp_srv_users().get("users") or [])]
+    lst = kp_srv_users()
+    have = [u["name"] for u in (lst.get("users") or [])]
     r = _kp_srv_pw_set(dest["id"], name, pw, "set" if name in have else "add")
+    if not r["ok"] and not lst.get("ok"):
+        # the user list could not be read (slow cloud repo, transient error), so the
+        # add/set choice was a guess — try the other verb before giving up
+        r = _kp_srv_pw_set(dest["id"], name, pw, "add" if name in have else "set")
     if not r["ok"]:
         return r
     users = [u for u in s["users"] if u["name"] != name]
@@ -12512,6 +12543,14 @@ def kp_srv_set(d):
     want = bool((d or {}).get("enabled", s["enabled"]))
     if want and not dest_id:
         return {"ok": False, "log": "pick the repository clients should write into"}
+    if dest_id:
+        # A synced spare is an exact byte replica of another backup's primary: the next
+        # `repository sync-to --delete` would erase whatever clients wrote there.
+        for b in cfg["backups"]:
+            if b.get("dest2") == dest_id and b.get("dest2_mode", "sync") == "sync":
+                return {"ok": False, "log": "«%s» mirrors that repository as its spare copy — "
+                        "client backups written there would be erased on the next replication. "
+                        "Pick another repository." % (b.get("name") or b["id"])}
     if s["enabled"] and (port != s["port"] or dest_id != s["dest"]):
         kp_srv_stop()                      # old port must not stay open in the firewall
     _kp_srv_save(enabled=want, dest=dest_id, port=port)
@@ -12523,6 +12562,11 @@ def kp_srv_set(d):
         _kp_srv_save(enabled=False)
         return r
     return {"ok": True, "running": True, "fingerprint": r.get("fingerprint", "")}
+
+def _kp_srv_spares(cfg):
+    """Repositories that are somebody's synced spare — unusable for the server."""
+    return {b["dest2"]: (b.get("name") or b["id"]) for b in cfg["backups"]
+            if b.get("dest2") and b.get("dest2_mode", "sync") == "sync"}
 
 def kp_srv_status(deep=False):
     cfg = kp_load()
@@ -12542,7 +12586,8 @@ def kp_srv_status(deep=False):
            "url_alt": "https://%s.local:%d" % (host, s["port"]),
            "host": host, "log": _kp_srv_log(10) if (s["enabled"] and not running) else "",
            "dest_missing": bool(dest and dest.get("kind") == "fs"
-                                and not os.path.isdir(dest.get("path") or ""))}
+                                and not os.path.isdir(dest.get("path") or "")),
+           "spares": _kp_srv_spares(cfg)}
     if deep and dest:
         u = kp_srv_users()
         if u.get("ok"):
@@ -12553,14 +12598,23 @@ def kp_srv_status(deep=False):
             out["clients"] = [x for x in sr["sources"] if x["spec"].split(":")[0] != own]
     return out
 
+_kp_srv_try = [0.0]        # last start attempt — a cloud repo can take minutes to open
+
 def _kp_srv_tick(now):
     """Keep the server up: it must be back after a reboot, after a crash, and after a
-    reinstall (kopia.json comes back with the settings backup, so `enabled` is enough)."""
+    reinstall (kopia.json comes back with the settings backup, so `enabled` is enough).
+    Backed off on purpose: kp_srv_start opens the repository, which for a cloud repo can
+    block for minutes, and this runs in the monitor thread — retrying every 60 s would
+    stall every other check behind it."""
     s = _kp_srv_cfg()
     if not s["enabled"] or not kopia_installed():
         return
     if _systemd_active(KP_SRV_UNIT + ".service"):
+        _kp_srv_try[0] = 0.0
         return
+    if now - _kp_srv_try[0] < 300:
+        return
+    _kp_srv_try[0] = now
     r = kp_srv_start()
     if not r.get("ok"):
         notify_event("kp_err", "kp_srv", "Kopia: backup server is down",
