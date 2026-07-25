@@ -9869,6 +9869,10 @@ def kp_load():
             b["schedule"] = {}
         if not isinstance(b.get("retention"), dict):
             b["retention"] = {}
+        if not isinstance(b.get("hooks"), dict):
+            b["hooks"] = {}
+        if not isinstance(b.get("rules"), dict):
+            b["rules"] = {}
         if not isinstance(b.get("folders", []), list):
             b["folders"] = []
     for s in d["sources"]:
@@ -9916,9 +9920,11 @@ def _kp_cache_dir(destid):
         return os.path.join(root, ".kopia-cache", destid)
     return os.path.join("/var/cache/kopia", destid)
 
-# Global engine options: parallelism for snapshot uploads, an upload speed cap
-# (kopia has no throttle of its own — for CLOUD repos the cap rides on the rclone
-# child via RCLONE_BWLIMIT; local disks are never throttled), and cache limits.
+# Global engine options: parallelism for snapshot uploads, speed caps and cache
+# limits. Speed caps go through `kopia repository throttle set`, which kopia
+# applies to EVERY backend (a local USB disk included) and stores in the
+# repository — so the cap survives a reinstall and does not depend on the rclone
+# child. Our opts file stays the source of truth and is pushed into each repo.
 KP_OPTS_FILE = os.path.join(NAS_CONFIG, "kopia-opts.json")
 
 def kp_opts_get():
@@ -9931,9 +9937,35 @@ def kp_opts_get():
         except (TypeError, ValueError):
             return dv
     return {"parallel": _i("parallel", 2, 1, 16),
-            "bwlimit_kb": _i("bwlimit_kb", 0, 0, 10_000_000),        # KB/s, 0 = unlimited (cloud only)
+            "bwlimit_kb": _i("bwlimit_kb", 0, 0, 10_000_000),        # upload KB/s, 0 = unlimited
+            "dnlimit_kb": _i("dnlimit_kb", 0, 0, 10_000_000),        # download KB/s, 0 = unlimited
             "cache_content_mb": _i("cache_content_mb", 0, 0, 100_000),   # 0 = kopia default
             "cache_meta_mb": _i("cache_meta_mb", 0, 0, 100_000)}
+
+def kp_throttle_args(opts=None):
+    """argv tail for `repository throttle set` from the saved options (0 = off)."""
+    o = opts or kp_opts_get()
+    return ["repository", "throttle", "set",
+            "--upload-bytes-per-second", str(int(o["bwlimit_kb"]) * 1024),
+            "--download-bytes-per-second", str(int(o["dnlimit_kb"]) * 1024)]
+
+def kp_throttle_push(destid, opts=None):
+    """Write the saved speed caps into one repository. Cheap (local metadata),
+    but it needs the repo open — call it after connect / on options save."""
+    return _kp(destid, kp_throttle_args(opts), timeout=60)
+
+def kp_throttle_get(destid):
+    """Read back what the repository itself stores, so the UI can prove it applied."""
+    r = _kp(destid, ["repository", "throttle", "get", "--json"], timeout=60)
+    if not r["ok"]:
+        return {"ok": False, "log": _kp_err_tail(r)}
+    try:
+        d = json.loads(r["out"] or "{}")
+    except ValueError:
+        d = {}
+    return {"ok": True,
+            "up_kb": int((d.get("maxUploadSpeedBytesPerSecond") or 0) / 1024),
+            "dn_kb": int((d.get("maxDownloadSpeedBytesPerSecond") or 0) / 1024)}
 
 def kp_opts_set(d):
     cur = kp_opts_get()
@@ -9945,17 +9977,18 @@ def kp_opts_set(d):
                 pass
     _json_save(KP_OPTS_FILE, cur)
     out = kp_opts_get()          # re-read → clamped
-    # cache limits apply per connected repo via `kopia cache set`
-    if out["cache_content_mb"] or out["cache_meta_mb"]:
-        for x in kp_load().get("dests") or []:
-            if not kp_dest_connected(x["id"]):
-                continue
+    for x in kp_load().get("dests") or []:
+        if not kp_dest_connected(x["id"]):
+            continue
+        # cache limits apply per connected repo via `kopia cache set`
+        if out["cache_content_mb"] or out["cache_meta_mb"]:
             a = ["cache", "set"]
             if out["cache_content_mb"]:
                 a += ["--content-cache-size-limit-mb", str(out["cache_content_mb"])]
             if out["cache_meta_mb"]:
                 a += ["--metadata-cache-size-limit-mb", str(out["cache_meta_mb"])]
             _kp(x["id"], a, timeout=30)
+        kp_throttle_push(x["id"], out)
     return out
 
 def _kp_env():
@@ -9964,9 +9997,6 @@ def _kp_env():
     env["KOPIA_CHECK_FOR_UPDATES"] = "false"
     env["RCLONE_CONFIG"] = RCLONE_CONF       # kopia's rclone child inherits this; harmless for fs repos
     env["HOME"] = "/root"                    # kopia keeps per-repo state under $HOME/.config on some paths
-    bw = kp_opts_get().get("bwlimit_kb") or 0
-    if bw:
-        env["RCLONE_BWLIMIT"] = "%dk" % bw   # the rclone child (cloud repos) honors this; fs repos ignore it
     return env
 
 def _kp(destid, args, timeout=120, extra_env=None):
@@ -10035,7 +10065,10 @@ def _kp_repo_args(dest, op):
         os.makedirs(cache, exist_ok=True)
     except OSError:
         pass
-    a += ["--cache-directory", cache]
+    a += ["--cache-directory", cache, "--enable-actions"]
+    # --enable-actions is a CLIENT-side permission: without it kopia silently skips
+    # the before/after-snapshot commands a backup may define. We are root here and
+    # the only commands are the ones typed into our own UI.
     if cache.startswith("/var/cache/"):
         # falling back to the SD card — cap the cache hard (content 2G / metadata 1G)
         a += ["--content-cache-size-mb", "2000", "--metadata-cache-size-mb", "1000"]
@@ -10164,11 +10197,33 @@ def _kp_write_pwfile(dest):
     except (OSError, subprocess.SubprocessError):
         return False
 
+def _kp_ensure_actions(destid):
+    """Turn on `enableActions` in an ALREADY connected config. Repos connected by
+    an older version of the panel lack the flag, and kopia would then skip the
+    before/after commands without a word. Patching the derived JSON is cheaper and
+    safer than a re-connect (which would touch the network for cloud repos)."""
+    f = _kp_cfg_file(destid)
+    try:
+        with open(f) as fh:
+            d = json.load(fh)
+        if not isinstance(d, dict) or d.get("enableActions"):
+            return False
+        d["enableActions"] = True
+        tmp = f + ".tmp%d" % os.getpid()
+        with open(tmp, "w") as fh:
+            json.dump(d, fh, indent=2)
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, f)
+        return True
+    except (OSError, ValueError):
+        return False
+
 def _kp_ensure_connected(dest):
     """Self-healing connect: the per-dest kopia config lives in /etc and may be
     missing after a reinstall (kopia.json is restored by the settings backup, the
     derived .config files are not) — rebuild it from the entity on first use."""
     if kp_dest_connected(dest["id"]):
+        _kp_ensure_actions(dest["id"])
         return {"ok": True}
     os.makedirs(KOPIA_CFG_DIR, exist_ok=True)
     r = _kp(dest["id"], _kp_repo_args(dest, "connect"), timeout=300)
@@ -10178,6 +10233,7 @@ def _kp_ensure_connected(dest):
         except OSError:
             pass
         return {"ok": False, "log": _kp_err_tail(r)}
+    kp_throttle_push(dest["id"])     # caps live in the repo; a fresh connect re-asserts ours
     return {"ok": True}
 
 def kp_dest_test(destid):
@@ -10233,7 +10289,77 @@ def kp_dest_stats(destid):
             out["data_bytes"] = sum(latest.values())
         except (ValueError, TypeError):
             pass
+    out["maint"] = _kp_maint_info(destid)
     return out
+
+_KP_HUM_RE = re.compile(r"([\d.]+)\s*([KMGTP]?)i?B", re.I)
+
+def _kp_human_bytes(s):
+    """kopia prints sizes for people ("217.3 KB") and has no --raw for these —
+    parse back to bytes. Approximate by construction: fine for a display figure,
+    never use it for a guard."""
+    m = _KP_HUM_RE.search(str(s or ""))
+    if not m:
+        return 0
+    mult = {"": 1, "K": 1000, "M": 1000 ** 2, "G": 1000 ** 3,
+            "T": 1000 ** 4, "P": 1000 ** 5}[m.group(2).upper()]
+    try:
+        return int(float(m.group(1)) * mult)
+    except ValueError:
+        return 0
+
+def _kp_maint_info(destid):
+    """`maintenance info` — when housekeeping last ran and when it runs next.
+    Text-only output (no --json), so parse the two cycle blocks."""
+    r = _kp(destid, ["maintenance", "info"], timeout=90)
+    if not r["ok"]:
+        return {}
+    out, cur = {"owner": ""}, ""
+    for ln in (r["out"] or "").splitlines():
+        s = ln.strip()
+        m = re.match(r"^Owner:\s*(\S+)", s)
+        if m:
+            out["owner"] = m.group(1)
+        elif s.startswith("Quick Cycle"):
+            cur = "quick"
+        elif s.startswith("Full Cycle"):
+            cur = "full"
+        elif s.startswith("Log Retention"):
+            cur = "logs"
+        elif s.startswith("Recent Maintenance Runs"):
+            break
+        elif cur in ("quick", "full") and ":" in s:
+            k, v = s.split(":", 1)
+            k, v = k.strip(), v.strip()
+            if k == "next run":
+                out[cur + "_next"] = v
+            elif k == "interval":
+                out[cur + "_interval"] = v
+            elif k == "scheduled":
+                out[cur + "_on"] = (v == "true")
+        elif cur == "logs" and s.startswith("max total size"):
+            out["log_max"] = s.split(":", 1)[1].strip()
+    return out
+
+def kp_dest_medium(destid):
+    """How much the repository actually OCCUPIES on the medium (`blob stats`).
+    Deliberately a separate, opt-in call: it lists every blob, which on a cloud
+    remote costs as much as a full recursive listing (minutes on a big repo)."""
+    cfg = kp_load()
+    dest = _kp_find(cfg["dests"], str(destid or ""))
+    if not dest:
+        return {"ok": False, "log": "no such destination"}
+    c = _kp_ensure_connected(dest)
+    if not c["ok"]:
+        return c
+    r = _kp(destid, ["blob", "stats"], timeout=30 * 60)
+    if not r["ok"]:
+        return {"ok": False, "log": _kp_err_tail(r)}
+    m = re.search(r"^Count:\s*(\d+)", r["out"], re.M)
+    t = re.search(r"^Total:\s*(.+)$", r["out"], re.M)
+    return {"ok": True, "blobs": int(m.group(1)) if m else 0,
+            "bytes": _kp_human_bytes(t.group(1)) if t else 0,
+            "approx": True}
 
 def kp_dest_cache(destid, clear=False):
     cfg = kp_load()
@@ -10442,6 +10568,69 @@ def _kp_norm_schedule(d):
         dow = 0
     return {"mode": mode, "time": t, "dow": dow}
 
+_KP_HOOKS = {"before": "", "after": "", "mode": "optional", "timeout": 600}
+
+def _kp_norm_hooks(d):
+    """Commands to run before/after a snapshot. This is how a database is backed
+    up correctly: dump it (or pause the container) in `before`, clean up in
+    `after` — instead of copying live database files and hoping.
+    mode: essential = a failing hook fails the snapshot, optional = only logged."""
+    d = d if isinstance(d, dict) else {}
+    out = dict(_KP_HOOKS)
+    for k in ("before", "after"):
+        s = str(d.get(k) or "").replace("\r", "").strip()
+        out[k] = s[:2000]
+    out["mode"] = d.get("mode") if d.get("mode") in ("essential", "optional") else "optional"
+    try:
+        out["timeout"] = max(10, min(6 * 3600, int(d.get("timeout", 600))))
+    except (TypeError, ValueError):
+        out["timeout"] = 600
+    return out
+
+_KP_RULES = {"one_fs": False, "ignore_cache_dirs": True, "max_file_mb": 0,
+             "ignore_file_errors": False, "ignore_dir_errors": False}
+
+def _kp_norm_rules(d):
+    """Reading rules for the snapshot walk: stay on one filesystem (a pool branch
+    or a nested mount would otherwise be pulled in), honour CACHEDIR.TAG, skip
+    absurdly large files, and decide whether an unreadable file fails the run."""
+    d = d if isinstance(d, dict) else {}
+    out = dict(_KP_RULES)
+    for k in ("one_fs", "ignore_cache_dirs", "ignore_file_errors", "ignore_dir_errors"):
+        out[k] = bool(d.get(k, out[k]))
+    try:
+        out["max_file_mb"] = max(0, min(10_000_000, int(d.get("max_file_mb", 0))))
+    except (TypeError, ValueError):
+        out["max_file_mb"] = 0
+    return out
+
+KP_HOOK_DIR = os.path.join(KOPIA_CFG_DIR, "hooks")
+
+def _kp_hook_script(bid, when, cmd):
+    """Materialise a hook as a real script and hand kopia the PATH to it. Kopia
+    splits an inline action into path+args on whitespace and does NOT use a shell,
+    so a pipeline («pg_dump … | gzip > f») would be mangled — a script gets the
+    full shell, and it is auditable on disk (root-only, 0700)."""
+    f = os.path.join(KP_HOOK_DIR, "%s-%s.sh" % (bid, when))
+    if not str(cmd or "").strip():
+        try:
+            os.remove(f)
+        except OSError:
+            pass
+        return ""
+    try:
+        os.makedirs(KP_HOOK_DIR, exist_ok=True)
+        os.chmod(KP_HOOK_DIR, 0o700)
+        tmp = f + ".tmp%d" % os.getpid()
+        with open(tmp, "w") as fh:
+            fh.write("#!/bin/sh\n# generated by the NAS panel — Kopia %s-snapshot hook\n"
+                     "set -e\n%s\n" % (when, cmd))
+        os.chmod(tmp, 0o700)
+        os.replace(tmp, f)
+        return f
+    except OSError:
+        return ""
+
 def kp_backup_save(d):
     cfg = kp_load()
     name = (str(d.get("name") or "").strip() or "Backup")[:48]
@@ -10496,6 +10685,8 @@ def kp_backup_save(d):
           "dest2_mode": d.get("dest2_mode") if d.get("dest2_mode") in ("sync", "independent") else "sync",
           "retention": _kp_norm_retention(d.get("retention")),
           "schedule": _kp_norm_schedule(d.get("schedule")),
+          "hooks": _kp_norm_hooks(d.get("hooks")),
+          "rules": _kp_norm_rules(d.get("rules")),
           "compression": bool(d.get("compression", True)),
           "usb_trigger": bool(d.get("usb_trigger")),
           "notify_ok": bool(d.get("notify_ok")),
@@ -10535,12 +10726,52 @@ def kp_backup_delete(kid):
     return {"ok": True}
 
 
+KP_LOG_KEEP_DAYS = 14
+KP_LOG_KEEP_BYTES = 64 * 1024 * 1024     # per destination
+
+def _kp_logs_gc():
+    """Kopia writes a log file per invocation, and our Explorer invokes it per click:
+    38 MB in two days on this box, sitting on the backup medium. Kopia sweeps its own
+    logs only by ITS defaults (30 days / ~1 GB) — too generous for a Pi, so trim by
+    age first, then oldest-first until under the size cap. Removed bytes are reported."""
+    freed = 0
+    for d in (kp_load().get("dests") or []):
+        base = os.path.join(_kp_cache_dir(d["id"]), "logs")
+        files, now = [], time.time()
+        for root, _, names in os.walk(base):
+            for n in names:
+                p = os.path.join(root, n)
+                try:
+                    stt = os.stat(p)
+                except OSError:
+                    continue
+                if now - stt.st_mtime > KP_LOG_KEEP_DAYS * 86400:
+                    try:
+                        os.remove(p); freed += stt.st_size
+                    except OSError:
+                        pass
+                else:
+                    files.append((stt.st_mtime, stt.st_size, p))
+        tot = sum(x[1] for x in files)
+        for _, sz, p in sorted(files):                  # oldest first
+            if tot <= KP_LOG_KEEP_BYTES:
+                break
+            try:
+                os.remove(p); tot -= sz; freed += sz
+            except OSError:
+                pass
+    return freed
+
 def _kp_gc():
     """Daily housekeeping: history rows and state files of backups/destinations that no
     longer exist. Deleting through the panel already cleans up after itself — this catches
     what an older version, a hand-edited config or a restored settings backup left behind."""
     if not os.path.isfile(KOPIA_CONF):      # no config at all → nothing is "orphaned"
         return {"hist": 0, "files": 0}
+    try:
+        _kp_logs_gc()
+    except OSError:
+        pass
     cfg = kp_load()
     bids = {b["id"] for b in cfg["backups"]}
     dids = {d["id"] for d in cfg["dests"]}
@@ -10619,7 +10850,9 @@ def _kp_forget_runs(kid):
                 fcntl.flock(lockf, fcntl.LOCK_UN); lockf.close()
             except OSError:
                 pass
-    for p in (_kp_runf(kid, "json"), _kp_runf(kid, "log"), _kp_runf(kid, "cancel")):
+    for p in (_kp_runf(kid, "json"), _kp_runf(kid, "log"), _kp_runf(kid, "cancel"),
+              os.path.join(KP_HOOK_DIR, "%s-before.sh" % kid),
+              os.path.join(KP_HOOK_DIR, "%s-after.sh" % kid)):
         try:
             os.remove(p)
         except OSError:
@@ -10700,6 +10933,7 @@ def kp_snapshots(destid):
                     "failed": int(summ.get("numFailed") or 0),
                     "backup": str(tags.get("tag:nasbk") or tags.get("nasbk") or ""),
                     "root": str((s.get("rootEntry") or {}).get("obj") or ""),
+                    "pins": [str(x) for x in (s.get("pins") or [])],
                     "incomplete": bool(s.get("incomplete"))})
     out.sort(key=lambda x: -x["ts"])
     return {"ok": True, "snapshots": out[:500]}
@@ -10755,6 +10989,14 @@ def _kp_policy_apply(destid, bk, src):
     prune step. NOTE: --clear-ignore in the SAME command as --add-ignore clears
     AFTER adding (verified live) — the reset must be a separate call."""
     ret = bk.get("retention") or {}
+    hooks = _kp_norm_hooks(bk.get("hooks"))
+    rules = _kp_norm_rules(bk.get("rules"))
+    # hooks belong to the BACKUP but kopia stores actions per policy target, so the
+    # same pair is set on every folder of the source; passing "" removes an action
+    hb = _kp_hook_script(bk["id"], "before", hooks["before"])
+    ha = _kp_hook_script(bk["id"], "after", hooks["after"])
+    if hb or ha:
+        _kp_ensure_actions(destid)   # older configs lack enableActions → kopia would skip them
     for folder in src.get("folders") or []:
         r = _kp(destid, ["policy", "set", folder, "--clear-ignore"], timeout=60)
         if not r["ok"]:
@@ -10765,7 +11007,16 @@ def _kp_policy_apply(destid, bk, src):
                 "--keep-weekly", str(ret.get("weekly", 4)),
                 "--keep-monthly", str(ret.get("monthly", 6)),
                 "--keep-annual", str(ret.get("annual", 0)),
-                "--compression", ("zstd" if bk.get("compression", True) else "none")]
+                "--compression", ("zstd" if bk.get("compression", True) else "none"),
+                "--before-snapshot-root-action", hb,
+                "--after-snapshot-root-action", ha,
+                "--action-command-mode", hooks["mode"],
+                "--action-command-timeout", "%ds" % hooks["timeout"],
+                "--one-file-system", ("true" if rules["one_fs"] else "false"),
+                "--ignore-cache-dirs", ("true" if rules["ignore_cache_dirs"] else "false"),
+                "--ignore-file-errors", ("true" if rules["ignore_file_errors"] else "false"),
+                "--ignore-dir-errors", ("true" if rules["ignore_dir_errors"] else "false"),
+                "--max-file-size", str(int(rules["max_file_mb"]) * 1024 * 1024)]
         for pat in (src.get("excludes") or []):
             args += ["--add-ignore", pat]       # text patterns apply to every folder
         for xp in (src.get("exclude_paths") or []):
@@ -11003,7 +11254,9 @@ def _kp_show_dir(destid, arg, timeout=180):
     RECURSIVE size and file count, which plain `ls` does not give. Read is capped and
     the stream is checked to actually BE a directory (a file oid would dump content)."""
     cmd = [_kopia_bin(), "--config-file", _kp_cfg_file(destid),
-           "--log-dir", os.path.join(_kp_cache_dir(destid), "logs"), "show", arg]
+           "--log-dir", os.path.join(_kp_cache_dir(destid), "logs"),
+           # browsing writes a log file per click; keep those quiet (see _kp_logs_gc)
+           "--file-log-level", "error", "--disable-content-log", "show", arg]
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                 env=_kp_env())
@@ -11102,7 +11355,8 @@ def kp_snap_find(destid, oid, query, cap=200):
     # scanning a hard line budget, whichever comes first, so memory/time stay bounded.
     SCAN_MAX = 400_000
     cmd = [_kopia_bin(), "--config-file", _kp_cfg_file(destid),
-           "--log-dir", os.path.join(_kp_cache_dir(destid), "logs"), "ls", "-lr", oid]
+           "--log-dir", os.path.join(_kp_cache_dir(destid), "logs"),
+           "--file-log-level", "error", "--disable-content-log", "ls", "-lr", oid]
     out, more, scanned = [], False, 0
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
@@ -11163,7 +11417,9 @@ def kp_dl_open(destid, oid, rel=""):
     if not c["ok"]:
         return c
     cmd = [_kopia_bin(), "--config-file", _kp_cfg_file(destid),
-           "--log-dir", os.path.join(_kp_cache_dir(destid), "logs"), "show", arg]
+           "--log-dir", os.path.join(_kp_cache_dir(destid), "logs"),
+           # browsing writes a log file per click; keep those quiet (see _kp_logs_gc)
+           "--file-log-level", "error", "--disable-content-log", "show", arg]
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                                 env=_kp_env())
@@ -11301,6 +11557,164 @@ def kp_snap_delete(destid, snapid):
     r = _kp(destid, ["snapshot", "delete", snapid, "--delete"], timeout=300)
     return {"ok": r["ok"], "log": "" if r["ok"] else _kp_err_tail(r)}
 
+KP_PIN = "keep"          # our single pin name — one meaning: retention must not touch it
+
+def kp_snap_pin(destid, snapid, on=True):
+    """Pin a restore point so retention can never expire it («keep this one»).
+    NOTE: pinning REWRITES the snapshot manifest, so its id changes — the caller
+    must re-read the list instead of reusing the id it just sent."""
+    cfg = kp_load()
+    dest = _kp_find(cfg["dests"], str(destid or ""))
+    if not dest:
+        return {"ok": False, "log": "no such destination"}
+    snapid = str(snapid or "").strip()
+    if not re.match(r"^[0-9a-f]{16,64}$", snapid):
+        return {"ok": False, "log": "bad snapshot id"}
+    c = _kp_ensure_connected(dest)
+    if not c["ok"]:
+        return c
+    r = _kp(destid, ["snapshot", "pin", snapid,
+                     ("--add" if on else "--remove"), KP_PIN], timeout=180)
+    return {"ok": r["ok"], "log": "" if r["ok"] else _kp_err_tail(r)}
+
+_KP_DIFF_ADD = re.compile(r"^added (file|directory|symlink) (\./.*?) \(")
+_KP_DIFF_DEL = re.compile(r"^removed (file|directory|symlink) (\./.*?) \(")
+_KP_DIFF_CHG = re.compile(r"^changed (\./.*?) at .*?\(size (\d+) -> (\d+)\)")
+
+def kp_snap_diff(destid, oid1, oid2, cap=400):
+    """What changed between two restore points (`kopia diff`). Read-only; the
+    per-entry «sizes differ / modification times differ» chatter is dropped, the
+    trailing JSON line carries the totals."""
+    cfg = kp_load()
+    dest = _kp_find(cfg["dests"], str(destid or ""))
+    if not dest:
+        return {"ok": False, "log": "no such destination"}
+    for o in (oid1, oid2):
+        if not _KP_OID_RE.match(str(o or "")):
+            return {"ok": False, "log": "bad object id"}
+    c = _kp_ensure_connected(dest)
+    if not c["ok"]:
+        return c
+    r = _kp(destid, ["diff", str(oid1), str(oid2)], timeout=20 * 60)
+    if not r["ok"]:
+        return {"ok": False, "log": _kp_err_tail(r)}
+    added, removed, changed, stats, more = [], [], [], {}, False
+    for ln in (r["out"] or "").splitlines():
+        s = ln.strip()
+        if s.startswith("{") and '"fileEntries"' in s:
+            try:
+                stats = json.loads(s)
+            except ValueError:
+                pass
+            continue
+        m = _KP_DIFF_ADD.match(s)
+        if m:
+            if len(added) < cap:
+                added.append({"path": m.group(2), "kind": m.group(1)})
+            else:
+                more = True
+            continue
+        m = _KP_DIFF_DEL.match(s)
+        if m:
+            if len(removed) < cap:
+                removed.append({"path": m.group(2), "kind": m.group(1)})
+            else:
+                more = True
+            continue
+        m = _KP_DIFF_CHG.match(s)
+        if m:
+            if len(changed) < cap:
+                changed.append({"path": m.group(1), "from": int(m.group(2)),
+                                "to": int(m.group(3))})
+            else:
+                more = True
+    fe = (stats.get("fileEntries") or {}) if isinstance(stats, dict) else {}
+    return {"ok": True, "added": added, "removed": removed, "changed": changed,
+            "more": more, "totals": {"added": int(fe.get("added") or 0),
+                                     "removed": int(fe.get("removed") or 0),
+                                     "modified": int(fe.get("modified") or 0)}}
+
+def kp_snap_sources(destid):
+    """Distinct snapshot sources (user@host:/path) of one repository with counts —
+    the picker for «move snapshot history» needs exactly this."""
+    cfg = kp_load()
+    dest = _kp_find(cfg["dests"], str(destid or ""))
+    if not dest:
+        return {"ok": False, "log": "no such destination"}
+    c = _kp_ensure_connected(dest)
+    if not c["ok"]:
+        return c
+    r = _kp(destid, ["snapshot", "list", "--all", "--json"], timeout=180)
+    if not r["ok"]:
+        return {"ok": False, "log": _kp_err_tail(r)}
+    try:
+        raw = json.loads(r["out"] or "[]")
+    except ValueError:
+        return {"ok": False, "log": "bad snapshot list"}
+    seen = {}
+    for s in (raw if isinstance(raw, list) else []):
+        src = s.get("source") or {}
+        spec = "%s@%s:%s" % (src.get("userName") or "", src.get("host") or "",
+                             src.get("path") or "")
+        e = seen.setdefault(spec, {"spec": spec, "path": src.get("path") or "",
+                                   "user": src.get("userName") or "",
+                                   "host": src.get("host") or "", "count": 0,
+                                   "exists": False})
+        e["count"] += 1
+    for e in seen.values():
+        e["exists"] = os.path.isdir(e["path"])
+    return {"ok": True, "sources": sorted(seen.values(), key=lambda x: x["spec"])}
+
+def kp_move_history(destid, src_spec, new_path, copy=False):
+    """Re-point the snapshot history of a source path onto another path, so a folder
+    that MOVED (a disk remounted elsewhere, a rename) keeps its history instead of
+    starting a second, unrelated timeline. `copy` keeps the old entries as well."""
+    cfg = kp_load()
+    dest = _kp_find(cfg["dests"], str(destid or ""))
+    if not dest:
+        return {"ok": False, "log": "no such destination"}
+    src_spec = str(src_spec or "").strip()
+    new_path = str(new_path or "").strip()
+    if not re.match(r"^[^\s:@/]*@[^\s:@/]+:/[^\n\r\0]*$", src_spec):
+        return {"ok": False, "log": "pick the history to move"}
+    if not new_path.startswith("/") or any(c in new_path for c in "\n\r\0") or ".." in new_path:
+        return {"ok": False, "log": "the new path must be absolute"}
+    if _kp_dest_busy(destid, cfg):
+        return {"ok": False, "log": "destination is busy (run or maintenance in progress)"}
+    user_host = src_spec.split(":", 1)[0]
+    dst_spec = "%s:%s" % (user_host, new_path.rstrip("/") or "/")
+    if dst_spec == src_spec:
+        return {"ok": False, "log": "that is the same path"}
+    c = _kp_ensure_connected(dest)
+    if not c["ok"]:
+        return c
+    r = _kp(destid, ["snapshot", ("copy-history" if copy else "move-history"),
+                     src_spec, dst_spec], timeout=600)
+    # kopia narrates the move on STDERR — counting only stdout reported 0 moved
+    txt = (r["out"] or "") + (r["err"] or "")
+    return {"ok": r["ok"], "log": ("" if r["ok"] else _kp_err_tail(r)),
+            "moved": txt.count("moving ") + txt.count("copying "),
+            "to": dst_spec}
+
+def kp_policy_export(destid):
+    """Read back the policies as kopia itself stores them — the honest answer to
+    «what rules is this repository actually applying», independent of our config."""
+    cfg = kp_load()
+    dest = _kp_find(cfg["dests"], str(destid or ""))
+    if not dest:
+        return {"ok": False, "log": "no such destination"}
+    c = _kp_ensure_connected(dest)
+    if not c["ok"]:
+        return c
+    r = _kp(destid, ["policy", "export"], timeout=180)
+    if not r["ok"]:
+        return {"ok": False, "log": _kp_err_tail(r)}
+    try:
+        txt = json.dumps(json.loads(r["out"] or "{}"), indent=2, sort_keys=True)
+    except ValueError:
+        txt = (r["out"] or "")[:200000]
+    return {"ok": True, "text": txt[:200000]}
+
 # ---- restore (transient unit, one at a time, pty progress) ----
 KP_RESTORE_STATE  = os.path.join(NAS_CONFIG, "kopia-restore.json")
 KP_RESTORE_LOG    = os.path.join(NAS_CONFIG, "kopia-restore.log")
@@ -11336,12 +11750,12 @@ def _kp_obj_ok(arg):
     except ValueError:
         return False
 
-def kp_restore_start(destid, oid, target, rel="", name=""):
+def kp_restore_start(destid, oid, target, rel="", name="", overwrite=False):
     """Restore ONE snapshot subtree (by object id, optionally plus a path inside it)
     into a local folder — a thin wrapper over the multi-item runner, which does all
     the validation. Copy-only: the repository is never written."""
     return kp_restore_jobs(destid, [{"oid": oid, "rel": rel,
-                                     "target": target, "name": name}])
+                                     "target": target, "name": name}], overwrite)
 
 def _kp_restore_job(j):
     """Validate one restore item {oid,rel,target,name} → {arg,target,label}. Raises."""
@@ -11360,9 +11774,11 @@ def _kp_restore_job(j):
     os.makedirs(parent, exist_ok=True)
     return {"arg": arg, "target": final, "label": leaf or os.path.basename(final) or final}
 
-def kp_restore_jobs(destid, items):
+def kp_restore_jobs(destid, items, overwrite=False):
     """Restore one OR MANY objects (multi-select) in a single transient unit, each into
-    its own target. Copy-only; the repository is never written."""
+    its own target. Copy-only; the repository is never written. `overwrite` replaces
+    files that already exist on the target — the deliberate choice when restoring
+    OVER something broken; the default keeps existing files untouched."""
     cfg = kp_load()
     dest = _kp_find(cfg["dests"], str(destid or ""))
     if not dest:
@@ -11389,6 +11805,7 @@ def kp_restore_jobs(destid, items):
         _json_save(KP_RESTORE_STATE, {"running": True, "started": int(time.time()),
                                       "dest": destid, "jobs": jobs, "total": len(jobs),
                                       "idx": 0, "pct": 0, "result": None,
+                                      "overwrite": bool(overwrite),
                                       "target": jobs[0]["target"] if len(jobs) == 1
                                       else "%d items" % len(jobs)})
         return _kp_restore_spawn(destid)
@@ -11475,9 +11892,11 @@ def _kp_restore_cli(destid):
                 cur=("%d/%d  %s" % (i + 1, total, label)) if total > 1 else label)
             w("restoring %s → %s" % (arg, target))
             master, slave = pty.openpty()
+            ow = ["--overwrite-files", "--overwrite-directories", "--overwrite-symlinks"] \
+                if st.get("overwrite") else ["--skip-existing"]
             proc = subprocess.Popen([_kopia_bin(), "--config-file", _kp_cfg_file(destid),
                                      "--log-dir", os.path.join(_kp_cache_dir(destid), "logs"),
-                                     "restore", arg, target, "--skip-existing"],
+                                     "restore", arg, target] + ow,
                                     stdout=slave, stderr=slave, env=_kp_env(), close_fds=True)
             os.close(slave)
             buf, stopped = b"", False
@@ -11618,59 +12037,128 @@ def _kp_dest_busy(destid, cfg=None):
     for b in cfg["backups"]:
         if destid in (b.get("dest"), b.get("dest2")) and kp_run_state(b["id"]).get("running"):
             return True
-    for u in ("nas-kopia-maint-%s" % destid, "nas-kopia-vfy-%s" % destid):
-        if _systemd_active(u + ".service"):
+    # estimate only reads local files — it does not write to the repo and never blocks
+    for k in ("maint", "verify", "fix", "val"):
+        if _systemd_active("nas-kopia-%s-%s.service" % (KP_BG_KINDS[k], destid)):
             return True
     return False
 
 def _kp_bg_state_file(kind, destid):
     return os.path.join(NAS_CONFIG, "kopia-%s-%s.json" % (kind, destid))
 
+# background repo jobs, each in its own transient unit: housekeeping, verification,
+# size estimate, repair of invalid files, storage validation
+KP_BG_KINDS = {"maint": "maint", "verify": "vfy", "est": "est", "fix": "fix", "val": "val"}
+
+def _kp_bg_unit(kind, destid):
+    return "nas-kopia-%s-%s" % (KP_BG_KINDS.get(kind, kind), destid)
+
 def kp_bg_state(kind, destid):
     st = _json_load_strict(_kp_bg_state_file(kind, destid), {})
-    unit = "nas-kopia-%s-%s" % ("maint" if kind == "maint" else "vfy", destid)
     if st.get("running") and time.time() - (st.get("started") or 0) > 15 \
-            and not _systemd_active(unit + ".service"):
+            and not _systemd_active(_kp_bg_unit(kind, destid) + ".service"):
         st["running"] = False
         st["result"] = st.get("result") or "aborted"
     return st
 
-def _kp_bg_start(kind, destid):
-    """Long repo housekeeping (maintenance / percent-verify) in its own transient
-    unit — never inline in the monitor thread."""
-    unit = "nas-kopia-%s-%s" % ("maint" if kind == "maint" else "vfy", destid)
-    cmd = ["systemd-run", "--collect", "--quiet", "--unit", unit,
+def _kp_bg_start(kind, destid, arg=""):
+    """Long repo work (maintenance / percent-verify / estimate / repair / validate)
+    in its own transient unit — never inline in the monitor thread."""
+    cmd = ["systemd-run", "--collect", "--quiet", "--unit", _kp_bg_unit(kind, destid),
            "--setenv=SUDO_USER=" + TARGET_USER, "--setenv=HOME=" + HOME,
-           "--setenv=KPB_KIND", "--setenv=KPB_DEST",
+           "--setenv=KPB_KIND", "--setenv=KPB_DEST", "--setenv=KPB_ARG",
            sys.executable, os.path.join(HERE, "nas-web.py"), "kopia-bg"]
     try:
-        r = subprocess.run(cmd, env=dict(os.environ, KPB_KIND=kind, KPB_DEST=destid),
+        r = subprocess.run(cmd, env=dict(os.environ, KPB_KIND=kind, KPB_DEST=destid,
+                                         KPB_ARG=str(arg or "")),
                            capture_output=True, text=True, timeout=15)
         return r.returncode == 0
     except (OSError, subprocess.SubprocessError):
         return False
 
-def _kp_bg_cli(kind, destid):
-    """Driver: repository maintenance (weekly) or 1% file verification (monthly)."""
-    if kind not in ("maint", "verify") or not _KP_ID_RE.match(str(destid or "")):
+_KP_EST_FILES = re.compile(r"Snapshot includes ([\d,]+) file\(s\), total size (.+)$")
+_KP_EST_EXCL  = re.compile(r"Snapshot excludes ([\d,]+) (file|director)")
+
+def _kp_estimate(destid, bk, src):
+    """`snapshot estimate` per source folder — answers «how much is this going to
+    be» BEFORE the first run, which is otherwise a walk into the dark (and the
+    reason a healthy 20 GB first snapshot once looked like a hang)."""
+    files = size = ex_files = ex_dirs = 0
+    per, errs = [], []
+    for folder in (src.get("folders") or []):
+        if not os.path.isdir(folder):
+            errs.append("%s: not there" % folder)
+            continue
+        r = _kp(destid, ["snapshot", "estimate", folder], timeout=2 * 3600)
+        if not r["ok"]:
+            errs.append("%s: %s" % (folder, _kp_err_tail(r)))
+            continue
+        f = b = 0
+        for ln in (r["out"] or "").splitlines():
+            m = _KP_EST_FILES.search(ln.strip())
+            if m:
+                f = int(m.group(1).replace(",", ""))
+                b = _kp_human_bytes(m.group(2))
+                continue
+            m = _KP_EST_EXCL.search(ln.strip())
+            if m:
+                n = int(m.group(1).replace(",", ""))
+                if m.group(2) == "file":
+                    ex_files += n
+                else:
+                    ex_dirs += n
+        files += f
+        size += b
+        per.append({"folder": folder, "files": f, "bytes": b})
+    return {"files": files, "bytes": size, "excluded_files": ex_files,
+            "excluded_dirs": ex_dirs, "folders": per, "errors": errs,
+            "backup": bk.get("id") or "", "name": bk.get("name") or ""}
+
+def _kp_bg_cli(kind, destid, arg=""):
+    """Driver for every background repository job (see KP_BG_KINDS)."""
+    if kind not in KP_BG_KINDS or not _KP_ID_RE.match(str(destid or "")):
         return
     cfg = kp_load()
     dest = _kp_find(cfg["dests"], destid)
     if not dest:
         return
-    _json_save(_kp_bg_state_file(kind, destid), {"running": True, "started": int(time.time())})
+    _json_save(_kp_bg_state_file(kind, destid), {"running": True, "started": int(time.time()),
+                                                 "arg": str(arg or "")})
+    extra = {}
     c = _kp_ensure_connected(dest)
     if not c["ok"]:
         r = {"ok": False, "out": "", "err": c.get("log") or "connect failed"}
     elif kind == "maint":
         r = _kp(destid, ["maintenance", "run", "--full"], timeout=4 * 3600)
-    else:
+    elif kind == "verify":
         r = _kp(destid, ["snapshot", "verify", "--verify-files-percent=1"], timeout=12 * 3600)
+    elif kind == "est":
+        bk = _kp_find(cfg["backups"], str(arg or ""))
+        src = _kp_find(cfg["sources"], (bk or {}).get("source") or "") if bk else None
+        if not bk or not src:
+            r = {"ok": False, "out": "", "err": "no such backup"}
+        else:
+            extra["estimate"] = _kp_estimate(destid, bk, src)
+            r = {"ok": not (extra["estimate"]["errors"] and not extra["estimate"]["files"]),
+                 "out": "", "err": "; ".join(extra["estimate"]["errors"])[:400]}
+    elif kind == "fix":
+        # dry by default: kopia only rewrites manifests with --commit
+        a = ["snapshot", "fix", "invalid-files"]
+        if str(arg or "") == "commit":
+            a.append("--commit")
+        r = _kp(destid, a, timeout=6 * 3600)
+        # the scan narrates on stderr, the verdict («No changes.») on stdout — keep both
+        extra["text"] = "\n".join(((r["out"] or "") + (r["err"] or "")).splitlines()[-40:])
+        extra["committed"] = (str(arg or "") == "commit")
+    else:
+        r = _kp(destid, ["repository", "validate-provider"], timeout=2 * 3600)
+        extra["text"] = "\n".join(((r["out"] or "") + (r["err"] or "")).splitlines()[-40:])
     _json_save(_kp_bg_state_file(kind, destid),
-               {"running": False, "started": int(time.time()), "done": int(time.time()),
-                "result": "ok" if r["ok"] else "error",
-                "error": "" if r["ok"] else _kp_err_tail(r)})
-    if not r["ok"]:
+               dict(extra, running=False, started=int(time.time()), done=int(time.time()),
+                    arg=str(arg or ""),
+                    result=("ok" if r["ok"] else "error"),
+                    error=("" if r["ok"] else _kp_err_tail(r))))
+    if not r["ok"] and kind in ("maint", "verify"):
         try:
             notify_event("kp_maint", "kp_maint:%s:%s" % (kind, destid),
                          "Kopia: %s failed" % ("maintenance" if kind == "maint" else "verification"),
@@ -11980,6 +12468,7 @@ def _kp_snap_cli(bid):
                 "--log-dir", os.path.join(_kp_cache_dir(dst["id"]), "logs"),
                 "snapshot", "create"] + folders + \
                ["--json", "--progress", "--progress-update-interval=2s", "--tags", "nasbk:" + bid,
+                "--description", (bk.get("name") or bid)[:64],
                 "--parallel", str(kp_opts_get()["parallel"])]
         proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=slave,
                                 env=_kp_env(), close_fds=True)
@@ -21814,25 +22303,61 @@ class H(BaseHTTPRequestHandler):
                 self._json(kp_dest_stats(str(self._body().get("id") or "")))
             elif p == "/api/kopia/dest/delete":
                 self._json(kp_dest_forget(str(self._body().get("id") or "")))
-            elif p in ("/api/kopia/dest/maintenance", "/api/kopia/dest/verify"):
-                kind = "maint" if p.endswith("maintenance") else "verify"
-                did = str(self._body().get("id") or "")
+            elif p in ("/api/kopia/dest/maintenance", "/api/kopia/dest/verify",
+                       "/api/kopia/dest/validate", "/api/kopia/dest/fix",
+                       "/api/kopia/backup/estimate"):
+                b = self._body()
+                kind = {"maintenance": "maint", "verify": "verify", "validate": "val",
+                        "fix": "fix", "estimate": "est"}[p.rsplit("/", 1)[1]]
+                arg = ""
+                if kind == "est":
+                    bk = _kp_find(kp_load()["backups"], str(b.get("id") or ""))
+                    if not bk:
+                        self._json({"ok": False, "log": "no such backup"}); return
+                    arg, did = bk["id"], str(bk.get("dest") or "")
+                else:
+                    did = str(b.get("id") or "")
+                    if kind == "fix" and b.get("commit"):
+                        arg = "commit"
                 if not _KP_ID_RE.match(did) or not _kp_find(kp_load()["dests"], did):
                     self._json({"ok": False, "log": "no such destination"})
-                elif _kp_dest_busy(did):
+                elif kind != "est" and _kp_dest_busy(did):
                     self._json({"ok": False, "log": "destination is busy"})
                 elif kp_bg_state(kind, did).get("running"):
                     self._json({"ok": False, "log": "already running"})
                 else:
-                    self._json({"ok": _kp_bg_start(kind, did)})
+                    self._json({"ok": _kp_bg_start(kind, did, arg), "dest": did})
+            elif p == "/api/kopia/snap/pin":
+                b = self._body()
+                self._json(kp_snap_pin(str(b.get("d") or ""), b.get("id", ""),
+                                       bool(b.get("on", True))))
+            elif p == "/api/kopia/snap/diff":
+                b = self._body()
+                self._json(kp_snap_diff(str(b.get("d") or ""), b.get("a", ""), b.get("b", "")))
+            elif p == "/api/kopia/dest/medium":
+                self._json(kp_dest_medium(str(self._body().get("id") or "")))
+            elif p == "/api/kopia/dest/policies":
+                self._json(kp_policy_export(str(self._body().get("id") or "")))
+            elif p == "/api/kopia/dest/throttle":
+                did = str(self._body().get("id") or "")
+                if not _KP_ID_RE.match(did) or not _kp_find(kp_load()["dests"], did):
+                    self._json({"ok": False, "log": "no such destination"})
+                else:
+                    self._json(kp_throttle_get(did))
+            elif p == "/api/kopia/dest/history":
+                b = self._body()
+                if b.get("list"):
+                    self._json(kp_snap_sources(str(b.get("id") or "")))
+                else:
+                    self._json(kp_move_history(str(b.get("id") or ""), b.get("src", ""),
+                                              b.get("path", ""), bool(b.get("copy"))))
             elif p == "/api/kopia/dest/bg-status":
                 b = self._body()
                 did = str(b.get("id") or "")
                 if not _KP_ID_RE.match(did):
                     self._json({"ok": False, "log": "bad id"})
                 else:
-                    self._json({"ok": True, "maint": kp_bg_state("maint", did),
-                                "verify": kp_bg_state("verify", did)})
+                    self._json(dict({k: kp_bg_state(k, did) for k in KP_BG_KINDS}, ok=True))
             elif p == "/api/kopia/backup/save":
                 self._json(kp_backup_save(self._body() or {}))
             elif p == "/api/kopia/backup/delete":
@@ -21854,12 +22379,13 @@ class H(BaseHTTPRequestHandler):
                 self._json(kp_snap_delete(str(b.get("d") or ""), b.get("id", "")))
             elif p == "/api/kopia/snap/restore/start":
                 b = self._body()
+                ow = bool(b.get("overwrite"))
                 if isinstance(b.get("items"), list):
-                    self._json(kp_restore_jobs(str(b.get("d") or ""), b["items"]))
+                    self._json(kp_restore_jobs(str(b.get("d") or ""), b["items"], ow))
                 else:
                     self._json(kp_restore_start(str(b.get("d") or ""), b.get("oid", ""),
                                                 b.get("target", ""), b.get("rel", ""),
-                                                b.get("name", "")))
+                                                b.get("name", ""), ow))
             elif p == "/api/kopia/snap/restore/cancel":
                 self._json(kp_restore_cancel())
             elif p == "/api/kopia/mount":
@@ -22050,7 +22576,8 @@ if __name__ == "__main__":
         # backup id arrives through the unit env (uniform with the other drivers)
         _kp_snap_cli(os.environ.get("KPS_BID", ""))
     elif len(sys.argv) > 1 and sys.argv[1] == "kopia-bg":
-        _kp_bg_cli(os.environ.get("KPB_KIND", ""), os.environ.get("KPB_DEST", ""))
+        _kp_bg_cli(os.environ.get("KPB_KIND", ""), os.environ.get("KPB_DEST", ""),
+                   os.environ.get("KPB_ARG", ""))
     elif len(sys.argv) > 1 and sys.argv[1] == "kopia-restore":
         _kp_restore_cli(os.environ.get("KPR2_DEST", ""))
     elif len(sys.argv) > 1 and sys.argv[1] == "rclone-restore":

@@ -1493,6 +1493,9 @@
   .kpx-tllab{flex:none;display:flex;align-items:center;gap:6px;font-size:9.5px;font-weight:700;
     letter-spacing:.06em;text-transform:uppercase;color:var(--win-dim,var(--dim))}
   .kpx-tllab svg{color:var(--win-accent,var(--accent))}
+  /* pinned restore point: the star stays lit, so «kept for ever» is visible at a glance */
+  .kpx-tlbar .iconbtn.on{color:var(--win-warn,var(--warn));background:color-mix(in srgb,var(--win-warn,var(--warn)) 16%,transparent)}
+  .kpx-tick.pinned>i{box-shadow:0 0 0 2px color-mix(in srgb,var(--win-warn,var(--warn)) 70%,transparent)}
   .kpx-track{flex:1;min-width:0;overflow-x:auto;overflow-y:hidden;padding:3px 0;
     border-radius:9px;background:color-mix(in srgb,var(--win-line,var(--line)) 22%,transparent)}
   .kpx-inner{display:flex;align-items:flex-start;position:relative;padding:2px 8px;width:max-content;min-width:100%}
@@ -8688,6 +8691,7 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
   mb.onclick=ev=>showMenu(ev.clientX,ev.clientY,[
    {label:"Rename…",ic:svg("edit",16),act:()=>kpAskName("Backup name",b.name||"",nm=>
     kP("/api/kopia/backup/save",Object.assign({},b,{name:nm})).then(refresh))},
+   {label:"Estimate size…",ic:svg("gauge",16),act:()=>kpEstDlg(b)},
    {sep:1},
    {label:"Delete backup",ic:svg("trash",16),dng:1,act:()=>confirmDlg("Delete backup?",
    `«${esc(b.name||b.id)}» — the backup card and its run history are removed; sources, destinations and all snapshots stay.`,
@@ -8767,6 +8771,8 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
    <div class="kp-sec"><h4>${svg("folder",13)} Data — what goes where</h4>${secSource(draft)}${secDest(draft)}${secSpare(draft)}</div>
    <div class="kp-sec"><h4>${svg("archive",13)} History — how much to keep</h4>${secRetention(draft)}</div>
    <div class="kp-sec"><h4>${svg("refresh",13)} Schedule</h4>${secSchedule(draft)}</div>
+   <div class="kp-sec"><h4>${svg("term",13)} Before &amp; after — run a command</h4>${secHooks(draft)}</div>
+   <div class="kp-sec"><h4>${svg("eye",13)} What gets read</h4>${secRules(draft)}</div>
    <div class="kp-sec"><h4>${svg("note",13)} Notes</h4>
    <p class="kp-help">Your own words about this backup — why it exists, what to check first, anything future-you will want. Shown on the backup card.</p>
    <textarea id="kDesc" rows="3" style="resize:vertical;min-height:64px" placeholder="e.g. Docker volumes from the Ugreen NAS. Restore paperless first — its database dump lives in dumps/daily.">${esc(draft.description||"")}</textarea></div>
@@ -8782,7 +8788,8 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
    if(g("#kDesc"))draft.description=g("#kDesc").value;
    if(g("#kNok"))draft.notify_ok=g("#kNok").checked;
    if(g("#kNerr"))draft.notify_err=g("#kNerr").checked;
-   if(g("#kEn"))draft.enabled=g("#kEn").checked;};
+   if(g("#kEn"))draft.enabled=g("#kEn").checked;
+   readHooks(box,draft);readRules(box,draft);};
   wireSecs(box,draft,()=>{readRet(box,draft);readSched(box,draft);readFlags();draw();});
   box.querySelector("#kSave").onclick=async()=>{
    readFlags();readRet(box,draft);readSched(box,draft);
@@ -8857,6 +8864,42 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
     <select id="kSchD" style="width:108px;${s.mode==="weekly"?"":"display:none"}">${DOWS.map((w,i)=>`<option value="${i}"${(+s.dow||0)===i?" selected":""}>${w}</option>`).join("")}</select></div></div>
    <div class="srow"><div class="srow-l"><div class="srow-t">Run when the disk is plugged in</div><div class="srow-d">For a removable destination: plug the backup disk in and this backup starts by itself — handy for an off-site drive you rotate.</div></div>
     <div class="srow-c"><label class="tgl"><input type="checkbox" id="kUsb"${d.usb_trigger?" checked":""}><span class="sl"></span></label></div></div>`;};
+ /* Commands around the snapshot. This is the correct way to back up a live database:
+    dump it in «before» so the snapshot picks up the dump, not half-written db files.
+    Kopia does not use a shell for actions, so the panel stores each command as a
+    root-only script and hands kopia the path — pipelines and redirects work. */
+ const secHooks=d=>{const h=d.hooks||{};
+  return`<div class="field" style="margin-bottom:8px"><label>Before the snapshot</label>
+   <p class="kp-help">Runs on this NAS, as <b>root</b>, in a shell — pipes and redirects are fine. The snapshot waits for it to finish. This is where a database dump belongs: copying live database files gives a torn, unrestorable snapshot.</p>
+   <textarea id="kHb" rows="2" style="resize:vertical;min-height:52px" placeholder="docker exec paperless-db pg_dumpall -U paperless | gzip > /mnt/storage/dumps/paperless.sql.gz">${esc(h.before||"")}</textarea></div>
+   <div class="field" style="margin-bottom:8px"><label>After the snapshot</label>
+   <p class="kp-help">Clean-up: remove the dump, start the container back up, ping something.</p>
+   <textarea id="kHa" rows="2" style="resize:vertical;min-height:52px" placeholder="rm -f /mnt/storage/dumps/paperless.sql.gz">${esc(h.after||"")}</textarea></div>
+   <div class="srow"><div class="srow-l"><div class="srow-t">If the command fails</div><div class="srow-d">«Stop the backup» is right for a dump you can't do without — a snapshot taken anyway would look fine and be useless. «Carry on» only notes it in the log.</div></div>
+    <div class="srow-c"><div class="seg" id="kHm"><button data-v="essential"${h.mode==="essential"?' class="on"':""}>Stop the backup</button><button data-v="optional"${h.mode!=="essential"?' class="on"':""}>Carry on</button></div></div></div>
+   <div class="srow"><div class="srow-l"><div class="srow-t">Give up after</div><div class="srow-d">A hung command must not hold the backup for ever.</div></div>
+    <div class="srow-c"><input id="kHt" type="number" min="10" max="21600" class="mono" style="width:80px" value="${+(h.timeout||600)}"><span style="font-size:11.5px;color:var(--win-dim,var(--dim))">seconds</span></div></div>`;};
+ const readHooks=(root,d)=>{const q=s=>root.querySelector(s);if(!q("#kHb"))return;
+  const m=q("#kHm .on");
+  d.hooks={before:q("#kHb").value,after:q("#kHa").value,
+   mode:m?m.dataset.v:"optional",timeout:+(q("#kHt")||{}).value||600};};
+ /* How the walk reads files: the defaults are safe, each switch answers a real
+    failure — a nested mount pulled in, a cache folder backed up, one unreadable
+    file failing the whole run. */
+ const secRules=d=>{const r=d.rules||{};
+  const row=(id,t,desc,on)=>`<div class="srow"><div class="srow-l"><div class="srow-t">${t}</div><div class="srow-d">${desc}</div></div>
+    <div class="srow-c"><label class="tgl"><input type="checkbox" id="${id}"${on?" checked":""}><span class="sl"></span></label></div></div>`;
+  return`<p class="kp-help">Leave these alone unless a run tells you otherwise — the defaults are the safe choice.</p>
+   ${row("kRu_fs","Stay on one filesystem","Don't follow into anything mounted inside a source folder — a USB disk, a network share or another pool branch would otherwise be dragged into this backup.",r.one_fs)}
+   ${row("kRu_cd","Skip cache folders","Honour <span class=\"mono\">CACHEDIR.TAG</span>, the marker programs put in throwaway caches.",r.ignore_cache_dirs!==false)}
+   ${row("kRu_fe","Ignore unreadable files","A file that can't be read is logged and skipped instead of failing the run. Convenient — but a backup «succeeds» while silently missing data, so keep it off unless a run keeps tripping on one file.",r.ignore_file_errors)}
+   ${row("kRu_de","Ignore unreadable folders","Same for a whole folder — a broken mountpoint, say.",r.ignore_dir_errors)}
+   <div class="srow"><div class="srow-l"><div class="srow-t">Skip files larger than</div><div class="srow-d">Keeps an accidental 200 GB disk image out of the repository. 0 = no limit.</div></div>
+    <div class="srow-c"><input id="kRu_mx" type="number" min="0" class="mono" style="width:90px" value="${+(r.max_file_mb||0)}"><span style="font-size:11.5px;color:var(--win-dim,var(--dim))">MB</span></div></div>`;};
+ const readRules=(root,d)=>{const q=s=>root.querySelector(s);if(!q("#kRu_fs"))return;
+  d.rules={one_fs:q("#kRu_fs").checked,ignore_cache_dirs:q("#kRu_cd").checked,
+   ignore_file_errors:q("#kRu_fe").checked,ignore_dir_errors:q("#kRu_de").checked,
+   max_file_mb:+(q("#kRu_mx")||{}).value||0};};
  const retPreview=root=>{const el=root.querySelector("#kRetPrev");if(!el)return;
   const g=k=>+((root.querySelector("#kRet_"+k)||{}).value||0);
   el.textContent=`≈ ${g("latest")+g("daily")+g("weekly")+g("monthly")+g("annual")} restore points once history builds up`;};
@@ -8897,6 +8940,8 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
    const off=b.dataset.v==="off";
    const dsel=q("#kSchD");if(dsel)dsel.style.display=b.dataset.v==="weekly"?"":"none";
    const t=q("#kSchT"),at=q("#kSchAt");if(t)t.style.display=off?"none":"";if(at)at.style.display=off?"none":"";});
+  if(q("#kHm"))q("#kHm").querySelectorAll("button").forEach(b=>b.onclick=()=>
+   q("#kHm").querySelectorAll("button").forEach(x=>x.classList.toggle("on",x===b)));
   retPreview(root);}
 
  /* ---------- wizard ---------- */
@@ -9034,6 +9079,7 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
        <button class="btn sm" data-mnt="${att(x.id)}" title="${x.mounted?"Unmount from /mnt/kopia":"Mount read-only so you can open it in Files"}">${x.mounted?`${svg("eject",13)} Unmount`:`${svg("hdd",13)} Mount`}</button>`:""}
        <button class="iconbtn" data-maint="${att(x.id)}" title="Run maintenance now — compact and clean the repository">${svg("wand",15)}</button>
        <button class="iconbtn" data-cache="${att(x.id)}" title="Clear the local cache (rebuilds on next use)">${svg("eraser",15)}</button>
+       <button class="iconbtn" data-more="${att(x.id)}" title="More — check the storage, repair, move history, policies">${svg("cog",15)}</button>
        <button class="iconbtn ${idle?"dng":""}" data-rm="${att(x.id)}" title="${idle?"Remove this destination from the panel (repository data is kept)":"In use by "+att(used.join(", "))+" — can't remove"}"${idle?"":" disabled"}>${svg("trash",15)}</button></div></div>
     </div>`;};
   const on=list.filter(x=>usedBy("dst",x.id).length), off=list.filter(x=>!usedBy("dst",x.id).length);
@@ -9054,10 +9100,18 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
    const r=await kP("/api/kopia/dest/stats",{id});
    if(!(r&&r.ok)){stat(id,`<span style="color:var(--win-good,var(--good))">✓ reachable</span>`);return;}
    const dedup=r.data_bytes&&r.stored_bytes?Math.max(1,r.data_bytes/r.stored_bytes):0;
+   const mi=r.maint||{};
    stat(id,`<div style="color:var(--win-good,var(--good));font-weight:600;font-size:13px">${r.snapshots||0} snapshot${(r.snapshots||0)===1?"":"s"}</div>`
     +(r.stored_bytes?`<div style="margin-top:3px">${fmtB(r.data_bytes||0)} of data in <b>${fmtB(r.stored_bytes)}</b>${dedup>1.05?` · ${dedup.toFixed(1)}× dedup`:""}</div>`:"")
-    +`<div style="margin-top:3px"><span class="kp-quiet" data-check="${att(id)}">refresh</span></div>`);
-   const rf=tc.querySelector(`[data-d="${id}"] [data-check]`);if(rf)rf.onclick=()=>runCheck(id);};
+    +(mi.full_next?`<div style="margin-top:3px" title="Kopia compacts and cleans the repository on its own schedule; the panel also runs a full pass weekly.">housekeeping: ${mi.full_on===false?"paused":"next "+esc(String(mi.full_next).split(" (")[0])}</div>`:"")
+    +`<div style="margin-top:3px"><span class="kp-quiet" data-check="${att(id)}">refresh</span> · <span class="kp-quiet" data-medium="${att(id)}" title="Lists every object — slow on a cloud repository">measure space used</span></div>`);
+   const box=tc.querySelector(`[data-d="${id}"]`);
+   const rf=box&&box.querySelector("[data-check]");if(rf)rf.onclick=()=>runCheck(id);
+   const md=box&&box.querySelector("[data-medium]");
+   if(md)md.onclick=async()=>{md.textContent="measuring…";
+    const m=await kP("/api/kopia/dest/medium",{id});
+    md.outerHTML=m&&m.ok?`<span title="Approximate — kopia reports this figure rounded">${fmtB(m.bytes)} in ${m.blobs} objects on the medium</span>`
+     :`<span style="color:var(--win-danger,var(--danger))">${esc((m&&m.log)||"failed")}</span>`;};};
   tc.querySelectorAll("[data-check]").forEach(b=>b.onclick=()=>runCheck(b.dataset.check));
   tc.querySelectorAll("[data-use]").forEach(b=>b.onclick=ev=>{ev.stopPropagation();kpNewWiz({dest:b.dataset.use});});
   tc.querySelectorAll("[data-browse]").forEach(b=>b.onclick=()=>{snapDest=b.dataset.browse;snapBk="";tab="snaps";syncNav();paint();});
@@ -9073,9 +9127,117 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
    const r=await kP("/api/kopia/dest/cache",{id});
    confirmDlg("Clear cache?",`${r&&r.ok?fmtB(r.bytes):"?"} of local cache for «${esc(x&&x.name||id)}» — kopia rebuilds it on next use (slower first run).`,
     async()=>{const r2=await kP("/api/kopia/dest/cache",{id,clear:true});stat(id,r2&&r2.ok?"cache cleared":"failed");});});
+  tc.querySelectorAll("[data-more]").forEach(b=>b.onclick=ev=>{const id=b.dataset.more,x=list.find(v=>v.id===id);
+   showMenu(ev.clientX,ev.clientY,[
+    {label:"Check the storage…",ic:svg("shield",16),act:()=>kpValDlg(x)},
+    {label:"Repair invalid files…",ic:svg("wand",16),act:()=>kpFixDlg(x)},
+    {label:"Move snapshot history…",ic:svg("sync",16),act:()=>kpHistDlg(x)},
+    {label:"Show the rules kopia applies…",ic:svg("logs",16),act:()=>kpPolDlg(x)}]);});
   tc.querySelectorAll("[data-rm]").forEach(b=>b.onclick=()=>{if(b.disabled)return;const id=b.dataset.rm;
    confirmDlg("Remove destination?","The repository DATA stays on the medium — only the panel's card is removed. You can «Connect existing» later.",
     async()=>{const r=await kP("/api/kopia/dest/delete",{id});if(!(r&&r.ok))toast((r&&r.log)||"failed");await refresh();},1);});}
+
+ /* ---------- background repository jobs with a live result (validate / repair / estimate) ----
+    All three run in their own transient unit, so the dialog only polls the state file and can
+    be closed and reopened without losing the job. */
+ function kpBgDlg(o){const s=document.getElementById("scrim");let timer=null,closed=false;
+  s.innerHTML=`<div class="dialog" style="width:min(560px,94vw)"><h3>${svg(o.ic,16)} ${esc(o.title)}</h3>
+   <p style="margin:2px 0 12px;font-size:12px;color:var(--win-dim,var(--dim))">${o.intro}</p>
+   <div id="kbgBody"></div>
+   <div class="r"><span id="kbgS" style="flex:1;text-align:left;font-size:12px;color:var(--win-dim,var(--dim))"></span>
+    <button class="btn" id="kbgX">Close</button><button class="btn pri" id="kbgGo">${esc(o.go)}</button></div></div>`;
+  s.classList.add("show");
+  const stop=()=>{closed=true;if(timer)clearTimeout(timer);};
+  s.querySelector("#kbgX").onclick=()=>{stop();s.classList.remove("show");};
+  const body=s.querySelector("#kbgBody"),note=s.querySelector("#kbgS"),go=s.querySelector("#kbgGo");
+  const show=st=>{if(closed)return;
+   go.disabled=!!st.running;
+   note.textContent=st.running?"running…":"";
+   body.innerHTML=st.running?`<div class="bar" style="margin:4px 0 8px"><i class="pg" style="width:35%"></i></div><div class="kp-help">This runs in the background — you can close the dialog and come back.</div>`
+    :(st.result?o.render(st):`<div class="kp-help">${o.idle||""}</div>`);
+   o.wire&&o.wire(body,st);};
+  const poll=async()=>{if(closed)return;
+   const r=await kP("/api/kopia/dest/bg-status",{id:o.dest});
+   const st=(r&&r[o.kind])||{};show(st);
+   if(st.running)timer=setTimeout(poll,2000);};
+  go.onclick=async()=>{go.disabled=true;note.textContent="starting…";
+   const r=await kP(o.start,o.payload||{id:o.dest});
+   if(!(r&&r.ok)){go.disabled=false;note.textContent=(r&&r.log)||"failed";return;}
+   poll();};
+  poll();}
+ /* «How big is this going to be» BEFORE the first run — a first snapshot of 20 GB into the
+    cloud otherwise looks like a hang for half an hour. */
+ function kpEstDlg(b){kpBgDlg({dest:b.dest,kind:"est",ic:"gauge",title:"Estimate — "+(b.name||b.id),
+  go:"Estimate now",start:"/api/kopia/backup/estimate",payload:{id:b.id},
+  intro:"Walks the source folders and counts what a snapshot would take in, honouring this backup's exclusions. It only reads — nothing is written to the repository.",
+  idle:"Useful before the first run, and after adding folders.",
+  render:st=>{const e=st.estimate||{};
+   return`<div class="kp-flow" style="margin-bottom:10px">
+     <div class="kp-seg"><b>${(e.files||0).toLocaleString(LOC)}</b><span>FILES</span></div>
+     <div class="kp-seg"><b>${fmtB(e.bytes||0)}</b><span>TOTAL SIZE</span></div>
+     <div class="kp-seg"><b>${(e.excluded_files||0).toLocaleString(LOC)}</b><span>EXCLUDED</span></div></div>
+    ${(e.folders||[]).map(f=>`<div class="srow"><div class="srow-l"><div class="srow-t mono" style="font-size:11.5px;text-transform:none;letter-spacing:0">${esc(f.folder)}</div></div>
+      <div class="srow-c mono" style="font-size:12px">${(f.files||0).toLocaleString(LOC)} files · ${fmtB(f.bytes||0)}</div></div>`).join("")}
+    ${(e.errors||[]).length?`<div class="kp-note err" style="margin-top:8px">${esc(e.errors.join(" · "))}</div>`:""}
+    <div class="kp-help" style="margin-top:8px">Sizes are what the SOURCE holds. What lands in the repository is usually less — kopia deduplicates and compresses${b.compression===false?" (compression is off for this backup)":""}, and unchanged files are not sent again on later runs.</div>`;}});}
+ const kpTail=t=>t?`<div class="kp-tail" style="max-height:30vh;overflow:auto;white-space:pre-wrap">${esc(t)}</div>`:"";
+ const kpVerd=(st,okTxt)=>st.result==="ok"?`<div class="kp-note"><b style="color:var(--win-good,var(--good))">${okTxt}</b></div>`
+  :`<div class="kp-note err"><b>Failed:</b> ${esc(st.error||"see the output below")}</div>`;
+ function kpValDlg(x){kpBgDlg({dest:x.id,kind:"val",ic:"shield",title:"Check the storage — "+x.name,
+  go:"Run the check",start:"/api/kopia/dest/validate",
+  intro:"Writes test objects, reads them back and runs a short concurrency test — it proves the medium (or the rclone remote) behaves the way kopia needs. Existing data is not touched. Takes about a minute.",
+  idle:"Worth running when a repository lives behind something unusual — the rclone backend, a network share, a new USB bridge.",
+  render:st=>kpVerd(st,"All good — this storage behaves correctly.")+kpTail(st.text)});}
+ function kpFixDlg(x){let commit=false;
+  kpBgDlg({dest:x.id,kind:"fix",ic:"wand",title:"Repair invalid files — "+x.name,
+   go:"Look for damage",start:"/api/kopia/dest/fix",payload:{id:x.id},
+   intro:"Scans the snapshot manifests for entries that no longer read back — the follow-up to a verification that found damage. The first pass only LOOKS; nothing is written until you ask for it.",
+   idle:"A healthy repository reports «No changes.»",
+   render:st=>kpVerd(st,st.committed?"Repaired — the damaged entries were replaced with placeholders.":"Scan finished.")
+    +kpTail(st.text)
+    +(st.result==="ok"&&!st.committed&&!/No changes/.test(st.text||"")?`<div class="kp-help" style="margin-top:8px">Damage was found. Repairing replaces the unreadable entries with placeholders so the rest of the snapshot stays usable — the files themselves cannot come back.</div><div class="r" style="margin-top:6px"><button class="btn dng" id="kfixGo">Repair for real</button></div>`:""),
+   wire:(body)=>{const b=body.querySelector("#kfixGo");
+    if(b)b.onclick=async()=>{b.disabled=true;
+     const r=await kP("/api/kopia/dest/fix",{id:x.id,commit:true});
+     if(!(r&&r.ok)){toast((r&&r.log)||"failed");b.disabled=false;}};}});}
+ function kpPolDlg(x){const s=document.getElementById("scrim");
+  s.innerHTML=`<div class="dialog" style="width:min(700px,94vw)"><h3>${svg("logs",16)} Rules in ${esc(x.name)}</h3>
+   <p style="margin:2px 0 12px;font-size:12px;color:var(--win-dim,var(--dim))">What kopia itself has stored for this repository — retention, compression, exclusions and the before/after commands. The panel writes these from each backup's settings; this is the read-back.</p>
+   <div id="kpolB"><div class="set-load">reading…</div></div>
+   <div class="r"><button class="btn pri" id="kpolX">Close</button></div></div>`;
+  s.classList.add("show");
+  s.querySelector("#kpolX").onclick=()=>s.classList.remove("show");
+  kP("/api/kopia/dest/policies",{id:x.id}).then(r=>{const b=s.querySelector("#kpolB");if(!b)return;
+   b.innerHTML=(r&&r.ok)?kpTail(r.text):`<div class="kp-note err">${esc((r&&r.log)||"failed")}</div>`;});}
+ /* A folder that MOVED (disk remounted elsewhere, renamed share) otherwise starts a second,
+    unrelated timeline — this re-points the existing history at the new path. */
+ function kpHistDlg(x){const s=document.getElementById("scrim");let srcs=[],pick="";
+  const draw=()=>{s.innerHTML=`<div class="dialog" style="width:min(560px,94vw)"><h3>${svg("sync",16)} Move snapshot history</h3>
+    <p style="margin:2px 0 12px;font-size:12px;color:var(--win-dim,var(--dim))">If a source folder moved — a disk remounted somewhere else, a renamed share — kopia treats the new path as a brand-new source and its history starts from zero. Moving the history keeps one timeline.</p>
+    <div class="kp-eyebrow">History to move</div>
+    <div class="kp-well" style="margin-bottom:10px">${srcs.length?srcs.map(v=>`<button class="kp-witem" data-s="${att(v.spec)}" style="text-align:left;${v.spec===pick?"background:var(--sel)":""}">
+       <span style="flex:1;min-width:0"><span class="mono" style="font-size:11.5px">${esc(v.path)}</span>
+        <span style="color:var(--win-dim,var(--dim));font-size:11px"> · ${v.count} point${v.count>1?"s":""}${v.exists?"":" · folder is gone"}</span></span>
+       ${v.spec===pick?svg("check",14):""}</button>`).join("")
+      :`<div class="kp-help" style="padding:8px">This repository has no snapshots yet.</div>`}</div>
+    <div class="field"><label>New path on this NAS</label><input id="khNew" placeholder="/mnt/storage/photos" data-noenter></div>
+    <div class="kp-opt"><div><div class="ot">Keep the old entries too</div><div class="od">Copies the history instead of moving it — the old path keeps its snapshots as well.</div></div>
+     <label class="tgl"><input type="checkbox" id="khCopy"><span class="sl"></span></label></div>
+    <div class="r"><span id="khS" style="flex:1;text-align:left;font-size:12px;color:var(--win-dim,var(--dim))"></span>
+     <button class="btn" id="khX">Cancel</button><button class="btn pri" id="khO">Move history</button></div></div>`;
+   s.querySelectorAll("[data-s]").forEach(b=>b.onclick=()=>{pick=b.dataset.s;draw();});
+   s.querySelector("#khX").onclick=()=>s.classList.remove("show");
+   s.querySelector("#khO").onclick=async()=>{const np=(s.querySelector("#khNew").value||"").trim();
+    const st=s.querySelector("#khS");
+    if(!pick){st.textContent="pick the history to move";return;}
+    if(!np.startsWith("/")){st.textContent="the new path must start with /";return;}
+    st.textContent="moving…";
+    const r=await kP("/api/kopia/dest/history",{id:x.id,src:pick,path:np,copy:s.querySelector("#khCopy").checked});
+    if(!(r&&r.ok)){st.textContent=(r&&r.log)||"failed";return;}
+    toast(r.moved+" snapshot"+(r.moved===1?"":"s")+" now live under "+np);
+    s.classList.remove("show");EX=null;await refresh();};};
+  draw();s.classList.add("show");
+  kP("/api/kopia/dest/history",{id:x.id,list:1}).then(r=>{if(r&&r.ok){srcs=r.sources||[];if(srcs.length===1)pick=srcs[0].spec;draw();}});}
 
  /* ---------- Snapshots tab: the Backup Explorer ----------
     One repository at a time. Left: the folders this repo protects, with the tree of the
@@ -9150,6 +9312,46 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
    EX.path=g.path;EX.snap=g.list[g.list.length-1];}
   exPaintAll(tc);exLoad(tc);}
 
+ /* Re-read the list but stay where the user is: pinning REWRITES the manifest, so the
+    same point in time comes back under a new id — re-find it by timestamp. */
+ async function exReload(tc,ts){
+  const want=snapDest,rel=EX.rel,path=EX.path;
+  const r=await api("/api/kopia/snapshots?d="+encodeURIComponent(want));
+  if(!EX||snapDest!==want)return;
+  if(!(r&&r.ok)){EX.snaps=[];EX.err=(r&&r.log)||"could not read this repository";exPaintAll(tc);return;}
+  EX.err="";
+  EX.snaps=(r.snapshots||[]).filter(s=>s.root&&(!snapBk||s.backup===snapBk));
+  EX.path=path;EX.rel=rel;EX.kids={};
+  const g=exGroup();
+  EX.snap=g&&g.list.length?(g.list.find(s=>s.ts===ts)||g.list[g.list.length-1]):null;
+  if(!EX.snap){const ps=exPaths();if(ps.length){EX.path=ps[0].path;EX.snap=ps[0].list[ps[0].list.length-1];}}
+  exPaintAll(tc);exLoad(tc);}
+
+ /* What changed between two restore points (`kopia diff`) — the file-level answer to
+    «what do these files actually do», the same question Mirror's «What changed» asks. */
+ function kpDiffDlg(older,newer){const s=document.getElementById("scrim");
+  const sec=(t,cls,ic,rows,fmt)=>!rows.length?"":`<div class="kp-sec" style="margin-bottom:8px"><h4>${svg(ic,12)} ${t} — ${rows.length}${rows.length>=400?"+":""}</h4>
+    <div style="max-height:26vh;overflow:auto">${rows.map(x=>`<div class="mono" style="font-size:11.5px;padding:2px 0;border-bottom:1px solid var(--win-line,var(--line));word-break:break-all"><span style="color:var(--win-${cls},var(--${cls}))">${esc(x.path.replace(/^\.\//,""))}</span>${fmt?fmt(x):""}</div>`).join("")}</div></div>`;
+  s.innerHTML=`<div class="dialog" style="width:min(680px,94vw)"><h3>${svg("list",16)} What changed</h3>
+   <p style="margin:2px 0 12px;font-size:12px;color:var(--win-dim,var(--dim))">Between <b>${esc(dts(older.ts))}</b> and <b>${esc(dts(newer.ts))}</b> · <span class="mono">${esc(newer.path)}</span></p>
+   <div id="kdfBody"><div class="set-load">comparing…</div></div>
+   <div class="r"><button class="btn pri" id="kdfX">Close</button></div></div>`;
+  s.classList.add("show");
+  s.querySelector("#kdfX").onclick=()=>s.classList.remove("show");
+  kP("/api/kopia/snap/diff",{d:snapDest,a:older.root,b:newer.root}).then(r=>{
+   const box=s.querySelector("#kdfBody");if(!box)return;
+   if(!(r&&r.ok)){box.innerHTML=`<div class="kp-note err">${esc((r&&r.log)||"comparison failed")}</div>`;return;}
+   const t=r.totals||{},none=!r.added.length&&!r.removed.length&&!r.changed.length;
+   box.innerHTML=`<div class="kp-flow" style="margin-bottom:10px">
+     <div class="kp-seg"><b>${t.added||0}</b><span>ADDED</span></div>
+     <div class="kp-seg"><b>${t.modified||0}</b><span>CHANGED</span></div>
+     <div class="kp-seg"><b>${t.removed||0}</b><span>REMOVED</span></div></div>
+    ${none?`<div class="pf-empty">Nothing changed between these two points.</div>`:""}
+    ${sec("Added","good","plus",r.added)}
+    ${sec("Changed","warn","refresh",r.changed,x=>` <span style="color:var(--win-dim,var(--dim))">${fmtB(x.from)} → ${fmtB(x.to)}</span>`)}
+    ${sec("Removed","danger","trash",r.removed)}
+    ${r.more?`<div class="kp-help">Only the first 400 paths per group are listed.</div>`:""}`;});}
+
  /* one directory of the CURRENT restore point, cached (cache dies with the restore point) */
  async function exLs(rel,then){
   const key=rel||"",stamp=EX.snap.id;
@@ -9194,14 +9396,21 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
   if(list.length>1){const items=list.map(e=>{const it=exItemFor(e);
     return{oid:it.oid,rel:it.rel,name:it.dir?"":it.name,target:it.dir?it.orig:it.orig.split("/").slice(0,-1).join("/")};});
    confirmDlg("Put "+list.length+" items back?",
-    `<b>${list.length}</b> selected items are restored to their original places, as of <b>${esc(dts(EX.snap.ts))}</b>.<br>Copy-only: nothing already there is overwritten or deleted.`,
-    ()=>exStart(tc,{d:snapDest,items},"restoring "+list.length+" items…"));return;}
+    `<b>${list.length}</b> selected items are restored to their original places, as of <b>${esc(dts(EX.snap.ts))}</b>.${exOwHTML()}`,
+    ()=>exStart(tc,{d:snapDest,items,overwrite:exOwRead()},"restoring "+list.length+" items…"));return;}
   const t=exTarget();if(!t.oid)return;
   const into=t.dir?t.orig:t.orig.split("/").slice(0,-1).join("/");
   confirmDlg("Put it back where it came from?",
-   `${esc(t.label)} as of <b>${esc(dts(EX.snap.ts))}</b><br>→ <span class="mono">${esc(t.orig)}</span><br><br>
-    Copy-only: anything already there is left exactly as it is — nothing is overwritten or deleted.`,
-   ()=>exStart(tc,{d:snapDest,oid:t.oid,rel:t.rel,target:into,name:t.dir?"":t.name},"restoring…"));}
+   `${esc(t.label)} as of <b>${esc(dts(EX.snap.ts))}</b><br>→ <span class="mono">${esc(t.orig)}</span>${exOwHTML()}`,
+   ()=>exStart(tc,{d:snapDest,oid:t.oid,rel:t.rel,target:into,name:t.dir?"":t.name,
+    overwrite:exOwRead()},"restoring…"));}
+ /* Restores keep existing files by default — the safe answer when you are fishing one file
+    out of history. Restoring OVER something broken is the other, deliberate case. */
+ const exOwHTML=()=>`<br><br><label style="display:flex;gap:9px;align-items:flex-start;cursor:pointer">
+   <input type="checkbox" id="kxOw" style="margin-top:2px">
+   <span style="font-size:12px"><b>Replace files that are already there</b><br>
+    <span style="color:var(--win-dim,var(--dim))">Off: existing files are kept and only what is missing comes back. On: the version from this restore point wins — use it when what's on disk is damaged.</span></span></label>`;
+ const exOwRead=()=>!!(document.querySelector("#kxOw")||{}).checked;
  function exCopy(tc){const list=exSelList();
   if(list.length>1){pickFolder({overlay:true,start:"/media/nas",title:"Copy "+list.length+" items to…",
     note:"Copying "+list.length+" selected items as of "+dts(EX.snap.ts)+" into the folder you pick. Nothing there is deleted.",
@@ -9439,15 +9648,25 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
     const d=new Date(s.ts*1000),dk=d.toDateString();
     const lbl=dk!==lastD?d.toLocaleDateString(LOC,{month:"short",day:"numeric"}):d.toTimeString().slice(0,5);
     lastD=dk;
-    return `<button class="kpx-tick${i===idx?" on":""}" data-t="${att(s.id)}" title="${att(dts(s.ts)+" · "+s.files+" files · "+fmtB(s.bytes))}"><i></i><span>${esc(lbl)}</span></button>`;}).join("")}</div></div>
+    return `<button class="kpx-tick${i===idx?" on":""}${(s.pins||[]).length?" pinned":""}" data-t="${att(s.id)}" title="${att(dts(s.ts)+" · "+s.files+" files · "+fmtB(s.bytes)+((s.pins||[]).length?" · kept for ever":""))}"><i></i><span>${esc(lbl)}</span></button>`;}).join("")}</div></div>
    <button class="iconbtn" id="kxNext" title="Newer restore point"${idx<0||idx>=list.length-1?" disabled":""}>${svg("chev",15)}</button>
    <div class="kpx-tldiv"></div>
    <button class="btn sm" id="kxCal" title="Pick a restore point by date">${svg("calendar",13)} ${esc(dts(sel.ts))} <span style="color:var(--win-dim,var(--dim));font-weight:400">· ${sel.files} files · ${fmtB(sel.bytes)}</span></button>
-   <button class="iconbtn" id="kxDel" title="Delete this restore point">${svg("trash",14)}</button>`;
+   <button class="iconbtn" id="kxDiff" title="${idx>0?"See what changed since the previous restore point":"Nothing older to compare with"}"${idx<=0?" disabled":""}>${svg("list",14)}</button>
+   <button class="iconbtn${(sel.pins||[]).length?" on":""}" id="kxPin" title="${(sel.pins||[]).length?"Kept for ever — retention will not remove this point. Click to unpin.":"Keep this point for ever (retention will never remove it)"}">${svg("star",14)}</button>
+   <button class="iconbtn" id="kxDel" title="Delete this restore point"${(sel.pins||[]).length?" disabled":""}>${svg("trash",14)}</button>`;
   el.querySelectorAll("[data-t]").forEach(b=>b.onclick=()=>exSelSnap(tc,list.find(s=>s.id===b.dataset.t)));
   el.querySelector("#kxPrev").onclick=()=>exSelSnap(tc,list[idx-1]);
   el.querySelector("#kxNext").onclick=()=>exSelSnap(tc,list[idx+1]);
   el.querySelector("#kxCal").onclick=ev=>exCal(tc,ev.currentTarget);
+  el.querySelector("#kxDiff").onclick=()=>{if(idx>0)kpDiffDlg(list[idx-1],list[idx]);};
+  el.querySelector("#kxPin").onclick=async()=>{const s=EX.snap,on=!(s.pins||[]).length;
+   toast(on?"pinning…":"unpinning…");
+   const r=await kP("/api/kopia/snap/pin",{d:snapDest,id:s.id,on:on});
+   if(!(r&&r.ok)){toast((r&&r.log)||"failed");return;}
+   // pinning REWRITES the manifest, so the id changes — re-read the list, never reuse it
+   EX.snaps=null;EX.kids={};await exReload(tc,s.ts);
+   toast(on?"Kept for ever":"Unpinned");};
   el.querySelector("#kxDel").onclick=()=>{const s=EX.snap;
    confirmDlg("Delete this restore point?",
     `${esc(dts(s.ts))} · <span class="mono">${esc(s.path)}</span><br>This point in time disappears from the repository. Files on the source are not touched, and the other restore points stay.`,
@@ -9629,8 +9848,10 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
    <div class="kp-sec"><h4>${svg("gauge",13)} Performance</h4>
     <div class="srow"><div class="srow-l"><div class="srow-t">Parallel uploads</div><div class="srow-d">How many files kopia hashes and sends at once. Higher is faster on big machines, but uses more CPU and memory — 2 suits a Raspberry Pi.</div></div>
      <div class="srow-c"><input id="kO_par" type="number" min="1" max="16" class="mono" style="width:70px"></div></div>
-    <div class="srow"><div class="srow-l"><div class="srow-t">Cloud upload limit</div><div class="srow-d">Caps upload speed to cloud destinations so a backup doesn't saturate your connection. Local and USB disks are never throttled. 0 = no limit.</div></div>
-     <div class="srow-c"><input id="kO_bw" type="number" min="0" class="mono" style="width:90px"><span style="font-size:11.5px;color:var(--win-dim,var(--dim))">KB/s</span></div></div></div>
+    <div class="srow"><div class="srow-l"><div class="srow-t">Upload limit</div><div class="srow-d">Caps how fast a backup writes to its repository, so it doesn't saturate the connection — or hammer a USB bridge. Applies to <b>every</b> destination, cloud and local disk alike, and is stored inside each repository. 0 = no limit.</div></div>
+     <div class="srow-c"><input id="kO_bw" type="number" min="0" class="mono" style="width:90px"><span style="font-size:11.5px;color:var(--win-dim,var(--dim))">KB/s</span></div></div>
+    <div class="srow"><div class="srow-l"><div class="srow-t">Download limit</div><div class="srow-d">The same cap in the other direction: restores, verification and browsing. 0 = no limit.</div></div>
+     <div class="srow-c"><input id="kO_dn" type="number" min="0" class="mono" style="width:90px"><span style="font-size:11.5px;color:var(--win-dim,var(--dim))">KB/s</span></div></div></div>
    <div class="kp-sec"><h4>${svg("layers",13)} Cache</h4>
     <p style="font-size:11.5px;color:var(--win-dim,var(--dim));margin:0 0 10px;line-height:1.5">Kopia keeps a local cache to avoid re-reading the repository. It lives on the main storage (<span class="mono">.kopia-cache/</span>), off the SD card, and rebuilds itself if cleared. Caps below stop it growing without bound — 0 leaves kopia's own default. Per-repository size and a Clear button are on each destination.</p>
     <div class="srow"><div class="srow-l"><div class="srow-t">Content cache limit</div><div class="srow-d">The bulk of the cache — file data blocks.</div></div>
@@ -9645,13 +9866,13 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
    <div class="r" style="margin-top:2px"><button class="btn pri" id="kO_save">Save options</button><span id="kO_st" style="color:var(--win-dim,var(--dim));font-size:12px;margin-left:10px"></span></div>`;
   api("/api/kopia/opts").then(r=>{const o=(r&&r.opts)||{};
    const set=(id,v)=>{const e=tc.querySelector(id);if(e)e.value=v;};
-   set("#kO_par",o.parallel);set("#kO_bw",o.bwlimit_kb);set("#kO_cc",o.cache_content_mb);set("#kO_mc",o.cache_meta_mb);});
+   set("#kO_par",o.parallel);set("#kO_bw",o.bwlimit_kb);set("#kO_dn",o.dnlimit_kb);set("#kO_cc",o.cache_content_mb);set("#kO_mc",o.cache_meta_mb);});
   tc.querySelector("#kO_save").onclick=async()=>{
    const g=id=>+((tc.querySelector(id)||{}).value||0);
    const st=tc.querySelector("#kO_st");st.textContent="saving…";
-   const r=await kP("/api/kopia/opts",{parallel:g("#kO_par"),bwlimit_kb:g("#kO_bw"),
+   const r=await kP("/api/kopia/opts",{parallel:g("#kO_par"),bwlimit_kb:g("#kO_bw"),dnlimit_kb:g("#kO_dn"),
     cache_content_mb:g("#kO_cc"),cache_meta_mb:g("#kO_mc")});
-   st.textContent=r&&r.ok?"Saved — applies from the next run":"Failed";};
+   st.textContent=r&&r.ok?"Saved — speed caps written into every connected repository":"Failed";};
   const c=tc.querySelector("#kPwC");if(c)c.onclick=()=>{navigator.clipboard&&navigator.clipboard.writeText(D.password||"");toast("Copied");};
   const ps=tc.querySelector("#kPwSet");if(ps)ps.onclick=()=>kpPwDlg();
   tc.querySelector("#kUpd").onclick=async()=>{const s=tc.querySelector("#kUpdS");s.textContent="updating…";
