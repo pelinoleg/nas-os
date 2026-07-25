@@ -11581,10 +11581,17 @@ _KP_DIFF_ADD = re.compile(r"^added (file|directory|symlink) (\./.*?) \(")
 _KP_DIFF_DEL = re.compile(r"^removed (file|directory|symlink) (\./.*?) \(")
 _KP_DIFF_CHG = re.compile(r"^changed (\./.*?) at .*?\(size (\d+) -> (\d+)\)")
 
-def kp_snap_diff(destid, oid1, oid2, cap=400):
-    """What changed between two restore points (`kopia diff`). Read-only; the
-    per-entry «sizes differ / modification times differ» chatter is dropped, the
-    trailing JSON line carries the totals."""
+KP_DIFF_CAP = 400            # paths returned per group — everything beyond is COUNTED, not listed
+KP_DIFF_SCAN_MAX = 400_000   # hard line budget: two points can differ by a whole library
+
+def kp_snap_diff(destid, oid1, oid2, cap=KP_DIFF_CAP):
+    """What changed between two restore points (`kopia diff`). Read-only.
+    STREAMED, not buffered: a snapshot pair can differ by hundreds of thousands of
+    files, and `_kp` would pull that whole listing into the panel's memory. We keep
+    exact COUNTS of every line we see and only the first `cap` paths per group, so a
+    huge diff costs bounded memory and the numbers stay honest. The per-entry
+    «sizes differ / modification times differ» chatter is dropped; the trailing JSON
+    line carries kopia's own totals (used when the scan was not truncated)."""
     cfg = kp_load()
     dest = _kp_find(cfg["dests"], str(destid or ""))
     if not dest:
@@ -11595,44 +11602,65 @@ def kp_snap_diff(destid, oid1, oid2, cap=400):
     c = _kp_ensure_connected(dest)
     if not c["ok"]:
         return c
-    r = _kp(destid, ["diff", str(oid1), str(oid2)], timeout=20 * 60)
-    if not r["ok"]:
-        return {"ok": False, "log": _kp_err_tail(r)}
-    added, removed, changed, stats, more = [], [], [], {}, False
-    for ln in (r["out"] or "").splitlines():
-        s = ln.strip()
-        if s.startswith("{") and '"fileEntries"' in s:
-            try:
-                stats = json.loads(s)
-            except ValueError:
-                pass
-            continue
-        m = _KP_DIFF_ADD.match(s)
-        if m:
-            if len(added) < cap:
-                added.append({"path": m.group(2), "kind": m.group(1)})
-            else:
-                more = True
-            continue
-        m = _KP_DIFF_DEL.match(s)
-        if m:
-            if len(removed) < cap:
-                removed.append({"path": m.group(2), "kind": m.group(1)})
-            else:
-                more = True
-            continue
-        m = _KP_DIFF_CHG.match(s)
-        if m:
-            if len(changed) < cap:
-                changed.append({"path": m.group(1), "from": int(m.group(2)),
-                                "to": int(m.group(3))})
-            else:
-                more = True
-    fe = (stats.get("fileEntries") or {}) if isinstance(stats, dict) else {}
+    cmd = [_kopia_bin(), "--config-file", _kp_cfg_file(destid),
+           "--log-dir", os.path.join(_kp_cache_dir(destid), "logs"),
+           "--file-log-level", "error", "--disable-content-log",
+           "diff", str(oid1), str(oid2)]
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                text=True, env=_kp_env())
+    except (OSError, subprocess.SubprocessError) as e:
+        return {"ok": False, "log": str(e)[:200]}
+    added, removed, changed, stats = [], [], [], {}
+    n_add = n_del = n_chg = scanned = 0
+    truncated = False
+    deadline = time.monotonic() + 20 * 60
+    try:
+        for ln in proc.stdout:
+            scanned += 1
+            if scanned > KP_DIFF_SCAN_MAX or time.monotonic() > deadline:
+                truncated = True
+                break
+            s = ln.strip()
+            if s.startswith("{") and '"fileEntries"' in s:
+                try:
+                    stats = json.loads(s)
+                except ValueError:
+                    pass
+                continue
+            m = _KP_DIFF_ADD.match(s)
+            if m:
+                n_add += 1
+                if len(added) < cap:
+                    added.append({"path": m.group(2), "kind": m.group(1)})
+                continue
+            m = _KP_DIFF_DEL.match(s)
+            if m:
+                n_del += 1
+                if len(removed) < cap:
+                    removed.append({"path": m.group(2), "kind": m.group(1)})
+                continue
+            m = _KP_DIFF_CHG.match(s)
+            if m:
+                n_chg += 1
+                if len(changed) < cap:
+                    changed.append({"path": m.group(1), "from": int(m.group(2)),
+                                    "to": int(m.group(3))})
+    finally:
+        try:
+            proc.stdout.close()
+            proc.kill()
+            proc.wait(timeout=10)
+        except (OSError, subprocess.SubprocessError):
+            pass
+    # Count the LINES, not kopia's trailing summary: its `fileEntries.modified` comes out
+    # doubled (one changed file reports 2 — verified on a 720-file change and on a 1-file
+    # one), so the summary would tell the user twice the truth. Our counters match exactly
+    # what the listing shows, and `truncated` says when they are only a floor.
     return {"ok": True, "added": added, "removed": removed, "changed": changed,
-            "more": more, "totals": {"added": int(fe.get("added") or 0),
-                                     "removed": int(fe.get("removed") or 0),
-                                     "modified": int(fe.get("modified") or 0)}}
+            "cap": cap, "truncated": truncated,
+            "totals": {"added": n_add, "removed": n_del, "modified": n_chg},
+            "more": (n_add > len(added) or n_del > len(removed) or n_chg > len(changed))}
 
 def kp_snap_sources(destid):
     """Distinct snapshot sources (user@host:/path) of one repository with counts —

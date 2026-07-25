@@ -1364,6 +1364,7 @@
   .kp-pk.on .pk-ck{opacity:1}
   .kp-pk.off{cursor:not-allowed;background:transparent;border-style:dashed;opacity:.7}
   .kp-pk.off .pk-ic,.kp-pk.off .pk-n{color:var(--win-dim,var(--dim))}
+  .kp-pk[data-pick="static"]{cursor:default}      /* the locked source row is a statement, not a choice */
   .kp-pk.add{justify-content:center;border-style:dashed;color:var(--win-accent,var(--accent));
     font-weight:650;font-size:12.5px;gap:7px}
   .pk-tag{font-size:9.5px;font-weight:700;letter-spacing:.03em;text-transform:uppercase;
@@ -1493,9 +1494,32 @@
   .kpx-tllab{flex:none;display:flex;align-items:center;gap:6px;font-size:9.5px;font-weight:700;
     letter-spacing:.06em;text-transform:uppercase;color:var(--win-dim,var(--dim))}
   .kpx-tllab svg{color:var(--win-accent,var(--accent))}
-  /* pinned restore point: the star stays lit, so «kept for ever» is visible at a glance */
-  .kpx-tlbar .iconbtn.on{color:var(--win-warn,var(--warn));background:color-mix(in srgb,var(--win-warn,var(--warn)) 16%,transparent)}
-  .kpx-tick.pinned>i{box-shadow:0 0 0 2px color-mix(in srgb,var(--win-warn,var(--warn)) 70%,transparent)}
+  /* Kept ("pinned") restore points must be findable at a glance and months later: the tick
+     itself turns amber, the selected point says so, and the counter walks through them. */
+  .kpx-tlbar .iconbtn.on{color:var(--win-warn,var(--warn));background:color-mix(in srgb,var(--win-warn,var(--warn)) 18%,transparent)}
+  .kpx-tick.pinned>i{background:var(--win-warn,var(--warn));box-shadow:0 0 0 3px color-mix(in srgb,var(--win-warn,var(--warn)) 28%,transparent)}
+  .kpx-tick.pinned>span{color:var(--win-warn,var(--warn));font-weight:650}
+  /* «What changed»: folders collapse, because a run can touch thousands of files and a flat
+     list of names answers nothing — the folder and its count do. */
+  .kdf-g+.kdf-g{border-top:1px solid var(--win-line,var(--line))}
+  .kdf-gh{display:flex;align-items:center;gap:8px;width:100%;background:none;border:0;cursor:pointer;
+    padding:5px 2px;text-align:left;color:inherit;font:inherit}
+  .kdf-gc{display:inline-flex;transition:transform .12s;color:var(--win-dim,var(--dim))}
+  .kdf-gc.open{transform:rotate(90deg)}
+  .kdf-gp{flex:1;min-width:0;font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+    direction:ltr;unicode-bidi:plaintext;color:var(--win-dim,var(--dim))}
+  .kdf-gn{flex:none;font-size:11px;font-weight:700;font-variant-numeric:tabular-nums}
+  @media(hover:hover){.kdf-gh:hover .kdf-gp{color:var(--text)}}
+  .kdf-gl{padding:1px 0 6px 24px}
+  .kdf-f{display:flex;gap:10px;align-items:baseline;font-size:11.5px;padding:1px 0}
+  .kdf-f>span:first-child{flex:1;min-width:0;word-break:break-all}
+  .kdf-m{flex:none;color:var(--win-dim,var(--dim));font-variant-numeric:tabular-nums}
+  .kpx-kept,.kpx-keptb{display:inline-flex;align-items:center;gap:4px;border:0;cursor:pointer;
+    font:inherit;font-size:9.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
+    padding:2px 7px;border-radius:999px;color:var(--win-warn,var(--warn));
+    background:color-mix(in srgb,var(--win-warn,var(--warn)) 16%,transparent)}
+  .kpx-keptb{margin-left:7px;cursor:inherit}
+  @media(hover:hover){.kpx-kept:hover{background:color-mix(in srgb,var(--win-warn,var(--warn)) 30%,transparent)}}
   .kpx-track{flex:1;min-width:0;overflow-x:auto;overflow-y:hidden;padding:3px 0;
     border-radius:9px;background:color-mix(in srgb,var(--win-line,var(--line)) 22%,transparent)}
   .kpx-inner{display:flex;align-items:flex-start;position:relative;padding:2px 8px;width:max-content;min-width:100%}
@@ -1552,6 +1576,8 @@
     font-size:11.5px;color:var(--win-dim,var(--dim));font-family:inherit;cursor:default}
   .kpx-cal .g button.has{color:var(--text);font-weight:650;cursor:pointer;
     background:color-mix(in srgb,var(--win-accent,var(--accent)) 14%,transparent)}
+  .kpx-cal .g button.kept{background:color-mix(in srgb,var(--win-warn,var(--warn)) 24%,transparent);
+    box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--win-warn,var(--warn)) 55%,transparent)}
   .kpx-cal .g button.on{background:var(--win-accent,var(--accent));color:#fff}
   .kpx-cal .ft{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:9px;
     font-size:11px;color:var(--win-dim,var(--dim))}
@@ -8768,7 +8794,7 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
   const draft=JSON.parse(JSON.stringify(b));
   const draw=()=>{
   box.innerHTML=`
-   <div class="kp-sec"><h4>${svg("folder",13)} Data — what goes where</h4>${secSource(draft)}${secDest(draft)}${secSpare(draft)}</div>
+   <div class="kp-sec"><h4>${svg("folder",13)} Data — what goes where</h4>${secSource(draft,1)}${secDest(draft)}${secSpare(draft)}</div>
    <div class="kp-sec"><h4>${svg("archive",13)} History — how much to keep</h4>${secRetention(draft)}</div>
    <div class="kp-sec"><h4>${svg("refresh",13)} Schedule</h4>${secSchedule(draft)}</div>
    <div class="kp-sec"><h4>${svg("term",13)} Before &amp; after — run a command</h4>${secHooks(draft)}</div>
@@ -8806,13 +8832,30 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
    <span class="pk-ck">${svg("check",16)}</span></button>`;
  /* who else already uses this thing — the answer to "did I set this up twice?" */
  const usedByOther=(d,pred)=>(D.backups||[]).filter(b=>b.id!==(d&&d.id)&&pred(b)).map(b=>b.name||b.id);
- const secSource=d=>`<div class="field"><label>Source — what to back up</label>
-   <div class="kp-picks">${(D.sources||[]).map(s=>{const u=usedByOther(d,b=>b.source===s.id);
+ /* Picking the source is a WIZARD decision. In the settings of a live backup the normal
+    change is «add a folder to what I already protect» — so the source is shown locked, with
+    editing its folders one click away. Swapping the source outright is still possible, but
+    behind a confirm: kopia keys snapshots by PATH, so a new source does not move or lose the
+    old snapshots — it starts a second timeline next to them, and that surprises people. */
+ const srcPicks=d=>`<div class="kp-picks">${(D.sources||[]).map(s=>{const u=usedByOther(d,b=>b.source===s.id);
      return pkRow({kind:"src",id:s.id,on:d.source===s.id,ic:"folder",name:s.name,
       tags:u.length?[["in "+u.join(", ")]]:[],
       meta:s.folders.slice(0,2).join("  ·  ")+(s.folders.length>2?"  +"+(s.folders.length-2)+" more":"")});}).join("")}
-    <button class="kp-pk add" id="kSrcNew">${svg("plus",14)} New source…</button></div>
-   ${d.source?`<div style="margin-top:7px"><span class="kp-quiet" id="kSrcEd" style="font-size:11.5px">edit the selected source →</span></div>`:""}</div>`;
+    <button class="kp-pk add" id="kSrcNew">${svg("plus",14)} New source…</button></div>`;
+ const secSource=(d,locked)=>{
+  const cur=(D.sources||[]).find(s=>s.id===d.source);
+  if(!locked||!cur||d._srcOpen)
+   return`<div class="field"><label>Source — what to back up</label>${srcPicks(d)}
+    ${d.source?`<div style="margin-top:7px"><span class="kp-quiet" id="kSrcEd" style="font-size:11.5px">edit the selected source →</span></div>`:""}</div>`;
+  const nex=(cur.exclude_paths||[]).length;
+  return`<div class="field"><label>Source — what to back up</label>
+   <div class="kp-picks">${pkRow({kind:"static",id:"",on:true,ic:"folder",name:cur.name,
+     tags:[[(cur.folders||[]).length+" folder"+((cur.folders||[]).length===1?"":"s")]].concat(nex?[[nex+" left out"]]:[]),
+     meta:(cur.folders||[]).slice(0,2).join("  ·  ")+((cur.folders||[]).length>2?"  +"+((cur.folders||[]).length-2)+" more":"")})}</div>
+   <div style="margin-top:7px;display:flex;gap:12px;flex-wrap:wrap;align-items:center">
+    <button class="btn sm" id="kSrcEd2">${svg("edit",13)} Edit folders</button>
+    <span class="kp-quiet" id="kSrcChg" style="font-size:11.5px">change the source…</span></div>
+   <div class="kp-help" style="margin-top:6px">To protect more, add folders to <b>${esc(cur.name)}</b> — that keeps one history. Changing the source is for a different job entirely.</div></div>`;};
  /* One destination belongs to ONE backup: sharing a repository makes two backups fight over
     the same retention, and a synced spare would delete the other one's snapshots outright. */
  const dstPath=x=>x.kind==="fs"?x.path:(x.remote+":"+(x.remote_path||""));
@@ -8918,10 +8961,17 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
    const k=b.dataset.pick,v=b.dataset.v;
    if(k==="src")d.source=v;
    else if(k==="dest")d.dest=v;
-   else{d.dest2=v;const m=q("#kD2m");if(m)m.style.display=v?"":"none";}
+   else if(k==="spare"){d.dest2=v;const m=q("#kD2m");if(m)m.style.display=v?"":"none";}
+   else return;                       // «static» row: the locked source, not a choice
    ch();});
   if(q("#kSrcNew"))q("#kSrcNew").onclick=()=>srcDlg(null,id=>{d.source=id;ch();});
   if(q("#kSrcEd"))q("#kSrcEd").onclick=()=>{const s=srcOf(d);if(s)srcDlg(s,()=>ch());};
+  if(q("#kSrcEd2"))q("#kSrcEd2").onclick=()=>{const s=srcOf(d);if(s)srcDlg(s,()=>ch());};
+  if(q("#kSrcChg"))q("#kSrcChg").onclick=()=>confirmDlg("Change what this backup protects?",
+   `Snapshots already taken are keyed by their folder paths — they stay in the repository, readable, and nothing is deleted.<br><br>
+    But this backup would start a <b>second history</b> for the new folders, and «Snapshots» will show both timelines side by side. Retention counts each path on its own.<br><br>
+    If you only want to protect more, cancel and use <b>Edit folders</b> instead.`,
+   ()=>{d._srcOpen=true;ch();},1);
   if(q("#kDstNew"))q("#kDstNew").onclick=()=>destDlg({},id=>{d.dest=id;ch();});
   if(q("#kDst2New"))q("#kDst2New").onclick=()=>destDlg({spare:true},id=>{d.dest2=id;ch();});
   if(q("#kD2mode"))q("#kD2mode").querySelectorAll("button").forEach(b=>b.onclick=()=>{
@@ -9141,7 +9191,7 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
     All three run in their own transient unit, so the dialog only polls the state file and can
     be closed and reopened without losing the job. */
  function kpBgDlg(o){const s=document.getElementById("scrim");let timer=null,closed=false;
-  s.innerHTML=`<div class="dialog" style="width:min(560px,94vw)"><h3>${svg(o.ic,16)} ${esc(o.title)}</h3>
+  s.innerHTML=`<div class="dialog" style="max-width:none;width:min(560px,94vw)"><h3>${svg(o.ic,16)} ${esc(o.title)}</h3>
    <p style="margin:2px 0 12px;font-size:12px;color:var(--win-dim,var(--dim))">${o.intro}</p>
    <div id="kbgBody"></div>
    <div class="r"><span id="kbgS" style="flex:1;text-align:left;font-size:12px;color:var(--win-dim,var(--dim))"></span>
@@ -9201,7 +9251,7 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
      const r=await kP("/api/kopia/dest/fix",{id:x.id,commit:true});
      if(!(r&&r.ok)){toast((r&&r.log)||"failed");b.disabled=false;}};}});}
  function kpPolDlg(x){const s=document.getElementById("scrim");
-  s.innerHTML=`<div class="dialog" style="width:min(700px,94vw)"><h3>${svg("logs",16)} Rules in ${esc(x.name)}</h3>
+  s.innerHTML=`<div class="dialog" style="max-width:none;width:min(700px,94vw)"><h3>${svg("logs",16)} Rules in ${esc(x.name)}</h3>
    <p style="margin:2px 0 12px;font-size:12px;color:var(--win-dim,var(--dim))">What kopia itself has stored for this repository — retention, compression, exclusions and the before/after commands. The panel writes these from each backup's settings; this is the read-back.</p>
    <div id="kpolB"><div class="set-load">reading…</div></div>
    <div class="r"><button class="btn pri" id="kpolX">Close</button></div></div>`;
@@ -9212,7 +9262,7 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
  /* A folder that MOVED (disk remounted elsewhere, renamed share) otherwise starts a second,
     unrelated timeline — this re-points the existing history at the new path. */
  function kpHistDlg(x){const s=document.getElementById("scrim");let srcs=[],pick="";
-  const draw=()=>{s.innerHTML=`<div class="dialog" style="width:min(560px,94vw)"><h3>${svg("sync",16)} Move snapshot history</h3>
+  const draw=()=>{s.innerHTML=`<div class="dialog" style="max-width:none;width:min(560px,94vw)"><h3>${svg("sync",16)} Move snapshot history</h3>
     <p style="margin:2px 0 12px;font-size:12px;color:var(--win-dim,var(--dim))">If a source folder moved — a disk remounted somewhere else, a renamed share — kopia treats the new path as a brand-new source and its history starts from zero. Moving the history keeps one timeline.</p>
     <div class="kp-eyebrow">History to move</div>
     <div class="kp-well" style="margin-bottom:10px">${srcs.length?srcs.map(v=>`<button class="kp-witem" data-s="${att(v.spec)}" style="text-align:left;${v.spec===pick?"background:var(--sel)":""}">
@@ -9330,27 +9380,64 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
  /* What changed between two restore points (`kopia diff`) — the file-level answer to
     «what do these files actually do», the same question Mirror's «What changed» asks. */
  function kpDiffDlg(older,newer){const s=document.getElementById("scrim");
-  const sec=(t,cls,ic,rows,fmt)=>!rows.length?"":`<div class="kp-sec" style="margin-bottom:8px"><h4>${svg(ic,12)} ${t} — ${rows.length}${rows.length>=400?"+":""}</h4>
-    <div style="max-height:26vh;overflow:auto">${rows.map(x=>`<div class="mono" style="font-size:11.5px;padding:2px 0;border-bottom:1px solid var(--win-line,var(--line));word-break:break-all"><span style="color:var(--win-${cls},var(--${cls}))">${esc(x.path.replace(/^\.\//,""))}</span>${fmt?fmt(x):""}</div>`).join("")}</div></div>`;
-  s.innerHTML=`<div class="dialog" style="width:min(680px,94vw)"><h3>${svg("list",16)} What changed</h3>
+  let RES=null,q="",openG={},only="all";
+  const clean=p=>p.replace(/^\.\//,"");
+  /* Group by folder: a run can touch thousands of files, and a flat list of them answers
+     nothing. Folders sorted by how much changed in them, biggest first. */
+  const groupOf=rows=>{const m=new Map();
+   rows.forEach(x=>{const p=clean(x.path),i=p.lastIndexOf("/"),d=i<0?"(top level)":p.slice(0,i);
+    const g=m.get(d)||[];g.push(Object.assign({},x,{base:i<0?p:p.slice(i+1)}));m.set(d,g);});
+   return [...m.entries()].sort((a,b)=>b[1].length-a[1].length||a[0].localeCompare(b[0]));};
+  const KIND={add:["Added","good","plus"],chg:["Changed","warn","refresh"],del:["Removed","danger","trash"]};
+  const sec=(k,rows,fmt)=>{const [title,cls,ic]=KIND[k];
+   const hit=q?rows.filter(x=>clean(x.path).toLowerCase().includes(q)):rows;
+   if(!rows.length)return"";
+   const groups=groupOf(hit),shown=hit.length;
+   return`<div class="kp-sec" style="margin-bottom:8px"><h4>${svg(ic,12)} ${title} — ${(RES.totals[k==="add"?"added":k==="chg"?"modified":"removed"]||0).toLocaleString(LOC)}${q?` · ${shown} match${shown===1?"":"es"}`:""}</h4>
+    ${!groups.length?`<div class="kp-help">nothing matches «${esc(q)}»</div>`:""}
+    <div style="max-height:38vh;overflow:auto">${groups.map(([dir,items])=>{
+      const gid=k+":"+dir,open=q?true:!!openG[gid];
+      return`<div class="kdf-g"><button class="kdf-gh" data-g="${att(gid)}">
+        <span class="kdf-gc${open?" open":""}">${svg("chev",12)}</span>
+        <span class="mono kdf-gp">${esc(dir)}</span>
+        <span class="kdf-gn" style="color:var(--win-${cls},var(--${cls}))">${items.length}</span></button>
+       ${open?`<div class="kdf-gl">${items.slice(0,200).map(x=>`<div class="kdf-f mono"><span>${esc(x.base)}</span>${fmt?fmt(x):""}</div>`).join("")}
+        ${items.length>200?`<div class="kp-help" style="padding:3px 0 0">+${items.length-200} more in this folder</div>`:""}</div>`:""}</div>`;}).join("")}</div></div>`;};
+  const draw=()=>{const box=s.querySelector("#kdfBody");if(!box||!RES)return;
+   const t=RES.totals||{},none=!(t.added||t.modified||t.removed);
+   box.innerHTML=`<div class="kp-flow" style="margin-bottom:10px">
+     <div class="kp-seg"><b>${(t.added||0).toLocaleString(LOC)}</b><span>ADDED</span></div>
+     <div class="kp-seg"><b>${(t.modified||0).toLocaleString(LOC)}</b><span>CHANGED</span></div>
+     <div class="kp-seg"><b>${(t.removed||0).toLocaleString(LOC)}</b><span>REMOVED</span></div></div>
+    ${none?`<div class="pf-empty">Nothing changed between these two points.</div>`:`
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:9px;flex-wrap:wrap">
+     <input id="kdfQ" placeholder="filter by path…" data-noenter value="${att(q)}" style="flex:1;min-width:180px">
+     <div class="seg" id="kdfOnly"><button data-v="all"${only==="all"?' class="on"':""}>All</button><button data-v="add"${only==="add"?' class="on"':""}>Added</button><button data-v="chg"${only==="chg"?' class="on"':""}>Changed</button><button data-v="del"${only==="del"?' class="on"':""}>Removed</button></div></div>
+    ${(only==="all"||only==="add")?sec("add",RES.added):""}
+    ${(only==="all"||only==="chg")?sec("chg",RES.changed,x=>`<span class="kdf-m">${fmtB(x.from)} → ${fmtB(x.to)}</span>`):""}
+    ${(only==="all"||only==="del")?sec("del",RES.removed):""}
+    ${RES.more?`<div class="kp-help">Counts above are complete. The lists show the first ${RES.cap||400} paths per group — enough to see the shape of a change without dragging a hundred thousand names into the browser.</div>`:""}
+    ${RES.truncated?`<div class="kp-note err">These points differ by more than the comparison scans in one go — the numbers are a floor, not a total.</div>`:""}`}`;
+   const qi=box.querySelector("#kdfQ");
+   if(qi){qi.oninput=()=>{q=qi.value.trim().toLowerCase();draw();
+     const q2=s.querySelector("#kdfQ");if(q2){q2.focus();q2.setSelectionRange(q2.value.length,q2.value.length);}};}
+   box.querySelectorAll("[data-g]").forEach(b=>b.onclick=()=>{openG[b.dataset.g]=!openG[b.dataset.g];draw();});
+   const seg=box.querySelector("#kdfOnly");
+   if(seg)seg.querySelectorAll("button").forEach(b=>b.onclick=()=>{only=b.dataset.v;draw();});};
+  s.innerHTML=`<div class="dialog" style="max-width:none;width:min(900px,96vw)"><h3>${svg("list",16)} What changed</h3>
    <p style="margin:2px 0 12px;font-size:12px;color:var(--win-dim,var(--dim))">Between <b>${esc(dts(older.ts))}</b> and <b>${esc(dts(newer.ts))}</b> · <span class="mono">${esc(newer.path)}</span></p>
-   <div id="kdfBody"><div class="set-load">comparing…</div></div>
+   <div id="kdfBody"><div class="set-load">comparing… (large snapshots take a while)</div></div>
    <div class="r"><button class="btn pri" id="kdfX">Close</button></div></div>`;
   s.classList.add("show");
   s.querySelector("#kdfX").onclick=()=>s.classList.remove("show");
   kP("/api/kopia/snap/diff",{d:snapDest,a:older.root,b:newer.root}).then(r=>{
    const box=s.querySelector("#kdfBody");if(!box)return;
    if(!(r&&r.ok)){box.innerHTML=`<div class="kp-note err">${esc((r&&r.log)||"comparison failed")}</div>`;return;}
-   const t=r.totals||{},none=!r.added.length&&!r.removed.length&&!r.changed.length;
-   box.innerHTML=`<div class="kp-flow" style="margin-bottom:10px">
-     <div class="kp-seg"><b>${t.added||0}</b><span>ADDED</span></div>
-     <div class="kp-seg"><b>${t.modified||0}</b><span>CHANGED</span></div>
-     <div class="kp-seg"><b>${t.removed||0}</b><span>REMOVED</span></div></div>
-    ${none?`<div class="pf-empty">Nothing changed between these two points.</div>`:""}
-    ${sec("Added","good","plus",r.added)}
-    ${sec("Changed","warn","refresh",r.changed,x=>` <span style="color:var(--win-dim,var(--dim))">${fmtB(x.from)} → ${fmtB(x.to)}</span>`)}
-    ${sec("Removed","danger","trash",r.removed)}
-    ${r.more?`<div class="kp-help">Only the first 400 paths per group are listed.</div>`:""}`;});}
+   RES=r;
+   // one folder open by default when the change is small enough to read at a glance
+   const flat=[].concat(r.added,r.changed,r.removed);
+   if(flat.length&&flat.length<=40){const g=groupOf(flat);if(g.length)["add","chg","del"].forEach(k=>{openG[k+":"+g[0][0]]=true;});}
+   draw();});}
 
  /* one directory of the CURRENT restore point, cached (cache dies with the restore point) */
  async function exLs(rel,then){
@@ -9641,7 +9728,9 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
   if(EXCAL)EXCAL();                                  // a floating calendar must not outlive its timeline
   const list=g.list,idx=list.findIndex(s=>s.id===EX.snap.id);let lastD="";
   const sel=EX.snap;
-  el.innerHTML=`<div class="kpx-tllab">${svg("clock",13)}<span>${list.length} point${list.length>1?"s":""}</span></div>
+  const kept=list.filter(s=>(s.pins||[]).length);
+  el.innerHTML=`<div class="kpx-tllab">${svg("clock",13)}<span>${list.length} point${list.length>1?"s":""}</span>
+    ${kept.length?`<button class="kpx-kept" id="kxKept" title="Points you marked as «keep for ever» — click to walk through them">${svg("star",11)} ${kept.length} kept</button>`:""}</div>
    <button class="iconbtn" id="kxPrev" title="Older restore point"${idx<=0?" disabled":""}><span class="kpx-rot">${svg("chev",15)}</span></button>
    <div class="kpx-track" id="kxTrack"><div class="kpx-inner">${list.map((s,i)=>{
     // first point of a day is labelled with the date, the rest of that day with the time
@@ -9651,7 +9740,7 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
     return `<button class="kpx-tick${i===idx?" on":""}${(s.pins||[]).length?" pinned":""}" data-t="${att(s.id)}" title="${att(dts(s.ts)+" · "+s.files+" files · "+fmtB(s.bytes)+((s.pins||[]).length?" · kept for ever":""))}"><i></i><span>${esc(lbl)}</span></button>`;}).join("")}</div></div>
    <button class="iconbtn" id="kxNext" title="Newer restore point"${idx<0||idx>=list.length-1?" disabled":""}>${svg("chev",15)}</button>
    <div class="kpx-tldiv"></div>
-   <button class="btn sm" id="kxCal" title="Pick a restore point by date">${svg("calendar",13)} ${esc(dts(sel.ts))} <span style="color:var(--win-dim,var(--dim));font-weight:400">· ${sel.files} files · ${fmtB(sel.bytes)}</span></button>
+   <button class="btn sm" id="kxCal" title="Pick a restore point by date">${svg("calendar",13)} ${esc(dts(sel.ts))} <span style="color:var(--win-dim,var(--dim));font-weight:400">· ${sel.files} files · ${fmtB(sel.bytes)}</span>${(sel.pins||[]).length?`<span class="kpx-keptb" title="Kept for ever">${svg("star",11)} kept</span>`:""}</button>
    <button class="iconbtn" id="kxDiff" title="${idx>0?"See what changed since the previous restore point":"Nothing older to compare with"}"${idx<=0?" disabled":""}>${svg("list",14)}</button>
    <button class="iconbtn${(sel.pins||[]).length?" on":""}" id="kxPin" title="${(sel.pins||[]).length?"Kept for ever — retention will not remove this point. Click to unpin.":"Keep this point for ever (retention will never remove it)"}">${svg("star",14)}</button>
    <button class="iconbtn" id="kxDel" title="Delete this restore point"${(sel.pins||[]).length?" disabled":""}>${svg("trash",14)}</button>`;
@@ -9661,12 +9750,20 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
   el.querySelector("#kxCal").onclick=ev=>exCal(tc,ev.currentTarget);
   el.querySelector("#kxDiff").onclick=()=>{if(idx>0)kpDiffDlg(list[idx-1],list[idx]);};
   el.querySelector("#kxPin").onclick=async()=>{const s=EX.snap,on=!(s.pins||[]).length;
-   toast(on?"pinning…":"unpinning…");
+   const pb=el.querySelector("#kxPin");pb.disabled=true;
+   toast(on?"keeping this point…":"releasing this point…");
    const r=await kP("/api/kopia/snap/pin",{d:snapDest,id:s.id,on:on});
-   if(!(r&&r.ok)){toast((r&&r.log)||"failed");return;}
-   // pinning REWRITES the manifest, so the id changes — re-read the list, never reuse it
-   EX.snaps=null;EX.kids={};await exReload(tc,s.ts);
-   toast(on?"Kept for ever":"Unpinned");};
+   if(!(r&&r.ok)){pb.disabled=false;toast((r&&r.log)||"failed");return;}
+   // Pinning REWRITES the manifest, so the id changes — re-read the list and find the
+   // same point by TIME. Do NOT null EX.snaps first: tabSnaps treats null as «boot me»
+   // and the status poll would jump the selection to the newest point mid-flight, which
+   // looked exactly like «the star did nothing».
+   EX.kids={};await exReload(tc,s.ts);
+   toast(on?"Kept — retention will never remove this point":"Released — retention may thin it out again");};
+  const kj=el.querySelector("#kxKept");
+  if(kj)kj.onclick=()=>{const kept=list.filter(s=>(s.pins||[]).length);if(!kept.length)return;
+   // walk through the kept points, so «where is the one I marked» is one click
+   const after=kept.find(s=>s.ts>sel.ts);exSelSnap(tc,after||kept[0]);};
   el.querySelector("#kxDel").onclick=()=>{const s=EX.snap;
    confirmDlg("Delete this restore point?",
     `${esc(dts(s.ts))} · <span class="mono">${esc(s.path)}</span><br>This point in time disappears from the repository. Files on the source are not touched, and the other restore points stay.`,
@@ -9696,7 +9793,8 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
    const first=new Date(y,m,1),lead=(first.getDay()+6)%7,days=new Date(y,m+1,0).getDate();
    let cells="";for(let i=0;i<lead;i++)cells+="<button disabled></button>";
    for(let d=1;d<=days;d++){const k=y+"-"+m+"-"+d,has=by[k];
-    cells+=`<button class="${has?"has":""}${has&&has.some(s=>s.id===EX.snap.id)?" on":""}"${has?` data-d="${k}" title="${att(has.length+" restore point"+(has.length>1?"s":""))}"`:" disabled"}>${d}</button>`;}
+    const kept=has&&has.some(s=>(s.pins||[]).length);
+    cells+=`<button class="${has?"has":""}${has&&has.some(s=>s.id===EX.snap.id)?" on":""}${kept?" kept":""}"${has?` data-d="${k}" title="${att(has.length+" restore point"+(has.length>1?"s":"")+(kept?" · kept for ever":""))}"`:" disabled"}>${d}</button>`;}
    pop.innerHTML=`<div class="hd"><button class="iconbtn" data-mv="-1"><span class="kpx-rot">${svg("chev",14)}</span></button>
      <b>${esc(first.toLocaleDateString(LOC,{month:"long",year:"numeric"}))}</b>
      <button class="iconbtn" data-mv="1">${svg("chev",14)}</button></div>
