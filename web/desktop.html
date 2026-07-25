@@ -1488,9 +1488,14 @@
   .kpx-cell{color:var(--win-dim,var(--dim));font-size:11.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   /* the time scrubber — a control strip, deliberately UNLIKE the content panel:
      a tinted bar with an inset groove the restore-point dots ride along */
-  .kpx-tlbar{display:flex;align-items:center;gap:10px;padding:7px 11px;border-radius:12px;
+  /* Two rows on purpose: the strip gets the full width, so it never collapses to nothing when
+     the date button and the actions are wide (and the strip no longer moves when they change). */
+  .kpx-tlbar{display:flex;flex-direction:column;gap:7px;padding:8px 11px;border-radius:12px;
     background:color-mix(in srgb,var(--win-accent,var(--accent)) 11%,var(--card));
     border:1px solid color-mix(in srgb,var(--win-accent,var(--accent)) 30%,transparent)}
+  .kpx-tlhead{display:flex;align-items:center;gap:10px}
+  .kpx-tlstrip{display:flex;align-items:stretch;gap:8px;min-height:46px}
+  .kpx-tlacts{display:flex;align-items:center;gap:2px;flex:none}
   .kpx-tllab{flex:none;display:flex;align-items:center;gap:6px;font-size:9.5px;font-weight:700;
     letter-spacing:.06em;text-transform:uppercase;color:var(--win-dim,var(--dim))}
   .kpx-tllab svg{color:var(--win-accent,var(--accent))}
@@ -1512,6 +1517,21 @@
   .kp-stepn{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;
     border-radius:50%;background:var(--win-accent,var(--accent));color:#fff;font-size:10.5px;
     font-weight:800;margin-right:5px;letter-spacing:0}
+  /* the three counts must not read as one word, and each kind carries its own colour */
+  .kdf-sum{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:11px}
+  .kdf-st{display:flex;flex-direction:column;gap:3px;padding:9px 12px;border-radius:11px;
+    background:color-mix(in srgb,var(--c) 11%,transparent);
+    border:1px solid color-mix(in srgb,var(--c) 30%,transparent)}
+  .kdf-st b{font-size:20px;font-weight:750;line-height:1;color:var(--c);font-variant-numeric:tabular-nums}
+  .kdf-st span{display:flex;align-items:center;gap:4px;font-size:9.5px;font-weight:700;
+    letter-spacing:.06em;text-transform:uppercase;color:var(--win-dim,var(--dim))}
+  .kdf-st svg{color:var(--c)}
+  .kdf-sec{border-left:3px solid color-mix(in srgb,var(--c) 65%,transparent)}
+  .kdf-sec>h4 svg{color:var(--c)}
+  .kdf-n{font-weight:750;letter-spacing:0;color:var(--c)}
+  .kdf-q{font-weight:400;letter-spacing:0;text-transform:none;color:var(--win-dim,var(--dim))}
+  .kdf-mk{flex:none;width:11px;text-align:center;font-style:normal;font-weight:800;
+    color:color-mix(in srgb,var(--c) 85%,var(--text))}
   .kdf-g+.kdf-g{border-top:1px solid var(--win-line,var(--line))}
   .kdf-gh{display:flex;align-items:center;gap:8px;width:100%;background:none;border:0;cursor:pointer;
     padding:5px 2px;text-align:left;color:inherit;font:inherit}
@@ -1530,25 +1550,84 @@
     padding:2px 7px;border-radius:999px;color:var(--win-warn,var(--warn));
     background:color-mix(in srgb,var(--win-warn,var(--warn)) 16%,transparent)}
   .kpx-keptb{margin-left:7px;cursor:inherit}
+  /* The date button used to change width with every different digit, and read as one grey
+     blob. Tabular figures fix the width; each thing inside gets its own weight so date,
+     time, count and size are separable at a glance. */
+  /* min-width, not just tabular figures: «5 files» and «12 files» are different LENGTHS, and a
+     button that changes size as you step through history is maddening. Metrics sit to the
+     right, so the date and time never move. */
+  .kpx-calb{display:inline-flex;align-items:baseline;gap:5px;flex:none;min-width:250px;
+    font-variant-numeric:tabular-nums}
+  .kpx-calb .m{display:inline-flex;align-items:baseline;gap:5px;margin-left:auto}
+  .kpx-calb svg{align-self:center}
+  .kpx-calb b{font-weight:650;color:var(--text)}
+  .kpx-calb b.t{font-weight:750;color:var(--win-accent,var(--accent))}
+  .kpx-calb i{font-style:normal;opacity:.4}
+  .kpx-calb span{font-weight:500;color:var(--win-dim,var(--dim));font-size:11px}
+  .kpx-calb span.sz{font-weight:600}
   .kpx-skept{flex:none;display:inline-flex;color:var(--win-warn,var(--warn))}
+  /* «it is working» must be impossible to miss: a moving bar plus a line of text, shown only
+     after ~250 ms so a cached (instant) click does not flash */
+  .kpx-busy{display:none;align-items:center;gap:9px;padding:6px 12px;font-size:11.5px;
+    color:var(--win-accent,var(--accent));
+    background:color-mix(in srgb,var(--win-accent,var(--accent)) 10%,transparent);
+    border-bottom:1px solid color-mix(in srgb,var(--win-accent,var(--accent)) 26%,transparent)}
+  .kpx-busy.on{display:flex}
+  .kpx-busy span{display:flex;align-items:center;gap:6px;font-weight:600}
+  .kpx-busy>i{flex:none;width:34px;height:4px;border-radius:999px;overflow:hidden;position:relative;
+    background:color-mix(in srgb,var(--win-accent,var(--accent)) 25%,transparent)}
+  .kpx-busy>i::after{content:"";position:absolute;inset:0 auto 0 0;width:40%;border-radius:999px;
+    background:var(--win-accent,var(--accent));animation:kpxrun 1s ease-in-out infinite}
+  @keyframes kpxrun{0%{left:0}50%{left:60%}100%{left:0}}
+  .kpx-skel{padding:6px 10px}
+  .kpx-sk{display:flex;align-items:center;gap:10px;height:30px;animation:kpxpulse 1.2s ease-in-out infinite}
+  .kpx-sk>i{flex:none;width:16px;height:16px;border-radius:5px;background:var(--win-line,var(--line))}
+  .kpx-sk>b{height:9px;border-radius:999px;background:var(--win-line,var(--line));
+    width:clamp(120px,32%,340px)}
+  @keyframes kpxpulse{0%,100%{opacity:.35}50%{opacity:.75}}
+  .kpx-boot{display:flex;flex-direction:column;align-items:center;gap:6px;padding:38px 22px;text-align:center}
+  .kpx-boot svg{color:var(--win-accent,var(--accent))}
+  .kpx-boot b{font-size:13px}
+  .kpx-boot span{font-size:11.5px;color:var(--win-dim,var(--dim));max-width:360px;line-height:1.5}
   /* a history sent by ANOTHER machine through the backup server */
   .kpx-owner{display:block;font-size:9.5px;font-weight:700;letter-spacing:.04em;text-transform:none;
     color:var(--win-accent,var(--accent));overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   @media(hover:hover){.kpx-kept:hover{background:color-mix(in srgb,var(--win-warn,var(--warn)) 30%,transparent)}}
-  .kpx-track{flex:1;min-width:0;overflow-x:auto;overflow-y:hidden;padding:3px 0;
+  .kpx-track{flex:1;min-width:80px;overflow-x:auto;overflow-y:hidden;padding:3px 0;
     border-radius:9px;background:color-mix(in srgb,var(--win-line,var(--line)) 22%,transparent)}
   .kpx-inner{display:flex;align-items:flex-start;position:relative;padding:2px 8px;width:max-content;min-width:100%}
-  .kpx-inner::before{content:"";position:absolute;left:16px;right:16px;top:11px;height:2px;
+  .kpx-inner::before{content:"";position:absolute;left:16px;right:16px;top:26px;height:2px;
     background:color-mix(in srgb,var(--win-accent,var(--accent)) 30%,var(--win-line,var(--line)))}
-  .kpx-tldiv{flex:none;width:1px;align-self:stretch;margin:2px 0;
+  .kpx-tldiv{display:none;flex:none;width:1px;align-self:stretch;margin:2px 0;
     background:color-mix(in srgb,var(--win-line,var(--line)) 60%,transparent)}
   /* ticks spread over the axis while there is room, and scroll once there are many */
-  .kpx-tick{position:relative;flex:1 0 34px;max-width:110px;background:none;border:none;padding:0 2px;
+  /* Day groups over fixed-width ticks: the label never changes meaning, and nothing shifts
+     when the selection moves (constant width AND constant font-weight — a bold selected
+     label used to reflow the whole strip). */
+  .kpx-day{display:flex;flex-direction:column;min-width:0;flex:none}
+  .kpx-day+.kpx-day{margin-left:7px;padding-left:7px;
+    border-left:1px dashed color-mix(in srgb,var(--win-line,var(--line)) 80%,transparent)}
+  .kpx-dlab{display:flex;align-items:center;gap:4px;padding:0 3px 3px;font-size:9px;font-weight:700;
+    letter-spacing:.05em;text-transform:uppercase;color:var(--win-dim,var(--dim));white-space:nowrap}
+  .kpx-dlab span{font-weight:600;letter-spacing:0;opacity:.7;
+    background:color-mix(in srgb,var(--win-line,var(--line)) 60%,transparent);border-radius:999px;padding:0 4px}
+  .kpx-dticks{display:flex}
+  .kpx-tick{position:relative;flex:none;width:46px;background:none;border:none;padding:0 2px;
     display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;
-    color:var(--win-dim,var(--dim));font-size:9.5px;font-family:inherit}
+    color:var(--win-dim,var(--dim));font-size:9.5px;font-weight:600;font-family:inherit;
+    font-variant-numeric:tabular-nums}
+  /* many points: narrow the ticks and keep only the selected time visible — the day
+     headings stay, so the scale is still readable at a glance */
+  .kpx-track.tight .kpx-tick{width:26px}
+  .kpx-track.tight .kpx-tick>span{display:none}
+  .kpx-track.tight .kpx-tick.on>span{display:block;position:absolute;top:100%;
+    background:var(--win-bg,var(--bg));padding:0 3px;border-radius:4px;z-index:1}
+  .kpx-track.tiny .kpx-tick{width:14px}
+  .kpx-track.tiny .kpx-tick>span{display:none}
+  .kpx-track.tiny .kpx-dlab span{display:none}
   .kpx-tick i{width:10px;height:10px;border-radius:50%;background:var(--glass);
     border:2px solid color-mix(in srgb,var(--win-accent,var(--accent)) 55%,var(--win-dim,var(--dim)));display:block;margin-top:4px}
-  .kpx-tick.on{color:var(--win-accent,var(--accent));font-weight:750}
+  .kpx-tick.on{color:var(--win-accent,var(--accent))}   /* colour, not weight — weight reflows */
   .kpx-tick.on i{background:var(--win-accent,var(--accent));border-color:var(--win-accent,var(--accent));
     box-shadow:0 0 0 3px color-mix(in srgb,var(--win-accent,var(--accent)) 28%,transparent)}
   @media(hover:hover){.kpx-tick:hover i{border-color:var(--win-accent,var(--accent))}}
@@ -9420,7 +9499,8 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
    const hit=q?rows.filter(x=>clean(x.path).toLowerCase().includes(q)):rows;
    if(!rows.length)return"";
    const groups=groupOf(hit),shown=hit.length;
-   return`<div class="kp-sec" style="margin-bottom:8px"><h4>${svg(ic,12)} ${title} — ${(RES.totals[k==="add"?"added":k==="chg"?"modified":"removed"]||0).toLocaleString(LOC)}${q?` · ${shown} match${shown===1?"":"es"}`:""}</h4>
+   const MARK={add:"+",chg:"~",del:"\u2212"};
+   return`<div class="kp-sec kdf-sec" style="margin-bottom:8px;--c:var(--win-${cls},var(--${cls}))"><h4>${svg(ic,12)} ${title} <span class="kdf-n">${(RES.totals[k==="add"?"added":k==="chg"?"modified":"removed"]||0).toLocaleString(LOC)}</span>${q?` <span class="kdf-q">${shown} match${shown===1?"":"es"}</span>`:""}</h4>
     ${!groups.length?`<div class="kp-help">nothing matches «${esc(q)}»</div>`:""}
     <div style="max-height:38vh;overflow:auto">${groups.map(([dir,items])=>{
       const gid=k+":"+dir,open=q?true:!!openG[gid];
@@ -9428,14 +9508,14 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
         <span class="kdf-gc${open?" open":""}">${svg("chev",12)}</span>
         <span class="mono kdf-gp">${esc(dir)}</span>
         <span class="kdf-gn" style="color:var(--win-${cls},var(--${cls}))">${items.length}</span></button>
-       ${open?`<div class="kdf-gl">${items.slice(0,200).map(x=>`<div class="kdf-f mono"><span>${esc(x.base)}</span>${fmt?fmt(x):""}</div>`).join("")}
+       ${open?`<div class="kdf-gl">${items.slice(0,200).map(x=>`<div class="kdf-f mono"><i class="kdf-mk">${MARK[k]}</i><span>${esc(x.base)}</span>${fmt?fmt(x):""}</div>`).join("")}
         ${items.length>200?`<div class="kp-help" style="padding:3px 0 0">+${items.length-200} more in this folder</div>`:""}</div>`:""}</div>`;}).join("")}</div></div>`;};
   const draw=()=>{const box=s.querySelector("#kdfBody");if(!box||!RES)return;
    const t=RES.totals||{},none=!(t.added||t.modified||t.removed);
-   box.innerHTML=`<div class="kp-flow" style="margin-bottom:10px">
-     <div class="kp-seg"><b>${(t.added||0).toLocaleString(LOC)}</b><span>ADDED</span></div>
-     <div class="kp-seg"><b>${(t.modified||0).toLocaleString(LOC)}</b><span>CHANGED</span></div>
-     <div class="kp-seg"><b>${(t.removed||0).toLocaleString(LOC)}</b><span>REMOVED</span></div></div>
+   box.innerHTML=`<div class="kdf-sum">
+     <div class="kdf-st" style="--c:var(--win-good,var(--good))"><b>${(t.added||0).toLocaleString(LOC)}</b><span>${svg("plus",10)} added</span></div>
+     <div class="kdf-st" style="--c:var(--win-warn,var(--warn))"><b>${(t.modified||0).toLocaleString(LOC)}</b><span>${svg("refresh",10)} changed</span></div>
+     <div class="kdf-st" style="--c:var(--win-danger,var(--danger))"><b>${(t.removed||0).toLocaleString(LOC)}</b><span>${svg("trash",10)} removed</span></div></div>
     ${none?`<div class="pf-empty">Nothing changed between these two points.</div>`:`
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:9px;flex-wrap:wrap">
      <input id="kdfQ" placeholder="filter by path…" data-noenter value="${att(q)}" style="flex:1;min-width:180px">
@@ -9467,15 +9547,52 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
    draw();});}
 
  /* one directory of the CURRENT restore point, cached (cache dies with the restore point) */
- async function exLs(rel,then){
+ /* A cold read of a cloud repository takes seconds (it opens the repository and, for an
+    rclone backend, starts a bridge), a cached one takes milliseconds. So: say so — but only
+    after a moment, or every cached click would flash a spinner. */
+ const exBusy=(tc,on)=>{
+  if(on){EX._busy=(EX._busy||0)+1;
+   if(!EX._bt)EX._bt=setTimeout(()=>{EX._bt=null;
+    const el=tc.querySelector("#kxBusy");if(el&&EX._busy>0)el.classList.add("on");},260);
+  }else{EX._busy=Math.max(0,(EX._busy||0)-1);
+   if(!EX._busy){if(EX._bt){clearTimeout(EX._bt);EX._bt=null;}
+    const el=tc.querySelector("#kxBusy");if(el)el.classList.remove("on");}}};
+ async function exLs(rel,then,tc){
   const key=rel||"",stamp=EX.snap.id;
   if(EX.kids[key])return then&&then(EX.kids[key]);
+  if(tc)exBusy(tc,true);
   const r=await kP("/api/kopia/snap/ls",{d:snapDest,oid:EX.snap.root,rel:key});
+  if(tc)exBusy(tc,false);
   if(!EX||!EX.snap||EX.snap.id!==stamp)return;
   EX.kids[key]=(r&&r.ok)?{entries:r.entries||[],total:r.total||{}}
    :{entries:[],err:(r&&r.log)||"this folder could not be read"};
   then&&then(EX.kids[key]);}
- const exLoad=tc=>{if(EX.snap)exLs(EX.rel,()=>{exPaintRows(tc);exPaintSide(tc);exPaintActs(tc);});};
+ const exLoad=tc=>{if(EX.snap)exLs(EX.rel,()=>{exPaintRows(tc);exPaintSide(tc);exPaintActs(tc);
+   exWarmAround(tc);},tc);};
+
+ /* Warm the answers the user is most likely to ask for next: the subfolders of what they are
+    looking at, and the SAME folder in the neighbouring restore points (stepping the timeline is
+    the common move). Server-side those answers are keyed by object id, so warming one is
+    permanent. One request at a time, only while nothing else is loading, and never more than
+    a handful — this must stay invisible, not compete with the user. */
+ const exWarmed=new Set();
+ async function exWarmAround(tc){
+  if(!EX||!EX.snap)return;
+  const jobs=[],cur=EX.kids[EX.rel||""]||{};
+  (cur.entries||[]).filter(e=>e.dir).slice(0,6).forEach(e=>
+   jobs.push({oid:EX.snap.root,rel:e.rel}));
+  const g=exGroup();
+  if(g){const i=g.list.findIndex(x=>x.id===EX.snap.id);
+   [g.list[i-1],g.list[i+1]].forEach(n=>{if(n&&n.root)jobs.push({oid:n.root,rel:EX.rel||""});});}
+  for(const j of jobs){
+   const k=snapDest+"|"+j.oid+"|"+j.rel;
+   if(exWarmed.has(k))continue;
+   exWarmed.add(k);
+   if(exWarmed.size>4000)exWarmed.clear();
+   if(EX._busy)return;                            // the user is waiting — do not queue behind them
+   await kP("/api/kopia/snap/ls",{d:snapDest,oid:j.oid,rel:j.rel});
+   if(!EX||EX.dest!==snapDest)return;
+  }}
 
  function exSelSnap(tc,s){if(!s||!EX.snap||s.id===EX.snap.id)return;
   EX.snap=s;EX.kids={};exClearSel();EX.deep=null;exPaintAll(tc);exLoad(tc);}
@@ -9485,7 +9602,7 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
   let acc="";rel.split("/").filter(Boolean).forEach(p=>{acc=acc?acc+"/"+p:p;EX.open[acc]=true;});
   exPaintCrumbs(tc);exPaintSide(tc);exPaintActs(tc);exLoad(tc);}
  function exToggle(tc,rel){EX.open[rel]=!EX.open[rel];exPaintSide(tc);
-  if(EX.open[rel])exLs(rel,()=>exPaintSide(tc));}
+  if(EX.open[rel])exLs(rel,()=>exPaintSide(tc),tc);}
 
  /* what an action targets. One selected row → that object; a selected row that is a
     folder → its subtree; nothing selected → the folder you are looking at. */
@@ -9684,6 +9801,10 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
    <span class="kpx-cell">${esc(kxKind(e))}</span>
    <span class="kpx-cell">${esc(kxDate(e.mtime))}</span></div>`;}
 
+ /* first paint has nothing to show yet: a skeleton reads as «working», an empty box reads as
+    «broken», and the word «loading…» in 11px grey was easy to miss entirely */
+ const kpxSkeleton=(n=7)=>`<div class="kpx-skel">${Array.from({length:n},(_,i)=>
+   `<div class="kpx-sk" style="animation-delay:${i*90}ms"><i></i><b></b></div>`).join("")}</div>`;
  function exPaintRows(tc){const box=tc.querySelector("#kxRows");if(!box)return;
   const wire=list=>{EX._rows=list;
    box.querySelectorAll("[data-i]").forEach(n=>{const e=list[+n.dataset.i];
@@ -9757,28 +9878,43 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
   if(!g||!EX.snap){el.style.display="none";el.innerHTML="";return;}
   el.style.display="";
   if(EXCAL)EXCAL();                                  // a floating calendar must not outlive its timeline
-  const list=g.list,idx=list.findIndex(s=>s.id===EX.snap.id);let lastD="";
+  const list=g.list,idx=list.findIndex(s=>s.id===EX.snap.id);
   const sel=EX.snap;
+  // Grouped by DAY: the day is a heading over its points and every tick is a time. The old
+  // strip labelled the first point of a day with a date and the rest with a time — the same
+  // slot meant two different things, and because the two are different widths the whole strip
+  // shifted under the cursor as the selection moved. Ticks are a fixed width now, and the
+  // track thins them out (`tight`/`tiny`) instead of growing without bound.
+  const days=[];
+  list.forEach(s=>{const d=new Date(s.ts*1000),k=d.toDateString();
+   const lab=d.toLocaleDateString(LOC,{month:"short",day:"numeric"});
+   const last=days[days.length-1];
+   if(last&&last.key===k)last.list.push(s);else days.push({key:k,label:lab,list:[s]});});
   // Kept points are counted across the WHOLE repository, not just this folder: the timeline
   // only ever shows one folder, so a per-folder counter cannot answer «where is the point I
   // marked». The walk switches folders when it has to.
   const keptAll=(EX.snaps||[]).filter(s=>(s.pins||[]).length).sort((a,b)=>a.ts-b.ts);
   const keptHere=list.filter(s=>(s.pins||[]).length).length;
-  el.innerHTML=`<div class="kpx-tllab">${svg("clock",13)}<span>${list.length} point${list.length>1?"s":""}</span>
-    ${keptAll.length?`<button class="kpx-kept" id="kxKept" title="${att(keptAll.length+" point"+(keptAll.length>1?"s":"")+" kept for ever in this repository"+(keptHere<keptAll.length?" ("+keptHere+" in this folder) — click to walk through them, across folders":" — click to walk through them"))}">${svg("star",11)} ${keptAll.length} kept${keptHere<keptAll.length?" · "+keptHere+" here":""}</button>`:""}</div>
-   <button class="iconbtn" id="kxPrev" title="Older restore point"${idx<=0?" disabled":""}><span class="kpx-rot">${svg("chev",15)}</span></button>
-   <div class="kpx-track" id="kxTrack"><div class="kpx-inner">${list.map((s,i)=>{
-    // first point of a day is labelled with the date, the rest of that day with the time
-    const d=new Date(s.ts*1000),dk=d.toDateString();
-    const lbl=dk!==lastD?d.toLocaleDateString(LOC,{month:"short",day:"numeric"}):d.toTimeString().slice(0,5);
-    lastD=dk;
-    return `<button class="kpx-tick${i===idx?" on":""}${(s.pins||[]).length?" pinned":""}" data-t="${att(s.id)}" title="${att(dts(s.ts)+" · "+s.files+" files · "+fmtB(s.bytes)+((s.pins||[]).length?" · kept for ever":""))}"><i></i><span>${esc(lbl)}</span></button>`;}).join("")}</div></div>
-   <button class="iconbtn" id="kxNext" title="Newer restore point"${idx<0||idx>=list.length-1?" disabled":""}>${svg("chev",15)}</button>
-   <div class="kpx-tldiv"></div>
-   <button class="btn sm" id="kxCal" title="Pick a restore point by date">${svg("calendar",13)} ${esc(dts(sel.ts))} <span style="color:var(--win-dim,var(--dim));font-weight:400">· ${sel.files} files · ${fmtB(sel.bytes)}</span>${(sel.pins||[]).length?`<span class="kpx-keptb" title="Kept for ever">${svg("star",11)} kept</span>`:""}</button>
-   <button class="iconbtn" id="kxDiff" title="${idx>0?"See what changed since the previous restore point":"Nothing older to compare with"}"${idx<=0?" disabled":""}>${svg("list",14)}</button>
-   <button class="iconbtn${(sel.pins||[]).length?" on":""}" id="kxPin" title="${(sel.pins||[]).length?"Kept for ever — retention will not remove this point. Click to unpin.":"Keep this point for ever (retention will never remove it)"}">${svg("star",14)}</button>
-   <button class="iconbtn" id="kxDel" title="Delete this restore point"${(sel.pins||[]).length?" disabled":""}>${svg("trash",14)}</button>`;
+  el.innerHTML=`<div class="kpx-tlhead">
+    <div class="kpx-tllab">${svg("clock",13)}<span>${list.length} point${list.length>1?"s":""}</span>
+     ${keptAll.length?`<button class="kpx-kept" id="kxKept" title="${att(keptAll.length+" point"+(keptAll.length>1?"s":"")+" kept for ever in this repository"+(keptHere<keptAll.length?" ("+keptHere+" in this folder) — click to walk through them, across folders":" — click to walk through them"))}">${svg("star",11)} ${keptAll.length} kept${keptHere<keptAll.length?" · "+keptHere+" here":""}</button>`:""}</div>
+    <span style="flex:1"></span>
+    <button class="btn sm kpx-calb" id="kxCal" title="${att(dts(sel.ts)+" · pick a restore point by date")}">${svg("calendar",13)}
+     <b>${esc(new Date(sel.ts*1000).toLocaleDateString(LOC,{day:"2-digit",month:"short"}))}</b>
+     <b class="t">${esc(new Date(sel.ts*1000).toTimeString().slice(0,5))}</b>
+     <span class="m"><i>·</i><span>${sel.files} file${sel.files===1?"":"s"}</span>
+      <i>·</i><span class="sz">${fmtB(sel.bytes)}</span></span>${(sel.pins||[]).length?`<span class="kpx-keptb" title="Kept for ever">${svg("star",11)} kept</span>`:""}</button>
+    <div class="kpx-tlacts">
+     <button class="iconbtn" id="kxDiff" title="${idx>0?"See what changed since the previous restore point":"Nothing older to compare with"}"${idx<=0?" disabled":""}>${svg("list",14)}</button>
+     <button class="iconbtn${(sel.pins||[]).length?" on":""}" id="kxPin" title="${(sel.pins||[]).length?"Kept for ever — retention will not remove this point. Click to release it.":"Keep this point for ever (retention will never remove it)"}">${svg("star",14)}</button>
+     <button class="iconbtn" id="kxDel" title="${(sel.pins||[]).length?"Kept points cannot be deleted — release it first":"Delete this restore point"}"${(sel.pins||[]).length?" disabled":""}>${svg("trash",14)}</button></div></div>
+   <div class="kpx-tlstrip">
+    <button class="iconbtn" id="kxPrev" title="Older restore point"${idx<=0?" disabled":""}><span class="kpx-rot">${svg("chev",15)}</span></button>
+    <div class="kpx-track ${list.length>200?"tiny":list.length>60?"tight":""}" id="kxTrack"><div class="kpx-inner">${days.map(day=>`
+     <div class="kpx-day"><div class="kpx-dlab">${esc(day.label)}${day.list.length>1?`<span>${day.list.length}</span>`:""}</div>
+      <div class="kpx-dticks">${day.list.map(s=>{const on=s.id===sel.id;
+       return `<button class="kpx-tick${on?" on":""}${(s.pins||[]).length?" pinned":""}" data-t="${att(s.id)}" title="${att(dts(s.ts)+" · "+s.files+" files · "+fmtB(s.bytes)+((s.pins||[]).length?" · kept for ever":""))}"><i></i><span>${esc(new Date(s.ts*1000).toTimeString().slice(0,5))}</span></button>`;}).join("")}</div></div>`).join("")}</div></div>
+    <button class="iconbtn" id="kxNext" title="Newer restore point"${idx<0||idx>=list.length-1?" disabled":""}>${svg("chev",15)}</button></div>`;
   el.querySelectorAll("[data-t]").forEach(b=>b.onclick=()=>exSelSnap(tc,list.find(s=>s.id===b.dataset.t)));
   el.querySelector("#kxPrev").onclick=()=>exSelSnap(tc,list[idx-1]);
   el.querySelector("#kxNext").onclick=()=>exSelSnap(tc,list[idx+1]);
@@ -9864,6 +10000,9 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
   exPaintActs(tc);exPaintRst(tc);
   const st=tc.querySelector("#kxState");
   if(st)st.innerHTML=EX.err?`<div class="pf-empty" style="color:var(--win-danger,var(--danger))">${esc(EX.err)}</div>`:"";}
+ /* while the snapshot list itself is being read there is no timeline and no rows — say it */
+ const exBootHTML=()=>`<div class="kpx-boot">${svg("clock",15)}<b>Reading the repository…</b>
+   <span>opening it takes a few seconds; folders you have already visited open instantly afterwards</span></div>`;
 
  function tabSnaps(tc){
   const dests=(D.dests||[]).filter(x=>x.connected||usedBy("dst",x.id).length);
@@ -9903,7 +10042,8 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
        <button class="btn sm pri" id="kxRestore" title="Put it back where it came from">${svg("refresh",13)} Restore</button></div></div>
      <div class="kpx-list" id="kxList" tabindex="0">
       <div class="kpx-h" id="kxHead"><span data-s="name">Name</span><span data-s="size" class="num">Size</span><span data-s="kind">Type</span><span data-s="mtime">Modified</span></div>
-      <div id="kxRows"><div class="pf-empty">loading…</div></div></div></div></div>
+      <div class="kpx-busy" id="kxBusy"><i></i><span>${svg("clock",12)} Reading the repository…</span></div>
+      <div id="kxRows">${kpxSkeleton()}</div></div></div></div>
    <div class="kpx-tlbar" id="kxTl"></div></div>`;
   tc.querySelectorAll("[data-c]").forEach(b=>b.onclick=()=>{snapDest=b.dataset.c;snapBk="";tabSnaps(tc);});
   tc.querySelectorAll("[data-bkf]").forEach(b=>b.onclick=()=>{snapBk=snapBk===b.dataset.bkf?"":b.dataset.bkf;tabSnaps(tc);});
@@ -9947,7 +10087,9 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
   tc.querySelector("#kxCopy").onclick=()=>exCopy(tc);
   tc.querySelector("#kxDl").onclick=()=>exDownload();
   exPaintRst(tc);
-  if(EX.snaps===null){EX.snaps=null;exBoot(tc);}
+  if(EX.snaps===null){EX.snaps=null;
+   const rowsBox=tc.querySelector("#kxRows");if(rowsBox)rowsBox.innerHTML=exBootHTML();
+   exBoot(tc);}
   else{exPaintAll(tc);exLoad(tc);}
   if(EX.snaps&&!EX.snaps.length&&!EX.err){
    tc.querySelector("#kxState").innerHTML=kpEmpty("clock",snapBk?"No restore points from this backup here":"No restore points yet",
