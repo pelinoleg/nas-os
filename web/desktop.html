@@ -9393,7 +9393,7 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
     same point in time comes back under a new id — re-find it by timestamp. */
  async function exReload(tc,ts){
   const want=snapDest,rel=EX.rel,path=EX.path,key=EX.key;
-  const r=await api("/api/kopia/snapshots?d="+encodeURIComponent(want));
+  const r=await api("/api/kopia/snapshots?force=1&d="+encodeURIComponent(want));
   if(!EX||snapDest!==want)return;
   if(!(r&&r.ok)){EX.snaps=[];EX.err=(r&&r.log)||"could not read this repository";exPaintAll(tc);return;}
   EX.err="";

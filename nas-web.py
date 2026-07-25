@@ -10939,10 +10939,36 @@ def kp_browse(path):
     entries.sort(key=lambda x: (not x["dir"], x["name"].lower()))
     return {"ok": True, "path": path, "abs": True, "entries": entries}
 
-def kp_snapshots(destid):
+_KP_SNAPS_CACHE = {}          # destid -> (ts, stamp, payload); the list CAN change
+KP_SNAPS_TTL = 45             # seconds — long enough for tab switches, short enough to be honest
+
+def _kp_snaps_stamp(destid, cfg=None):
+    """A cheap fingerprint of «could this repository have new snapshots». The runner is a
+    separate process, so the panel cannot invalidate its own memory when a backup finishes —
+    but the run-state file it writes is right here, so watch that instead of guessing with a
+    timer. A client writing through the backup server leaves no local trace; the TTL covers
+    that case."""
+    cfg = cfg or kp_load()
+    parts = []
+    for b in cfg["backups"]:
+        if destid in (b.get("dest"), b.get("dest2")):
+            try:
+                parts.append(int(os.path.getmtime(_kp_runf(b["id"], "json"))))
+            except OSError:
+                parts.append(0)
+    return tuple(parts)
+
+def kp_snapshots(destid, force=False):
     """Snapshot list of one repository, newest first, with the nasbk tag so the
-    UI can filter per backup."""
+    UI can filter per backup. Held for a few seconds: unlike an object-id answer this list
+    grows with every run, so callers that must see the truth (after a pin, a delete, or a
+    finished backup) pass force=True."""
     cfg = kp_load()
+    stamp = _kp_snaps_stamp(str(destid or ""), cfg)
+    if not force:
+        c = _KP_SNAPS_CACHE.get(str(destid or ""))
+        if c and time.time() - c[0] < KP_SNAPS_TTL and c[1] == stamp:
+            return c[2]
     dest = _kp_find(cfg["dests"], str(destid or ""))
     if not dest:
         return {"ok": False, "log": "no such destination"}
@@ -10979,8 +11005,10 @@ def kp_snapshots(destid):
     out.sort(key=lambda x: -x["ts"])
     # who WE are: with the backup server on, a repository also holds other machines'
     # snapshots, and the explorer must badge those, not ours
-    return {"ok": True, "snapshots": out[:500],
-            "own": "root@" + (socket.gethostname() or "").split(".")[0]}
+    res = {"ok": True, "snapshots": out[:500],
+           "own": "root@" + (socket.gethostname() or "").split(".")[0]}
+    _KP_SNAPS_CACHE[str(destid or "")] = (time.time(), stamp, res)
+    return res
 
 # ---- snapshot runner: policies, progress, 3-2-1 replication -----------------
 KP_HIST_FILE = os.path.join(NAS_CONFIG, "kopia-history.json")
@@ -11355,6 +11383,92 @@ def _kp_entry(e):
             "files": int(summ.get("files") or 0) if isdir else 0,
             "mtime": _kp_iso(e.get("mtime"))}
 
+# ---- answer cache for everything addressed by object id ----------------------
+# A kopia object id is content-addressed: the directory it names can never change its
+# contents. So a listing (or a search, or a diff of two ids) is answerable from disk FOR
+# EVER — no invalidation, no staleness, no TTL to get wrong. Worth doing because the cost
+# is not the listing itself: every miss opens the repository, and for a cloud repo that
+# means starting an `rclone serve webdav` bridge — measured 2.4 s per folder click on
+# pcloud, paid again on every revisit. The store lives inside the destination's cache
+# directory, so «Clear local cache» and forgetting a destination both wipe it.
+KP_ANS_MAX_ROWS = 20000
+KP_ANS_MAX_BYTES = 64 * 1024 * 1024
+_KP_ANS_LOCK = threading.Lock()
+
+def _kp_ans_db(destid):
+    return os.path.join(_kp_cache_dir(destid), "panel-answers.db")
+
+def _kp_ans_open(destid, create=True):
+    """Open (or create) the store. A store damaged by a power cut is thrown away and
+    rebuilt: sqlite fails on the very first statement, so without this the cache would
+    stay silently dead for ever — the worst kind of broken, because nothing looks wrong."""
+    path = _kp_ans_db(destid)
+    if not create and not os.path.exists(path):
+        return None                      # a plain miss must not leave an empty store behind
+    for attempt in (1, 2):
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            db = sqlite3.connect(path, timeout=5)
+            db.execute("CREATE TABLE IF NOT EXISTS ans(k TEXT PRIMARY KEY, ts INT, v TEXT)")
+            return db
+        except sqlite3.DatabaseError:
+            if attempt == 2:
+                return None
+            try:
+                os.remove(path)          # not a database (truncated / garbage) → start over
+            except OSError:
+                return None
+        except (sqlite3.Error, OSError):
+            return None
+    return None
+
+def _kp_ans_get(destid, key):
+    with _KP_ANS_LOCK:
+        db = _kp_ans_open(destid, create=False)
+        if not db:
+            return None
+        try:
+            row = db.execute("SELECT v FROM ans WHERE k=?", (key,)).fetchone()
+            if not row:
+                return None
+            val = json.loads(row[0])
+            db.execute("UPDATE ans SET ts=? WHERE k=?", (int(time.time()), key))
+            db.commit()
+            return val
+        except (sqlite3.Error, ValueError):
+            try:
+                os.remove(_kp_ans_db(destid))
+            except OSError:
+                pass
+            return None
+        finally:
+            try:
+                db.close()
+            except sqlite3.Error:
+                pass
+
+def _kp_ans_put(destid, key, value):
+    with _KP_ANS_LOCK:
+        db = _kp_ans_open(destid)
+        if not db:
+            return
+        try:
+            db.execute("INSERT OR REPLACE INTO ans(k, ts, v) VALUES(?,?,?)",
+                       (key, int(time.time()), json.dumps(value)))
+            n, size = db.execute("SELECT COUNT(*), COALESCE(SUM(LENGTH(v)),0) FROM ans").fetchone()
+            if n > KP_ANS_MAX_ROWS or size > KP_ANS_MAX_BYTES:
+                # drop the least recently used quarter — cheaper than trimming one by one
+                db.execute("DELETE FROM ans WHERE k IN (SELECT k FROM ans ORDER BY ts LIMIT ?)",
+                           (max(1, n // 4),))
+            db.commit()
+        except (sqlite3.Error, ValueError, TypeError):
+            pass
+        finally:
+            try:
+                db.close()
+            except sqlite3.Error:
+                pass
+
 def kp_snap_ls(destid, oid, rel=""):
     """One directory level of a snapshot, addressed as <snapshot root>/<rel>."""
     cfg = kp_load()
@@ -11365,6 +11479,10 @@ def kp_snap_ls(destid, oid, rel=""):
         arg = _kp_obj_arg(oid, rel)
     except ValueError as e:
         return {"ok": False, "log": str(e)}
+    ck = "ls:" + arg
+    hit = _kp_ans_get(destid, ck)
+    if hit is not None:
+        return hit                       # content-addressed: this answer cannot go stale
     c = _kp_ensure_connected(dest)
     if not c["ok"]:
         return c
@@ -11376,8 +11494,10 @@ def kp_snap_ls(destid, oid, rel=""):
     entries = [e for e in entries if e["oid"] and e["name"]]
     entries.sort(key=lambda x: (not x["dir"], x["name"].lower()))
     summ = d.get("summary") or {}
-    return {"ok": True, "entries": entries, "rel": _kp_relpath(rel),
-            "total": {"size": int(summ.get("size") or 0), "files": int(summ.get("files") or 0)}}
+    out = {"ok": True, "entries": entries, "rel": _kp_relpath(rel),
+           "total": {"size": int(summ.get("size") or 0), "files": int(summ.get("files") or 0)}}
+    _kp_ans_put(destid, ck, out)
+    return out
 
 def kp_snap_find(destid, oid, query, cap=200):
     """Search a snapshot's whole tree for a filename substring — «which snapshot
@@ -11391,6 +11511,10 @@ def kp_snap_find(destid, oid, query, cap=200):
     q = str(query or "").strip().lower()
     if len(q) < 2:
         return {"ok": False, "log": "type at least 2 characters"}
+    ck = "find:%s:%d:%s" % (oid, cap, q)
+    hit = _kp_ans_get(destid, ck)
+    if hit is not None:
+        return hit
     c = _kp_ensure_connected(dest)
     if not c["ok"]:
         return c
@@ -11437,7 +11561,9 @@ def kp_snap_find(destid, oid, query, cap=200):
             proc.wait(timeout=10)
         except (OSError, subprocess.SubprocessError):
             pass
-    return {"ok": True, "matches": out, "more": more}
+    res = {"ok": True, "matches": out, "more": more}
+    _kp_ans_put(destid, ck, res)
+    return res
 
 def _kp_dl_name(name, fallback="download"):
     """Filename for Content-Disposition — basename only, control chars stripped."""
@@ -11599,6 +11725,7 @@ def kp_snap_delete(destid, snapid):
     if not re.match(r"^[0-9a-f]{16,64}$", snapid):
         return {"ok": False, "log": "bad snapshot id"}
     r = _kp(destid, ["snapshot", "delete", snapid, "--delete"], timeout=300)
+    _KP_SNAPS_CACHE.pop(str(destid), None)
     return {"ok": r["ok"], "log": "" if r["ok"] else _kp_err_tail(r)}
 
 KP_PIN = "keep"          # our single pin name — one meaning: retention must not touch it
@@ -11619,6 +11746,7 @@ def kp_snap_pin(destid, snapid, on=True):
         return c
     r = _kp(destid, ["snapshot", "pin", snapid,
                      ("--add" if on else "--remove"), KP_PIN], timeout=180)
+    _KP_SNAPS_CACHE.pop(str(destid), None)   # pinning rewrites the manifest: ids changed
     return {"ok": r["ok"], "log": "" if r["ok"] else _kp_err_tail(r)}
 
 _KP_DIFF_ADD = re.compile(r"^added (file|directory|symlink) (\./.*?) \(")
@@ -11643,6 +11771,10 @@ def kp_snap_diff(destid, oid1, oid2, cap=KP_DIFF_CAP):
     for o in (oid1, oid2):
         if not _KP_OID_RE.match(str(o or "")):
             return {"ok": False, "log": "bad object id"}
+    ck = "diff:%s:%s:%d" % (oid1, oid2, cap)
+    hit = _kp_ans_get(destid, ck)
+    if hit is not None:
+        return hit
     c = _kp_ensure_connected(dest)
     if not c["ok"]:
         return c
@@ -11701,10 +11833,13 @@ def kp_snap_diff(destid, oid1, oid2, cap=KP_DIFF_CAP):
     # doubled (one changed file reports 2 — verified on a 720-file change and on a 1-file
     # one), so the summary would tell the user twice the truth. Our counters match exactly
     # what the listing shows, and `truncated` says when they are only a floor.
-    return {"ok": True, "added": added, "removed": removed, "changed": changed,
-            "cap": cap, "truncated": truncated,
-            "totals": {"added": n_add, "removed": n_del, "modified": n_chg},
-            "more": (n_add > len(added) or n_del > len(removed) or n_chg > len(changed))}
+    res = {"ok": True, "added": added, "removed": removed, "changed": changed,
+           "cap": cap, "truncated": truncated,
+           "totals": {"added": n_add, "removed": n_del, "modified": n_chg},
+           "more": (n_add > len(added) or n_del > len(removed) or n_chg > len(changed))}
+    if not truncated:        # a cut-short comparison is not a final answer — don't freeze it
+        _kp_ans_put(destid, ck, res)
+    return res
 
 def kp_snap_sources(destid):
     """Distinct snapshot sources (user@host:/path) of one repository with counts —
@@ -11762,6 +11897,7 @@ def kp_move_history(destid, src_spec, new_path, copy=False):
         return c
     r = _kp(destid, ["snapshot", ("copy-history" if copy else "move-history"),
                      src_spec, dst_spec], timeout=600)
+    _KP_SNAPS_CACHE.pop(str(destid), None)
     # kopia narrates the move on STDERR — counting only stdout reported 0 moved
     txt = (r["out"] or "") + (r["err"] or "")
     return {"ok": r["ok"], "log": ("" if r["ok"] else _kp_err_tail(r)),
@@ -22170,7 +22306,8 @@ class H(BaseHTTPRequestHandler):
             elif p == "/api/kopia/run/status":
                 self._json(kp_run_status((q.get("b") or [""])[0]))
             elif p == "/api/kopia/snapshots":
-                self._json(kp_snapshots((q.get("d") or [""])[0]))
+                self._json(kp_snapshots((q.get("d") or [""])[0],
+                                        force=((q.get("force") or ["0"])[0] == "1")))
             elif p == "/api/kopia/restore/status":
                 self._json(kp_restore_status())
             elif p == "/api/kopia/snap/file":
