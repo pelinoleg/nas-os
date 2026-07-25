@@ -1501,6 +1501,17 @@
   .kpx-tick.pinned>span{color:var(--win-warn,var(--warn));font-weight:650}
   /* «What changed»: folders collapse, because a run can touch thousands of files and a flat
      list of names answers nothing — the folder and its count do. */
+  /* Server tab: copy-paste recipes and click-to-copy values */
+  .kp-cmd{display:flex;align-items:flex-start;gap:8px;width:100%}
+  .kp-cmd pre{flex:1;min-width:0;margin:0;padding:9px 11px;border-radius:9px;overflow-x:auto;
+    background:var(--code-bg);color:var(--code-fg);font:12px/1.55 var(--mono);white-space:pre}
+  .kp-cmd .btn{flex:none;margin-top:2px}
+  .kp-copyv{cursor:pointer;background:var(--card);padding:3px 8px;border-radius:7px;font-size:11.5px;
+    border:1px solid var(--win-line,var(--line))}
+  @media(hover:hover){.kp-copyv:hover{border-color:var(--win-accent,var(--accent));color:var(--win-accent,var(--accent))}}
+  .kp-stepn{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;
+    border-radius:50%;background:var(--win-accent,var(--accent));color:#fff;font-size:10.5px;
+    font-weight:800;margin-right:5px;letter-spacing:0}
   .kdf-g+.kdf-g{border-top:1px solid var(--win-line,var(--line))}
   .kdf-gh{display:flex;align-items:center;gap:8px;width:100%;background:none;border:0;cursor:pointer;
     padding:5px 2px;text-align:left;color:inherit;font:inherit}
@@ -8332,7 +8343,8 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
  let tab=initTab||"overview",D=null,detail=null,wiz=null,lastJson="";
  const CATS=[{id:"overview",name:"Overview",ic:"shield"},{id:"sources",name:"Sources",ic:"folder"},
   {id:"dests",name:"Destinations",ic:"hdd"},{id:"snaps",name:"Snapshots",ic:"clock"},
-  {id:"hist",name:"History",ic:"list"},{id:"opts",name:"Options",ic:"cog"}];
+  {id:"hist",name:"History",ic:"list"},{id:"srv",name:"Server",ic:"net"},
+  {id:"opts",name:"Options",ic:"cog"}];
  const ago=t=>{if(!t)return"never";const s=Math.max(0,Math.floor(Date.now()/1000-t));if(s<90)return"just now";
   const m=Math.floor(s/60),h=Math.floor(m/60),d=Math.floor(h/24);return d?d+"d ago":h?h+"h ago":m+"m ago";};
  const dts=t=>t?new Date(t*1000).toLocaleString(LOC):"—";
@@ -8366,7 +8378,8 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
   if(!D){tc.innerHTML='<div class="set-load">loading…</div>';return;}
   if(D.offline){tc.innerHTML='<div class="set-load">no connection to the panel — retrying…</div>';return;}
   if(!D.installed){paintInstall(tc);return;}
-  ({overview:tabOverview,sources:tabSources,dests:tabDests,snaps:tabSnaps,hist:tabHist,opts:tabOpts}[tab]||tabOverview)(tc);};
+  ({overview:tabOverview,sources:tabSources,dests:tabDests,snaps:tabSnaps,hist:tabHist,
+    srv:tabServer,opts:tabOpts}[tab]||tabOverview)(tc);};
  const refresh=async()=>{await load();paint();};
 
  // gentle poll: repaint only when the status payload actually changed
@@ -9932,6 +9945,169 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
    box.innerHTML=groups.map(g=>`<div class="kp-sec"><h4>${svg(histMode==="bk"?"shield":"clock",13)} ${esc(g.k)}${histMode==="bk"?` <span style="font-weight:400;letter-spacing:0;text-transform:none;color:var(--win-dim,var(--dim))">· ${g.items.length} run${g.items.length>1?"s":""}</span>`:""}</h4>
     ${g.items.map(x=>kpRunRow(x,histMode!=="bk")).join("")}</div>`).join("");
    kpWireTails(box);});}
+
+ /* ---------- Server tab: let other machines back up INTO this box ----------
+    Two panes on purpose: «Settings» is the switchboard, «How to connect» is the copy-paste
+    recipe with this box's real address, fingerprint and logins already filled in — the part
+    people actually need and never remember. The server serves ONE repository; clients
+    authenticate with their own login@hostname and never learn the repository password. */
+ let srvPane="set",SRV=null,srvBusy=false;
+ const srvClip=(t,label)=>{navigator.clipboard&&navigator.clipboard.writeText(t);toast((label||"Copied")+" copied");};
+ const codeBlock=(id,text)=>`<div class="kp-cmd"><pre id="${id}">${esc(text)}</pre>
+   <button class="btn sm" data-copy="${id}">${svg("copy",12)} Copy</button></div>`;
+ async function tabServer(tc){
+  tc.innerHTML=`<div style="display:flex;align-items:center;gap:10px"><h3 class="set-title" style="margin:0">Backup server</h3><span style="flex:1"></span>
+    <div class="seg" id="kSrvSeg"><button data-v="set"${srvPane==="set"?' class="on"':""}>Settings</button><button data-v="how"${srvPane==="how"?' class="on"':""}>How to connect</button></div></div>
+   <p class="set-sub">Other machines — laptops, another box — can back up <b>into</b> this NAS: versioned snapshots with shared deduplication, without giving anyone the repository password.</p>
+   <div id="kSrvBody"><div class="set-load">loading…</div></div>`;
+  tc.querySelectorAll("#kSrvSeg button").forEach(b=>b.onclick=()=>{srvPane=b.dataset.v;tabServer(tc);});
+  const r=await kP("/api/kopia/server",{deep:1});
+  const box=tc.querySelector("#kSrvBody");if(!box)return;
+  if(!r||!r.ok){box.innerHTML=`<div class="kp-note err">${esc((r&&r.log)||"could not read the server status")}</div>`;return;}
+  SRV=r;
+  (srvPane==="how"?srvHow:srvSettings)(box,tc);}
+
+ function srvSettings(box,tc){const s=SRV;
+  const on=s.running,col=on?"good":s.enabled?"danger":"dim";
+  const dests=(D.dests||[]);
+  box.innerHTML=`
+   <div class="kp-hero" style="--kp-hc:var(--win-${col==="dim"?"dim":col},var(--${col==="dim"?"dim":col}))">
+    <div class="kp-hero-ic">${svg("net",20)}</div>
+    <div style="flex:1;min-width:0">
+     <div class="kp-big">${on?"Accepting backups from other machines":s.enabled?"Server is down":"Off"}</div>
+     <div style="color:var(--win-dim,var(--dim));font-size:12px;margin-top:2px">
+      ${on?`listening on <span class="mono">${esc(s.url)}</span> · writing into <b>${esc(s.dest_name||"—")}</b>`
+        :s.enabled?"it should be running — see the log below":"other machines cannot back up here yet"}</div></div>
+    <label class="tgl" title="${s.dest?"":"pick a repository first"}"><input type="checkbox" id="kSrvOn"${s.enabled?" checked":""}${s.dest?"":" disabled"}><span class="sl"></span></label></div>
+   ${s.enabled&&!on&&s.log?`<div class="kp-note err" style="margin-bottom:10px"><b>The server is not running.</b></div>${kpTail(s.log)}`:""}
+   ${s.dest_missing?`<div class="kp-note err" style="margin-bottom:10px">The disk of the chosen repository is not plugged in — clients will be refused until it is back.</div>`:""}
+   <div class="kp-sec"><h4>${svg("hdd",13)} Where client backups land</h4>
+    <p class="kp-help">One server serves one repository. Everything clients send goes here, and deduplication is shared with what this box backs up itself — the same file from three machines is stored once. Retention for a client's own folders is set <b>on that client</b>; this box's retention rules only cover its own paths.</p>
+    <div class="kp-picks">${dests.length?dests.map(x=>{const used=usedBy("dst",x.id);
+      return pkRow({kind:"srvdest",id:x.id,on:s.dest===x.id,ic:x.kind==="fs"?"hdd":"globe",name:x.name,
+       tags:used.length?[["also receives "+used.join(", ")]]:[],
+       meta:x.kind==="fs"?x.path:(x.remote+":"+(x.remote_path||""))});}).join("")
+     :`<div class="kp-help" style="padding:8px">No repositories yet — create one on the <b>Destinations</b> tab first.</div>`}</div></div>
+   <div class="kp-sec"><h4>${svg("net",13)} Address and identity</h4>
+    <div class="srow"><div class="srow-l"><div class="srow-t">Port</div><div class="srow-d">Opened in the firewall only while the server is on. 51515 is kopia's default.</div></div>
+     <div class="srow-c"><input id="kSrvPort" type="number" min="1024" max="65535" class="mono" style="width:100px" value="${+s.port}"></div></div>
+    <div class="srow"><div class="srow-l"><div class="srow-t">URL for clients</div><div class="srow-d">Use the IP if your network's <span class="mono">.local</span> names are unreliable.</div></div>
+     <div class="srow-c" style="flex-direction:column;align-items:flex-end;gap:4px">
+      <code class="mono kp-copyv" data-c="${att(s.url)}" title="Click to copy">${esc(s.url)}</code>
+      <code class="mono kp-copyv" data-c="${att(s.url_alt)}" title="Click to copy">${esc(s.url_alt)}</code></div></div>
+    <div class="srow"><div class="srow-l"><div class="srow-t">Certificate fingerprint</div><div class="srow-d">The box signs its own certificate, so each client <b>pins</b> this fingerprint instead of trusting an authority. It is not a secret — but it must match exactly, or the client refuses to connect.</div></div>
+     <div class="srow-c" style="flex-direction:column;align-items:flex-end;gap:5px">
+      <code class="mono kp-copyv" data-c="${att(s.fingerprint)}" title="Click to copy" style="max-width:320px;overflow:hidden;text-overflow:ellipsis">${esc(s.fingerprint||"—")}</code>
+      <button class="kp-quiet" id="kSrvCert" style="font-size:11px">create a new certificate…</button></div></div></div>
+   <div class="kp-sec"><h4>${svg("key",13)} Machines allowed in</h4>
+    <p class="kp-help">One login per machine, and the name <b>must</b> be that machine's own <span class="mono">login@hostname</span> — that is the identity kopia sends. A mismatch looks exactly like a wrong password. Each machine gets its own password; none of them is the repository password.</p>
+    <div class="kp-well">${(s.users||[]).length?(s.users||[]).map(u=>`<div class="kp-witem">
+       <span style="flex:1;min-width:0"><b class="mono">${esc(u.name)}</b>
+        ${u.password?`<span class="mono kp-copyv" data-c="${att(u.password)}" title="Click to copy" style="margin-left:8px;color:var(--win-dim,var(--dim))">${esc(u.password)}</span>`
+          :`<span style="margin-left:8px;color:var(--win-dim,var(--dim));font-size:11px">password not stored here — reset it to see one</span>`}</span>
+       <button class="iconbtn" data-uedit="${att(u.name)}" title="Set a new password">${svg("edit",14)}</button>
+       <button class="iconbtn dng" data-udel="${att(u.name)}" title="Remove this machine">${svg("trash",14)}</button></div>`).join("")
+      :`<div class="kp-help" style="padding:8px">No machines yet.</div>`}
+     <button class="kp-wadd" id="kSrvAdd">${svg("plus",14)} Add a machine</button></div></div>
+   ${(s.clients||[]).length?`<div class="kp-sec"><h4>${svg("clock",13)} What clients have sent</h4>
+     ${(s.clients||[]).map(c=>`<div class="srow"><div class="srow-l"><div class="srow-t mono" style="text-transform:none;letter-spacing:0">${esc(c.user+"@"+c.host)}</div>
+       <div class="srow-d mono">${esc(c.path)}</div></div>
+      <div class="srow-c">${c.count} restore point${c.count===1?"":"s"}</div></div>`).join("")}
+     <p class="kp-help" style="margin-top:8px">Browse them like anything else: <b>Snapshots</b> → repository «${esc(s.dest_name||"")}». Each machine's folders form their own timeline.</p></div>`:""}
+   <div class="r"><button class="btn pri" id="kSrvSave">Save</button>
+    ${s.running?`<button class="btn" id="kSrvRe">Restart server</button>`:""}
+    <span id="kSrvSt" style="color:var(--win-dim,var(--dim));font-size:12px;margin-left:10px"></span></div>`;
+  const st=m=>{const e=box.querySelector("#kSrvSt");if(e)e.textContent=m||"";};
+  box.querySelectorAll(".kp-copyv").forEach(e=>e.onclick=()=>srvClip(e.dataset.c));
+  box.querySelectorAll("[data-pick='srvdest']").forEach(b=>b.onclick=()=>{
+   box.querySelectorAll("[data-pick='srvdest']").forEach(x=>x.classList.toggle("on",x===b));
+   SRV.dest=b.dataset.v;const t=box.querySelector("#kSrvOn");if(t)t.disabled=false;});
+  const save=async(extra)=>{if(srvBusy)return;srvBusy=true;st("applying…");
+   const body=Object.assign({dest:SRV.dest,port:+box.querySelector("#kSrvPort").value||51515,
+    enabled:box.querySelector("#kSrvOn").checked},extra||{});
+   const r=await kP("/api/kopia/server/set",body);srvBusy=false;
+   if(!(r&&r.ok)){st((r&&r.log)||"failed");return;}
+   tabServer(tc);};
+  box.querySelector("#kSrvSave").onclick=()=>save();
+  box.querySelector("#kSrvOn").onchange=()=>save();
+  const re=box.querySelector("#kSrvRe");
+  if(re)re.onclick=async()=>{st("restarting…");const r=await kP("/api/kopia/server/restart");
+   if(!(r&&r.ok))st((r&&r.log)||"failed");else tabServer(tc);};
+  box.querySelector("#kSrvCert").onclick=()=>confirmDlg("Create a new certificate?",
+   "Every machine that already connects pins the current fingerprint — after this they will all refuse to connect until you give them the new one. Only do this if the key may have leaked.",
+   async()=>{st("creating…");const r=await kP("/api/kopia/server/cert");
+    if(!(r&&r.ok))st((r&&r.log)||"failed");else tabServer(tc);},1);
+  box.querySelector("#kSrvAdd").onclick=()=>srvUserDlg("",tc);
+  box.querySelectorAll("[data-uedit]").forEach(b=>b.onclick=()=>srvUserDlg(b.dataset.uedit,tc));
+  box.querySelectorAll("[data-udel]").forEach(b=>b.onclick=()=>{const n=b.dataset.udel;
+   confirmDlg("Remove "+esc(n)+"?",`That machine can no longer connect. The snapshots it already sent stay in the repository — remove them on the <b>Snapshots</b> tab if you want them gone.`,
+    async()=>{const r=await kP("/api/kopia/server/user",{name:n,remove:1});
+     if(!(r&&r.ok))toast((r&&r.log)||"failed");tabServer(tc);},1);});}
+
+ /* one machine = one login@hostname + its own password */
+ function srvUserDlg(name,tc){const s=document.getElementById("scrim"),edit=!!name;
+  const gen="kp-"+Math.random().toString(36).slice(2,8)+Math.random().toString(36).slice(2,6);
+  s.innerHTML=`<div class="dialog" style="max-width:none;width:min(560px,94vw)"><h3>${svg("key",16)} ${edit?"New password for "+esc(name):"Add a machine"}</h3>
+   <p style="margin:2px 0 12px;font-size:12px;color:var(--win-dim,var(--dim))">${edit?"The machine will have to reconnect with the new password."
+     :"The name must be the client's own login and hostname. On the client, <span class=\"mono\">whoami</span> and <span class=\"mono\">hostname</span> tell you both — or pass <span class=\"mono\">--override-username/--override-hostname</span> when connecting and use whatever you type here."}</p>
+   ${edit?"":`<div class="field"><label>Machine login</label><input id="kSuName" placeholder="oleg@macbook" autocapitalize="off" spellcheck="false"></div>`}
+   <div class="field"><label>Password</label><input id="kSuPw" value="${att(gen)}" maxlength="128" spellcheck="false"></div>
+   <div class="kp-help">Kept in the panel so you can look it up later (it travels inside the settings backup, like the SMB passwords).</div>
+   <div class="r"><span id="kSuS" style="flex:1;text-align:left;font-size:12px;color:var(--win-dim,var(--dim))"></span>
+    <button class="btn" id="kSuX">Cancel</button><button class="btn pri" id="kSuO">${edit?"Set password":"Add"}</button></div></div>`;
+  s.classList.add("show");
+  s.querySelector("#kSuX").onclick=()=>s.classList.remove("show");
+  s.querySelector("#kSuO").onclick=async()=>{
+   const nm=edit?name:(s.querySelector("#kSuName").value||"").trim();
+   const pw=(s.querySelector("#kSuPw").value||"").trim();
+   const note=s.querySelector("#kSuS");
+   if(!/^[A-Za-z0-9._-]+@[A-Za-z0-9._-]+$/.test(nm)){note.textContent="use login@hostname";return;}
+   if(pw.length<4){note.textContent="password must be at least 4 characters";return;}
+   note.textContent="saving…";
+   const r=await kP("/api/kopia/server/user",{name:nm,password:pw});
+   if(!(r&&r.ok)){note.textContent=(r&&r.log)||"failed";return;}
+   s.classList.remove("show");toast(edit?"Password changed":"Machine added");tabServer(tc);};}
+
+ /* the recipe pane — real values, not placeholders */
+ function srvHow(box,tc){const s=SRV;
+  const url=s.url,fp=s.fingerprint||"<start the server to get the fingerprint>";
+  const who=(s.users&&s.users[0]&&s.users[0].name)||"oleg@macbook";
+  const user=who.split("@")[0],host=who.split("@")[1]||"macbook";
+  const pw=(s.users&&s.users[0]&&s.users[0].password)||"<the password from Settings>";
+  const step=(n,t,body)=>`<div class="kp-sec"><h4><span class="kp-stepn">${n}</span> ${t}</h4>${body}</div>`;
+  box.innerHTML=`
+   ${!s.running?`<div class="kp-note${s.enabled?" err":""}" style="margin-bottom:10px">${s.enabled?"The server is not running right now — clients will be refused until it is back.":"The server is <b>off</b>. Turn it on under <b>Settings</b>, then these commands will work."}</div>`:""}
+   <p class="set-sub" style="margin-top:0">Everything below is filled in with this box's real address, fingerprint and first machine login. Run it <b>on the machine you want to back up</b>, not here.</p>
+   ${step(1,"Install kopia on that machine",`
+    <p class="kp-help">Any recent version works — the client and this box do not have to match exactly.</p>
+    <div class="srow"><div class="srow-l"><div class="srow-t">macOS</div></div><div class="srow-c">${codeBlock("k1a","brew install kopia")}</div></div>
+    <div class="srow"><div class="srow-l"><div class="srow-t">Windows</div></div><div class="srow-c">${codeBlock("k1b","winget install kopia.kopia")}</div></div>
+    <div class="srow"><div class="srow-l"><div class="srow-t">Debian / Ubuntu</div><div class="srow-d">or grab the .deb from github.com/kopia/kopia/releases</div></div><div class="srow-c">${codeBlock("k1c","sudo apt install kopia")}</div></div>
+    <p class="kp-help">Prefer clicking? Install <b>KopiaUI</b> instead — same engine with a window, and it can use the connection from step 2.</p>`)}
+   ${step(2,"Connect it to this box",`
+    <p class="kp-help">This asks for nothing but the password of that machine's login (from <b>Settings</b> → Machines allowed in). The repository password stays here and is never sent.</p>
+    ${codeBlock("k2",`kopia repository connect server \\\n  --url=${url} \\\n  --server-cert-fingerprint=${fp} \\\n  --override-username=${user} --override-hostname=${host}`)}
+    <p class="kp-help">The two <span class="mono">--override-*</span> flags are only needed if the machine's own login and hostname differ from the name you registered. Password prompt: <span class="mono">${esc(pw)}</span>${s.users&&s.users.length?"":" (add a machine under Settings first)"}.</p>`)}
+   ${step(3,"Back something up",`
+    ${codeBlock("k3","kopia snapshot create ~/Documents")}
+    <p class="kp-help">The first run uploads everything; later runs send only what changed, and anything this box already holds is not sent at all.</p>`)}
+   ${step(4,"Make it automatic",`
+    <p class="kp-help">Kopia can keep its own schedule on the client — no cron needed:</p>
+    ${codeBlock("k4a","kopia policy set ~/Documents --snapshot-interval=1h")}
+    <p class="kp-help">And how much history that machine keeps is its own decision, set on the client:</p>
+    ${codeBlock("k4b","kopia policy set ~/Documents --keep-daily=7 --keep-weekly=4 --keep-monthly=6")}
+    <p class="kp-help">KopiaUI has both of these as checkboxes. Note that a client only makes snapshots while it is running and reachable — a laptop that is asleep is simply late, not broken.</p>`)}
+   ${step(5,"Find those backups here",`
+    <p class="kp-help">Open <b>Snapshots</b> and pick the repository${s.dest_name?` «<b>${esc(s.dest_name)}</b>»`:""}. Each machine's folders appear as their own timeline, and you can browse, compare, download or restore them exactly like this box's own backups — including onto a different machine.</p>
+    <p class="kp-help">Watch the free space: client backups share this repository, so they count against the same disk or cloud quota.</p>`)}
+   <div class="kp-sec"><h4>${svg("info",13)} When it does not work</h4>
+    <div class="srow"><div class="srow-l"><div class="srow-t">«access denied» or wrong password</div><div class="srow-d">Nine times out of ten the login does not match. The name registered here must equal the client's <span class="mono">login@hostname</span>, or the client must pass the <span class="mono">--override-*</span> flags from step 2.</div></div></div>
+    <div class="srow"><div class="srow-l"><div class="srow-t">certificate / fingerprint error</div><div class="srow-d">The fingerprint changed (new certificate, or the box was reinstalled without its settings backup). Copy the current one from <b>Settings</b> and reconnect.</div></div></div>
+    <div class="srow"><div class="srow-l"><div class="srow-t">nothing answers on the port</div><div class="srow-d">Check that Settings shows «Accepting backups», that the client is on the same network, and try the IP instead of the <span class="mono">.local</span> name.</div></div></div>
+    <div class="srow"><div class="srow-l"><div class="srow-t">the repository disk is unplugged</div><div class="srow-d">Clients are refused while it is missing. They retry on their own once it is back.</div></div></div></div>`;
+  box.querySelectorAll("[data-copy]").forEach(b=>b.onclick=()=>{
+   const pre=box.querySelector("#"+b.dataset.copy);
+   srvClip((pre.textContent||"").replace(/\\\n\s*/g,""),"Command");});}
 
  /* ---------- Options tab ---------- */
  function tabOpts(tc){

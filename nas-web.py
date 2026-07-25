@@ -9111,6 +9111,9 @@ _BK_SECTIONS = (
                                                        "etc/nas-os/rclone.conf",
                                                        # kopia.json holds the repository password (deliberately open)
                                                        "etc/nas-os/kopia.json",
+                                                       # the backup server's TLS identity — clients pin its
+                                                       # fingerprint, so a lost key means re-pinning every client
+                                                       "etc/nas-os/kopia/server/",
                                                        "root/.ssh/nas-backup")),
     ("smbpw",     "SMB passwords (cleartext)",  True,  ("etc/nas-os/smb-users.json",)),
     # Syncthing's identity IS key.pem: lose it and the box comes back as a stranger
@@ -9224,6 +9227,11 @@ def _bk_sources():
                    ("/etc/nas-os/smb-users.json", "etc/nas-os/smb-users.json"),   # cleartext SMB passwords → secret section
                    (RCLONE_CONF, "etc/nas-os/rclone.conf"),                       # rclone remotes (cloud keys) → secret section
                    (KOPIA_CONF, "etc/nas-os/kopia.json"),                         # kopia entities + repo password → secret section
+                   # The backup server's TLS identity: clients PIN this certificate's
+                   # fingerprint, so losing it means every client refuses to connect until
+                   # it is re-pinned by hand. Same reasoning as the Syncthing key below.
+                   (KP_SRV_CERT, "etc/nas-os/kopia/server/cert.pem"),
+                   (KP_SRV_KEY, "etc/nas-os/kopia/server/key.pem"),
                    ("/var/lib/samba/private/passdb.tdb", "var/lib/samba/private/passdb.tdb"),
                    # Syncthing: the device identity (cert+key = the device ID other
                    # machines trust) and the folder/device list. The database is NOT
@@ -9875,6 +9883,8 @@ def kp_load():
             b["rules"] = {}
         if not isinstance(b.get("folders", []), list):
             b["folders"] = []
+    if not isinstance(d.get("server"), dict):
+        d["server"] = {}
     for s in d["sources"]:
         if not isinstance(s.get("folders"), list):
             s["folders"] = []
@@ -10391,6 +10401,12 @@ def kp_dest_forget(destid):
             if b.get("dest") == destid or b.get("dest2") == destid]
     if used:
         return {"ok": False, "log": "in use by: " + ", ".join(used)}
+    srv = _kp_srv_cfg(cfg)
+    if srv["dest"] == destid:
+        if srv["enabled"]:
+            return {"ok": False, "log": "the backup server hands this repository to other "
+                                        "machines — turn the server off first"}
+        _kp_srv_save(dest="")       # server is off: just drop the dangling reference
     if _kp_dest_busy(destid, cfg):
         return {"ok": False, "log": "destination is busy (run or maintenance in progress)"}
     if os.path.ismount(_kp_mnt_mp(destid)):
@@ -10928,7 +10944,9 @@ def kp_snapshots(destid):
         except (ValueError, OverflowError):
             pass
         tags = s.get("tags") or {}
-        out.append({"id": s.get("id"), "ts": ts, "path": ((s.get("source") or {}).get("path") or ""),
+        srcm = s.get("source") or {}
+        out.append({"id": s.get("id"), "ts": ts, "path": (srcm.get("path") or ""),
+                    "user": srcm.get("userName") or "", "host": srcm.get("host") or "",
                     "bytes": int(summ.get("size") or 0), "files": int(summ.get("files") or 0),
                     "failed": int(summ.get("numFailed") or 0),
                     "backup": str(tags.get("tag:nasbk") or tags.get("nasbk") or ""),
@@ -12195,6 +12213,360 @@ def _kp_bg_cli(kind, destid, arg=""):
         except Exception:
             pass
 
+# ---- repository server: let OTHER machines back up INTO one of our repositories ----
+# One server serves ONE repository. A client runs `kopia repository connect server` and
+# authenticates with its own user@host + password: it never learns the repository password
+# and never touches the storage — so handing a laptop access is not handing it everything.
+# TLS is mandatory for anything but loopback, and a home box has no CA, so we keep a
+# self-signed certificate and hand out its SHA256 fingerprint for the client to PIN.
+# Deduplication is shared: two laptops with the same file store it once.
+KP_SRV_DIR  = os.path.join(KOPIA_CFG_DIR, "server")
+KP_SRV_CERT = os.path.join(KP_SRV_DIR, "cert.pem")
+KP_SRV_KEY  = os.path.join(KP_SRV_DIR, "key.pem")
+KP_SRV_UNIT = "nas-kopia-server"
+KP_SRV_PORT = 51515
+_KP_SRV_USER_RE = re.compile(r"^[A-Za-z0-9._-]{1,40}@[A-Za-z0-9._-]{1,60}$")
+
+def _kp_srv_cfg(cfg=None):
+    """Normalized server settings out of kopia.json (which the settings backup carries)."""
+    s = (cfg or kp_load()).get("server")
+    s = s if isinstance(s, dict) else {}
+    try:
+        port = int(s.get("port") or KP_SRV_PORT)
+    except (TypeError, ValueError):
+        port = KP_SRV_PORT
+    users = []
+    for u in (s.get("users") or []):
+        if isinstance(u, dict) and _KP_SRV_USER_RE.match(str(u.get("name") or "")):
+            users.append({"name": str(u["name"]), "password": str(u.get("password") or ""),
+                          "added": int(u.get("added") or 0)})
+    return {"enabled": bool(s.get("enabled")), "dest": str(s.get("dest") or ""),
+            "port": (port if 1024 <= port <= 65535 else KP_SRV_PORT),
+            "users": users, "control_pw": str(s.get("control_pw") or "")}
+
+def _kp_srv_save(**patch):
+    with _KP_CFG_LOCK:
+        cfg = kp_load()
+        s = _kp_srv_cfg(cfg)
+        s.update(patch)
+        cfg["server"] = s
+        kp_save(cfg)
+    return s
+
+def _kp_srv_fingerprint():
+    """SHA256 of the certificate in DER form — exactly what kopia clients pin."""
+    try:
+        with open(KP_SRV_CERT) as f:
+            pem = f.read()
+        body = pem.split("-----BEGIN CERTIFICATE-----", 1)[1].split("-----END CERTIFICATE-----", 1)[0]
+        return hashlib.sha256(base64.b64decode(body)).hexdigest()
+    except (OSError, IndexError, ValueError):
+        return ""
+
+def _kp_srv_names():
+    """Every name/address a client on this LAN might dial, so one certificate covers
+    the IP, the bare hostname and the mDNS name."""
+    host = (socket.gethostname() or "nas").split(".")[0]
+    dns = [host, host + ".local", "localhost"]
+    ips = ["127.0.0.1"]
+    ip = lan_ip()
+    if ip and ip not in ips:
+        ips.insert(0, ip)
+    return host, dns, ips
+
+def _kp_srv_ensure_cert(force=False):
+    if not force and os.path.exists(KP_SRV_CERT) and os.path.exists(KP_SRV_KEY):
+        return _kp_srv_fingerprint()
+    host, dns, ips = _kp_srv_names()
+    try:
+        os.makedirs(KP_SRV_DIR, exist_ok=True)
+        os.chmod(KP_SRV_DIR, 0o700)
+    except OSError as e:
+        return ""
+    san = "subjectAltName=" + ",".join(["DNS:" + d for d in dns] + ["IP:" + i for i in ips])
+    r = _run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes",
+              "-keyout", KP_SRV_KEY, "-out", KP_SRV_CERT, "-days", "3650",
+              "-subj", "/CN=%s" % host, "-addext", san], timeout=180)
+    if not r.get("ok"):
+        return ""
+    for f in (KP_SRV_CERT, KP_SRV_KEY):
+        try:
+            os.chmod(f, 0o600)
+        except OSError:
+            pass
+    return _kp_srv_fingerprint()
+
+def _kp_srv_ufw(allow, port):
+    """Only this port, only while the server is on (same shape as the Syncthing toggle)."""
+    if not shutil.which("ufw"):
+        return
+    try:
+        if "active" not in subprocess.run(["ufw", "status"], capture_output=True,
+                                          text=True, timeout=10).stdout:
+            return
+    except (OSError, subprocess.SubprocessError):
+        return
+    p = "%d/tcp" % port
+    _run(["ufw", "allow", p] if allow else ["ufw", "delete", "allow", p], timeout=20)
+
+def kp_srv_start():
+    """Bring the server up in its own transient unit — it must survive a panel restart
+    (systemd kills the whole cgroup of nas-web) and come back if it dies."""
+    if not kopia_installed():
+        return {"ok": False, "log": "kopia is not installed"}
+    cfg = kp_load()
+    s = _kp_srv_cfg(cfg)
+    dest = _kp_find(cfg["dests"], s["dest"])
+    if not dest:
+        return {"ok": False, "log": "pick the repository clients should write into"}
+    if dest.get("kind") == "fs" and not os.path.isdir(dest.get("path") or ""):
+        return {"ok": False, "log": "that repository's disk is not plugged in"}
+    c = _kp_ensure_connected(dest)
+    if not c["ok"]:
+        return c
+    fp = _kp_srv_ensure_cert()
+    if not fp:
+        return {"ok": False, "log": "could not create the TLS certificate (is openssl installed?)"}
+    if _systemd_active(KP_SRV_UNIT + ".service"):
+        subprocess.run(["systemctl", "stop", KP_SRV_UNIT + ".service"], capture_output=True, timeout=30)
+    cmd = ["systemd-run", "--collect", "--quiet", "--unit", KP_SRV_UNIT,
+           "-p", "Restart=on-failure", "-p", "RestartSec=15",
+           "--setenv=SUDO_USER=" + TARGET_USER, "--setenv=HOME=" + HOME,
+           "--setenv=KOPIA_PASSWORD", "--setenv=RCLONE_CONFIG",
+           _kopia_bin(), "--config-file", _kp_cfg_file(dest["id"]),
+           "--log-dir", os.path.join(_kp_cache_dir(dest["id"]), "logs"),
+           "server", "start", "--address", "https://0.0.0.0:%d" % s["port"],
+           "--tls-cert-file", KP_SRV_CERT, "--tls-key-file", KP_SRV_KEY,
+           # No HTML UI and no control API: the panel IS the UI, and the control API would
+           # need a password — kopia only takes that one in argv (world-readable in /proc),
+           # and its only use here is «reload users», which a restart does deterministically.
+           "--no-ui", "--no-control-api", "--no-check-for-updates"]
+    try:
+        r = subprocess.run(cmd, env=_kp_env(), capture_output=True, text=True, timeout=20)
+    except (OSError, subprocess.SubprocessError) as e:
+        return {"ok": False, "log": str(e)[:200]}
+    if r.returncode != 0:
+        return {"ok": False, "log": (r.stderr or "could not start")[:300]}
+    time.sleep(2)
+    if not _systemd_active(KP_SRV_UNIT + ".service"):
+        return {"ok": False, "log": "the server exited right away — " + (_kp_srv_log(6) or "see the log")}
+    _kp_srv_ufw(True, s["port"])
+    return {"ok": True, "fingerprint": fp}
+
+def kp_srv_stop(close_port=True):
+    s = _kp_srv_cfg()
+    subprocess.run(["systemctl", "stop", KP_SRV_UNIT + ".service"], capture_output=True, timeout=30)
+    if close_port:
+        _kp_srv_ufw(False, s["port"])
+    return {"ok": True}
+
+def _kp_srv_log(n=14):
+    try:
+        r = subprocess.run(["journalctl", "-u", KP_SRV_UNIT + ".service", "-n", str(n),
+                            "--no-pager", "-o", "cat"], capture_output=True, text=True, timeout=10)
+        return "\n".join([x for x in (r.stdout or "").splitlines() if x.strip()][-n:])
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+def kp_srv_refresh():
+    """Make a user change take effect NOW. Kopia's own answer is `server refresh` over the
+    control API, but that API is only reachable with a password kopia accepts in argv alone
+    (proved: it ignores KOPIA_SERVER_CONTROL_PASSWORD for its own flag, answering 401) — so
+    we restart the unit instead. Left to itself the server would pick the change up in 5-10
+    minutes, which reads as «the new machine can't log in». A restart costs a client an
+    interrupted upload; they reconnect and continue by themselves."""
+    if not _systemd_active(KP_SRV_UNIT + ".service"):
+        return {"ok": True, "note": "server is not running"}
+    kp_srv_stop(close_port=False)
+    return kp_srv_start()
+
+def kp_srv_users(dest_id=None):
+    """User accounts as the REPOSITORY stores them (authoritative), merged with the
+    passwords we mirror locally so the panel can show them (same deal as SMB users)."""
+    s = _kp_srv_cfg()
+    dest = _kp_find(kp_load()["dests"], dest_id or s["dest"])
+    mirror = {u["name"]: u for u in s["users"]}
+    if not dest:
+        return {"ok": False, "log": "no repository selected", "users": list(mirror.values())}
+    r = _kp(dest["id"], ["server", "users", "list"], timeout=90)
+    if not r["ok"]:
+        return {"ok": False, "log": _kp_err_tail(r), "users": list(mirror.values())}
+    out = []
+    for ln in (r["out"] or "").splitlines():
+        nm = ln.strip()
+        if _KP_SRV_USER_RE.match(nm):
+            out.append({"name": nm, "password": (mirror.get(nm) or {}).get("password", ""),
+                        "added": (mirror.get(nm) or {}).get("added", 0)})
+    return {"ok": True, "users": out}
+
+def _kp_srv_pw_set(dest_id, name, pw, verb):
+    """`server users add|set` with the password typed in, not passed in argv.
+    kopia's --user-password puts the secret on the command line (world-readable in
+    /proc), and --ask-password refuses a pipe («inappropriate ioctl for device») —
+    so drive its two prompts over a pty, the same trick the snapshot progress uses."""
+    cmd = [_kopia_bin(), "--config-file", _kp_cfg_file(dest_id),
+           "--log-dir", os.path.join(_kp_cache_dir(dest_id), "logs"),
+           "--file-log-level", "error", "server", "users", verb, name, "--ask-password"]
+    master, slave = pty.openpty()
+    try:
+        proc = subprocess.Popen(cmd, stdin=slave, stdout=slave, stderr=slave,
+                                env=_kp_env(), close_fds=True)
+    except (OSError, subprocess.SubprocessError) as e:
+        os.close(master); os.close(slave)
+        return {"ok": False, "log": str(e)[:200]}
+    os.close(slave)
+    buf, sent, deadline = b"", 0, time.monotonic() + 180
+    try:
+        while time.monotonic() < deadline:
+            r_, _, _ = select.select([master], [], [], 0.5)
+            if r_:
+                try:
+                    chunk = os.read(master, 4096)
+                except OSError:
+                    break
+                if not chunk:
+                    break
+                buf += chunk
+                # two prompts: "Enter new password for user X:" then "Re-enter password…"
+                if sent < 2 and buf.count(b":") > sent:
+                    os.write(master, (pw + "\n").encode())
+                    sent += 1
+            if proc.poll() is not None:
+                break
+        else:
+            proc.kill()
+            return {"ok": False, "log": "timed out setting the password"}
+    finally:
+        try:
+            os.close(master)
+        except OSError:
+            pass
+    try:
+        proc.wait(timeout=10)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+    txt = buf.decode("utf-8", "replace")
+    if proc.returncode != 0:
+        tail = [x for x in txt.splitlines() if x.strip() and "password" not in x.lower()]
+        return {"ok": False, "log": (tail[-1] if tail else "could not save the user")[:200]}
+    return {"ok": True}
+
+def kp_srv_user_save(name, password=""):
+    """Add (or re-password) one machine. The name MUST be the client's own
+    «login@hostname» — that is the identity kopia sends; anything else is rejected
+    at connect time with «access denied», which reads like a wrong password."""
+    name = str(name or "").strip()
+    if not _KP_SRV_USER_RE.match(name):
+        return {"ok": False, "log": "use login@hostname, e.g. oleg@macbook"}
+    pw = str(password or "").strip() or ("kp-" + secrets.token_hex(6))
+    if len(pw) < 4 or len(pw) > 128 or any(c in pw for c in "\n\r\0"):
+        return {"ok": False, "log": "password must be 4-128 characters"}
+    cfg = kp_load()
+    s = _kp_srv_cfg(cfg)
+    dest = _kp_find(cfg["dests"], s["dest"])
+    if not dest:
+        return {"ok": False, "log": "pick the repository first"}
+    c = _kp_ensure_connected(dest)
+    if not c["ok"]:
+        return c
+    have = [u["name"] for u in (kp_srv_users().get("users") or [])]
+    r = _kp_srv_pw_set(dest["id"], name, pw, "set" if name in have else "add")
+    if not r["ok"]:
+        return r
+    users = [u for u in s["users"] if u["name"] != name]
+    users.append({"name": name, "password": pw, "added": int(time.time())})
+    _kp_srv_save(users=users)
+    kp_srv_refresh()
+    return {"ok": True, "name": name, "password": pw}
+
+def kp_srv_user_del(name):
+    name = str(name or "").strip()
+    if not _KP_SRV_USER_RE.match(name):
+        return {"ok": False, "log": "bad user"}
+    cfg = kp_load()
+    s = _kp_srv_cfg(cfg)
+    dest = _kp_find(cfg["dests"], s["dest"])
+    if dest:
+        c = _kp_ensure_connected(dest)
+        if c["ok"]:
+            r = _kp(dest["id"], ["server", "users", "delete", name], timeout=90)
+            if not r["ok"] and "not found" not in (r["err"] + r["out"]).lower():
+                return {"ok": False, "log": _kp_err_tail(r)}
+    _kp_srv_save(users=[u for u in s["users"] if u["name"] != name])
+    kp_srv_refresh()
+    return {"ok": True}
+
+def kp_srv_set(d):
+    """Apply the settings form: which repository, which port, on or off."""
+    cfg = kp_load()
+    s = _kp_srv_cfg(cfg)
+    dest_id = str((d or {}).get("dest") or s["dest"])
+    if dest_id and not _kp_find(cfg["dests"], dest_id):
+        return {"ok": False, "log": "no such repository"}
+    try:
+        port = int((d or {}).get("port") or s["port"])
+    except (TypeError, ValueError):
+        return {"ok": False, "log": "bad port"}
+    if not (1024 <= port <= 65535):
+        return {"ok": False, "log": "port must be between 1024 and 65535"}
+    want = bool((d or {}).get("enabled", s["enabled"]))
+    if want and not dest_id:
+        return {"ok": False, "log": "pick the repository clients should write into"}
+    if s["enabled"] and (port != s["port"] or dest_id != s["dest"]):
+        kp_srv_stop()                      # old port must not stay open in the firewall
+    _kp_srv_save(enabled=want, dest=dest_id, port=port)
+    if not want:
+        kp_srv_stop()
+        return {"ok": True, "running": False}
+    r = kp_srv_start()
+    if not r["ok"]:
+        _kp_srv_save(enabled=False)
+        return r
+    return {"ok": True, "running": True, "fingerprint": r.get("fingerprint", "")}
+
+def kp_srv_status(deep=False):
+    cfg = kp_load()
+    s = _kp_srv_cfg(cfg)
+    if kopia_installed() and not os.path.exists(KP_SRV_CERT):
+        # make the identity now, not at switch-on: the «How to connect» recipe quotes the
+        # fingerprint, and a recipe with a placeholder in it is not a recipe
+        _kp_srv_ensure_cert()
+    dest = _kp_find(cfg["dests"], s["dest"])
+    host, dns, ips = _kp_srv_names()
+    running = _systemd_active(KP_SRV_UNIT + ".service")
+    out = {"ok": True, "installed": kopia_installed(), "enabled": s["enabled"],
+           "running": running, "port": s["port"], "dest": s["dest"],
+           "dest_name": (dest or {}).get("name") or "", "users": s["users"],
+           "fingerprint": _kp_srv_fingerprint(),
+           "url": "https://%s:%d" % (ips[0], s["port"]),
+           "url_alt": "https://%s.local:%d" % (host, s["port"]),
+           "host": host, "log": _kp_srv_log(10) if (s["enabled"] and not running) else "",
+           "dest_missing": bool(dest and dest.get("kind") == "fs"
+                                and not os.path.isdir(dest.get("path") or ""))}
+    if deep and dest:
+        u = kp_srv_users()
+        if u.get("ok"):
+            out["users"] = u["users"]
+        sr = kp_snap_sources(s["dest"])
+        own = "root@" + host
+        if sr.get("ok"):
+            out["clients"] = [x for x in sr["sources"] if x["spec"].split(":")[0] != own]
+    return out
+
+def _kp_srv_tick(now):
+    """Keep the server up: it must be back after a reboot, after a crash, and after a
+    reinstall (kopia.json comes back with the settings backup, so `enabled` is enough)."""
+    s = _kp_srv_cfg()
+    if not s["enabled"] or not kopia_installed():
+        return
+    if _systemd_active(KP_SRV_UNIT + ".service"):
+        return
+    r = kp_srv_start()
+    if not r.get("ok"):
+        notify_event("kp_err", "kp_srv", "Kopia: backup server is down",
+                     "other machines cannot back up here: %s" % (r.get("log") or "unknown"),
+                     cooldown=6 * 3600)
+
 def _kp_health(cfg, now):
     """Cheap periodic checks (no network): destination folder gone, backups stale."""
     thr = int((load_monitor().get("events", {}).get("kp_stale") or {}).get("threshold") or 7)
@@ -12231,6 +12603,7 @@ def _kopia_tick():
     if not kopia_installed():
         return
     cfg = kp_load()
+    _safe(_kp_srv_tick, time.time())      # the repository server must come back by itself
     if not cfg["backups"] and not cfg["dests"]:
         return
     now = time.time()
@@ -13587,6 +13960,21 @@ def disaster_build():
               "kopia snapshot list --all",
               "kopia restore <snapshot-id> /where/to/put/it",
               "```", ""]
+        ksrv = _kp_srv_cfg(kcfg)
+        if ksrv["dest"]:
+            kd = _kp_find(kcfg.get("dests") or [], ksrv["dest"]) or {}
+            L += ["### Other machines backing up into this box", "",
+                  "Repository server (%s) on port %d, writing into **%s**."
+                  % ("on" if ksrv["enabled"] else "off", ksrv["port"], kd.get("name") or "?"),
+                  "Certificate fingerprint clients pin: `%s`" % (_kp_srv_fingerprint() or "?"),
+                  "(it lives in etc/nas-os/kopia/server/ inside the settings backup — restore it "
+                  "and the clients keep working; recreate it and every client must be re-pinned)", ""]
+            for u in ksrv["users"]:
+                L.append("- `%s` — password `%s`" % (u["name"], u.get("password") or "?"))
+            L += ["", "A client reconnects with:", "", "```",
+                  "kopia repository connect server --url=https://<this box>:%d \\" % ksrv["port"],
+                  "  --server-cert-fingerprint=%s" % (_kp_srv_fingerprint() or "<fingerprint>"),
+                  "```", ""]
         for b in kcfg.get("backups") or []:
             src = _kp_find(kcfg.get("sources") or [], b.get("source") or "") or {}
             d1 = _kp_find(kcfg.get("dests") or [], b.get("dest") or "") or {}
@@ -18260,6 +18648,13 @@ def _ufw_managed_ports():
         add("445/tcp", "Files (Samba)")
     if os.path.exists("/etc/exports") and os.path.getsize("/etc/exports") > 0:
         add("2049/tcp", "Files (NFS)")
+    try:                                   # kopia repository server, only while it is on
+        if os.path.exists(KOPIA_CONF):
+            ks = _kp_srv_cfg()
+            if ks["enabled"]:
+                add("%d/tcp" % ks["port"], "Kopia backup server")
+    except (OSError, ValueError, KeyError):
+        pass
     try:
         r = subprocess.run(["docker", "ps", "--format", "{{.Names}}\t{{.Ports}}"],
                            capture_output=True, text=True, timeout=8)
@@ -22355,6 +22750,29 @@ class H(BaseHTTPRequestHandler):
                     self._json({"ok": False, "log": "already running"})
                 else:
                     self._json({"ok": _kp_bg_start(kind, did, arg), "dest": did})
+            elif p == "/api/kopia/server":
+                self._json(kp_srv_status(deep=bool(self._body().get("deep"))))
+            elif p == "/api/kopia/server/set":
+                self._json(kp_srv_set(self._body() or {}))
+            elif p == "/api/kopia/server/restart":
+                kp_srv_stop(close_port=False)
+                self._json(kp_srv_start())
+            elif p == "/api/kopia/server/user":
+                b = self._body()
+                if b.get("remove"):
+                    self._json(kp_srv_user_del(str(b.get("name") or "")))
+                else:
+                    self._json(kp_srv_user_save(str(b.get("name") or ""),
+                                                str(b.get("password") or "")))
+            elif p == "/api/kopia/server/cert":
+                fp = _kp_srv_ensure_cert(force=True)
+                if not fp:
+                    self._json({"ok": False, "log": "could not create the certificate"})
+                else:
+                    # a new certificate means every client must be re-pinned
+                    r = kp_srv_start() if _kp_srv_cfg()["enabled"] else {"ok": True}
+                    self._json({"ok": bool(r.get("ok")), "fingerprint": fp,
+                                "log": r.get("log", "")})
             elif p == "/api/kopia/snap/pin":
                 b = self._body()
                 self._json(kp_snap_pin(str(b.get("d") or ""), b.get("id", ""),
