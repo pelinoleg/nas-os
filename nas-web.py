@@ -15469,14 +15469,26 @@ def imsb_up(internal=False):
         return {"ok": False, "log": (r.stderr or "")[-400:]}
     return {"ok": True, "url": "http://%s:%d" % (lan_ip() or "127.0.0.1", cfg["port"])}
 
-def imsb_down(wipe=True, force=False):
+def imsb_down(wipe=True, force=False, by_hand=False):
     """Stop the copy. Refuses while a refresh is in flight: `compose down` would take the
-    database container with it, and the restore writing into it would die halfway."""
+    database container with it, and the restore writing into it would die halfway.
+
+    Asked for BY HAND, it also switches «keep the copy running» off. That setting is a standing
+    instruction, and the keeper acts on it once a minute — so without this, Stop was undone
+    within the minute and the copy looked like it refused to stop at all. The button the person
+    just pressed is the newer intent; the UI says the setting goes with it."""
     cfg = imsb_load()
     p = _imsb_paths(cfg)
     if not force and _systemd_active(IMSB_UNIT + ".service"):
         return {"ok": False, "log": "a refresh is running — stopping now would break it. "
                                     "Wait for it to finish (it is a few minutes)."}
+    kept = False
+    if by_hand and cfg.get("keep_up"):
+        cfg["keep_up"] = False
+        imsb_save(cfg)
+        kept = True
+        # and do not let a keeper that is already on its way undo this
+        _imsb_up_try[0] = time.time()
     subprocess.run(["docker", "compose", "-p", IMSB_PROJ, "--project-directory", p["stack"],
                     "-f", os.path.join(p["stack"], "compose.yaml"), "down"],
                    capture_output=True, text=True, timeout=300)
@@ -15489,7 +15501,7 @@ def imsb_down(wipe=True, force=False):
         # is scratch by definition; the backup below was never touched
         shutil.rmtree(p["upper"], ignore_errors=True)
         shutil.rmtree(p["wk"], ignore_errors=True)
-    return {"ok": True}
+    return {"ok": True, "keep_up_off": kept}
 
 def imsb_promote(library="", move_to="", start=True):
     """«I live here now.» Turn the standby into a normal, permanent Immich: the database that
@@ -24012,7 +24024,7 @@ class H(BaseHTTPRequestHandler):
             elif p == "/api/immich-standby/up":
                 self._json(imsb_up())
             elif p == "/api/immich-standby/down":
-                self._json(imsb_down())
+                self._json(imsb_down(by_hand=True))
             elif p == "/api/kopia/server":
                 self._json(kp_srv_status(deep=bool(self._body().get("deep"))))
             elif p == "/api/kopia/server/set":

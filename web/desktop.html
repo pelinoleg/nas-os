@@ -8498,9 +8498,17 @@ function winImmichStandby(){openWin("__immichsb","Immich Standby",(body,win)=>{
     async()=>{const r=await P("/api/immich-standby/up");
      if(!(r&&r.ok)){toast((r&&r.log)||"failed");return;}toast("Starting — give it a minute");await load();paint();});
   const dn=q("#sbDown");
+  /* If «keep the copy running» is on, a keeper starts the copy again within the minute — so
+     stopping has to switch that off, and the dialog has to say so rather than let the button
+     look broken. */
   if(dn)dn.onclick=()=>confirmDlg("Stop the copy?",
-    "The containers stop and the library overlay is unmounted. The restored database stays, so bringing it up again takes a minute.",
-    async()=>{await P("/api/immich-standby/down");await load();paint();},1);};
+    "The containers stop and the library overlay is unmounted. The restored database stays, so bringing it up again takes a minute."
+    +(D.keep_up?`<br><br><b>«Keep the copy running» will be switched off</b>, otherwise it would be
+      started again within a minute. Tonight's refresh happens either way — turn it back on when
+      you want the copy up around the clock.`:""),
+    async()=>{const r=await P("/api/immich-standby/down");
+     if(r&&r.keep_up_off)toast("Stopped · «keep the copy running» is now off");
+     await load();paint();},1);};
 
  /* --- Overview: the proof, the chain, and the two jobs you can start by hand --- */
  const paneNow=(box)=>{const d=D.dump,last=D.last||{},okRun=last.result==="ok",chk=D.check||{};
