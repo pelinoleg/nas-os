@@ -3265,6 +3265,10 @@ def _def_monitor():
         "nb_conn":     {"on": True,  "priority": 1, "desk": True},
         "nb_srcmiss":  {"on": False, "priority": 1, "desk": True},
         "nb_stale":    {"on": True,  "priority": 1, "threshold": 7,  "desk": True},
+        # a scheduled run that never happened AND is now too late to catch up. nb_stale only
+        # notices after its threshold in DAYS — a daily backup can go missing for a week in
+        # silence, which is exactly how one went unnoticed until it was looked for by hand
+        "nb_missed":   {"on": True,  "priority": 1, "desk": True},
         "nb_size":     {"on": False, "priority": 0, "threshold": 40, "desk": True},
         # database dumps inside a backup: the files stop arriving long before anyone notices,
         # because the backup itself keeps succeeding — it faithfully copies the same old dump
@@ -9625,6 +9629,15 @@ def _nb_sched_tick():
         # must not immediately fire the 15:00 it never lived through
         if (late > window or _nb_last_real_run(pid) >= due
                 or float(cfg.get("saved") or 0) > due):
+            if late > window and _nb_last_real_run(pid) < due and float(cfg.get("saved") or 0) <= due:
+                # missed AND too late to make up: say so the same day. Waiting for nb_stale
+                # (days) means a daily backup can quietly skip most of a week
+                notify_event("nb_missed", "nb:missed:" + pid,
+                             "NAS backup: a scheduled run was missed",
+                             "«%s» was due at %s and did not run — the box was off or the panel "
+                             "was not running. It was not started late because the next run is "
+                             "closer than the missed one." % (cfg.get("name") or pid, label),
+                             cooldown=6 * 3600)
             _nb_sched_mark(pid, label)
             continue
         _nb_sched_mark(pid, label)
