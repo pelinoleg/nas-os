@@ -14938,10 +14938,13 @@ def _imsb_db_start(cfg):
     p = _imsb_paths(cfg)
     os.makedirs(p["db"], exist_ok=True)
     subprocess.run(["docker", "rm", "-f", IMSB_DB_CT], capture_output=True, timeout=60)
-    r = subprocess.run(["docker", "run", "-d", "--name", IMSB_DB_CT,
-                        "-e", "POSTGRES_PASSWORD=" + cfg["db_password"],
-                        "-e", "POSTGRES_USER=postgres", "-e", "POSTGRES_DB=immich",
-                        "-e", "POSTGRES_INITDB_ARGS=--data-checksums",
+    # the password goes through a 0600 file, not the command line: /proc/<pid>/cmdline is
+    # readable by every user on the box (same rule as the sshfs and kopia drivers)
+    envf = os.path.join(cfg["work"], "db.env")
+    with open(os.open(envf, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as f:
+        f.write("POSTGRES_PASSWORD=%s\nPOSTGRES_USER=postgres\nPOSTGRES_DB=immich\n"
+                "POSTGRES_INITDB_ARGS=--data-checksums\n" % cfg["db_password"])
+    r = subprocess.run(["docker", "run", "-d", "--name", IMSB_DB_CT, "--env-file", envf,
                         "-v", p["db"] + ":/var/lib/postgresql/data", IMSB_PGIMG],
                        capture_output=True, text=True, timeout=300)
     if r.returncode != 0:
@@ -15011,14 +15014,20 @@ def _imsb_refresh_cli():
         if started_own:
             _imsb_db_stop()
 
-    def fail(msg):
-        # the previous copy is untouched: everything happened in a database of its own
-        try:
-            _imsb_psql(["-c", "DROP DATABASE IF EXISTS %s" % IMSB_NEW_DB], timeout=300)
-        except (OSError, subprocess.SubprocessError):
-            pass
+    def fail(msg, keep_new=False):
+        # the previous copy is untouched: everything happened in a database of its own — so the
+        # half-loaded one goes away. UNLESS the swap got as far as dropping the old one: then the
+        # new database is the ONLY copy left and dropping it here would destroy what the message
+        # promises is still there.
+        if not keep_new:
+            try:
+                _imsb_psql(["-c", "DROP DATABASE IF EXISTS %s" % IMSB_NEW_DB], timeout=300)
+            except (OSError, subprocess.SubprocessError):
+                pass
         cleanup()
-        if cfg.get("keep_up") and was_up and not _imsb_stack_up():
+        # ...and do not start the copy against a database that is not in place — it would just
+        # crash-loop, which reads as «the standby is broken» rather than «one rename failed»
+        if not keep_new and cfg.get("keep_up") and was_up and not _imsb_stack_up():
             _safe(lambda: imsb_up(internal=True))
         _imsb_hist(imsb_load(), {"ts": int(time.time()), "result": "error", "error": msg[:400],
                                  "seconds": int(time.time() - t0),
@@ -15130,7 +15139,14 @@ def _imsb_refresh_cli():
         users = count('select count(*) from "user"') or count("select count(*) from users")
         if assets <= 0:
             return fail("the dump loaded but the database has no assets — that is not a usable copy")
-        prev = (imsb_load().get("last") or {}).get("assets") or 0
+        # compare against the last refresh that actually LANDED, not against «last»: a failed
+        # night (corrupt dump, no room) writes an error entry with no count, and reading that
+        # one would disarm this guard for exactly the run after a bad night
+        prev = 0
+        for h in reversed((imsb_load().get("history") or [])):
+            if isinstance(h, dict) and h.get("kind") != "check" and (h.get("assets") or 0) > 0:
+                prev = h["assets"]
+                break
         note = ""
         if prev and assets < prev * 0.9:
             note = "assets dropped from %d to %d since the last refresh" % (prev, assets)
@@ -15152,9 +15168,17 @@ def _imsb_refresh_cli():
             return fail("could not replace the old copy: " + (sw.stderr or "")[-300:])
         sw = _imsb_psql(["-c", "ALTER DATABASE %s RENAME TO immich" % IMSB_NEW_DB], timeout=300)
         if sw.returncode != 0:
-            # the old one is gone and the new one is not in place — say exactly that
-            return fail("the new copy could not be renamed into place (it is still there as %s): %s"
-                        % (IMSB_NEW_DB, (sw.stderr or "")[-200:]))
+            # the name is free now, so the usual cause is a connection that grabbed the new
+            # database in the meantime — cut them and try the one thing that can still work
+            _imsb_psql(["-c", "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                              "WHERE datname='%s' AND pid<>pg_backend_pid()" % IMSB_NEW_DB], timeout=120)
+            sw = _imsb_psql(["-c", "ALTER DATABASE %s RENAME TO immich" % IMSB_NEW_DB], timeout=300)
+        if sw.returncode != 0:
+            # the old one is gone and the new one is not in place — say exactly that, and KEEP it:
+            # it is now the only copy of the data, and a full refresh would be needed otherwise
+            return fail("the new copy could not be renamed into place. The data is safe in the "
+                        "database «%s» — rename it by hand, or just run another refresh: %s"
+                        % (IMSB_NEW_DB, (sw.stderr or "")[-200:]), keep_new=True)
         cleanup()
         cfg2 = imsb_load()
         _imsb_hist(cfg2, {"ts": int(time.time()), "result": "ok", "assets": assets,
@@ -15261,8 +15285,13 @@ def _imsb_selftest(cfg):
         steps.append("stopped here: %s" % str(e)[:160])
     finally:
         if not was_up and not cfg.get("keep_up"):
-            _safe(imsb_down)
-            steps.append("put everything back")
+            # force=True because this IS the unit the guard is protecting against: the check runs
+            # inside nas-immich-standby, so an unforced stop refuses itself and leaves the copy up.
+            # With «keep the copy running» off that also stops every nightly refresh from then on
+            # (they skip a running copy) — a check that quietly disables the thing it checks.
+            r_dn = _safe(lambda: imsb_down(force=True), {})
+            steps.append("put everything back" if (r_dn or {}).get("ok")
+                         else "could not stop the copy again — it is still running")
     return {"ts": int(time.time()), "kind": "check", "result": "ok" if ok else "error",
             "seconds": int(time.time() - t0), "steps": steps}
 
@@ -15491,7 +15520,7 @@ def imsb_promote(library="", move_to="", start=True):
             "log": "" if r.returncode == 0 else (r.stderr or "")[-300:]}
 
 _imsb_last_slot = ""
-_imsb_up_try = [0.0]
+_imsb_up_try = [0.0, 0]     # last keeper attempt, and whether one is in flight
 
 def _imsb_tick():
     """Nightly refresh, one shot per minute-slot (same pattern as the other schedulers)."""
@@ -15505,13 +15534,22 @@ def _imsb_tick():
     # is this keeper's job — backed off, because starting it opens the repository and mounts.
     if (cfg.get("keep_up") and _imsb_db_ready(cfg) and not _imsb_stack_up()
             and not _systemd_active(IMSB_UNIT + ".service")
-            and now - _imsb_up_try[0] > 600):
+            and not _imsb_up_try[1] and now - _imsb_up_try[0] > 600):
         _imsb_up_try[0] = now
-        r = imsb_up()
-        if not r.get("ok"):
-            notify_event("imsb_fail", "imsb:keepup", "Immich standby: the copy is not running",
-                         "«keep the copy running» is on, but starting it failed: "
-                         + (r.get("log") or "")[:200], cooldown=6 * 3600)
+        # in a thread of its own: starting the copy waits minutes for Postgres to replay its log,
+        # and the monitor thread also carries the thermal guard, the schedulers and the health
+        # checks — none of that may stand still because a standby is coming up
+        def _keeper():
+            try:
+                r = imsb_up()
+                if not r.get("ok"):
+                    notify_event("imsb_fail", "imsb:keepup", "Immich standby: the copy is not running",
+                                 "«keep the copy running» is on, but starting it failed: "
+                                 + (r.get("log") or "")[:200], cooldown=6 * 3600)
+            finally:
+                _imsb_up_try[1] = 0
+        _imsb_up_try[1] = 1
+        threading.Thread(target=_keeper, daemon=True).start()
     slot = time.strftime("%Y-%m-%d %H:%M")
     if slot == _imsb_last_slot or not slot.endswith(cfg["time"]):
         return
@@ -23846,6 +23884,17 @@ class H(BaseHTTPRequestHandler):
             elif p == "/api/immich-standby/save":
                 b = self._body() or {}
                 cfg = imsb_load()
+                # The folders and the port are baked into the containers that are running right
+                # now: change them under a live copy and «Stop» would look for a compose file
+                # that has moved, leaving the containers orphaned and the old overlay mounted.
+                moved = [k for k in ("backup", "work") if isinstance(b.get(k), str)
+                         and b[k].strip() and b[k].strip() != cfg[k]]
+                if b.get("port") and str(b["port"]).strip() not in ("", str(cfg["port"])):
+                    moved.append("port")
+                if moved and (_imsb_stack_up() or _systemd_active(IMSB_UNIT + ".service")):
+                    words = {"backup": "backup folder", "work": "standby folder", "port": "port"}
+                    self._json({"ok": False, "log": "the copy is running — stop it before changing "
+                                "the %s" % " and the ".join(words[k] for k in moved)}); return
                 for k in ("backup", "work", "time"):
                     if isinstance(b.get(k), str) and b[k].strip():
                         cfg[k] = b[k].strip()
@@ -23854,9 +23903,14 @@ class H(BaseHTTPRequestHandler):
                         cfg[k] = bool(b[k])
                 if b.get("port"):
                     try:
-                        cfg["port"] = int(b["port"])
+                        port = int(b["port"])
                     except (TypeError, ValueError):
-                        pass
+                        self._json({"ok": False, "log": "the port must be a number"}); return
+                    if not 1024 <= port <= 65535:
+                        # silently falling back to 2284 (which is what loading would do) looks
+                        # like the save was ignored
+                        self._json({"ok": False, "log": "the port must be between 1024 and 65535"}); return
+                    cfg["port"] = port
                 for k in ("backup", "work"):
                     if not str(cfg[k]).startswith("/") or ".." in str(cfg[k]):
                         self._json({"ok": False, "log": "%s must be an absolute path" % k}); return

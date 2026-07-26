@@ -8619,6 +8619,9 @@ function winImmichStandby(){openWin("__immichsb","Immich Standby",(body,win)=>{
     cannot make for you: where the photos live afterwards. */
  function promoteDlg(){const s=document.getElementById("scrim");
   const lib=(D.backup||"")+"/home/Photos Immich";
+  // next to the standby folder, not inside it — and spelled out, because a default containing
+  // «/../» reads as broken even though the server normalises it away
+  const dfltLib=()=>((D.work||"/media/nas").replace(/\/+$/,"").replace(/\/[^/]+$/,"")||"")+"/immich/library";
   const draw=(mode)=>{s.innerHTML=`<div class="dialog" style="max-width:none;width:min(620px,94vw)">
     <h3>${svg("arrowup",16)} Make this the permanent Immich</h3>
     <p style="margin:2px 0 12px;font-size:12px;color:var(--win-dim,var(--dim))">
@@ -8635,7 +8638,7 @@ function winImmichStandby(){openWin("__immichsb","Immich Standby",(body,win)=>{
        live library. The Mirror profile that fills it must be changed, or it will keep overwriting
        your live photos with whatever the old NAS had.</div>`
      :`<div class="field"><label>New folder for the library</label>
-        <input id="sbMv" class="mono" value="${att((D.work||"/media/nas/t7-4TB")+"/../immich/library".replace("//","/"))}" spellcheck="false">
+        <input id="sbMv" class="mono" value="${att(dfltLib())}" spellcheck="false">
         <div class="kp-help">Must be on the same disk as the backup, and empty.</div></div>`}
     <div class="r"><span id="sbPrS" style="flex:1;text-align:left;font-size:12px;color:var(--win-dim,var(--dim))"></span>
      <button class="btn" id="sbPrX">Cancel</button>
