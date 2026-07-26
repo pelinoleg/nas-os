@@ -8518,12 +8518,14 @@ function winImmichStandby(){openWin("__immichsb","Immich Standby",(body,win)=>{
     <div class="srow"><div class="srow-l"><div class="srow-t">At</div></div>
      <div class="srow-c"><input type="time" id="sbTime" value="${att(D.time)}" style="width:110px"></div></div></div>
    <div class="kp-sec"><h4>${svg("hdd",13)} Folders and port</h4>
-    <div class="srow"><div class="srow-l"><div class="srow-t">Backup to stand by</div>
-      <div class="srow-d">its «home/Photos Immich» holds both the library and the dumps</div></div>
-     <div class="srow-c"><input id="sbBackup" class="mono" style="width:min(330px,44vw)" value="${att(D.backup)}"></div></div>
-    <div class="srow"><div class="srow-l"><div class="srow-t">Standby folder</div>
-      <div class="srow-d">the restored database and the scratch layer${D.db_bytes?` · now ${fmtB(D.db_bytes)}`:""}</div></div>
-     <div class="srow-c"><input id="sbWork" class="mono" style="width:min(330px,44vw)" value="${att(D.work)}"></div></div>
+    <!-- paths get their own full-width line: squeezed into the right-hand column of a settings
+         row you can see about a third of «/media/nas/t7-4TB/Ugreen-Backup», which is useless -->
+    <div class="field"><label>Backup to stand by</label>
+     <input id="sbBackup" class="mono" spellcheck="false" value="${att(D.backup)}">
+     <div class="kp-help">Its «home/Photos Immich» holds both the library and the dumps.</div></div>
+    <div class="field"><label>Standby folder</label>
+     <input id="sbWork" class="mono" spellcheck="false" value="${att(D.work)}">
+     <div class="kp-help">The restored database and the scratch layer live here${D.db_bytes?` — now ${fmtB(D.db_bytes)}`:""}.</div></div>
     <div class="srow"><div class="srow-l"><div class="srow-t">Port for the copy</div>
       <div class="srow-d">its own, so a real Immich installed here later cannot collide with it</div></div>
      <div class="srow-c"><input type="number" id="sbPort" min="1024" max="65535" class="mono" style="width:100px" value="${+D.port}"></div></div>
