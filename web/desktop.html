@@ -1507,6 +1507,27 @@
   /* «What changed»: folders collapse, because a run can touch thousands of files and a flat
      list of names answers nothing — the folder and its count do. */
   /* Server tab: copy-paste recipes and click-to-copy values */
+  /* Immich standby: the chain of custody reads left to right — dump written, copied here,
+     restored, how many photos — so «are these photos current» is one glance, not four cards. */
+  .sb-chain{display:flex;align-items:stretch;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+  .sb-step{flex:1 1 130px;min-width:0;display:flex;flex-direction:column;gap:3px;padding:9px 12px;
+    border-radius:11px;background:var(--card);border:1px solid var(--win-line,var(--line))}
+  .sb-step>i{width:8px;height:8px;border-radius:50%}
+  .sb-step>b{font-size:14px;font-weight:700;line-height:1.15;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sb-step>span{font-size:9.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;
+    color:var(--win-dim,var(--dim))}
+  .sb-arr{align-self:center;color:var(--win-dim,var(--dim));font-size:16px;opacity:.6}
+  .sb-run,.sb-prog{display:flex;align-items:center;gap:11px;padding:10px 13px;border-radius:11px;margin-bottom:11px;
+    background:color-mix(in srgb,var(--win-accent,var(--accent)) 10%,transparent);
+    border:1px solid color-mix(in srgb,var(--win-accent,var(--accent)) 26%,transparent)}
+  .sb-run b,.sb-prog b{display:block;font-size:13px}
+  .sb-run span,.sb-prog span{font-size:11.5px;color:var(--win-dim,var(--dim))}
+  .sb-run>span:first-child{color:var(--win-accent,var(--accent));display:flex}
+  .sb-prog>i{flex:none;width:34px;height:4px;border-radius:999px;position:relative;overflow:hidden;
+    background:color-mix(in srgb,var(--win-accent,var(--accent)) 25%,transparent)}
+  .sb-prog>i::after{content:"";position:absolute;inset:0 auto 0 0;width:40%;border-radius:999px;
+    background:var(--win-accent,var(--accent));animation:kpxrun 1s ease-in-out infinite}
+  .sb-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:2px}
   .kp-cmd{display:flex;align-items:flex-start;gap:8px;width:100%}
   .kp-cmd pre{flex:1;min-width:0;margin:0;padding:9px 11px;border-radius:9px;overflow-x:auto;
     background:var(--code-bg);color:var(--code-fg);font:12px/1.55 var(--mono);white-space:pre}
@@ -3393,7 +3414,7 @@ const P={
  contrast:'<circle cx="12" cy="12" r="10"/><path d="M12 2a10 10 0 0 0 0 20Z" fill="currentColor"/>',
 };
 // full-colour brand logos (own viewBox, not the 24×24 monochrome grid) — used for app icons
-const RAW_LOGOS={kopia:'<g transform="translate(-6.4,-6.4) scale(0.15)"><path fill="#2f80ff" d="M164.4 171.7c83.6-162 299.8-64.8 281.5 79.9 89.7 13 89.7 170.6-10.2 170.6-24.5 2.2-102.4 2.2-102.4 2.2v-69.1l42.8-47.5L303 169.6l-78 138.2 44.9 47.5v69.1h-185C-11 424.4-39.5 258.1 72.6 230c-4.1-38.9 38.8-77.8 89.7-58.3z"/></g>',syncthing:'<g transform="translate(-8.1,-8.1) scale(0.684)"><linearGradient id="stgr" gradientUnits="userSpaceOnUse" x1="58.666" y1="117.332" x2="58.666" y2="0"><stop offset="0" style="stop-color:#0882C8"/><stop offset="1" style="stop-color:#26B6DB"/></linearGradient><circle fill="url(#stgr) #1499D2" cx="58.7" cy="58.7" r="58.7"/><circle fill="none" stroke="#FFFFFF" stroke-width="6" stroke-miterlimit="10" cx="58.7" cy="58.5" r="43.7"/><path fill="#FFFFFF" d="M94.7,47.8c4.7,1.6,9.8-0.9,11.4-5.6c1.6-4.7-0.9-9.8-5.6-11.4c-4.7-1.6-9.8,0.9-11.4,5.6C87.5,41.1,90,46.2,94.7,47.8z"/><line fill="none" stroke="#FFFFFF" stroke-width="6" stroke-miterlimit="10" x1="97.6" y1="39.4" x2="67.5" y2="64.4"/><path fill="#FFFFFF" d="M77.6,91c-0.4,4.9,3.2,9.3,8.2,9.8c5,0.4,9.3-3.2,9.8-8.2c0.4-4.9-3.2-9.3-8.2-9.8C82.4,82.4,78,86,77.6,91z"/><line fill="none" stroke="#FFFFFF" stroke-width="6" stroke-miterlimit="10" x1="86.5" y1="91.8" x2="67.5" y2="64.4"/><path fill="#FFFFFF" d="M60,69.3c2.7,4.2,8.3,5.4,12.4,2.7c4.2-2.7,5.4-8.3,2.7-12.4c-2.7-4.2-8.3-5.4-12.4-2.7C58.5,59.5,57.3,65.1,60,69.3z"/><path fill="#FFFFFF" d="M21.2,61.4c-4.3-2.5-9.8-1.1-12.3,3.1c-2.5,4.3-1.1,9.8,3.1,12.3c4.3,2.5,9.8,1.1,12.3-3.1C26.8,69.5,25.4,64,21.2,61.4z"/><line fill="none" stroke="#FFFFFF" stroke-width="6" stroke-miterlimit="10" x1="16.6" y1="69.1" x2="67.5" y2="64.4"/></g>'
+const RAW_LOGOS={immichsb:'<g transform="translate(-1.5,-2.5) scale(0.108)"><path d="M238.8 155.5c33.5 29.7 60.5 61.5 77.9 91.5 29.9-53.4 49.8-116.9 50.1-157.3v-.8c0-59.8-59.7-83.1-111.1-83.1S144.6 29 144.6 88.8V92c28.7 12.8 62.6 35.6 94.2 63.5" style="fill:#fa2921"/><path d="M55.9 318.6c21-23.3 53.1-48.6 89.4-69.9 38.6-22.7 77.2-38.6 111.1-45.8-41.6-44.9-95.8-83.5-134.1-96.2-.3-.1-.5-.2-.7-.2-57-18.7-97.6 30.9-113.5 79.8S-4.1 299.1 52.8 317.6c.8.2 1.8.6 3.1 1" style="fill:#ed79b5"/><path d="M503.9 185.4C488 136.6 447.4 87 390.5 105.5c-.8.3-1.8.6-3.1 1-3.3 31.2-14.4 70.5-31.2 109.1-17.9 41.1-39.8 76.6-62.9 102.4 60 11.9 126.5 11.3 165.1-1 .3-.1.5-.2.7-.2 57-18.6 60.6-82.5 44.8-131.4" style="fill:#ffb400"/><path d="M205 366.3c-9.7-43.7-12.8-85.3-9.3-119.8-55.5 25.7-109 65.3-133 97.8-.2.2-.3.4-.5.6-35.2 48.4-.6 102.3 41 132.5s103.5 46.4 138.7-1.9c.5-.7 1.1-1.5 1.9-2.6-15.6-27.1-29.7-65.5-38.8-106.6" style="fill:#1e83f7"/><path d="M448.8 341.9c-30.7 6.5-71.5 8.1-113.4 4-44.6-4.3-85.1-14.2-116.8-28.2 7.2 60.8 28.4 123.8 51.9 156.7.2.2.3.4.5.6 35.2 48.4 97.1 32.2 138.7 1.9 41.6-30.2 76.2-84.1 41-132.5-.5-.6-1.1-1.4-1.9-2.5" style="fill:#18c249"/></g><circle cx="50" cy="50" r="15.5" fill="#0e1520" stroke="#0e1520" stroke-width="2"/><g stroke="#ffffff" stroke-width="2.6" fill="none" stroke-linecap="round"><path d="M50 42.5v7.5"/><path d="M44.9 45.2a7.6 7.6 0 1 0 10.2 0"/></g>',kopia:'<g transform="translate(-6.4,-6.4) scale(0.15)"><path fill="#2f80ff" d="M164.4 171.7c83.6-162 299.8-64.8 281.5 79.9 89.7 13 89.7 170.6-10.2 170.6-24.5 2.2-102.4 2.2-102.4 2.2v-69.1l42.8-47.5L303 169.6l-78 138.2 44.9 47.5v69.1h-185C-11 424.4-39.5 258.1 72.6 230c-4.1-38.9 38.8-77.8 89.7-58.3z"/></g>',syncthing:'<g transform="translate(-8.1,-8.1) scale(0.684)"><linearGradient id="stgr" gradientUnits="userSpaceOnUse" x1="58.666" y1="117.332" x2="58.666" y2="0"><stop offset="0" style="stop-color:#0882C8"/><stop offset="1" style="stop-color:#26B6DB"/></linearGradient><circle fill="url(#stgr) #1499D2" cx="58.7" cy="58.7" r="58.7"/><circle fill="none" stroke="#FFFFFF" stroke-width="6" stroke-miterlimit="10" cx="58.7" cy="58.5" r="43.7"/><path fill="#FFFFFF" d="M94.7,47.8c4.7,1.6,9.8-0.9,11.4-5.6c1.6-4.7-0.9-9.8-5.6-11.4c-4.7-1.6-9.8,0.9-11.4,5.6C87.5,41.1,90,46.2,94.7,47.8z"/><line fill="none" stroke="#FFFFFF" stroke-width="6" stroke-miterlimit="10" x1="97.6" y1="39.4" x2="67.5" y2="64.4"/><path fill="#FFFFFF" d="M77.6,91c-0.4,4.9,3.2,9.3,8.2,9.8c5,0.4,9.3-3.2,9.8-8.2c0.4-4.9-3.2-9.3-8.2-9.8C82.4,82.4,78,86,77.6,91z"/><line fill="none" stroke="#FFFFFF" stroke-width="6" stroke-miterlimit="10" x1="86.5" y1="91.8" x2="67.5" y2="64.4"/><path fill="#FFFFFF" d="M60,69.3c2.7,4.2,8.3,5.4,12.4,2.7c4.2-2.7,5.4-8.3,2.7-12.4c-2.7-4.2-8.3-5.4-12.4-2.7C58.5,59.5,57.3,65.1,60,69.3z"/><path fill="#FFFFFF" d="M21.2,61.4c-4.3-2.5-9.8-1.1-12.3,3.1c-2.5,4.3-1.1,9.8,3.1,12.3c4.3,2.5,9.8,1.1,12.3-3.1C26.8,69.5,25.4,64,21.2,61.4z"/><line fill="none" stroke="#FFFFFF" stroke-width="6" stroke-miterlimit="10" x1="16.6" y1="69.1" x2="67.5" y2="64.4"/></g>'
 ,rclone:'<g transform="matrix(1.3422,0,0,1.3422,0,3.842)"><path fill="#70caf2" d="m 45.726917,21.83581 c -1.507672,-2.611426 -3.701518,-4.579735 -6.222732,-5.808561 -0.322585,1.72227 -0.932898,3.419936 -1.857594,5.021921 l -1.459147,2.532147 c 0.971853,0.539918 1.817954,1.334759 2.414598,2.368122 1.753027,3.035842 0.712146,6.919151 -2.324383,8.672176 -3.035847,1.753025 -6.919159,0.712829 -8.672186,-2.323698 l -2.944264,-5.091631 h -4.751283 l -2.375642,4.114312 2.946315,5.090948 c 4.025469,6.971776 12.939592,9.360401 19.911375,5.334937 6.971101,-4.024782 9.359727,-12.938896 5.334943,-19.910673"/><path fill="#b4e3f9" d="M 31.127807,0.45456543 C 24.156023,-3.5702158 15.2419,-1.1815912 11.217114,5.7895021 9.7087599,8.4009285 9.1018638,11.285048 9.2980112,14.083052 10.950572,13.501445 12.726153,13.180911 14.576228,13.180911 l 2.921711,-0.0027 c -0.01845,-1.111274 0.247406,-2.241684 0.843367,-3.2743635 1.75371,-3.036526 5.636339,-4.0774059 8.672868,-2.3236971 3.03653,1.7530242 4.076727,5.6356506 2.323701,8.6721766 l -2.936747,5.095732 2.374958,4.114995 4.751283,-6.83e-4 2.93538,-5.097099 C 40.488218,13.394145 38.099591,4.4793466 31.127807,0.45456543"/><path fill="#3f79ad" d="m 19.297646,37.095505 -1.463932,-2.529413 c -0.9534,0.57204 -2.064675,0.906925 -3.25728,0.906925 -3.506736,0 -6.3491688,-2.842428 -6.3491688,-6.349162 0,-3.50605 2.8424328,-6.348479 6.3491688,-6.348479 l 5.881011,-0.0041 2.376326,-4.114312 -2.376326,-4.114312 -5.881695,0.0055 C 6.5254965,14.548074 0,21.074248 0,29.12381 0,37.174056 6.5254965,43.70023 14.57575,43.70023 c 3.014659,0 5.814718,-0.915811 8.139101,-2.48294 -1.329976,-1.140662 -2.49251,-2.520528 -3.417205,-4.12183"/></g>'};
 // the logo art fills its 64×64 box; the line icons have ~2u padding in 24×24 — pad the
 // logo's viewBox to match so it doesn't render visually larger than everything else
@@ -4175,6 +4196,7 @@ const INTERNAL=[
  {id:"__rclone",name:"Rclone",color:"linear-gradient(135deg,#3aa0f0,#5a6cf0)",ic:"rclone",bare:1,fn:()=>winRclone()},
  {id:"__kopia",name:"Kopia",color:"linear-gradient(135deg,#3b82f6,#1d4ed8)",ic:"kopia",bare:1,fn:()=>winKopia()},
  {id:"__syncthing",name:"Syncthing",color:"linear-gradient(135deg,#26B6DB,#0882C8)",ic:"syncthing",bare:1,fn:()=>winSyncthing()},
+ {id:"__immichsb",name:"Immich Standby",color:"linear-gradient(135deg,#fa2921,#ed79b5)",ic:"immichsb",bare:1,fn:()=>winImmichStandby()},
  {id:"__resil",name:"Resilience",color:"linear-gradient(135deg,#F08C4B,#D9603B)",ic:"lifef",bare:1,fn:()=>winResil()},
  {id:"__vault",name:"Credentials",color:"linear-gradient(135deg,#e0913c,#c96f22)",ic:"keyf",bare:1,fn:()=>winVault()},
  {id:"__notes",name:"Notes",color:"linear-gradient(135deg,#F2C14E,#E09F2F)",ic:"notec",bare:1,fn:()=>winNotes()},
@@ -8386,6 +8408,142 @@ function winResil(initTab){openWin("__resil","Resilience",(body,win)=>{
    /syncthing/ behind this login — which is what makes the same-origin iframe below
    legal (the GUI answers X-Frame-Options: SAMEORIGIN) and keeps an unauthenticated
    admin page off the LAN. Everything configurable lives in Settings → Syncthing. */
+
+/* ---------- Immich Standby: a warm spare of another box's Immich ----------
+   The backup holds the library and a nightly dump; this keeps a database restored from the
+   newest dump ready and idle, so «bring it up» is a minute rather than ten — and the nightly
+   restore is what proves the backup is restorable at all. */
+function winImmichStandby(){openWin("__immichsb","Immich Standby",(body,win)=>{
+ body.style.padding="0";body.style.display="flex";body.style.flexDirection="column";
+ let D=null,loadErr="",timer=null,setOpen=false,note="";
+ // kP and dtShort belong to other windows (declared inside them, not globally) — reaching for
+ // them from here throws mid-render and leaves half a window behind
+ const P=(u,b)=>api(u,{method:"POST",body:JSON.stringify(b||{})});
+ const dts=t=>{if(!t)return"—";const d=new Date(t*1000);
+  return d.toLocaleDateString(LOC,{day:"2-digit",month:"short"})+", "+d.toTimeString().slice(0,5);};
+ const ago=t=>{if(!t)return"never";const s=Math.max(0,Math.floor(Date.now()/1000-t));
+  const m=Math.floor(s/60),h=Math.floor(m/60),d=Math.floor(h/24);
+  return d?d+"d ago":h?h+"h ago":m?m+"m ago":"just now";};
+ const dur=s=>{s=Math.max(0,Math.floor(s));const m=Math.floor(s/60);
+  return m?m+"m "+(s%60)+"s":s+"s";};
+ const load=async()=>{const r=await api("/api/immich-standby");
+  if(r&&r.ok){D=r;loadErr="";}else loadErr=(r&&r.log)||"the panel did not answer";
+  return D;};
+
+ const paint=()=>{
+  if(!D){body.innerHTML=`<div class="kp-empty" style="margin:auto;text-align:center">
+    <div class="ei">${svg("immichsb",26)}</div><div class="et">${loadErr?"Cannot read the standby":"Loading…"}</div>
+    <div class="ed">${esc(loadErr||"reading the backup and the standby database")}</div>
+    ${loadErr?`<button class="btn" id="sbRetry" style="margin-top:10px">Retry</button>`:""}</div>`;
+   const rb=body.querySelector("#sbRetry");if(rb)rb.onclick=async()=>{await load();paint();};return;}
+  const d=D.dump,last=D.last||{},okRun=last.result==="ok",pr=D.progress||{};
+  /* One question first: could I look at these photos right now, and how old are they?
+     Everything else — schedule, paths, history — is secondary and folds away. */
+  const st=!D.have_backup?["danger","No backup to stand by","the Mirror copy of the other NAS is not where I was told to look"]
+   :!d?["danger","No database dump in the backup","the library is here, but without a dump there is nothing to restore"]
+   :D.refreshing?["accent","Refreshing the copy…",(pr.phase||"working")]
+   :D.running?(D.answers?["good","The copy is running","open it, look around, then stop it — it holds the library through an overlay"]
+                       :["accent","Starting the copy…","Immich needs a minute or two after the containers come up"])
+   :!D.db_ready?["warn","Never prepared","one refresh and this becomes a copy you can start in a minute"]
+   :!okRun?["danger","The last refresh failed","what is on disk may be stale or half-written — look at the error below"]
+   :(d.age_days>2?["warn","Ready — but the dump is "+d.age_days+" days old","the other NAS may have stopped writing dumps"]
+     :["good","Ready to bring up","press the button and it is a working Immich in about two minutes"]);
+  const act=D.refreshing?""
+   :D.running?`${D.answers?`<a class="btn pri" href="${att(D.url)}" target="_blank" rel="noopener">${svg("globe",14)} Open Immich</a>`:""}
+     <button class="btn dng" id="sbDown">${svg("power",14)} Stop</button>`
+   :(D.db_ready?`<button class="btn pri" id="sbUp">${svg("play",14)} Bring it up</button>`:"");
+  // the chain of custody, in the order the data travels
+  const chain=[
+   ["Dump written", d?ago(d.ts):"no dump", d?"good":"danger"],
+   ["Copied here", d?dts(d.ts):"—", d?(d.age_days>2?"warn":"good"):"danger"],
+   ["Restored here", okRun?dts(last.ts):"never", okRun?(d&&last.dump_ts===d.ts?"good":"warn"):"danger"],
+   ["Photos in the copy", okRun&&last.assets?last.assets.toLocaleString(LOC):"—", okRun?"good":"dim"]];
+  body.innerHTML=`<div class="nbmain" style="flex-direction:column"><div class="set-main"><div class="set-pane" id="tc">
+   <div class="kp-hero" style="--kp-hc:var(--win-${st[0]},var(--${st[0]}))">
+    <div class="kp-hero-ic">${svg("immichsb",22)}</div>
+    <div style="flex:1;min-width:0"><div class="kp-big">${esc(st[1])}</div>
+     <div style="color:var(--win-dim,var(--dim));font-size:12px;margin-top:2px">${esc(st[2])}</div></div>
+    <div style="display:flex;gap:8px;align-items:center">${act}</div></div>
+   ${D.refreshing?`<div class="sb-prog"><i></i><div><b>${esc(pr.phase||"working")}</b>
+      <span>${pr.started?dur(Date.now()/1000-pr.started)+" so far":""} · loading a ${d?fmtB(d.bytes):""} dump takes about ten minutes on this box${D.db_bytes?` · database now ${fmtB(D.db_bytes)}`:""}</span></div></div>`:""}
+   ${D.running?`<div class="sb-run"><span>${svg("globe",13)}</span>
+     <div><b><a href="${att(D.url)}" target="_blank" rel="noopener">${esc(D.url)}</a></b>
+      <span>log in with the same account as on the other NAS${D.since?" · running "+dur(Date.now()/1000-D.since):""}${D.answers?"":" · still starting"}</span></div></div>`:""}
+   <div class="sb-chain">${chain.map(([t,v,c])=>`<div class="sb-step">
+     <i style="background:var(--win-${c==="dim"?"line":c},var(--${c==="dim"?"line":c}))"></i>
+     <b>${esc(v)}</b><span>${esc(t)}</span></div>`).join('<div class="sb-arr">›</div>')}</div>
+   ${last.error?`<div class="kp-note err" style="margin-top:10px"><b>Last refresh failed:</b> ${esc(last.error)}</div>`:""}
+   ${last.note?`<div class="kp-note" style="margin-top:10px">${esc(last.note)}</div>`:""}
+   <div class="sb-row">
+    <button class="btn" id="sbRun"${D.refreshing||D.running?" disabled":""} title="${att(D.running?"stop the copy first — the database is in use":D.refreshing?"already refreshing":"load the newest dump into the standby database")}">${svg("refresh",13)} Refresh from the newest dump</button>
+    <span class="kp-help" style="margin:0">${D.enabled?`automatic every night at ${esc(D.time)}`:"automatic refresh is off"}</span>
+    <span style="flex:1"></span><span id="sbSt" style="color:var(--win-dim,var(--dim));font-size:12px"></span></div>
+   <h3 class="set-title kp-disc${setOpen?" open":""}" id="sbSetHead" style="margin-top:14px">${svg("chev",15)} Settings — schedule, port, folders</h3>
+   <div id="sbSet" style="${setOpen?"":"display:none"}"></div>
+   ${(D.history||[]).length?`<div class="kp-sec" style="margin-top:12px"><h4>${svg("clock",13)} Refreshes</h4>
+     ${(D.history||[]).slice().reverse().slice(0,8).map(h=>`<div class="kp-run">
+       <span>${esc(dts(h.ts))}</span><span class="kp-badge ${h.result==="ok"?"ok":"err"}">${esc(h.result)}</span>
+       <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--win-dim,var(--dim))">${esc(h.dump||"")}</span>
+       <span class="mono">${h.assets?h.assets.toLocaleString(LOC)+" photos · ":""}${h.seconds?dur(h.seconds):""}</span></div>`).join("")}</div>`:""}
+   </div></div></div>`;
+  const q=id=>body.querySelector(id),stx=m=>{const e=q("#sbSt");if(e)e.textContent=m||"";};
+  if(note){stx(note);note="";}
+  q("#sbRun").onclick=async()=>{stx("starting…");const r=await P("/api/immich-standby/refresh");
+   if(!(r&&r.ok)){stx((r&&r.log)||"failed");return;}note="";await load();paint();};
+  const up=q("#sbUp");
+  if(up)up.onclick=()=>confirmDlg("Bring the copy up?",
+    `Immich ${d?esc(d.version):""} starts against the database restored ${esc(ago(last.ts))}, with the backup's
+     library mounted read-through. <b>Nothing is written into the backup itself</b> — what the copy
+     generates goes into a scratch layer that is wiped when you stop it.<br><br>
+     It answers on <span class="mono">${esc(D.url)}</span> in a minute or two.`,
+    async()=>{stx("starting the copy…");const r=await P("/api/immich-standby/up");
+     if(!(r&&r.ok)){stx((r&&r.log)||"failed");return;}note="started — give it a minute";await load();paint();});
+  const dn=q("#sbDown");
+  if(dn)dn.onclick=()=>confirmDlg("Stop the copy?",
+    "The containers stop and the library overlay is unmounted. The restored database stays, so bringing it up again takes a minute.",
+    async()=>{stx("stopping…");await P("/api/immich-standby/down");await load();paint();},1);
+  const head=q("#sbSetHead"),box=q("#sbSet");
+  head.onclick=()=>{setOpen=!setOpen;head.classList.toggle("open",setOpen);
+   box.style.display=setOpen?"":"none";if(setOpen)paintSet(box);};
+  if(setOpen)paintSet(box);};
+
+ const paintSet=(box)=>{
+  box.innerHTML=`<div class="kp-sec"><h4>${svg("refresh",13)} Nightly refresh</h4>
+    <p class="kp-help">The newest dump is loaded into the database kept here. That restore is also the
+     proof: if it fails you hear about it the next morning, not on the day you need it. Skipped when the
+     same dump is already restored.</p>
+    <div class="srow"><div class="srow-l"><div class="srow-t">Refresh automatically</div>
+      <div class="srow-d">after the Mirror run that brings the dump over</div></div>
+     <div class="srow-c"><label class="tgl"><input type="checkbox" id="sbEn"${D.enabled?" checked":""}><span class="sl"></span></label></div></div>
+    <div class="srow"><div class="srow-l"><div class="srow-t">At</div></div>
+     <div class="srow-c"><input type="time" id="sbTime" value="${att(D.time)}" style="width:110px"></div></div></div>
+   <div class="kp-sec"><h4>${svg("hdd",13)} Folders and port</h4>
+    <div class="srow"><div class="srow-l"><div class="srow-t">Backup to stand by</div>
+      <div class="srow-d">its «home/Photos Immich» holds both the library and the dumps</div></div>
+     <div class="srow-c"><input id="sbBackup" class="mono" style="width:min(330px,44vw)" value="${att(D.backup)}"></div></div>
+    <div class="srow"><div class="srow-l"><div class="srow-t">Standby folder</div>
+      <div class="srow-d">the restored database and the scratch layer${D.db_bytes?` · now ${fmtB(D.db_bytes)}`:""}</div></div>
+     <div class="srow-c"><input id="sbWork" class="mono" style="width:min(330px,44vw)" value="${att(D.work)}"></div></div>
+    <div class="srow"><div class="srow-l"><div class="srow-t">Port for the copy</div>
+      <div class="srow-d">its own, so a real Immich installed here later cannot collide with it</div></div>
+     <div class="srow-c"><input type="number" id="sbPort" min="1024" max="65535" class="mono" style="width:100px" value="${+D.port}"></div></div>
+    <div class="r" style="margin-top:2px"><button class="btn pri" id="sbSave">Save</button>
+     <span id="sbSetSt" style="color:var(--win-dim,var(--dim));font-size:12px;margin-left:10px"></span></div></div>`;
+  const q=id=>box.querySelector(id);
+  const save=async()=>{const s2=q("#sbSetSt");s2.textContent="saving…";
+   const r=await P("/api/immich-standby/save",{enabled:q("#sbEn").checked,time:q("#sbTime").value,
+     port:+q("#sbPort").value||2284,backup:q("#sbBackup").value,work:q("#sbWork").value});
+   if(r&&r.ok){D=r;s2.textContent="saved";setTimeout(()=>{setOpen=true;paint();},400);}
+   else s2.textContent=(r&&r.log)||"could not save";};
+  q("#sbSave").onclick=save;q("#sbEn").onchange=save;};
+
+ (async()=>{await load();paint();
+  timer=setInterval(async()=>{if(!body.isConnected){clearInterval(timer);return;}
+   const k=o=>JSON.stringify(o&&{r:o.refreshing,u:o.running,a:o.answers,l:o.last,p:o.progress});
+   const before=k(D);await load();
+   if(k(D)!==before)paint();},4000);})();
+},{w:840,h:600});}
+
 function winSyncthing(){openWin("__syncthing","Syncthing",(body,win)=>{
  body.style.padding="0";body.style.display="flex";body.style.flexDirection="column";
  const note=(ic,title,desc,btn,fn)=>{

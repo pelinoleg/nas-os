@@ -14,7 +14,7 @@ server must run as root (the nas-setup.sh launcher does that).
 """
 import json, os, re, subprocess, time, shutil, socket, threading, pwd, mimetypes, glob, errno, heapq, sys, sqlite3, fnmatch, calendar
 import html as _htmllib
-import pty, select, struct, hashlib, base64, signal, fcntl, termios, secrets, hmac, shlex, stat
+import pty, select, struct, hashlib, base64, signal, fcntl, termios, secrets, hmac, shlex, stat, gzip
 import urllib.request, urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse, parse_qs, quote, urlencode
@@ -3283,6 +3283,8 @@ def _def_monitor():
         "kp_err":      {"on": True,  "priority": 1, "desk": True},     # snapshot / spare copy / destination problem
         "kp_stale":    {"on": True,  "priority": 1, "threshold": 7, "desk": True},   # newest snapshot older than N days
         "kp_maint":    {"on": True,  "priority": 1, "desk": True},     # repo maintenance / verification failed
+        # the standby copy of another box's Immich could not be refreshed from the backup
+        "imsb_fail":   {"on": True,  "priority": 1, "desk": True},
         # --- Resilience app ---
         "dirty_boot":  {"on": True,  "priority": 1},                   # power loss / crash detected on boot
         "resil_drill": {"on": True,  "priority": 0, "desk": True},     # weekly readiness audit found blockers
@@ -3456,7 +3458,7 @@ for _k in ("panel_new", "panel_fail", "ssh_login"):
 for _k in ("ip_changed", "link_changed", "vpn_offline", "traffic"):
     _EVENT_KIND[_k] = "net"
 for _k in ("snap_ok", "snap_err", "scrub_err", "delete_block", "backup", "mergerfs",
-           "nas_backup", "nb_conn", "nb_srcmiss", "nb_stale", "nb_dumps", "nb_size", "nb_dest", "nb_guard", "nb_verify",
+           "nas_backup", "imsb_fail", "nb_conn", "nb_srcmiss", "nb_stale", "nb_dumps", "nb_size", "nb_dest", "nb_guard", "nb_verify",
            "fsw_corrupt", "fsw_guard", "fsw_root", "fsw_del", "fsw_scan"):
     _EVENT_KIND[_k] = "protect"
 
@@ -14731,6 +14733,431 @@ def _resil_tick():
     if ch:
         _json_save(RESIL_STATE, st)
 
+# ---- Immich standby: a warm spare of another box's Immich -----------------------------
+# The Mirror backup holds two halves of somebody else's Immich: the media library (a plain
+# rsync copy) and a nightly pg_dump. Owning them is not the same as being able to run them,
+# and the gap only shows on the worst day. So every night the newest dump is loaded into a
+# Postgres data directory kept HERE, ready and idle: the restore is both the preparation and
+# the proof — if today's dump cannot be restored, you learn today.
+#
+# Nothing runs in between. Bringing the copy up starts the containers against the database
+# that is already there (a minute or two instead of ten), with the library mounted through an
+# overlay: Immich writes its thumbnails into a scratch layer, and the backup underneath stays
+# exactly as the backup made it.
+IMSB_CONF   = "/etc/nas-os/immich-standby.json"
+IMSB_UNIT   = "nas-immich-standby"
+IMSB_DB_CT  = "immich-standby-db"
+IMSB_PROJ   = "immich-standby"
+IMSB_PGIMG  = "ghcr.io/immich-app/postgres:14-vectorchord0.3.0-pgvectors0.2.0"
+IMSB_RECIPE = os.path.join(HERE, "services", "immich", "docker-compose.yml")
+_IMSB_DUMP_RE = re.compile(r"immich-db-backup-.*?-(v[0-9][0-9.]*)-pg([0-9.]+)\.sql\.gz$")
+
+def imsb_defaults():
+    return {"enabled": False,
+            "backup": "/media/nas/t7-4TB/Ugreen-Backup",
+            "work": "/media/nas/t7-4TB/immich-standby",
+            "time": "03:30", "port": 2284,
+            "db_password": "", "last": {}, "history": []}
+
+def imsb_load():
+    d = _json_load_strict(IMSB_CONF, {})
+    if not isinstance(d, dict):
+        d = {}
+    out = imsb_defaults()
+    for k, v in out.items():
+        if k in d and isinstance(d[k], type(v)):
+            out[k] = d[k]
+    try:
+        out["port"] = int(out["port"]) if 1024 <= int(out["port"]) <= 65535 else 2284
+    except (TypeError, ValueError):
+        out["port"] = 2284
+    if not re.match(r"^([01]\d|2[0-3]):[0-5]\d$", str(out["time"])):
+        out["time"] = "03:30"
+    return out
+
+def imsb_save(d):
+    os.makedirs(os.path.dirname(IMSB_CONF), exist_ok=True)
+    tmp = IMSB_CONF + ".tmp%d" % os.getpid()
+    with open(tmp, "w") as f:
+        json.dump(d, f, ensure_ascii=False, indent=1)
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, IMSB_CONF)
+
+def _imsb_paths(cfg):
+    w = cfg["work"]
+    return {"db": os.path.join(w, "db"), "stack": os.path.join(w, "stack"),
+            "lib": os.path.join(w, "library"), "upper": os.path.join(w, "lib-upper"),
+            "wk": os.path.join(w, "lib-work"), "log": os.path.join(w, "refresh.log"),
+            "src": os.path.join(cfg["backup"], "home", "Photos Immich")}
+
+def _imsb_dump(cfg):
+    """The newest dump in the backup, with the Immich version it came from — a restored
+    database only fits its own version, and the source writes that version into the name."""
+    p = _imsb_paths(cfg)
+    best = None
+    try:
+        for f in os.listdir(os.path.join(p["src"], "backups")):
+            m = _IMSB_DUMP_RE.search(f)
+            if not m:
+                continue
+            full = os.path.join(p["src"], "backups", f)
+            ts = os.path.getmtime(full)
+            if not best or ts > best["ts"]:
+                best = {"file": full, "name": f, "ts": ts,
+                        "version": m.group(1), "pg": m.group(2),
+                        "bytes": os.path.getsize(full)}
+    except OSError:
+        return None
+    return best
+
+def _imsb_db_ready(cfg):
+    """Has a dump ever been restored into the standby data directory?"""
+    return os.path.exists(os.path.join(_imsb_paths(cfg)["db"], "PG_VERSION"))
+
+def _imsb_stack_up():
+    try:
+        r = subprocess.run(["docker", "ps", "--filter", "label=com.docker.compose.project=" + IMSB_PROJ,
+                            "--format", "{{.Names}}"], capture_output=True, text=True, timeout=20)
+        return [x for x in (r.stdout or "").splitlines() if x.strip()]
+    except (OSError, subprocess.SubprocessError):
+        return []
+
+def imsb_status():
+    cfg = imsb_load()
+    p = _imsb_paths(cfg)
+    dump = _imsb_dump(cfg)
+    up = _imsb_stack_up()
+    last = cfg.get("last") or {}
+    out = {"ok": True, "enabled": bool(cfg["enabled"]), "backup": cfg["backup"],
+           "work": cfg["work"], "time": cfg["time"], "port": cfg["port"],
+           "have_backup": os.path.isdir(p["src"]),
+           "dump": ({"name": dump["name"], "ts": int(dump["ts"]), "bytes": dump["bytes"],
+                     "version": dump["version"],
+                     "age_days": int((time.time() - dump["ts"]) / 86400)} if dump else None),
+           "db_ready": _imsb_db_ready(cfg),
+           "db_bytes": _dir_size(p["db"]) if os.path.isdir(p["db"]) else 0,
+           "refreshing": _systemd_active(IMSB_UNIT + ".service"),
+           "running": bool(up), "containers": up,
+           "url": "http://%s:%d" % (lan_ip() or "127.0.0.1", cfg["port"]),
+           "last": last, "history": (cfg.get("history") or [])[-30:],
+           "mounted": os.path.ismount(p["lib"])}
+    if out["refreshing"]:
+        pr = _json_load_strict(_imsb_prog_file(cfg), {})
+        out["progress"] = {"phase": str(pr.get("phase") or "working"),
+                           "started": int(pr.get("started") or 0)}
+    if out["running"]:
+        # «the containers are up» and «you can open it» are different things: Immich needs a
+        # minute or two after start, and saying «running» while the page refuses is a lie
+        out["answers"] = False
+        try:
+            with socket.create_connection(("127.0.0.1", cfg["port"]), timeout=1.5) as c:
+                c.sendall(b"GET / HTTP/1.0\r\nHost: localhost\r\n\r\n")
+                out["answers"] = b"200" in (c.recv(64) or b"")
+        except OSError:
+            pass
+        try:
+            r = subprocess.run(["docker", "inspect", "-f", "{{.State.StartedAt}}",
+                                "immich_sb_server"], capture_output=True, text=True, timeout=15)
+            t = (r.stdout or "").strip()[:19]
+            out["since"] = int(calendar.timegm(time.strptime(t, "%Y-%m-%dT%H:%M:%S"))) if t else 0
+        except (OSError, ValueError, subprocess.SubprocessError):
+            out["since"] = 0
+    return out
+
+def _imsb_prog_file(cfg):
+    return os.path.join(cfg["work"], "progress.json")
+
+def _imsb_prog(cfg, phase, started=None):
+    """Where the refresh is right now. Written by the driver, read by the window — a job that
+    takes nine minutes and reports nothing looks exactly like a job that has hung."""
+    try:
+        os.makedirs(cfg["work"], exist_ok=True)
+        _json_save(_imsb_prog_file(cfg), {"phase": phase, "ts": int(time.time()),
+                                          "started": int(started or time.time())})
+    except OSError:
+        pass
+
+def _imsb_hist(cfg, entry):
+    h = [x for x in (cfg.get("history") or []) if isinstance(x, dict)]
+    h.append(entry)
+    cfg["history"] = h[-30:]
+    cfg["last"] = entry
+    imsb_save(cfg)
+
+def _imsb_psql(args, timeout=600, db="postgres", input_=None):
+    return subprocess.run(["docker", "exec", "-i", IMSB_DB_CT, "psql", "-U", "postgres",
+                           "-d", db, "-v", "ON_ERROR_STOP=1"] + args,
+                          capture_output=True, text=True, timeout=timeout, input=input_)
+
+def _imsb_db_start(cfg):
+    """A standalone Postgres on the standby data directory — the stack is not involved, so a
+    refresh never depends on (or disturbs) a copy that happens to be running."""
+    p = _imsb_paths(cfg)
+    os.makedirs(p["db"], exist_ok=True)
+    subprocess.run(["docker", "rm", "-f", IMSB_DB_CT], capture_output=True, timeout=60)
+    r = subprocess.run(["docker", "run", "-d", "--name", IMSB_DB_CT,
+                        "-e", "POSTGRES_PASSWORD=" + cfg["db_password"],
+                        "-e", "POSTGRES_USER=postgres", "-e", "POSTGRES_DB=immich",
+                        "-e", "POSTGRES_INITDB_ARGS=--data-checksums",
+                        "-v", p["db"] + ":/var/lib/postgresql/data", IMSB_PGIMG],
+                       capture_output=True, text=True, timeout=300)
+    if r.returncode != 0:
+        return {"ok": False, "log": (r.stderr or "")[-300:]}
+    # pg_isready lies during initdb (the entrypoint runs a temporary server first), so wait
+    # for a real query to succeed three times in a row
+    good, deadline = 0, time.monotonic() + 300
+    while time.monotonic() < deadline:
+        try:
+            if _imsb_psql(["-c", "select 1"], timeout=20).returncode == 0:
+                good += 1
+                if good >= 3:
+                    return {"ok": True}
+            else:
+                good = 0
+        except (OSError, subprocess.SubprocessError):
+            good = 0
+        time.sleep(2)
+    return {"ok": False, "log": "Postgres never came up"}
+
+def _imsb_db_stop():
+    subprocess.run(["docker", "rm", "-f", IMSB_DB_CT], capture_output=True, timeout=120)
+
+def imsb_refresh_start():
+    cfg = imsb_load()
+    if not shutil.which("docker"):
+        return {"ok": False, "log": "docker is not installed"}
+    if _systemd_active(IMSB_UNIT + ".service"):
+        return {"ok": False, "log": "a refresh is already running"}
+    if _imsb_stack_up():
+        return {"ok": False, "log": "the standby copy is running — stop it first"}
+    if not _imsb_dump(cfg):
+        return {"ok": False, "log": "no Immich dump found in %s" % _imsb_paths(cfg)["src"]}
+    cmd = ["systemd-run", "--collect", "--quiet", "--unit", IMSB_UNIT,
+           "--setenv=SUDO_USER=" + TARGET_USER, "--setenv=HOME=" + HOME,
+           sys.executable, os.path.join(HERE, "nas-web.py"), "immich-standby-refresh"]
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=20)
+    except (OSError, subprocess.SubprocessError) as e:
+        return {"ok": False, "log": str(e)[:200]}
+    return {"ok": r.returncode == 0, "log": (r.stderr or "")[:200]}
+
+def _imsb_refresh_cli():
+    """Driver: load the newest dump into the standby database and check what landed."""
+    cfg = imsb_load()
+    p = _imsb_paths(cfg)
+    dump = _imsb_dump(cfg)
+    t0 = time.time()
+    if not cfg.get("db_password"):
+        cfg["db_password"] = "sb-" + secrets.token_hex(10)
+        imsb_save(cfg)
+    def fail(msg):
+        _imsb_db_stop()
+        _imsb_hist(imsb_load(), {"ts": int(time.time()), "result": "error", "error": msg[:400],
+                                 "seconds": int(time.time() - t0),
+                                 "dump": (dump or {}).get("name", "")})
+        try:
+            notify_event("imsb_fail", "imsb", "Immich standby: refresh failed",
+                         msg[:300], cooldown=6 * 3600)
+        except Exception:
+            pass
+        return
+    if not dump:
+        return fail("no dump found in the backup")
+    try:
+        with open(p["log"], "w") as f:
+            f.write("refresh started %s\ndump: %s\n" % (time.strftime("%F %T"), dump["name"]))
+    except OSError:
+        pass
+    _imsb_prog(cfg, "starting the database", t0)
+    r = _imsb_db_start(cfg)
+    if not r["ok"]:
+        return fail("could not start the standby Postgres: " + r.get("log", ""))
+    try:
+        # a fresh database every time: a half-applied dump on top of yesterday's would be
+        # neither yesterday's nor today's, and nobody would notice until the restore mattered
+        _imsb_psql(["-c", "DROP DATABASE IF EXISTS immich"], timeout=300)
+        cr = _imsb_psql(["-c", "CREATE DATABASE immich"], timeout=300)
+        if cr.returncode != 0:
+            return fail("could not create the database: " + (cr.stderr or "")[-300:])
+        _imsb_prog(cfg, "creating the roles the dump needs", t0)
+        # roles: a single-database dump carries none, and stops at the first OWNER TO
+        roles = set()
+        try:
+            with gzip.open(dump["file"], "rt", errors="replace") as fh:
+                for line in fh:
+                    for m in re.finditer(r"OWNER TO ([A-Za-z0-9_]+)", line):
+                        roles.add(m.group(1))
+                    if len(roles) > 20:
+                        break
+        except (OSError, EOFError) as e:
+            return fail("could not read the dump: %s" % e)
+        for role in sorted(roles - {"postgres"}):
+            _imsb_psql(["-c", "DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE "
+                              "rolname='%s') THEN CREATE ROLE %s LOGIN; END IF; END $$;"
+                        % (role, role)], timeout=60)
+        _imsb_prog(cfg, "loading the dump", t0)
+        with gzip.open(dump["file"], "rb") as fh:
+            proc = subprocess.Popen(["docker", "exec", "-i", IMSB_DB_CT, "psql", "-U", "postgres",
+                                     "-d", "immich", "-v", "ON_ERROR_STOP=1", "-q"],
+                                    stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                    stderr=subprocess.STDOUT)
+            try:
+                while True:
+                    chunk = fh.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    proc.stdin.write(chunk)
+            finally:
+                try:
+                    proc.stdin.close()
+                except OSError:
+                    pass
+            out = (proc.stdout.read() or b"").decode("utf-8", "replace")
+            proc.wait(timeout=4 * 3600)
+        if proc.returncode != 0:
+            return fail("the dump did not load: " + out[-400:])
+        def count(sql):
+            try:
+                r2 = _imsb_psql(["-tAc", sql], db="immich", timeout=120)
+                return int((r2.stdout or "0").strip() or 0)
+            except (ValueError, OSError, subprocess.SubprocessError):
+                return 0
+        _imsb_prog(cfg, "checking what landed", t0)
+        assets = count("select count(*) from asset") or count("select count(*) from assets")
+        users = count('select count(*) from "user"') or count("select count(*) from users")
+        if assets <= 0:
+            return fail("the dump loaded but the database has no assets — that is not a "
+                        "usable copy")
+        prev = (imsb_load().get("last") or {}).get("assets") or 0
+        note = ""
+        if prev and assets < prev * 0.9:
+            # not a failure — but a library does not lose a tenth of itself overnight
+            note = "assets dropped from %d to %d since the last refresh" % (prev, assets)
+            try:
+                notify_event("imsb_fail", "imsb:drop", "Immich standby: the copy shrank",
+                             note, cooldown=24 * 3600)
+            except Exception:
+                pass
+        _imsb_db_stop()
+        cfg2 = imsb_load()
+        _imsb_hist(cfg2, {"ts": int(time.time()), "result": "ok", "assets": assets,
+                          "users": users, "seconds": int(time.time() - t0),
+                          "dump": dump["name"], "version": dump["version"],
+                          "dump_ts": int(dump["ts"]), "note": note})
+    except (OSError, subprocess.SubprocessError, ValueError) as e:
+        return fail("refresh failed: %s" % e)
+    finally:
+        _imsb_db_stop()
+
+def imsb_up():
+    """Start the standby copy against the database that is already restored. The library is
+    mounted through an overlay so Immich can write (it insists on writing) without a single
+    byte landing in the backup underneath."""
+    cfg = imsb_load()
+    p = _imsb_paths(cfg)
+    if _systemd_active(IMSB_UNIT + ".service"):
+        return {"ok": False, "log": "a refresh is running — wait for it to finish"}
+    if not _imsb_db_ready(cfg):
+        return {"ok": False, "log": "nothing has been restored yet — run a refresh first"}
+    if not os.path.isdir(p["src"]):
+        return {"ok": False, "log": "the backup library is not there: " + p["src"]}
+    if not os.path.isfile(IMSB_RECIPE):
+        return {"ok": False, "log": "the Immich recipe is missing from the repo"}
+    for d in ("lib", "upper", "wk", "stack"):
+        os.makedirs(p[d], exist_ok=True)
+    if not os.path.ismount(p["lib"]):
+        r = subprocess.run(["mount", "-t", "overlay", "overlay", "-o",
+                            "lowerdir=%s,upperdir=%s,workdir=%s" % (p["src"], p["upper"], p["wk"]),
+                            p["lib"]], capture_output=True, text=True, timeout=60)
+        if r.returncode != 0:
+            return {"ok": False, "log": "could not mount the library overlay: "
+                                        + (r.stderr or "")[-200:]}
+    version = ((cfg.get("last") or {}).get("version")
+               or ((_imsb_dump(cfg) or {}).get("version")) or "release")
+    # The catalog recipe is written for a REAL install: fixed port, fixed container names and
+    # restart:unless-stopped. A standby must collide with none of that and must never come back
+    # by itself after a reboot — it is supposed to be down until somebody asks for it.
+    comp = open(IMSB_RECIPE).read().replace('"2283:2283"', '"%d:2283"' % cfg["port"])
+    comp = re.sub(r"container_name:\s*immich_", "container_name: immich_sb_", comp)
+    comp = re.sub(r"restart:\s*unless-stopped", 'restart: "no"', comp)
+    # the desktop shortcut is built from these labels: without fixing them the icon would
+    # point at 2283 (a real Immich's port) and be indistinguishable from the real thing
+    comp = comp.replace('"web-desktop.name=Immich"', '"web-desktop.name=Immich (standby copy)"')
+    comp = comp.replace("http://localhost:2283", "http://localhost:%d" % cfg["port"])
+    with open(os.path.join(p["stack"], "compose.yaml"), "w") as f:
+        f.write(comp)
+    with open(os.path.join(p["stack"], ".env"), "w") as f:
+        f.write("# written by the Immich standby — do not edit by hand\n"
+                "UPLOAD_LOCATION=%s\nDB_DATA_LOCATION=%s\nDB_PASSWORD=%s\n"
+                "DB_USERNAME=postgres\nDB_DATABASE_NAME=immich\nIMMICH_VERSION=%s\nTZ=%s\n"
+                % (p["lib"], p["db"], cfg["db_password"], version,
+                   (open("/etc/timezone").read().strip() if os.path.exists("/etc/timezone") else "UTC")))
+    os.chmod(os.path.join(p["stack"], ".env"), 0o600)
+    compose = ["docker", "compose", "-p", IMSB_PROJ, "--project-directory", p["stack"],
+               "-f", os.path.join(p["stack"], "compose.yaml")]
+    # Postgres FIRST, and wait until it really answers. A database restored a moment ago
+    # replays its write-ahead log on the first start, and Immich's server does not survive
+    # meeting a database in that state: it exits with «the database system is starting up»
+    # and — because a standby must never resurrect itself, so restart is off — stays dead.
+    r = subprocess.run(compose + ["up", "-d", "database"], capture_output=True, text=True, timeout=600)
+    if r.returncode != 0:
+        return {"ok": False, "log": (r.stderr or "")[-400:]}
+    good, deadline = 0, time.monotonic() + 420
+    while time.monotonic() < deadline:
+        try:
+            q = subprocess.run(["docker", "exec", "immich_sb_postgres", "psql", "-U", "postgres",
+                                "-d", "immich", "-c", "select 1"],
+                               capture_output=True, timeout=20)
+            good = good + 1 if q.returncode == 0 else 0
+            if good >= 3:
+                break
+        except (OSError, subprocess.SubprocessError):
+            good = 0
+        time.sleep(3)
+    if good < 3:
+        return {"ok": False, "log": "the restored database did not finish starting up"}
+    r = subprocess.run(compose + ["up", "-d"], capture_output=True, text=True, timeout=900)
+    if r.returncode != 0:
+        return {"ok": False, "log": (r.stderr or "")[-400:]}
+    return {"ok": True, "url": "http://%s:%d" % (lan_ip() or "127.0.0.1", cfg["port"])}
+
+def imsb_down(wipe=True):
+    cfg = imsb_load()
+    p = _imsb_paths(cfg)
+    subprocess.run(["docker", "compose", "-p", IMSB_PROJ, "--project-directory", p["stack"],
+                    "-f", os.path.join(p["stack"], "compose.yaml"), "down"],
+                   capture_output=True, text=True, timeout=300)
+    if os.path.ismount(p["lib"]):
+        subprocess.run(["umount", p["lib"]], capture_output=True, timeout=60)
+        if os.path.ismount(p["lib"]):
+            subprocess.run(["umount", "-l", p["lib"]], capture_output=True, timeout=60)
+    if wipe and os.path.isdir(p["upper"]) and not os.path.ismount(p["lib"]):
+        # whatever the copy generated while it ran — thumbnails it thought were missing —
+        # is scratch by definition; the backup below was never touched
+        shutil.rmtree(p["upper"], ignore_errors=True)
+        shutil.rmtree(p["wk"], ignore_errors=True)
+    return {"ok": True}
+
+_imsb_last_slot = ""
+
+def _imsb_tick():
+    """Nightly refresh, one shot per minute-slot (same pattern as the other schedulers)."""
+    global _imsb_last_slot
+    cfg = imsb_load()
+    if not cfg["enabled"] or not shutil.which("docker"):
+        return
+    slot = time.strftime("%Y-%m-%d %H:%M")
+    if slot == _imsb_last_slot or not slot.endswith(cfg["time"]):
+        return
+    _imsb_last_slot = slot
+    if _imsb_stack_up() or _systemd_active(IMSB_UNIT + ".service"):
+        return
+    dump = _imsb_dump(cfg)
+    last = cfg.get("last") or {}
+    if dump and last.get("result") == "ok" and int(dump["ts"]) == int(last.get("dump_ts") or 0):
+        return          # the same dump is already restored — nothing to redo
+    imsb_refresh_start()
+
 def monitor_loop():
     _safe(_therm_recover)      # release containers orphaned by thermal guard before a crash/reboot
     threading.Thread(target=_poke_watcher, daemon=True).start()
@@ -14749,7 +15176,7 @@ def monitor_loop():
         funcs = ((history_sample, monitor_tick, maintenance_daily, _smart_selftest_tick,
                   _nb_sched_tick, _nb_drill_sched_tick, _automount_tick, _summary_tick, _thermal_tick, usb_ops_sync,
                   _fsw_tick, _replica_tick, _remotes_tick, _rclone_mounts_tick, _screen_tick,
-                  _resil_tick, _kopia_tick) if full else
+                  _resil_tick, _kopia_tick, _imsb_tick) if full else
                  (monitor_tick, _automount_tick, usb_ops_sync))
         for fn in funcs:
             try:
@@ -22404,6 +22831,8 @@ class H(BaseHTTPRequestHandler):
                 self._json({"ok": True, "opts": rclone_opts_get()})
             elif p == "/api/syncthing/status":
                 self._json(st_status())
+            elif p == "/api/immich-standby":
+                self._json(imsb_status())
             elif p == "/api/kopia/status":
                 self._json(kp_status())
             elif p == "/api/kopia/run/status":
@@ -23044,6 +23473,32 @@ class H(BaseHTTPRequestHandler):
                     self._json({"ok": False, "log": "already running"})
                 else:
                     self._json({"ok": _kp_bg_start(kind, did, arg), "dest": did})
+            elif p == "/api/immich-standby":
+                self._json(imsb_status())
+            elif p == "/api/immich-standby/save":
+                b = self._body() or {}
+                cfg = imsb_load()
+                for k in ("backup", "work", "time"):
+                    if isinstance(b.get(k), str) and b[k].strip():
+                        cfg[k] = b[k].strip()
+                if "enabled" in b:
+                    cfg["enabled"] = bool(b["enabled"])
+                if b.get("port"):
+                    try:
+                        cfg["port"] = int(b["port"])
+                    except (TypeError, ValueError):
+                        pass
+                for k in ("backup", "work"):
+                    if not str(cfg[k]).startswith("/") or ".." in str(cfg[k]):
+                        self._json({"ok": False, "log": "%s must be an absolute path" % k}); return
+                imsb_save(cfg)
+                self._json(imsb_status())
+            elif p == "/api/immich-standby/refresh":
+                self._json(imsb_refresh_start())
+            elif p == "/api/immich-standby/up":
+                self._json(imsb_up())
+            elif p == "/api/immich-standby/down":
+                self._json(imsb_down())
             elif p == "/api/kopia/server":
                 self._json(kp_srv_status(deep=bool(self._body().get("deep"))))
             elif p == "/api/kopia/server/set":
@@ -23316,6 +23771,8 @@ if __name__ == "__main__":
     elif len(sys.argv) > 1 and sys.argv[1] == "kopia-snap":
         # backup id arrives through the unit env (uniform with the other drivers)
         _kp_snap_cli(os.environ.get("KPS_BID", ""))
+    elif len(sys.argv) > 1 and sys.argv[1] == "immich-standby-refresh":
+        _imsb_refresh_cli()
     elif len(sys.argv) > 1 and sys.argv[1] == "kopia-bg":
         _kp_bg_cli(os.environ.get("KPB_KIND", ""), os.environ.get("KPB_DEST", ""),
                    os.environ.get("KPB_ARG", ""))
