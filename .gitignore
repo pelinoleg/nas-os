@@ -15,6 +15,7 @@
 !/dialogrc-nas
 !/web/
 !/services/
+!/tools/
 !/.claude/
 .claude/settings.local.json
 

@@ -13670,6 +13670,7 @@ const EVMETA=[
  {k:"nb_conn",t:"Backup source unreachable",d:"periodic connection check to the main NAS (~every 30 min)",dp:1},
  {k:"nb_srcmiss",t:"Source folder gone",d:"a folder chosen for backup disappeared on the source",dp:1},
  {k:"nb_stale",t:"No backup in a while",d:"last run older than the threshold (or none yet)",thr:"d",dp:1},
+ {k:"nb_dumps",t:"Database dumps stopped arriving",d:"the backup still runs, but the newest .sql.gz inside it is older than the threshold — a database restored from it would be that stale",thr:"d",dp:1},
  {k:"nb_size",t:"Backup size changed sharply",d:"the destination size jumped more than the threshold since last check",thr:"%",dp:0},
  {k:"nb_dest",t:"Low space in destination",d:"the destination is filled above the threshold, or the pool isn't mounted",thr:"%",dp:1},
  {k:"nb_guard",t:"Deletion guard triggered",d:"backup stopped: too many files would be deleted (threshold on the «Deleted» tab)",dp:2},

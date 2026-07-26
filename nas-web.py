@@ -3266,6 +3266,9 @@ def _def_monitor():
         "nb_srcmiss":  {"on": False, "priority": 1, "desk": True},
         "nb_stale":    {"on": True,  "priority": 1, "threshold": 7,  "desk": True},
         "nb_size":     {"on": False, "priority": 0, "threshold": 40, "desk": True},
+        # database dumps inside a backup: the files stop arriving long before anyone notices,
+        # because the backup itself keeps succeeding — it faithfully copies the same old dump
+        "nb_dumps":    {"on": True,  "priority": 1, "threshold": 8,  "desk": True},
         "nb_dest":     {"on": True,  "priority": 1, "threshold": 95, "desk": True},
         "nb_guard":    {"on": True,  "priority": 1, "desk": True},   # --max-delete guard fired
         "nb_verify":   {"on": True,  "priority": 1, "desk": True},   # checksum mismatch found
@@ -3453,7 +3456,7 @@ for _k in ("panel_new", "panel_fail", "ssh_login"):
 for _k in ("ip_changed", "link_changed", "vpn_offline", "traffic"):
     _EVENT_KIND[_k] = "net"
 for _k in ("snap_ok", "snap_err", "scrub_err", "delete_block", "backup", "mergerfs",
-           "nas_backup", "nb_conn", "nb_srcmiss", "nb_stale", "nb_size", "nb_dest", "nb_guard", "nb_verify",
+           "nas_backup", "nb_conn", "nb_srcmiss", "nb_stale", "nb_dumps", "nb_size", "nb_dest", "nb_guard", "nb_verify",
            "fsw_corrupt", "fsw_guard", "fsw_root", "fsw_del", "fsw_scan"):
     _EVENT_KIND[_k] = "protect"
 
@@ -8017,6 +8020,56 @@ def nb_health_tick(fire, ev, pri, thr, now):
         except Exception:
             pass
 
+_NB_DUMP_DIRS = ("backups", "dumps", "db-backup", "db_backup", "sql")
+_NB_DUMP_RE = re.compile(r"\.(sql|sql\.gz|sql\.zst|sql\.xz|dump|pgdump|sql\.bz2)$", re.I)
+
+def _nb_dump_watch(dest_base, state, now, days):
+    """«The dumps stopped arriving» — the failure that hides behind a green backup.
+    A file-level backup keeps succeeding while the database dump inside it is weeks old,
+    because copying an unchanged file is a success. The restore is what breaks, months later.
+    Cheap by construction: only directories that LOOK like dump folders are scanned (a full
+    walk of a terabyte is out of the question), and only every 12 hours."""
+    if not dest_base or not os.path.isdir(dest_base):
+        return []
+    if now - float(state.get("dumps_ts") or 0) < 12 * 3600:
+        return list(state.get("dumps_stale") or [])
+    state["dumps_ts"] = now
+    stale, seen = [], 0
+    try:
+        r = subprocess.run(["find", dest_base, "-maxdepth", "5", "-type", "d",
+                            "(", "-name", "backups", "-o", "-name", "dumps",
+                            "-o", "-name", "db-backup*", ")", "-print"],
+                           capture_output=True, text=True, timeout=120)
+        dirs = [d for d in (r.stdout or "").splitlines() if d and "/_deleted/" not in d]
+    except (OSError, subprocess.SubprocessError):
+        return []
+    for d in dirs[:40]:
+        newest, name = 0, ""
+        try:
+            for root, _dirs, files in os.walk(d):
+                if root.count("/") - d.count("/") > 2:
+                    _dirs[:] = []
+                    continue
+                for f in files:
+                    if not _NB_DUMP_RE.search(f):
+                        continue
+                    try:
+                        m = os.path.getmtime(os.path.join(root, f))
+                    except OSError:
+                        continue
+                    if m > newest:
+                        newest, name = m, f
+        except OSError:
+            continue
+        if not newest:
+            continue                      # a «backups» folder without dumps is not our business
+        seen += 1
+        if now - newest > days * 86400:
+            stale.append({"dir": d, "file": name, "age": int((now - newest) / 86400)})
+    state["dumps_stale"] = stale
+    state["dumps_seen"] = seen
+    return stale
+
 def _nb_health_one(cfg, many, fire, ev, pri, thr, now):
     pid = cfg["id"]
     # with multiple profiles "NAS backup: source unreachable" is useless —
@@ -8081,6 +8134,20 @@ def _nb_health_one(cfg, many, fire, ev, pri, thr, now):
                 fire_p("nb_stale", "NAS backup: not updated for a long time",
                      "Last run %d days ago (threshold %d)" % (int((now - ts) / 86400), days),
                      pri("nb_stale"), ev_name="nb_stale", lvl="warn")
+    # --- database dumps inside the destination stopped being refreshed ---
+    if ev.get("nb_dumps", {}).get("on") and not (push_ssh or _nb_rclone(cfg) or _nb_rclone_c2c(cfg)):
+        d_days = thr("nb_dumps", 8)
+        if d_days > 0:
+            stale = _nb_dump_watch(cfg.get("dest_base") or "", hs, now, d_days)
+            if stale:
+                what = ", ".join("%s (%dd)" % (os.path.basename(x["dir"].rstrip("/")), x["age"])
+                                 for x in stale[:3])
+                fire_p("nb_dumps", "Backup: database dumps stopped arriving",
+                       "The backup keeps running, but the newest dump in %s is %d days old — "
+                       "a database restored from it would be that stale. Folders: %s"
+                       % (stale[0]["dir"], stale[0]["age"], what),
+                       pri("nb_dumps"), ev_name="nb_dumps", lvl="warn")
+            _nb_health_save(pid, hs)
     if push_ssh or _nb_rclone(cfg) or _nb_rclone_c2c(cfg):
         return   # no local destination to monitor: a remote SSH server, or a cloud (rclone) dest
                  # (pull cloud→local keeps a real local dest, so it still gets the space check)
@@ -14154,6 +14221,20 @@ def disaster_build():
               "```", "",
               "Dumps written by **pg_dumpall** (what the panel's Replica feature makes)",
               "already carry the roles — no extra step there.", ""]
+        # Immich is the case this box actually holds: a whole library plus nightly dumps.
+        # Doing it by hand at 3am is a dozen fiddly steps, so there is a script — and it can
+        # rehearse itself without touching anything.
+        if os.path.isfile("/opt/nas-os/tools/immich-restore.sh"):
+            L += ["### Immich specifically", "",
+                  "The backup holds the library **and** the nightly dump. This brings it up here:", "",
+                  "```sh",
+                  "sudo /opt/nas-os/tools/immich-restore.sh --rehearse       # prove it works, change nothing",
+                  "sudo /opt/nas-os/tools/immich-restore.sh --library /mnt/storage/immich",
+                  "```", "",
+                  "It picks the newest dump, reads the Immich version out of the dump's own name",
+                  "(a restored database only fits the version it came from), creates the missing",
+                  "roles, loads the dump and starts the stack. The rehearsal does the whole thing",
+                  "against a throwaway library and removes itself afterwards.", ""]
     # Kopia snapshot repositories: without the password the backups are unreadable —
     # that is exactly what this card is for.
     kcfg = _safe(kp_load, None)
