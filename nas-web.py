@@ -9549,15 +9549,89 @@ def _smart_selftest_tick():
                 pass
         break                      # one kind of test per night
 
+NB_SCHED_STATE = os.path.join(NAS_CONFIG, "nas-backup-sched.json")   # profile -> slot acted on
+
+def _nb_sched_mark(pid, label):
+    d = _json_load_strict(NB_SCHED_STATE, {})
+    if not isinstance(d, dict):
+        d = {}
+    d[pid] = label
+    try:
+        _json_save(NB_SCHED_STATE, d)
+    except OSError:
+        pass
+
+def _nb_sched_last_due(cfg, now):
+    """(timestamp, label) of the moment this profile was most recently DUE — today's slot once
+    it has passed, otherwise the one before it. Days are stepped through localtime, not by
+    subtracting 86400 from a timestamp: across a DST change that is off by an hour."""
+    s = cfg.get("schedule") or {}
+    if not s.get("enabled"):
+        return 0.0, ""
+    try:
+        hh, mm = [int(x) for x in str(s.get("time") or "").split(":")[:2]]
+    except ValueError:
+        return 0.0, ""
+    dows = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    want = s.get("dow", "Sun") if s.get("freq") == "weekly" else ""
+    for back in range(0, 9):
+        d = time.localtime(now - back * 86400)
+        t = time.mktime((d.tm_year, d.tm_mon, d.tm_mday, hh, mm, 0, 0, 0, -1))
+        if t > now:
+            continue
+        st = time.localtime(t)
+        if want and dows[st.tm_wday] != want:
+            continue
+        return t, time.strftime("%Y-%m-%d %H:%M", st)
+    return 0.0, ""
+
+def _nb_last_real_run(pid):
+    """When a real (not dry) run of this profile last happened. The history holds finished runs;
+    the run state also covers one that is going on right now."""
+    ts = 0.0
+    h = _json_load_strict(nb_history_file(pid), [])
+    if isinstance(h, list) and h and isinstance(h[-1], dict):
+        try:
+            ts = float(h[-1].get("ts") or 0)
+        except (TypeError, ValueError):
+            ts = 0.0
+    st = _nb_run_state_read(pid)
+    if not st.get("dry"):
+        try:
+            ts = max(ts, float(st.get("started") or 0))
+        except (TypeError, ValueError):
+            pass
+    return ts
+
 def _nb_sched_tick():
-    """Start the main NAS backup on schedule (once a minute, no repeat in the same minute)."""
-    global _nb_last_sched
-    now = time.time(); slot = time.strftime("%Y-%m-%d %H:%M", time.localtime(now))
-    if slot != _nb_last_sched:
-        _nb_last_sched = slot
-        for cfg in nb_profiles():
-            if nb_schedule_due(cfg, now):
-                nb_run_bg(cfg["id"], dry=False)
+    """Start backups on schedule. The slot each profile last acted on is PERSISTED, which buys
+    two things the old exact-minute check could not give: a restart inside the scheduled minute
+    cannot start the same run twice, and — the reason this exists — a slot that went by while
+    the panel was NOT running (a restart, a reboot, an update) is caught up instead of silently
+    costing a day. Nothing is caught up once the next run is nearer than the missed one."""
+    now = time.time()
+    state = _json_load_strict(NB_SCHED_STATE, {})
+    if not isinstance(state, dict):
+        state = {}
+    for cfg in nb_profiles():
+        due, label = _nb_sched_last_due(cfg, now)
+        pid = cfg["id"]
+        if not due or state.get(pid) == label:
+            continue
+        late = now - due
+        window = 24 * 3600 if (cfg.get("schedule") or {}).get("freq") == "weekly" else 12 * 3600
+        # too late to bother, already run since (by hand, or by the slot before a config
+        # reload), or the profile was only saved AFTER that slot — a schedule set at 20:00
+        # must not immediately fire the 15:00 it never lived through
+        if (late > window or _nb_last_real_run(pid) >= due
+                or float(cfg.get("saved") or 0) > due):
+            _nb_sched_mark(pid, label)
+            continue
+        _nb_sched_mark(pid, label)
+        if late > 120:
+            print("[backup] %s: the %s run was missed (panel not running?) — starting it now, "
+                  "%d min late" % (cfg.get("name") or pid, label, late // 60), flush=True)
+        nb_run_bg(pid, dry=False)
     _nb_queue_drain()      # freed up — take the next one from the queue
 
 def _nb_drill_sched_tick():
@@ -19442,8 +19516,15 @@ def _load_sessions():
         with open(SESS_FILE) as f:
             d = json.load(f)
         now = time.time()
-        return {t: e for t, e in d.items() if e > now}
-    except (OSError, ValueError):
+        # every entry is checked for SHAPE, not just for expiry: one junk value in this file
+        # used to raise at import time, and systemd restarted the panel into the same crash
+        # again and again — the whole box loses its web interface over a stray session record
+        out = {}
+        for t, e in (d.items() if isinstance(d, dict) else ()):
+            if isinstance(t, str) and isinstance(e, (int, float)) and not isinstance(e, bool) and e > now:
+                out[t] = e
+        return out
+    except (OSError, ValueError, AttributeError):
         return {}
 
 def _save_sessions():
