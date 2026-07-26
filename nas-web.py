@@ -15340,9 +15340,14 @@ def imsb_up(internal=False):
         return {"ok": False, "log": (r.stderr or "")[-400:]}
     return {"ok": True, "url": "http://%s:%d" % (lan_ip() or "127.0.0.1", cfg["port"])}
 
-def imsb_down(wipe=True):
+def imsb_down(wipe=True, force=False):
+    """Stop the copy. Refuses while a refresh is in flight: `compose down` would take the
+    database container with it, and the restore writing into it would die halfway."""
     cfg = imsb_load()
     p = _imsb_paths(cfg)
+    if not force and _systemd_active(IMSB_UNIT + ".service"):
+        return {"ok": False, "log": "a refresh is running — stopping now would break it. "
+                                    "Wait for it to finish (it is a few minutes)."}
     subprocess.run(["docker", "compose", "-p", IMSB_PROJ, "--project-directory", p["stack"],
                     "-f", os.path.join(p["stack"], "compose.yaml"), "down"],
                    capture_output=True, text=True, timeout=300)
@@ -15460,6 +15465,7 @@ def imsb_promote(library="", move_to="", start=True):
             "log": "" if r.returncode == 0 else (r.stderr or "")[-300:]}
 
 _imsb_last_slot = ""
+_imsb_up_try = [0.0]
 
 def _imsb_tick():
     """Nightly refresh, one shot per minute-slot (same pattern as the other schedulers)."""
@@ -15467,6 +15473,19 @@ def _imsb_tick():
     cfg = imsb_load()
     if not cfg["enabled"] or not shutil.which("docker"):
         return
+    now = time.time()
+    # «keep the copy running» has to mean after a reboot too. The containers are deliberately
+    # restart:"no" (a standby must not resurrect itself when nobody asked), so bringing it back
+    # is this keeper's job — backed off, because starting it opens the repository and mounts.
+    if (cfg.get("keep_up") and _imsb_db_ready(cfg) and not _imsb_stack_up()
+            and not _systemd_active(IMSB_UNIT + ".service")
+            and now - _imsb_up_try[0] > 600):
+        _imsb_up_try[0] = now
+        r = imsb_up()
+        if not r.get("ok"):
+            notify_event("imsb_fail", "imsb:keepup", "Immich standby: the copy is not running",
+                         "«keep the copy running» is on, but starting it failed: "
+                         + (r.get("log") or "")[:200], cooldown=6 * 3600)
     slot = time.strftime("%Y-%m-%d %H:%M")
     if slot == _imsb_last_slot or not slot.endswith(cfg["time"]):
         return
