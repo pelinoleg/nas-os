@@ -9180,6 +9180,7 @@ _BK_SECTIONS = (
                                                        "etc/nas-os/rclone.conf",
                                                        # kopia.json holds the repository password (deliberately open)
                                                        "etc/nas-os/kopia.json",
+                                                       "etc/nas-os/immich-standby.json",
                                                        # the backup server's TLS identity — clients pin its
                                                        # fingerprint, so a lost key means re-pinning every client
                                                        "etc/nas-os/kopia/server/",
@@ -9296,6 +9297,10 @@ def _bk_sources():
                    ("/etc/nas-os/smb-users.json", "etc/nas-os/smb-users.json"),   # cleartext SMB passwords → secret section
                    (RCLONE_CONF, "etc/nas-os/rclone.conf"),                       # rclone remotes (cloud keys) → secret section
                    (KOPIA_CONF, "etc/nas-os/kopia.json"),                         # kopia entities + repo password → secret section
+                   # Immich standby: schedule, folders and the generated database password.
+                   # The restored database itself is NOT backed up — it is derived from a dump
+                   # that already lives in the backup, and it is gigabytes.
+                   (IMSB_CONF, "etc/nas-os/immich-standby.json"),
                    # The backup server's TLS identity: clients PIN this certificate's
                    # fingerprint, so losing it means every client refuses to connect until
                    # it is re-pinned by hand. Same reasoning as the Syncthing key below.
