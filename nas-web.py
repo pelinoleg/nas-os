@@ -23884,36 +23884,38 @@ class H(BaseHTTPRequestHandler):
             elif p == "/api/immich-standby/save":
                 b = self._body() or {}
                 cfg = imsb_load()
+                # What was sent is judged BEFORE the state it was sent in: a typed-wrong port
+                # under a running copy should say what is wrong with the port, not «stop the copy
+                # first» — that reads as if the value would have been fine.
+                new = {}
+                if b.get("port"):
+                    try:
+                        new["port"] = int(b["port"])
+                    except (TypeError, ValueError):
+                        self._json({"ok": False, "log": "the port must be a number"}); return
+                    if not 1024 <= new["port"] <= 65535:
+                        # silently falling back to 2284 (which is what loading would do) looks
+                        # like the save was ignored
+                        self._json({"ok": False, "log": "the port must be between 1024 and 65535"}); return
+                for k in ("backup", "work"):
+                    if isinstance(b.get(k), str) and b[k].strip():
+                        new[k] = b[k].strip()
+                        if not new[k].startswith("/") or ".." in new[k]:
+                            self._json({"ok": False, "log": "%s must be an absolute path" % k}); return
                 # The folders and the port are baked into the containers that are running right
                 # now: change them under a live copy and «Stop» would look for a compose file
                 # that has moved, leaving the containers orphaned and the old overlay mounted.
-                moved = [k for k in ("backup", "work") if isinstance(b.get(k), str)
-                         and b[k].strip() and b[k].strip() != cfg[k]]
-                if b.get("port") and str(b["port"]).strip() not in ("", str(cfg["port"])):
-                    moved.append("port")
+                moved = [k for k in ("backup", "work", "port") if k in new and new[k] != cfg[k]]
                 if moved and (_imsb_stack_up() or _systemd_active(IMSB_UNIT + ".service")):
                     words = {"backup": "backup folder", "work": "standby folder", "port": "port"}
                     self._json({"ok": False, "log": "the copy is running — stop it before changing "
                                 "the %s" % " and the ".join(words[k] for k in moved)}); return
-                for k in ("backup", "work", "time"):
-                    if isinstance(b.get(k), str) and b[k].strip():
-                        cfg[k] = b[k].strip()
+                cfg.update(new)
+                if isinstance(b.get("time"), str) and b["time"].strip():
+                    cfg["time"] = b["time"].strip()
                 for k in ("enabled", "keep_up"):
                     if k in b:
                         cfg[k] = bool(b[k])
-                if b.get("port"):
-                    try:
-                        port = int(b["port"])
-                    except (TypeError, ValueError):
-                        self._json({"ok": False, "log": "the port must be a number"}); return
-                    if not 1024 <= port <= 65535:
-                        # silently falling back to 2284 (which is what loading would do) looks
-                        # like the save was ignored
-                        self._json({"ok": False, "log": "the port must be between 1024 and 65535"}); return
-                    cfg["port"] = port
-                for k in ("backup", "work"):
-                    if not str(cfg[k]).startswith("/") or ".." in str(cfg[k]):
-                        self._json({"ok": False, "log": "%s must be an absolute path" % k}); return
                 imsb_save(cfg)
                 self._json(imsb_status())
             elif p == "/api/immich-standby/promote":
