@@ -1528,6 +1528,9 @@
   .sb-prog>i::after{content:"";position:absolute;inset:0 auto 0 0;width:40%;border-radius:999px;
     background:var(--win-accent,var(--accent));animation:kpxrun 1s ease-in-out infinite}
   .sb-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:2px}
+  /* four short tabs instead of one long scroll: the verdict stays above them, always visible */
+  .sb-tabs{margin:2px 0 12px;flex-wrap:wrap}
+  .sb-tabs button{display:inline-flex;align-items:center;gap:6px}
   /* the proof line: what the box verified by itself, and when */
   .sb-note{display:flex;align-items:flex-start;gap:9px;padding:9px 12px;border-radius:11px;margin-bottom:11px;
     font-size:12px;line-height:1.5;background:color-mix(in srgb,var(--win-good,var(--good)) 9%,transparent);
@@ -8423,7 +8426,7 @@ function winResil(initTab){openWin("__resil","Resilience",(body,win)=>{
    restore is what proves the backup is restorable at all. */
 function winImmichStandby(){openWin("__immichsb","Immich Standby",(body,win)=>{
  body.style.padding="0";body.style.display="flex";body.style.flexDirection="column";
- let D=null,loadErr="",timer=null,setOpen=false,helpOpen=false,note="";
+ let D=null,loadErr="",timer=null,tab="now",note="";
  // kP and dtShort belong to other windows (declared inside them, not globally) — reaching for
  // them from here throws mid-render and leaves half a window behind
  const P=(u,b)=>api(u,{method:"POST",body:JSON.stringify(b||{})});
@@ -8444,33 +8447,29 @@ function winImmichStandby(){openWin("__immichsb","Immich Standby",(body,win)=>{
     <div class="ed">${esc(loadErr||"reading the backup and the standby database")}</div>
     ${loadErr?`<button class="btn" id="sbRetry" style="margin-top:10px">Retry</button>`:""}</div>`;
    const rb=body.querySelector("#sbRetry");if(rb)rb.onclick=async()=>{await load();paint();};return;}
-  const d=D.dump,last=D.last||{},okRun=last.result==="ok",pr=D.progress||{};
-  /* One question first: could I look at these photos right now, and how old are they?
-     Everything else — schedule, paths, history — is secondary and folds away. */
-  // the answer to the only question worth asking, in words, with the date in it
+  const d=D.dump,last=D.last||{},okRun=last.result==="ok",pr=D.progress||{},chk=D.check||{};
+  /* One question, always on screen: could I look at these photos right now, and how old are
+     they. Everything else lives behind a tab — with all of it unfolded at once this window was
+     a wall of text nobody would read twice. */
   const asOf=okRun&&last.dump_ts?new Date(last.dump_ts*1000):null;
   const asOfTxt=asOf?asOf.toLocaleDateString(LOC,{day:"2-digit",month:"long"})+", "+asOf.toTimeString().slice(0,5):"";
   const st=!D.have_backup?["danger","No backup to stand by","the Mirror copy of the other NAS is not where I was told to look"]
    :!d?["danger","No database dump in the backup","the library is here, but without a dump there is nothing to restore"]
    :D.refreshing?["accent","Refreshing the copy…",(pr.phase||"working")]
-   :D.running?(D.answers?["good","The copy is running","open it, look around, then stop it — it holds the library through an overlay"]
+   :D.running?(D.answers?["good","The copy is running","open it, look around, then stop it when you are done"]
                        :["accent","Starting the copy…","Immich needs a minute or two after the containers come up"])
    :!D.db_ready?["warn","Never prepared","one refresh and this becomes a copy you can start in a minute"]
-   :!okRun?["danger","The last refresh failed","what is on disk may be stale or half-written — look at the error below"]
+   :!okRun?["danger","The last refresh failed","what is on disk may be stale — see History"]
    :(d.age_days>2?["warn","Ready — but the data is "+d.age_days+" days old",
-       "if the main NAS died now you would have photos up to "+asOfTxt+"; the other NAS may have stopped writing dumps"]
+       "if the main NAS died now you would have photos up to "+asOfTxt]
      :["good","Your photos are safe here","if the main NAS died right now you would have everything up to "
        +asOfTxt+", and this copy is a working Immich two minutes later"]);
   const act=D.refreshing?""
    :D.running?`${D.answers?`<a class="btn pri" href="${att(D.url)}" target="_blank" rel="noopener">${svg("globe",14)} Open Immich</a>`:""}
      <button class="btn dng" id="sbDown">${svg("power",14)} Stop</button>`
    :(D.db_ready?`<button class="btn pri" id="sbUp">${svg("play",14)} Bring it up</button>`:"");
-  // the chain of custody, in the order the data travels
-  const chain=[
-   ["Dump written", d?ago(d.ts):"no dump", d?"good":"danger"],
-   ["Copied here", d?dts(d.ts):"—", d?(d.age_days>2?"warn":"good"):"danger"],
-   ["Restored here", okRun?dts(last.ts):"never", okRun?(d&&last.dump_ts===d.ts?"good":"warn"):"danger"],
-   ["Photos in the copy", okRun&&last.assets?last.assets.toLocaleString(LOC):"—", okRun?"good":"dim"]];
+  const TABS=[["now","Overview","gauge"],["hist","History","clock"],
+              ["set","Settings","cog"],["help","How it works","info"]];
   body.innerHTML=`<div class="nbmain" style="flex-direction:column"><div class="set-main"><div class="set-pane" id="tc">
    <div class="kp-hero" style="--kp-hc:var(--win-${st[0]},var(--${st[0]}))">
     <div class="kp-hero-ic">${svg("immichsb",22)}</div>
@@ -8478,75 +8477,97 @@ function winImmichStandby(){openWin("__immichsb","Immich Standby",(body,win)=>{
      <div style="color:var(--win-dim,var(--dim));font-size:12px;margin-top:2px">${esc(st[2])}</div></div>
     <div style="display:flex;gap:8px;align-items:center">${act}</div></div>
    ${D.refreshing?`<div class="sb-prog"><i></i><div><b>${esc(pr.phase||"working")}</b>
-      <span>${pr.started?dur(Date.now()/1000-pr.started)+" so far":""} · loading a ${d?fmtB(d.bytes):""} dump takes about ten minutes on this box${D.db_bytes?` · database now ${fmtB(D.db_bytes)}`:""}</span></div></div>`:""}
-   ${D.running?`<div class="sb-run"><span>${svg("globe",13)}</span>
+      <span>${pr.started?dur(Date.now()/1000-pr.started)+" so far":""}${D.keep_up&&D.running?" · the copy keeps serving until the last moment":""}</span></div></div>`:""}
+   ${D.running&&!D.refreshing?`<div class="sb-run"><span>${svg("globe",13)}</span>
      <div><b><a href="${att(D.url)}" target="_blank" rel="noopener">${esc(D.url)}</a></b>
-      <span>log in with the same account as on the other NAS${D.since?" · running "+dur(Date.now()/1000-D.since):""}${D.answers?"":" · still starting"}</span></div></div>`:""}
-   ${(()=>{const c=D.check||{};if(!c.ts)return `<div class="sb-note">${svg("info",13)}<span>The box has not checked the copy end to end yet — it does that by itself once a week, or press «Check it end to end» below.</span></div>`;
-     const okc=c.result==="ok";
-     return `<div class="sb-note${okc?"":" bad"}">${svg(okc?"check":"warn",13)}
-       <span><b>${okc?"Checked end to end":"The last end-to-end check failed"} ${esc(ago(c.ts))}</b> — ${esc((c.steps||[]).join(" · "))}</span></div>`;})()}
-   <div class="sb-chain">${chain.map(([t,v,c])=>`<div class="sb-step">
-     <i style="background:var(--win-${c==="dim"?"line":c},var(--${c==="dim"?"line":c}))"></i>
-     <b>${esc(v)}</b><span>${esc(t)}</span></div>`).join('<div class="sb-arr">›</div>')}</div>
-   ${last.error?`<div class="kp-note err" style="margin-top:10px"><b>Last refresh failed:</b> ${esc(last.error)}</div>`:""}
-   ${last.note?`<div class="kp-note" style="margin-top:10px">${esc(last.note)}</div>`:""}
-   <div class="sb-row">
-    <button class="btn" id="sbRun"${D.refreshing||(D.running&&!D.keep_up)?" disabled":""} title="${att(D.running&&!D.keep_up?"stop the copy first — the database is in use":D.refreshing?"already refreshing":"load the newest dump into the standby database")}">${svg("refresh",13)} Refresh from the newest dump</button>
-    <button class="btn" id="sbCheck"${D.refreshing?" disabled":""} title="Start the copy, wait for its web interface, open a real photo from the library, then put everything back">${svg("shield",13)} Check it end to end</button>
-    <span class="kp-help" style="margin:0">${D.enabled?`automatic every night at ${esc(D.time)}${D.keep_up?" · the copy stays up and is recycled in place":""}`:"automatic refresh is off"}</span>
-    <span style="flex:1"></span><span id="sbSt" style="color:var(--win-dim,var(--dim));font-size:12px"></span></div>
-   <h3 class="set-title kp-disc${helpOpen?" open":""}" id="sbHelpHead" style="margin-top:14px">${svg("chev",15)} What this is, in plain words</h3>
-   <div id="sbHelp" style="${helpOpen?"":"display:none"}">
-    <div class="kp-sec"><h4>${svg("info",13)} How the copy works</h4>
-     <p class="kp-help" style="font-size:12px;line-height:1.65">
-      Your main NAS writes a database dump every night, and the Mirror backup copies it here along
-      with the photo library. Two halves — neither is usable alone.<br><br>
-      <b>Every night</b> this box loads the newest dump into a database it keeps ready. That is
-      also the test: if a dump cannot be restored, you are told the next morning. The load goes
-      into a spare database first, so a bad dump never costs you the copy you already had.<br><br>
-      <b>Once a week</b> it goes further: it starts the copy for real, waits for the web interface
-      and opens an actual photo, then puts everything back. That line above is the result.<br><br>
-      <b>«Bring it up»</b> starts a working Immich on this box in about two minutes, with your real
-      photos. It never writes into the backup: the library is mounted read-through and everything
-      Immich generates lands in a scratch layer that is wiped when you press Stop.<br><br>
-      <b>Nothing here touches the main NAS</b>, and nothing here deletes photos. The worst this app
-      can do is fail to start a copy — which is exactly what the weekly check is for.</p></div></div>
-   <h3 class="set-title kp-disc${setOpen?" open":""}" id="sbSetHead" style="margin-top:14px">${svg("chev",15)} Settings — schedule, port, folders</h3>
-   <div id="sbSet" style="${setOpen?"":"display:none"}"></div>
-   ${(D.history||[]).length?`<div class="kp-sec" style="margin-top:12px"><h4>${svg("clock",13)} Refreshes</h4>
-     ${(D.history||[]).slice().reverse().slice(0,8).map(h=>`<div class="kp-run">
-       <span>${esc(dts(h.ts))}</span><span class="kp-badge ${h.result==="ok"?"ok":"err"}">${esc(h.result)}</span>
-       <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--win-dim,var(--dim))">${esc(h.kind==="check"?("end-to-end check — "+((h.steps||[]).join(" · "))):(h.dump||""))}</span>
-       <span class="mono">${h.assets?h.assets.toLocaleString(LOC)+" photos · ":""}${h.seconds?dur(h.seconds):""}</span></div>`).join("")}</div>`:""}
-   </div></div></div>`;
-  const q=id=>body.querySelector(id),stx=m=>{const e=q("#sbSt");if(e)e.textContent=m||"";};
-  if(note){stx(note);note="";}
-  q("#sbRun").onclick=async()=>{stx("starting…");const r=await P("/api/immich-standby/refresh");
-   if(!(r&&r.ok)){stx((r&&r.log)||"failed");return;}note="";await load();paint();};
-  q("#sbCheck").onclick=()=>confirmDlg("Check the copy end to end?",
-    `The box starts the copy, waits for its web interface, opens a real photo from the library and
-     then puts everything back the way it was. Takes two or three minutes and changes nothing.`,
-    async()=>{stx("checking…");const r=await P("/api/immich-standby/check");
-     if(!(r&&r.ok)){stx((r&&r.log)||"failed");return;}await load();paint();});
+      <span>same account as on the other NAS${D.since?" · running "+dur(Date.now()/1000-D.since):""}</span></div></div>`:""}
+   <div class="seg sb-tabs" id="sbTabs">${TABS.map(([k,t,ic])=>
+     `<button data-t="${k}"${tab===k?' class="on"':""}>${svg(ic,13)} ${t}</button>`).join("")}</div>
+   <div id="sbPane"></div></div></div></div>`;
+  const q=id=>body.querySelector(id);
+  body.querySelectorAll("#sbTabs button").forEach(b=>b.onclick=()=>{tab=b.dataset.t;paint();});
+  ({now:paneNow,hist:paneHist,set:paintSet,help:paneHelp}[tab]||paneNow)(q("#sbPane"));
+  // actions that live in the header, whatever tab is open
+  const stx=m=>{const e=q("#sbSt");if(e)e.textContent=m||"";};
   const up=q("#sbUp");
   if(up)up.onclick=()=>confirmDlg("Bring the copy up?",
     `Immich ${d?esc(d.version):""} starts against the database restored ${esc(ago(last.ts))}, with the backup's
      library mounted read-through. <b>Nothing is written into the backup itself</b> — what the copy
      generates goes into a scratch layer that is wiped when you stop it.<br><br>
      It answers on <span class="mono">${esc(D.url)}</span> in a minute or two.`,
-    async()=>{stx("starting the copy…");const r=await P("/api/immich-standby/up");
-     if(!(r&&r.ok)){stx((r&&r.log)||"failed");return;}note="started — give it a minute";await load();paint();});
+    async()=>{const r=await P("/api/immich-standby/up");
+     if(!(r&&r.ok)){toast((r&&r.log)||"failed");return;}toast("Starting — give it a minute");await load();paint();});
   const dn=q("#sbDown");
   if(dn)dn.onclick=()=>confirmDlg("Stop the copy?",
     "The containers stop and the library overlay is unmounted. The restored database stays, so bringing it up again takes a minute.",
-    async()=>{stx("stopping…");await P("/api/immich-standby/down");await load();paint();},1);
-  const hh=q("#sbHelpHead"),hb=q("#sbHelp");
-  hh.onclick=()=>{helpOpen=!helpOpen;hh.classList.toggle("open",helpOpen);hb.style.display=helpOpen?"":"none";};
-  const head=q("#sbSetHead"),box=q("#sbSet");
-  head.onclick=()=>{setOpen=!setOpen;head.classList.toggle("open",setOpen);
-   box.style.display=setOpen?"":"none";if(setOpen)paintSet(box);};
-  if(setOpen)paintSet(box);};
+    async()=>{await P("/api/immich-standby/down");await load();paint();},1);};
+
+ /* --- Overview: the proof, the chain, and the two jobs you can start by hand --- */
+ const paneNow=(box)=>{const d=D.dump,last=D.last||{},okRun=last.result==="ok",chk=D.check||{};
+  const chain=[
+   ["Dump written", d?ago(d.ts):"no dump", d?"good":"danger"],
+   ["Copied here", d?dts(d.ts):"—", d?(d.age_days>2?"warn":"good"):"danger"],
+   ["Restored here", okRun?dts(last.ts):"never", okRun?(d&&last.dump_ts===d.ts?"good":"warn"):"danger"],
+   ["Photos in the copy", okRun&&last.assets?last.assets.toLocaleString(LOC):"—", okRun?"good":"dim"]];
+  box.innerHTML=`
+   ${chk.ts?`<div class="sb-note${chk.result==="ok"?"":" bad"}">${svg(chk.result==="ok"?"check":"warn",13)}
+     <span><b>${chk.result==="ok"?"Checked end to end":"The last end-to-end check failed"} ${esc(ago(chk.ts))}</b> — ${esc((chk.steps||[]).join(" · "))}</span></div>`
+    :`<div class="sb-note" style="background:none;border-style:dashed">${svg("info",13)}
+     <span>Not checked end to end yet — the box does that by itself once a week, or press «Check it end to end».</span></div>`}
+   <div class="sb-chain">${chain.map(([t,v,c])=>`<div class="sb-step">
+     <i style="background:var(--win-${c==="dim"?"line":c},var(--${c==="dim"?"line":c}))"></i>
+     <b>${esc(v)}</b><span>${esc(t)}</span></div>`).join('<div class="sb-arr">›</div>')}</div>
+   ${last.error?`<div class="kp-note err">${esc(last.error)}</div>`:""}
+   ${last.note?`<div class="kp-note">${esc(last.note)}</div>`:""}
+   <div class="sb-row">
+    <button class="btn" id="sbRun"${D.refreshing||(D.running&&!D.keep_up)?" disabled":""}
+      title="${att(D.running&&!D.keep_up?"stop the copy first — the database is in use":"load the newest dump into the standby database")}">${svg("refresh",13)} Refresh from the newest dump</button>
+    <button class="btn" id="sbCheck"${D.refreshing?" disabled":""}
+      title="Start the copy, wait for its web interface, open a real photo, then put everything back">${svg("shield",13)} Check it end to end</button>
+    <span style="flex:1"></span><span id="sbSt" style="color:var(--win-dim,var(--dim));font-size:12px"></span></div>
+   <div class="kp-help" style="margin-top:8px">${D.enabled?`Refreshes itself every night at ${esc(D.time)}${D.keep_up?", keeping the copy up and recycling it in place":", with the copy left down in between"}.`:"Automatic refresh is off — this copy will age."}</div>`;
+  const stx=m=>{const e=box.querySelector("#sbSt");if(e)e.textContent=m||"";};
+  box.querySelector("#sbRun").onclick=async()=>{stx("starting…");
+   const r=await P("/api/immich-standby/refresh");
+   if(!(r&&r.ok)){stx((r&&r.log)||"failed");return;}await load();paint();};
+  box.querySelector("#sbCheck").onclick=()=>confirmDlg("Check the copy end to end?",
+    `The box starts the copy, waits for its web interface, opens a real photo from the library and
+     then puts everything back the way it was. Two or three minutes, and it changes nothing.`,
+    async()=>{const r=await P("/api/immich-standby/check");
+     if(!(r&&r.ok)){toast((r&&r.log)||"failed");return;}await load();paint();});};
+
+ /* --- History: one diary of everything the box did for this copy --- */
+ const paneHist=(box)=>{const h=(D.history||[]).slice().reverse();
+  if(!h.length){box.innerHTML=`<div class="pf-empty">Nothing has happened yet.</div>`;return;}
+  box.innerHTML=`<div class="kp-sec"><h4>${svg("clock",13)} Everything this copy has done</h4>
+   ${h.map(x=>`<div class="kp-run">
+     <span>${esc(dts(x.ts))}</span>
+     <span class="kp-badge ${x.result==="ok"?"ok":"err"}">${x.kind==="check"?"check":"refresh"}</span>
+     <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--win-dim,var(--dim))">${esc(x.kind==="check"?(x.steps||[]).join(" · "):(x.dump||""))}</span>
+     <span class="mono">${x.assets?x.assets.toLocaleString(LOC)+" photos · ":""}${x.seconds?dur(x.seconds):""}</span></div>
+    ${x.error?`<div class="kp-note err">${esc(x.error)}</div>`:""}`).join("")}</div>`;};
+
+ /* --- How it works: the explanation lives in the app, not in anyone's memory --- */
+ const paneHelp=(box)=>{box.innerHTML=`<div class="kp-sec"><h4>${svg("info",13)} In plain words</h4>
+   <p class="kp-help" style="font-size:12px;line-height:1.7">
+    Your main NAS writes a database dump every night, and the Mirror backup copies it here along
+    with the photo library. Two halves — neither is usable alone.<br><br>
+    <b>Every night</b> this box loads the newest dump into a database it keeps ready. That is also
+    the test: if a dump cannot be restored, you are told the next morning. The load goes into a
+    spare database first, so a bad dump never costs you the copy you already had.<br><br>
+    <b>Once a week</b> it goes further: it starts the copy for real, waits for the web interface and
+    opens an actual photo from the library, then puts everything back. That is the line at the top
+    of Overview.<br><br>
+    <b>«Bring it up»</b> starts a working Immich here in about two minutes, with your real photos.
+    It never writes into the backup: the library is mounted read-through and everything Immich
+    generates lands in a scratch layer that is wiped when you press Stop.<br><br>
+    <b>Nothing here touches the main NAS</b> and nothing here deletes photos. The worst this app can
+    do is fail to start a copy — which is exactly what the weekly check is for.</p></div>
+   <div class="kp-sec"><h4>${svg("shield",13)} What to do once a month</h4>
+    <p class="kp-help" style="font-size:12px;line-height:1.7">
+     Open this window, press <b>Bring it up</b>, wait a minute, open the address it shows, log in with
+     your usual account and look at a few albums. Then press <b>Stop</b>. That is the whole ritual —
+     the nightly and weekly jobs do the rest.</p></div>`;};
 
  const paintSet=(box)=>{
   box.innerHTML=`<div class="kp-sec"><h4>${svg("refresh",13)} Nightly refresh</h4>
@@ -8589,7 +8610,7 @@ function winImmichStandby(){openWin("__immichsb","Immich Standby",(body,win)=>{
    const r=await P("/api/immich-standby/save",{enabled:q("#sbEn").checked,keep_up:q("#sbKeep").checked,
      time:q("#sbTime").value,
      port:+q("#sbPort").value||2284,backup:q("#sbBackup").value,work:q("#sbWork").value});
-   if(r&&r.ok){D=r;s2.textContent="saved";setTimeout(()=>{setOpen=true;paint();},400);}
+   if(r&&r.ok){D=r;s2.textContent="saved";setTimeout(()=>{tab="set";paint();},400);}
    else s2.textContent=(r&&r.log)||"could not save";};
   q("#sbSave").onclick=save;q("#sbEn").onchange=save;q("#sbKeep").onchange=save;
   const pr=q("#sbPromote");if(pr)pr.onclick=()=>promoteDlg();};
