@@ -14756,6 +14756,9 @@ IMSB_PROJ   = "immich-standby"
 IMSB_PGIMG  = "ghcr.io/immich-app/postgres:14-vectorchord0.3.0-pgvectors0.2.0"
 IMSB_RECIPE = os.path.join(HERE, "services", "immich", "docker-compose.yml")
 _IMSB_DUMP_RE = re.compile(r"immich-db-backup-.*?-(v[0-9][0-9.]*)-pg([0-9.]+)\.sql\.gz$")
+# Immich keeps a marker file in every media folder and kills its microservices worker when one
+# is missing — see _imsb_markers().
+IMSB_MEDIA_DIRS = ("upload", "library", "thumbs", "profile", "encoded-video", "backups")
 
 def imsb_defaults():
     return {"enabled": False,
@@ -15263,6 +15266,26 @@ def _imsb_selftest(cfg):
     return {"ts": int(time.time()), "kind": "check", "result": "ok" if ok else "error",
             "seconds": int(time.time() - t0), "steps": steps}
 
+def _imsb_markers(lib):
+    """Immich keeps a `.immich` marker file in every media folder and kills its microservices
+    worker the moment one is missing («Failed to read …/.immich»). With restart off — a standby
+    must not resurrect itself — the copy then stays dead, and the reason is buried in a container
+    log nobody thinks to open. The backup normally carries the markers (rsync copied them), so
+    this is the empty-library case; create what is missing.
+
+    Called AFTER the overlay is mounted on purpose: everything written here lands in the scratch
+    layer, never in the backup underneath. Returns "" when the library is ready."""
+    for d in IMSB_MEDIA_DIRS:
+        try:
+            os.makedirs(os.path.join(lib, d), exist_ok=True)
+            mk = os.path.join(lib, d, ".immich")
+            if not os.path.isfile(mk):
+                with open(mk, "a"):
+                    pass
+        except OSError as e:
+            return "%s (%s)" % (d, e)
+    return ""
+
 def imsb_up(internal=False):
     """Start the standby copy against the database that is already restored. The library is
     mounted through an overlay so Immich can write (it insists on writing) without a single
@@ -15291,6 +15314,9 @@ def imsb_up(internal=False):
         if r.returncode != 0:
             return {"ok": False, "log": "could not mount the library overlay: "
                                         + (r.stderr or "")[-200:]}
+    miss = _imsb_markers(p["lib"])
+    if miss:
+        return {"ok": False, "log": "could not prepare the library: " + miss}
     version = ((cfg.get("last") or {}).get("version")
                or ((_imsb_dump(cfg) or {}).get("version")) or "release")
     # The catalog recipe is written for a REAL install: fixed port, fixed container names and
