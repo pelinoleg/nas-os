@@ -1528,6 +1528,14 @@
   .sb-prog>i::after{content:"";position:absolute;inset:0 auto 0 0;width:40%;border-radius:999px;
     background:var(--win-accent,var(--accent));animation:kpxrun 1s ease-in-out infinite}
   .sb-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:2px}
+  /* the proof line: what the box verified by itself, and when */
+  .sb-note{display:flex;align-items:flex-start;gap:9px;padding:9px 12px;border-radius:11px;margin-bottom:11px;
+    font-size:12px;line-height:1.5;background:color-mix(in srgb,var(--win-good,var(--good)) 9%,transparent);
+    border:1px solid color-mix(in srgb,var(--win-good,var(--good)) 24%,transparent)}
+  .sb-note>span:first-child,.sb-note>svg{flex:none;color:var(--win-good,var(--good))}
+  .sb-note.bad{background:color-mix(in srgb,var(--win-danger,var(--danger)) 9%,transparent);
+    border-color:color-mix(in srgb,var(--win-danger,var(--danger)) 26%,transparent)}
+  .sb-note.bad>svg{color:var(--win-danger,var(--danger))}
   .kp-cmd{display:flex;align-items:flex-start;gap:8px;width:100%}
   .kp-cmd pre{flex:1;min-width:0;margin:0;padding:9px 11px;border-radius:9px;overflow-x:auto;
     background:var(--code-bg);color:var(--code-fg);font:12px/1.55 var(--mono);white-space:pre}
@@ -8415,7 +8423,7 @@ function winResil(initTab){openWin("__resil","Resilience",(body,win)=>{
    restore is what proves the backup is restorable at all. */
 function winImmichStandby(){openWin("__immichsb","Immich Standby",(body,win)=>{
  body.style.padding="0";body.style.display="flex";body.style.flexDirection="column";
- let D=null,loadErr="",timer=null,setOpen=false,note="";
+ let D=null,loadErr="",timer=null,setOpen=false,helpOpen=false,note="";
  // kP and dtShort belong to other windows (declared inside them, not globally) — reaching for
  // them from here throws mid-render and leaves half a window behind
  const P=(u,b)=>api(u,{method:"POST",body:JSON.stringify(b||{})});
@@ -8439,6 +8447,9 @@ function winImmichStandby(){openWin("__immichsb","Immich Standby",(body,win)=>{
   const d=D.dump,last=D.last||{},okRun=last.result==="ok",pr=D.progress||{};
   /* One question first: could I look at these photos right now, and how old are they?
      Everything else — schedule, paths, history — is secondary and folds away. */
+  // the answer to the only question worth asking, in words, with the date in it
+  const asOf=okRun&&last.dump_ts?new Date(last.dump_ts*1000):null;
+  const asOfTxt=asOf?asOf.toLocaleDateString(LOC,{day:"2-digit",month:"long"})+", "+asOf.toTimeString().slice(0,5):"";
   const st=!D.have_backup?["danger","No backup to stand by","the Mirror copy of the other NAS is not where I was told to look"]
    :!d?["danger","No database dump in the backup","the library is here, but without a dump there is nothing to restore"]
    :D.refreshing?["accent","Refreshing the copy…",(pr.phase||"working")]
@@ -8446,8 +8457,10 @@ function winImmichStandby(){openWin("__immichsb","Immich Standby",(body,win)=>{
                        :["accent","Starting the copy…","Immich needs a minute or two after the containers come up"])
    :!D.db_ready?["warn","Never prepared","one refresh and this becomes a copy you can start in a minute"]
    :!okRun?["danger","The last refresh failed","what is on disk may be stale or half-written — look at the error below"]
-   :(d.age_days>2?["warn","Ready — but the dump is "+d.age_days+" days old","the other NAS may have stopped writing dumps"]
-     :["good","Ready to bring up","press the button and it is a working Immich in about two minutes"]);
+   :(d.age_days>2?["warn","Ready — but the data is "+d.age_days+" days old",
+       "if the main NAS died now you would have photos up to "+asOfTxt+"; the other NAS may have stopped writing dumps"]
+     :["good","Your photos are safe here","if the main NAS died right now you would have everything up to "
+       +asOfTxt+", and this copy is a working Immich two minutes later"]);
   const act=D.refreshing?""
    :D.running?`${D.answers?`<a class="btn pri" href="${att(D.url)}" target="_blank" rel="noopener">${svg("globe",14)} Open Immich</a>`:""}
      <button class="btn dng" id="sbDown">${svg("power",14)} Stop</button>`
@@ -8469,27 +8482,53 @@ function winImmichStandby(){openWin("__immichsb","Immich Standby",(body,win)=>{
    ${D.running?`<div class="sb-run"><span>${svg("globe",13)}</span>
      <div><b><a href="${att(D.url)}" target="_blank" rel="noopener">${esc(D.url)}</a></b>
       <span>log in with the same account as on the other NAS${D.since?" · running "+dur(Date.now()/1000-D.since):""}${D.answers?"":" · still starting"}</span></div></div>`:""}
+   ${(()=>{const c=D.check||{};if(!c.ts)return `<div class="sb-note">${svg("info",13)}<span>The box has not checked the copy end to end yet — it does that by itself once a week, or press «Check it end to end» below.</span></div>`;
+     const okc=c.result==="ok";
+     return `<div class="sb-note${okc?"":" bad"}">${svg(okc?"check":"warn",13)}
+       <span><b>${okc?"Checked end to end":"The last end-to-end check failed"} ${esc(ago(c.ts))}</b> — ${esc((c.steps||[]).join(" · "))}</span></div>`;})()}
    <div class="sb-chain">${chain.map(([t,v,c])=>`<div class="sb-step">
      <i style="background:var(--win-${c==="dim"?"line":c},var(--${c==="dim"?"line":c}))"></i>
      <b>${esc(v)}</b><span>${esc(t)}</span></div>`).join('<div class="sb-arr">›</div>')}</div>
    ${last.error?`<div class="kp-note err" style="margin-top:10px"><b>Last refresh failed:</b> ${esc(last.error)}</div>`:""}
    ${last.note?`<div class="kp-note" style="margin-top:10px">${esc(last.note)}</div>`:""}
    <div class="sb-row">
-    <button class="btn" id="sbRun"${D.refreshing||D.running?" disabled":""} title="${att(D.running?"stop the copy first — the database is in use":D.refreshing?"already refreshing":"load the newest dump into the standby database")}">${svg("refresh",13)} Refresh from the newest dump</button>
-    <span class="kp-help" style="margin:0">${D.enabled?`automatic every night at ${esc(D.time)}`:"automatic refresh is off"}</span>
+    <button class="btn" id="sbRun"${D.refreshing||(D.running&&!D.keep_up)?" disabled":""} title="${att(D.running&&!D.keep_up?"stop the copy first — the database is in use":D.refreshing?"already refreshing":"load the newest dump into the standby database")}">${svg("refresh",13)} Refresh from the newest dump</button>
+    <button class="btn" id="sbCheck"${D.refreshing?" disabled":""} title="Start the copy, wait for its web interface, open a real photo from the library, then put everything back">${svg("shield",13)} Check it end to end</button>
+    <span class="kp-help" style="margin:0">${D.enabled?`automatic every night at ${esc(D.time)}${D.keep_up?" · the copy stays up and is recycled in place":""}`:"automatic refresh is off"}</span>
     <span style="flex:1"></span><span id="sbSt" style="color:var(--win-dim,var(--dim));font-size:12px"></span></div>
+   <h3 class="set-title kp-disc${helpOpen?" open":""}" id="sbHelpHead" style="margin-top:14px">${svg("chev",15)} What this is, in plain words</h3>
+   <div id="sbHelp" style="${helpOpen?"":"display:none"}">
+    <div class="kp-sec"><h4>${svg("info",13)} How the copy works</h4>
+     <p class="kp-help" style="font-size:12px;line-height:1.65">
+      Your main NAS writes a database dump every night, and the Mirror backup copies it here along
+      with the photo library. Two halves — neither is usable alone.<br><br>
+      <b>Every night</b> this box loads the newest dump into a database it keeps ready. That is
+      also the test: if a dump cannot be restored, you are told the next morning. The load goes
+      into a spare database first, so a bad dump never costs you the copy you already had.<br><br>
+      <b>Once a week</b> it goes further: it starts the copy for real, waits for the web interface
+      and opens an actual photo, then puts everything back. That line above is the result.<br><br>
+      <b>«Bring it up»</b> starts a working Immich on this box in about two minutes, with your real
+      photos. It never writes into the backup: the library is mounted read-through and everything
+      Immich generates lands in a scratch layer that is wiped when you press Stop.<br><br>
+      <b>Nothing here touches the main NAS</b>, and nothing here deletes photos. The worst this app
+      can do is fail to start a copy — which is exactly what the weekly check is for.</p></div></div>
    <h3 class="set-title kp-disc${setOpen?" open":""}" id="sbSetHead" style="margin-top:14px">${svg("chev",15)} Settings — schedule, port, folders</h3>
    <div id="sbSet" style="${setOpen?"":"display:none"}"></div>
    ${(D.history||[]).length?`<div class="kp-sec" style="margin-top:12px"><h4>${svg("clock",13)} Refreshes</h4>
      ${(D.history||[]).slice().reverse().slice(0,8).map(h=>`<div class="kp-run">
        <span>${esc(dts(h.ts))}</span><span class="kp-badge ${h.result==="ok"?"ok":"err"}">${esc(h.result)}</span>
-       <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--win-dim,var(--dim))">${esc(h.dump||"")}</span>
+       <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--win-dim,var(--dim))">${esc(h.kind==="check"?("end-to-end check — "+((h.steps||[]).join(" · "))):(h.dump||""))}</span>
        <span class="mono">${h.assets?h.assets.toLocaleString(LOC)+" photos · ":""}${h.seconds?dur(h.seconds):""}</span></div>`).join("")}</div>`:""}
    </div></div></div>`;
   const q=id=>body.querySelector(id),stx=m=>{const e=q("#sbSt");if(e)e.textContent=m||"";};
   if(note){stx(note);note="";}
   q("#sbRun").onclick=async()=>{stx("starting…");const r=await P("/api/immich-standby/refresh");
    if(!(r&&r.ok)){stx((r&&r.log)||"failed");return;}note="";await load();paint();};
+  q("#sbCheck").onclick=()=>confirmDlg("Check the copy end to end?",
+    `The box starts the copy, waits for its web interface, opens a real photo from the library and
+     then puts everything back the way it was. Takes two or three minutes and changes nothing.`,
+    async()=>{stx("checking…");const r=await P("/api/immich-standby/check");
+     if(!(r&&r.ok)){stx((r&&r.log)||"failed");return;}await load();paint();});
   const up=q("#sbUp");
   if(up)up.onclick=()=>confirmDlg("Bring the copy up?",
     `Immich ${d?esc(d.version):""} starts against the database restored ${esc(ago(last.ts))}, with the backup's
@@ -8502,6 +8541,8 @@ function winImmichStandby(){openWin("__immichsb","Immich Standby",(body,win)=>{
   if(dn)dn.onclick=()=>confirmDlg("Stop the copy?",
     "The containers stop and the library overlay is unmounted. The restored database stays, so bringing it up again takes a minute.",
     async()=>{stx("stopping…");await P("/api/immich-standby/down");await load();paint();},1);
+  const hh=q("#sbHelpHead"),hb=q("#sbHelp");
+  hh.onclick=()=>{helpOpen=!helpOpen;hh.classList.toggle("open",helpOpen);hb.style.display=helpOpen?"":"none";};
   const head=q("#sbSetHead"),box=q("#sbSet");
   head.onclick=()=>{setOpen=!setOpen;head.classList.toggle("open",setOpen);
    box.style.display=setOpen?"":"none";if(setOpen)paintSet(box);};
@@ -8516,7 +8557,12 @@ function winImmichStandby(){openWin("__immichsb","Immich Standby",(body,win)=>{
       <div class="srow-d">after the Mirror run that brings the dump over</div></div>
      <div class="srow-c"><label class="tgl"><input type="checkbox" id="sbEn"${D.enabled?" checked":""}><span class="sl"></span></label></div></div>
     <div class="srow"><div class="srow-l"><div class="srow-t">At</div></div>
-     <div class="srow-c"><input type="time" id="sbTime" value="${att(D.time)}" style="width:110px"></div></div></div>
+     <div class="srow-c"><input type="time" id="sbTime" value="${att(D.time)}" style="width:110px"></div></div>
+    <div class="srow"><div class="srow-l"><div class="srow-t">Keep the copy running</div>
+      <div class="srow-d">Leave Immich up all the time and let each refresh recycle it: the dump is
+       loaded into a second database while the copy keeps serving, and only the swap takes it down —
+       a couple of minutes a night. Costs about 2 GB of memory permanently, so it is off by default.</div></div>
+     <div class="srow-c"><label class="tgl"><input type="checkbox" id="sbKeep"${D.keep_up?" checked":""}><span class="sl"></span></label></div></div></div>
    <div class="kp-sec"><h4>${svg("hdd",13)} Folders and port</h4>
     <!-- paths get their own full-width line: squeezed into the right-hand column of a settings
          row you can see about a third of «/media/nas/t7-4TB/Ugreen-Backup», which is useless -->
@@ -8530,14 +8576,60 @@ function winImmichStandby(){openWin("__immichsb","Immich Standby",(body,win)=>{
       <div class="srow-d">its own, so a real Immich installed here later cannot collide with it</div></div>
      <div class="srow-c"><input type="number" id="sbPort" min="1024" max="65535" class="mono" style="width:100px" value="${+D.port}"></div></div>
     <div class="r" style="margin-top:2px"><button class="btn pri" id="sbSave">Save</button>
-     <span id="sbSetSt" style="color:var(--win-dim,var(--dim));font-size:12px;margin-left:10px"></span></div></div>`;
+     <span id="sbSetSt" style="color:var(--win-dim,var(--dim));font-size:12px;margin-left:10px"></span></div></div>
+   <div class="kp-sec"><h4>${svg("arrowup",13)} Moving in for good</h4>
+    <p class="kp-help">The day this box becomes the main one: the warm database becomes the real
+     database, the stack moves to <span class="mono">/opt/stacks/immich</span> on the normal port,
+     and the standby switches itself off. Nothing is copied — the library is either used where it
+     is or moved (instantly, on the same disk).</p>
+    ${D.have_real_immich?`<div class="kp-note">This box already has an Immich in <span class="mono">/opt/stacks/immich</span> — there is nothing to promote.</div>`
+      :`<button class="btn" id="sbPromote"${D.db_ready?"":" disabled"}>${svg("arrowup",13)} Make this the permanent Immich…</button>`}</div>`;
   const q=id=>box.querySelector(id);
   const save=async()=>{const s2=q("#sbSetSt");s2.textContent="saving…";
-   const r=await P("/api/immich-standby/save",{enabled:q("#sbEn").checked,time:q("#sbTime").value,
+   const r=await P("/api/immich-standby/save",{enabled:q("#sbEn").checked,keep_up:q("#sbKeep").checked,
+     time:q("#sbTime").value,
      port:+q("#sbPort").value||2284,backup:q("#sbBackup").value,work:q("#sbWork").value});
    if(r&&r.ok){D=r;s2.textContent="saved";setTimeout(()=>{setOpen=true;paint();},400);}
    else s2.textContent=(r&&r.log)||"could not save";};
-  q("#sbSave").onclick=save;q("#sbEn").onchange=save;};
+  q("#sbSave").onclick=save;q("#sbEn").onchange=save;q("#sbKeep").onchange=save;
+  const pr=q("#sbPromote");if(pr)pr.onclick=()=>promoteDlg();};
+
+ /* The one irreversible action here, so it explains itself and makes the single decision it
+    cannot make for you: where the photos live afterwards. */
+ function promoteDlg(){const s=document.getElementById("scrim");
+  const lib=(D.backup||"")+"/home/Photos Immich";
+  const draw=(mode)=>{s.innerHTML=`<div class="dialog" style="max-width:none;width:min(620px,94vw)">
+    <h3>${svg("arrowup",16)} Make this the permanent Immich</h3>
+    <p style="margin:2px 0 12px;font-size:12px;color:var(--win-dim,var(--dim))">
+     The database that has been kept warm becomes the real one — no restore, no waiting. The stack
+     lands in <span class="mono">/opt/stacks/immich</span> on port 2283 and starts on boot like any
+     other app, and the standby switches itself off.</p>
+    <div class="kp-eyebrow">Where the photos live afterwards</div>
+    <div class="kp-kinds" style="margin-bottom:10px">
+     <button class="kp-kind${mode==="inplace"?" on":""}" data-m="inplace">${svg("hdd",18)}
+      <b>Use them where they are</b><span>the backup copy becomes the live library — it stops being a backup that moment</span></button>
+     <button class="kp-kind${mode==="move"?" on":""}" data-m="move">${svg("folder",18)}
+      <b>Move them</b><span>instant on the same disk — nothing is copied</span></button></div>
+    ${mode==="inplace"?`<div class="kp-note err">After this, <span class="mono">${esc(lib)}</span> is your
+       live library. The Mirror profile that fills it must be changed, or it will keep overwriting
+       your live photos with whatever the old NAS had.</div>`
+     :`<div class="field"><label>New folder for the library</label>
+        <input id="sbMv" class="mono" value="${att((D.work||"/media/nas/t7-4TB")+"/../immich/library".replace("//","/"))}" spellcheck="false">
+        <div class="kp-help">Must be on the same disk as the backup, and empty.</div></div>`}
+    <div class="r"><span id="sbPrS" style="flex:1;text-align:left;font-size:12px;color:var(--win-dim,var(--dim))"></span>
+     <button class="btn" id="sbPrX">Cancel</button>
+     <button class="btn dng" id="sbPrGo">Promote</button></div></div>`;
+   s.querySelectorAll("[data-m]").forEach(b=>b.onclick=()=>draw(b.dataset.m));
+   s.querySelector("#sbPrX").onclick=()=>s.classList.remove("show");
+   s.querySelector("#sbPrGo").onclick=async()=>{
+    const note=s.querySelector("#sbPrS");note.textContent="promoting…";
+    const body=mode==="move"?{move_to:(s.querySelector("#sbMv").value||"").trim()}:{library:lib};
+    const r=await P("/api/immich-standby/promote",body);
+    if(!(r&&r.ok)){note.textContent=(r&&r.log)||"failed";return;}
+    s.classList.remove("show");
+    toast("Promoted — Immich is starting on port 2283");
+    await load();paint();};};
+  draw("move");s.classList.add("show");}
 
  (async()=>{await load();paint();
   timer=setInterval(async()=>{if(!body.isConnected){clearInterval(timer);return;}
