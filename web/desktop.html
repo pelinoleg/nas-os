@@ -3176,6 +3176,16 @@
   .bk-lock{font-size:10.5px;font-weight:600;color:var(--warn);display:inline-flex;align-items:center;gap:2px;vertical-align:middle}
   .bk-lock svg{color:var(--warn)}
   .bk-hint{font-size:11.5px;color:var(--mut);margin:-6px 0 12px}
+  /* «a newer version is on the box» — same materials as the rest of the furniture, and it sits
+     above the dock so it never covers what you are reading */
+  .verbar{position:fixed;left:50%;transform:translateX(-50%);bottom:96px;z-index:620;display:flex;
+   align-items:center;gap:10px;padding:9px 10px 9px 14px;border-radius:14px;
+   background:var(--glass-2);backdrop-filter:blur(20px) saturate(1.4);-webkit-backdrop-filter:blur(20px) saturate(1.4);
+   border:1px solid var(--line);box-shadow:var(--sh-lg,0 12px 34px rgba(0,0,0,.3));
+   color:var(--ink);font-size:13px;max-width:min(520px,94vw)}
+  .verbar span{display:flex;align-items:center;gap:8px}
+  .verbar span svg{color:var(--accent);flex:none}
+  @media(max-width:640px){.verbar{left:10px;right:10px;transform:none;max-width:none;bottom:auto;top:52px}}
   .toast{position:fixed;left:50%;bottom:96px;transform:translateX(-50%) translateY(14px);z-index:600;background:var(--glass-2);backdrop-filter:blur(20px) saturate(1.4);-webkit-backdrop-filter:blur(20px) saturate(1.4);
     border:1px solid var(--line-2);border-radius:var(--r-md);padding:12px 18px;font-size:13px;font-weight:500;box-shadow:var(--sh);opacity:0;pointer-events:none;transition:.26s cubic-bezier(.2,.8,.3,1)}
   .toast.show{opacity:1;transform:translateX(-50%)}
@@ -15134,6 +15144,37 @@ function maybeOnboard(){let done=false;try{done=!!SET.onboarded||localStorage.ge
  ob.querySelector("#obSkip").onclick=fin;
  ob.querySelector("#obGo").onclick=()=>{fin();location.href="/setup.html";};
  ob.addEventListener("click",e=>{if(e.target===ob)fin();});}
+/* --- «there is a new version» — the only thing that reaches across every app, so it lives
+   at the top level and touches nothing else. It never reloads by itself on a normal box:
+   you might be halfway through typing something. --- */
+function versionWatch(){
+ let mine=null, bar=null, dev=false;
+ const show=()=>{ if(bar) return;
+  bar=document.createElement("div"); bar.className="verbar";
+  bar.innerHTML=`<span>${svg("wand",15)} A newer version of the panel is on the box.</span>
+    <button class="btn pri sm" id="verGo">Reload</button>
+    <button class="iconbtn sm" id="verX" title="Later">${svg("x",15)}</button>`;
+  document.body.appendChild(bar);
+  bar.querySelector("#verGo").onclick=()=>location.reload();
+  bar.querySelector("#verX").onclick=()=>{bar.remove();bar=null;mine=null;};  // ask again next change
+ };
+ const tick=async()=>{
+  try{
+   const r=await fetch("/api/version",{cache:"no-store"});
+   if(!r.ok) return;                       // 401 on the login screen, or an older server: stay quiet
+   const j=await r.json();
+   if(!j || !j.v) return;
+   dev=!!j.dev;
+   if(mine===null){mine=j.v;return;}       // first answer is the baseline, never a notification
+   if(j.v!==mine){ if(dev) location.reload(); else show(); }
+  }catch(e){}                              // no server, no network, no panel — simply nothing happens
+ };
+ // self-rescheduling: 30 s normally, 1.5 s when the dev flag is on the box. A hidden tab does
+ // not ask at all — it is the visible ones that can be looking at stale code.
+ const loop=()=>{ (document.hidden?Promise.resolve():tick()).finally(
+   ()=>setTimeout(loop, dev?1500:30000)); };
+ loop();
+}
 /* boot */
 (async function(){
  try{const a=await(await fetch("/api/auth/state")).json();if(!a.authed)authGate();}catch(e){}
@@ -15148,6 +15189,7 @@ function maybeOnboard(){let done=false;try{done=!!SET.onboarded||localStorage.ge
  // window geometry is per-device: loaded from localStorage only (a window sized for the desktop is
  // wrong on the tablet). The server copy is a write-only backup — we do NOT pull it back here.
  syncthingFollowTheme();   // correct a mismatch left by a reboot or a manual change
+ try{versionWatch();}catch(e){}   // its own try: a watcher must never be able to stop the panel booting
  const tb=document.getElementById("themeBtn");if(tb)tb.onclick=cycleTheme;
  const pb=document.getElementById("powerBtn");
  if(pb){pb.innerHTML=svg("power",17);pb.onclick=()=>{const r=pb.getBoundingClientRect();
