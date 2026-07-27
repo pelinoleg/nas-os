@@ -3526,7 +3526,7 @@ const WP_DEFAULT="https://bing.biturl.top/?resolution=1920&format=image&mkt=en-U
    Widget/tray/dock lists are on auto (null). If the user edited them → overwritten from desktop.json. */
 let SET={accent:"coral",accentHex:"#405e6d",theme:"light",wpType:"url",wpUrl:WP_DEFAULT,wpVer:0,fxDim:34,fxBlur:30,fxNoise:100,
  perf:false,blur:false,wpSlide:true,wpSlideMin:30,mbAlpha:1,wdgAlpha:1,mbIcon:.95,mbFs:1.05,
- deskIcon:1.05,deskFs:1.15,deskLc:"",deskShadow:false,deskGlass:true,deskTileOp:82,deskTileBlur:3,widgets:null,railHidden:false,
+ deskIcon:1.05,deskFs:1.15,deskLc:"",deskShadow:false,deskGlass:true,deskTileOp:82,deskTileBlur:3,widgets:null,railHidden:false,deskAppsHidden:false,
  mbOp:0,dockOp:3,wdgOp:15,mbBlur:0,dockBlur:0,wdgBlur:1,
  mbGrad:false,mbGradH:90,mbGradInt:50,mbGradOp:100,
  winShadow:true,dockShadow:false,tileShadow:true,mbSat:100,dockSat:100,wdgSat:90,winSat:100,
@@ -4243,18 +4243,36 @@ const INTERNAL=[
  {id:"__set",name:"Settings",color:"linear-gradient(135deg,#7183a0,#55647d)",ic:"gearf",bare:1,fn:()=>winSettings()},
  {id:"__wiz",name:"Wizard",color:"linear-gradient(135deg,#46B98A,#2f9d70)",ic:"wandf",bare:1,fn:()=>location.href="/setup.html"},
 ];
+/* Right-click is how you hide a single icon — but the wall panel and a phone have no right
+   button, and there the menu was simply unreachable. A long press opens the same one. */
+function longPress(node,fn){
+ let t=null,sx=0,sy=0;
+ const cancel=()=>{if(t){clearTimeout(t);t=null;}};
+ node.addEventListener("touchstart",e=>{const p=e.touches[0];sx=p.clientX;sy=p.clientY;
+  cancel();t=setTimeout(()=>{t=null;fn(sx,sy);},500);},{passive:true});
+ node.addEventListener("touchmove",e=>{const p=e.touches[0];
+  if(Math.abs(p.clientX-sx)>10||Math.abs(p.clientY-sy)>10)cancel();},{passive:true});
+ node.addEventListener("touchend",cancel);
+ node.addEventListener("touchcancel",cancel);
+}
 function renderApps(){
  const box=document.getElementById("apps");box.innerHTML="";
+ if(SET.deskAppsHidden)return;      // the surface is deliberately empty; Launchpad still has everything
  /* Shortcuts of containers with the web-desktop.* label (running and stopped; hidden enable=false are filtered out by the backend). */
  APPS.forEach(app=>{if(!app.url)return;
   const key=app.container||app.name;
   if((SET.deskHidden||[]).includes(key))return;      // hidden in Launchpad
   const b=el(`<button class="app" title="${app.container||""}${app.running?"":" · stopped"}"><div class="tile applbl" style="background:${tileColor(app.name)}">${appIconHTML(app)}</div><div class="lbl">${app.name}</div><span class="st ${app.running?"on":"off"}"></span></button>`);
   b.onclick=()=>window.open(app.url,"_blank");
-  b.oncontextmenu=e=>{e.preventDefault();showMenu(e.clientX,e.clientY,[
+  const appMenu=(x,y)=>showMenu(x,y,[
    {label:"Hide from the desktop",ic:svg("eye",16),act:()=>{
     SET.deskHidden=[...(SET.deskHidden||[]),key];saveSettings();renderApps();
-    toast("You can bring it back from Launchpad — the button in the top bar");}}]);};
+    toast("You can bring it back from Launchpad — the button in the top bar");}},
+   {label:"Hide all shortcuts",ic:svg("grid",16),act:()=>{
+    SET.deskAppsHidden=true;saveSettings();renderApps();
+    toast("The desktop is clear — every app is in Launchpad");}}]);
+  b.oncontextmenu=e=>{e.preventDefault();appMenu(e.clientX,e.clientY);};
+  longPress(b,appMenu);
   box.appendChild(b);});
  if(APPS_LOADED&&!APPS.filter(a=>a.url).length)box.appendChild(el(`<div class="apps-hint">App shortcuts will appear here automatically.<br>Add the container labels <b>web-desktop.*</b> in docker-compose, bring it up in <b>Dockge</b> and click <b>"Refresh shortcuts"</b> (right-click the desktop).<br><br>System tools are in the panel below.</div>`));
 }
@@ -4337,7 +4355,8 @@ function renderDock(){
   const b=el(`<button title="${esc(a.name)}${busy?" — backup running":""}${esc(tTitle)}" draggable="true" data-did="${a.id}"><span class="di${busy?" di-busy":""}${a.bare?" di-bare":""}"${a.bare?"":` style="background:${a.color}"`}>${appIcon(icName)}${OPEN[a.id]?'<span class="run"></span>':''}${busy?'<span class="di-spin"></span>':''}</span><span class="dl">${esc(a.name)}</span></button>`);
   b.onclick=a.fn;
   if(a.id==="__nasbak")b.oncontextmenu=e=>{e.preventDefault();nbDockMenu(e.clientX,e.clientY);};
-  else b.oncontextmenu=e=>{e.preventDefault();dockCtxMenu(a,e.clientX,e.clientY);};
+  else{b.oncontextmenu=e=>{e.preventDefault();dockCtxMenu(a,e.clientX,e.clientY);};
+       longPress(b,(x,y)=>dockCtxMenu(a,x,y));}
   b.ondragstart=()=>b.classList.add("dragging");
   b.ondragend=()=>{b.classList.remove("dragging");SET.dockOrder=[...d.querySelectorAll("button[data-did]")].map(x=>x.dataset.did);saveSettings();};
   d.appendChild(b);});
@@ -13802,6 +13821,7 @@ function lsBar(lb){lb.innerHTML=`
 function lsWidgets(lb){const cl=/^#[0-9a-f]{6}$/i;lb.innerHTML=`
   <div class="set-card">
    ${pToggle("Hide the widget panel","Removes the right panel entirely — the desktop takes the full width.","railHidden","right panel with summaries")}
+   ${pToggle("Hide app shortcuts","Clears the shortcuts off the desktop. Every app stays in Launchpad (the grid button in the top bar) — this only empties the surface.","deskAppsHidden","app shortcuts on the desktop")}
   </div>
   <div class="set-card"><div class="set-grp">Widget background</div>
    ${opSlider("Background opacity","wdgOp","Custom density of widget backgrounds. By default — shared, same as windows (the «Material» tab).")}
