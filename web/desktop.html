@@ -3181,6 +3181,7 @@
   .ed-ro{display:flex;align-items:flex-start;gap:8px;padding:9px 12px;font-size:12.5px;
    background:color-mix(in srgb,var(--warn) 12%,transparent);border-bottom:1px solid var(--line);color:var(--ink)}
   .ed-ro svg{color:var(--warn);flex:none;margin-top:1px}
+  .mon-sub{font-size:11.5px;color:var(--mut);margin-top:2px;max-width:46ch}
   .verbar{position:fixed;left:50%;transform:translateX(-50%);bottom:96px;z-index:620;display:flex;
    align-items:center;gap:10px;padding:9px 10px 9px 14px;border-radius:14px;
    background:var(--glass-2);backdrop-filter:blur(20px) saturate(1.4);-webkit-backdrop-filter:blur(20px) saturate(1.4);
@@ -14028,12 +14029,27 @@ function notifyTab(tc){tc.innerHTML=`<div style="color:var(--mut);font-size:12px
    <div class="mon-note">The keys are stored on the device and protected from unauthorized access. The user key is in your pushover.net profile; the token is created via «Application/API Token».</div>
    <div class="set-h">Alerts</div>
    <div class="mon-row"><span>Send push notifications to your phone (Pushover)</span><label class="tgl"><input type="checkbox" id="nfEn"><span class="sl"></span></label></div>
+   <div class="mon-row"><span>What may ring the phone<div class="mon-sub">A channel that fires for everything gets switched off — and then the one that mattered is missed too.</div></span>
+     <select id="nfMode" style="max-width:270px">
+       <option value="important">Only what cannot wait (recommended)</option>
+       <option value="all">Every event that is switched on below</option>
+       <option value="off">Nothing — the panel only</option></select></div>
+   <div class="mon-note" id="nfModeNote"></div>
    <div style="display:flex;gap:16px;flex-wrap:wrap"><div class="field" style="margin:8px 0 4px"><label>Don't repeat the same event more often than, min</label><input id="nfCd" class="mono" style="max-width:120px"></div>
    <div class="field" style="margin:8px 0 4px"><label>Remind about unread critical events, min (0 — off)</label><input id="nfCr" class="mono" style="max-width:120px"></div></div>
    <div class="mon-note">All events are always written to the log (the bell in the top bar). The «Desktop» column is a desktop banner and a counter on the bell; «Push» is a Pushover notification on your phone (when the toggle above is on). The dropdown is the Pushover priority.</div>
    <div class="ev-cols"><span style="font-size:11px;color:var(--mut)">Event</span><span class="grow"></span><span class="ev-colp" title="Notification priority in Pushover (does not affect the desktop)">Pushover priority</span><span class="ev-col" title="Push notification to your phone via Pushover">Pushover</span><span class="ev-col" title="Desktop banner + counter on the bell">Desktop</span></div>
    <div id="nfEvents"></div>`;
-  const en=tc.querySelector("#nfEn");en.checked=!!MON.enabled;
+  const en=tc.querySelector("#nfEn");
+   const md=tc.querySelector("#nfMode");
+   md.value=MON.push_mode||"important";
+   const NOTE={important:"Data at risk or the box in trouble: a read-only filesystem, a failing disk, no power headroom, overheating, a blocked mass deletion. Everything else waits for the daily digest.",
+     all:"Every event with its Push switch on will reach your phone. This is what makes people turn Pushover off.",
+     off:"Nothing reaches the phone. The panel and the digest still record everything."};
+   const noteEl=tc.querySelector("#nfModeNote");
+   const syncMode=()=>{noteEl.textContent=NOTE[md.value]||"";};
+   md.onchange=()=>{syncMode();saveMon();};
+   syncMode();en.checked=!!MON.enabled;
   const evbox=tc.querySelector("#nfEvents");
   EVMETA.forEach(m=>{
    if(m.grp){evbox.appendChild(el(`<div class="set-h">${esc(m.grp)}</div>`));return;}
@@ -14047,7 +14063,7 @@ function notifyTab(tc){tc.innerHTML=`<div style="color:var(--mut);font-size:12px
   const cr=tc.querySelector("#nfCr");cr.value=SET.critRemind!=null?SET.critRemind:10;
   cr.onchange=()=>{SET.critRemind=Math.max(0,Math.min(240,+cr.value||0));cr.value=SET.critRemind;saveSettings();};
   const items=EVMETA.filter(m=>m.k);
-  const collect=()=>{const events={};items.forEach(m=>{const o={on:tc.querySelector("#evon_"+m.k).checked,desk:tc.querySelector("#evd_"+m.k).checked,priority:+tc.querySelector("#evp_"+m.k).value};if(m.thr!==undefined)o.threshold=+tc.querySelector("#ev_"+m.k).value||0;events[m.k]=o;});return {enabled:en.checked,cooldown:Math.max(1,+cd.value||30)*60,events};};
+  const collect=()=>{const events={};const _pm=(tc.querySelector('#nfMode')||{}).value;items.forEach(m=>{const o={on:tc.querySelector("#evon_"+m.k).checked,desk:tc.querySelector("#evd_"+m.k).checked,priority:+tc.querySelector("#evp_"+m.k).value};if(m.thr!==undefined)o.threshold=+tc.querySelector("#ev_"+m.k).value||0;events[m.k]=o;});return {enabled:en.checked,push_mode:_pm||"important",cooldown:Math.max(1,+cd.value||30)*60,events};};
   const saveMon=()=>api("/api/monitor",{method:"POST",body:JSON.stringify({monitor:collect()})});
   // when the Pushover master toggle is off, grey out everything that only affects Pushover — the
   // per-event priority selects and push switches, and Test — but leave the Desktop switches alone

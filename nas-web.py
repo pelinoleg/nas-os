@@ -3192,7 +3192,10 @@ def _def_monitor():
     # priority = Pushover level, capped at 1 ("high": loud, bypasses Do-Not-Disturb,
     # never repeats). Rule of thumb: real problems → Pushover+Desktop@1; routine/info
     # → Desktop only; power-user metrics (mem/swap/load/traffic/…) → off (opt-in).
-    return {"enabled": False, "cooldown": 1800, "events": {
+    return {"enabled": False, "cooldown": 1800,
+            # which alerts may interrupt a person on their phone; everything else reaches the
+            # panel and the daily digest. Deliberately narrow — see _PUSH_NOW
+            "push_mode": "important", "events": {
         # --- disks: attach/detach/mode ---
         "disk_add":    {"on": False, "priority": 0,  "desk": True},   # you plugged it in — info
         "disk_remove": {"on": True,  "priority": 1},                   # unexpected removal = data risk
@@ -3324,6 +3327,8 @@ def save_monitor(d):
             cur["cooldown"] = max(60, int(d["cooldown"]))
         except (ValueError, TypeError):
             pass
+    if d.get("push_mode") in ("important", "all", "off"):
+        cur["push_mode"] = d["push_mode"]
     ev = d.get("events")
     if isinstance(ev, dict):
         for ek, evv in ev.items():
@@ -3473,6 +3478,22 @@ for _k in ("snap_ok", "snap_err", "scrub_err", "delete_block", "backup", "merger
            "fsw_corrupt", "fsw_guard", "fsw_root", "fsw_del", "fsw_scan"):
     _EVENT_KIND[_k] = "protect"
 
+# A CONDITION is something that stays true until it is fixed — «updates are available»,
+# «this backup has not run», «the disk is hot». Logging one every cycle turned the feed into a
+# river nobody reads: measured on this box, 25% of two weeks of events were the same two update
+# notices repeated 136 times. A condition gets ONE record that keeps its first-seen time, counts
+# its repeats and carries the latest wording. Real events — a disk appeared, a backup finished,
+# the box booted — are not conditions and are still appended each time.
+_EVENT_COND = {
+    "updates", "sec_updates", "reboot_req", "root_full", "diskfull", "inodes", "docker_space",
+    "mem", "swap", "load", "proc_hog", "slow_disk", "temp", "disktemp", "sustained_heat",
+    "undervolt", "throttle", "smart", "smart_wear", "sd_degrade", "fan_stall", "pool",
+    "mergerfs", "readonly", "fserror", "vpn_offline", "time_drift", "cfg_corrupt", "svcfail",
+    "container_loop", "health", "write_load", "log_sentry",
+    "nb_conn", "nb_srcmiss", "nb_stale", "nb_size", "nb_dumps", "nb_dest", "kp_stale",
+}
+COND_KEEP_DAYS = 30          # after this long without a repeat, a condition starts a new record
+
 def log_event(event, title, msg="", lvl=None, kind=None, desk=None):
     """Write an event to the log. lvl: info|ok|warn|crit. desk=None → from the
     event settings (whether to show as a card on the desktop)."""
@@ -3493,6 +3514,21 @@ def log_event(event, title, msg="", lvl=None, kind=None, desk=None):
         # We merge ONLY unread entries: if the user has already read the old
         # one, a repeat must create a new one (otherwise the badge/card won't come alive).
         # Critical ones are always added anew — that is the periodic reminder.
+        if event in _EVENT_COND:
+            # merged whether or not it has been read, and however old it is: a condition that is
+            # still true must not become a second entry just because you looked at the first one
+            for it in reversed(items):
+                if it.get("event") == event and it.get("title") == title \
+                        and now - (it.get("t2") or it.get("t", 0)) <= COND_KEEP_DAYS * 86400:
+                    it["n"] = it.get("n", 1) + 1
+                    it["t2"] = now
+                    it["cond"] = 1
+                    if msg:
+                        it["msg"] = msg
+                    if lvl == "crit" or (lvl == "warn" and it.get("lvl") == "info"):
+                        it["lvl"] = lvl          # a condition that got worse says so
+                    _events_save(ev)
+                    return it["id"]
         if lvl != "crit":
             for it in reversed(items[-40:]):
                 if it.get("event") == event and it.get("title") == title \
@@ -3506,7 +3542,7 @@ def log_event(event, title, msg="", lvl=None, kind=None, desk=None):
                     return it["id"]
         ev["seq"] += 1
         items.append({"id": ev["seq"], "t": now, "event": event, "title": title,
-                      "msg": msg, "lvl": lvl,
+                      "msg": msg, "lvl": lvl, "cond": 1 if event in _EVENT_COND else 0,
                       "kind": kind or _EVENT_KIND.get(event, "system"),
                       "desk": bool(desk)})
         cutoff = now - EVENTS_DAYS * 86400
@@ -4021,7 +4057,7 @@ def monitor_tick():
             log_event(name, title, msg, lvl)
         except Exception:
             pass
-        if cfg.get("enabled") and ev.get(name, {}).get("on"):
+        if cfg.get("enabled") and ev.get(name, {}).get("on") and _push_allowed(name, priority, cfg):
             push_notify(title, msg, priority)
     s = _safe(stats)
     if not s:                       # without base metrics, skip the tick (the next one retries)
@@ -8957,9 +8993,10 @@ def load_maintenance():
          "snap_scrub_dow": "Sun",     # SnapRAID: day of week for scrub
          "snap_scrub_time": "05:00",  # SnapRAID: scrub time
          "automount_recover": True,   # auto-remount of a dropped disk
-         "summary_enabled": False,    # status summary (to Pushover/journal)
+         "summary_enabled": True,     # status summary (to Pushover/journal) — ON by default:
+                                      # it is what makes a quiet phone safe (see push_mode)
          "summary_freq": "daily",     # daily | weekly
-         "summary_time": "09:00",     # HH:MM
+         "summary_time": "20:00",     # HH:MM — evening: «what happened today», not «yesterday»
          "summary_dow": "Mon",        # for weekly
          "thermal_mode": "warn",      # off | warn | auto (active thermal protection)
          "thermal_hot": 80,           # "hot" threshold, °C
@@ -9692,6 +9729,26 @@ def _nb_drill_sched_tick():
             if nb_drill_start(cfg["id"]).get("ok"):
                 return                       # one per pass; the next due one waits a minute
 
+# The phone is for what cannot wait until you next look at the panel: data at risk, or the box
+# about to stop being a box. Everything else still lands in the panel and in the daily digest.
+# The list is deliberately short — an alert channel that fires for everything gets switched off,
+# and then the one that mattered is missed too.
+_PUSH_NOW = {
+    "readonly", "fserror", "smart", "sd_degrade", "diskfull", "root_full", "inodes",
+    "undervolt", "sustained_heat", "fan_stall", "cfg_corrupt", "delete_block", "nb_guard",
+    "pool", "mergerfs", "disk_remove", "dirty_boot",
+}
+
+def _push_allowed(name, priority, cfg=None):
+    """push_mode: important (default) — only the list above, plus anything explicitly critical;
+    all — the old behaviour; off — the panel only."""
+    mode = ((cfg or load_monitor()).get("push_mode") or "important")
+    if mode == "off":
+        return False
+    if mode == "all":
+        return True
+    return name in _PUSH_NOW or (priority or 0) >= 2
+
 def notify_event(name, key, title, msg, lvl=None, priority=None, cooldown=1800):
     """Deliver an event outside monitor_tick: always journal + Pushover, if enabled and ev.on.
     key — the cooldown key (reuses _MON_LAST, like fire())."""
@@ -9706,7 +9763,7 @@ def notify_event(name, key, title, msg, lvl=None, priority=None, cooldown=1800):
         log_event(name, title, msg, lvl)
     except Exception:
         pass
-    if cfg.get("enabled") and ev.get("on"):
+    if cfg.get("enabled") and ev.get("on") and _push_allowed(name, priority, cfg):
         push_notify(title, msg, priority)
     return True
 
@@ -9838,6 +9895,38 @@ def _pool_recovery():
 # ---- daily/weekly status summary ----
 _LAST_SUMMARY = ""
 
+def _events_digest(hours=24):
+    """«What happened» in the words of the log itself — one line per kind of thing, conditions
+    named as conditions. This is what makes it possible for the phone to stay quiet: the answer
+    to «is anything going on» arrives once a day instead of forty times."""
+    try:
+        with _events_lock:
+            items = list(_events_load()["items"])
+    except Exception:
+        return []
+    now = time.time(); since = now - hours * 3600
+    fresh = [it for it in items if isinstance(it, dict)
+             and max(it.get("t", 0), it.get("t2") or 0) >= since]
+    if not fresh:
+        # a silent day is an ANSWER, not an absence of one — that is the whole point of a digest
+        return ["Nothing needs you."]
+    out, rank = [], {"crit": 0, "warn": 1, "ok": 2, "info": 3}
+    open_conds = [it for it in fresh if it.get("cond") and it.get("lvl") in ("warn", "crit")]
+    for it in sorted(open_conds, key=lambda x: rank.get(x.get("lvl"), 9))[:6]:
+        age = now - it.get("t", now)
+        out.append("• %s%s" % (it.get("title", ""),
+                               (" — going on for %d day(s)" % int(age // 86400)) if age > 86400 else ""))
+    others = [it for it in fresh if not it.get("cond")]
+    bad = [it for it in others if it.get("lvl") in ("warn", "crit")]
+    for it in sorted(bad, key=lambda x: rank.get(x.get("lvl"), 9))[:6]:
+        out.append("• %s" % it.get("title", ""))
+    good = len(others) - len(bad)
+    if good > 0:
+        out.append("%d other thing(s) happened, none of them a problem." % good)
+    if not bad and not open_conds:
+        out.insert(0, "Nothing needs you.")
+    return out
+
 def _build_summary():
     s = _safe(stats) or {}
     host = s.get("host", "NAS")
@@ -9884,16 +9973,23 @@ def _summary_tick():
     m = load_maintenance()
     if not m.get("summary_enabled"):
         return
-    lt = time.localtime()
-    if time.strftime("%H:%M", lt) != m.get("summary_time", "09:00"):
-        return
-    if m.get("summary_freq") == "weekly" and _DOW[lt.tm_wday] != m.get("summary_dow", "Mon"):
-        return
-    slot = time.strftime("%Y-%m-%d %H:%M", lt)
-    if slot == _LAST_SUMMARY:
+    now = time.time()
+    wd = None
+    if m.get("summary_freq") == "weekly":
+        try:
+            wd = _DOW.index(m.get("summary_dow", "Mon"))
+        except ValueError:
+            wd = 0
+    due, slot = sched_last_due(now, m.get("summary_time", "09:00"), wd)
+    # the same rule as every other schedule here: a slot that went by while the panel was
+    # restarting is still owed, up to a point — but a digest older than six hours is stale news
+    if not due or slot == _LAST_SUMMARY or now - due > 6 * 3600:
         return
     _LAST_SUMMARY = slot
     title, body = _build_summary()
+    dig = _events_digest(24 if m.get("summary_freq") != "weekly" else 24 * 7)
+    if dig:
+        body = (body + "\n\n" if body else "") + "Since the last one:\n" + "\n".join(dig)
     notify_event("daily_summary", "summary:%s" % slot, title, body, "info", cooldown=0)
 
 # ---- active thermal protection ----
