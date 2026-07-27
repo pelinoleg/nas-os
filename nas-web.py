@@ -3494,6 +3494,20 @@ _EVENT_COND = {
 }
 COND_KEEP_DAYS = 30          # after this long without a repeat, a condition starts a new record
 
+def _events_prune(ev, now):
+    """Drop what has aged out — by LAST activity, not by first-seen. A condition keeps the date
+    it started (that is what «going on for N days» is made of), so pruning on `t` deleted live
+    conditions, which then came straight back as brand-new records: that is exactly what «four
+    notifications appeared again» was. Checked over the whole list too — the old shortcut looked
+    only at the first entry, assuming it is the oldest, and one live condition sitting there
+    froze the pruning completely."""
+    items = ev.get("items") or []
+    cutoff = now - EVENTS_DAYS * 86400
+    fresh = [it for it in items
+             if isinstance(it, dict) and max(it.get("t", 0), it.get("t2") or 0) >= cutoff]
+    if len(fresh) != len(items) or len(fresh) > EVENTS_CAP:
+        ev["items"] = fresh[-EVENTS_CAP:]
+
 def _events_merge_conditions():
     """One-off: fold the duplicates the OLD rule left behind. Conditions only started sharing a
     record today, so the existing log still holds «security updates applied» four times over. The
@@ -3541,6 +3555,10 @@ def log_event(event, title, msg="", lvl=None, kind=None, desk=None):
     title = str(title or "")[:160]; msg = str(msg or "")[:500]
     with _events_lock:
         ev = _events_load()
+        # prune FIRST, and on every call: the condition branch below returns early, so a prune
+        # left at the end of the function simply never ran on a box whose events are mostly
+        # conditions
+        _events_prune(ev, now)
         items = ev["items"]
         # dedup: the same non-critical event with the same title within 4 h → counter ×N.
         # We merge ONLY unread entries: if the user has already read the old
@@ -3577,9 +3595,6 @@ def log_event(event, title, msg="", lvl=None, kind=None, desk=None):
                       "msg": msg, "lvl": lvl, "cond": 1 if event in _EVENT_COND else 0,
                       "kind": kind or _EVENT_KIND.get(event, "system"),
                       "desk": bool(desk)})
-        cutoff = now - EVENTS_DAYS * 86400
-        if len(items) > EVENTS_CAP or (items and items[0].get("t", 0) < cutoff):
-            ev["items"] = [it for it in items if it.get("t", 0) >= cutoff][-EVENTS_CAP:]
         _events_save(ev)
         _events_cond.notify_all()      # wake long-poll waiters on /api/events
         return ev["seq"]
@@ -4098,12 +4113,21 @@ def monitor_tick():
 
     # --- system startup ---
     if not _MON_BOOT_SENT:
+        # The box booting is news. The panel being restarted — which happens several times an
+        # hour while it is being worked on — is not, and claiming «system started» for it is
+        # simply untrue. /proc/uptime knows the difference.
         try:
-            log_event("boot", "System started", "%s is back online" % host, "ok")
-        except Exception:
-            pass
-        if cfg.get("enabled") and ev.get("boot", {}).get("on"):
-            push_notify("NAS: system started", "%s is back online" % host, pri("boot"))
+            with open("/proc/uptime") as f:
+                _up = float(f.read().split()[0])
+        except (OSError, ValueError, IndexError):
+            _up = 0.0
+        if _up < 300:
+            try:
+                log_event("boot", "System started", "%s is back online" % host, "ok")
+            except Exception:
+                pass
+            if cfg.get("enabled") and ev.get("boot", {}).get("on"):
+                push_notify("NAS: system started", "%s is back online" % host, pri("boot"))
         _MON_BOOT_SENT = True
 
     # --- corrupted settings files (queue filled by the loader) ---
