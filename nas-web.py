@@ -22563,6 +22563,36 @@ class H(BaseHTTPRequestHandler):
         # would otherwise AttributeError into a 500. Coerce to an empty object.
         return v if isinstance(v, dict) else {}
 
+    # Compressed copies of static files, keyed by (path, mtime, size). The panel is one big
+    # HTML file, so this is the difference between 1.39 MB and 0.40 MB on EVERY load — and the
+    # shell is deliberately never cached, so every load is a full download. Compressing on each
+    # request would cost the Pi ~80 ms of CPU per hit; compressing once per file change costs
+    # nothing after the first.
+    _GZ_CACHE = {}
+    _GZ_TYPES = (".html", ".css", ".js", ".svg", ".json", ".webmanifest", ".map")
+
+    def _gzipped(self, full, data, ext):
+        """(body, is_gzip) — the compressed copy when it is worth it and the client asked."""
+        if ext not in self._GZ_TYPES or len(data) < 1024:
+            return data, False
+        if "gzip" not in (self.headers.get("Accept-Encoding") or "").lower():
+            return data, False
+        try:
+            st = os.stat(full)
+            key = (full, int(st.st_mtime), st.st_size)
+        except OSError:
+            return data, False
+        hit = H._GZ_CACHE.get(key)
+        if hit is None:
+            try:
+                hit = gzip.compress(data, 6)
+            except (OSError, ValueError):
+                return data, False
+            if len(H._GZ_CACHE) > 48:        # bounded: this is a fixed set of files, not user data
+                H._GZ_CACHE.clear()
+            H._GZ_CACHE[key] = hit
+        return (hit, True) if len(hit) < len(data) else (data, False)
+
     def _static(self, path):
         if path == "/" or path == "":
             path = "/desktop.html"
@@ -22602,14 +22632,22 @@ class H(BaseHTTPRequestHandler):
             etag = '"%x-%x"' % (int(st_.st_mtime), st_.st_size)
         except OSError:
             etag = None
+        body, gz = self._gzipped(full, data, ext)
+        if etag and gz:
+            etag = etag[:-1] + '-gz"'   # a compressed body is a DIFFERENT entity than the plain one
         if etag and ext != ".html" and self.headers.get("If-None-Match") == etag:
             self.send_response(304)
             self.send_header("ETag", etag)
             self.send_header("Cache-Control", "no-cache, must-revalidate")
+            self.send_header("Vary", "Accept-Encoding")
             self.end_headers()
             return
         self.send_response(200)
         self.send_header("Content-Type", ctype)
+        if gz:
+            self.send_header("Content-Encoding", "gzip")
+        if ext in self._GZ_TYPES:
+            self.send_header("Vary", "Accept-Encoding")
         # HTML — do NOT cache at all (mobile browsers with no-cache without a validator
         # still showed the old shell); revalidate JS/CSS by ETag.
         if ext == ".html":
@@ -22621,9 +22659,9 @@ class H(BaseHTTPRequestHandler):
                 self.send_header("ETag", etag)
         elif ext == ".woff2":
             self.send_header("Cache-Control", "public, max-age=31536000, immutable")
-        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(data)
+        self.wfile.write(body)
 
     def _sendraw(self, path, download=False):
         if not os.path.isfile(path):
