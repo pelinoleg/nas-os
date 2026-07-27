@@ -22563,6 +22563,34 @@ class H(BaseHTTPRequestHandler):
         # would otherwise AttributeError into a 500. Coerce to an empty object.
         return v if isinstance(v, dict) else {}
 
+    # Compressed copies of static files, keyed by (path, mtime, size).
+    _VER = {"t": 0.0, "v": ""}
+
+    @staticmethod
+    def web_stamp():
+        """A fingerprint of everything in web/. An open tab compares it with the one it started
+        with, so a panel left open on a phone or a second screen can say «there is a new version»
+        instead of quietly running yesterday's code until someone thinks to reload.
+        Cheap (stat only) and cached for two seconds — it is polled, not streamed: a stream would
+        hold a thread per client on a Pi, and this answer is 40 bytes."""
+        now = time.monotonic()
+        if H._VER["v"] and now - H._VER["t"] < 2.0:
+            return H._VER["v"]
+        h = hashlib.sha1()
+        try:
+            for root, dirs, files in os.walk(WEB_DIR):
+                dirs.sort()
+                for fn in sorted(files):
+                    try:
+                        st = os.stat(os.path.join(root, fn))
+                    except OSError:
+                        continue
+                    h.update(("%s|%d|%d;" % (fn, int(st.st_mtime), st.st_size)).encode())
+        except OSError:
+            pass
+        H._VER.update(t=now, v=h.hexdigest()[:16])
+        return H._VER["v"]
+
     # Compressed copies of static files, keyed by (path, mtime, size). The panel is one big
     # HTML file, so this is the difference between 1.39 MB and 0.40 MB on EVERY load — and the
     # shell is deliberately never cached, so every load is a full download. Compressing on each
@@ -23274,7 +23302,13 @@ class H(BaseHTTPRequestHandler):
         if p.startswith("/api/") and not self._authed():
             self._json({"error": "auth", "configured": auth_configured()}, 401); return
         try:
-            if p == "/api/stats":
+            if p == "/api/version":
+                # dev flag: with this file present the page reloads ITSELF on every change,
+                # which is what makes editing the panel bearable. Absent (every normal box) it
+                # only ever offers a reload.
+                self._json({"v": H.web_stamp(),
+                            "dev": os.path.exists("/etc/nas-os/dev-reload")})
+            elif p == "/api/stats":
                 self._json(stats())
             elif p == "/api/screen/config":
                 # _run() returns a DICT {ok,code,log}: calling .strip() on it dropped the endpoint
