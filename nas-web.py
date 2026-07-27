@@ -3453,16 +3453,23 @@ for _k in ("pool", "diskfull", "root_full", "inodes", "docker_space"):
 for _k in ("temp", "throttle", "undervolt", "mem", "swap", "load", "sustained_heat",
            "fan_stall", "proc_hog", "thermal_guard"):
     _EVENT_KIND[_k] = "power"
+_EVENT_KIND["dirty_boot"] = "power"
+_EVENT_KIND["write_load"] = "disk"
 for _k in ("svcfail", "container", "container_loop", "cron_failed", "boot",
            "reboot_req", "updates", "sec_updates", "time_drift", "weekly",
            "daily_summary", "cfg_corrupt"):
     _EVENT_KIND[_k] = "svc"
 for _k in ("panel_new", "panel_fail", "ssh_login"):
     _EVENT_KIND[_k] = "access"
+for _k in ("resil_drill", "log_sentry", "health"):
+    _EVENT_KIND[_k] = "svc"
 for _k in ("ip_changed", "link_changed", "vpn_offline", "traffic"):
     _EVENT_KIND[_k] = "net"
 for _k in ("snap_ok", "snap_err", "scrub_err", "delete_block", "backup", "mergerfs",
            "nas_backup", "imsb_fail", "nb_conn", "nb_srcmiss", "nb_stale", "nb_dumps", "nb_size", "nb_dest", "nb_guard", "nb_verify",
+           # every Kopia alert used to fall through to «system» — a failed snapshot backup filed
+           # under the same heading as a service restart, which is where nobody looks for it
+           "nb_missed", "kp_run", "kp_err", "kp_stale", "kp_maint",
            "fsw_corrupt", "fsw_guard", "fsw_root", "fsw_del", "fsw_scan"):
     _EVENT_KIND[_k] = "protect"
 
@@ -13318,6 +13325,7 @@ def _kp_snap_cli(bid):
 
     phases, result, err = {}, "ok", ""
     policy_warn = ""          # rules could not be re-stated, the stored ones still apply
+    retried = False           # the snapshot needed a second attempt after a backend hiccup
     snap_bytes = snap_files = failed_files = 0
     tail = []
     _w0 = w
@@ -13504,6 +13512,7 @@ def _kp_snap_cli(bid):
                     w(ln)
                 manifests = _parse_manifests(r2.get("out"))
                 if manifests:
+                    retried = True
                     w("the second attempt went through")
         for mf in manifests:
             summ = ((mf.get("rootEntry") or {}).get("summ") or {})
@@ -13516,9 +13525,15 @@ def _kp_snap_cli(bid):
             result, err = "error", ("snapshot failed (code %d) — see the log" % proc.returncode
                                     + ((": " + tail_lines[-1][-160:]) if tail_lines else ""))
             return
-        if proc.returncode != 0 or failed_files:
-            result = "warn"
-            err = "%d file(s) could not be read" % failed_files if failed_files else "snapshot finished with errors"
+        if failed_files:
+            result, err = "warn", "%d file(s) could not be read" % failed_files
+        elif retried:
+            # the first attempt died on the backend, the second went through cleanly. Still a
+            # warning — something DID go wrong — but «finished with errors» would be a lie about
+            # a snapshot that is complete
+            result, err = "warn", "the destination hiccuped; the snapshot went through on the second attempt"
+        elif proc.returncode != 0:
+            result, err = "warn", "snapshot finished with errors"
         w("snapshot done: %d files, %s%s" % (snap_files, fmt_bytes(snap_bytes),
                                              (", %d failed" % failed_files) if failed_files else ""))
         if manifests and result in ("ok", "warn"):
