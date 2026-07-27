@@ -9756,11 +9756,19 @@ def _nb_sched_tick():
                              cooldown=6 * 3600)
             _nb_sched_mark(pid, label)
             continue
-        _nb_sched_mark(pid, label)
         if late > 120:
             print("[backup] %s: the %s run was missed (panel not running?) — starting it now, "
                   "%d min late" % (cfg.get("name") or pid, label, late // 60), flush=True)
-        nb_run_bg(pid, dry=False)
+        r = nb_run_bg(pid, dry=False)
+        if r.get("ok"):
+            _nb_sched_mark(pid, label)
+        else:
+            notify_event("nb_missed", "nb:start:" + pid,
+                         "NAS backup: scheduled run could not start",
+                         "«%s» was due at %s but could not start: %s. It will be retried while "
+                         "the schedule window is still open."
+                         % (cfg.get("name") or pid, label, r.get("log") or "unknown error"),
+                         cooldown=6 * 3600)
     _nb_queue_drain()      # freed up — take the next one from the queue
 
 def _nb_drill_sched_tick():
@@ -13269,6 +13277,8 @@ def _kopia_tick():
         s = b.get("schedule") or {}
         if not b.get("enabled", True) or s.get("mode") not in ("daily", "weekly"):
             continue
+        if b["id"] in (stt.get("pending") or {}):
+            continue                         # the queued-start loop below owns this attempt
         due, label = sched_last_due(now, s.get("time"),
                                     int(s.get("dow", 0)) if s.get("mode") == "weekly" else None)
         if not due or done.get(b["id"]) == label:
@@ -13284,14 +13294,22 @@ def _kopia_tick():
                              cooldown=6 * 3600)
             done[b["id"]] = label; dirty = True
             continue
-        done[b["id"]] = label; dirty = True
         if late > 120:
             print("[kopia] %s: the %s run was missed — starting it now, %d min late"
                   % (b.get("name") or b["id"], label, late // 60), flush=True)
         r = kp_run_start(b["id"])
-        if not r.get("ok") and "busy" in (r.get("log") or ""):
+        if r.get("ok"):
+            done[b["id"]] = label; dirty = True
+        elif "busy" in (r.get("log") or ""):
             stt.setdefault("pending", {})[b["id"]] = int(now)   # queued: retry below
             dirty = True
+        else:
+            notify_event("nb_missed", "kp:start:" + b["id"],
+                         "Snapshot backup: scheduled run could not start",
+                         "«%s» was due at %s but could not start: %s. It will be retried while "
+                         "the schedule window is still open."
+                         % (b.get("name") or b["id"], label, r.get("log") or "unknown error"),
+                         cooldown=6 * 3600)
     # queued starts: the destination was busy at the scheduled minute — keep trying for 6h
     for bid, ts in list((stt.get("pending") or {}).items()):
         b = _kp_find(cfg["backups"], bid)
@@ -13299,7 +13317,14 @@ def _kopia_tick():
             stt["pending"].pop(bid, None); dirty = True
             continue
         r = kp_run_start(bid)
-        if r.get("ok") or "busy" not in (r.get("log") or ""):
+        if r.get("ok"):
+            _due, label = sched_last_due(now, (b.get("schedule") or {}).get("time"),
+                                         int((b.get("schedule") or {}).get("dow", 0))
+                                         if (b.get("schedule") or {}).get("mode") == "weekly" else None)
+            if label:
+                done[bid] = label
+            stt["pending"].pop(bid, None); dirty = True
+        elif "busy" not in (r.get("log") or ""):
             stt["pending"].pop(bid, None); dirty = True
     # 2) §9.3 run-on-plug-in: an fs destination just became present again
     pres = stt.setdefault("present", {})
@@ -13376,8 +13401,9 @@ def _kp_drill(destid, manifests, w):
     import random
     rng = random.Random()
     tmpd = os.path.join(NAS_CONFIG, "kopia-drill.%d" % os.getpid())
-    checked = matched = 0
+    attempted = checked = matched = failed = 0
     rot = []
+    failures = []
     try:
         os.makedirs(tmpd, exist_ok=True)
         pairs = [(((mf.get("source") or {}).get("path") or ""),
@@ -13399,8 +13425,12 @@ def _kp_drill(destid, manifests, w):
                 except OSError:
                     continue
                 tmpf = os.path.join(tmpd, "drill-%d.bin" % checked)
+                attempted += 1
                 r = _kp(destid, ["restore", oid, tmpf], timeout=600)
                 if not r["ok"]:
+                    failed += 1
+                    failures.append({"path": rel, "why": _kp_err_tail(r)})
+                    w("restore drill failed for %s: %s" % (rel, _kp_err_tail(r)))
                     continue
                 def _sha(p):
                     h = hashlib.sha256()
@@ -13426,6 +13456,8 @@ def _kp_drill(destid, manifests, w):
             pass
     if checked:
         w("restore drill: %d/%d random file(s) restored and byte-identical" % (matched, checked))
+    elif attempted:
+        w("restore drill: none of %d attempted file(s) could be verified" % attempted)
     if rot:
         w("DRILL MISMATCH: " + ", ".join(rot[:3]))
         try:
@@ -13435,7 +13467,8 @@ def _kp_drill(destid, manifests, w):
                          cooldown=6 * 3600)
         except Exception:
             pass
-    return {"checked": checked, "ok": matched, "rot": len(rot)}
+    return {"attempted": attempted, "checked": checked, "ok": matched,
+            "failed": failed, "failures": failures[:3], "rot": len(rot)}
 
 def _kp_snap_cli(bid):
     """Driver (transient unit nas-kopia-<id>): apply policies, snapshot every
@@ -13692,11 +13725,17 @@ def _kp_snap_cli(bid):
             upd(phase="drill", force=True)
             t_drill = time.time()
             drill = _kp_drill(dst["id"], manifests, w)
-            if drill.get("checked"):
+            if drill.get("attempted") or drill.get("checked"):
                 phases["drill"] = dict(drill, dur=int(time.time() - t_drill))
-            if drill.get("rot"):
+            if drill.get("rot") or drill.get("failed") or not drill.get("checked"):
                 result = "warn" if result == "ok" else result
-                err = (err + "; " if err else "") + "restore drill found mismatched files"
+                if drill.get("rot"):
+                    drill_err = "restore drill found mismatched files"
+                elif drill.get("failed"):
+                    drill_err = "restore drill could not restore %d sampled file(s)" % drill["failed"]
+                else:
+                    drill_err = "restore drill could not verify a sampled file"
+                err = (err + "; " if err else "") + drill_err
         if skipped:
             result = result if result != "ok" else "warn"
             err = (err + "; " if err else "") + "missing folders skipped: " + ", ".join(skipped[:3])

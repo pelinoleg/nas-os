@@ -4,7 +4,7 @@
 #   ./check.sh          — run everything
 #   ./check.sh py js sh — run only the named groups
 #
-# Groups: py, sh, gen (scripts generated inside heredocs), js, css, i18n, git.
+# Groups: py, test, sh, gen (scripts generated inside heredocs), js, css, i18n, git.
 # Node is not installed on the box: JS is checked through the node:20-alpine
 # image (see MEMORY: js-validation-no-node). Without docker the js group is
 # skipped, not failed.
@@ -19,7 +19,7 @@ skip(){ printf '  \033[33m—\033[0m %s\n' "$1"; }
 head(){ printf '\n\033[1m%s\033[0m\n' "$1"; }
 # NB: don't name the array GROUPS — that's a bash builtin variable (group ids),
 # assigning to it is silently ignored.
-CHECKS=("$@"); [ ${#CHECKS[@]} -eq 0 ] && CHECKS=(py sh gen js css i18n git)
+CHECKS=("$@"); [ ${#CHECKS[@]} -eq 0 ] && CHECKS=(py test sh gen js css i18n git)
 has(){ local g; for g in "${CHECKS[@]}"; do [ "$g" = "$1" ] && return 0; done; return 1; }
 
 # --- extract the shell scripts that live inside heredocs / python strings ---
@@ -73,6 +73,14 @@ if has py; then
   head "Python"
   RUN=1
   python3 -m py_compile nas-web.py 2>/dev/null && ok "nas-web.py compiles" || bad "nas-web.py"
+fi
+
+# ------------------------------------------------------------ regression --
+if has test; then
+  head "Regression tests"
+  RUN=1
+  python3 -m unittest discover -s tests >/dev/null 2>&1 \
+    && ok "backup reliability" || bad "backup reliability"
 fi
 
 # ------------------------------------------------------------------- shell --
