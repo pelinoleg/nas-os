@@ -11076,7 +11076,12 @@ def _kp_forget_runs(kid):
             pass
     with _KP_CFG_LOCK:
         stt = _kp_state_load()
-        if (stt.get("pending") or {}).pop(kid, None) is not None:
+        # «pending» is a queued start; «done» is the slot already acted on. Leaving the latter
+        # behind is not just clutter: a NEW backup that reused the id would inherit «tonight is
+        # already handled» and quietly skip its first run.
+        gone = [k for k in ("pending", "done")
+                if isinstance(stt.get(k), dict) and stt[k].pop(kid, None) is not None]
+        if gone:
             _json_save(KP_STATE_FILE, stt)
 
 def kp_status():
@@ -22585,7 +22590,7 @@ class H(BaseHTTPRequestHandler):
                         st = os.stat(os.path.join(root, fn))
                     except OSError:
                         continue
-                    h.update(("%s|%d|%d;" % (fn, int(st.st_mtime), st.st_size)).encode())
+                    h.update(("%s|%d|%d;" % (fn, st.st_mtime_ns, st.st_size)).encode())
         except OSError:
             pass
         H._VER.update(t=now, v=h.hexdigest()[:16])
@@ -22607,7 +22612,7 @@ class H(BaseHTTPRequestHandler):
             return data, False
         try:
             st = os.stat(full)
-            key = (full, int(st.st_mtime), st.st_size)
+            key = (full, st.st_mtime_ns, st.st_size)
         except OSError:
             return data, False
         hit = H._GZ_CACHE.get(key)
@@ -22657,7 +22662,7 @@ class H(BaseHTTPRequestHandler):
         # fresh file. HTML stays no-store (there the validator was not trusted at all).
         try:
             st_ = os.stat(full)
-            etag = '"%x-%x"' % (int(st_.st_mtime), st_.st_size)
+            etag = '"%x-%x"' % (st_.st_mtime_ns, st_.st_size)
         except OSError:
             etag = None
         body, gz = self._gzipped(full, data, ext)
