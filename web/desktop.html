@@ -3186,6 +3186,10 @@
   .ev-c.is-rings{position:relative}
   .ev-c.is-rings::after{content:"rings";position:absolute;left:50%;transform:translateX(-50%);
    bottom:-11px;font-size:8.5px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--warn)}
+  .selbox{position:fixed;z-index:1;pointer-events:none;border-radius:4px;
+   border:1px solid color-mix(in srgb,var(--accent) 70%,transparent);
+   background:color-mix(in srgb,var(--accent) 14%,transparent)}
+  body.selecting{user-select:none}
   .verbar{position:fixed;left:50%;transform:translateX(-50%);bottom:96px;z-index:620;display:flex;
    align-items:center;gap:10px;padding:9px 10px 9px 14px;border-radius:14px;
    background:var(--glass-2);backdrop-filter:blur(20px) saturate(1.4);-webkit-backdrop-filter:blur(20px) saturate(1.4);
@@ -4255,6 +4259,29 @@ function longPress(node,fn){
  node.addEventListener("touchend",cancel);
  node.addEventListener("touchcancel",cancel);
 }
+/* A drag on empty desktop draws the band every desktop draws. Decorative on purpose: it
+   selects nothing, because there is nothing here that a selection would then act on — it is
+   the missing feedback that the surface is a surface, not a wall. */
+function initDeskSelect(){
+ const desk=document.querySelector(".desk");if(!desk)return;
+ let box=null,x0=0,y0=0;
+ const stop=()=>{if(box){box.remove();box=null;}
+  window.removeEventListener("mousemove",move);window.removeEventListener("mouseup",stop);
+  document.body.classList.remove("selecting");};
+ const move=e=>{if(!box)return;
+  const x=Math.min(e.clientX,x0),y=Math.min(e.clientY,y0);
+  box.style.left=x+"px";box.style.top=y+"px";
+  box.style.width=Math.abs(e.clientX-x0)+"px";box.style.height=Math.abs(e.clientY-y0)+"px";};
+ desk.addEventListener("mousedown",e=>{
+  if(e.button!==0)return;
+  // anything interactive keeps its own behaviour — a drag inside a widget is not a marquee
+  if(e.target.closest(".app,.wdg,button,a,input,select,textarea,.win"))return;
+  x0=e.clientX;y0=e.clientY;
+  box=document.createElement("div");box.className="selbox";
+  box.style.cssText="left:"+x0+"px;top:"+y0+"px;width:0;height:0";
+  desk.appendChild(box);document.body.classList.add("selecting");
+  window.addEventListener("mousemove",move);window.addEventListener("mouseup",stop);});
+}
 function renderApps(){
  const box=document.getElementById("apps");box.innerHTML="";
  if(SET.deskAppsHidden)return;      // the surface is deliberately empty; Launchpad still has everything
@@ -4271,7 +4298,7 @@ function renderApps(){
    {label:"Hide all shortcuts",ic:svg("grid",16),act:()=>{
     SET.deskAppsHidden=true;saveSettings();renderApps();
     toast("The desktop is clear — every app is in Launchpad");}}]);
-  b.oncontextmenu=e=>{e.preventDefault();appMenu(e.clientX,e.clientY);};
+  b.oncontextmenu=e=>{e.preventDefault();e.stopPropagation();appMenu(e.clientX,e.clientY);};
   longPress(b,appMenu);
   box.appendChild(b);});
  if(APPS_LOADED&&!APPS.filter(a=>a.url).length)box.appendChild(el(`<div class="apps-hint">App shortcuts will appear here automatically.<br>Add the container labels <b>web-desktop.*</b> in docker-compose, bring it up in <b>Dockge</b> and click <b>"Refresh shortcuts"</b> (right-click the desktop).<br><br>System tools are in the panel below.</div>`));
@@ -13818,11 +13845,32 @@ function lsBar(lb){lb.innerHTML=`
    <div class="mon-note" style="margin:0 0 6px">What to show in the bar:</div><div id="trayList"></div></div>`;
  cfgList(lb.querySelector("#trayList"),trayCfg,c=>{SET.tray=c;},TRAY_DEFS,()=>paintTray(LAST||MOCK.stats));
  wireLook(lb);}
+function lsAppsList(lb){
+ const box=lb.querySelector("#lsApps");if(!box)return;
+ const shortcuts=(APPS||[]).filter(a=>a.url);
+ if(!shortcuts.length){
+  box.innerHTML=`<div class="set-grp">Shortcuts from Docker</div>
+   <div class="mon-note">None yet. A container gets a shortcut here when its compose file carries
+   the <b>web-desktop.*</b> labels.</div>`;return;}
+ const hid=SET.deskHidden||[];
+ box.innerHTML=`<div class="set-grp">Shortcuts from Docker</div>
+  <div class="mon-note">These appear by themselves, from the <b>web-desktop.*</b> labels on your
+  containers. Switch one off and it leaves the desktop only — it stays in Launchpad and its
+  container is not touched.</div>`
+  +shortcuts.map(a=>{const k=a.container||a.name;
+   return `<div class="mon-row"><span>${esc(a.name)}<div class="mon-sub mono">${esc(a.container||"")}</div></span>
+    <label class="tgl"><input type="checkbox" data-app="${att(k)}"${hid.includes(k)?"":" checked"}><span class="sl"></span></label></div>`;}).join("");
+ box.querySelectorAll("input[data-app]").forEach(cb=>cb.onchange=()=>{
+  const k=cb.dataset.app,cur=SET.deskHidden||[];
+  SET.deskHidden=cb.checked?cur.filter(x=>x!==k):[...cur,k];
+  saveSettings();renderApps();});
+}
 function lsWidgets(lb){const cl=/^#[0-9a-f]{6}$/i;lb.innerHTML=`
   <div class="set-card">
    ${pToggle("Hide the widget panel","Removes the right panel entirely — the desktop takes the full width.","railHidden","right panel with summaries")}
    ${pToggle("Hide app shortcuts","Clears the shortcuts off the desktop. Every app stays in Launchpad (the grid button in the top bar) — this only empties the surface.","deskAppsHidden","app shortcuts on the desktop")}
   </div>
+  <div class="set-card" id="lsApps"></div>
   <div class="set-card"><div class="set-grp">Widget background</div>
    ${opSlider("Background opacity","wdgOp","Custom density of widget backgrounds. By default — shared, same as windows (the «Material» tab).")}
    ${pSlider("Blur behind widgets","wdgBlur",0,100,1,"px","Frosted blur of the wallpaper behind widgets. 0 — no blur.")}
@@ -13850,7 +13898,7 @@ function lsPop(lb){const cl=/^#[0-9a-f]{6}$/i;lb.innerHTML=`
  const pc2=lb.querySelector("#popC"),pk=isLight()?"popLight":"popDark";
  pc2.oninput=()=>{SET[pk]=pc2.value;applySettings();};pc2.onchange=()=>saveSettings();
  lb.querySelectorAll("[data-preset]").forEach(b=>b.onclick=()=>{SET[b.dataset.preset]="";applySettings();saveSettings();lsPop(lb);});
- wireLook(lb);}
+ wireLook(lb);lsAppsList(lb);}
 function lsDock(lb){lb.innerHTML=`
   <div class="set-card">
    <div class="field"><label>Position</label><div class="seg" id="dockPos">
@@ -15170,7 +15218,10 @@ function opsPop(){const b=document.getElementById("opsBtn");if(!b)return;
   ()=>{OPS.autoOpened=false;if(OPS.list.some(x=>x.state==="run"))OPS.autoClosed=true;});}
 
 /* context menu */
-document.querySelector(".desk").addEventListener("contextmenu",e=>{e.preventDefault();
+document.querySelector(".desk").addEventListener("contextmenu",e=>{
+ // an icon (or a widget) answers for itself — the surface menu is for the surface only
+ if(e.target.closest(".app,.wdg"))return;
+ e.preventDefault();
  showMenu(e.clientX,e.clientY,[
   {label:"Refresh shortcuts",ic:svg("refresh",17),act:()=>{pollApps();toast("Shortcuts refreshed");}},
   {label:"Refresh all",ic:svg("refresh",17),act:()=>{poll();pollApps();pollDisks();}},{sep:1},
@@ -15299,6 +15350,7 @@ function versionWatch(){
  // wrong on the tablet). The server copy is a write-only backup — we do NOT pull it back here.
  syncthingFollowTheme();   // correct a mismatch left by a reboot or a manual change
  try{versionWatch();}catch(e){}   // its own try: a watcher must never be able to stop the panel booting
+ try{initDeskSelect();}catch(e){}
  const tb=document.getElementById("themeBtn");if(tb)tb.onclick=cycleTheme;
  const pb=document.getElementById("powerBtn");
  if(pb){pb.innerHTML=svg("power",17);pb.onclick=()=>{const r=pb.getBoundingClientRect();
