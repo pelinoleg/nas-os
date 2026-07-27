@@ -3289,14 +3289,24 @@
   .nt-bar .seg button{padding:5px 10px;font-size:12px}
   .nt-bar input,.nt-bar select{background:var(--card);border:1px solid var(--line);border-radius:9px;color:var(--text);padding:7px 10px;font-size:12.3px}
   .nt-bar input{width:140px}
-  .nt-row{display:flex;gap:10px;padding:9px 10px;border-radius:10px;align-items:flex-start;margin-bottom:6px}
-  .nt-row.new+.nt-row.new{margin-top:2px}
-  .nt-row:hover{background:var(--card)}
-  .nt-row .nt-w{width:110px;flex:none;font-size:11px;color:var(--mut);margin-top:2.5px}
+  .nt-grp{background:var(--card);border:1px solid var(--line);border-radius:14px;margin:0 0 12px;overflow:hidden}
+  .nt-grp.open{border-color:color-mix(in srgb,var(--warn) 45%,var(--line));background:color-mix(in srgb,var(--warn) 7%,var(--card))}
+  .nt-gh{display:flex;align-items:center;gap:6px;padding:8px 12px;font-size:10.5px;font-weight:800;
+   letter-spacing:.06em;text-transform:uppercase;color:var(--mut);border-bottom:1px solid var(--line)}
+  .nt-grp.open .nt-gh,.nt-grp.open .nt-gh svg{color:var(--warn)}
+  .nt-row{display:flex;gap:10px;padding:10px 12px;align-items:flex-start;border-left:3px solid transparent}
+  .nt-row+.nt-row{border-top:1px solid var(--line)}
+  .nt-row.l-crit{border-left-color:var(--danger)}
+  .nt-row.l-warn{border-left-color:var(--warn)}
+  .nt-row.l-ok{border-left-color:color-mix(in srgb,var(--good) 55%,transparent)}
+  .nt-row.new{background:color-mix(in srgb,var(--accent) 6%,transparent)}
+  @media(hover:hover){.nt-row:hover{background:var(--card-2)}}
+  .nt-row .nt-ic{flex:none;margin-top:1px;opacity:.9}
+  .nt-row .nt-w{width:62px;flex:none;font-size:11px;color:var(--mut);margin-top:3px;font-variant-numeric:tabular-nums}
   .nt-row .nt-k{flex:none;font-size:10px;font-weight:700;color:var(--dim);background:var(--card-2);border-radius:6px;padding:2.5px 7px;margin-top:1px}
   .nt-row .nt-mm{flex:1;min-width:0}
-  .nt-row .nt-tt{font-size:12.6px;font-weight:600}
-  .nt-row .nt-ms{font-size:11.6px;color:var(--dim);margin-top:2px;white-space:pre-wrap;word-break:break-word}
+  .nt-row .nt-tt{font-size:13px;font-weight:650;line-height:1.35}
+  .nt-row .nt-ms{font-size:11.6px;color:var(--mut);margin-top:3px;white-space:pre-wrap;word-break:break-word}
   @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style></head><body>
 <div class="wall" id="wall"></div>
@@ -14958,9 +14968,40 @@ function winNotif(){openWin("__notif","Notifications",async body=>{
  let lvl="",kind="",q="",items=[];
  const list=body.querySelector("#ntList");
  let seenAt=EVQ.seen;    // the divide at the moment of opening — we highlight new ones
+ /* One flat river of same-weight rows is why nobody read this. Three changes: what is still
+    WRONG is lifted out of the chronology (a condition is not news, it is a state), the rest is
+    grouped by day so the time column stops repeating the date, and the level is carried by a
+    coloured edge instead of by an icon alone. */
+ const dayLabel=t=>{const d0=new Date(t*1000),n=new Date(),y=new Date(n-864e5);
+  const same=(a,b)=>a.toDateString()===b.toDateString();
+  return same(d0,n)?"Today":same(d0,y)?"Yesterday":d0.toLocaleDateString(LOC,{weekday:"short",day:"numeric",month:"short"});};
+ const howLong=t=>{const s=Math.max(0,Date.now()/1000-t);
+  return s<3600?Math.round(s/60)+" min":s<86400?Math.round(s/3600)+" h":Math.round(s/86400)+" d";};
+ const ntRow=(e,when)=>`<div class="nt-row l-${esc(e.lvl||"info")}${e.id>seenAt?" new":""}">
+   <span class="nt-w">${esc(when)}</span>
+   <span class="nt-ic" title="${att(NKIND[e.kind]||e.kind||"")}">${nico(e)}</span>
+   <div class="nt-mm"><div class="nt-tt">${esc(e.title)}${e.n>1?` <span class="nmul">×${e.n}</span>`:""}</div>
+    ${e.msg?`<div class="nt-ms">${esc(e.msg)}</div>`:""}</div></div>`;
  const paint=()=>{const f=items.filter(e=>(!lvl||e.lvl===lvl)&&(!kind||e.kind===kind)&&(!q||(e.title+" "+(e.msg||"")).toLowerCase().includes(q)));
-  list.innerHTML=f.length?f.map(e=>`<div class="nt-row${e.id>seenAt?" new":""}"><span class="nt-w">${ruWhen(e.t2||e.t)}</span><span title="${att(NKIND[e.kind]||e.kind||"")}">${nico(e)}</span><div class="nt-mm"><div class="nt-tt">${esc(e.title)}${e.n>1?` <span class="nmul">×${e.n}</span>`:""}</div>${e.msg?`<div class="nt-ms">${esc(e.msg)}</div>`:""}</div></div>`).join("")
-   :`<div class="dempty">${svg("bell",16)} ${items.length?"Nothing matches the filter":"The log is empty — system events and your actions will be collected here"}</div>`;};
+  // by WHEN IT LAST HAPPENED, not by the order it was written. A condition keeps its record and
+  // its id but its time moves forward every time it repeats, so an id-ordered list showed 14:31
+  // above 09:00 above 14:08 — caught by looking at a rendering, not at the code.
+  f.sort((a,b)=>((b.t2||b.t)-(a.t2||a.t)));
+  if(!f.length){list.innerHTML=`<div class="dempty">${svg("bell",16)} ${items.length?"Nothing matches the filter":"The log is empty — system events and your actions will be collected here"}</div>`;return;}
+  const isOpen=e=>e.cond&&(e.lvl==="warn"||e.lvl==="crit");
+  const open=f.filter(isOpen), rest=f.filter(e=>!isOpen(e));
+  let h="";
+  // worst first, and among equals the one that has been going on longest
+  const rank={crit:0,warn:1,ok:2,info:3};
+  open.sort((a,b)=>(rank[a.lvl]-rank[b.lvl])||(a.t-b.t));
+  if(open.length)h+=`<div class="nt-grp open"><div class="nt-gh">${svg("warn",13)} Still going on — ${open.length}</div>`
+    +open.map(e=>ntRow(e,howLong(e.t))).join("")+`</div>`;
+  let day="";
+  rest.forEach(e=>{const dl=dayLabel(e.t2||e.t);
+   if(dl!==day){if(day)h+="</div>";day=dl;h+=`<div class="nt-grp"><div class="nt-gh">${esc(dl)}</div>`;}
+   h+=ntRow(e,new Date((e.t2||e.t)*1000).toLocaleTimeString(LOC,{hour:"2-digit",minute:"2-digit"}));});
+  if(day)h+="</div>";
+  list.innerHTML=h;};
  const loadEv=async()=>{seenAt=EVQ.seen;const r=await api("/api/events?limit=1000");items=((r&&r.events)||[]).slice().reverse();paint();markSeen();};
  body.querySelectorAll("#ntLvl button").forEach(bt=>bt.onclick=()=>{body.querySelectorAll("#ntLvl button").forEach(x=>x.classList.toggle("on",x===bt));lvl=bt.dataset.l;paint();});
  const kb=body.querySelector("#ntKindBtn");

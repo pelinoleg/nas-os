@@ -3494,6 +3494,38 @@ _EVENT_COND = {
 }
 COND_KEEP_DAYS = 30          # after this long without a repeat, a condition starts a new record
 
+def _events_merge_conditions():
+    """One-off: fold the duplicates the OLD rule left behind. Conditions only started sharing a
+    record today, so the existing log still holds «security updates applied» four times over. The
+    merge keeps the newest record (its id, so read/unread stays meaningful), sums the counts and
+    takes the earliest first-seen — otherwise «going on for N days» would lie about the age."""
+    with _events_lock:
+        ev = _events_load()
+        if ev.get("condv"):
+            return 0
+        items = ev["items"]; keep = []; by = {}
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            k = (it.get("event"), it.get("title"))
+            if it.get("event") in _EVENT_COND and k in by:
+                first = by[k]
+                first["n"] = first.get("n", 1) + it.get("n", 1)
+                first["t"] = min(first.get("t", 0), it.get("t", 0))
+                first["t2"] = max(first.get("t2") or first.get("t", 0), it.get("t2") or it.get("t", 0))
+                if it.get("id", 0) > first.get("id", 0):     # newest wording and id win
+                    first["id"], first["msg"], first["lvl"] = it["id"], it.get("msg", ""), it.get("lvl")
+                continue
+            if it.get("event") in _EVENT_COND:
+                it["cond"] = 1
+                by[k] = it
+            keep.append(it)
+        removed = len(items) - len(keep)
+        ev["items"] = sorted(keep, key=lambda x: x.get("id", 0))
+        ev["condv"] = 1
+        _events_save(ev)
+        return removed
+
 def log_event(event, title, msg="", lvl=None, kind=None, desk=None):
     """Write an event to the log. lvl: info|ok|warn|crit. desk=None → from the
     event settings (whether to show as a card on the desktop)."""
@@ -24656,6 +24688,7 @@ def main():
         _motd_extras_apply(motd_load())   # third-party greeting fragments — per setting
     except Exception:
         pass
+    _safe(_events_merge_conditions)   # one-off: fold the duplicates the old dedup rule left
     threading.Thread(target=monitor_loop, daemon=True).start()
     srv = _Server(("0.0.0.0", PORT), H)
     ip = lan_ip()
