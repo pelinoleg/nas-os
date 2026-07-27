@@ -101,5 +101,46 @@ class ScheduleTests(unittest.TestCase):
         self.assertEqual(state["pending"]["abcdef"], 1000)
 
 
+
+
+class AlreadyRunningTests(unittest.TestCase):
+    """A run that is ALREADY going satisfies its own schedule slot. Treating that as a failed
+    start raised «could not start» and re-attempted every minute until the run finished."""
+
+    def test_mirror_slot_is_marked_when_the_run_is_already_going(self):
+        marks, notes = [], []
+        profile = {"id": "p1", "name": "P", "saved": 0,
+                   "schedule": {"enabled": True, "freq": "daily", "time": "15:00"}}
+        with mock.patch.object(nas, "nb_profiles", lambda: [profile]), \
+             mock.patch.object(nas, "nb_run_bg",
+                               lambda pid, dry=False, allow_delete=False:
+                               {"ok": False, "log": "already running"}), \
+             mock.patch.object(nas, "_nb_last_real_run", lambda pid: 0), \
+             mock.patch.object(nas, "_nb_sched_mark",
+                               lambda pid, label: marks.append((pid, label))), \
+             mock.patch.object(nas, "_json_load_strict", lambda path, default: default), \
+             mock.patch.object(nas, "notify_event",
+                               lambda *a, **k: notes.append(a[0]) or True), \
+             mock.patch.object(nas, "_nb_queue_drain", lambda: None):
+            nas._nb_sched_tick()
+        self.assertEqual(len(marks), 1, "an already-running backup must consume its slot")
+        self.assertEqual(notes, [], "and must not report a failure to start")
+
+
+class DrillSampleTests(unittest.TestCase):
+    """No file small enough to spot-check is a limit of the sampler, not a bad backup."""
+
+    def test_empty_sample_is_not_a_failure(self):
+        logged = []
+        manifests = [{"source": {"path": "/source"}, "rootEntry": {"obj": "k" + "a" * 32}}]
+        with tempfile.TemporaryDirectory() as td, \
+             mock.patch.object(nas, "NAS_CONFIG", td), \
+             mock.patch.object(nas, "_kp_drill_pick", lambda *a, **k: None):
+            out = nas._kp_drill("dest", manifests, logged.append)
+        self.assertEqual(out["attempted"], 0, "nothing was samplable")
+        self.assertEqual(out["failed"], 0, "and nothing failed — the two are not the same")
+        self.assertEqual(out["rot"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()

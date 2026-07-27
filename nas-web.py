@@ -9760,7 +9760,10 @@ def _nb_sched_tick():
             print("[backup] %s: the %s run was missed (panel not running?) — starting it now, "
                   "%d min late" % (cfg.get("name") or pid, label, late // 60), flush=True)
         r = nb_run_bg(pid, dry=False)
-        if r.get("ok"):
+        # «already running» is not a failed start — it means the very thing this slot asks for is
+        # happening (a manual run that overlaps its own schedule). Treating it as a failure raised
+        # «could not start» and re-attempted every minute until that run finished.
+        if r.get("ok") or "already running" in (r.get("log") or ""):
             _nb_sched_mark(pid, label)
         else:
             notify_event("nb_missed", "nb:start:" + pid,
@@ -13298,8 +13301,8 @@ def _kopia_tick():
             print("[kopia] %s: the %s run was missed — starting it now, %d min late"
                   % (b.get("name") or b["id"], label, late // 60), flush=True)
         r = kp_run_start(b["id"])
-        if r.get("ok"):
-            done[b["id"]] = label; dirty = True
+        if r.get("ok") or "already running" in (r.get("log") or ""):
+            done[b["id"]] = label; dirty = True      # see the Mirror note above
         elif "busy" in (r.get("log") or ""):
             stt.setdefault("pending", {})[b["id"]] = int(now)   # queued: retry below
             dirty = True
@@ -13727,15 +13730,16 @@ def _kp_snap_cli(bid):
             drill = _kp_drill(dst["id"], manifests, w)
             if drill.get("attempted") or drill.get("checked"):
                 phases["drill"] = dict(drill, dur=int(time.time() - t_drill))
-            if drill.get("rot") or drill.get("failed") or not drill.get("checked"):
+            if drill.get("rot") or drill.get("failed"):
                 result = "warn" if result == "ok" else result
-                if drill.get("rot"):
-                    drill_err = "restore drill found mismatched files"
-                elif drill.get("failed"):
-                    drill_err = "restore drill could not restore %d sampled file(s)" % drill["failed"]
-                else:
-                    drill_err = "restore drill could not verify a sampled file"
-                err = (err + "; " if err else "") + drill_err
+                err = (err + "; " if err else "") + (
+                    "restore drill found mismatched files" if drill.get("rot")
+                    else "restore drill could not restore %d sampled file(s)" % drill["failed"])
+            elif not drill.get("checked"):
+                # nothing was even attempted: the sampler descends at random and skips files over
+                # 200 MB, so a snapshot of only huge files offers it nothing. That is a limit of
+                # the spot-check, not a fault of the backup — say it in the log, do not cry wolf.
+                w("restore drill: no file small enough to spot-check in this snapshot")
         if skipped:
             result = result if result != "ok" else "warn"
             err = (err + "; " if err else "") + "missing folders skipped: " + ", ".join(skipped[:3])
