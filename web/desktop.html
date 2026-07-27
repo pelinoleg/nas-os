@@ -3182,6 +3182,10 @@
    background:color-mix(in srgb,var(--warn) 12%,transparent);border-bottom:1px solid var(--line);color:var(--ink)}
   .ed-ro svg{color:var(--warn);flex:none;margin-top:1px}
   .mon-sub{font-size:11.5px;color:var(--mut);margin-top:2px;max-width:46ch}
+  .ev-c.is-gated{opacity:.45}
+  .ev-c.is-rings{position:relative}
+  .ev-c.is-rings::after{content:"rings";position:absolute;left:50%;transform:translateX(-50%);
+   bottom:-11px;font-size:8.5px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--warn)}
   .verbar{position:fixed;left:50%;transform:translateX(-50%);bottom:96px;z-index:620;display:flex;
    align-items:center;gap:10px;padding:9px 10px 9px 14px;border-radius:14px;
    background:var(--glass-2);backdrop-filter:blur(20px) saturate(1.4);-webkit-backdrop-filter:blur(20px) saturate(1.4);
@@ -14031,6 +14035,7 @@ const EVMETA=[
 const PRIO=[[2,"Emergency"],[1,"Important"],[0,"Normal"],[-1,"Quiet"],[-2,"Badge"]];
 function notifyTab(tc){tc.innerHTML=`<div style="color:var(--mut);font-size:12px">loading…</div>`;
  api("/api/monitor").then(r=>{const MON=(r&&r.monitor)||{events:{}},NTF=(r&&r.notify)||{},ev=MON.events||{};
+  const URGENT=new Set((r&&r.push_now)||[]);
   tc.innerHTML=`
    <div class="set-h" style="margin-top:0;padding-top:0;border:none">Pushover account</div>
    <div class="field"><label>User key</label><input id="nfU" class="mono" value="${att(NTF.user||'')}" placeholder="u..."></div>
@@ -14047,7 +14052,7 @@ function notifyTab(tc){tc.innerHTML=`<div style="color:var(--mut);font-size:12px
    <div class="mon-note" id="nfModeNote"></div>
    <div style="display:flex;gap:16px;flex-wrap:wrap"><div class="field" style="margin:8px 0 4px"><label>Don't repeat the same event more often than, min</label><input id="nfCd" class="mono" style="max-width:120px"></div>
    <div class="field" style="margin:8px 0 4px"><label>Remind about unread critical events, min (0 — off)</label><input id="nfCr" class="mono" style="max-width:120px"></div></div>
-   <div class="mon-note">All events are always written to the log (the bell in the top bar). The «Desktop» column is a desktop banner and a counter on the bell; «Push» is a Pushover notification on your phone (when the toggle above is on). The dropdown is the Pushover priority.</div>
+   <div class="mon-note">All events are always written to the log (the bell in the top bar). The «Desktop» column is a desktop banner and a counter on the bell; «Push» means this event MAY reach your phone — whether it actually does is decided by «What may ring the phone» above: in the recommended mode only the urgent ones ring (marked <b>rings</b>), everything else waits for the evening digest. Everything on this tab saves itself; the «Save keys» button is only for the two Pushover keys. The dropdown is the Pushover priority.</div>
    <div class="ev-cols"><span style="font-size:11px;color:var(--mut)">Event</span><span class="grow"></span><span class="ev-colp" title="Notification priority in Pushover (does not affect the desktop)">Pushover priority</span><span class="ev-col" title="Push notification to your phone via Pushover">Pushover</span><span class="ev-col" title="Desktop banner + counter on the bell">Desktop</span></div>
    <div id="nfEvents"></div>`;
   const en=tc.querySelector("#nfEn");
@@ -14058,7 +14063,7 @@ function notifyTab(tc){tc.innerHTML=`<div style="color:var(--mut);font-size:12px
      off:"Nothing reaches the phone. The panel and the digest still record everything."};
    const noteEl=tc.querySelector("#nfModeNote");
    const syncMode=()=>{noteEl.textContent=NOTE[md.value]||"";};
-   md.onchange=()=>{syncMode();saveMon();};
+   md.onchange=()=>{syncMode();saveMon();if(window._ntSyncGate)window._ntSyncGate();};
    syncMode();en.checked=!!MON.enabled;
   const evbox=tc.querySelector("#nfEvents");
   EVMETA.forEach(m=>{
@@ -14082,8 +14087,18 @@ function notifyTab(tc){tc.innerHTML=`<div style="color:var(--mut);font-size:12px
       if(s)s.disabled=off;if(o){o.disabled=off;const cell=o.closest(".ev-c");if(cell)cell.classList.toggle("is-off",off);}});
     const t=tc.querySelector("#nfTest");if(t)t.disabled=off;};
   en.onchange=()=>{saveMon();syncPush();};cd.onchange=saveMon;
-  items.forEach(m=>{tc.querySelector("#evon_"+m.k).onchange=saveMon;tc.querySelector("#evd_"+m.k).onchange=saveMon;tc.querySelector("#evp_"+m.k).onchange=saveMon;if(m.thr!==undefined)tc.querySelector("#ev_"+m.k).onchange=saveMon;});
-  syncPush();
+  items.forEach(m=>{tc.querySelector("#evon_"+m.k).onchange=()=>{saveMon();syncGate();};tc.querySelector("#evd_"+m.k).onchange=saveMon;tc.querySelector("#evp_"+m.k).onchange=saveMon;if(m.thr!==undefined)tc.querySelector("#ev_"+m.k).onchange=saveMon;});
+  // the honest state of every Push switch under the current mode
+  const syncGate=()=>{const narrow=(tc.querySelector("#nfMode")||{}).value!=="all";
+    items.forEach(m=>{const o=tc.querySelector("#evon_"+m.k);if(!o)return;
+      const cell=o.closest(".ev-c");if(!cell)return;
+      const urgent=URGENT.has(m.k)||(+((tc.querySelector("#evp_"+m.k)||{}).value||0)>=2);
+      cell.classList.toggle("is-gated",narrow&&!urgent&&o.checked);
+      cell.classList.toggle("is-rings",narrow&&urgent&&o.checked);
+      cell.title=!o.checked?"":(narrow?(urgent?"Urgent — this one rings your phone"
+        :"Held back: in the recommended mode this waits for the evening digest instead of ringing")
+        :"Rings your phone");});};
+  syncPush();syncGate();window._ntSyncGate=syncGate;
   tc.querySelector("#nfSave").onclick=async()=>{const rr=await api("/api/monitor",{method:"POST",body:JSON.stringify({notify:{user:tc.querySelector("#nfU").value.trim(),token:tc.querySelector("#nfT").value.trim()}})});const st=tc.querySelector("#nfStat");if(rr&&rr.notify){st.textContent=nasTr(rr.notify.configured?"✓ keys set":"not configured");st.style.color=rr.notify.configured?"var(--good)":"var(--mut)";}toast(LIVE?"Keys saved":"Demo");flashSaved(tc.querySelector("#nfSave"));};
   tc.querySelector("#nfTest").onclick=async()=>{const rr=await api("/api/monitor",{method:"POST",body:JSON.stringify({test:true})});toast(LIVE?(rr&&rr.ok?"Test sent to Pushover ✓":"Not sent: "+((rr&&rr.log)||"")):"Demo");};
  });}

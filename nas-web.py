@@ -23664,7 +23664,10 @@ class H(BaseHTTPRequestHandler):
             elif p == "/api/systemd/journal":
                 self._json(systemd_journal((q.get("unit") or [""])[0], (q.get("lines") or ["200"])[0]))
             elif p == "/api/monitor":
-                self._json({"monitor": load_monitor(), "notify": load_notify()})
+                # the UI has to be able to say WHICH switches actually reach a phone in the
+                # narrow mode — otherwise a switch that is on but gated is a lie on screen
+                self._json({"monitor": load_monitor(), "notify": load_notify(),
+                            "push_now": sorted(_PUSH_NOW)})
             elif p == "/api/unit":
                 self._json(unit_read((q.get("name") or [""])[0]))
             elif p == "/api/stacks":
