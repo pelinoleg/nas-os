@@ -3178,6 +3178,9 @@
   .bk-hint{font-size:11.5px;color:var(--mut);margin:-6px 0 12px}
   /* «a newer version is on the box» — same materials as the rest of the furniture, and it sits
      above the dock so it never covers what you are reading */
+  .ed-ro{display:flex;align-items:flex-start;gap:8px;padding:9px 12px;font-size:12.5px;
+   background:color-mix(in srgb,var(--warn) 12%,transparent);border-bottom:1px solid var(--line);color:var(--ink)}
+  .ed-ro svg{color:var(--warn);flex:none;margin-top:1px}
   .verbar{position:fixed;left:50%;transform:translateX(-50%);bottom:96px;z-index:620;display:flex;
    align-items:center;gap:10px;padding:9px 10px 9px 14px;border-radius:14px;
    background:var(--glass-2);backdrop-filter:blur(20px) saturate(1.4);-webkit-backdrop-filter:blur(20px) saturate(1.4);
@@ -7512,6 +7515,16 @@ function winDiskUsage(initRoot){const existed=!!OPEN["__duscan"];const w=openWin
  if(existed&&initRoot&&w&&w._duGo)w._duGo(initRoot);
  return w;}
 /* Separate file editor/viewer window (title = name, its own buttons) */
+/* Why a file cannot be saved, in words that say what to do instead. */
+function roWhy(reason,path){
+ if(/protected system path/.test(reason||"")){
+  if(/^\/opt\/nas-os/.test(path||""))
+   return "This is inside the panel's own folder, which is a git checkout — an edit here would be "
+        + "overwritten by the next update anyway. Ask Claude to change it, or edit it over SSH.";
+  return "System folders are not editable from the file manager, so a slip cannot break the box.";
+ }
+ return reason||"This file cannot be written from here.";
+}
 function openFileWin(e){openWin("ed:"+e.path,e.name,body=>{
  body.style.padding="0";
  const draw=async()=>{const r=await api("/api/fs/read?path="+encodeURIComponent(e.path));
@@ -7527,14 +7540,18 @@ function openFileWin(e){openWin("ed:"+e.path,e.name,body=>{
    body.innerHTML=`<div class="ed-wrap"><div class="ed-bar"><span id="edDot" style="color:var(--warn);flex:none;font-weight:700"></span><span class="ed-path mono" title="${att(e.path)}">${esc(e.path)}</span><span class="grow"></span>
      <button class="iconbtn" id="edWrap" title="Line wrap">${svg("logs",14)}</button>
      <a class="btn sm" href="/api/fs/raw?dl=1&path=${encodeURIComponent(e.path)}" download="${att(e.name)}" title="Download">${svg("download",13)}</a>
-     <button class="btn sm pri" id="edSave">${svg("save",13)} Save</button></div><div class="ed-body" id="edBody"></div></div>`;
+     <button class="btn sm pri" id="edSave"${r.writable===false?" disabled":""}>${svg("save",13)} Save</button></div>${
+     r.writable===false?`<div class="ed-ro">${svg("warn",14)}<span><b>Read-only here.</b> ${esc(roWhy(r.ro_reason,e.path))}</span></div>`:""
+     }<div class="ed-body" id="edBody"></div></div>`;
    const _ts=Math.max(2,Math.min(8,+SET.fmTabSize||2));
    ensureCM(()=>{cm=CodeMirror(body.querySelector("#edBody"),{value:r.content||"",mode:cmMode(e.name),lineNumbers:true,lineWrapping:false,tabSize:_ts,indentUnit:_ts,styleActiveLine:true});setTimeout(()=>cm.refresh(),40);
      cm.on("change",()=>{if(!dirty){dirty=true;const d=body.querySelector("#edDot");if(d)d.textContent="● ";}});
      if(window.ResizeObserver){const ro=new ResizeObserver(()=>cm&&cm.refresh());ro.observe(body.querySelector("#edBody"));}});
    body.querySelector("#edWrap").onclick=function(){if(!cm)return;const w=!cm.getOption("lineWrapping");cm.setOption("lineWrapping",w);this.classList.toggle("pri",w);};
    body.querySelector("#edSave").onclick=async()=>{if(!cm)return;const w=await api("/api/fs/write",{method:"POST",body:JSON.stringify({path:e.path,content:cm.getValue()})});
-     toast(LIVE?(w&&w.ok?"Saved (.bak created)":("Error: "+((w&&w.log)||"").slice(0,60))):"Demo: saving unavailable");
+     if(w&&w.ok)toast("Saved (.bak created)");
+     else if(!LIVE)toast("Demo: saving unavailable");
+     else confirmDlg("Not saved",esc(roWhy((w&&w.log)||"",e.path))+"<br><br>Your text is still in the editor — copy it out before closing this window.",()=>{});
      if(w&&w.ok){dirty=false;const d=body.querySelector("#edDot");if(d)d.textContent="";}};};
  draw();
 },{w:720,h:560,geoKey:"file-edit"});}

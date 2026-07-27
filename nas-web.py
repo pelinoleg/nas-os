@@ -17698,9 +17698,14 @@ def fs_read(path):
             raw = f.read()
     except OSError as e:
         return {"ok": False, "log": str(e)}
+    # Whether it could be SAVED is answered when it is OPENED, not after the typing: the editor
+    # used to let you edit a protected file happily and only refuse at the Save button, where the
+    # answer was a two-second toast. The work looked like it had simply vanished.
+    _w, _werr = _fs_guard(path)
     try:
         return {"ok": True, "path": path, "content": raw.decode("utf-8"),
-                "size": size, "binary": False}
+                "size": size, "binary": False,
+                "writable": _werr is None, "ro_reason": _werr or ""}
     except UnicodeDecodeError:
         return {"ok": True, "path": path, "binary": True, "size": size}
 
