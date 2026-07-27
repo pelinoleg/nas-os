@@ -10405,6 +10405,7 @@ def _kp_ensure_connected(dest):
             pass
         return {"ok": False, "log": _kp_err_tail(r)}
     kp_throttle_push(dest["id"])     # caps live in the repo; a fresh connect re-asserts ours
+    _safe(lambda: _kp_automaint_off(dest["id"]))   # maintenance is ours, on our schedule
     return {"ok": True}
 
 def kp_dest_test(destid):
@@ -11216,6 +11217,86 @@ def _kp_ignore_rule(folder, path):
     return path[len(root):].rstrip("/")
 
 
+_KP_TRANSIENT = ("blob not found", "session marker", "connection reset", "unexpected eof",
+                 "i/o timeout", "context deadline exceeded", "too many requests", "429",
+                 "423 locked", "temporarily", "server misbehaving", "broken pipe",
+                 "connection refused", "no such host", "timeout")
+
+def _kp_transient(text):
+    """Does this failure look like the backend having a bad moment rather than the repository
+    being wrong? Measured on this box: pcloud through kopia's rclone bridge drops roughly one
+    small write in three with «unable to write session marker … BLOB not found», while the very
+    same write succeeds on the next try. Retrying is safe for the calls this guards — kopia's
+    writes are content-addressed and a snapshot resumes rather than starts over."""
+    t = (text or "").lower()
+    return any(w in t for w in _KP_TRANSIENT)
+
+_KP_BACKOFF = (5, 15, 45)     # ~65s of patience: measured, the bad patches come in bursts
+
+def _kp_retry(destid, args, timeout=300, tries=4):
+    """Run an IDEMPOTENT kopia command, retrying a backend hiccup. Only for commands that can
+    be repeated with the same result (policy set, maintenance set) — never for anything that
+    counts, deletes or moves. The waits grow: pcloud does not fail evenly, it fails in bursts —
+    three tries six seconds apart all landed inside one bad minute and the backup still died."""
+    r = {}
+    for i in range(tries):
+        r = _kp(destid, args, timeout=timeout)
+        if r["ok"] or not _kp_transient((r.get("err") or "") + (r.get("out") or "")):
+            return r
+        if i < tries - 1:
+            time.sleep(_KP_BACKOFF[min(i, len(_KP_BACKOFF) - 1)])
+    return r
+
+def _kp_policy_ever(bid, bk):
+    """Have this backup's rules ever reached the repository? Either we stamped it, or it has a
+    run that finished — an older backup predates the stamp but plainly had its rules applied."""
+    if bk.get("policy_ts"):
+        return True
+    try:
+        for e in kp_history():
+            if e.get("backup") == bid and e.get("result") in ("ok", "warn"):
+                return True
+    except Exception:
+        pass
+    return False
+
+def _kp_mark_policy(bid):
+    """Remember that this backup's rules did reach the repository at least once — that is what
+    lets a later run treat a failed re-statement as a warning instead of a dead backup."""
+    with _KP_CFG_LOCK:
+        cfg = kp_load()
+        bk = _kp_find(cfg["backups"], bid)
+        if bk:
+            bk["policy_ts"] = int(time.time())
+            kp_save(cfg)
+
+def _kp_automaint_off(destid):
+    """Switch kopia's OWN automatic maintenance off on a repository we manage.
+
+    Kopia runs a maintenance cycle as a side effect of whatever command happens to be first
+    after one falls due — and «whatever command» was our two-second `policy set` at the head of
+    a backup. On a cloud repository a full cycle is minutes of listing and compacting, so the
+    backup either waited for it or died with it: both nightly cloud backups failed that way on
+    27.07 (one on our 60s cap, one on a pcloud hiccup writing a session marker). Maintenance is
+    OURS here — a weekly `maintenance run --full` in its own unit — so the automatic one is
+    both redundant and a way for unrelated work to kill a backup before it starts.
+    Done once per destination; the flag lives with the entity."""
+    cfg = kp_load()
+    dest = _kp_find(cfg["dests"], destid)
+    if not dest or dest.get("automaint") == "off":
+        return {"ok": True}
+    r = _kp_retry(destid, ["maintenance", "set", "--enable-quick=false", "--enable-full=false"],
+                  timeout=300)
+    if not r["ok"]:
+        return {"ok": False, "log": _kp_err_tail(r)}
+    with _KP_CFG_LOCK:
+        cfg = kp_load()
+        d2 = _kp_find(cfg["dests"], destid)
+        if d2:
+            d2["automaint"] = "off"
+            kp_save(cfg)
+    return {"ok": True}
+
 def _kp_policy_apply(destid, bk, src):
     """Set retention/compression/ignores on every source folder in this repo.
     Kopia then enforces retention by itself after each snapshot — no separate
@@ -11231,7 +11312,9 @@ def _kp_policy_apply(destid, bk, src):
     if hb or ha:
         _kp_ensure_actions(destid)   # older configs lack enableActions → kopia would skip them
     for folder in src.get("folders") or []:
-        r = _kp(destid, ["policy", "set", folder, "--clear-ignore"], timeout=60)
+        # 300s, not 60: opening a cloud repository is seconds on a good night and much more on
+        # a bad one, and a cap tight enough to trip on that turns a slow link into a failed backup
+        r = _kp_retry(destid, ["policy", "set", folder, "--clear-ignore"], timeout=300)
         if not r["ok"]:
             return {"ok": False, "log": _kp_err_tail(r)}
         args = ["policy", "set", folder,
@@ -11256,7 +11339,7 @@ def _kp_policy_apply(destid, bk, src):
             rule = _kp_ignore_rule(folder, xp)  # path exclusions belong to THEIR folder only
             if rule:
                 args += ["--add-ignore", rule]
-        r = _kp(destid, args, timeout=60)
+        r = _kp_retry(destid, args, timeout=300)
         if not r["ok"]:
             return {"ok": False, "log": _kp_err_tail(r)}
     return {"ok": True}
@@ -13183,6 +13266,7 @@ def _kp_snap_cli(bid):
         return os.path.exists(_kp_runf(bid, "cancel"))
 
     phases, result, err = {}, "ok", ""
+    policy_warn = ""          # rules could not be re-stated, the stored ones still apply
     snap_bytes = snap_files = failed_files = 0
     tail = []
     _w0 = w
@@ -13230,10 +13314,23 @@ def _kp_snap_cli(bid):
             result, err = "error", "destination: " + (c.get("log") or "connect failed")
             return
         upd(phase="policy", force=True)
+        _kp_automaint_off(dst["id"])   # no maintenance cycle may ambush the steps below
         p = _kp_policy_apply(dst["id"], bk, src)
         if not p["ok"]:
-            result, err = "error", "policy: " + (p.get("log") or "")
-            return
+            # The rules (retention, exclusions) are STORED IN THE REPOSITORY and still there from
+            # the last run. So if the write fails on a backend hiccup and rules were established
+            # before, the snapshot is worth far more than the re-statement of rules that already
+            # hold: carry on and say so. With no rules ever applied there is nothing to fall back
+            # on — that one fails.
+            if _kp_transient(p.get("log") or "") and _kp_policy_ever(bid, bk):
+                policy_warn = (p.get("log") or "")[-160:]
+                w("could not re-state the rules at the destination (%s) — the rules already "
+                  "stored there still apply, carrying on with the snapshot" % policy_warn)
+            else:
+                result, err = "error", "policy: " + (p.get("log") or "")
+                return
+        else:
+            _kp_mark_policy(bid)
         # ---- snapshot (stderr on a pty for live counters) ----
         upd(phase="snapshot", force=True)
         t_snap = time.time()
@@ -13257,6 +13354,7 @@ def _kp_snap_cli(bid):
         t_out = threading.Thread(target=_read_stdout, daemon=True)
         t_out.start()
         buf = b""
+        tail_lines = []          # the last few non-progress lines: the reason a run failed
         STALL = 20 * 60          # kill a snapshot that emits nothing for this long (disk gone / kopia wedged)
         last_out = time.monotonic()
         # Silence alone does NOT mean wedged: kopia prints progress only when asked for it,
@@ -13316,6 +13414,8 @@ def _kp_snap_cli(bid):
                         cur=line.lstrip("-|/\\* "))
                 else:
                     w(line)
+                    tail_lines.append(line)
+                    del tail_lines[:-12]     # only the last few matter: they carry the reason
         try:
             os.close(master)
         except OSError:
@@ -13324,14 +13424,36 @@ def _kp_snap_cli(bid):
         t_out.join(timeout=5)
         if result == "stopped":
             return
-        manifests = []
-        for line in (out_buf[0].decode("utf-8", "replace") if out_buf and out_buf[0] else "").splitlines():
-            line = line.strip()
-            if line.startswith("{"):
-                try:
-                    manifests.append(json.loads(line))
-                except ValueError:
-                    pass
+        def _parse_manifests(text):
+            out = []
+            for line in (text or "").splitlines():
+                line = line.strip()
+                if line.startswith("{"):
+                    try:
+                        out.append(json.loads(line))
+                    except ValueError:
+                        pass
+            return out
+
+        manifests = _parse_manifests(out_buf[0].decode("utf-8", "replace") if out_buf and out_buf[0] else "")
+        if proc.returncode != 0 and not manifests and not cancelled():
+            tail_txt = "\n".join(tail_lines)
+            # A cloud backend that drops one write does not mean the backup cannot be taken:
+            # kopia is incremental and content-addressed, so a second pass re-sends nothing that
+            # already arrived. One retry — a repository that is genuinely wrong fails twice.
+            if _kp_transient(tail_txt):
+                w("the destination hiccuped — taking the snapshot again "
+                  "(nothing already uploaded is sent twice)")
+                upd(cur="retrying after a hiccup at the destination", force=True)
+                r2 = _kp(dst["id"], ["snapshot", "create"] + folders +
+                         ["--json", "--tags", "nasbk:" + bid,
+                          "--description", (bk.get("name") or bid)[:64],
+                          "--parallel", str(kp_opts_get()["parallel"])], timeout=4 * 3600)
+                for ln in (_kp_err_tail(r2) or "").splitlines()[-6:]:
+                    w(ln)
+                manifests = _parse_manifests(r2.get("out"))
+                if manifests:
+                    w("the second attempt went through")
         for mf in manifests:
             summ = ((mf.get("rootEntry") or {}).get("summ") or {})
             snap_bytes += int(summ.get("size") or 0)
@@ -13340,7 +13462,8 @@ def _kp_snap_cli(bid):
         phases["snapshot"] = {"dur": int(time.time() - t_snap), "bytes": snap_bytes,
                               "files": snap_files, "failed": failed_files}
         if proc.returncode != 0 and not manifests:
-            result, err = "error", "snapshot failed (code %d) — see the log" % proc.returncode
+            result, err = "error", ("snapshot failed (code %d) — see the log" % proc.returncode
+                                    + ((": " + tail_lines[-1][-160:]) if tail_lines else ""))
             return
         if proc.returncode != 0 or failed_files:
             result = "warn"
@@ -13359,6 +13482,10 @@ def _kp_snap_cli(bid):
         if skipped:
             result = result if result != "ok" else "warn"
             err = (err + "; " if err else "") + "missing folders skipped: " + ", ".join(skipped[:3])
+        if policy_warn:
+            result = "warn" if result == "ok" else result
+            err = (err + "; " if err else "") + "the backup rules could not be re-stated at the " \
+                  "destination (the ones already stored there applied)"
         # ---- spare copy (3-2-1) ----
         d2_err = ""
         if d2 and d2.get("kind") == "fs":
