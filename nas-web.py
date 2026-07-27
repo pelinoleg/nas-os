@@ -9565,29 +9565,45 @@ def _nb_sched_mark(pid, label):
     except OSError:
         pass
 
-def _nb_sched_last_due(cfg, now):
-    """(timestamp, label) of the moment this profile was most recently DUE — today's slot once
-    it has passed, otherwise the one before it. Days are stepped through localtime, not by
-    subtracting 86400 from a timestamp: across a DST change that is off by an hour."""
-    s = cfg.get("schedule") or {}
-    if not s.get("enabled"):
-        return 0.0, ""
+_DOWS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
+def sched_last_due(now, hhmm, wday=None):
+    """(timestamp, label) of the moment a HH:MM schedule was most recently DUE — today's slot
+    once it has passed, otherwise the one before it; `wday` (0=Mon, as tm_wday) makes it weekly.
+    Shared by every scheduler here, because they all had the same hole: comparing the schedule
+    against the CURRENT minute means the slot exists for sixty seconds inside one live process,
+    and a restart or a reboot across that minute loses the run for the day, silently.
+    Days are stepped through localtime, not by subtracting 86400 from a timestamp: across a DST
+    change that is off by an hour."""
     try:
-        hh, mm = [int(x) for x in str(s.get("time") or "").split(":")[:2]]
+        hh, mm = [int(x) for x in str(hhmm or "").split(":")[:2]]
     except ValueError:
         return 0.0, ""
-    dows = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-    want = s.get("dow", "Sun") if s.get("freq") == "weekly" else ""
+    if not (0 <= hh <= 23 and 0 <= mm <= 59):
+        return 0.0, ""
     for back in range(0, 9):
         d = time.localtime(now - back * 86400)
         t = time.mktime((d.tm_year, d.tm_mon, d.tm_mday, hh, mm, 0, 0, 0, -1))
         if t > now:
             continue
         st = time.localtime(t)
-        if want and dows[st.tm_wday] != want:
+        if wday is not None and st.tm_wday != wday:
             continue
         return t, time.strftime("%Y-%m-%d %H:%M", st)
     return 0.0, ""
+
+def _nb_sched_last_due(cfg, now):
+    """The Mirror profile flavour of sched_last_due (its weekday is a name)."""
+    s = cfg.get("schedule") or {}
+    if not s.get("enabled"):
+        return 0.0, ""
+    wd = None
+    if s.get("freq") == "weekly":
+        try:
+            wd = _DOWS.index(s.get("dow", "Sun"))
+        except ValueError:
+            wd = 6
+    return sched_last_due(now, s.get("time"), wd)
 
 def _nb_last_real_run(pid):
     """When a real (not dry) run of this profile last happened. The history holds finished runs;
@@ -11247,6 +11263,22 @@ def _kp_retry(destid, args, timeout=300, tries=4):
             time.sleep(_KP_BACKOFF[min(i, len(_KP_BACKOFF) - 1)])
     return r
 
+def _kp_last_run_ts(bid):
+    """When this backup last ran at all, whatever the outcome. The run state survives restarts
+    and covers a run in flight; history covers the ones before it."""
+    ts = 0.0
+    try:
+        ts = float(kp_run_state(bid).get("started") or 0)
+    except (TypeError, ValueError, AttributeError):
+        ts = 0.0
+    try:
+        for e in kp_history():
+            if e.get("backup") == bid:
+                ts = max(ts, float(e.get("ts") or 0))
+    except Exception:
+        pass
+    return ts
+
 def _kp_policy_ever(bid, bk):
     """Have this backup's rules ever reached the repository? Either we stamped it, or it has a
     run that finished — an older backup predates the stamp but plainly had its rules applied."""
@@ -12499,7 +12531,6 @@ def kp_mount_stop(destid):
 
 # ---- scheduler / maintenance / health tick ----------------------------------
 KP_STATE_FILE = os.path.join(NAS_CONFIG, "kopia-state.json")
-_kp_last_sched = ""
 _kp_last_health = 0.0
 
 def _kp_state_load():
@@ -13055,7 +13086,7 @@ def _kopia_tick():
     """monitor_loop: minute-slot schedules (+ retry while the destination is busy),
     run-on-plug-in for removable destinations, weekly maintenance / monthly verify
     per primary destination, 30-min health checks."""
-    global _kp_last_sched, _kp_last_health
+    global _kp_last_health
     if not kopia_installed():
         return
     cfg = kp_load()
@@ -13066,22 +13097,37 @@ def _kopia_tick():
     stt = _kp_state_load()
     dirty = False
     # 1) schedules — one shot per minute-slot (same pattern as _nb_sched_tick)
-    slot = time.strftime("%Y-%m-%d %H:%M", time.localtime(now))
-    if slot != _kp_last_sched and slot != stt.get("slot"):
-        _kp_last_sched = slot
-        stt["slot"] = slot; dirty = True
-        hhmm = time.strftime("%H:%M", time.localtime(now))
-        wday = time.localtime(now).tm_wday
-        for b in cfg["backups"]:
-            s = b.get("schedule") or {}
-            if not b.get("enabled", True) or s.get("mode") not in ("daily", "weekly"):
-                continue
-            if s.get("time") != hhmm or (s.get("mode") == "weekly" and int(s.get("dow", 0)) != wday):
-                continue
-            r = kp_run_start(b["id"])
-            if not r.get("ok") and "busy" in (r.get("log") or ""):
-                stt.setdefault("pending", {})[b["id"]] = int(now)   # queued: retry below
-                dirty = True
+    # Asked as «when was this last due, and did we act on that slot», not «is it 03:30 right
+    # now» — the second question loses the whole night if the panel is restarted or the box is
+    # rebooted inside that minute, which is exactly how two nights went missing in the Mirror app.
+    done = stt.setdefault("done", {})
+    for b in cfg["backups"]:
+        s = b.get("schedule") or {}
+        if not b.get("enabled", True) or s.get("mode") not in ("daily", "weekly"):
+            continue
+        due, label = sched_last_due(now, s.get("time"),
+                                    int(s.get("dow", 0)) if s.get("mode") == "weekly" else None)
+        if not due or done.get(b["id"]) == label:
+            continue
+        late = now - due
+        window = 24 * 3600 if s.get("mode") == "weekly" else 12 * 3600
+        if late > window or _kp_last_run_ts(b["id"]) >= due:
+            if late > window and _kp_last_run_ts(b["id"]) < due:
+                notify_event("nb_missed", "kp:missed:" + b["id"],
+                             "Snapshot backup: a scheduled run was missed",
+                             "«%s» was due at %s and did not run — the box was off or the panel "
+                             "was not running." % (b.get("name") or b["id"], label),
+                             cooldown=6 * 3600)
+            done[b["id"]] = label; dirty = True
+            continue
+        done[b["id"]] = label; dirty = True
+        if late > 120:
+            print("[kopia] %s: the %s run was missed — starting it now, %d min late"
+                  % (b.get("name") or b["id"], label, late // 60), flush=True)
+        r = kp_run_start(b["id"])
+        if not r.get("ok") and "busy" in (r.get("log") or ""):
+            stt.setdefault("pending", {})[b["id"]] = int(now)   # queued: retry below
+            dirty = True
     # queued starts: the destination was busy at the scheduled minute — keep trying for 6h
     for bid, ts in list((stt.get("pending") or {}).items()):
         b = _kp_find(cfg["backups"], bid)
@@ -14980,6 +15026,7 @@ def imsb_defaults():
             "work": "/media/nas/t7-4TB/immich-standby",
             "time": "03:30", "port": 2284, "keep_up": False,
             "last_check": {}, "last_check_ts": 0, "promoted": {},
+            "last_slot": "",          # the nightly slot already acted on (survives a restart)
             "db_password": "", "last": {}, "history": []}
 
 def imsb_load():
@@ -15745,12 +15792,10 @@ def imsb_promote(library="", move_to="", start=True):
             "started": r.returncode == 0, "url": "http://%s:2283" % (lan_ip() or "127.0.0.1"),
             "log": "" if r.returncode == 0 else (r.stderr or "")[-300:]}
 
-_imsb_last_slot = ""
 _imsb_up_try = [0.0, 0]     # last keeper attempt, and whether one is in flight
 
 def _imsb_tick():
-    """Nightly refresh, one shot per minute-slot (same pattern as the other schedulers)."""
-    global _imsb_last_slot
+    """Nightly refresh, once per due slot (same pattern as the other schedulers)."""
     cfg = imsb_load()
     if not cfg["enabled"] or not shutil.which("docker"):
         return
@@ -15776,18 +15821,28 @@ def _imsb_tick():
                 _imsb_up_try[1] = 0
         _imsb_up_try[1] = 1
         threading.Thread(target=_keeper, daemon=True).start()
-    slot = time.strftime("%Y-%m-%d %H:%M")
-    if slot == _imsb_last_slot or not slot.endswith(cfg["time"]):
+    # «when was it last due», not «is it 16:30 this second»: a restart or a reboot inside that
+    # minute used to cost the whole night's refresh without a word (the same hole the Mirror
+    # schedules had). The slot acted on is remembered in the config, so it also cannot run twice.
+    due, label = sched_last_due(now, cfg["time"])
+    if not due or cfg.get("last_slot") == label or now - due > 12 * 3600:
+        if due and cfg.get("last_slot") != label and now - due > 12 * 3600:
+            cfg["last_slot"] = label      # too late to be worth it — but do not fire it later
+            imsb_save(cfg)
         return
-    _imsb_last_slot = slot
     if _systemd_active(IMSB_UNIT + ".service"):
         return
     if _imsb_stack_up() and not cfg.get("keep_up"):
         return          # somebody is using the copy and did not ask for it to be recycled
+    cfg["last_slot"] = label
+    imsb_save(cfg)
     dump = _imsb_dump(cfg)
     last = cfg.get("last") or {}
     if dump and last.get("result") == "ok" and int(dump["ts"]) == int(last.get("dump_ts") or 0):
         return          # the same dump is already restored — nothing to redo
+    if now - due > 120:
+        print("[immich-standby] the %s refresh was missed — starting it now, %d min late"
+              % (label, (now - due) // 60), flush=True)
     imsb_refresh_start()
 
 def monitor_loop():
