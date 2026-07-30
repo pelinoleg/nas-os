@@ -3527,6 +3527,23 @@ install_fake_hwclock() {
     # the load/save pair is enabled by the package; make sure a stale floor file
     # cannot drag the clock backwards if timesyncd was removed at some point
     [ -f /var/lib/systemd/timesync/clock ] && run touch /var/lib/systemd/timesync/clock
+    # The packaged fake-hwclock-load.service is Type=oneshot WITHOUT RemainAfterExit, so
+    # it falls back to «inactive» the moment it finishes. It is WantedBy=sysinit.target,
+    # and every unit that pulls sysinit.target in during early boot re-queues a start job
+    # for it: five land inside systemd's default 10s window, the sixth trips the start
+    # rate limit and the box comes up with a RED fake-hwclock-load.service — even though
+    # every single run exited 0 and the clock was restored correctly. Staying active after
+    # the (idempotent) restore makes the extra pulls no-ops. Same family as the smartd
+    # guard: a false alarm on a freshly booted box teaches the user to ignore red.
+    run mkdir -p /etc/systemd/system/fake-hwclock-load.service.d
+    write_file /etc/systemd/system/fake-hwclock-load.service.d/nas-remain.conf <<'EOF'
+# NAS-OS: oneshot without RemainAfterExit + WantedBy=sysinit.target = repeated starts
+# during boot -> start rate limit -> «failed» after five SUCCESSFUL runs.
+[Service]
+RemainAfterExit=yes
+EOF
+    run systemctl daemon-reload
+    systemctl is-failed fake-hwclock-load.service >/dev/null 2>&1 && run systemctl reset-failed fake-hwclock-load.service
     info "fake-hwclock: clock saved ($(cat /etc/fake-hwclock.data 2>/dev/null))"
 }
 

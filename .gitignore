@@ -6,6 +6,7 @@
 !/README.md
 !/CLAUDE.md
 !/DESIGN.md
+!/docs/
 !/install.sh
 !/nas-web.py
 !/nas-wizard.sh
@@ -15,6 +16,7 @@
 !/dialogrc-nas
 !/web/
 !/services/
+!/systemd/
 !/tools/
 !/tests/
 !/.claude/
