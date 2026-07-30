@@ -2232,6 +2232,12 @@
   .lp-grid .app{width:auto}
   .lp-grid .lp-empty{grid-column:1/-1;color:var(--dim);font-size:13px;text-align:center;padding:30px}
   .lp-pin{position:absolute;top:4px;right:10px;width:8px;height:8px;border-radius:50%;background:var(--accent);opacity:.85}
+  /* The counterpart of the pin: a tile that is NOT on the desktop / not in the dock says so.
+     Without it the only difference was a missing dot — an absence nobody reads as a state.
+     A plus, not an eye: an open eye on a hidden thing reads as "visible", and the badge
+     should name the action available here, which is putting it back. */
+  .lp-off{position:absolute;top:1px;right:6px;display:flex;align-items:center;color:var(--dim);opacity:.75}
+  .lp-off svg{width:13px;height:13px}
   .lp-grid .tile.lp-bare{background:none!important;box-shadow:none!important}
   .lp-grid .tile.lp-bare svg{filter:drop-shadow(0 1px 2px rgba(0,0,0,.25))}
   /* the glyphs are fixed-size SVGs — scale them up to fill the bigger launchpad tiles */
@@ -4251,6 +4257,9 @@ const INTERNAL=[
 ];
 /* Right-click is how you hide a single icon — but the wall panel and a phone have no right
    button, and there the menu was simply unreachable. A long press opens the same one. */
+// What to tell people about reaching a tile's menu — the gesture is not the same on a
+// touch screen, and "right-click" is a dead end on the wall panel and on a phone.
+function menuHint(){return isTouch()?"Press and hold to bring it back.":"Right-click to bring it back.";}
 function longPress(node,fn){
  let t=null,sx=0,sy=0;
  const cancel=()=>{if(t){clearTimeout(t);t=null;}};
@@ -4425,7 +4434,7 @@ function lpDraw(){
  if(sys.length)grid.insertAdjacentHTML("beforeend",`<div class="lp-h">NAS tools</div>`);
  sys.forEach(a=>{
   const inDock=!hid.includes(a.id);
-  const b=el(`<button class="app" style="position:relative" title="${att(a.name)}">${inDock?'<span class="lp-pin" title="in the Dock"></span>':""}
+  const b=el(`<button class="app" style="position:relative" title="${att(a.name+(inDock?"":" — not in the Dock. "+menuHint()))}">${inDock?'<span class="lp-pin" title="in the Dock"></span>':`<span class="lp-off" title="not in the Dock">${svg("plus",13)}</span>`}
    <div class="tile${a.bare?" lp-bare":""}"${a.bare?"":` style="background:${a.color}"`}>${appIcon(a.ic,a.bare?44:30)}</div>
    <div class="lbl">${esc(a.name)}</div></button>`);
   b.onclick=()=>{lpClose();a.fn();};
@@ -4441,7 +4450,7 @@ function lpDraw(){
  apps.forEach(app=>{
   const key=app.container||app.name;
   const onDesk=!dHid.includes(key);
-  const b=el(`<button class="app" style="position:relative" title="${att(app.container||app.name)}">${onDesk?'<span class="lp-pin" title="on the desktop"></span>':""}<div class="tile applbl" style="background:${tileColor(app.name)}">${appIconHTML(app)}</div><div class="lbl">${esc(app.name)}</div><span class="st ${app.running?"on":"off"}"></span></button>`);
+  const b=el(`<button class="app" style="position:relative" title="${att((app.container||app.name)+(onDesk?"":" — hidden from the desktop. "+menuHint()))}">${onDesk?'<span class="lp-pin" title="on the desktop"></span>':`<span class="lp-off" title="hidden from the desktop">${svg("plus",13)}</span>`}<div class="tile applbl" style="background:${tileColor(app.name)}">${appIconHTML(app)}</div><div class="lbl">${esc(app.name)}</div><span class="st ${app.running?"on":"off"}"></span></button>`);
   b.onclick=()=>{lpClose();window.open(app.url,"_blank");};
   const appMenu=(x,y)=>showMenu(x,y,[
    onDesk?{label:"Hide from the desktop",ic:svg("eye",16),act:()=>{SET.deskHidden=[...dHid,key];saveSettings();renderApps();lpDraw();}}
@@ -15234,15 +15243,47 @@ function opsPop(){const b=document.getElementById("opsBtn");if(!b)return;
   ()=>{OPS.autoOpened=false;if(OPS.list.some(x=>x.state==="run"))OPS.autoClosed=true;});}
 
 /* context menu */
-document.querySelector(".desk").addEventListener("contextmenu",e=>{
- // an icon (or a widget) answers for itself — the surface menu is for the surface only
- if(e.target.closest(".app,.wdg"))return;
- e.preventDefault();
- showMenu(e.clientX,e.clientY,[
+/* Bringing a shortcut back used to live only inside a context menu on the very icon the
+   user had just made disappear — you had to already know it was there. These entries put
+   the way back on the empty desktop instead, and they show up ONLY when something is
+   actually hidden, so the menu says nothing when there is nothing to say. */
+function deskRestoreItems(){
+ const dHid=SET.deskHidden||[];
+ const hidden=(APPS||[]).filter(a=>a.url&&dHid.includes(a.container||a.name));
+ const out=[];
+ if(SET.deskAppsHidden)out.push({label:"Show app shortcuts",ic:svg("eye",17),act:()=>{
+  SET.deskAppsHidden=false;saveSettings();renderApps();
+  toast(hidden.length?"Shortcuts are back — "+hidden.length+" of them are still hidden one by one":"Shortcuts are back");}});
+ if(hidden.length)out.push({label:"Hidden shortcuts ("+hidden.length+")",ic:svg("grid",17),sub:[
+  ...hidden.map(app=>({label:app.name,ic:svg("plus",16),act:()=>{
+   SET.deskHidden=(SET.deskHidden||[]).filter(x=>x!==(app.container||app.name));
+   saveSettings();renderApps();toast(app.name+" is back on the desktop");}})),
+  {sep:1},
+  {label:"Show them all",ic:svg("eye",16),act:()=>{
+   const keys=hidden.map(a=>a.container||a.name);
+   SET.deskHidden=(SET.deskHidden||[]).filter(x=>!keys.includes(x));
+   SET.deskAppsHidden=false;saveSettings();renderApps();toast("All shortcuts are back");}}]});
+ if(out.length)out.push({sep:1});
+ return out;
+}
+function deskMenu(x,y){
+ showMenu(x,y,[
+  ...deskRestoreItems(),
   {label:"Refresh shortcuts",ic:svg("refresh",17),act:()=>{pollApps();toast("Shortcuts refreshed");}},
   {label:"Refresh all",ic:svg("refresh",17),act:()=>{poll();pollApps();pollDisks();}},{sep:1},
   {label:"Log out of the panel",ic:svg("key",17),act:logout},{sep:1},
-  {label:"Reboot",ic:svg("power",17),act:reboot,dng:1},{label:"Power off",ic:svg("power",17),act:poweroff,dng:1}]);});
+  {label:"Reboot",ic:svg("power",17),act:reboot,dng:1},{label:"Power off",ic:svg("power",17),act:poweroff,dng:1}]);}
+document.querySelector(".desk").addEventListener("contextmenu",e=>{
+ // an icon (or a widget) answers for itself — the surface menu is for the surface only
+ if(e.target.closest(".app,.wdg"))return;
+ e.preventDefault();deskMenu(e.clientX,e.clientY);});
+// Same menu with a finger. longPress() only reports the point, so the "is it mine?" guard is
+// done by hit-testing it: without that, a long press on an ICON would open the icon menu and
+// the desktop would immediately replace it — the exact overlap bug fixed for the icons in July.
+longPress(document.querySelector(".desk"),(x,y)=>{
+ const t=document.elementFromPoint(x,y);
+ if(t&&t.closest(".app,.wdg,.win,.menu,button,input,select,textarea"))return;
+ deskMenu(x,y);});
 
 /* poll */
 let LAST=null;
