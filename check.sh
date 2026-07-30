@@ -124,12 +124,14 @@ python3 - <<'PY' && ok "no stray Cyrillic" || bad "stray Cyrillic found (see abo
 import re, subprocess, sys
 CY = re.compile(r"[А-Яа-яЁё]")
 # Allowed to keep Cyrillic:
-#   CLAUDE.md                        — project doc, deliberately Russian
+#   CLAUDE.md, docs/*               — project docs, deliberately Russian (the rule is about
+#                                      UI STRINGS; the notes we write to ourselves are not UI)
 #   web/tui-editor.js, web/tui-hl.js — vendored third-party, kept byte-for-byte
 #   nas-web.py                       — _TRANSLIT transliteration keys and the folder-name
 #                                      sanitizer regexes (the "А-Яа-яЁё" char-range that
 #                                      deliberately allows Russian in user file names)
 ALLOW_FILES = {"CLAUDE.md", "web/tui-editor.js", "web/tui-hl.js"}
+ALLOW_DIRS = ("docs/",)
 def line_ok(f, ln):
     t = ln.replace("А-Яа-яЁё", "")            # the Cyrillic char-range literal itself
                                               # (detector regexes here, sanitizer regexes in nas-web.py)
@@ -138,7 +140,7 @@ def line_ok(f, ln):
     return not CY.search(t)
 bad = []
 for f in subprocess.check_output(["git", "ls-files"]).decode().split():
-    if f in ALLOW_FILES:
+    if f in ALLOW_FILES or f.startswith(ALLOW_DIRS):
         continue
     try:
         lines = open(f, encoding="utf-8").read().splitlines()

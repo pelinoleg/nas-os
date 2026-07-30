@@ -3183,6 +3183,8 @@
   .ed-ro svg{color:var(--warn);flex:none;margin-top:1px}
   .mon-sub{font-size:11.5px;color:var(--mut);margin-top:2px;max-width:46ch}
   .ev-c.is-gated{opacity:.45}
+  /* a per-app switch that the master «Hide app shortcuts» overrules — shown muted, never as live */
+  .mon-row.is-gated{opacity:.5}
   .ev-c.is-rings{position:relative}
   .ev-c.is-rings::after{content:"rings";position:absolute;left:50%;transform:translateX(-50%);
    bottom:-11px;font-size:8.5px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;color:var(--warn)}
@@ -4294,7 +4296,8 @@ function renderApps(){
   const appMenu=(x,y)=>showMenu(x,y,[
    {label:"Hide from the desktop",ic:svg("eye",16),act:()=>{
     SET.deskHidden=[...(SET.deskHidden||[]),key];saveSettings();renderApps();
-    toast("You can bring it back from Launchpad — the button in the top bar");}},
+    // naming the route is the whole point of this toast: «somewhere in Launchpad» is not an answer
+    toast("Back from Settings → Appearance → Widgets, or long-press it in Launchpad");}},
    {label:"Hide all shortcuts",ic:svg("grid",16),act:()=>{
     SET.deskAppsHidden=true;saveSettings();renderApps();
     toast("The desktop is clear — every app is in Launchpad");}}]);
@@ -4426,9 +4429,11 @@ function lpDraw(){
    <div class="tile${a.bare?" lp-bare":""}"${a.bare?"":` style="background:${a.color}"`}>${appIcon(a.ic,a.bare?44:30)}</div>
    <div class="lbl">${esc(a.name)}</div></button>`);
   b.onclick=()=>{lpClose();a.fn();};
-  b.oncontextmenu=e=>{e.preventDefault();showMenu(e.clientX,e.clientY,[
+  const sysMenu=(x,y)=>showMenu(x,y,[
    inDock?{label:"Remove from Dock",ic:svg("eject",16),act:()=>{SET.dockHidden=[...(SET.dockHidden||[]),a.id];saveSettings();renderDock();lpDraw();}}
-         :{label:"Pin to Dock",ic:svg("plus",16),act:()=>{SET.dockHidden=(SET.dockHidden||[]).filter(x=>x!==a.id);saveSettings();renderDock();lpDraw();}}]);};
+         :{label:"Pin to Dock",ic:svg("plus",16),act:()=>{SET.dockHidden=(SET.dockHidden||[]).filter(x=>x!==a.id);saveSettings();renderDock();lpDraw();}}]);
+  b.oncontextmenu=e=>{e.preventDefault();e.stopPropagation();sysMenu(e.clientX,e.clientY);};
+  longPress(b,sysMenu);      // Launchpad is where things come BACK from: a touch screen has no right click
   grid.appendChild(b);});
  const dHid=SET.deskHidden||[];
  const apps=(APPS||[]).filter(a=>a.url&&f(a.name,a.container));
@@ -4438,9 +4443,11 @@ function lpDraw(){
   const onDesk=!dHid.includes(key);
   const b=el(`<button class="app" style="position:relative" title="${att(app.container||app.name)}">${onDesk?'<span class="lp-pin" title="on the desktop"></span>':""}<div class="tile applbl" style="background:${tileColor(app.name)}">${appIconHTML(app)}</div><div class="lbl">${esc(app.name)}</div><span class="st ${app.running?"on":"off"}"></span></button>`);
   b.onclick=()=>{lpClose();window.open(app.url,"_blank");};
-  b.oncontextmenu=e=>{e.preventDefault();showMenu(e.clientX,e.clientY,[
+  const appMenu=(x,y)=>showMenu(x,y,[
    onDesk?{label:"Hide from the desktop",ic:svg("eye",16),act:()=>{SET.deskHidden=[...dHid,key];saveSettings();renderApps();lpDraw();}}
-         :{label:"Show on the desktop",ic:svg("plus",16),act:()=>{SET.deskHidden=dHid.filter(x=>x!==key);saveSettings();renderApps();lpDraw();}}]);};
+         :{label:"Show on the desktop",ic:svg("plus",16),act:()=>{SET.deskHidden=dHid.filter(x=>x!==key);saveSettings();renderApps();lpDraw();}}]);
+  b.oncontextmenu=e=>{e.preventDefault();e.stopPropagation();appMenu(e.clientX,e.clientY);};
+  longPress(b,appMenu);      // the only way back for a hidden shortcut — it must work with a finger too
   grid.appendChild(b);});
  if(!sys.length&&!apps.length)grid.innerHTML=`<div class="lp-empty">Nothing found.</div>`;
 }
@@ -13691,7 +13698,10 @@ function paintRange(sl){const mn=+sl.min||0,mx=+sl.max||100,v=+sl.value;sl.style
 function wireLook(lb){
  lb.querySelectorAll("input[data-fx]").forEach(sl=>{const out=lb.querySelector("#o_"+sl.dataset.fx);paintRange(sl);sl.oninput=()=>{SET[sl.dataset.fx]=+sl.value;if(out)out.textContent=sl.value+sl.dataset.unit;paintRange(sl);applyFx();};sl.onchange=saveSettings;});
  lb.querySelectorAll("input[data-p]").forEach(sl=>{const key=sl.dataset.p,ty=sl.dataset.type,out=lb.querySelector("#o_"+key);paintRange(sl);sl.oninput=()=>{SET[key]=+sl.value;if(out)out.textContent=TFMT[ty](+sl.value);paintRange(sl);applySettings();};sl.onchange=()=>{saveSettings();if(key==="wpSlideMin")startSlideshow();};});
- lb.querySelectorAll("input[data-pt]").forEach(inp=>{inp.onchange=()=>{const k=inp.dataset.pt;SET[k]=inp.checked;applySettings();saveSettings();if(k==="wpSlide"){const si=lb.querySelector("#slideInt");if(si)si.style.display=inp.checked?"":"none";startSlideshow();}};});
+ lb.querySelectorAll("input[data-pt]").forEach(inp=>{inp.onchange=()=>{const k=inp.dataset.pt;SET[k]=inp.checked;applySettings();saveSettings();if(k==="wpSlide"){const si=lb.querySelector("#slideInt");if(si)si.style.display=inp.checked?"":"none";startSlideshow();}
+  // deskAppsHidden is read only by renderApps(), which applySettings() never calls — without this
+  // the switch looked dead: shortcuts came back on the next page load, not when you flipped it
+  if(k==="deskAppsHidden"){renderApps();lsAppsList(lb);}};});
  lb.querySelectorAll("input[data-op]").forEach(sl=>{const key=sl.dataset.op,out=lb.querySelector("#o_"+key);paintRange(sl);
   sl.oninput=()=>{SET[key]=+sl.value;if(out)out.textContent=sl.value+"%";paintRange(sl);applySettings();
    const rb=lb.querySelector(`[data-opreset="${key}"]`);if(rb)rb.disabled=false;};
@@ -13853,12 +13863,17 @@ function lsAppsList(lb){
    <div class="mon-note">None yet. A container gets a shortcut here when its compose file carries
    the <b>web-desktop.*</b> labels.</div>`;return;}
  const hid=SET.deskHidden||[];
+ // With «Hide app shortcuts» on, none of these switches change anything you can see. Saying so
+ // beats showing rows that look live — a switch that is on while something above it overrules
+ // it is a lie on screen.
+ const gated=!!SET.deskAppsHidden;
  box.innerHTML=`<div class="set-grp">Shortcuts from Docker</div>
   <div class="mon-note">These appear by themselves, from the <b>web-desktop.*</b> labels on your
   containers. Switch one off and it leaves the desktop only — it stays in Launchpad and its
-  container is not touched.</div>`
+  container is not touched.${gated?` <b>«Hide app shortcuts» above is on</b>, so the desktop stays
+  empty whatever you set here — turn it off to see these again.`:""}</div>`
   +shortcuts.map(a=>{const k=a.container||a.name;
-   return `<div class="mon-row"><span>${esc(a.name)}<div class="mon-sub mono">${esc(a.container||"")}</div></span>
+   return `<div class="mon-row${gated?" is-gated":""}"><span>${esc(a.name)}<div class="mon-sub mono">${esc(a.container||"")}</div></span>
     <label class="tgl"><input type="checkbox" data-app="${att(k)}"${hid.includes(k)?"":" checked"}><span class="sl"></span></label></div>`;}).join("");
  box.querySelectorAll("input[data-app]").forEach(cb=>cb.onchange=()=>{
   const k=cb.dataset.app,cur=SET.deskHidden||[];
@@ -13883,7 +13898,8 @@ function lsWidgets(lb){const cl=/^#[0-9a-f]{6}$/i;lb.innerHTML=`
  const wc2=lb.querySelector("#wdgC"),wk=isLight()?"wdgLight":"wdgDark";
  wc2.oninput=()=>{SET[wk]=wc2.value;applySettings();};wc2.onchange=()=>saveSettings();
  lb.querySelectorAll("[data-wreset]").forEach(b=>b.onclick=()=>{SET[b.dataset.wreset]="";applySettings();saveSettings();lsWidgets(lb);});
- wireLook(lb);}
+ // the #lsApps card lives in THIS tab — filling it from anywhere else leaves it empty forever
+ wireLook(lb);lsAppsList(lb);}
 function lsPop(lb){const cl=/^#[0-9a-f]{6}$/i;lb.innerHTML=`
   <div class="set-card">
    <div class="mon-note" style="margin:0">Top-bar popovers — health, notifications, operations. They inherit the widget glass by default; set your own here.</div>
@@ -13898,7 +13914,7 @@ function lsPop(lb){const cl=/^#[0-9a-f]{6}$/i;lb.innerHTML=`
  const pc2=lb.querySelector("#popC"),pk=isLight()?"popLight":"popDark";
  pc2.oninput=()=>{SET[pk]=pc2.value;applySettings();};pc2.onchange=()=>saveSettings();
  lb.querySelectorAll("[data-preset]").forEach(b=>b.onclick=()=>{SET[b.dataset.preset]="";applySettings();saveSettings();lsPop(lb);});
- wireLook(lb);lsAppsList(lb);}
+ wireLook(lb);}
 function lsDock(lb){lb.innerHTML=`
   <div class="set-card">
    <div class="field"><label>Position</label><div class="seg" id="dockPos">
