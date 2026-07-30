@@ -15246,12 +15246,22 @@ function opsPop(){const b=document.getElementById("opsBtn");if(!b)return;
 /* Bringing a shortcut back used to live only inside a context menu on the very icon the
    user had just made disappear — you had to already know it was there. These entries put
    the way back on the empty desktop instead, and they show up ONLY when something is
-   actually hidden, so the menu says nothing when there is nothing to say. */
+   actually hidden, so the menu says nothing when there is nothing to say.
+   Hide-all lives here too: it used to sit on the icon menu alone, which meant the switch
+   that empties the desktop could only be reached from the very things it removes — once
+   the desktop was clear there was nothing left to right-click. An action and its undo
+   belong on the same surface. */
 function deskRestoreItems(){
  const dHid=SET.deskHidden||[];
- const hidden=(APPS||[]).filter(a=>a.url&&dHid.includes(a.container||a.name));
+ const shortcuts=(APPS||[]).filter(a=>a.url);
+ const hidden=shortcuts.filter(a=>dHid.includes(a.container||a.name));
  const out=[];
- if(SET.deskAppsHidden)out.push({label:"Show app shortcuts",ic:svg("eye",17),act:()=>{
+ if(!SET.deskAppsHidden&&shortcuts.length>hidden.length)out.push({label:"Hide all shortcuts",ic:svg("eye",17),act:()=>{
+  SET.deskAppsHidden=true;saveSettings();renderApps();
+  toast("The desktop is clear — every app is in Launchpad");}});
+ // The label states what this does NOT do. Turning the master switch off brings back
+ // everything except what was removed one by one, and a count is the honest way to say so.
+ if(SET.deskAppsHidden)out.push({label:hidden.length?"Show shortcuts ("+hidden.length+" stay hidden)":"Show app shortcuts",ic:svg("eye",17),act:()=>{
   SET.deskAppsHidden=false;saveSettings();renderApps();
   toast(hidden.length?"Shortcuts are back — "+hidden.length+" of them are still hidden one by one":"Shortcuts are back");}});
  if(hidden.length)out.push({label:"Hidden shortcuts ("+hidden.length+")",ic:svg("grid",17),sub:[
