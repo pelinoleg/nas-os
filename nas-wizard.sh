@@ -1932,7 +1932,9 @@ install_uas_off() {
     # path where it is a real module — that is the whole test.
     if ! is_pi && modinfo uas 2>/dev/null | grep -qE '^filename:[[:space:]]*/'; then
         run mkdir -p /etc/modprobe.d
-        write_file /etc/modprobe.d/nas-uas-off.conf <<'EOF'
+        local _uas_conf=/etc/modprobe.d/nas-uas-off.conf _uas_had=0
+        [ -f "$_uas_conf" ] && _uas_had=1
+        write_file "$_uas_conf" <<'EOF'
 # NAS-OS: never let a USB-SATA bridge run on UAS. Its error recovery resets the WHOLE
 # usb device, so one stuck command (a SMART pass-through issued while rsync writes is
 # enough) aborts every in-flight write and ext4 flips to read-only mid-backup.
@@ -1941,6 +1943,12 @@ install_uas_off() {
 blacklist uas
 install uas /bin/true
 EOF
+        # modprobe.d is baked INTO the initramfs: on a box that boots from a USB disk
+        # uas loads there, before the real root is even mounted, and the file above
+        # alone would never be consulted for it. Rebuild once, when the conf is new.
+        if [ "$_uas_had" -eq 0 ] && command -v update-initramfs >/dev/null 2>&1; then
+            run update-initramfs -u || warn "update-initramfs failed — a USB-booted system keeps uas until the image is rebuilt"
+        fi
         info "UAS disabled kernel-wide (uas is a module on this board)"
     fi
     write_file /usr/local/bin/nas-uas-off.sh <<'UASOFF'
@@ -2886,7 +2894,9 @@ t=""
 for h in /sys/class/hwmon/hwmon*; do
   case "$(cat "$h/name" 2>/dev/null)" in
     coretemp|k10temp|zenpower|cpu_thermal|soc_thermal|x86_pkg_temp)
-      t=$(( $(cat "$h/temp1_input" 2>/dev/null || echo 0) / 1000 )); break ;;
+      t="$(cat "$h/temp1_input" 2>/dev/null)"
+      case "$t" in ''|*[!0-9]*) t=0 ;; *) t=$(( t / 1000 )) ;; esac
+      break ;;
   esac
 done
 [ -n "$t" ] || t=$(vcgencmd measure_temp 2>/dev/null | tr -dc '0-9.' | cut -d. -f1)

@@ -3264,14 +3264,29 @@ def missing_pkgs_recheck():
     _MISS_PKGS.update(t=0.0)
     return missing_base_packages()
 
+_pkg_install_lock = threading.Lock()
+
 def install_missing_packages():
     """Try to install what the installer had to skip. This is the whole point of
     surfacing the list: on a newer Debian the package usually exists under a new
     name or simply arrived in the repo later, and then one button fixes it."""
+    # a second click while the first run is still going must not start a second apt
+    if not _pkg_install_lock.acquire(blocking=False):
+        return {"ok": False, "log": "an install run is already in progress — wait for it to finish"}
+    try:
+        return _install_missing_locked()
+    finally:
+        _pkg_install_lock.release()
+
+def _install_missing_locked():
     miss = missing_pkgs_recheck()
     if not miss:
         return {"ok": True, "log": "nothing to install — all packages are present"}
-    names = [m["pkg"] for m in miss]
+    # the skip file is root-written, but these names end up on an apt command line —
+    # accept only things that look like Debian package names
+    names = [m["pkg"] for m in miss if re.match(r"^[a-z0-9][a-z0-9.+-]{1,63}$", m["pkg"])]
+    if not names:
+        return {"ok": False, "log": "no valid package names to install"}
     env = dict(os.environ, DEBIAN_FRONTEND="noninteractive")
     # unattended-upgrades is part of the base, so the dpkg lock being busy is a normal
     # state here — wait for it rather than fail the one button meant to fix things
@@ -23096,8 +23111,8 @@ class H(BaseHTTPRequestHandler):
         rel = path.lstrip("/")
         # One URL that answers with the board's own mark. The berry logo is a statement
         # about the HARDWARE, and setup.html needs it before any JS (or any auth) has
-        # run — so the server picks the file, not the client. Rewriting rel here keeps
-        # the normal ETag/gzip path for free.
+        # run — so the server picks the file, not the client. Rewriting rel keeps the
+        # normal serving path; the ETag branch below covers .svg exactly for this URL.
         if rel == "icon-brand.svg":
             rel = "icon-flat.svg" if IS_PI else "icon-board.svg"
         full = os.path.realpath(os.path.join(WEB_DIR, rel))
@@ -23156,7 +23171,11 @@ class H(BaseHTTPRequestHandler):
         if ext == ".html":
             self.send_header("Cache-Control", "no-store, must-revalidate")
             self.send_header("Pragma", "no-cache")
-        elif ext in (".js", ".css"):
+        elif ext in (".js", ".css", ".svg"):
+            # .svg is here for /icon-brand.svg: two DIFFERENT files behind one URL
+            # (picked by the board). With no validator at all a browser may cache
+            # heuristically — and after a box swap the hostname is still nas.local,
+            # so the old box's berry would survive onto the new machine.
             self.send_header("Cache-Control", "no-cache, must-revalidate")
             if etag:
                 self.send_header("ETag", etag)
