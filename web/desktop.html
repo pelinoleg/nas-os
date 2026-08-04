@@ -3117,6 +3117,18 @@
   .srow-c{flex:none;display:flex;align-items:center;gap:8px}
   .srow-off{opacity:.5}.srow input:disabled,.srow select:disabled{cursor:not-allowed}
   .srow-c input.mono{max-width:150px}
+  /* Display-token permissions: a grid rather than a stack of toggle rows —
+     fourteen of those would bury the rest of the tab. The ones that can stop a
+     service or cut the power are marked, so a careless tick is a deliberate one. */
+  .gl-acts{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:6px;margin-top:10px}
+  .gl-act{display:grid;grid-template-columns:auto 1fr;gap:2px 8px;align-items:baseline;
+    padding:8px 10px;border:1px solid var(--line);border-radius:8px;cursor:pointer}
+  .gl-act:hover{border-color:var(--accent)}
+  .gl-act input{grid-row:span 2;align-self:center;margin:0}
+  .gl-act-t{font-size:12px;font-weight:550}
+  .gl-act-d{font-size:11px;color:var(--mut);line-height:1.35;grid-column:2}
+  .gl-act.risky{border-color:color-mix(in srgb,var(--warn) 45%,var(--line))}
+  .gl-act.risky .gl-act-t::after{content:"·  can disrupt";font-weight:400;color:var(--warn);margin-left:6px}
   .tip{display:inline-flex;align-items:center;justify-content:center;color:var(--mut);cursor:help;opacity:.7;flex:none;vertical-align:middle;margin-left:4px;position:relative;top:-1px}
   .srow-t .tip,.mon-row .tip{top:0}
   .tip:hover{opacity:1;color:var(--accent)}
@@ -12231,6 +12243,24 @@ let SYSC=null, PENDING_REBOOT=false;
    so changing tiles here never requires reflashing the device. */
 /* NB: distinct name — a global sparkSVG(data,color,max) already exists for the
    monitoring widgets and function declarations override each other */
+/* What a display token can be granted, and what each one really does. Mirrors
+   GLANCE_ACTIONS in nas-web.py — the server filters against its own copy, so a
+   name that drifts here is refused rather than silently obeyed. */
+const GL_ACT_LIST=[
+ ["touch","Wake the screen","turns the local screen's backlight back on",0],
+ ["sleep","Sleep the screen","turns the local screen's backlight off",0],
+ ["speed","Speed test","measures the internet link, takes 10-18 s",0],
+ ["backup","Run a backup","starts a profile; the id goes in p",0],
+ ["backup_stop","Stop a backup","asks the running job to stop cleanly",0],
+ ["kopia","Run Kopia","starts a Kopia snapshot by id",0],
+ ["kopia_stop","Stop Kopia","cancels the running snapshot",0],
+ ["apt_update","System updates","installs pending apt packages",0],
+ ["img_update","Container images","pulls and restarts what has an update",0],
+ ["fsw_accept","Accept file changes","clears the deletion warning",0],
+ ["stack","Control a stack","up, down, restart, stop or start a compose stack",1],
+ ["eject","Eject a disk","unmounts a USB drive; refuses system and pool disks",1],
+ ["reboot","Reboot the box","everything running stops",1],
+ ["poweroff","Shut the box down","it will not come back without physical access",1]];
 function glSpark(v){if(!v||v.length<2)return "";
  const mn=Math.min(...v),mx=Math.max(...v),sp=(mx-mn)||1;
  const pts=v.map((x,i)=>`${(i/(v.length-1)*46).toFixed(1)},${(17-(x-mn)/sp*14).toFixed(1)}`).join(" ");
@@ -12721,10 +12751,16 @@ async function glanceTab(tc){
   <div class="srow"><div class="srow-l"><div class="srow-t">Token</div><div class="srow-d mono">${tok?esc(tok):"— not created —"}</div></div><div class="srow-c"><button class="btn sm" id="glNew">${tok?"Reissue":"Create"}</button><button class="btn sm" id="glCopy"${tok?"":" disabled"}>Copy URL</button><button class="btn sm warn" id="glRev"${tok?"":" disabled"}>Revoke</button></div></div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Device address</div><div class="srow-d mono" style="user-select:all;word-break:break-all">${esc(url)}</div><div class="srow-d">the <span class="mono">lang</span> parameter = <span class="mono">en</span> (Latin) or <span class="mono">ru</span></div></div><div class="srow-c"><button class="btn sm" id="glTest">Check</button></div></div>
   <div class="set-h">What the endpoint serves</div>
-  <div class="set-sub">JSON: <span class="mono">tiles[]</span> — all metrics (id, label, value, unit, state ok/warn/danger, raw with machine numbers, some have spark — a day's history); <span class="mono">avail</span>/<span class="mono">avail30</span> — availability bars for 24 h and 30 days; <span class="mono">colors</span> — status shades; <span class="mono">status</span> — overall verdict; <span class="mono">seq</span> + a <span class="mono">304</span> response, so unchanged data isn't fetched.</div>
+  <div class="set-sub">JSON: <span class="mono">tiles[]</span> — all metrics (id, label, value, unit, state ok/warn/danger, raw with machine numbers, some have spark — a day's history); <span class="mono">byId</span> — the same tiles keyed by id, which is what to address from a fixed layout: positions in <span class="mono">tiles[]</span> shift when a disk or a backup job comes and goes; <span class="mono">counts</span> — how many tiles sit in each state; <span class="mono">avail</span>/<span class="mono">avail30</span> — availability bars for 24 h and 30 days; <span class="mono">colors</span> — status shades; <span class="mono">status</span> — overall verdict; <span class="mono">seq</span> + a <span class="mono">304</span> response, so unchanged data isn't fetched.</div>
+  <div class="set-h">Actions</div>
+  <div class="set-sub">By default the token only reads. Tick what a device may also <i>do</i>: it posts <span class="mono">{"a":"&lt;name&gt;"}</span> to <span class="mono">/api/glance/act</span> with the same token, and every call is written to the action log. Note that the token is stored in plain text on the device — and a panel that serves its own config over the network hands it to anyone on your LAN. Grant only what you would be comfortable with any device on the network doing.</div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Allowed actions</div><div class="srow-d">${(cfg.actions&&cfg.actions.length)?esc(cfg.actions.join(", ")):"— none, read-only —"}</div></div></div>
+  <div class="gl-acts" id="glActs">${GL_ACT_LIST.map(([id,t,d,risky])=>`
+    <label class="gl-act${risky?" risky":""}"><input type="checkbox" data-a="${id}"${(cfg.actions||[]).includes(id)?" checked":""}>
+     <span class="gl-act-t">${esc(t)}</span><span class="gl-act-d">${esc(d)}</span></label>`).join("")}</div>
   <div class="set-h">Availability</div>
   <div class="set-sub">The journal is kept by the network guard: it pings the gateway and records the state (online / no network / powered off) — this is <span class="mono">avail</span> in the response and the "Availability" widgets on the desktop.</div>
-  <div class="srow"><div class="srow-l"><div class="srow-t">Probe interval</div><div class="srow-d">more often — finer bars, less often — less background work</div></div><div class="srow-c"><div class="seg" id="glPing">${[15,30,60,120].map(v=>`<button data-v="${v}" class="${(cfg.ping_interval||30)===v?"on":""}">${v}from</button>`).join("")}</div></div></div>`;
+  <div class="srow"><div class="srow-l"><div class="srow-t">Probe interval</div><div class="srow-d">more often — finer bars, less often — less background work</div></div><div class="srow-c"><div class="seg" id="glPing">${[15,30,60,120].map(v=>`<button data-v="${v}" class="${(cfg.ping_interval||30)===v?"on":""}">${v}s</button>`).join("")}</div></div></div>`;
  const post=async d=>api("/api/glance/config",{method:"POST",body:JSON.stringify(d)});
  const rer=()=>glanceTab(tc);
  tc.querySelector("#glEn").onchange=e=>post({enabled:e.target.checked});
@@ -12732,6 +12768,11 @@ async function glanceTab(tc){
  tc.querySelector("#glRev").onclick=async()=>{await post({token_action:"revoke"});rer();};
  tc.querySelector("#glCopy").onclick=()=>{if(navigator.clipboard)navigator.clipboard.writeText(url);toast("Copied");};
  tc.querySelector("#glTest").onclick=()=>window.open(url,"_blank");
+ tc.querySelectorAll("#glActs input").forEach(cb=>cb.onchange=async()=>{
+  const on=[...tc.querySelectorAll("#glActs input:checked")].map(x=>x.dataset.a);
+  const r=await post({actions:on});
+  if(r&&r.ok){rer();toast(on.length?("Allowed: "+on.length):"Read-only");}
+  else{toast("failed");cb.checked=!cb.checked;}});
  tc.querySelectorAll("#glPing button").forEach(b=>b.onclick=()=>{tc.querySelectorAll("#glPing button").forEach(x=>x.classList.toggle("on",x===b));post({ping_interval:+b.dataset.v});toast("Interval updated");});
 }
 /* Settings tab «Syncthing»: the service itself. Syncthing keeps its own settings

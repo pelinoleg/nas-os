@@ -1784,6 +1784,18 @@ def wud_invalidate():
 #  show: the settings tab picks/orders tiles, the device just renders them.
 # --------------------------------------------------------------------------- #
 GLANCE_FILE = os.path.join(NAS_CONFIG, "glance.json")
+
+# Actions an external display may be granted. Nothing is granted by default:
+# the token travels in plain text (it sits in the device's own config, which on
+# a panel like DisplaySquare is served openly on the LAN), so "may read the
+# feed" must never imply "may power the box off". The owner ticks each one.
+# `touch` and `sleep` only poke the local screen and carry no risk; `reboot`
+# and `poweroff` are listed so they *can* be granted deliberately, and the
+# settings page says plainly what that means.
+GLANCE_ACTIONS = ("touch", "sleep", "speed", "backup", "backup_stop",
+                  "kopia", "kopia_stop", "eject", "stack",
+                  "apt_update", "img_update", "fsw_accept",
+                  "reboot", "poweroff")
 AVAIL_LOG = "/var/lib/nas-wizard/avail.log"   # written by nas-netguard.sh
 
 # (id, label-ru, label-en) — every tile the server can build. Collectors may
@@ -1929,8 +1941,11 @@ def load_glance():
     availability polling interval. Layout/tile selection is done by the device
     itself — the endpoint returns the WHOLE set of metrics (see glance_payload)."""
     d = _json_load_strict(GLANCE_FILE, {})
+    acts = d.get("actions")
+    acts = [a for a in GLANCE_ACTIONS if isinstance(acts, list) and a in acts]
     return {"enabled": bool(d.get("enabled")),
             "token": d.get("token") or "",
+            "actions": acts,
             "ping_interval": int(d.get("ping_interval") or 30)}
 
 
@@ -1938,6 +1953,13 @@ def save_glance(d):
     cur = load_glance()
     if "enabled" in d:
         cur["enabled"] = bool(d["enabled"])
+    if "actions" in d:
+        want = d.get("actions")
+        # filtered against the catalogue rather than stored as sent: this list
+        # is what authorises a request later, so an unknown name must never
+        # reach it.
+        cur["actions"] = [a for a in GLANCE_ACTIONS
+                          if isinstance(want, list) and a in want]
     act = d.get("token_action")
     if act == "new":
         cur["token"] = secrets.token_hex(16)
@@ -1956,7 +1978,16 @@ def save_glance(d):
             subprocess.run(["systemctl", "restart", "nas-netguard.timer"], timeout=15)
         except (OSError, subprocess.SubprocessError):
             pass
-    _json_save(GLANCE_FILE, cur, indent=2)
+    # Merge into whatever the file already holds rather than writing only the
+    # keys this function knows about. glance.json still carries a `screens`
+    # layout from an earlier design of this tab -- nothing reads it today, but
+    # writing `cur` wholesale would delete it the first time anyone ticked a
+    # box here, and a settings toggle must not be able to drop data it never
+    # asked about.
+    raw = _json_load_strict(GLANCE_FILE, {})
+    raw = dict(raw) if isinstance(raw, dict) else {}
+    raw.update(cur)
+    _json_save(GLANCE_FILE, raw, indent=2)
     with _GL_LOCK:
         _GL_CACHE["langs"].clear()
     return cur
@@ -2602,12 +2633,29 @@ def glance_payload(lang="ru", screen=""):
         return v if isinstance(v, str) and re.match(r"^#[0-9a-fA-F]{6}$", v) else dflt
     colors = {"ok": _hue("goodHex", "#1FA971"), "warn": _hue("warnHex", "#CF881B"),
               "danger": _hue("dangerHex", "#DE4E48"), "accent": _hue("accentHex", "#12B0A6")}
-    payload = {"v": 3, "host": socket.gethostname(), "status": status,
-               "problems": problems[:6], "tiles": tiles, "colors": colors,
+    counts = {"ok": 0, "warn": 0, "danger": 0}
+    for t in tiles:
+        if t["state"] in counts:
+            counts[t["state"]] += 1
+    payload = {"v": 4, "host": socket.gethostname(), "status": status,
+               "problems": problems[:6], "tiles": tiles,
+               # The same tiles keyed by id. `tiles` is an ordered list for
+               # rendering, but a client addressing it by index breaks the
+               # moment a disk is unplugged or a backup job is added: the
+               # dynamic nb:* and dk:* entries shift everything after them, and
+               # the reader silently starts showing a different metric under
+               # the old caption. byId survives all of it.
+               "byId": {t["id"]: t for t in tiles},
+               "counts": counts, "colors": colors,
                "avail": {"bars": av["bars"], "pct24": av["pct"]},
                "avail30": {"bars": av30["bars"], "pct": av30["pct"]},
+               # What this token may do, so a client can discover its own
+               # rights instead of probing and collecting 403s.
+               "actions": {"url": "/api/glance/act", "method": "POST",
+                           "field": "a", "allowed": list(cfg["actions"])},
                "ts": int(time.time())}
-    sig = json.dumps([tiles, problems, status, av["bars"], av30["bars"], colors],
+    sig = json.dumps([tiles, problems, status, av["bars"], av30["bars"], colors,
+                      cfg["actions"]],
                      sort_keys=True, ensure_ascii=False)
     with _GL_LOCK:
         c = _GL_CACHE["langs"].setdefault(lang, {"t": 0, "sig": "", "seq": 0, "payload": None})
@@ -22450,7 +22498,7 @@ def screen_op_run(op):
               line="done" if ok else "finished with errors")
     _json_save(SCREEN_OP_FILE, st, indent=None)
 
-def screen_action(b):
+def screen_action(b, preauthorised=False):
     """Actions from the local screen. 'touch' is not an action — it is the wake
     signal, so it works even when the action buttons are switched off."""
     a = str(b.get("a") or "")
@@ -22469,7 +22517,11 @@ def screen_action(b):
         _safe(lambda: _screen_apply(force=True))
         return {"ok": True}
     cfg = load_screen()
-    if not cfg["actions"]:
+    # `preauthorised` is set by the glance endpoint, which has already checked
+    # its own allow-list. Without it a token action would also depend on the
+    # local screen's switch -- two unrelated settings gating one request, and
+    # an "allowed" action answering "disabled" for no visible reason.
+    if not (preauthorised or cfg["actions"]):
         return {"ok": False, "log": "actions from the screen are disabled"}
     if a == "backup":
         return nb_run_bg(_nb_bpid(b))
@@ -23897,6 +23949,34 @@ class H(BaseHTTPRequestHandler):
             if not (self._local() or self._authed()):
                 self._json({"error": "forbidden"}, 403); return
             self._json(screen_action(self._body())); return
+        if p == "/api/glance/act":
+            # An external display acts with the same read-only token it polls
+            # with, but only within the allow-list the owner ticked. Deliberately
+            # a separate path from /api/screen/act, which stays session-only:
+            # widening that one would have handed every existing caller the new
+            # rights too.
+            cfg = load_glance()
+            b = self._body() or {}
+            tok = ((parse_qs(urlparse(self.path).query).get("token") or [""])[0]
+                   or self.headers.get("X-Glance-Token") or str(b.get("token") or ""))
+            # bytes, like the GET path: compare_digest raises TypeError on a
+            # non-ASCII str, and a 500 here would leak that the token was odd
+            ok = bool(cfg["enabled"] and cfg["token"]
+                      and hmac.compare_digest(tok.encode("utf-8", "ignore"),
+                                              str(cfg["token"]).encode("utf-8")))
+            if not ok:
+                self._json({"ok": False, "error": "auth"}, 401); return
+            a = str(b.get("a") or "")
+            if a not in cfg["actions"]:
+                self._json({"ok": False, "error": "not allowed", "action": a,
+                            "allowed": list(cfg["actions"])}, 403); return
+            r = screen_action(b, preauthorised=True)
+            # Same audit trail the session path keeps: an action that can stop a
+            # backup or reboot the box must be attributable afterwards.
+            _safe(lambda: log_action("/api/glance/act",
+                                     {"a": a, "from": self._client_ip()},
+                                     r if isinstance(r, dict) else {}))
+            self._json(r); return
         if p == "/api/agent/notify":
             # local shell agents (nas-notify.sh) — pre-auth, loopback only
             if self.client_address[0] not in ("127.0.0.1", "::1", "::ffff:127.0.0.1"):
