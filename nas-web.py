@@ -22268,7 +22268,7 @@ def _screen_usb_cfg():
             "dest_off": bool(dest and _dest_disk_absent(dest))}
 
 
-def screen_payload(lang="", p2=False):
+def screen_payload(lang="", p2=False, events_max=30):
     # the screen language comes from screen.json, not the kiosk browser; the UI is
     # English-only now, so lang is effectively always "en"
     cfg0 = load_screen()
@@ -22300,8 +22300,15 @@ def screen_payload(lang="", p2=False):
     problems = [{"name": c.get("name"), "value": c.get("value"),
                  "lvl": c.get("lvl"), "hint": c.get("hint") or ""}
                 for c in (hp.get("checks") or []) if c.get("lvl") in ("bad", "warn")]
+    # The event feed is by far the heaviest section (25 entries ~ 5.6 KB of an
+    # 18 KB payload). The local screen wants all of them; a small external panel
+    # shows five, and pays for thirty on every poll. `?events=` caps it.
+    try:
+        n_ev = max(0, min(30, int(events_max)))
+    except (TypeError, ValueError):
+        n_ev = 30
     ev = _safe(lambda: events_list(0, 40), {}) or {}
-    events = list(reversed(ev.get("events") or []))[:30]   # newest on top
+    events = list(reversed(ev.get("events") or []))[:n_ev]   # newest on top
     bks = []
     for p in (_safe(nb_profiles_public, []) or []):
         h = _safe(lambda pid=p["id"]: nb_history(pid), []) or []   # newest first
@@ -22674,6 +22681,19 @@ class H(BaseHTTPRequestHandler):
 
     def _authed(self):
         return session_valid(self._cookie_token())
+
+    def _glance_tok_ok(self, extra=""):
+        """The read-only display token, from the query, a header or `extra`
+        (the POST path also accepts it in the JSON body).
+        Compared as bytes: compare_digest raises TypeError on a non-ASCII str,
+        and on a pre-auth path that would 500 instead of answering cleanly."""
+        cfg = load_glance()
+        if not (cfg["enabled"] and cfg["token"]):
+            return False
+        tok = ((parse_qs(urlparse(self.path).query).get("token") or [""])[0]
+               or self.headers.get("X-Glance-Token") or extra or "")
+        return hmac.compare_digest(tok.encode("utf-8", "ignore"),
+                                   str(cfg["token"]).encode("utf-8"))
 
     def _local(self):
         """Request came from the box itself (the local screen's kiosk browser)."""
@@ -23566,11 +23586,16 @@ class H(BaseHTTPRequestHandler):
             self._json({"config": load_screen(), "present": bool(_bl_dir()),
                         "unit": (u.get("log") or "").strip()}); return
         if p == "/api/screen/data":
-            # the local screen works without a session; from the LAN — only with a password
-            if not (self._local() or self._authed()):
+            # the local screen works without a session; from the LAN — only with
+            # a password, or with the display token. The token already reads the
+            # whole of /api/glance, and this is the same class of data in more
+            # detail — an external panel that has to reproduce this dashboard
+            # cannot do it from the 25 glance tiles alone.
+            if not (self._local() or self._authed() or self._glance_tok_ok()):
                 self._json({"error": "auth"}, 401); return
             self._json(screen_payload((q.get("lang") or [""])[0],
-                                      p2=bool((q.get("p2") or [""])[0]))); return
+                                      p2=bool((q.get("p2") or [""])[0]),
+                                      events_max=(q.get("events") or [30])[0])); return
         if p.startswith("/api/") and not self._authed():
             self._json({"error": "auth", "configured": auth_configured()}, 401); return
         try:
@@ -23957,14 +23982,7 @@ class H(BaseHTTPRequestHandler):
             # rights too.
             cfg = load_glance()
             b = self._body() or {}
-            tok = ((parse_qs(urlparse(self.path).query).get("token") or [""])[0]
-                   or self.headers.get("X-Glance-Token") or str(b.get("token") or ""))
-            # bytes, like the GET path: compare_digest raises TypeError on a
-            # non-ASCII str, and a 500 here would leak that the token was odd
-            ok = bool(cfg["enabled"] and cfg["token"]
-                      and hmac.compare_digest(tok.encode("utf-8", "ignore"),
-                                              str(cfg["token"]).encode("utf-8")))
-            if not ok:
+            if not self._glance_tok_ok(str(b.get("token") or "")):
                 self._json({"ok": False, "error": "auth"}, 401); return
             a = str(b.get("a") or "")
             if a not in cfg["actions"]:
