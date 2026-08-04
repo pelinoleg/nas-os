@@ -9532,7 +9532,7 @@ SB_DRILL_FILE = os.path.join(NAS_CONFIG, "settings-drill.json")
 
 def _drill_check(name, ok, note=""):
     """One verdict. ok=None means SKIPPED (no tool / nothing to check) — and a skip
-    is NOT a failure: the July rule, «отсутствие данных о проверке ≠ провал проверки»."""
+    is NOT a failure: the July rule — no data about a check is not a failed check."""
     return {"name": name, "ok": ok, "note": note}
 
 def settings_backup_drill(name=None):
