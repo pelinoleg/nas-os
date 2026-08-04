@@ -12225,6 +12225,7 @@ function backupTab(tc){
   <div class="nb-dwarn" id="bkEph" style="display:none;margin-bottom:8px"></div>
   <div class="srow" style="margin-bottom:8px"><div class="srow-l"><div class="srow-t">Hide this folder in the file manager${tipHTML("The backup folder won't clutter the file manager. The «hidden» toggle in the FM window will still show it.")}</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="bkHide"><span class="sl"></span></label></div></div>
   <div class="mon-note" id="bkNote">loading…</div>
+  <div class="srow" id="bkDrillRow" style="margin:8px 0"><div class="srow-l"><div class="srow-t">Restore drill${tipHTML("Monthly, the newest archive is unpacked into a scratch folder and every subsystem's own tool judges its config: testparm for Samba, docker compose config for stacks, parsers for keys and state files. Nothing on the box is touched. This is what proves the backup can actually bring a system back — before the day it has to.")}</div><div class="srow-d" id="bkDrill">no drill has run yet</div></div><div class="srow-c"><button class="btn sm" id="bkDrillRun">${svg("activity",13)} Run now</button></div></div>
   <div id="bkList"></div>`;
  const list=tc.querySelector("#bkList"),note=tc.querySelector("#bkNote");
  const days=tc.querySelector("#bkDays"),keep=tc.querySelector("#bkKeep");
@@ -12233,6 +12234,10 @@ function backupTab(tc){
   const md=(r&&r.maintenance)||{};days.value=md.backup_days;keep.value=md.backup_keep;
   toast(+md.backup_days?`Auto-backup: every ${md.backup_days} d`: "Auto-backup disabled");load();};
  days.onchange=saveCfg;keep.onchange=saveCfg;
+ {const b=tc.querySelector("#bkDrillRun");if(b)b.onclick=async()=>{b.disabled=true;b.textContent="Checking…";
+  const r=await api("/api/settings-backup/drill",{method:"POST",body:JSON.stringify({})});
+  b.disabled=false;b.innerHTML=svg("activity",13)+" Run now";
+  toast(r&&r.ok?"Drill passed — the archive restores":"Drill FAILED: "+((r&&(r.log||(r.checks||[]).filter(c=>c.ok===false).map(c=>c.name).join(", ")))||"?"));load();};}
  {const bd=tc.querySelector("#bkDir"),bdb=tc.querySelector("#bkDirB");
   if(bdb)bdb.onclick=()=>pickFolder({title:"Folder for settings backups",start:bd.value||"/mnt/storage",onPick:p=>{bd.value=p;}});}
  tc.querySelector("#bkDirSave").onclick=async()=>{const r=await api("/api/maintenance",{method:"POST",body:JSON.stringify({maintenance:{settings_backup_dir:dir.value.trim()}})});
@@ -12251,6 +12256,11 @@ function backupTab(tc){
    const bs=eph.querySelector("#bkStMain");if(bs)bs.onclick=()=>storageDlg(load);}
   else eph.style.display="none";
   note.textContent=nasTr(`Folder: ${r.dir} · ${r.days?`automatically every ${r.days} d`:"auto-backup disabled"} · kept ${r.keep} most recent`);
+  {const dd=tc.querySelector("#bkDrill");if(dd){const dr=r.drill;
+   if(!dr)dd.textContent="no drill has run yet — monthly by timer, or run now";
+   else{const bad=(dr.checks||[]).filter(c=>c.ok===false);
+    dd.innerHTML=dr.ok?`<span style="color:var(--good)">✓ ${esc(dr.archive)} restores</span> · ${ruWhen(dr.ts)} · ${(dr.checks||[]).filter(c=>c.ok===true).length} checks`
+     :`<span style="color:var(--danger)">✗ ${esc(dr.archive)}: ${bad.map(c=>esc(c.name+(c.note?" ("+c.note+")":""))).join(", ")}</span> · ${ruWhen(dr.ts)}`;}}}
   list.innerHTML=(r.list&&r.list.length)?"":`<div class="dempty">${svg("save",16)} No backups yet — click «Create»</div>`;
   (r.list||[]).forEach(b=>{
    const row=el(`<div class="stk-cont" style="margin-bottom:6px"><span class="nico">${svg("save",14)}</span><span class="cn">${esc(b.name)}</span><span class="cstat">${ruWhen(b.t)} · ${fmtB(b.size)}</span>

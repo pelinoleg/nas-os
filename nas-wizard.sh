@@ -4025,7 +4025,30 @@ Persistent=true
 [Install]
 WantedBy=timers.target
 UNIT
+    # Settings-backup restore drill: the archive is WRITTEN on schedule, but only
+    # this proves it can bring a box back up — extraction into a scratch dir plus
+    # per-subsystem fact checks (testparm, compose config, parsers). Monthly: the
+    # archive set changes slowly, and a failing drill raises a panel event.
+    write_file /etc/systemd/system/nas-settings-drill.service <<UNIT
+[Unit]
+Description=NAS: settings backup restore drill
+[Service]
+Type=oneshot
+Nice=10
+IOSchedulingClass=idle
+ExecStart=/usr/bin/python3 $SCRIPT_DIR/nas-web.py settings-drill
+UNIT
+    write_file /etc/systemd/system/nas-settings-drill.timer <<'UNIT'
+[Unit]
+Description=NAS: monthly settings restore drill
+[Timer]
+OnCalendar=*-*-02 04:10:00
+Persistent=true
+[Install]
+WantedBy=timers.target
+UNIT
     run systemctl daemon-reload
+    run systemctl enable --now nas-settings-drill.timer
     run systemctl enable --now nas-thumbs.timer
     report_skipped_packages
     echo "system prepared"

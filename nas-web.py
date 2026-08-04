@@ -758,9 +758,10 @@ def smart_detail(dev):
 
 _C_ENV = dict(os.environ, LC_ALL="C", LANG="C")   # stable (English) utility output for parsing
 
-def _run(cmd, timeout=40, env=None):
+def _run(cmd, timeout=40, env=None, cwd=None):
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=env or _C_ENV)
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
+                           env=env or _C_ENV, cwd=cwd)
         return {"ok": p.returncode == 0, "code": p.returncode, "log": (p.stdout + p.stderr).strip()}
     except (OSError, subprocess.SubprocessError) as e:
         return {"ok": False, "code": -1, "log": str(e)}
@@ -9527,6 +9528,190 @@ def settings_backup_inspect(path):
          "desc": _BK_DESC.get(k, "")}
         for k, t, s, _p in _BK_SECTIONS if k in seen]}
 
+SB_DRILL_FILE = os.path.join(NAS_CONFIG, "settings-drill.json")
+
+def _drill_check(name, ok, note=""):
+    """One verdict. ok=None means SKIPPED (no tool / nothing to check) — and a skip
+    is NOT a failure: the July rule, «отсутствие данных о проверке ≠ провал проверки»."""
+    return {"name": name, "ok": ok, "note": note}
+
+def settings_backup_drill(name=None):
+    """Prove the settings archive can actually bring a box back up — with FACTS.
+
+    The archive is written on schedule, but nothing ever proved it restores: that
+    is normally discovered on a dead box, at the worst possible moment. Same idea
+    as the kopia restore drill: extract the newest archive into a scratch dir
+    (never the live system) and let each subsystem's own tool judge its config —
+    testparm for Samba, docker compose config for stacks, parsers for the rest.
+    Nothing on the box is touched or restarted."""
+    import tempfile, configparser, xml.etree.ElementTree as _ET
+    d = settings_backup_dir()
+    if name:
+        if "/" in name or not _BK_NAME_RE.match(name):
+            return {"ok": False, "log": "bad archive name"}
+    else:
+        try:
+            names = sorted(f for f in os.listdir(d) if _BK_NAME_RE.match(f))
+        except OSError:
+            names = []
+        if not names:
+            return {"ok": False, "log": "no settings archives in " + d}
+        name = names[-1]
+    path = os.path.join(d, name)
+    checks = []
+    with tempfile.TemporaryDirectory(prefix="nas-sb-drill-") as td:
+        # -- 1. the archive opens and extracts safely ------------------------
+        try:
+            with tarfile.open(path, "r:gz") as tar:
+                members = tar.getmembers()
+                # filter="data" refuses absolute paths, .. escapes and symlink tricks —
+                # an archive is INPUT, even our own
+                tar.extractall(td, filter="data")
+            checks.append(_drill_check("archive", True, "%d files" % len(members)))
+        except (OSError, tarfile.TarError) as e:
+            return _drill_finish(name, [_drill_check("archive", False, str(e))])
+        j = lambda *pp: os.path.join(td, *pp)
+
+        # -- 2. manifest ------------------------------------------------------
+        try:
+            with open(j("manifest.json")) as f:
+                mf = json.load(f)
+            listed, present = len(mf.get("files") or []), len(members) - 1
+            checks.append(_drill_check("manifest", abs(listed - present) <= 2,
+                                       "listed %d / present %d" % (listed, present)))
+        except (OSError, ValueError):
+            checks.append(_drill_check("manifest", False, "missing or unparsable"))
+
+        # -- 3. Samba: its own parser is the judge ---------------------------
+        tp = shutil.which("testparm")
+        for arc, label in (("etc/samba/smb.conf", "smb.conf"),
+                           ("etc/samba/nas-shares.conf", "nas-shares.conf")):
+            if not os.path.isfile(j(arc)):
+                checks.append(_drill_check(label, None, "not in archive"))
+                continue
+            if not tp:
+                checks.append(_drill_check(label, None, "testparm not installed"))
+                continue
+            r = _run([tp, "-s", j(arc)], timeout=20)
+            checks.append(_drill_check(label, r.get("ok"),
+                                       "" if r.get("ok") else (r.get("log") or "")[-160:]))
+
+        # -- 4. SMB passwords survive (magic header, not just size) ----------
+        tdb = j("var/lib/samba/private/passdb.tdb")
+        if os.path.isfile(tdb):
+            with open(tdb, "rb") as f:
+                magic = f.read(8)
+            checks.append(_drill_check("passdb.tdb", magic == b"TDB file",
+                                       "%d bytes" % os.path.getsize(tdb)))
+        else:
+            checks.append(_drill_check("passdb.tdb", None, "not in archive"))
+
+        # -- 5. every stack compose validates --------------------------------
+        stacks = j("opt/stacks")
+        # compose v2 plugin is part of the base install; no v1 fallback on purpose
+        dc = ["docker", "compose"] if shutil.which("docker") else None
+        n_ok = n_bad = 0; bad_note = ""
+        if os.path.isdir(stacks) and dc:
+            for sd in sorted(os.listdir(stacks)):
+                cf = next((os.path.join(stacks, sd, f) for f in
+                           ("docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml")
+                           if os.path.isfile(os.path.join(stacks, sd, f))), None)
+                if not cf:
+                    continue
+                # cwd = the stack dir so its .env (extracted alongside) is picked up
+                r = _run(dc + ["-f", cf, "config", "-q"], timeout=60,
+                         cwd=os.path.dirname(cf))
+                if r.get("ok"):
+                    n_ok += 1
+                else:
+                    n_bad += 1
+                    bad_note += "%s: %s; " % (sd, (r.get("log") or "")[-120:])
+            checks.append(_drill_check("stacks", n_bad == 0,
+                                       ("%d valid" % n_ok) if n_bad == 0 else bad_note[:300]))
+        else:
+            checks.append(_drill_check("stacks", None,
+                                       "no stacks in archive" if dc else "docker not installed"))
+
+        # -- 6. the panel's own state files parse ----------------------------
+        bad = []
+        for pat in ("etc/nas-os/*.json", "nas-config/*.json"):
+            for fp in glob.glob(j(*pat.split("/"))):
+                try:
+                    with open(fp) as f:
+                        json.load(f)
+                except ValueError:
+                    bad.append(os.path.basename(fp))
+                except OSError:
+                    pass
+        checks.append(_drill_check("json state", not bad, ", ".join(bad)[:200]))
+
+        # -- 7. the panel password hash is a real record ---------------------
+        try:
+            with open(j("etc/nas-os/webauth.json")) as f:
+                wa = json.load(f)
+            checks.append(_drill_check("webauth", bool(wa.get("salt") and wa.get("hash"))))
+        except OSError:
+            checks.append(_drill_check("webauth", None, "not in archive"))
+        except ValueError:
+            # present but unparsable is a FAILURE, not an absence — the note must not lie
+            checks.append(_drill_check("webauth", False, "unparsable"))
+
+        # -- 8. keys and identities: right SHAPE, never used -----------------
+        def pem_ok(fp, needle):
+            try:
+                with open(fp, "rb") as f:
+                    return needle in f.read(4096)
+            except OSError:
+                return None
+        for arc, label, needle in (
+                ("root/.ssh/nas-backup", "ssh key", b"PRIVATE KEY"),
+                ("var/lib/syncthing/key.pem", "syncthing identity", b"PRIVATE KEY"),
+                ("etc/nas-os/kopia/server/key.pem", "kopia server tls", b"PRIVATE KEY")):
+            r = pem_ok(j(*arc.split("/")), needle)
+            checks.append(_drill_check(label, r, "" if r else
+                                       ("not in archive" if r is None else "wrong format")))
+
+        # -- 9. rclone remotes / syncthing config parse ----------------------
+        if os.path.isfile(j("etc/nas-os/rclone.conf")):
+            try:
+                cp = configparser.ConfigParser(); cp.read(j("etc/nas-os/rclone.conf"))
+                checks.append(_drill_check("rclone.conf", True, "%d remotes" % len(cp.sections())))
+            except configparser.Error as e:
+                checks.append(_drill_check("rclone.conf", False, str(e)[:150]))
+        else:
+            checks.append(_drill_check("rclone.conf", None, "not in archive"))
+        if os.path.isfile(j("var/lib/syncthing/config.xml")):
+            try:
+                _ET.parse(j("var/lib/syncthing/config.xml"))
+                checks.append(_drill_check("syncthing config", True))
+            except _ET.ParseError as e:
+                checks.append(_drill_check("syncthing config", False, str(e)[:150]))
+
+        # -- 10. reference files exist (informational) -----------------------
+        refs = [x for x in ("fstab", "snapraid.conf") if os.path.isfile(j("reference/etc", x))]
+        checks.append(_drill_check("reference", None, ", ".join(refs) or "none"))
+    return _drill_finish(name, checks)
+
+def _drill_finish(name, checks):
+    failed = [c for c in checks if c["ok"] is False]
+    res = {"ok": not failed, "archive": name, "ts": int(time.time()),
+           "checks": checks, "failed": len(failed)}
+    _safe(lambda: _json_save(SB_DRILL_FILE, res, indent=2))
+    if failed:
+        _safe(lambda: log_event("sbdrill", "Settings backup FAILED its restore drill",
+                                "%s: %s" % (name, ", ".join(c["name"] for c in failed)),
+                                "err", kind="cond"))
+    return res
+
+def settings_backup_drill_cli():
+    r = settings_backup_drill()
+    if not r.get("checks"):
+        print("drill: %s" % r.get("log")); return
+    for c in r["checks"]:
+        mark = "SKIP" if c["ok"] is None else ("ok" if c["ok"] else "FAIL")
+        print("  %-4s %-18s %s" % (mark, c["name"], c.get("note", "")))
+    print("drill %s: %s" % (r["archive"], "OK" if r["ok"] else "FAILED (%d)" % r["failed"]))
+
 def settings_backup_path():
     """Where to put the settings backup: a custom path from maintenance or the default.
     Default — on the pool (survives reinstall), a separate folder (not the shared «backups»)."""
@@ -9677,6 +9862,7 @@ def settings_backup_list():
     ephemeral = (not custom) and d.startswith("/var/")
     return {"ok": True, "dir": d, "days": cfg.get("backup_days", 7),
             "keep": cfg.get("backup_keep", BACKUP_KEEP), "list": out,
+            "drill": _json_load_strict(SB_DRILL_FILE, None),
             "ephemeral": ephemeral, "custom": custom,
             "pool": bool(storage_root())}
 
@@ -24459,6 +24645,8 @@ class H(BaseHTTPRequestHandler):
                 self._json({"ok": True, "id": eid})
             elif p == "/api/fs/fetch/cancel":
                 b = self._body(); self._json(fs_fetch_cancel(b.get("id", "")))
+            elif p == "/api/settings-backup/drill":
+                self._json(settings_backup_drill(self._body().get("name")))
             elif p == "/api/settings-backup/make":
                 self._json(settings_backup_make())
             elif p == "/api/settings-backup/restore":
@@ -25188,6 +25376,8 @@ if __name__ == "__main__":
         _args = sys.argv[2:]
         _pid = next((a for a in _args if a != "deep"), NB_MAIN)
         nb_compare_run(_pid, deep=("deep" in _args))
+    elif len(sys.argv) > 1 and sys.argv[1] == "settings-drill":
+        settings_backup_drill_cli()   # nas-settings-drill.timer (see wizard)
     elif len(sys.argv) > 1 and sys.argv[1] == "recycle-sweep":
         smb_recycle_sweep_cli()   # nas-recycle-sweep.timer (see install_smb_shares)
     elif len(sys.argv) > 1 and sys.argv[1] == "backup-drill":
