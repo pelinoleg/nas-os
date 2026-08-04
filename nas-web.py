@@ -20588,26 +20588,58 @@ def _journald_max():
             return l.split("=", 1)[-1].strip()
     return ""
 
+def _par(thunks, workers=8):
+    """Run {key: thunk} concurrently -> {key: result}.
+
+    sysconf's probes are dozens of INDEPENDENT subprocess calls; run sequentially the
+    settings window pays their sum — measured 2.2-5.3 s on a loaded Pi, with
+    fail2ban-client ping alone at 1.6 s and ufw status at 0.8 s. Concurrently the
+    answer costs one slowest probe. Worker cap keeps the fork burst reasonable on a
+    4-core box; the call happens only when a settings window opens, never on a poll."""
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=min(workers, max(1, len(thunks)))) as ex:
+        futs = {k: ex.submit(v) for k, v in thunks.items()}
+        return {k: f.result() for k, f in futs.items()}
+
 def sysconf():
     """Full current state of all configurable parameters."""
     cfg, cl = _boot_config(), _cmdline_path()
+    # only the probes that shell out are farmed to the pool; plain file reads and
+    # os.path checks stay inline — a thread per stat() would be noise
+    r = _par({
+        "hostname":    lambda: _sc("hostname") or _read("/etc/hostname"),
+        "timezone":    lambda: _sc("timedatectl", "show", "-p", "Timezone", "--value")
+                               or _read("/etc/timezone"),
+        "time_synced": lambda: _sc("timedatectl", "show", "-p",
+                                   "NTPSynchronized", "--value") == "yes",
+        "chrony":      lambda: _svc(["chrony", "chronyd"]),
+        "fstrim":      lambda: _svc("fstrim.timer"),
+        "journald_max": _journald_max,
+        "network":     _net_state,
+        "ufw":         _ufw_state,
+        "fail2ban":    _fail2ban_state,
+        "log2ram":     lambda: _svc("log2ram"),
+        "firmware":    lambda: (_sc("vcgencmd", "version").splitlines() or [""])[0],
+        "eeprom":      lambda: (_sc("vcgencmd", "bootloader_version").splitlines() or [""])[0],
+        "throttled":   _throttled_decode,
+        "zram":        _zram_status,
+        "governor":    _governor,
+    })
     return {
         "system": {
-            "hostname": _sc("hostname") or _read("/etc/hostname"),
-            "timezone": _sc("timedatectl", "show", "-p", "Timezone", "--value")
-                        or _read("/etc/timezone"),
-            "time_synced": _sc("timedatectl", "show", "-p",
-                               "NTPSynchronized", "--value") == "yes",
-            "chrony": _svc(["chrony", "chronyd"]),
-            "fstrim": _svc("fstrim.timer"),
+            "hostname": r["hostname"],
+            "timezone": r["timezone"],
+            "time_synced": r["time_synced"],
+            "chrony": r["chrony"],
+            "fstrim": r["fstrim"],
             "unattended": _unattended_on(),
-            "journald_max": _journald_max(),
+            "journald_max": r["journald_max"],
         },
-        "network": _net_state(),
+        "network": r["network"],
         "security": {
-            "ufw": _ufw_state(),
-            "fail2ban": _fail2ban_state(),
-            "log2ram": _svc("log2ram"),
+            "ufw": r["ufw"],
+            "fail2ban": r["fail2ban"],
+            "log2ram": r["log2ram"],
         },
         # "pi" carries BOTH the Pi-only knobs and three that exist on any board
         # (watchdog, zram, governor). is_pi tells the UI which half to draw: on other
@@ -20616,16 +20648,16 @@ def sysconf():
         "pi": {
             "is_pi": IS_PI,
             "model": _board_model(),
-            "firmware": (_sc("vcgencmd", "version").splitlines() or [""])[0],
-            "eeprom": (_sc("vcgencmd", "bootloader_version").splitlines() or [""])[0],
+            "firmware": r["firmware"],
+            "eeprom": r["eeprom"],
             "temp": temp_c(),
-            "throttled": _throttled_decode(),
+            "throttled": r["throttled"],
             "usbpower": _cfg_has(cfg, "usb_max_current_enable=1"),
             "pcie3": _cfg_has(cfg, "dtparam=pciex1_gen=3"),
             "cgroup": _memory_cgroup_on(),
             "watchdog": os.path.isfile("/etc/systemd/system.conf.d/watchdog.conf"),
-            "zram": _zram_status(),
-            "governor": _governor(),
+            "zram": r["zram"],
+            "governor": r["governor"],
             "config_path": cfg, "cmdline_path": cl,
         },
     }
@@ -23062,6 +23094,12 @@ class H(BaseHTTPRequestHandler):
         if path == "/" or path == "":
             path = "/desktop.html"
         rel = path.lstrip("/")
+        # One URL that answers with the board's own mark. The berry logo is a statement
+        # about the HARDWARE, and setup.html needs it before any JS (or any auth) has
+        # run — so the server picks the file, not the client. Rewriting rel here keeps
+        # the normal ETag/gzip path for free.
+        if rel == "icon-brand.svg":
+            rel = "icon-flat.svg" if IS_PI else "icon-board.svg"
         full = os.path.realpath(os.path.join(WEB_DIR, rel))
         root = os.path.realpath(WEB_DIR)
         # Graceful stub for the removed runtime i18n. Devices with a pre-english-only

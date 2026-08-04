@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# nas-wizard.sh — NAS setup wizard for Raspberry Pi 5
+# nas-wizard.sh — NAS setup wizard (Raspberry Pi / any Debian box)
 #
 # Implemented stages (per spec):
 #   1.  System preparation (NAS stack + utilities + Pi packages, docker,
@@ -161,7 +161,7 @@ NAS_CONFIG="$TARGET_HOME/nas-config"
 # ---------------------------------------------------------------------------
 usage() {
     cat <<EOF
-nas-wizard.sh — NAS setup on Raspberry Pi 5
+nas-wizard.sh — NAS setup (Raspberry Pi / any Debian box)
 
   --dry-run           Print commands, change nothing
   --stage system      Stage 1: system preparation
@@ -2280,20 +2280,28 @@ stage_pi() {
     temp="$(vcgencmd measure_temp 2>/dev/null | sed 's/temp=//')"
     throttled="$(vcgencmd get_throttled 2>/dev/null)"
 
+    # The checklist follows the board: config.txt / EEPROM entries exist only on a Pi,
+    # and a checkbox that cannot act is worse than an absent one — it lies (same rule
+    # as the panel's Hardware tab). The universal rows are identical on either list.
+    local items=()
+    if is_pi; then
+        items+=("usbpower" "USB max current — power for USB disks (Pi5)" ON)
+        items+=("pcie3"    "PCIe Gen3 for NVMe — faster, but out of spec" OFF)
+        items+=("cgroup"   "Memory cgroup — memory limits for docker" OFF)
+        items+=("eeprom"   "Update EEPROM firmware (rpi-eeprom)" OFF)
+    fi
+    items+=("trim"     "Enable fstrim.timer (TRIM for SSD/NVMe)" ON)
+    items+=("sysctl"   "Sysctl tuning (swappiness, somaxconn, tcp)" OFF)
+    items+=("zram"     "zram-swap (zstd, 50% RAM)" OFF)
+    items+=("chrony"   "chrony instead of timesyncd (accurate time)" OFF)
+    items+=("governor" "Adaptive CPU governor by temperature" OFF)
+    items+=("wifips"   "Disable Wi-Fi power-save (stability)" OFF)
+    items+=("watchdog" "Watchdog: auto-reboot on hang" ON)
+    local head_line="Check the actions to apply:"
+    is_pi && head_line="Current temp: ${temp:-?}  throttle: ${throttled:-?}\nCheck the actions (config.txt/cmdline edits require a reboot):"
     local raw
-    raw="$(ui_checklist "Pi tuning (hardware)" \
-        "Current temp: ${temp:-?}  throttle: ${throttled:-?}\nCheck the actions (config.txt/cmdline edits require a reboot):" \
-        "usbpower" "USB max current — power for USB disks (Pi5)" ON \
-        "trim"     "Enable fstrim.timer (TRIM for SSD/NVMe)" ON \
-        "pcie3"    "PCIe Gen3 for NVMe — faster, but out of spec" OFF \
-        "cgroup"   "Memory cgroup — memory limits for docker" OFF \
-        "sysctl"   "Sysctl tuning (swappiness, somaxconn, tcp)" OFF \
-        "zram"     "zram-swap (zstd, 50% RAM)" OFF \
-        "chrony"   "chrony instead of timesyncd (accurate time)" OFF \
-        "governor" "Adaptive CPU governor by temperature" OFF \
-        "eeprom"   "Update EEPROM firmware (rpi-eeprom)" OFF \
-        "wifips"   "Disable Wi-Fi power-save (stability)" OFF \
-        "watchdog" "Watchdog: auto-reboot on hang" ON)" || { info "cancelled"; return 0; }
+    raw="$(ui_checklist "$(is_pi && echo "Pi tuning (hardware)" || echo "Hardware tuning")" \
+        "$head_line" "${items[@]}")" || { info "cancelled"; return 0; }
 
     local sel; sel="$(checklist_selected "$raw")"
     local need_reboot=0
@@ -2942,7 +2950,7 @@ Check:
 main_menu() {
     while true; do
         local choice
-        choice="$(ui_menu "NAS Wizard (Raspberry Pi 5)$([ "$DRY_RUN" -eq 1 ] && echo '  [DRY-RUN]')" \
+        choice="$(ui_menu "NAS Wizard$([ "$DRY_RUN" -eq 1 ] && echo '  [DRY-RUN]')" \
             "Choose a stage. Log: $LOG" \
             "system"   "Stage 1: system preparation (packages, docker, directories)" \
             "disk"     "Stage 2: attach a disk (format -> fstab -> mount)" \

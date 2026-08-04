@@ -3347,7 +3347,7 @@
 
 <div class="mb-grad"></div>
 <div class="menubar">
-  <div class="mb-brand"><img class="mb-logo" id="mbLogo" src="/icon-flat.svg" alt="NAS" draggable="false"><span id="brandName">nas.local</span></div>
+  <div class="mb-brand"><img class="mb-logo" src="/icon-brand.svg" alt="NAS" draggable="false"><span id="brandName">nas.local</span></div>
   <span class="mb-sep"></span>
   <button class="mb-theme" id="lpBtn" title="All apps"></button>
   <div class="winbar" id="winbar"></div>
@@ -3382,12 +3382,10 @@
 (function(){
 "use strict";
 const HOSTFB="nas.local";
-/* The brand mark names the MACHINE, so it has to follow the machine: icon-flat.svg is
-   the Raspberry Pi berry and on a mini-PC it is simply a false statement. Same viewBox
-   in both files, so every CSS size rule keeps working. LAST may not be filled on the
-   very first paint — default to the berry, which is right on the box this ships on,
-   and the next poll corrects it. */
-const BRANDICO=()=>(LAST&&LAST.is_pi===false)?"/icon-board.svg":"/icon-flat.svg";
+/* The brand mark names the MACHINE. The server picks the file behind this URL by the
+   board it runs on (see _static in nas-web.py) — so it is right from the FIRST paint,
+   with no LAST-dependent flicker, and setup.html gets the same answer pre-auth. */
+const BRANDICO=()=>"/icon-brand.svg";
 const host=()=>(location.hostname&&location.hostname!=="null")?location.hostname:HOSTFB;
 
 /* icons — Lucide (ISC), clean and consistent */
@@ -4090,8 +4088,6 @@ function pkgsDlg(miss){
   poll();
  };
 }
-function paintBrandIco(){const l=document.getElementById("mbLogo");
- if(l){const w=BRANDICO();if(l.getAttribute("src")!==w)l.setAttribute("src",w);}}
 function paintBasePkgs(s){
  const el=document.getElementById("basePkgs");if(!el)return;
  const miss=(s&&s.missing_pkgs)||[];
@@ -14753,7 +14749,7 @@ function piTab(tc){withSysc(tc,()=>{const p=SYSC.pi||{};const g=p.governor||{};c
  tc.innerHTML=`${rebootBan()}
   <h3 class="set-title">${isPi?"Raspberry Pi":"Hardware"}</h3><p class="set-sub">Hardware parameters of the board.${isPi?" Many apply only after a reboot.":""}</p>
   <div class="pi-card">
-   <div class="pi-head">${isPi?`<img src="/icon-flat.svg" alt="">`:`<img src="/icon-board.svg" alt="">`}
+   <div class="pi-head"><img src="/icon-brand.svg" alt="">
     <div><div class="pi-model">${esc(p.model||(isPi?"Raspberry Pi":"This machine"))}</div>
      <div class="pi-temp"><b style="color:${p.temp>=70?'var(--danger)':p.temp>=60?'var(--warn)':'var(--good)'}">${p.temp!=null?p.temp+"°":"—"}</b> CPU temp</div></div></div>
    ${isPi?`<div class="pi-kv">
@@ -15458,7 +15454,7 @@ function syncUsbOps(jobs){
    delete USB_OPS[j.dev];
   }});}
 
-async function poll(){const s=await api("/api/stats");LAST=s;pushHist(s);paintTray(s);paintSys(s);paintBasePkgs(s);paintBrandIco();
+async function poll(){const s=await api("/api/stats");LAST=s;pushHist(s);paintTray(s);paintSys(s);paintBasePkgs(s);
  const bn=document.getElementById("brandName");if(bn)bn.textContent=(s.host||location.hostname.split(".")[0]||"nas")+".local";
  const nr=!!(s&&s.nb_running);if(nr!==NB_RUNNING){NB_RUNNING=nr;renderDock();}
  syncUsbOps(s&&s.usb_import);

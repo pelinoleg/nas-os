@@ -7,7 +7,12 @@
 set -euo pipefail
 
 REPO="${NASOS_REPO:-https://github.com/pelinoleg/nas-os.git}"
-BRANCH="${NASOS_BRANCH:-main}"
+# NASOS_REF pins the install to a tag (or branch): a bare `curl | bash` takes whatever
+# main is at that minute — including an edit pushed five minutes ago. A box being set
+# up for real should install a version that is KNOWN to work:
+#   curl -fsSL .../install.sh | sudo NASOS_REF=v2026.08.04 bash
+# NASOS_BRANCH is the old name for the same knob and still works; REF wins when both set.
+REF="${NASOS_REF:-${NASOS_BRANCH:-main}}"
 DEST="${NASOS_DEST:-/opt/nas-os}"
 PORT="${NAS_WEB_PORT:-80}"
 
@@ -59,14 +64,17 @@ apt-get update -qq
 apt-get install -y --no-install-recommends git ca-certificates >/dev/null
 
 if [ -d "$DEST/.git" ]; then
-  say "Updating $DEST from git…"
-  git -C "$DEST" fetch --depth 1 origin "$BRANCH" && git -C "$DEST" reset --hard "origin/$BRANCH"
+  say "Updating $DEST from git ($REF)…"
+  # FETCH_HEAD instead of origin/$REF: a tag fetched shallowly has no remote-tracking
+  # ref, so "origin/v2026.08.04" would not exist — FETCH_HEAD always does
+  git -C "$DEST" fetch --depth 1 origin "$REF" && git -C "$DEST" reset --hard FETCH_HEAD
 elif [ -f "$DEST/nas-web.py" ]; then
   say "Using existing files in $DEST (no git)"
 else
-  say "Cloning $REPO → $DEST…"
+  say "Cloning $REPO ($REF) → $DEST…"
   rm -rf "$DEST"
-  git clone --depth 1 -b "$BRANCH" "$REPO" "$DEST"
+  # -b accepts both branches and tags
+  git clone --depth 1 -b "$REF" "$REPO" "$DEST"
 fi
 chmod +x "$DEST/nas-wizard.sh" 2>/dev/null || true
 chmod +x "$DEST/tools/update-ai-cli.sh" 2>/dev/null || true

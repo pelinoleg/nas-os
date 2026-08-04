@@ -15,8 +15,11 @@
 - `web/desktop.html` — весь десктоп: инлайн `<style>` + инлайн `<script>` (ванильный JS, без сборки).
 - `web/setup.html` — мастер первичной настройки (отдельная страница).
 - `web/sw.js` — service worker (network-first; HTML — только из сети).
-- `install.sh` — `curl -fsSL .../install.sh | sudo bash` → `git clone/reset --hard origin/main`
-  в `/opt/nas-os`, ставит службу `nas-web` оттуда. **Переустановка воспроизводит текущий код 1:1.**
+- `install.sh` — `curl -fsSL .../install.sh | sudo bash` → `git clone/reset --hard` в
+  `/opt/nas-os`, ставит службу `nas-web` оттуда. **Переустановка воспроизводит текущий код 1:1.**
+  По умолчанию ставится `main`; `NASOS_REF=v2026.08.04` (тег или ветка) пинит установку на
+  проверенную версию — боевой бокс ставить С ТЕГА, `main` может быть правкой пятиминутной
+  давности. Теги — датные (`vГГГГ.ММ.ДД`), вешать на проверенное состояние.
   Запускает `nas-wizard.sh api system` = `stage_system_apply` (авто-база, headless). Что база
   ставит из коробки (2026-07-20 расширена): пакеты (STACK/UTIL/PI + docker + gh), watchdog,
   uas-off, usb-timeout, smartd-guard, thumbs-таймер, **avahi+libnss-mdns** (`.local`),
