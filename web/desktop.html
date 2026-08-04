@@ -11303,6 +11303,7 @@ function winBackup(){openWin("__nasbak","Mirror",(body,win)=>{
    <div class="srow"><div class="srow-l"><div class="srow-t">Mode</div></div><div class="srow-c"><div class="seg" id="dDel"><button data-v="archive" class="${dm==="archive"?"on":""}">Archive</button><button data-v="mirror" class="${dm==="mirror"?"on":""}">Mirror</button><button data-v="add" class="${dm==="add"?"on":""}">Add only</button></div></div></div>
    <div class="nb-help" id="dHelp"><b>${esc(h.t)}</b><span>${esc(h.d)}</span></div>
    <div class="srow" id="dGuardRow" style="${dm==="add"?"display:none":""}"><div class="srow-l"><div class="srow-t">Mass-deletion guard${tipHTML("If a run would delete more than this % of files (vs last time), the backup stops and deletes NOTHING. Saves you if the source was wiped/unmounted. Recommended 20%. 0 — disable.")}</div><div class="srow-d">stops if too much would be deleted (recommended 20%)</div></div><div class="srow-c"><input class="mono" id="dMax" style="max-width:60px" value="${c.max_delete_pct==null?20:c.max_delete_pct}"><span style="color:var(--mut);font-size:12px">%</span></div></div>
+   <div class="srow"><div class="srow-l"><div class="srow-t">Mass-change guard${tipHTML("If a run would REWRITE more than this % of the copy, the backup refuses and writes nothing. Deletion has its own guard, but ransomware deletes nothing — it rewrites every file, and a mirror would replace the copy with encrypted garbage. Recommended 50%. 0 — disable.")}</div><div class="srow-d">stops if too much would be rewritten — the ransomware signature (recommended 50%)</div></div><div class="srow-c"><input class="mono" id="dChg" style="max-width:60px" value="${c.change_guard_pct==null?50:c.change_guard_pct}"><span style="color:var(--mut);font-size:12px">%</span></div></div>
    <div id="dArch" style="${dm==="archive"?"":"display:none"}">
    <div class="set-h">Where to keep deleted files${tipHTML("Template for the folder inside the destination where deleted/changed files are moved. Build it from the tokens below. «/» creates nested folders (e.g. _deleted/{year}/{month}). The first folder should be constant (retention cleans it).")}</div>
    <div class="usb-sub">
@@ -11317,6 +11318,7 @@ function winBackup(){openWin("__nasbak","Mirror",(body,win)=>{
   const g=s=>tc.querySelector(s);
   wireSeg(tc,"#dDel",v=>{g("#dArch").style.display=v==="archive"?"":"none";g("#dGuardRow").style.display=v==="add"?"none":"";const hh=HELP[v];g("#dHelp").innerHTML=`<b>${esc(hh.t)}</b><span>${esc(hh.d)}</span>`;saveCfg({delete_mode:v});});
   g("#dMax").onchange=()=>saveCfg({max_delete_pct:+g("#dMax").value||0});
+  g("#dChg").onchange=()=>saveCfg({change_guard_pct:+g("#dChg").value||0});
   g("#dRd").onchange=()=>saveCfg({retention_days:+g("#dRd").value||0});
   {const rg=g("#dRg");if(rg)rg.onchange=()=>saveCfg({retention_gb:+rg.value||0});}
   const dt=g("#dTpl"),dp=g("#dPrev"),base=isC2C()?c2cDst():isRclone()?((c.remote||"remote")+":"+((c.remote_path||"").replace(/^\/+|\/+$/g,""))):(c.dest_base||(push?"…":"/mnt/storage/nas-backup")).replace(/\/$/,"");
@@ -11539,13 +11541,20 @@ function winBackup(){openWin("__nasbak","Mirror",(body,win)=>{
    // first-run/no-baseline pull against a populated dest (pre-emptive refusal, source usually
    // INTACT), and a real mass-delete TRIP mid-sync. Each needs its own wording.
    const src=all.filter(j=>j.src_block),real=all.filter(j=>!j.src_block);
-   const emptyJ=src.filter(j=>j.block!=="nobaseline"),baseJ=src.filter(j=>j.block==="nobaseline");
+   const chgJ=src.filter(j=>j.block==="masschange");
+   const emptyJ=src.filter(j=>j.block!=="nobaseline"&&j.block!=="masschange"),baseJ=src.filter(j=>j.block==="nobaseline");
    const arch=CFG.delete_mode==="archive",nm=js=>esc(js.map(j=>j.src).join(", "));
    gn.className="nb-dwarn wrn";gn.style.display="block";
    let html="";
-   if(src.length){const noBase=baseJ.length&&!emptyJ.length;
-    html+=`<b>Backup refused — the copy is untouched.</b> ${noBase?"There's no deletion-guard baseline yet (first run, or the status was reset) and the destination already holds a copy":"The source is EMPTY or unavailable (the folder was emptied, or its disk is not mounted)"}: `
-     +`<span class="mono">${nm(src)}</span>.`
+   if(chgJ.length){const c0=chgJ[0];
+    html+=`<b>Backup REFUSED — mass rewrite on the source.</b> ${esc(String(c0.changed||"?"))} files would be `
+     +`REWRITTEN (over ${c0.guard_pct||50}% of the copy): <span class="mono">${nm(chgJ)}</span>. `
+     +`<b>The copy is untouched.</b>`
+     +`<div style="margin-top:6px">A legitimate backup rarely rewrites half the copy at once — this is the signature of <b>encryption malware</b> or bulk corruption on the source. Check the source computer first: open a few of these files there. If the change is really yours (mass conversion, re-tagging), run once with the guard off.</div>`;}
+   if(emptyJ.length||baseJ.length){const noBase=baseJ.length&&!emptyJ.length;
+    html+=`${chgJ.length?'<hr style="border:none;border-top:1px solid var(--line);margin:10px 0">':''}`
+     +`<b>Backup refused — the copy is untouched.</b> ${noBase?"There's no deletion-guard baseline yet (first run, or the status was reset) and the destination already holds a copy":"The source is EMPTY or unavailable (the folder was emptied, or its disk is not mounted)"}: `
+     +`<span class="mono">${nm(emptyJ.concat(baseJ))}</span>.`
      +`<div style="margin-top:6px">In <b>mirror/archive</b> mode a sync against ${noBase?"a source with no verified baseline":"an empty"} source would delete the destination copy${arch?" (moved to the deleted-files archive)":" — permanently"}. The run was stopped so that couldn't happen. ${noBase?"If the source is intact, run once with the guard off to establish the baseline.":"Fix the source (mount the disk / restore the folder) and run again."}</div>`
      +`<div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">`
      +`<button class="btn sm dng" id="oAllowSrc">${svg("check",13)} ${noBase?"The source is intact — sync now":"The source really is empty — sync anyway"}</button></div>`;}
@@ -11565,6 +11574,7 @@ function winBackup(){openWin("__nasbak","Mirror",(body,win)=>{
    if(emptyJ.length)parts.push(`sync the empty/unavailable source of «${emptyJ.map(j=>j.src).join(", ")}» → their ENTIRE destination copy ${arch?"moves to the deleted-files archive (recoverable)":"is deleted permanently"}`);
    if(baseJ.length)parts.push(`run the first sync of «${baseJ.map(j=>j.src).join(", ")}» with no baseline guard — normal if the source is intact, but if it is actually empty the copy would be deleted`);
    if(real.length)parts.push(`lift the mass-deletion guard for «${real.map(j=>j.src).join(", ")}» → surplus files ${arch?"move to the archive":"are erased for good"}`);
+   if(chgJ.length)parts.push(`lift the mass-change guard for «${chgJ.map(j=>j.src).join(", ")}» → the copy IS REWRITTEN with the source's current content${arch?" (old versions go to the deleted-files archive)":" — the old content is gone for good"}`);
    const doAllow=()=>confirmDlg("Run without the safety guards?",
      `This runs the WHOLE backup once with the safety guards OFF — it will: `+parts.join("; and ")+`. Only proceed if the sources are exactly as you intend.`,
      ()=>{run(false,true);},true);
@@ -14191,6 +14201,7 @@ const EVMETA=[
  {k:"nb_size",t:"Backup size changed sharply",d:"the destination size jumped more than the threshold since last check",thr:"%",dp:0},
  {k:"nb_dest",t:"Low space in destination",d:"the destination is filled above the threshold, or the pool isn't mounted",thr:"%",dp:1},
  {k:"nb_guard",t:"Deletion guard triggered",d:"backup stopped: too many files would be deleted (threshold on the «Deleted» tab)",dp:2},
+ {k:"nb_change",t:"Mass-change guard triggered",d:"backup refused: too many files would be rewritten — the ransomware signature; the copy is untouched",dp:2},
  {k:"backup",t:"Backup",d:"backup result from /var/log/nas-backup.log (if configured)",dp:0},
  {grp:"Access (panel login and SSH)"},
  {k:"panel_new",t:"Panel login from a new address",d:"a successful login from an IP not seen before",dp:1},

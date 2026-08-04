@@ -1310,6 +1310,10 @@ ACTION="${1:-sync}"
 LOG=/var/log/snapraid.log
 CONF=/etc/nas-wizard/notify.conf
 DELETE_THRESHOLD=500
+# Mass-CHANGE threshold: ransomware deletes nothing — it rewrites every file, and a
+# sync would fold the encrypted data into parity, destroying `snapraid fix`'s ability
+# to roll the files back. While sync is refused, parity still holds the clean state.
+UPDATE_THRESHOLD=2000
 HEALTHCHECK_URL=""
 [ -f "$CONF" ] && . "$CONF"
 notify(){ [ -x /usr/local/bin/nas-notify.sh ] && /usr/local/bin/nas-notify.sh "$@" || true; }
@@ -1342,9 +1346,19 @@ ping_hc(){ [ -n "$HEALTHCHECK_URL" ] && curl -fsS -m 12 --retry 2 "$HEALTHCHECK_
         fi
         removed=$(printf '%s\n' "$diff_out" | sed -n 's/^ *\([0-9][0-9]*\) removed$/\1/p')
         removed=${removed:-0}
-        echo "diff: removed=$removed threshold=$DELETE_THRESHOLD"
+        updated=$(printf '%s\n' "$diff_out" | sed -n 's/^ *\([0-9][0-9]*\) updated$/\1/p')
+        updated=${updated:-0}
+        echo "diff: removed=$removed/$DELETE_THRESHOLD updated=$updated/$UPDATE_THRESHOLD"
         if [ "$removed" -gt "$DELETE_THRESHOLD" ]; then
             echo "ABORT: files removed $removed > threshold $DELETE_THRESHOLD — sync SKIPPED (data protection)."
+            ping_hc "/fail"
+            exit 1
+        fi
+        if [ "$UPDATE_THRESHOLD" -gt 0 ] && [ "$updated" -gt "$UPDATE_THRESHOLD" ]; then
+            echo "ABORT: files UPDATED $updated > threshold $UPDATE_THRESHOLD — sync SKIPPED."
+            echo "A rewrite this large is the ransomware signature; while sync is refused,"
+            echo "'snapraid fix' can still roll files back to the last clean state."
+            echo "If the change is yours, set UPDATE_THRESHOLD higher in $CONF and re-run."
             ping_hc "/fail"
             exit 1
         fi

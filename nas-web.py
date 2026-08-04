@@ -3458,6 +3458,7 @@ def _def_monitor():
         "nb_dumps":    {"on": True,  "priority": 1, "threshold": 8,  "desk": True},
         "nb_dest":     {"on": True,  "priority": 1, "threshold": 95, "desk": True},
         "nb_guard":    {"on": True,  "priority": 1, "desk": True},   # --max-delete guard fired
+        "nb_change":   {"on": True,  "priority": 1, "desk": True},   # mass-change (ransomware) guard fired
         "nb_verify":   {"on": True,  "priority": 1, "desk": True},   # checksum mismatch found
         # --- reliability: disk reconnected on its own (auto-mount) ---
         "disk_remount":{"on": False, "priority": 0, "desk": True},   # self-healed → desk
@@ -3651,7 +3652,7 @@ for _k in ("resil_drill", "log_sentry", "health"):
 for _k in ("ip_changed", "link_changed", "vpn_offline", "traffic"):
     _EVENT_KIND[_k] = "net"
 for _k in ("snap_ok", "snap_err", "scrub_err", "delete_block", "backup", "mergerfs",
-           "nas_backup", "imsb_fail", "nb_conn", "nb_srcmiss", "nb_stale", "nb_dumps", "nb_size", "nb_dest", "nb_guard", "nb_verify",
+           "nas_backup", "imsb_fail", "nb_conn", "nb_srcmiss", "nb_stale", "nb_dumps", "nb_size", "nb_dest", "nb_guard", "nb_change", "nb_verify",
            # every Kopia alert used to fall through to «system» — a failed snapshot backup filed
            # under the same heading as a service restart, which is where nobody looks for it
            "nb_missed", "kp_run", "kp_err", "kp_stale", "kp_maint",
@@ -6028,7 +6029,11 @@ def _nb_defaults():
                       ".gradle/", ".idea/", ".vscode/", ".pytest_cache/", ".mypy_cache/",
                       "*.egg-info/", ".cache/", "bower_components/", ".turbo/"],
          "delete_mode": "archive", "retention_days": 30, "retention_gb": 0,
-         "deleted_dir": "_deleted/{date}", "max_delete_pct": 20, "bwlimit": 0,
+         "deleted_dir": "_deleted/{date}", "max_delete_pct": 20,
+         # mass-CHANGE guard (ransomware): a run that would REWRITE more than this % of
+         # the copy is refused before a single byte is written. Deletion has had a guard
+         # since day one; encryption malware deletes nothing — it rewrites everything.
+         "change_guard_pct": 50, "bwlimit": 0,
          "schedule": {"enabled": False, "freq": "daily", "time": "03:00", "dow": "Sun"}}
 
 def _nb_read_raw():
@@ -6386,6 +6391,9 @@ def nb_save(patch, pid=None):
         if k in patch:
             try: cur[k] = max(0, int(patch[k]))
             except (ValueError, TypeError): pass
+    if "change_guard_pct" in patch:
+        try: cur["change_guard_pct"] = max(0, min(100, int(patch["change_guard_pct"])))
+        except (TypeError, ValueError): pass
     if "max_delete_pct" in patch:
         try: cur["max_delete_pct"] = max(0, min(100, int(patch["max_delete_pct"])))
         except (ValueError, TypeError): pass
@@ -7812,6 +7820,34 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None, allow_delete=Fal
         args, env = nb_build_cmd(cfg, j, dry, prev_files=prevf.get(j["src"], 0),
                                  mkpath=bool(push_ssh and not shell_fs),
                                  allow_delete=allow_delete, stage=stage)
+        # ---- mass-CHANGE guard (pre-flight, nothing written yet) -----------------
+        # Ransomware rewrites files instead of deleting them: --max-delete never fires
+        # and a mirror faithfully replaces the copy with encrypted garbage (archive
+        # mode keeps old versions in _deleted, but retention ages them out). A
+        # --dry-run --stats pass over the SAME argv counts what would be rewritten;
+        # past the threshold the job is refused with the copy untouched. Same one-run
+        # override and banner flow as the deletion guard. No baseline (first run) —
+        # nothing to compare against, the probe is skipped.
+        _chg_pct = int(cfg.get("change_guard_pct", 50) or 0)
+        _prev = int(prevf.get(j["src"], 0) or 0)
+        if not dry and not allow_delete and _chg_pct > 0 and _prev >= NB_CHANGE_MIN:
+            limit = _nb_change_limit(_prev, cfg)
+            probe = [a for a in args
+                     if not a.startswith(("--out-format", "--info=progress2"))]
+            probe.insert(1, "--dry-run")
+            pr = _run(probe, timeout=3600, env=env)
+            pst = _nb_parse_stats((pr.get("log") or "").splitlines())
+            would = int(pst.get("xfer") or 0)
+            if pr.get("code") in (0, 24, 25) and would > limit:
+                writer("⚠ SKIPPED: %d files would be REWRITTEN (> %d = %d%% of the %d-file copy). "
+                       "A legitimate mirror rarely rewrites half the copy at once — this is the "
+                       "signature of encryption malware or bulk corruption on the source. The copy "
+                       "is untouched. If the change is intentional (mass re-tag, conversion), run "
+                       "once with the guard off." % (would, limit, _chg_pct, _prev))
+                emit({"src": j["src"], "ok": False, "code": 25, "src_block": True,
+                      "block": "masschange", "changed": would, "guard_limit": limit,
+                      "guard_pct": _chg_pct})
+                continue
         stat_lines = []
         try:
             p = subprocess.Popen(args, env=env, stdout=subprocess.PIPE,
@@ -8069,6 +8105,13 @@ def _nb_changes_write(pid, run_ts, per_job):
         data.pop(k, None)             # keep the 30 most recent runs
     try: _json_save(_nb_changes_file(pid), data, indent=None)
     except OSError: pass
+
+NB_CHANGE_MIN = 200   # below this baseline the %-guard is noise, not protection
+
+def _nb_change_limit(prev_files, cfg):
+    """How many rewritten files a run may carry before the mass-change guard trips."""
+    pct = int(cfg.get("change_guard_pct", 50) or 0)
+    return max(NB_CHANGE_MIN, int(prev_files * pct / 100.0))
 
 def _nb_parse_stats(lines):
     """Extract numbers from the rsync --stats block."""
@@ -8862,11 +8905,21 @@ def nb_run_cli(pid=None, dry=False, allow_delete=False):
         if not dry and not r.get("stopped"):
             jobs25 = [j for j in r.get("jobs", []) if j.get("code") == 25]
             guarded = [j.get("src") for j in jobs25 if not j.get("src_block")]   # real max-delete trip (a sync ran)
-            blocked = [j.get("src") for j in jobs25 if j.get("src_block")]        # pre-emptive refusal (nothing ran)
+            blocked = [j.get("src") for j in jobs25
+                       if j.get("src_block") and j.get("block") != "masschange"]  # pre-emptive refusal (nothing ran)
             if guarded:      # the mass-deletion guard tripped — a separate important notification
                 try: notify_event("nb_guard", "nb_guard:" + pid, "NAS backup: stopped by guard" + sfx,
                                   "Mass-deletion guard triggered: " + ", ".join(guarded) +
                                   ". Nothing was deleted — check the source (did you wipe or unmount it?).",
+                                  "crit", cooldown=0)
+                except Exception: pass
+            chgJ = [j.get("src") for j in jobs25 if j.get("block") == "masschange"]
+            if chgJ:         # the mass-change guard refused — possible ransomware on the source
+                try: notify_event("nb_change", "nb_change:" + pid, "Backup REFUSED: mass rewrite on the source" + sfx,
+                                  "More than half the copy would be REWRITTEN: " + ", ".join(chgJ) +
+                                  ". This is the signature of encryption malware or bulk corruption. "
+                                  "The copy is untouched. Check the source computer BEFORE re-running; "
+                                  "if the change is yours (mass conversion), run once with the guard off.",
                                   "crit", cooldown=0)
                 except Exception: pass
             if blocked:      # nothing ran — an empty/unavailable source would have wiped the copy
@@ -10169,6 +10222,7 @@ def _nb_drill_sched_tick():
 _PUSH_NOW = {
     "readonly", "fserror", "smart", "sd_degrade", "diskfull", "root_full", "inodes",
     "undervolt", "sustained_heat", "fan_stall", "cfg_corrupt", "delete_block", "nb_guard",
+    "nb_change",
     "pool", "mergerfs", "disk_remove", "dirty_boot",
 }
 

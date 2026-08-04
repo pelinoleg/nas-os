@@ -30,6 +30,9 @@ kind, out = sys.argv[1], sys.argv[2]
 if kind == "usb-import":
     src = open("nas-web.py", encoding="utf-8").read()
     m = re.search(r"_USB_SH = r'''(.*?)'''", src, re.S)
+elif kind == "snapraid":
+    src = open("nas-wizard.sh", encoding="utf-8").read()
+    m = re.search(r"write_file /usr/local/bin/nas-snapraid\.sh <<'WRAP'\n(.*?)\nWRAP\n", src, re.S)
 elif kind == "netguard":
     src = open("nas-wizard.sh", encoding="utf-8").read()
     m = re.search(r"write_file /usr/local/bin/nas-netguard\.sh <<'GUARD'\n(.*?)\nGUARD\n", src, re.S)
@@ -107,7 +110,7 @@ fi
 if has gen; then
   head "Generated scripts (heredoc)"
   RUN=1
-  for k in usb-import netguard motd dispatcher; do
+  for k in usb-import netguard motd dispatcher snapraid; do
     if extract "$k" "$TMP/$k.sh" 2>/dev/null; then
       bash -n "$TMP/$k.sh" 2>/dev/null && ok "$k" || bad "$k (bash -n)"
     else

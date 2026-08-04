@@ -144,3 +144,27 @@ class DrillSampleTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MassChangeGuardTests(unittest.TestCase):
+    """Ransomware rewrites, it does not delete — the change guard covers what
+    --max-delete never sees. The e2e (baseline -> refuse -> override) was proven
+    live; these pin the arithmetic and the stats parsing it depends on."""
+
+    def test_limit_scales_with_the_baseline(self):
+        self.assertEqual(nas._nb_change_limit(1000, {"change_guard_pct": 50}), 500)
+        self.assertEqual(nas._nb_change_limit(10000, {"change_guard_pct": 30}), 3000)
+
+    def test_small_baselines_use_the_floor(self):
+        # 50% of 60 files is 30 — but rewriting 31 files is normal life, not malware
+        self.assertEqual(nas._nb_change_limit(60, {"change_guard_pct": 50}),
+                         nas.NB_CHANGE_MIN)
+
+    def test_stats_transfer_count_parses_with_thousands_separators(self):
+        st = nas._nb_parse_stats([
+            "Number of files: 12,345 (reg: 12,000, dir: 345)",
+            "Number of regular files transferred: 6,789",
+            "Number of deleted files: 42",
+        ])
+        self.assertEqual(st["xfer"], 6789)
+        self.assertEqual(st["deleted"], 42)
