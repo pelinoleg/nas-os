@@ -90,6 +90,8 @@
     background:var(--mb-bg,var(--glass));backdrop-filter:var(--mb-bf,blur(16px));-webkit-backdrop-filter:var(--mb-bf,blur(16px));
     color:var(--mb-warn,var(--warn));box-shadow:var(--sh-sm);cursor:pointer;font-size:13px;font-weight:600;transition:.15s}
   .basepkgs:hover{transform:translateY(-2px)}
+  /* required-level miss: this is not housekeeping, a core feature of the box is gone */
+  .basepkgs.crit{color:var(--mb-danger,var(--danger));border-color:color-mix(in srgb,var(--danger) 45%,transparent)}
   .basepkgs svg{flex:none}
   @media (max-width:1024px){.basepkgs{right:12px;bottom:calc(72px + env(safe-area-inset-bottom))}}
   .mb-theme{display:flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:9px;border:none;background:transparent;color:var(--dim);cursor:pointer;transition:.13s;flex:none;opacity:var(--mb-icon-op,1)}
@@ -3345,7 +3347,7 @@
 
 <div class="mb-grad"></div>
 <div class="menubar">
-  <div class="mb-brand"><img class="mb-logo" src="/icon-flat.svg" alt="Raspberry Pi" draggable="false"><span id="brandName">nas.local</span></div>
+  <div class="mb-brand"><img class="mb-logo" id="mbLogo" src="/icon-flat.svg" alt="NAS" draggable="false"><span id="brandName">nas.local</span></div>
   <span class="mb-sep"></span>
   <button class="mb-theme" id="lpBtn" title="All apps"></button>
   <div class="winbar" id="winbar"></div>
@@ -3379,7 +3381,13 @@
 <script>
 (function(){
 "use strict";
-const HOSTFB="raspberrypi.local";
+const HOSTFB="nas.local";
+/* The brand mark names the MACHINE, so it has to follow the machine: icon-flat.svg is
+   the Raspberry Pi berry and on a mini-PC it is simply a false statement. Same viewBox
+   in both files, so every CSS size rule keeps working. LAST may not be filled on the
+   very first paint — default to the berry, which is right on the box this ships on,
+   and the next poll corrects it. */
+const BRANDICO=()=>(LAST&&LAST.is_pi===false)?"/icon-board.svg":"/icon-flat.svg";
 const host=()=>(location.hostname&&location.hostname!=="null")?location.hostname:HOSTFB;
 
 /* icons — Lucide (ISC), clean and consistent */
@@ -4048,24 +4056,55 @@ function confirmDlg(title,msg,onOk,danger){
 /* Base-install packages the wizard had to skip (renamed in a newer Debian, repo
    gone) — features are silently missing until they're installed, so the badge is
    non-dismissable and only goes away when dpkg actually sees every package. */
+/* Packages the installer could not find. Two levels, and the difference is the whole
+   point: "required" means a core job of this box (pool, parity, shares, backups,
+   discovery) is simply not available, "optional" is a convenience. A bare count answers
+   nothing — every surface here names the CONSEQUENCE instead. Same data also reaches
+   the SSH login banner, because a badge on a desktop nobody has open is not a channel. */
+function missReq(miss){return (miss||[]).filter(m=>m&&m.level==="req");}
+function pkgsDlg(miss){
+ const req=missReq(miss),opt=(miss||[]).filter(m=>!m||m.level!=="req");
+ const names=(miss||[]).map(m=>m.pkg);
+ const sc=document.getElementById("scrim");
+ const list=(arr)=>arr.map(m=>`<div class="mon-row"><div class="srow-l"><div class="srow-t mono">${esc(m.pkg)}</div>${m.why?`<div class="srow-d">${esc(m.why)}</div>`:""}</div></div>`).join("");
+ sc.innerHTML=`<div class="dialog" style="max-width:600px"><h3>${req.length?"Required packages are missing":"Optional packages are missing"}</h3>
+   <p>The installer could not find these in the OS repositories — usually a package renamed in a newer Debian release, sometimes a repo that was briefly unavailable.</p>
+   ${req.length?`<div class="set-grp" style="color:var(--danger)">These things do NOT work</div>${list(req)}`:""}
+   ${opt.length?`<div class="set-grp">Convenience only</div>${list(opt)}`:""}
+   <p style="margin-top:12px">Try installing them now, or do it over SSH:</p>
+   <pre style="user-select:all;white-space:pre-wrap;word-break:break-all;background:var(--code-bg,#16181d);color:var(--code-fg,#e8eaf0);padding:8px 10px;border-radius:8px;font-size:12px">sudo apt update &amp;&amp; sudo apt install ${names.map(esc).join(" ")}</pre>
+   <div id="pkgLog" style="display:none;white-space:pre-wrap;font-family:var(--mono);font-size:11px;max-height:200px;overflow:auto;background:var(--code-bg,#16181d);color:var(--code-fg,#e8eaf0);padding:8px 10px;border-radius:8px;margin-top:8px"></div>
+   <p style="opacity:.7;font-size:12px;margin-top:10px">This notice disappears by itself once the packages are actually installed — it is re-checked, not dismissed.</p>
+   <div class="r"><button class="btn" id="dc">Close</button><button class="btn primary" id="dinst">${svg("download",13)} Install them now</button></div></div>`;
+ sc.classList.add("show");
+ sc.querySelector("#dc").onclick=()=>sc.classList.remove("show");
+ const bi=sc.querySelector("#dinst"),lg=sc.querySelector("#pkgLog");
+ bi.onclick=async()=>{
+  bi.disabled=true;bi.innerHTML="Installing… (this can take a minute)";
+  lg.style.display="block";lg.textContent="apt-get update…";
+  const r=await api("/api/pkgs/install",{method:"POST",body:JSON.stringify({})});
+  lg.textContent=(r&&r.log)||"(no output)";lg.scrollTop=lg.scrollHeight;
+  bi.disabled=false;bi.innerHTML=svg("download",13)+" Install them now";
+  if(r&&r.ok){toast("All packages installed");sc.classList.remove("show");}
+  else toast("Some packages could not be installed — see the log");
+  poll();
+ };
+}
+function paintBrandIco(){const l=document.getElementById("mbLogo");
+ if(l){const w=BRANDICO();if(l.getAttribute("src")!==w)l.setAttribute("src",w);}}
 function paintBasePkgs(s){
  const el=document.getElementById("basePkgs");if(!el)return;
  const miss=(s&&s.missing_pkgs)||[];
  if(!miss.length){el.style.display="none";return;}
+ const req=missReq(miss);
  el.style.display="flex";
- el.innerHTML=svg("warn",15)+"<span>"+miss.length+" base package"+(miss.length>1?"s":"")+" missing</span>";
- el.onclick=()=>{
-  const sc=document.getElementById("scrim");
-  sc.innerHTML=`<div class="dialog" style="max-width:520px"><h3>Base packages missing</h3>
-    <p>The installer could not find these packages in the OS repositories (names may have changed in this release). The features they provide are unavailable until they are installed:</p>
-    <p style="margin:8px 0"><b>${miss.map(esc).join(", ")}</b></p>
-    <p>Install them manually, e.g. over SSH:</p>
-    <pre style="user-select:all;white-space:pre-wrap;word-break:break-all;background:var(--code-bg,#16181d);color:var(--code-fg,#e8eaf0);padding:8px 10px;border-radius:8px;font-size:12px">sudo apt install ${miss.map(esc).join(" ")}</pre>
-    <p style="opacity:.7;font-size:12px">This notice hides itself once the packages are installed (re-checked every few minutes).</p>
-    <div class="r"><button class="btn" id="dc">Close</button></div></div>`;
-  sc.classList.add("show");
-  sc.querySelector("#dc").onclick=()=>sc.classList.remove("show");
- };
+ el.classList.toggle("crit",req.length>0);
+ // Required missing => name the count of BROKEN THINGS, not of packages: "3 packages
+ // missing" reads as housekeeping, "3 features unavailable" reads as a problem.
+ el.innerHTML=svg("warn",15)+"<span>"+(req.length
+   ?req.length+" required package"+(req.length>1?"s":"")+" missing"
+   :miss.length+" optional package"+(miss.length>1?"s":"")+" missing")+"</span>";
+ el.onclick=()=>pkgsDlg(miss);
 }
 /* Restoring the settings backup by section. Secret ones (panel password, main NAS
    password) arrive cleared: restoring an old archive must not silently
@@ -4551,8 +4590,12 @@ function overviewTab(tc,win){
      card("Temp.",s.temp?s.temp+"°":"—",s.temp?loadCol(tempLoad(s.temp),"win"):"var(--mut)",HIST.temp,s.temp?loadCol(tempLoad(s.temp),"win"):"var(--mut)",90)+
      card("RAM",s.mem.pct+"%",loadCol(s.mem.pct,"win"),HIST.mem,loadCol(s.mem.pct,"win"),100)+
      card("↓ Network",fmtR(s.net.rx),"",HIST.rx,"#5aa9ff");
-   const thr=s.throttled||{},ok=thr.ok!==false;const tb=tc.querySelector("#ovThr");
-   if(tb)tb.innerHTML=`<div class="ov-thr ${ok?"good":"bad"}" title="${att(THR_HINT)}"><span class="dt"></span><div><b>${ok?"Power and frequency are normal":"Throttling / power sag"}</b><div class="sub">${esc(thr.raw||"throttled=0x0")} · click for details</div></div></div>`;
+   // These flags come from vcgencmd, which exists only on a Pi. Elsewhere throttled()
+   // answers "raw:null" — meaning NOT MEASURED, not "fine". Printing a green "Power and
+   // frequency are normal" off an unread sensor is the panel making a claim it cannot
+   // support, so on such a board the block is not drawn at all.
+   const thr=s.throttled||{},ok=thr.ok!==false,thrKnown=!!thr.raw;const tb=tc.querySelector("#ovThr");
+   if(tb)tb.innerHTML=!thrKnown?"":`<div class="ov-thr ${ok?"good":"bad"}" title="${att(THR_HINT)}"><span class="dt"></span><div><b>${ok?"Power and frequency are normal":"Throttling / power sag"}</b><div class="sub">${esc(thr.raw)} · click for details</div></div></div>`;
    const q=(id,html)=>{const n=tc.querySelector(id);if(n)n.innerHTML=html;};
    q("#ovMem",`<span>Memory</span><b>${fmtB(s.mem.used)} / ${fmtB(s.mem.total)}</b>`);
    const mb=tc.querySelector("#ovMemBar");if(mb)mb.style.width=s.mem.pct+"%";
@@ -4780,7 +4823,7 @@ function snapraidDlg(after){const s=document.getElementById("scrim");
 function diskListItem(x){
  const sys=x.role==="system",temp=x.smart&&x.smart.temp!=null?x.smart.temp:null,bad=x.smart&&x.smart.healthy===false;
  const nm=(sys?("System · "+driveType(x).label):(x.label||x.model||x.name)).replace(/</g,"&lt;");
- const mark=sys?`<img class="li-pi" src="/icon-flat.svg" alt="">`:`<span class="dot" style="background:${roleColor(x.role)}"></span>`;
+ const mark=sys?`<img class="li-pi" src="${BRANDICO()}" alt="">`:`<span class="dot" style="background:${roleColor(x.role)}"></span>`;
  const it=el(`<button class="dm2-item${sys?" sys":""}">
    ${mark}
    <span class="li-main"><span class="li-name">${nm}</span><span class="li-sub">${roleName[x.role]||x.role} · ${x.size||"—"}${sys?"":(x.mounted?"":" · not mounted")}</span></span>
@@ -4795,7 +4838,7 @@ function diskDetail(x,reload){
  const name=(x.model||dt.label||x.name).replace(/</g,"&lt;");
  const lbl=x.label?`<span class="dd-lbl">«${(""+x.label).replace(/</g,"&lt;")}»</span>`:"";
  const sysHead=x.role==="system"
-   ?`<div class="dd-ic dd-ic-pi"><img src="/icon-flat.svg" alt=""></div>`
+   ?`<div class="dd-ic dd-ic-pi"><img src="${BRANDICO()}" alt=""></div>`
    :`<div class="dd-ic" style="background:${roleColor(x.role)}">${I[dt.ic]||I.disks}</div>`;
  const headName=x.role==="system"?("System · "+dt.label):name;
  box.appendChild(el(`<div class="dd-head">
@@ -13639,7 +13682,10 @@ function winSettings(initTab){openWin("__set","Settings",body=>{
   {sep:1},
   // 3 — system & hardware
   {id:"system",name:"System",ic:"activity"},
-  {id:"pi",name:"Raspberry Pi",ic:"cpu"},
+  // Named after the board it is actually running on: on a non-Pi the Pi-only knobs
+  // are hidden inside the tab (see piTab), so calling it "Raspberry Pi" there would
+  // promise hardware controls the machine does not have.
+  {id:"pi",name:(LAST&&LAST.is_pi===false)?"Hardware":"Raspberry Pi",ic:"cpu"},
   {id:"maint",name:"Maintenance",ic:"heart"},
   {id:"usb",name:"USB import",ic:"usb"},
   {id:"tscr",name:"Touch screen",ic:"monitor"},
@@ -14299,9 +14345,25 @@ function maintTab(tc){
   const oa=tc.querySelector("#stOpsAuto");oa.checked=SET.opsAuto!==false;
   oa.onchange=()=>{SET.opsAuto=oa.checked;saveSettings();};
 }
+/* A permanent home for "the installer could not install this". The desktop badge is
+   easy to miss and the SSH banner only shows on login, so the fact also lives in a
+   settings tab that is always reachable — plus the button that fixes it. Rendered
+   only when there is something to say: an empty "all good" row is noise. */
+function pkgsCard(miss){
+ const req=missReq(miss),n=(miss||[]).length;
+ if(!n)return "";
+ const label=req.length?`${req.length} required package${req.length>1?"s":""} missing`
+                       :`${n} optional package${n>1?"s":""} missing`;
+ const why=req.length?req.map(m=>m.pkg+" — "+(m.why||"a core feature is unavailable")).join("; ")
+                     :(miss||[]).map(m=>m.pkg).join(", ");
+ return `<div class="set-grp" ${req.length?'style="color:var(--danger)"':""}>Packages the installer could not install</div>
+  <div class="srow"><div class="srow-l"><div class="srow-t" ${req.length?'style="color:var(--danger)"':""}>${label}</div><div class="srow-d">${esc(why)}</div></div><div class="srow-c"><button class="btn sm" id="stPkgs">Details and fix</button></div></div>`;
+}
 function systemTab(tc){withSysc(tc,()=>{const s=SYSC.system||{};
+ const miss=(LAST&&LAST.missing_pkgs)||[];
  tc.innerHTML=`${rebootBan()}
   <h3 class="set-title">System</h3><p class="set-sub">Server identity, time and maintenance.</p>
+  ${pkgsCard(miss)}
   <div class="srow"><div class="srow-l"><div class="srow-t">Hostname${tipHTML("Network name of the NAS. The server is visible as <name>.local (mDNS) and in Samba. Changes /etc/hostname.")}</div><div class="srow-d">now: ${esc(s.hostname||"?")}</div></div><div class="srow-c"><input class="mono" id="stHost" value="${att(s.hostname||"")}"><button class="btn sm" id="stHostA">Apply</button></div></div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Time zone${tipHTML("Local time in logs, cron and timers. Area/City format, e.g. Europe/London.")}</div><div class="srow-d">now: ${esc(s.timezone||"?")}</div></div><div class="srow-c"><input class="mono" id="stTz" value="${att(s.timezone||"")}" placeholder="Europe/London"><button class="btn sm" id="stTzA">Apply</button></div></div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Pool alias${tipHTML("An extra name for the /mnt/storage pool in the system root — a symlink, both paths work at once. Handy if the pool on another NAS is called /volume2: scripts and paths will match. Empty field — alias disabled.")}</div><div class="srow-d" id="stAliasCur">…</div></div><div class="srow-c"><input class="mono" id="stAlias" placeholder="/volume2 (empty = off)"><button class="btn sm" id="stAliasA">Apply</button></div></div>
@@ -14314,6 +14376,7 @@ function systemTab(tc){withSysc(tc,()=>{const s=SYSC.system||{};
   <div class="srow"><div class="srow-l"><div class="srow-t">Restart the panel${tipHTML("Restarts the nas-web service (the web interface). The connection will drop briefly.")}</div></div><div class="srow-c"><button class="btn sm" id="mWeb">Restart nas-web</button></div></div>
 `;
  wireSc(tc);
+ {const bp=tc.querySelector("#stPkgs");if(bp)bp.onclick=()=>pkgsDlg(miss);}
  const H=tc.querySelector("#stHost"),Tz=tc.querySelector("#stTz"),J=tc.querySelector("#stJ");
  tc.querySelector("#stHostA").onclick=async()=>{await sconf("hostname",H.value.trim());refreshSysc(rerSet);flashSaved(tc.querySelector("#stHostA"),"Applied ✓");};
  tc.querySelector("#stTzA").onclick=async()=>{await sconf("timezone",Tz.value.trim());refreshSysc(rerSet);flashSaved(tc.querySelector("#stTzA"),"Applied ✓");};
@@ -14674,31 +14737,40 @@ function motdTab(tc){
 }
 /* --- settings: Raspberry Pi --- */
 function piTab(tc){withSysc(tc,()=>{const p=SYSC.pi||{};const g=p.governor||{};const thr=p.throttled||{};
+ // Everything below splits in two: knobs that exist only on a Raspberry Pi (config.txt,
+ // EEPROM, vcgencmd telemetry) and knobs every Linux box has (governor, watchdog, zram).
+ // On other hardware the first group is not "off" — it is meaningless, so it is not drawn
+ // at all. A toggle that is shown but cannot act is a lie, and the memory-cgroup row used
+ // to be exactly that: it answered "config.txt not found" on a box where the controller
+ // had been enabled by the kernel all along.
+ const isPi=p.is_pi!==false;
  const chips=(arr,cls)=>arr&&arr.length?arr.map(x=>`<span class="sbadge ${cls}">${esc(x)}</span>`).join(""):`<span class="sbadge ok">no</span>`;
  const govBtns=(g.available||[]).map(x=>`<button data-g="${x}" class="${g.current===x?"on":""}">${esc(x)}</button>`).join("")||"—";
  tc.innerHTML=`${rebootBan()}
-  <h3 class="set-title">Raspberry Pi</h3><p class="set-sub">Hardware parameters of the board. Many apply only after a reboot.</p>
+  <h3 class="set-title">${isPi?"Raspberry Pi":"Hardware"}</h3><p class="set-sub">Hardware parameters of the board.${isPi?" Many apply only after a reboot.":""}</p>
   <div class="pi-card">
-   <div class="pi-head"><img src="/icon-flat.svg" alt="">
-    <div><div class="pi-model">${esc(p.model||"Raspberry Pi")}</div>
+   <div class="pi-head">${isPi?`<img src="/icon-flat.svg" alt="">`:`<img src="/icon-board.svg" alt="">`}
+    <div><div class="pi-model">${esc(p.model||(isPi?"Raspberry Pi":"This machine"))}</div>
      <div class="pi-temp"><b style="color:${p.temp>=70?'var(--danger)':p.temp>=60?'var(--warn)':'var(--good)'}">${p.temp!=null?p.temp+"°":"—"}</b> CPU temp</div></div></div>
-   <div class="pi-kv">
+   ${isPi?`<div class="pi-kv">
     <div class="row"><span>Firmware</span><b>${esc(p.firmware||"—")}</b></div>
     <div class="row"><span>EEPROM</span><b>${esc(p.eeprom||"—")}</b></div>
     <div class="row"><span>Throttling now</span><div class="thr-chips">${chips(thr.now,"bad")}</div></div>
     <div class="row"><span>Throttling occurred</span><div class="thr-chips">${chips(thr.ever,"warn")}</div></div>
-   </div></div>
-  <div class="set-grp">Power and bus <span class="pill-rb">after reboot</span></div>
+   </div>`:""}</div>
+  ${isPi?`<div class="set-grp">Power and bus <span class="pill-rb">after reboot</span></div>
   ${tglRow("Full USB current","Allows the Pi 5 USB ports to supply full current (1.6 A instead of 600 mA). Needed for USB SSD/HDD without external power — otherwise voltage dips and disk dropouts. usb_max_current_enable.","usbpower",p.usbpower,"powers USB disks without dips")}
   ${tglRow("PCIe Gen 3 for NVMe","Speeds the NVMe slot up from Gen2 to Gen3 — a noticeably faster disk. Formally out of the Pi 5 spec: stable on most boards, but some SSDs may glitch.","pcie3",p.pcie3,"speeds up NVMe (out of spec)")}
-  ${tglRow("Memory cgroup for Docker","Enables the memory cgroup in the kernel — without it docker can't limit container RAM (mem_limit). Edits cmdline.txt.","cgroup",p.cgroup,"container memory limits")}
+  ${tglRow("Memory cgroup for Docker","Enables the memory cgroup in the kernel — without it docker can't limit container RAM (mem_limit). Edits cmdline.txt.","cgroup",p.cgroup,"container memory limits")}`
+  :`<div class="set-grp">Docker</div>
+  <div class="srow is-gated"><div class="srow-l"><div class="srow-t">Memory cgroup for Docker${tipHTML("Lets docker cap a container's RAM (mem_limit). On this board the kernel enables the memory controller itself — there is nothing to switch.")}</div><div class="srow-d">${p.cgroup?"enabled by the kernel — nothing to do":"NOT enabled: add cgroup_enable=memory to the kernel command line in your bootloader"}</div></div><div class="srow-c"><span class="sbadge ${p.cgroup?"ok":"warn"}">${p.cgroup?"on":"off"}</span></div></div>`}
   <div class="set-grp">Thermals and performance</div>
-  ${svcRow("Adaptive CPU governor","Every 2 min: at ≥80 °C or throttling → powersave, otherwise ondemand. For fanless cases, so the board doesn't overheat.","governor_adaptive",g.adaptive,"auto frequency reduction when hot")}
+  ${svcRow("Adaptive CPU governor","Every 2 min: at ≥80 °C or throttling → the coolest governor this kernel offers, otherwise the balanced one. The names are not universal — intel_pstate boards only have powersave/performance — so the script picks from what the kernel actually lists. For fanless cases, so the board doesn't overheat.","governor_adaptive",g.adaptive,"auto frequency reduction when hot")}
   <div class="srow"><div class="srow-l"><div class="srow-t">CPU governor mode${tipHTML("CPU frequency policy. ondemand — by load (balanced), performance — always max (hotter), powersave — always minimum (cooler/slower). Applied immediately.")}</div><div class="srow-d">now: ${esc(g.current||"?")}</div></div><div class="srow-c"><div class="seg" id="pGov" style="flex-wrap:wrap;max-width:340px">${govBtns}</div></div></div>
   ${tglRow("Watchdog (auto-reboot on hang)","A hardware watchdog: if the system stops responding, the Pi reboots automatically. Useful for a NAS without a monitor and keyboard.","watchdog",p.watchdog,"reboots on a complete hang")}
-  ${svcRow("zram (compressed swap in RAM)","Compressed swap in RAM (zstd, 50% of RAM) instead of the disk — smoother under load, protects the SD card. Costs a bit of CPU for compression.","zram",p.zram,"compressed swap, protects the SD card")}
-  <div class="set-grp">Firmware</div>
-  <div class="srow"><div class="srow-l"><div class="srow-t">Update the bootloader (EEPROM)${tipHTML("Updates the Pi bootloader firmware (rpi-eeprom). Sometimes fixes NVMe/USB compatibility and power consumption. Requires a reboot.")}</div></div><div class="srow-c"><button class="btn sm" id="pEep">${svg("refresh",13)} Refresh</button></div></div>`;
+  ${svcRow("zram (compressed swap in RAM)",`Compressed swap in RAM (zstd, 50% of RAM) instead of the disk — smoother under load, and ${isPi?"it protects the SD card":"it spares the system SSD"} from swap writes. Costs a bit of CPU for compression.`,"zram",p.zram,isPi?"compressed swap, protects the SD card":"compressed swap, spares the system disk")}
+  ${isPi?`<div class="set-grp">Firmware</div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Update the bootloader (EEPROM)${tipHTML("Updates the Pi bootloader firmware (rpi-eeprom). Sometimes fixes NVMe/USB compatibility and power consumption. Requires a reboot.")}</div></div><div class="srow-c"><button class="btn sm" id="pEep">${svg("refresh",13)} Refresh</button></div></div>`:""}`;
  wireSc(tc);
  tc.querySelectorAll("#pGov button").forEach(b=>b.onclick=async()=>{await sconf("governor",b.dataset.g);refreshSysc(rerSet);});
  const ee=tc.querySelector("#pEep");if(ee)ee.onclick=()=>confirmDlg("EEPROM","Update the bootloader firmware? Applies after a reboot.",async()=>{await sconf("eeprom_update",1);});
@@ -14925,7 +14997,7 @@ let DISK_TEMP_MAX=null;   // the hottest disk temperature — for the "System" w
 const diskTcol=t=>t==null?"":t>=60?"var(--danger)":t>=50?"var(--warn)":"var(--good)";
 const barCol=p=>p>=90?"var(--danger)":p>=75?"var(--warn)":"var(--good)";
 function dRow(role,name,pct,free,temp,sys,sub){
- const mark=sys?`<img class="ddot-pi" src="/icon-flat.svg" alt="">`:`<span class="ddot" style="background:${DROLE_COL[role]||"var(--mut)"}"></span>`;
+ const mark=sys?`<img class="ddot-pi" src="${BRANDICO()}" alt="">`:`<span class="ddot" style="background:${DROLE_COL[role]||"var(--mut)"}"></span>`;
  return `<div class="dline${sys?" sys":""}" title="${att((sub?sub+" · ":"")+(roleName[role]||role)+(temp!=null?" · "+temp+"°C":""))}">
    ${mark}
    <span class="nm"><span class="dn">${esc(name)}</span>${sub?`<span class="dsub">${esc(sub)}</span>`:""}</span>
@@ -15382,7 +15454,7 @@ function syncUsbOps(jobs){
    delete USB_OPS[j.dev];
   }});}
 
-async function poll(){const s=await api("/api/stats");LAST=s;pushHist(s);paintTray(s);paintSys(s);paintBasePkgs(s);
+async function poll(){const s=await api("/api/stats");LAST=s;pushHist(s);paintTray(s);paintSys(s);paintBasePkgs(s);paintBrandIco();
  const bn=document.getElementById("brandName");if(bn)bn.textContent=(s.host||location.hostname.split(".")[0]||"nas")+".local";
  const nr=!!(s&&s.nb_running);if(nr!==NB_RUNNING){NB_RUNNING=nr;renderDock();}
  syncUsbOps(s&&s.usb_import);
@@ -15397,7 +15469,7 @@ async function pollDisks(){const d=await api("/api/disks");paintDiskWidget(d.dis
 function maybeOnboard(){let done=false;try{done=!!SET.onboarded||localStorage.getItem("nas_onboarded")==="1";}catch(e){}
  if(done)return;
  const ob=el(`<div class="onboard"><div class="ob-card">
-   <div class="ob-logo"><img src="/icon-flat.svg" alt="Raspberry Pi"></div>
+   <div class="ob-logo"><img src="${BRANDICO()}" alt="NAS"></div>
    <h2>Welcome to NAS</h2>
    <div class="sub">This is the control panel for your storage. Go through the Wizard to set up disks, apps and access — or look around on your own.</div>
    <div class="ob-steps">

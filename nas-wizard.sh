@@ -66,13 +66,82 @@ UTIL_PACKAGES=(
   lsof net-tools bind9-dnsutils iproute2 nmap
   psmisc              # fuser — «what holds this mountpoint» when a disk refuses to unmount
   bash-completion
+  network-manager    # panel Network tab + netguard Wi-Fi failover run on nmcli. RaspiOS ships
+                     # it; a plain Debian netinst without a desktop does NOT — and then both
+                     # features are dead with no visible error. Already-installed = no-op.
   parted gdisk dosfstools e2fsprogs xfsprogs exfatprogs ntfs-3g btrfs-progs udisks2
   hdparm nvme-cli sysstat
   unattended-upgrades apt-listchanges
   ffmpeg poppler-utils
 )
-# Pi-specific
+# Pi-specific. Absent on any other board — install_packages tags these skips as
+# level "pi" so they never reach the panel or the loud summary (see pkg_level).
 PI_PACKAGES=(libraspberrypi-bin raspi-config rpi-eeprom)
+
+# --- Which skipped packages actually matter -------------------------------------
+# A package renamed in a newer Debian is skipped silently by apt-cache and the
+# feature it carries just stops existing. "N packages missing" answers nothing:
+# the only useful question is WHAT BREAKS. So every package the box cannot do its
+# job without is listed here WITH that answer, and the answer is what the summary,
+# the SSH login banner and the panel all print.
+# Anything not listed is a convenience (editors, viewers, previews): still reported,
+# but quietly, without the red block.
+REQUIRED_PKGS=(
+  "mergerfs|the storage pool /mnt/storage cannot be assembled — several disks stay several disks"
+  "snapraid|no parity: a dead disk takes its files with it"
+  "smartmontools|no SMART: a disk that is dying gives no warning"
+  "rsync|the Mirror backup app cannot copy anything at all"
+  "openssh-client|no backups to another machine, no SSH mounts in the file manager"
+  "sshfs|the file manager cannot mount other servers (Servers section)"
+  "avahi-daemon|<host>.local stops resolving and the NAS disappears from Finder → Network"
+  "libnss-mdns|<host>.local stops resolving on this box itself"
+  "samba|network shares (SMB) cannot be served at all"
+  "iputils-arping|netguard loses its fallback check and can call a working wire dead"
+  "network-manager|the panel Network tab and the Wi-Fi failover stop working"
+  "parted|disks cannot be partitioned from the panel"
+  "gdisk|GPT partitioning from the panel is unavailable"
+  "e2fsprogs|ext4 disks cannot be formatted or checked — the pool format"
+  "dosfstools|FAT/EFI partitions cannot be formatted or checked"
+  "exfatprogs|exFAT disks (Windows/Mac portables) cannot be formatted"
+  "ntfs-3g|NTFS disks stay read-only or unreadable"
+  "btrfs-progs|btrfs disks cannot be formatted or inspected"
+  "xfsprogs|XFS disks cannot be formatted or inspected"
+  "udisks2|the panel cannot enumerate and mount disks reliably"
+  "nvme-cli|NVMe health, temperature and wear are unreadable"
+  "curl|the panel cannot reach the network: updates, rclone, kopia, Pushover"
+  "wget|rclone and kopia cannot be downloaded or updated"
+  "ca-certificates|every HTTPS call fails, including all cloud backups"
+  "gnupg|the Docker, GitHub and Syncthing repositories cannot be verified"
+  "git|the panel cannot version ~/nas-config or update itself"
+  "unzip|rclone cannot be installed or updated (its release is a zip)"
+  "jq|the shell helpers that read JSON state stop working"
+  "iproute2|no network state at all: addresses, routes, link"
+  "openssl|the Kopia repository server cannot get its TLS identity"
+  "unattended-upgrades|security updates stop arriving — the box quietly collects CVEs"
+)
+# pkg_level <pkg> -> req|opt|pi
+pkg_level() {
+    local p="$1" r
+    for r in "${PI_PACKAGES[@]}"; do [ "$r" = "$p" ] && { echo pi; return; }; done
+    for r in "${REQUIRED_PKGS[@]}"; do [ "${r%%|*}" = "$p" ] && { echo req; return; }; done
+    echo opt
+}
+# pkg_why <pkg> -> what breaks without it ('' for convenience packages)
+pkg_why() {
+    local p="$1" r
+    for r in "${REQUIRED_PKGS[@]}"; do [ "${r%%|*}" = "$p" ] && { echo "${r#*|}"; return; }; done
+    echo ""
+}
+
+# --- Board detection --------------------------------------------------------
+# Branch on the FACT of hardware, never on the architecture: an arm64 board that is
+# not a Pi has no config.txt either, and the question is always "is this knob real
+# here", not "which CPU is this". A toggle that is present but cannot act is worse
+# than one that is absent — it lies (see the Pi tab on x86).
+is_pi() {
+    [ -n "$(boot_config_path)" ] && command -v vcgencmd >/dev/null 2>&1 && return 0
+    grep -qs -i raspberry /proc/device-tree/model 2>/dev/null
+}
 
 # Mount points / directories
 STORAGE_MNT="/mnt/storage"
@@ -268,8 +337,15 @@ install_packages() {
         if apt-cache show "$pkg" >/dev/null 2>&1; then
             to_install+=("$pkg")
         else
-            warn "$label: package not available in the repository, skipping: $pkg"
-            NASW_SKIPPED+=("$label: $pkg")
+            local lvl why
+            lvl="$(pkg_level "$pkg")"; why="$(pkg_why "$pkg")"
+            if [ "$lvl" = req ]; then
+                warn "$label: REQUIRED package missing from the repository: $pkg — $why"
+            else
+                warn "$label: package not available in the repository, skipping: $pkg"
+            fi
+            # TSV so the panel and the login banner can say WHAT BREAKS, not just count
+            NASW_SKIPPED+=("$(printf '%s\t%s\t%s\t%s' "$lvl" "$pkg" "$label" "$why")")
         fi
     done
     if [ "${#to_install[@]}" -eq 0 ]; then
@@ -292,17 +368,29 @@ report_skipped_packages() {
         return 0
     fi
     [ "$DRY_RUN" -eq 0 ] && printf '%s\n' "${NASW_SKIPPED[@]}" > /var/lib/nas-wizard/skipped-packages
-    local s expected=() unexpected=()
-    for s in "${NASW_SKIPPED[@]}"; do
-        case "$s" in "Pi packages: "*) expected+=("${s#*: }") ;; *) unexpected+=("$s") ;; esac
-    done
-    [ "${#expected[@]}" -gt 0 ] && info "Pi-only packages skipped (fine on non-Pi hardware): ${expected[*]}"
-    if [ "${#unexpected[@]}" -gt 0 ]; then
+    local s lvl pkg why req=() opt=() pi=()
+    while IFS=$'\t' read -r lvl pkg _ why; do
+        case "$lvl" in
+            req) req+=("$pkg|$why") ;;
+            pi)  pi+=("$pkg") ;;
+            *)   opt+=("$pkg") ;;
+        esac
+    done < <(printf '%s\n' "${NASW_SKIPPED[@]}")
+    [ "${#pi[@]}" -gt 0 ] && info "Pi-only packages skipped (fine on non-Pi hardware): ${pi[*]}"
+    [ "${#opt[@]}" -gt 0 ] && warn "Optional packages unavailable (convenience features only): ${opt[*]}"
+    if [ "${#req[@]}" -gt 0 ]; then
+        # Loud, last, and it names the consequence — a count teaches nothing, and this
+        # is the one thing on the whole install that must not scroll past unnoticed.
         warn "==================================================================="
-        warn "${#unexpected[@]} package(s) were NOT available and were SKIPPED:"
-        for s in "${unexpected[@]}"; do warn "    $s"; done
-        warn "The features they provide are missing. Package names may have"
-        warn "changed in this OS release — check and install them manually."
+        warn "  ${#req[@]} REQUIRED package(s) could NOT be installed."
+        warn "  The box will come up, but these things will NOT work:"
+        warn ""
+        for s in "${req[@]}"; do warn "    • ${s%%|*} — ${s#*|}"; done
+        warn ""
+        warn "  Package names change between Debian releases. Try:"
+        warn "      sudo apt update && sudo apt install $(printf '%s ' "${req[@]%%|*}")"
+        warn "  The panel repeats this list (Settings → System) and so does the"
+        warn "  SSH login banner, until the packages are actually installed."
         warn "==================================================================="
     fi
 }
@@ -471,7 +559,7 @@ disk_of_mountpoint() {
 protected_disks() {
     local mp d src pk
     {
-        for mp in / /boot /boot/firmware /home /var; do
+        for mp in / /boot /boot/firmware /boot/efi /home /var; do
             d="$(disk_of_mountpoint "$mp" 2>/dev/null)"
             [ -n "$d" ] && echo "$d"
         done
@@ -648,7 +736,15 @@ stage_system() {
     install_smartd_guard   # smartmontools is installed right here — immediately clear failed with no disks
     install_screen         # local touch screen: installed only if the panel is actually connected
     install_packages "utilities"    "${UTIL_PACKAGES[@]}"
-    install_packages "Pi packages"  "${PI_PACKAGES[@]}"
+    if is_pi; then
+        if is_pi; then
+        install_packages "Pi packages" "${PI_PACKAGES[@]}"
+    else
+        info "not a Raspberry Pi — Pi-only packages (${PI_PACKAGES[*]}) not needed"
+    fi
+    else
+        info "not a Raspberry Pi — Pi-only packages (${PI_PACKAGES[*]}) not needed"
+    fi
     ensure_docker_repo   # docker-ce + compose-plugin from the official Docker repo
     ensure_gh            # GitHub CLI (for pushing panel code from the box)
 
@@ -1653,9 +1749,20 @@ pi_usb_power() {
 }
 # Memory cgroup for docker limits (editing cmdline.txt — a SINGLE-line file!)
 pi_cgroup() {
+    # Ask the kernel, not the bootloader: on cgroup v2 (every non-Pi Debian) the
+    # memory controller is on by default and there is nothing to enable. The old
+    # code only knew how to look in cmdline.txt, so on such a box it answered
+    # "cmdline.txt not found" — which reads as "broken" when the answer is "already on".
+    # v2: the root cgroup has no memory.max, the controller list is the honest source.
+    # v1: /proc/cgroups has an "enabled" column. Check both — a box can be on either.
+    if grep -qws memory /sys/fs/cgroup/cgroup.controllers 2>/dev/null \
+       || awk '$1=="memory" && $4==1{f=1} END{exit !f}' /proc/cgroups 2>/dev/null; then
+        info "memory cgroup already enabled by the kernel — nothing to do"
+        return 0
+    fi
     local cl=/boot/firmware/cmdline.txt
     [ -f "$cl" ] || cl=/boot/cmdline.txt
-    [ -f "$cl" ] || { warn "cmdline.txt not found — cgroup skipped"; return 0; }
+    [ -f "$cl" ] || { warn "no cmdline.txt and the memory cgroup is off — enable it in your bootloader (GRUB: cgroup_enable=memory)"; return 0; }
     if grep -qs 'cgroup_enable=memory' "$cl"; then info "memory cgroup already enabled"; return 0; fi
     backup_file "$cl"
     if [ "$DRY_RUN" -eq 1 ]; then
@@ -1813,6 +1920,27 @@ uas_seed_cmdline() {
 # it go stale. Hence the udev hook: a hand-maintained list is exactly what let the Ugreen
 # bridge stay on UAS and eat the backup.
 install_uas_off() {
+    # On a Pi the uas driver is BUILT INTO the kernel, so the only lever is the
+    # per-device usb-storage.quirks list maintained by the udev hook below. Anywhere
+    # else uas is an ordinary module, and one blacklist line does the whole job for
+    # every bridge, present and future — no VID:PID bookkeeping, no re-enumeration.
+    # Install it in ADDITION to the hook (the hook then finds nothing bound to uas
+    # and exits early), so a box that somehow loads uas anyway is still covered.
+    # `modinfo uas` prints "filename: (builtin)" on a Pi and an absolute /lib/modules
+    # path where it is a real module — that is the whole test.
+    if ! is_pi && modinfo uas 2>/dev/null | grep -qE '^filename:[[:space:]]*/'; then
+        run mkdir -p /etc/modprobe.d
+        write_file /etc/modprobe.d/nas-uas-off.conf <<'EOF'
+# NAS-OS: never let a USB-SATA bridge run on UAS. Its error recovery resets the WHOLE
+# usb device, so one stuck command (a SMART pass-through issued while rsync writes is
+# enough) aborts every in-flight write and ext4 flips to read-only mid-backup.
+# usb-storage (BOT) fails the stuck command alone. The speed cost is nil here: the
+# ceiling is the LAN and the HDD, not the transport. See install_uas_off().
+blacklist uas
+install uas /bin/true
+EOF
+        info "UAS disabled kernel-wide (uas is a module on this board)"
+    fi
     write_file /usr/local/bin/nas-uas-off.sh <<'UASOFF'
 #!/bin/sh
 # nas-wizard: disable UAS for one USB mass-storage bridge (from udev via systemd-run).
@@ -1905,12 +2033,21 @@ RULES
 # at http://127.0.0.1/screen — nas-web serves this page BEFORE the auth gate, but only
 # on loopback, so the screen never asks for a password and it can't be opened from the LAN.
 screen_present() {
-    local f
+    local f d drv
+    [ "${NASW_SCREEN:-}" = "1" ] && return 0        # explicit opt-in (headless box + a panel added later)
     for f in /sys/class/drm/card*-DSI-*/status; do
         [ -e "$f" ] && [ "$(cat "$f" 2>/dev/null)" = "connected" ] && return 0
     done
-    # some panels are visible only via the backlight
-    for f in /sys/class/backlight/*/brightness; do [ -e "$f" ] && return 0; done
+    # Some panels are visible only via the backlight — but "any backlight" is far too
+    # wide a net: every x86 laptop and many mini-PCs expose one, and they would then
+    # silently get a cage+chromium kiosk and its Chromium policy files installed on a
+    # box that has no touchscreen at all. Accept a backlight only when it belongs to a
+    # known DSI panel driver.
+    for d in /sys/class/backlight/*; do
+        [ -e "$d" ] || continue
+        drv="$(basename "$(readlink -f "$d/device/driver" 2>/dev/null)" 2>/dev/null)"
+        case "$drv" in rpi_touchscreen_attiny|*panel*|*dsi*) return 0 ;; esac
+    done
     return 1
 }
 install_screen() {
@@ -2074,12 +2211,38 @@ pi_governor() {
     write_file /usr/local/bin/nas-governor.sh <<'EOF'
 #!/bin/bash
 # nas-wizard: adaptive CPU governor by temperature/throttling
-tz=/sys/class/thermal/thermal_zone0/temp
-temp=0; [ -r "$tz" ] && temp=$(( $(cat "$tz") / 1000 ))
+# CPU temperature: the Pi has it on thermal_zone0, but on a generic x86 board zone0
+# is usually the ACPI chassis zone (or absent) while the real sensor is a hwmon named
+# coretemp/k10temp. Ask by NAME, take thermal_zone0 only as a last resort.
+cpu_temp_mc() {
+    local h n
+    for h in /sys/class/hwmon/hwmon*; do
+        n="$(cat "$h/name" 2>/dev/null)"
+        case "$n" in
+            coretemp|k10temp|zenpower|cpu_thermal|soc_thermal|x86_pkg_temp)
+                [ -r "$h/temp1_input" ] && { cat "$h/temp1_input"; return; } ;;
+        esac
+    done
+    [ -r /sys/class/thermal/thermal_zone0/temp ] && cat /sys/class/thermal/thermal_zone0/temp && return
+    echo 0
+}
+temp=$(( $(cpu_temp_mc) / 1000 ))
 thr_hex="$(vcgencmd get_throttled 2>/dev/null | sed 's/.*=//')"
 cur=$(( ${thr_hex:-0} & 0xf ))
-gov=ondemand
-if [ "$temp" -ge 80 ] || [ "$cur" -ne 0 ]; then gov=powersave; fi
+# The governor names are NOT universal: intel_pstate (any modern x86, N95/N100
+# included) offers only powersave/performance — writing "ondemand" there fails
+# silently and the timer becomes a no-op that still looks enabled. Pick the
+# coolest and the balanced name that this kernel actually offers.
+avail="$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors 2>/dev/null)"
+has(){ case " $avail " in *" $1 "*) return 0 ;; esac; return 1; }
+cool=powersave; has powersave || cool="$(printf '%s' "$avail" | awk '{print $1}')"
+norm=ondemand
+has ondemand || { if has schedutil; then norm=schedutil
+                  elif has powersave; then norm=powersave
+                  else norm="$cool"; fi; }
+gov="$norm"
+if [ "$temp" -ge 80 ] || [ "$cur" -ne 0 ]; then gov="$cool"; fi
+[ -n "$gov" ] || exit 0
 for g in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
     [ -w "$g" ] && echo "$gov" > "$g" 2>/dev/null || true
 done
@@ -3275,7 +3438,7 @@ install_motd() {
     run mkdir -p /etc/nas-wizard
     if [ ! -f /etc/nas-wizard/motd.txt ]; then
         write_file /etc/nas-wizard/motd.txt <<'TXT'
-NAS-OS - home NAS on Raspberry Pi 5
+NAS-OS - home NAS
 
   Panel        {panel}
   Data pool    /mnt/storage          Stacks  ~/services
@@ -3319,7 +3482,17 @@ V_HOST="$(hostname)"
 V_UPTIME="$(uptime -p 2>/dev/null | sed 's/^up //')"
 V_LOAD="$(awk '{printf "%s %s %s", $1, $2, $3}' /proc/loadavg 2>/dev/null)"
 V_TEMP=""; V_TEMPC=""
-t=$(cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null)
+# CPU temperature by SENSOR NAME, not by thermal_zone0: on a Pi zone0 is the SoC, but
+# on a generic x86 board it is usually the ACPI chassis zone (or missing entirely) and
+# the real reading lives in a hwmon called coretemp/k10temp.
+t=""
+for h in /sys/class/hwmon/hwmon*; do
+  case "$(cat "$h/name" 2>/dev/null)" in
+    coretemp|k10temp|zenpower|cpu_thermal|soc_thermal|x86_pkg_temp)
+      [ -r "$h/temp1_input" ] && { t=$(cat "$h/temp1_input" 2>/dev/null); break; } ;;
+  esac
+done
+[ -n "$t" ] || t=$(cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null)
 [ -n "$t" ] && { V_TEMPC=$((t/1000)); V_TEMP="${V_TEMPC}C"; }
 V_MEM="$(free -h 2>/dev/null | awk '/^Mem:/{printf "%s of %s", $3, $2}')"
 V_DATE="$(date '+%Y-%m-%d')"
@@ -3381,6 +3554,30 @@ if [ "${MOTD_TEXT:-1}" = "1" ] && [ -r "$TXT" ]; then
   printf '\n%s\n' "$txt"
 fi
 
+# ---- required packages that never got installed ---------------------------
+# Deliberately ABOVE the MOTD_INFO gate: this is not a status line the user may
+# switch off, it is a JOB TO DO. (Found the hard way — the box this was written on
+# had MOTD_INFO=0, so a block placed after the gate would never have appeared.)
+# It names the CONSEQUENCE: a package name alone tells nobody what is broken.
+# Re-checked against dpkg on every login, so it disappears by itself once fixed.
+SKIP=/var/lib/nas-wizard/skipped-packages
+if [ -s "$SKIP" ]; then
+  miss=""; missnames=""
+  while IFS="$(printf '\t')" read -r lvl pkg _ why; do
+    [ "$lvl" = "req" ] || continue
+    dpkg -s "$pkg" >/dev/null 2>&1 && continue
+    miss="$miss  - $pkg: $why
+"
+    missnames="$missnames $pkg"
+  done < "$SKIP"
+  if [ -n "$missnames" ]; then
+    if [ -n "${NO_COLOR:-}" ]; then RD=""; else RD=$'\033[1;31m'; fi
+    printf '\n%sRequired packages are missing - these things do NOT work:%s\n' "$RD" "$R"
+    printf '%s' "$miss"
+    printf '  %sFix:%s sudo apt update && sudo apt install%s\n' "$D" "$R" "$missnames"
+  fi
+fi
+
 [ "${MOTD_INFO:-1}" = "1" ] || exit 0
 printf '\n%s%s%s\n' "$B" "$V_HOST" "$R"
 row "Uptime" "${V_UPTIME:-?}   ${D}load${R} ${V_LOAD:-?}"
@@ -3396,6 +3593,7 @@ if [ -n "$V_IP" ]; then
   row "Panel" "$V_PANEL"
 fi
 [ -n "$V_CONT" ] && row "Containers" "$V_CONT running"
+
 printf '\n'
 MOTD
     run chmod +x /etc/update-motd.d/20-nas-os
@@ -3520,6 +3718,18 @@ install_kopia() {
 # and restores it at boot, so the clock starts minutes off instead of days.
 # ---------------------------------------------------------------------------
 install_fake_hwclock() {
+    # Only boards WITHOUT a battery-backed clock need this. Any ordinary x86 box has
+    # a real RTC, and installing a fake one there adds a second writer to the system
+    # clock for no benefit — the whole reason this exists is that a Pi boots days in
+    # the past. (The stale-clock guard in nas-netguard.sh stays either way: it costs
+    # nothing and protects against a clock that is wrong for any other reason.)
+    # NB: a Pi 5 DOES expose /dev/rtc0, but it only keeps time with a battery on the
+    # connector — so "has an RTC device" is not enough to skip this on a Pi. Skip only
+    # on non-Pi hardware, where an RTC is genuinely battery-backed.
+    if ! is_pi && { [ -e /dev/rtc0 ] || [ -e /dev/rtc ]; }; then
+        info "board has a battery-backed RTC — fake-hwclock not needed"
+        return 0
+    fi
     install_packages "clock" fake-hwclock
     command -v fake-hwclock >/dev/null 2>&1 || return 0
     run fake-hwclock save
@@ -3699,7 +3909,11 @@ stage_system_apply() {
     install_smartd_guard   # smartmontools is installed here too — immediately clear 'failed' when there are no disks
     install_screen         # local touchscreen: installed only if the panel is actually connected
     install_packages "utilities"   "${UTIL_PACKAGES[@]}"
-    install_packages "Pi packages" "${PI_PACKAGES[@]}"
+    if is_pi; then
+        install_packages "Pi packages" "${PI_PACKAGES[@]}"
+    else
+        info "not a Raspberry Pi — Pi-only packages (${PI_PACKAGES[*]}) not needed"
+    fi
     ensure_docker_repo   # docker-ce + compose-plugin from the official Docker repo
     ensure_gh            # GitHub CLI (to push panel code from the box)
     install_rclone       # cloud engine for the «Backup» app (latest official binary; selfupdate-able)

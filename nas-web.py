@@ -223,8 +223,37 @@ def cpu_percent(sample=0.20):
                     v=round(100 * (dt - di) / dt, 1) if dt > 0 else _CPU["v"])
         return _CPU["v"]
 
+# CPU temperature. thermal_zone0 is the SoC sensor on a Pi, but on an ordinary x86
+# board zone0 is usually the ACPI chassis zone — or missing entirely — while the real
+# reading sits in a hwmon named coretemp/k10temp. So ask by SENSOR NAME first and keep
+# zone0 only as the fallback. Resolved once: hwmon numbering is stable within a boot.
+_CPU_TEMP_NAMES = ("coretemp", "k10temp", "zenpower", "cpu_thermal",
+                   "soc_thermal", "x86_pkg_temp")
+_TEMP_PATH = {"v": None}
+
+def _cpu_temp_path():
+    if _TEMP_PATH["v"] is not None:
+        return _TEMP_PATH["v"]
+    found = ""
+    try:
+        for h in sorted(os.listdir("/sys/class/hwmon")):
+            d = "/sys/class/hwmon/" + h
+            if _read(d + "/name", "").strip() in _CPU_TEMP_NAMES \
+               and os.path.exists(d + "/temp1_input"):
+                found = d + "/temp1_input"
+                break
+    except OSError:
+        pass
+    if not found and os.path.exists("/sys/class/thermal/thermal_zone0/temp"):
+        found = "/sys/class/thermal/thermal_zone0/temp"
+    _TEMP_PATH["v"] = found
+    return found
+
 def temp_c():
-    raw = _read("/sys/class/thermal/thermal_zone0/temp", "")
+    p = _cpu_temp_path()
+    if not p:
+        return None
+    raw = _read(p, "")
     try:
         return round(int(raw) / 1000, 1)
     except ValueError:
@@ -469,6 +498,18 @@ def _psu_max_current():
         return None
 PSU_MA = _psu_max_current()
 
+# Is this a Raspberry Pi? Branch on the FACT of the hardware, never on the CPU
+# architecture — the question is always "is this knob real here". Everything Pi-only
+# (config.txt toggles, EEPROM, vcgencmd telemetry) hides itself on any other board:
+# a toggle that is present but cannot act is worse than one that is absent, because
+# it lies. Board identity does not change at runtime, so this is read once.
+def _detect_pi():
+    m = _read("/proc/device-tree/model", "")
+    if "raspberry" in m.lower():
+        return True
+    return bool(_read("/sys/firmware/devicetree/base/model", "").lower().count("raspberry"))
+IS_PI = _detect_pi()
+
 def throttled():
     try:
         out = subprocess.run(["vcgencmd", "get_throttled"], capture_output=True,
@@ -593,7 +634,7 @@ def disks():
         collect(d)
         role = "free"
         for mp in mounts:
-            if mp in ("/", "/boot", "/boot/firmware", "/var"):
+            if mp in ("/", "/boot", "/boot/firmware", "/boot/efi", "/var"):
                 role = "system"; break
         if role == "free":
             for mp in mounts:
@@ -762,7 +803,9 @@ def _disk_mountpoints(dev):
             mps.append(mp)
     return mps
 
-_SYS_MPS = ("/", "/boot", "/boot/firmware", "/var", "/home", "/usr")
+# /boot/efi belongs here too: a UEFI box always has an ESP, and without it the
+# panel lists the EFI partition among the DATA volumes.
+_SYS_MPS = ("/", "/boot", "/boot/firmware", "/boot/efi", "/var", "/home", "/usr")
 
 SPEEDTEST_FILE = os.path.join(NAS_CONFIG, "speedtest.json")
 _speed_lock = threading.Lock()
@@ -3166,21 +3209,83 @@ def save_winpos(d):
 # Re-checked against dpkg with a TTL, so the desktop badge disappears on its own
 # as soon as the user installs them by hand. "Pi packages" skips are expected on
 # non-Pi hardware and never surface here.
+SKIPPED_PKGS_FILE = "/var/lib/nas-wizard/skipped-packages"
 _MISS_PKGS = {"t": 0.0, "v": []}
+
+def _parse_skipped_line(line):
+    """One record from skipped-packages -> (level, pkg, why).
+
+    Current format is TSV: level<TAB>pkg<TAB>stage<TAB>what breaks. Boxes installed
+    before that wrote 'stage: pkg' — still parsed, as 'opt' with no consequence text,
+    because an upgraded box must not suddenly show an empty scary list."""
+    line = line.strip()
+    if not line:
+        return None
+    if "\t" in line:
+        p = line.split("\t")
+        lvl = p[0].strip() or "opt"
+        pkg = (p[1] if len(p) > 1 else "").strip()
+        why = (p[3] if len(p) > 3 else "").strip()
+        return (lvl, pkg, why) if pkg else None
+    if line.startswith("Pi packages:"):
+        return ("pi", line.split(": ", 1)[-1].strip(), "")
+    pkg = line.split(": ", 1)[-1].strip()
+    return ("opt", pkg, "") if pkg else None
+
 def missing_base_packages():
+    """Packages the installer could not find, that dpkg still does not see.
+
+    Returns [{pkg, level, why}] — level 'req' means a core feature is gone and the
+    panel says so loudly; 'opt' is a convenience. 'pi' skips are expected on non-Pi
+    hardware and never surface. Re-checked with a TTL so every surface (desktop badge,
+    Settings card, SSH banner) stops nagging on its own once the packages arrive."""
     now = time.time()
     if now - _MISS_PKGS["t"] < 300:
         return _MISS_PKGS["v"]
     out = []
-    for line in _read("/var/lib/nas-wizard/skipped-packages", "").splitlines():
-        line = line.strip()
-        if not line or line.startswith("Pi packages:"):
+    for line in _read(SKIPPED_PKGS_FILE, "").splitlines():
+        rec = _parse_skipped_line(line)
+        if not rec or rec[0] == "pi":
             continue
-        pkg = line.split(": ", 1)[-1].strip()
-        if pkg and subprocess.run(["dpkg", "-s", pkg], capture_output=True).returncode != 0:
-            out.append(pkg)
+        lvl, pkg, why = rec
+        if subprocess.run(["dpkg", "-s", pkg], capture_output=True).returncode != 0:
+            out.append({"pkg": pkg, "level": lvl, "why": why})
     _MISS_PKGS.update(t=now, v=out)
     return out
+
+def missing_pkgs_recheck():
+    """Drop the TTL cache — called right after an install attempt so the answer
+    reflects what just happened instead of an up-to-5-minute-old snapshot."""
+    _MISS_PKGS.update(t=0.0)
+    return missing_base_packages()
+
+def install_missing_packages():
+    """Try to install what the installer had to skip. This is the whole point of
+    surfacing the list: on a newer Debian the package usually exists under a new
+    name or simply arrived in the repo later, and then one button fixes it."""
+    miss = missing_pkgs_recheck()
+    if not miss:
+        return {"ok": True, "log": "nothing to install — all packages are present"}
+    names = [m["pkg"] for m in miss]
+    env = dict(os.environ, DEBIAN_FRONTEND="noninteractive")
+    logs = []
+    r = subprocess.run(["apt-get", "update"], capture_output=True, text=True,
+                       timeout=300, env=env)
+    logs.append((r.stdout or "") + (r.stderr or ""))
+    # One package that no longer exists must not block the others: apt-get install
+    # is all-or-nothing, so try the batch first and fall back to one by one.
+    r = subprocess.run(["apt-get", "install", "-y"] + names, capture_output=True,
+                       text=True, timeout=1800, env=env)
+    logs.append((r.stdout or "") + (r.stderr or ""))
+    if r.returncode != 0 and len(names) > 1:
+        logs.append("\n-- batch install failed, retrying one by one --")
+        for n in names:
+            r1 = subprocess.run(["apt-get", "install", "-y", n], capture_output=True,
+                                text=True, timeout=900, env=env)
+            logs.append("\n== %s ==\n%s%s" % (n, r1.stdout or "", r1.stderr or ""))
+    left = missing_pkgs_recheck()
+    return {"ok": not left, "left": left, "log": "\n".join(logs)[-8000:],
+            "installed": [n for n in names if n not in {m["pkg"] for m in left}]}
 
 def stats():
     iface = default_iface()
@@ -3191,6 +3296,9 @@ def stats():
         "temp": temp_c(),
         "throttled": throttled(),
         "psu_ma": PSU_MA,
+        # constant for the life of the box, but it rides along with stats so the UI can
+        # decide synchronously what hardware controls even make sense to draw
+        "is_pi": IS_PI,
         "missing_pkgs": _safe(missing_base_packages, []),
         "mem": mem_info(),
         # no pool means no pool stats either (it used to silently substitute the
@@ -14065,11 +14173,11 @@ def _bb_sample(prev_cpu):
     if cur and prev_cpu and cur[0] > prev_cpu[0]:
         dt, di = cur[0] - prev_cpu[0], cur[1] - prev_cpu[1]
         s["cpu"] = round(max(0.0, 100.0 * (dt - di) / dt), 1)
-    try:
-        with open("/sys/class/thermal/thermal_zone0/temp") as f:
-            s["temp"] = round(int(f.read().strip()) / 1000.0, 1)
-    except (OSError, ValueError):
-        pass
+    # same sensor the rest of the panel uses — a flight recorder whose temperature
+    # column is empty (or reads the chassis, not the CPU) is worse than no column
+    t = _safe(temp_c)
+    if t is not None:
+        s["temp"] = t
     if _BB_HAS["vcg"]:
         r = _run(["vcgencmd", "get_throttled"], timeout=5)
         m = re.search(r"0x([0-9a-fA-F]+)", r.get("log") or "") if r.get("ok") else None
@@ -20280,6 +20388,32 @@ def _governor():
             "available": _read(base + "scaling_available_governors").split(),
             "adaptive": _svc("nas-governor.timer")}
 
+def _board_model():
+    """Human name of the board. Device-tree on a Pi, DMI on a PC — a NAS panel that
+    cannot say what it is running on is answering "unknown" to a question the machine
+    can answer everywhere."""
+    m = _read("/proc/device-tree/model", "").replace("\x00", "").strip()
+    if m:
+        return m
+    vendor = _read("/sys/class/dmi/id/sys_vendor", "").strip()
+    prod = _read("/sys/class/dmi/id/product_name", "").strip()
+    name = " ".join(x for x in (vendor, prod) if x and x.lower() not in
+                    ("to be filled by o.e.m.", "default string", "system product name"))
+    return name or ""
+
+def _memory_cgroup_on():
+    """Is the memory controller actually available? Ask the KERNEL, not the bootloader.
+    The old check grepped cmdline.txt, so on cgroup v2 (every non-Pi Debian, where the
+    controller is on by default and there is no cmdline.txt at all) it reported 'off'
+    for something that has always been on."""
+    if "memory" in _read("/sys/fs/cgroup/cgroup.controllers", "").split():
+        return True
+    for line in _read("/proc/cgroups", "").splitlines()[1:]:
+        f = line.split()
+        if len(f) >= 4 and f[0] == "memory" and f[3] == "1":
+            return True
+    return False
+
 def _primary_iface():
     m = re.search(r"dev (\S+)", _sc("ip", "route", "get", "1.1.1.1"))
     return m.group(1) if m else ""
@@ -20470,15 +20604,20 @@ def sysconf():
             "fail2ban": _fail2ban_state(),
             "log2ram": _svc("log2ram"),
         },
+        # "pi" carries BOTH the Pi-only knobs and three that exist on any board
+        # (watchdog, zram, governor). is_pi tells the UI which half to draw: on other
+        # hardware the config.txt toggles and the vcgencmd readings are not "off",
+        # they are meaningless, and a toggle that cannot act is a toggle that lies.
         "pi": {
-            "model": _read("/proc/device-tree/model").replace("\x00", "").strip(),
+            "is_pi": IS_PI,
+            "model": _board_model(),
             "firmware": (_sc("vcgencmd", "version").splitlines() or [""])[0],
             "eeprom": (_sc("vcgencmd", "bootloader_version").splitlines() or [""])[0],
             "temp": temp_c(),
             "throttled": _throttled_decode(),
             "usbpower": _cfg_has(cfg, "usb_max_current_enable=1"),
             "pcie3": _cfg_has(cfg, "dtparam=pciex1_gen=3"),
-            "cgroup": "cgroup_enable=memory" in _read(cl),
+            "cgroup": _memory_cgroup_on(),
             "watchdog": os.path.isfile("/etc/systemd/system.conf.d/watchdog.conf"),
             "zram": _zram_status(),
             "governor": _governor(),
@@ -21694,7 +21833,8 @@ def usb_removable():
             capture_output=True, text=True, timeout=8).stdout)
     except (OSError, subprocess.SubprocessError, json.JSONDecodeError):
         return out
-    SYSMOUNTS = ("/", "/boot", "/boot/firmware", "/var", "/usr", "/home", "[SWAP]")
+    SYSMOUNTS = ("/", "/boot", "/boot/firmware", "/boot/efi", "/var", "/usr",
+                 "/home", "[SWAP]")
     def walk(nodes, usb_ancestor=False):
         for n in nodes:
             usb = usb_ancestor or n.get("tran") == "usb"   # SD/NVMe (tran mmc/nvme) excluded
@@ -23840,6 +23980,8 @@ class H(BaseHTTPRequestHandler):
                 self._json(automount_state())
             elif p == "/api/sysconf":
                 self._json(sysconf())
+            elif p == "/api/pkgs":
+                self._json({"missing": missing_pkgs_recheck(), "is_pi": IS_PI})
             elif p == "/api/usb-import":
                 self._json({"config": usb_import_load(), "drives": usb_removable()})
             elif p == "/api/usb-devices":
@@ -24091,6 +24233,8 @@ class H(BaseHTTPRequestHandler):
             elif p == "/api/sysconf":
                 b = self._body()
                 self._json(sysconf_set(b.get("key", ""), b.get("value"), b.get("extra")))
+            elif p == "/api/pkgs/install":
+                self._json(install_missing_packages())
             elif p == "/api/usb-import":
                 self._json(usb_import_save(self._body()))
             elif p == "/api/usb-import/run":

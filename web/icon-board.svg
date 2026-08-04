@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" aria-label="NAS" role="img" viewBox="0 0 256 232">
+  <!-- Neutral board mark, used instead of icon-flat.svg (the Raspberry Pi berry) on
+       hardware that is not a Pi: the logo names the machine, so on a mini-PC the berry
+       is simply a false statement. Same viewBox as icon-flat.svg so every existing
+       CSS size rule keeps working unchanged. Two stacked bays + a live indicator. -->
+  <g fill="none" stroke="#c51a4a" stroke-width="14" stroke-linejoin="round">
+    <rect x="26" y="34" width="204" height="72" rx="18"/>
+    <rect x="26" y="126" width="204" height="72" rx="18"/>
+  </g>
+  <g fill="#6cc04a">
+    <circle cx="62" cy="70" r="13"/>
+    <circle cx="62" cy="162" r="13"/>
+  </g>
+  <g fill="#c51a4a" opacity=".55">
+    <rect x="104" y="62" width="96" height="16" rx="8"/>
+    <rect x="104" y="154" width="96" height="16" rx="8"/>
+  </g>
+</svg>

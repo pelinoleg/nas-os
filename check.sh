@@ -79,8 +79,12 @@ fi
 if has test; then
   head "Regression tests"
   RUN=1
-  python3 -m unittest discover -s tests >/dev/null 2>&1 \
-    && ok "backup reliability" || bad "backup reliability"
+  # discover picks up every tests/test_*.py; name the count so a file that stops
+  # being collected (renamed, import error) is visible instead of silently "passing"
+  T_OUT="$(python3 -m unittest discover -s tests 2>&1)"
+  T_N="$(printf '%s' "$T_OUT" | sed -n 's/^Ran \([0-9]*\) test.*/\1/p' | tail -1)"
+  if printf '%s' "$T_OUT" | grep -q '^OK'; then ok "unit tests (${T_N:-?})"
+  else bad "unit tests (${T_N:-?})"; printf '%s\n' "$T_OUT" | tail -20; fi
 fi
 
 # ------------------------------------------------------------------- shell --
