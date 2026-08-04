@@ -2,6 +2,7 @@
 # Ignore EVERYTHING at the top level, then explicitly allow only project files,
 # so that `git add -A` doesn't drag in home-folder clutter, config, and caches.
 /*
+!/.github/
 !/.gitignore
 !/README.md
 !/CLAUDE.md

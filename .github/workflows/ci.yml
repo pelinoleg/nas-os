@@ -1,0 +1,20 @@
+# Runs the same checks the box runs before every push — but on GitHub's server,
+# on every push, whether or not any of our boxes is alive. install.sh pulls from
+# this repo, so a red X here means "do not install this commit".
+name: checks
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      # the git group is skipped: in CI the tree is a fresh checkout, always clean
+      - name: check.sh (syntax, generated scripts, web, cyrillic)
+        run: ./check.sh py sh gen js css i18n
+      - name: unit tests
+        run: python3 -m unittest discover -s tests -v
