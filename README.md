@@ -1,6 +1,7 @@
 # NAS-OS
 
-A lightweight "NAS operating system" on top of Raspberry Pi OS Lite: a browser-based desktop
+A lightweight "NAS operating system" on top of Debian / Raspberry Pi OS Lite (Pi and
+plain x86 boxes alike — the installer adapts to the board): a browser-based desktop
 (monitoring, disks/SMART, docker stacks, file manager with previews and a player, terminal,
 Pushover notifications) + a step-by-step setup wizard. Backend — Python standard library
 (no pip), engine — bash. Runs as root (SMART, docker, mounting, power, PTY).
@@ -9,6 +10,13 @@ Pushover notifications) + a step-by-step setup wizard. Backend — Python standa
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/pelinoleg/nas-os/main/install.sh | sudo bash
+```
+
+The same command works on a Raspberry Pi and on any x86 Debian box. For a box you
+depend on, pin the install to a tested release instead of whatever `main` is right now:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/pelinoleg/nas-os/main/install.sh | sudo NASOS_REF=v2026.08.04.1 bash
 ```
 
 The script:
@@ -21,7 +29,7 @@ Then open `http://<hostname>.local` and go through the **wizard**: Disks → Poo
 
 ### Install parameters (env)
 - `NASOS_DEST` — directory (default `/opt/nas-os`)
-- `NASOS_BRANCH` — branch (default `main`)
+- `NASOS_REF` — tag or branch to install (default `main`); `NASOS_BRANCH` is the older name for the same thing
 - `NAS_WEB_PORT` — port (default `80`)
 
 ## What lives where
