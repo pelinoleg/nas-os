@@ -1,0 +1,11 @@
+[Unit]
+Description=Install or update Claude Code and Codex CLI for %i
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=%i
+Group=%i
+ExecStart=/usr/local/libexec/nas-ai-cli-update
+TimeoutStartSec=35min

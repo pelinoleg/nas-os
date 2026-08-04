@@ -69,6 +69,7 @@ else
   git clone --depth 1 -b "$BRANCH" "$REPO" "$DEST"
 fi
 chmod +x "$DEST/nas-wizard.sh" 2>/dev/null || true
+chmod +x "$DEST/tools/update-ai-cli.sh" 2>/dev/null || true
 
 # --- global system stage of the wizard (packages/docker/directories/preview cache+timer) ---
 say "System setup (packages, docker, ffmpeg, preview cache…) — this may take a while…"
@@ -97,6 +98,17 @@ WantedBy=multi-user.target
 UNIT
 systemctl daemon-reload
 systemctl enable --now nas-web.service
+
+# --- Claude Code + Codex CLI: install when absent, update daily ----------------
+# Both CLIs keep credentials and binaries in the NAS user's home, so never run
+# their installers as root. The randomized delay avoids every NAS downloading at
+# exactly the same minute; Persistent catches up after the machine was powered off.
+say "Enabling automatic Claude Code and Codex CLI updates for $TARGET_USER…"
+install -m 0755 "$DEST/tools/update-ai-cli.sh" /usr/local/libexec/nas-ai-cli-update
+install -m 0644 "$DEST/systemd/nas-ai-cli-update@.service" /etc/systemd/system/
+install -m 0644 "$DEST/systemd/nas-ai-cli-update@.timer" /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now "nas-ai-cli-update@$TARGET_USER.timer"
 
 sleep 1
 IP="$(hostname -I 2>/dev/null | awk '{print $1}')"

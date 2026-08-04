@@ -1,0 +1,12 @@
+[Unit]
+Description=Daily Claude Code and Codex CLI update for %i
+
+[Timer]
+OnBootSec=10min
+OnCalendar=daily
+RandomizedDelaySec=2h
+Persistent=true
+Unit=nas-ai-cli-update@%i.service
+
+[Install]
+WantedBy=timers.target
