@@ -38,12 +38,16 @@ class CpuTempSensorTests(unittest.TestCase):
                     f.write(str(value[1]) + "\n")
         return td
 
-    def _resolve(self, td):
+    def _resolve(self, td, zone0=True):
         """Point every /sys/class/hwmon lookup at a fake tree.
 
         _read must be redirected too, not just listdir/exists — the first cut of this
         test patched only the latter two, so the name lookup still hit the real box,
-        found its genuine cpu_thermal and "passed" for the wrong reason."""
+        found its genuine cpu_thermal and "passed" for the wrong reason. The zone0
+        flag exists for the same reason, caught by CI's first-ever run: the fallback
+        check went to the REAL filesystem, so the test passed on a Pi (which has
+        thermal_zone0) and failed on a GitHub runner (which does not). A test that
+        peeks at its host is not a test of the code."""
         nas._TEMP_PATH["v"] = None          # the path is cached per boot
         real_listdir, real_exists = os.listdir, os.path.exists
 
@@ -55,6 +59,8 @@ class CpuTempSensorTests(unittest.TestCase):
             return real_listdir(fake(p))
 
         def exists(p):
+            if p == "/sys/class/thermal/thermal_zone0/temp":
+                return zone0
             return real_exists(fake(p))
 
         def read(p, default=""):
@@ -88,8 +94,16 @@ class CpuTempSensorTests(unittest.TestCase):
     def test_falls_back_to_thermal_zone0_when_no_sensor_is_named(self):
         with tempfile.TemporaryDirectory() as td:
             self._hwmon(td, {"hwmon0": ("nvme", 40000)})
-            got = self._resolve(td)
+            got = self._resolve(td, zone0=True)
         self.assertEqual(got, "/sys/class/thermal/thermal_zone0/temp")
+
+    def test_no_sensor_at_all_yields_no_path(self):
+        # a VM with neither a named hwmon nor thermal_zone0 — temp_c must answer
+        # None (not measured), not crash and not invent a reading
+        with tempfile.TemporaryDirectory() as td:
+            self._hwmon(td, {"hwmon0": ("nvme", 40000)})
+            got = self._resolve(td, zone0=False)
+        self.assertEqual(got, "")
 
     def tearDown(self):
         nas._TEMP_PATH["v"] = None
