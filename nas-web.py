@@ -592,8 +592,22 @@ def smart_info(dev):
     if not _smart_has_data(j):
         return None
     t = (j.get("temperature") or {}).get("current")
+    # SSD wear, best effort: NVMe reports percentage_used directly; SATA SSDs hide
+    # it in vendor attributes (usually "% life LEFT", so invert). None = unknown —
+    # never guess wear, a wrong number here drives a replace-the-disk decision.
+    wear = (j.get("nvme_smart_health_information_log") or {}).get("percentage_used")
+    if wear is None:
+        for a in ((j.get("ata_smart_attributes") or {}).get("table") or []):
+            nm = (a.get("name") or "").lower()
+            if nm in ("percent_lifetime_remain", "ssd_life_left", "media_wearout_indicator",
+                      "wear_leveling_count", "percent_life_remaining"):
+                v = a.get("value")
+                if isinstance(v, int) and 0 <= v <= 100:
+                    wear = 100 - v
+                break
     return {"temp": t if t else None,      # USB bridges return 0 — that's "don't know", not zero degrees
             "healthy": (j.get("smart_status") or {}).get("passed"),
+            "wear": wear,
             "hours": (j.get("power_on_time") or {}).get("hours")}
 
 def fs_tools():
@@ -612,12 +626,38 @@ def _size_bytes(s):
     except ValueError:
         return 0
 
+def _missing_branches():
+    """/mnt/disk* fstab entries whose mountpoint is not currently mounted."""
+    mounted = set()
+    for ln in _read("/proc/mounts").splitlines():
+        f = ln.split()
+        if len(f) >= 2:
+            mounted.add(f[1])
+    out = []
+    for ln in _read("/etc/fstab").splitlines():
+        f = ln.split()
+        if len(f) >= 2 and not ln.lstrip().startswith("#") \
+           and re.match(r"^/mnt/disk\d+$", f[1]) and f[1] not in mounted:
+            out.append({"mnt": f[1], "src": f[0]})
+    return out
+
+def _mounts_ro():
+    """mountpoint -> True when mounted read-only (the 'ro' option in /proc/mounts)."""
+    out = {}
+    for ln in _read("/proc/mounts").splitlines():
+        f = ln.split()
+        if len(f) >= 4:
+            out[f[1]] = f[3].split(",")[0] == "ro" or ",ro," in ("," + f[3] + ",")
+    return out
+
 def disks():
     res = []
     am_base = automount_state().get("base", "/media/nas")
     spin = _load_spindown()
     spd = _speedtest_load()
     scr = scrutiny_state().get("devices", {})   # {} if Scrutiny is not installed
+    _MOUNT_RO = _mounts_ro()
+    _HW_TEMPS = {dv: round(t, 1) for dv, t in _hwmon_disk_temps()}
     for d in _lsblk():
         if d.get("type") != "disk":
             continue
@@ -688,6 +728,11 @@ def disks():
             "rotational": d.get("rota") in (True, "1", 1), "in_fstab": in_fstab,
             "mounted": bool(mounts),
             "usage": disk_info(primary) if primary else None,
+            # a branch remounted read-only (emergency_ro after an I/O error) is a
+            # SCREAMING state — the bays paint it red
+            "ro": any(_MOUNT_RO.get(m) for m in mounts),
+            "temp_hw": _HW_TEMPS.get(name),
+            "temp_hist": _DTEMP_HIST.get(name) or [],
             "smart": smart_info(d.get("path")),
             "spindown": spin.get((d.get("serial") or "").strip() or "\0") or spin.get(d.get("path")),
             "speedtest": spd.get((d.get("serial") or "").strip() or "\0") or spd.get(d.get("path")),
@@ -2187,6 +2232,24 @@ def _gl_bytes(n, en):
             if s.endswith(a):
                 return s[:-len(a)] + b
     return s
+
+# 24h of per-disk temperatures for the Storage sparklines. Fed from hwmon only
+# (nvme/drivetemp — reading it never wakes a sleeping disk), sampled by the monitor
+# loop, RAM-only: a day of history rebuilds itself and is not worth disk writes.
+_DTEMP_HIST = {}          # dev -> [(ts, °C), ...] capped to 24h
+_DTEMP_LAST = {"t": 0.0}
+
+def _dtemp_sample():
+    now = time.time()
+    if now - _DTEMP_LAST["t"] < 300:
+        return
+    _DTEMP_LAST["t"] = now
+    cutoff = now - 86400
+    for dev, t in _hwmon_disk_temps():
+        h = _DTEMP_HIST.setdefault(dev, [])
+        h.append((int(now), round(t, 1)))
+        while h and h[0][0] < cutoff:
+            h.pop(0)
 
 def _hwmon_disk_temps():
     """Disk temps from hwmon (nvme/drivetemp) — never wakes sleeping disks,
@@ -4262,6 +4325,7 @@ def _inodes_full(thr):
     return out
 
 def monitor_tick():
+    _safe(_dtemp_sample)
     global _MON_BOOT_SENT, _MON_SMART_LAST, _MON_DEVS, _MON_IP, _MON_IFACE, _MON_HEAT, _MON_WEEKLY, _MON_USBIMP
     cfg = load_monitor()
     ev = cfg.get("events", {})
@@ -4426,6 +4490,12 @@ def monitor_tick():
                     bad.append("pending: %d" % d["pending"])
                 if bad:
                     fire("wear:" + dev, "NAS: disk wear", "%s — %s" % (dev, ", ".join(bad)), pri("smart_wear"), ev_name="smart_wear")
+            if isinstance(d.get("temp"), int) and d["temp"] > 0:
+                _h = _DTEMP_HIST.setdefault(os.path.basename(dev), [])
+                if not _h or time.time() - _h[-1][0] >= 300:
+                    _h.append((int(time.time()), d["temp"]))
+                    while _h and _h[0][0] < time.time() - 86400:
+                        _h.pop(0)
             if on("disktemp") and isinstance(d.get("temp"), int) and d["temp"] >= thr("disktemp", 60):
                 fire("dtemp:" + dev, "NAS: disk overheated", "%s — %s°C" % (dev, d["temp"]), pri("disktemp"), ev_name="disktemp")
 
@@ -24469,6 +24539,10 @@ class H(BaseHTTPRequestHandler):
             elif p == "/api/disks":
                 _scr = scrutiny_state()
                 self._json({"disks": disks(), "fs": fs_tools(), "snapraid": snapraid_status(),
+                            # pool branches present in fstab but NOT mounted: a pulled/dead
+                            # disk. The bays draw these as red ghost slots — a hole in the
+                            # pool must be impossible to miss.
+                            "missing_branches": _missing_branches(),
                             "pool": _pool_recovery(),
                             "scrutiny": {"ok": _scr.get("ok", False), "url": _scr.get("url")}})
             elif p == "/api/disk/smart":

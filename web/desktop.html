@@ -771,6 +771,45 @@
   .capbar .used{height:100%;display:block;background:linear-gradient(90deg,var(--accent),var(--accent-2));min-width:3px;transition:width .6s}
   /* ===== Storage: master-detail ===== */
   .dmroot{display:flex;flex-direction:column;height:100%}
+  /* Drive bays — the hardware-status picture (UGREEN-style): enclosure shells with
+     numbered slots and status LEDs, a card per drive underneath. Glass materials
+     only; state colours through the surface-adjusted tokens. */
+  .bays{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;padding:16px 14px 6px}
+  .bayshell{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 12px 8px;text-align:center}
+  .bayshell .bs-cap{font-size:11px;color:var(--win-dim,var(--dim));margin-top:7px}
+  .bayrow{display:flex;gap:7px;justify-content:center}
+  .bay{width:34px;height:74px;border-radius:8px;background:var(--glass);border:1px solid var(--line);
+    display:flex;flex-direction:column;align-items:center;justify-content:space-between;padding:5px 0 6px;
+    cursor:pointer;transition:.13s;position:relative}
+  .bay:hover{transform:translateY(-2px)}
+  .bay.on{box-shadow:0 0 0 2px var(--accent);border-color:transparent}
+  .bay.empty{border-style:dashed;opacity:.45;cursor:default}
+  .bay.empty:hover{transform:none}
+  .bay.ghost{border-style:dashed;border-color:var(--win-danger,var(--danger));cursor:default}
+  .bay .b-drv{width:20px;flex:1;margin:2px 0;border-radius:4px;background:var(--sel);
+    background-image:repeating-linear-gradient(180deg,transparent 0 5px,var(--line) 5px 6px)}
+  .bay.bad .b-drv{background:color-mix(in srgb,var(--danger) 22%,transparent)}
+  .bay .b-num{font-size:9.5px;color:var(--win-dim,var(--dim));font-family:var(--mono)}
+  .bay .b-led{width:7px;height:7px;border-radius:50%;background:var(--win-good,var(--good));box-shadow:0 0 5px var(--win-good,var(--good))}
+  .bay.warn .b-led{background:var(--win-warn,var(--warn));box-shadow:0 0 5px var(--win-warn,var(--warn))}
+  .bay.bad .b-led{background:var(--win-danger,var(--danger));box-shadow:0 0 6px var(--win-danger,var(--danger));animation:bayblink 1.1s infinite}
+  .bay.empty .b-led{background:var(--line);box-shadow:none}
+  @keyframes bayblink{50%{opacity:.35}}
+  .dcards{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;padding:10px 14px 4px}
+  .dcard{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px;cursor:pointer;transition:.13s}
+  .dcard:hover{transform:translateY(-1px)}
+  .dcard.on{box-shadow:0 0 0 2px var(--accent);border-color:transparent}
+  .dcard.bad{border-color:color-mix(in srgb,var(--danger) 55%,transparent);background:color-mix(in srgb,var(--danger) 7%,var(--card))}
+  .dcard .dc-top{display:flex;align-items:center;gap:8px}
+  .dcard .dc-nm{font-weight:650;font-size:12.5px;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .dcard .dc-badge{font-size:10.5px;font-weight:650;padding:2px 8px;border-radius:999px;background:var(--sel);color:var(--win-good,var(--good));flex:none}
+  .dcard.warn .dc-badge{color:var(--win-warn,var(--warn))}
+  .dcard.bad .dc-badge{color:var(--win-danger,var(--danger))}
+  .dcard .dc-sub{font-size:11px;color:var(--win-dim,var(--dim));margin-top:4px;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+  .dcard .dc-sub b{color:var(--win-fg,var(--text));font-weight:600}
+  .dcard .dc-spark{margin-left:auto;flex:none;opacity:.85}
+  .dcard .dc-serial{font-family:var(--mono);font-size:10px;color:var(--win-danger,var(--danger));margin-top:4px;user-select:all}
+  @media (max-width:1024px){.bays{gap:10px}.dcards{grid-template-columns:repeat(auto-fill,minmax(170px,1fr))}}
   .dm-pool{display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line);flex:none}
   .dm-pool .dp-ic{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;color:var(--accent);background:var(--accent-soft);flex:none}
   .dm-pool.np .dp-ic{color:var(--mut);background:var(--card-2)}
@@ -4705,6 +4744,7 @@ function winDisks(){openWin("__disks","Storage",(body,win)=>{
   if(!DM_SEL||!disks.find(x=>x.path===DM_SEL))DM_SEL=((disks.find(x=>x.role!=="system"))||disks[0]||{}).path;
   body.innerHTML="";
   const root=el(`<div class="dmroot"></div>`);
+  root.appendChild(bayStrip(disks,(d&&d.missing_branches)||[],DM_SEL,p=>{DM_SEL=p;load();}));
   root.appendChild(poolStrip(disks,am,load,(d&&d.snapraid)||{},(d&&d.pool)||null));
   // Scrutiny not installed → unobtrusive reminder (data is useful but not required)
   if(d&&d.scrutiny&&d.scrutiny.ok===false){
@@ -4742,6 +4782,70 @@ function scrubLine(snap){
  if(!snap||!snap.configured)return "";
  const fmt=e=>e&&e.date?`<span style="color:${e.result==="ok"?"var(--good)":"var(--danger)"}">${e.result==="ok"?"✓":"✗"}</span> ${e.date.slice(5,16)}`:"—";
  return ` · parity: sync ${fmt(snap.last_sync)}, scrub ${fmt(snap.last_scrub)}`;
+}
+/* Drive bays + status cards — the hardware picture on top of the Storage window.
+   Groups: M.2 (nvme) · Drive slots (sata/usb) · SD/eMMC (mmc). Unmounted fstab
+   branches show as red GHOST slots: a hole in the pool must be impossible to miss.
+   Status: bad = SMART fail / emergency-ro / missing / ≥70°; warn = ≥60° or wear ≥80%. */
+function diskState(x){
+ const t=(x.smart&&x.smart.temp)||x.temp_hw||0,w=x.smart&&x.smart.wear;
+ if(x.missing)return{cls:"bad",badge:"Missing",why:"pool branch is not mounted — disk pulled or dead"};
+ if(x.smart&&x.smart.healthy===false)return{cls:"bad",badge:"SMART fail",why:"the disk reports imminent failure — replace it"};
+ if(x.ro)return{cls:"bad",badge:"Read-only",why:"filesystem dropped to read-only after an I/O error — run e2fsck"};
+ if(t>=70)return{cls:"bad",badge:t+"° hot",why:"critical temperature"};
+ if(t>=60)return{cls:"warn",badge:t+"° warm",why:"high temperature"};
+ if(typeof w==="number"&&w>=80)return{cls:"warn",badge:"worn "+w+"%",why:"SSD wear is high — plan a replacement"};
+ return{cls:"ok",badge:"Normal",why:""};
+}
+function tempSpark(hist){
+ if(!hist||hist.length<3)return "";
+ const w=54,h=16,ts=hist.map(p=>p[0]),vs=hist.map(p=>p[1]);
+ const t0=Math.min(...ts),t1=Math.max(...ts)||1,v0=Math.min(...vs),v1=Math.max(...vs);
+ const pts=hist.map(p=>((p[0]-t0)/(t1-t0||1)*w).toFixed(1)+","+(h-2-((p[1]-v0)/((v1-v0)||1)*(h-4))).toFixed(1)).join(" ");
+ return `<svg class="dc-spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg>`;
+}
+function bayStrip(disks,missing,sel,onSel){
+ const wrap=el(`<div></div>`);
+ const kindOf=x=>x.tran==="nvme"?"m2":(x.tran==="mmc"?"sd":"drv");
+ const groups={m2:{cap:"M.2 slots",items:[]},drv:{cap:"Drive slots",items:[]},sd:{cap:"SD / eMMC",items:[]}};
+ disks.forEach(x=>groups[kindOf(x)].items.push(x));
+ (missing||[]).forEach(m=>groups.drv.items.push({missing:true,mnt:m.mnt,path:m.mnt,name:m.mnt.split("/").pop()}));
+ const bays=el(`<div class="bays"></div>`);
+ let n=0;
+ for(const k of ["m2","drv","sd"]){
+  const g=groups[k];if(!g.items.length)continue;
+  const shell=el(`<div class="bayshell"><div class="bayrow"></div><div class="bs-cap">${g.cap}</div></div>`);
+  const row=shell.querySelector(".bayrow");
+  g.items.forEach(x=>{n++;
+   const st=x.missing?{cls:"bad"}:diskState(x);
+   const b=el(`<div class="bay ${x.missing?"ghost bad":st.cls==="ok"?"":st.cls} ${(!x.missing&&x.path===sel)?"on":""}" title="${att(x.missing?x.mnt+" — pool branch missing":( (x.label||x.model||x.name)+" · "+(x.size||"")+(st.why?" · "+st.why:"") ))}">
+     <span class="b-num">${n}</span><span class="b-drv"></span><span class="b-led"></span></div>`);
+   if(!x.missing)b.onclick=()=>onSel(x.path);
+   row.appendChild(b);});
+  bays.appendChild(shell);
+ }
+ wrap.appendChild(bays);
+ const cards=el(`<div class="dcards"></div>`);
+ const roleName=r=>r==="system"?"System":(r==="data"||r==="pool")?"Pool":r==="parity"?"Parity":r==="removable"?"External":"Free";
+ disks.forEach(x=>{
+  const st=diskState(x);
+  const t=(x.smart&&x.smart.temp)||x.temp_hw;
+  const wear=x.smart&&typeof x.smart.wear==="number"?x.smart.wear:null;
+  const c=el(`<div class="dcard ${st.cls==="ok"?"":st.cls} ${x.path===sel?"on":""}" title="${att(st.why||"")}">
+   <div class="dc-top"><span class="dc-nm"></span><span class="dc-badge">${esc(st.badge)}</span></div>
+   <div class="dc-sub">${t?`<b>${t}°C</b> ·`:""} ${roleName(x.role)}${x.size?` · ${esc(x.size)}`:""}${wear!=null?` · <span title="SSD wear (percentage used)">worn <b>${wear}%</b></span>`:""}${tempSpark(x.temp_hist)}</div>
+   ${st.cls==="bad"&&x.serial?`<div class="dc-serial" title="Serial number — this exact physical disk is the one to pull">S/N ${esc(x.serial)}</div>`:""}</div>`);
+  c.querySelector(".dc-nm").textContent=x.label||x.model||x.name;
+  c.onclick=()=>onSel(x.path);
+  cards.appendChild(c);});
+ (missing||[]).forEach(m=>{
+  const c=el(`<div class="dcard bad" title="This pool branch is in fstab but nothing is mounted there — the disk was pulled or died. Part of /mnt/storage content is INVISIBLE until it returns; snapraid fix can rebuild it onto a replacement.">
+   <div class="dc-top"><span class="dc-nm"></span><span class="dc-badge">Missing</span></div>
+   <div class="dc-sub">pool branch · was <b class="mono">${esc(m.src||"?")}</b></div></div>`);
+  c.querySelector(".dc-nm").textContent=m.mnt;
+  cards.appendChild(c);});
+ wrap.appendChild(cards);
+ return wrap;
 }
 function poolStrip(disks,am,reload,snap,pool){
  // line about pool auto-remounts (the mergerfs service with Restart=always)
