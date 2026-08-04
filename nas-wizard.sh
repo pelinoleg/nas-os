@@ -4269,6 +4269,91 @@ api_pi() {
         wifips)   pi_wifi_powersave_off ;;  watchdog) pi_watchdog ;;
     esac; done
 }
+# ---------------------------------------------------------------------------
+# api dockerroot — move Docker off the system disk (NASW_PATH=/mnt/disk1 etc).
+# Why it exists: a 64 GB eMMC system disk must not carry docker images and app
+# databases — they are the two biggest writers. TWO things move:
+#   <path>/docker-data — the daemon data-root (images/layers/volumes, daemon.json)
+#   <path>/docker-apps — /opt/docker becomes a symlink here (stack configs + DBs;
+#                        compose paths keep working because the PATH stays /opt/docker)
+# The target must be a REAL filesystem: overlay2 cannot run on mergerfs/FUSE, so
+# the pool itself is refused — pick a branch (/mnt/diskN) or any ext4/xfs disk.
+# Idempotent; existing data is rsync-moved with docker stopped, old copies are
+# left behind with a loud hint (deleting them is the user's call).
+api_docker_root() {
+    local path="${NASW_PATH:-}"
+    [ -n "$path" ] || { echo "no target (NASW_PATH)"; return 2; }
+    case "$path" in /*) ;; *) echo "path must be absolute"; return 2 ;; esac
+    local fst; fst="$(findmnt -no FSTYPE -T "$path" 2>/dev/null)"
+    case "$fst" in
+        ext4|ext3|xfs|btrfs) ;;
+        fuse.mergerfs) echo "REFUSED: $path is on the mergerfs pool — docker's overlay2 cannot run on FUSE. Pick a branch (/mnt/diskN) or another real disk."; return 2 ;;
+        *) echo "REFUSED: $path is on '$fst' — need a real local filesystem (ext4/xfs/btrfs)"; return 2 ;;
+    esac
+    # The POINT is moving docker OFF the system disk. A path that merely LOOKS like
+    # a mount (/mnt/storage without a pool = a plain dir on the root fs) passes the
+    # fstype check and would "move" docker onto the very disk we are escaping —
+    # found the hard way: this exact call relocated a live box's docker onto its SD
+    # card. Same source device as / = refuse.
+    local rootsrc pathsrc
+    rootsrc="$(findmnt -no SOURCE / 2>/dev/null)"
+    pathsrc="$(findmnt -no SOURCE -T "$path" 2>/dev/null)"
+    if [ -z "$pathsrc" ] || [ "$pathsrc" = "$rootsrc" ]; then
+        echo "REFUSED: $path lives on the SYSTEM disk ($rootsrc) — that is exactly what we are moving away from. Mount a data disk first and pick a path on it."
+        return 2
+    fi
+    run mkdir -p "$path/docker-data" "$path/docker-apps"
+    local cur; cur="$(docker info -f '{{.DockerRootDir}}' 2>/dev/null)"; cur="${cur:-/var/lib/docker}"
+    local moved=0
+    if [ "$cur" != "$path/docker-data" ]; then
+        info "docker data-root: $cur -> $path/docker-data"
+        run systemctl stop docker docker.socket
+        run mkdir -p /etc/docker
+        # the json edit must respect dry-run too — a bare heredoc runs regardless
+        # (found the hard way: a --dry-run probe left data-root pointing at an
+        # empty dir, armed to fire on the next docker restart)
+        if [ "$DRY_RUN" -eq 1 ]; then
+            info "[DRY-RUN] set data-root=$path/docker-data in /etc/docker/daemon.json"
+        else
+        python3 - "$path/docker-data" <<'PYJ'
+import json, sys, os
+f = "/etc/docker/daemon.json"
+try:
+    d = json.load(open(f))
+except (OSError, ValueError):
+    d = {}
+d["data-root"] = sys.argv[1]
+json.dump(d, open(f, "w"), indent=2)
+PYJ
+        fi
+        if [ -d "$cur" ] && [ -n "$(ls -A "$cur" 2>/dev/null)" ]; then
+            info "moving existing docker data (this can take a while)…"
+            run rsync -aHX "$cur/" "$path/docker-data/" || { echo "rsync failed — data-root NOT switched"; run systemctl start docker; return 1; }
+            info "old copy left at $cur — remove it after checking: rm -rf $cur"
+        fi
+        moved=1
+    fi
+    if [ -d "$DOCKER_ROOT" ] && [ ! -L "$DOCKER_ROOT" ]; then
+        [ "$moved" -eq 1 ] || run systemctl stop docker docker.socket
+        if [ -n "$(ls -A "$DOCKER_ROOT" 2>/dev/null)" ]; then
+            info "moving $DOCKER_ROOT contents -> $path/docker-apps"
+            run rsync -aHX "$DOCKER_ROOT/" "$path/docker-apps/" || { echo "rsync failed — $DOCKER_ROOT left as is"; run systemctl start docker; return 1; }
+        fi
+        run mv "$DOCKER_ROOT" "$DOCKER_ROOT.moved.$(date +%s)"
+        run ln -s "$path/docker-apps" "$DOCKER_ROOT"
+        info "$DOCKER_ROOT is now a symlink to $path/docker-apps (old copy: $DOCKER_ROOT.moved.*)"
+        moved=1
+    elif [ -L "$DOCKER_ROOT" ]; then
+        info "$DOCKER_ROOT already points to $(readlink "$DOCKER_ROOT")"
+    fi
+    if [ "$moved" -eq 1 ]; then
+        run systemctl start docker
+        echo "Docker storage now lives on $path (data-root: $path/docker-data, apps: $path/docker-apps)"
+    else
+        echo "nothing to move — docker already lives on $path"
+    fi
+}
+
 api_shares() {
     local k
     for k in ${NASW_KEYS:-}; do case "$k" in
@@ -4415,6 +4500,7 @@ run_api() {
         syncthing)         install_syncthing ;;
         syncthing-update)  install_syncthing update ;;
         motd)           install_motd ;;
+        dockerroot)     api_docker_root ;;
         smb)            install_smb_shares ;;   # regen Samba groundwork + recycle-sweep timer
         tailscale)      mod_tailscale ;;
         staticip)       mod_staticip ;;

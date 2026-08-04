@@ -117,19 +117,28 @@
   .scrim.show{display:grid}.modal{background:var(--surface);border:1px solid var(--line-2);border-radius:var(--r-win);max-width:420px;width:100%;padding:22px;box-shadow:var(--sh)}
   .modal h3{margin:0 0 8px;color:var(--ink)}.modal p{margin:0 0 16px;color:var(--dim);font-size:13.5px}.modal .r{display:flex;gap:10px;justify-content:flex-end;margin-top:16px}
   @media(max-width:760px){.wrap{grid-template-columns:1fr}.rail{display:flex;overflow-x:auto;border-right:none;border-bottom:1px solid var(--line)}.step{white-space:nowrap}.step .nm{display:none}}
-/* drive bays for the Disks step — same visual language as the panel's Storage window */
-.bays{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin:4px 0 16px}
-.bayshell{background:var(--card,rgba(255,255,255,.04));border:1px solid var(--line,rgba(255,255,255,.09));border-radius:14px;padding:12px 12px 8px;text-align:center}
-.bayshell .bs-cap{font-size:11px;color:var(--mut,#889);margin-top:7px}
-.bayrow{display:flex;gap:7px;justify-content:center}
-.bay{width:32px;height:70px;border-radius:8px;background:rgba(127,127,127,.09);border:1px solid var(--line,rgba(255,255,255,.12));display:flex;flex-direction:column;align-items:center;justify-content:space-between;padding:5px 0 6px}
-.bay .b-drv{width:18px;flex:1;margin:2px 0;border-radius:4px;background:rgba(127,127,127,.16);background-image:repeating-linear-gradient(180deg,transparent 0 5px,rgba(127,127,127,.25) 5px 6px)}
-.bay .b-num{font-size:9.5px;color:var(--mut,#889);font-family:ui-monospace,monospace}
-.bay .b-led{width:7px;height:7px;border-radius:50%;background:#37c978;box-shadow:0 0 5px #37c978}
+/* drive bays for the Disks step — same silhouettes as the panel's Storage window */
+.bays{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin:4px 0 16px;align-items:stretch}
+.bayshell{background:var(--card,rgba(255,255,255,.04));border:1px solid var(--line,rgba(255,255,255,.09));border-radius:14px;padding:12px 14px 8px;text-align:center;display:flex;flex-direction:column;justify-content:space-between}
+.bayshell.int{background:rgba(255,255,255,.055);box-shadow:inset 0 1px 6px rgba(0,0,0,.2)}
+.bayshell .bs-cap{font-size:11px;color:var(--mut,#889);margin-top:9px}
+.bayrow{display:flex;gap:8px;justify-content:center;align-items:flex-end}
+.bayrow.col{flex-direction:column;align-items:stretch;gap:7px}
+.bay{position:relative;border-radius:7px}
+.bay .b-led{width:7px;height:7px;border-radius:50%;background:#37c978;box-shadow:0 0 5px #37c978;flex:none}
 .bay.free .b-led{background:#6ea8ff;box-shadow:0 0 5px #6ea8ff}
 .bay.warn .b-led{background:#e8b33e;box-shadow:0 0 5px #e8b33e}
 .bay.bad .b-led{background:#e5544e;box-shadow:0 0 6px #e5544e;animation:bayblink 1.1s infinite}
 @keyframes bayblink{50%{opacity:.35}}
+.bay .b-cap{font-family:ui-monospace,monospace;font-size:9.5px;color:var(--mut,#889)}
+.bay.m2{display:flex;align-items:center;gap:7px;width:118px;height:28px;padding:0 8px 0 0;background:rgba(255,255,255,.05);border:1px solid var(--line,rgba(255,255,255,.12))}
+.bay.m2 .b-fing{width:9px;height:15px;border-radius:2px 0 0 2px;flex:none;background:repeating-linear-gradient(90deg,#c9a34a 0 2px,rgba(0,0,0,.35) 2px 3.5px)}
+.bay.m2 .b-pcb{flex:1;display:flex;gap:4px;align-items:center}
+.bay.m2 .b-pcb i{display:block;height:11px;flex:1;border-radius:2.5px;background:rgba(255,255,255,.09);box-shadow:inset 0 0 0 1px rgba(255,255,255,.1)}
+.bay.drv{width:42px;height:76px;background:rgba(255,255,255,.05);border:1px solid var(--line,rgba(255,255,255,.12));display:flex;flex-direction:column;align-items:center;justify-content:space-between;padding:6px 0}
+.bay.drv .b-lbl{width:26px;height:30px;border-radius:3px;background:rgba(255,255,255,.09);background-image:repeating-linear-gradient(180deg,transparent 0 7px,rgba(255,255,255,.12) 7px 8px)}
+.bay.sd{width:34px;height:46px;background:rgba(255,255,255,.05);border:1px solid var(--line,rgba(255,255,255,.12));clip-path:polygon(26% 0,100% 0,100% 100%,0 100%,0 13%);border-radius:4px;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;padding:0 0 5px}
+.bay.sd .b-pins{position:absolute;top:3px;right:4px;width:19px;height:6px;background:repeating-linear-gradient(90deg,#c9a34a 0 2px,transparent 2px 4px)}
 .bay-legend{font-size:11px;color:var(--mut,#889);text-align:center;margin:-8px 0 14px}
 </style></head><body>
 <div class="top">
@@ -261,18 +270,23 @@ const R={
    // hardware picture first: what is physically plugged in, slot by slot, before
    // any decision about roles and formatting is made
    {const bx=p.querySelector("#bays");if(bx&&all.length){
-    const kindOf=x=>x.tran==="nvme"?"m2":(x.tran==="mmc"?"sd":"drv");
-    const groups={m2:{cap:"M.2 slots",items:[]},drv:{cap:"Drive slots",items:[]},sd:{cap:"SD / eMMC",items:[]}};
+    const kindOf=x=>x.tran==="nvme"?"m2":x.tran==="usb"?"ext":x.tran==="mmc"?"sd":"drv";
+    const groups={m2:{cap:"M.2 · NVMe",int:1,col:1,items:[]},drv:{cap:"SATA",int:1,items:[]},
+                  ext:{cap:"External · USB",items:[]},sd:{cap:"SD / eMMC",items:[]}};
     all.filter(x=>!x.no_media).forEach(x=>groups[kindOf(x)].items.push(x));
-    const bays=el(`<div class="bays"></div>`);let n=0;
-    for(const k of ["m2","drv","sd"]){const g=groups[k];if(!g.items.length)continue;
-     const shell=el(`<div class="bayshell"><div class="bayrow"></div><div class="bs-cap">${g.cap}</div></div>`);
+    const bays=el(`<div class="bays"></div>`);
+    for(const k of ["m2","drv","ext","sd"]){const g=groups[k];if(!g.items.length)continue;
+     const shell=el(`<div class="bayshell ${g.int?"int":""}"><div class="bayrow ${g.col?"col":""}"></div><div class="bs-cap">${g.cap}</div></div>`);
      const row=shell.querySelector(".bayrow");
-     g.items.forEach(x=>{n++;
+     g.items.forEach(x=>{
       const t=(x.smart&&x.smart.temp)||0;
-      const cls=(x.smart&&x.smart.healthy===false)||t>=70?"bad":t>=60?"warn":(x.role==="free"?"free":"");
+      const st=(x.smart&&x.smart.healthy===false)||t>=70?"bad":t>=60?"warn":(x.role==="free"?"free":"");
+      const cls=(k==="ext"?"drv":k)+(st?" "+st:"");
       const tip=`${x.model||x.name} · ${x.size||""} · ${x.role}${t?" · "+t+"°C":""}`;
-      row.appendChild(el(`<div class="bay ${cls}" title="${tip.replace(/"/g,"&quot;")}"><span class="b-num">${n}</span><span class="b-drv"></span><span class="b-led"></span></div>`));});
+      const inner=k==="m2"?`<span class="b-fing"></span><span class="b-pcb"><i></i><i></i></span><span class="b-cap">${x.size||""}</span><span class="b-led"></span>`
+        :k==="sd"?`<span class="b-pins"></span><span class="b-cap">${x.size||""}</span><span class="b-led"></span>`
+        :`<span class="b-cap">${x.size||""}</span><span class="b-lbl"></span><span class="b-led"></span>`;
+      row.appendChild(el(`<div class="bay ${cls}" title="${tip.replace(/"/g,"&quot;")}">${inner}</div>`));});
      bays.appendChild(shell);}
     bx.appendChild(bays);
     bx.appendChild(el(`<div class="bay-legend">green — in use · blue — free (can join the pool) · red — problem</div>`));
@@ -298,7 +312,16 @@ const R={
     seg.querySelectorAll("button").forEach(b=>b.onclick=()=>{role=b.dataset.r;seg.querySelectorAll("button").forEach(z=>z.classList.toggle("on",z===b));});
     const fmt=el(`<button class="btn dng sm">Format</button>`);fmt.onclick=()=>fmtModal(x.path,()=>run("format-disk",{dev:x.path,role,fs}));
     ctl.appendChild(seg);ctl.appendChild(fmt);row.appendChild(ctl);dl.appendChild(row);});});},
- mergerfs(p){p.innerHTML=head("Storage","mergerfs pool","Combines data disks into /mnt/storage. Requires ≥2 disks — otherwise this step is skipped automatically.")+`<div class="actions"><button class="btn pri" id="go">Build pool</button></div><div class="console" id="con"></div>`;p.querySelector("#go").onclick=()=>run("mergerfs");},
+ mergerfs(p){p.innerHTML=head("Storage","mergerfs pool","Combines data disks into /mnt/storage. Requires ≥2 disks — otherwise this step is skipped automatically.")+`<div class="actions"><button class="btn pri" id="go">Build pool</button></div>
+  <div class="card" style="margin-top:14px"><div class="opt"><span class="ic">${svg("cpu",16)}</span><span class="m"><span class="t">Docker on a data disk</span><span class="d">move images and app databases OFF the system disk (important on eMMC/SD — they are the two biggest writers). The pool itself is refused: docker cannot run on mergerfs, so pick a branch.</span></span></div>
+   <div class="opt" style="gap:8px"><select id="dkrDst" class="mono" style="flex:1;background:var(--card,rgba(255,255,255,.05));color:inherit;border:1px solid var(--line,rgba(255,255,255,.12));border-radius:8px;padding:8px"></select><button class="btn" id="dkrGo">Move Docker</button></div></div>
+  <div class="console" id="con"></div>`;
+  p.querySelector("#go").onclick=()=>run("mergerfs");
+  api("/api/disks").then(d=>{const sel=p.querySelector("#dkrDst");const brs=[];
+   ((d&&d.disks)||[]).forEach(x=>(x.mounts||[]).forEach(m=>{if(/^\/mnt\/disk\d+$/.test(m))brs.push(m);}));
+   sel.innerHTML=brs.length?brs.map(b=>`<option>${b}</option>`).join(""):`<option value="">no mounted branches yet — build the pool first</option>`;
+   p.querySelector("#dkrGo").onclick=()=>{const path=sel.value;if(!path)return;
+    if(confirm("Move Docker storage to "+path+"?\n\nContainers stop for the move and start again after."))run("dockerroot",{path});};});},
  snapraid(p){p.innerHTML=head("Storage","Parity · SnapRAID","Generates snapraid.conf, sets up mass-deletion protection and timers (sync 03:00, scrub Sun 05:00).")+
   `<div class="card">${chk("sync","Run the first sync now","May take a while on large disks",false,"layers")}</div>
    <div class="actions"><button class="btn pri" id="go">Configure SnapRAID</button></div><div class="console" id="con"></div>`;

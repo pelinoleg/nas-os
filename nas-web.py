@@ -21082,6 +21082,8 @@ def sysconf():
         "chrony":      lambda: _svc(["chrony", "chronyd"]),
         "fstrim":      lambda: _svc("fstrim.timer"),
         "journald_max": _journald_max,
+        "docker_root": lambda: (_sc("docker", "info", "-f", "{{.DockerRootDir}}")
+                                or "/var/lib/docker"),
         "network":     _net_state,
         "ufw":         _ufw_state,
         "fail2ban":    _fail2ban_state,
@@ -21101,6 +21103,7 @@ def sysconf():
             "fstrim": r["fstrim"],
             "unattended": _unattended_on(),
             "journald_max": r["journald_max"],
+            "docker_root": r["docker_root"],
         },
         "network": r["network"],
         "security": {
@@ -21291,6 +21294,10 @@ def sysconf_set(key, val, extra=None):
             _run(["apt-get", "update"], timeout=180)
             n = len(re.findall(r"^Inst ", _sc("apt-get", "-s", "upgrade"), re.M))
             return {"ok": True, "count": n, "log": f"{n} updates available"}
+        if key == "docker_root":
+            # heavy lifting (validation incl. same-disk refusal, stop, rsync,
+            # daemon.json, symlink, start) lives in the wizard: api dockerroot
+            return engine("dockerroot", {"path": str(val or "")})
         if key == "restart_web":
             subprocess.Popen(["systemctl", "restart", "nas-web"])
             return {"ok": True, "log": "restarting service…"}

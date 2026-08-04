@@ -771,30 +771,54 @@
   .capbar .used{height:100%;display:block;background:linear-gradient(90deg,var(--accent),var(--accent-2));min-width:3px;transition:width .6s}
   /* ===== Storage: master-detail ===== */
   .dmroot{display:flex;flex-direction:column;height:100%}
-  /* Drive bays — the hardware-status picture (UGREEN-style): enclosure shells with
-     numbered slots and status LEDs, a card per drive underneath. Glass materials
-     only; state colours through the surface-adjusted tokens. */
-  .bays{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;padding:16px 14px 6px}
-  .bayshell{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 12px 8px;text-align:center}
-  .bayshell .bs-cap{font-size:11px;color:var(--win-dim,var(--dim));margin-top:7px}
-  .bayrow{display:flex;gap:7px;justify-content:center}
-  .bay{width:34px;height:74px;border-radius:8px;background:var(--glass);border:1px solid var(--line);
-    display:flex;flex-direction:column;align-items:center;justify-content:space-between;padding:5px 0 6px;
-    cursor:pointer;transition:.13s;position:relative}
+  /* Drive bays — the hardware-status picture (UGREEN-style). Each bus gets its own
+     PHYSICAL silhouette: M.2 = horizontal stick with gold fingers, SATA/USB = a
+     standing 2.5" drive, SD/eMMC = a card with the clipped corner. Internal groups
+     sit in a darker "chassis" shell; external USB is its own detached enclosure. */
+  .bays{display:flex;gap:14px;justify-content:center;flex-wrap:wrap;align-items:stretch;padding:16px 14px 6px}
+  .bayshell{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px 8px;text-align:center;display:flex;flex-direction:column;justify-content:space-between}
+  .bayshell.int{background:color-mix(in srgb,var(--win-fg,#fff) 3%,var(--card));box-shadow:inset 0 1px 6px rgba(0,0,0,.18)}
+  .bayshell .bs-cap{font-size:11px;color:var(--win-dim,var(--dim));margin-top:9px;display:flex;gap:5px;align-items:center;justify-content:center}
+  .bayrow{display:flex;gap:8px;justify-content:center;align-items:flex-end}
+  .bayrow.col{flex-direction:column;align-items:stretch;gap:7px}
+  .bay{cursor:pointer;transition:.13s;position:relative;border-radius:7px}
   .bay:hover{transform:translateY(-2px)}
-  .bay.on{box-shadow:0 0 0 2px var(--accent);border-color:transparent}
-  .bay.empty{border-style:dashed;opacity:.45;cursor:default}
-  .bay.empty:hover{transform:none}
-  .bay.ghost{border-style:dashed;border-color:var(--win-danger,var(--danger));cursor:default}
-  .bay .b-drv{width:20px;flex:1;margin:2px 0;border-radius:4px;background:var(--sel);
-    background-image:repeating-linear-gradient(180deg,transparent 0 5px,var(--line) 5px 6px)}
-  .bay.bad .b-drv{background:color-mix(in srgb,var(--danger) 22%,transparent)}
-  .bay .b-num{font-size:9.5px;color:var(--win-dim,var(--dim));font-family:var(--mono)}
-  .bay .b-led{width:7px;height:7px;border-radius:50%;background:var(--win-good,var(--good));box-shadow:0 0 5px var(--win-good,var(--good))}
+  .bay.on{box-shadow:0 0 0 2px var(--accent)}
+  .bay.empty,.bay.ghost{cursor:default}
+  .bay.empty:hover,.bay.ghost:hover{transform:none}
+  .bay .b-led{width:7px;height:7px;border-radius:50%;background:var(--win-good,var(--good));box-shadow:0 0 5px var(--win-good,var(--good));flex:none}
   .bay.warn .b-led{background:var(--win-warn,var(--warn));box-shadow:0 0 5px var(--win-warn,var(--warn))}
   .bay.bad .b-led{background:var(--win-danger,var(--danger));box-shadow:0 0 6px var(--win-danger,var(--danger));animation:bayblink 1.1s infinite}
-  .bay.empty .b-led{background:var(--line);box-shadow:none}
+  .bay.empty .b-led,.bay.ghost .b-led{background:var(--line);box-shadow:none}
+  .bay.ghost .b-led{background:var(--win-danger,var(--danger));box-shadow:0 0 6px var(--win-danger,var(--danger));animation:bayblink 1.1s infinite}
   @keyframes bayblink{50%{opacity:.35}}
+  .bay .b-cap{font-family:var(--mono);font-size:9.5px;color:var(--win-dim,var(--dim))}
+  /* — M.2 stick: fingers · PCB with chips · size · LED — */
+  .bay.m2{display:flex;align-items:center;gap:7px;width:132px;height:30px;padding:0 9px 0 0;
+    background:linear-gradient(180deg,color-mix(in srgb,var(--win-fg,#fff) 7%,transparent),transparent),var(--glass);
+    border:1px solid var(--line)}
+  .bay.m2 .b-fing{width:9px;height:16px;border-radius:2px 0 0 2px;flex:none;
+    background:repeating-linear-gradient(90deg,#c9a34a 0 2px,rgba(0,0,0,.35) 2px 3.5px)}
+  .bay.m2 .b-pcb{flex:1;display:flex;gap:4px;align-items:center}
+  .bay.m2 .b-pcb i{display:block;height:12px;flex:1;border-radius:2.5px;background:var(--sel);box-shadow:inset 0 0 0 1px var(--line)}
+  .bay.m2 .b-pcb i:first-child{flex:1.6;height:14px}
+  .bay.m2.bad{background:color-mix(in srgb,var(--danger) 12%,var(--glass));border-color:color-mix(in srgb,var(--danger) 45%,transparent)}
+  /* — 2.5" drive standing: label strip + size — */
+  .bay.drv{width:44px;height:82px;background:var(--glass);border:1px solid var(--line);
+    display:flex;flex-direction:column;align-items:center;justify-content:space-between;padding:6px 0}
+  .bay.drv .b-lbl{width:28px;height:34px;border-radius:3px;background:var(--sel);box-shadow:inset 0 0 0 1px var(--line);
+    background-image:repeating-linear-gradient(180deg,transparent 0 7px,var(--line) 7px 8px)}
+  .bay.drv.bad{background:color-mix(in srgb,var(--danger) 12%,var(--glass));border-color:color-mix(in srgb,var(--danger) 45%,transparent)}
+  .bay.ghost{width:44px;height:82px;border:1.5px dashed var(--win-danger,var(--danger));background:transparent;
+    display:flex;flex-direction:column;align-items:center;justify-content:space-between;padding:6px 0}
+  .bay.ghost .b-lbl{opacity:.25}
+  /* — SD/eMMC card: the clipped corner — */
+  .bay.sd{width:36px;height:48px;background:var(--glass);border:1px solid var(--line);
+    clip-path:polygon(26% 0,100% 0,100% 100%,0 100%,0 13%);border-radius:4px;
+    display:flex;flex-direction:column;align-items:center;justify-content:flex-end;padding:0 0 5px}
+  .bay.sd .b-pins{position:absolute;top:3px;right:4px;width:20px;height:6px;
+    background:repeating-linear-gradient(90deg,#c9a34a 0 2px,transparent 2px 4px)}
+  .bay.sd.bad{background:color-mix(in srgb,var(--danger) 12%,var(--glass))}
   .dcards{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;padding:10px 14px 4px}
   .dcard{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px;cursor:pointer;transition:.13s}
   .dcard:hover{transform:translateY(-1px)}
@@ -4806,20 +4830,31 @@ function tempSpark(hist){
 }
 function bayStrip(disks,missing,sel,onSel){
  const wrap=el(`<div></div>`);
- const kindOf=x=>x.tran==="nvme"?"m2":(x.tran==="mmc"?"sd":"drv");
- const groups={m2:{cap:"M.2 slots",items:[]},drv:{cap:"Drive slots",items:[]},sd:{cap:"SD / eMMC",items:[]}};
+ // physical grouping: what bus the disk actually hangs on. External USB lives in
+ // its own detached enclosure — it is not part of the chassis and must not look it.
+ const kindOf=x=>x.tran==="nvme"?"m2":x.tran==="usb"?"ext":x.tran==="mmc"?"sd":"drv";
+ const groups={m2:{cap:"M.2 · NVMe",ic:"cpu",int:1,col:1,items:[]},
+               drv:{cap:"SATA",ic:"disks",int:1,items:[]},
+               ext:{cap:"External · USB",ic:"usb",items:[]},
+               sd:{cap:"SD / eMMC",ic:"sd",items:[]}};
  disks.forEach(x=>groups[kindOf(x)].items.push(x));
  (missing||[]).forEach(m=>groups.drv.items.push({missing:true,mnt:m.mnt,path:m.mnt,name:m.mnt.split("/").pop()}));
  const bays=el(`<div class="bays"></div>`);
  let n=0;
- for(const k of ["m2","drv","sd"]){
+ for(const k of ["m2","drv","ext","sd"]){
   const g=groups[k];if(!g.items.length)continue;
-  const shell=el(`<div class="bayshell"><div class="bayrow"></div><div class="bs-cap">${g.cap}</div></div>`);
+  const shell=el(`<div class="bayshell ${g.int?"int":""}"><div class="bayrow ${g.col?"col":""}"></div><div class="bs-cap">${svg(g.ic,13)} ${g.cap}</div></div>`);
   const row=shell.querySelector(".bayrow");
   g.items.forEach(x=>{n++;
    const st=x.missing?{cls:"bad"}:diskState(x);
-   const b=el(`<div class="bay ${x.missing?"ghost bad":st.cls==="ok"?"":st.cls} ${(!x.missing&&x.path===sel)?"on":""}" title="${att(x.missing?x.mnt+" — pool branch missing":( (x.label||x.model||x.name)+" · "+(x.size||"")+(st.why?" · "+st.why:"") ))}">
-     <span class="b-num">${n}</span><span class="b-drv"></span><span class="b-led"></span></div>`);
+   const cls=x.missing?"ghost":(k==="ext"?"drv":k)+(st.cls==="ok"?"":" "+st.cls);
+   const tip=x.missing?x.mnt+" — pool branch missing":( (x.label||x.model||x.name)+" · "+(x.size||"")+(st.why?" · "+st.why:"") );
+   let inner;
+   if(!x.missing&&k==="m2")inner=`<span class="b-fing"></span><span class="b-pcb"><i></i><i></i></span><span class="b-cap">${esc(x.size||"")}</span><span class="b-led"></span>`;
+   else if(!x.missing&&k==="sd")inner=`<span class="b-pins"></span><span class="b-cap">${esc(x.size||"")}</span><span class="b-led"></span>`;
+   else if(x.missing)inner=`<span class="b-cap">${n}</span><span class="b-lbl"></span><span class="b-led"></span>`;
+   else inner=`<span class="b-cap">${esc(x.size||"")}</span><span class="b-lbl"></span><span class="b-led"></span>`;
+   const b=el(`<div class="bay ${cls} ${(!x.missing&&x.path===sel)?"on":""}" title="${att(tip)}">${inner}</div>`);
    if(!x.missing)b.onclick=()=>onSel(x.path);
    row.appendChild(b);});
   bays.appendChild(shell);
@@ -14495,6 +14530,7 @@ function systemTab(tc){withSysc(tc,()=>{const s=SYSC.system||{};
   ${svcRow("Time synchronization (chrony)","Keeps the Pi clock accurate via the internet; replaces systemd-timesyncd. Important for backup timestamps, logs and TLS.","chrony",s.chrony,"accurate-time NTP client"+(s.time_synced?" · synchronized":""))}
   ${tglRow("Scheduled TRIM","Weekly frees unused SSD/NVMe blocks — maintains write speed and lifespan. For SSD/NVMe, not for HDD.","fstrim",s.fstrim&&s.fstrim.active,"fstrim.timer, weekly TRIM")}
   ${tglRow("Automatic security updates","unattended-upgrades installs security patches by itself. Less manual work and fewer holes; the downside — occasional unexpected updates.","unattended",s.unattended,"unattended-upgrades (security only)")}
+  <div class="srow"><div class="srow-l"><div class="srow-t">Docker storage${tipHTML("Where docker keeps images/layers (data-root) and where /opt/docker app data lives. On an eMMC/SD system disk these are the two biggest writers — move them to a data disk branch (/mnt/diskN). The mergerfs pool itself is refused: overlay2 cannot run on FUSE. Containers stop for the move and start again.")}</div><div class="srow-d">now: <span class="mono">${esc(s.docker_root||"/var/lib/docker")}</span>${(s.docker_root||"").startsWith("/var/lib/docker")?" · on the system disk":""}</div></div><div class="srow-c"><button class="btn sm" id="stDkr">${svg("folder",13)} Move…</button></div></div>
   <div class="srow"><div class="srow-l"><div class="srow-t">systemd journal limit${tipHTML("Maximum space for journald logs — protects the SD card from overflowing. Empty = system default.")}</div><div class="srow-d">now: ${esc(s.journald_max||"default")}</div></div><div class="srow-c"><input class="mono" id="stJ" style="max-width:90px" value="${att(s.journald_max||"")}" placeholder="200M"><button class="btn sm" id="stJA">Apply</button></div></div>
   <div class="set-grp">Maintenance</div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Package updates${tipHTML("Shows the list of available apt updates (what, from which version to which) and installs them with the «Update all» button. Security updates are marked.")}</div><div class="srow-d">${s.updates!=null?(s.updates?s.updates+" available":"up to date"):"view and install"}</div></div><div class="srow-c"><button class="btn sm" id="mChk">${svg("download",13)} Updates</button></div></div>
@@ -14502,6 +14538,11 @@ function systemTab(tc){withSysc(tc,()=>{const s=SYSC.system||{};
 `;
  wireSc(tc);
  {const bp=tc.querySelector("#stPkgs");if(bp)bp.onclick=()=>pkgsDlg(miss);}
+ {const bd=tc.querySelector("#stDkr");if(bd)bd.onclick=()=>pickFolder({title:"Docker storage target (a data disk, not the pool)",start:"/mnt",onPick:async p=>{
+   confirmDlg("Move Docker storage?",`Docker images and /opt/docker app data move to <b class="mono">${esc(p)}</b>. Containers stop for the move and start again. The pool itself will be refused (docker cannot run on mergerfs) — pick a branch like /mnt/disk1.`,async()=>{
+    toast("Moving Docker — this can take a while…");
+    const r=await sconf("docker_root",p);
+    refreshSysc(rerSet);});}});}
  const H=tc.querySelector("#stHost"),Tz=tc.querySelector("#stTz"),J=tc.querySelector("#stJ");
  tc.querySelector("#stHostA").onclick=async()=>{await sconf("hostname",H.value.trim());refreshSysc(rerSet);flashSaved(tc.querySelector("#stHostA"),"Applied ✓");};
  tc.querySelector("#stTzA").onclick=async()=>{await sconf("timezone",Tz.value.trim());refreshSysc(rerSet);flashSaved(tc.querySelector("#stTzA"),"Applied ✓");};
