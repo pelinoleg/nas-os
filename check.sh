@@ -62,7 +62,13 @@ PY
 }
 
 node_check(){   # node_check <file> <label>
-  if ! command -v docker >/dev/null 2>&1; then skip "$2 (no docker)"; return; fi
+  # local node first (CI runners and dev laptops have it); the box has none, so
+  # there the node:20-alpine image does the job; neither -> skip, not fail
+  if command -v node >/dev/null 2>&1; then
+    if node --check "$1" >/dev/null 2>&1; then ok "$2"; else bad "$2"; fi
+    return
+  fi
+  if ! command -v docker >/dev/null 2>&1; then skip "$2 (no node, no docker)"; return; fi
   local d; d="$(cd "$(dirname "$1")" && pwd)"
   if docker run --rm -v "$d":/w node:20-alpine node --check "/w/$(basename "$1")" >/dev/null 2>&1
     then ok "$2"; else bad "$2"; fi
