@@ -9756,6 +9756,137 @@ def _drill_finish(name, checks):
                                 "err", kind="cond"))
     return res
 
+# ---- box resurrection: find settings archives on attached disks -------------
+# A dead box's disks plugged into a fresh install carry everything needed to
+# bring the panel back — but only if the new box can FIND it. The setup wizard
+# scans mounted filesystems AND unmounted partitions (read-only, in a scratch
+# mountpoint) for nas-settings-backup/ and offers a one-click restore, BEFORE
+# the disks step where a wrong format would destroy exactly this.
+SETUP_SCAN_MNT = "/run/nas-setup-scan"
+
+def _scan_dir_for_archives(root):
+    """nas-settings-backup/*.tar.gz under a filesystem root (top level and one
+    level deep — a custom backup dir is usually <something>/nas-settings-backup)."""
+    out = []
+    cands = [os.path.join(root, "nas-settings-backup")]
+    try:
+        cands += [os.path.join(root, d, "nas-settings-backup")
+                  for d in sorted(os.listdir(root))[:64]
+                  if os.path.isdir(os.path.join(root, d))]
+    except OSError:
+        pass
+    for c in cands:
+        try:
+            names = sorted(f for f in os.listdir(c) if _BK_NAME_RE.match(f))
+        except OSError:
+            continue
+        for n in names[-3:]:            # the newest few are the ones that matter
+            fp = os.path.join(c, n)
+            rec = {"rel": os.path.relpath(fp, root), "name": n,
+                   "size": _safe(lambda: os.path.getsize(fp), 0)}
+            try:                        # host + date straight from the manifest
+                with tarfile.open(fp, "r:gz") as tar:
+                    mf = json.load(tar.extractfile("manifest.json"))
+                rec["host"] = mf.get("host") or ""
+                rec["ts"] = int(mf.get("ts") or 0)
+                rec["files"] = len(mf.get("files") or [])
+            except (OSError, KeyError, ValueError, tarfile.TarError):
+                rec["host"], rec["ts"] = "", 0
+            out.append(rec)
+    return out
+
+_SCAN_FS = ("ext4", "ext3", "xfs", "btrfs", "exfat", "ntfs", "vfat")
+
+def _scan_parts():
+    """(dev, fstype, mountpoint, disk, label) for every scannable partition."""
+    parts = []
+    def walk(nodes, disk):
+        for n in nodes:
+            d = disk or n.get("name") or ""
+            # "loop" included deliberately: costs nothing in production and lets the
+            # whole unmounted-branch path be tested with a loop device instead of
+            # sacrificing a real USB disk
+            if n.get("type") in ("part", "disk", "loop") and (n.get("fstype") or "") in _SCAN_FS:
+                parts.append((n.get("path") or "/dev/" + n.get("name", ""),
+                              n.get("fstype"), n.get("mountpoint") or "",
+                              d, n.get("label") or n.get("model") or ""))
+            walk(n.get("children") or [], d)
+    walk(_lsblk(), None)
+    return parts
+
+def setup_scan_backups():
+    """Scan every attached filesystem for settings archives. Unmounted partitions
+    are mounted READ-ONLY into a scratch dir and unmounted right after — nothing
+    the user later formats is left held open."""
+    sysd = _sys_disk()
+    found, errors = [], 0
+    os.makedirs(SETUP_SCAN_MNT, exist_ok=True)
+    for dev, fst, mp, disk, label in _scan_parts():
+        if disk == sysd:
+            continue                     # the fresh system disk cannot hold the old box's backup
+        if mp in ("/", "/boot", "/boot/firmware", "/boot/efi") or mp.startswith("/var"):
+            continue
+        if mp:
+            arcs = _scan_dir_for_archives(mp)
+            for a in arcs:
+                a.update(dev=dev, mount=mp, label=label)
+            found += arcs
+            continue
+        # not mounted: peek read-only, then let go
+        tmp = os.path.join(SETUP_SCAN_MNT, os.path.basename(dev))
+        os.makedirs(tmp, exist_ok=True)
+        r = _run(["mount", "-o", "ro", dev, tmp], timeout=30)
+        if not r.get("ok"):
+            errors += 1
+            continue
+        try:
+            arcs = _scan_dir_for_archives(tmp)
+            for a in arcs:
+                a.update(dev=dev, mount="", label=label)
+            found += arcs
+        finally:
+            _run(["umount", tmp], timeout=30)
+            _safe(lambda: os.rmdir(tmp))
+    found.sort(key=lambda a: a.get("ts") or 0, reverse=True)
+    return {"ok": True, "archives": found, "errors": errors}
+
+def setup_restore_backup(b):
+    """Restore EVERYTHING (secrets included — that is the point of resurrection)
+    from an archive found by the scan. An unmounted source is mounted read-only
+    for the duration of the restore only."""
+    dev = str(b.get("dev") or "")
+    mp = str(b.get("mount") or "")
+    rel = str(b.get("rel") or "")
+    if ".." in rel or rel.startswith("/") or not rel.endswith(".tar.gz"):
+        return {"ok": False, "log": "bad archive reference"}
+    tmp = None
+    if not mp:
+        if not re.match(r"^/dev/[a-zA-Z0-9/_-]+$", dev):
+            return {"ok": False, "log": "bad device"}
+        tmp = os.path.join(SETUP_SCAN_MNT, os.path.basename(dev))
+        os.makedirs(tmp, exist_ok=True)
+        r = _run(["mount", "-o", "ro", dev, tmp], timeout=30)
+        if not r.get("ok"):
+            return {"ok": False, "log": "could not mount %s: %s" % (dev, (r.get("log") or "")[-120:])}
+        mp = tmp
+    try:
+        path = os.path.realpath(os.path.join(mp, rel))
+        if not path.startswith(os.path.realpath(mp) + os.sep) or not os.path.isfile(path):
+            return {"ok": False, "log": "archive not found"}
+        res = settings_backup_restore(path, None)
+    finally:
+        if tmp:
+            _run(["umount", tmp], timeout=30)
+            _safe(lambda: os.rmdir(tmp))
+    if res.get("ok"):
+        # the restored smb.conf/shares must reach a RUNNING samba
+        _safe(smb_ensure)
+        _safe(smb_reload)
+        _safe(lambda: log_event("action", "Settings restored from another box's backup",
+                                "%s · %d files" % (os.path.basename(rel), len(res.get("restored") or [])),
+                                "ok", kind="action", desk=True))
+    return res
+
 def settings_backup_drill_cli():
     r = settings_backup_drill()
     if not r.get("checks"):
@@ -24487,6 +24618,8 @@ class H(BaseHTTPRequestHandler):
                 self._json({"creds": load_creds()})
             elif p == "/api/setup/state":
                 self._json(engine("state"))
+            elif p == "/api/setup/scan-backups":
+                self._json(setup_scan_backups())
             elif p.startswith("/api/"):
                 self._json({"error": "unknown endpoint"}, 404)
             elif p in ("/notes", "/notes/"):
@@ -24699,6 +24832,8 @@ class H(BaseHTTPRequestHandler):
                 self._json({"ok": True, "id": eid})
             elif p == "/api/fs/fetch/cancel":
                 b = self._body(); self._json(fs_fetch_cancel(b.get("id", "")))
+            elif p == "/api/setup/restore-backup":
+                self._json(setup_restore_backup(self._body()))
             elif p == "/api/settings-backup/drill":
                 self._json(settings_backup_drill(self._body().get("name")))
             elif p == "/api/settings-backup/make":

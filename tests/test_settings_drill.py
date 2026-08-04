@@ -98,3 +98,53 @@ class DrillTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ResurrectionScanTests(unittest.TestCase):
+    """The setup wizard's dead-box scan: the pure directory part."""
+
+    def _arc(self, d, name, host="oldbox"):
+        os.makedirs(os.path.dirname(os.path.join(d, name)), exist_ok=True)
+        with tarfile.open(os.path.join(d, name), "w:gz") as t:
+            data = json.dumps({"version": 1, "ts": 1700000000, "host": host,
+                               "files": ["a", "b"]}).encode()
+            ti = tarfile.TarInfo("manifest.json")
+            ti.size = len(data)
+            t.addfile(ti, __import__("io").BytesIO(data))
+
+    def test_finds_archives_at_root_and_one_level_deep(self):
+        with tempfile.TemporaryDirectory() as root:
+            self._arc(root, "nas-settings-backup/nas-settings-20260101-000000.tar.gz")
+            self._arc(root, "backups/nas-settings-backup/nas-settings-20260202-000000.tar.gz")
+            got = nas._scan_dir_for_archives(root)
+        self.assertEqual(len(got), 2)
+        self.assertEqual(got[0]["host"], "oldbox")
+        self.assertEqual(got[0]["files"], 2)
+
+    def test_foreign_files_are_ignored(self):
+        # the name contract is _BK_NAME_RE — deliberately loose (nas-settings-*.tar.gz),
+        # the same rule the list/rotation code lives by; anything else is not ours
+        with tempfile.TemporaryDirectory() as root:
+            d = os.path.join(root, "nas-settings-backup")
+            os.makedirs(d)
+            open(os.path.join(d, "random.tar.gz"), "w").close()
+            open(os.path.join(d, "backup.tgz"), "w").close()
+            self.assertEqual(nas._scan_dir_for_archives(root), [])
+
+    def test_unreadable_archive_is_listed_without_manifest_fields(self):
+        # a truncated/corrupt archive still shows up (the user should SEE it and
+        # judge), just without host/date — the restore itself would fail loudly
+        with tempfile.TemporaryDirectory() as root:
+            d = os.path.join(root, "nas-settings-backup")
+            os.makedirs(d)
+            open(os.path.join(d, "nas-settings-broken.tar.gz"), "w").close()
+            got = nas._scan_dir_for_archives(root)
+        self.assertEqual(len(got), 1)
+        self.assertEqual(got[0]["host"], "")
+        self.assertEqual(got[0]["ts"], 0)
+
+    def test_restore_ref_validation_refuses_escapes(self):
+        for bad in ({"rel": "../etc/passwd.tar.gz"}, {"rel": "/abs.tar.gz"},
+                    {"rel": "x.txt"}, {"dev": "dev; rm -rf /", "rel": "a.tar.gz"}):
+            r = nas.setup_restore_backup(bad)
+            self.assertFalse(r["ok"], bad)

@@ -125,6 +125,7 @@
   <label class="dry">Preview<button class="sw" id="dry" role="switch" aria-checked="false"></button></label>
   <a class="back" href="/">← Desktop</a>
 </div>
+<div id="resurrect" style="display:none"></div>
 <div class="wrap">
   <nav class="rail" id="rail"></nav>
   <main class="panel" id="panel"></main>
@@ -336,5 +337,38 @@ try{applyDeskTheme(JSON.parse(localStorage.getItem("nasdesk")||"{}"));}catch(e){
    DONE.security=!!(STATE.ufw||STATE.fail2ban);
    DONE.alerts=!!STATE.smartd;
    DONE.tuning=!!(STATE.t_usbpower||STATE.t_pcie3||STATE.t_cgroup||STATE.t_sysctl||STATE.t_zram||STATE.t_chrony||STATE.t_governor);}
- else document.getElementById("hostlbl").textContent="demo (no backend)";renderRail();renderPanel();})();
+ else document.getElementById("hostlbl").textContent="demo (no backend)";renderRail();renderPanel();
+ scanOldBox();})();
+
+/* Box resurrection. The dead box's disks, plugged into this fresh install, carry a
+   full settings backup — but only if the wizard FINDS it, and finds it BEFORE the
+   disks step where a careless format would destroy exactly this. So the scan runs
+   by itself on page load (mounted filesystems + unmounted partitions, read-only)
+   and the offer appears above everything else, uninvited. */
+function esc(x){const d=document.createElement("span");d.textContent=String(x??"");return d.innerHTML;}
+async function scanOldBox(){
+ const box=document.getElementById("resurrect");if(!box)return;
+ const r=await api("/api/setup/scan-backups");
+ const arcs=(r&&r.archives)||[];if(!arcs.length)return;
+ const a=arcs[0];   // newest across all disks; the rest are reachable later in Settings → Settings backup
+ const when=a.ts?new Date(a.ts*1000).toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"}):"";
+ box.style.display="block";
+ box.innerHTML=`<div class="card" style="max-width:980px;margin:18px auto 0;border-color:var(--accent)">
+   <div class="opt"><span class="ic">${svg("save",18)}</span><span class="m">
+    <span class="t">Settings backup found${a.host?` — from «${esc(a.host)}»`:""}</span>
+    <span class="d">${esc(a.name)}${when?" · "+when:""}${a.files?" · "+a.files+" files":""} · on ${esc(a.label||a.dev)}${a.mount?"":" (will be mounted read-only)"}.
+     This box can take over: panel password, Samba shares and users, docker stacks, backup profiles and keys — everything the old box knew.</span></span>
+    <button class="btn pri" id="rzGo">Restore this box</button></div>
+   <div class="console" id="rzCon" style="display:none"></div></div>`;
+ document.getElementById("rzGo").onclick=()=>{
+  if(!confirm("Restore ALL settings from this archive?\n\nThis OVERWRITES anything already configured here, including the panel password — after the restore you sign in with the OLD box's password. Shares, users, stacks, backup profiles and keys are restored too.\n\nDo this BEFORE formatting any disks."))return;
+  runRestore(a);};
+ async function runRestore(a){
+  const con=document.getElementById("rzCon"),go=document.getElementById("rzGo");
+  con.style.display="block";con.textContent="Restoring…";go.disabled=true;
+  const r=await api("/api/setup/restore-backup",{method:"POST",body:JSON.stringify({dev:a.dev,mount:a.mount,rel:a.rel})});
+  if(r&&r.ok){con.textContent="✓ Restored "+(r.restored||"")+" files. Sign in with the OLD box's password. The desktop, shares and stacks are back; disks/pool still need the steps below (hardware differs between boxes).";
+   go.textContent="Open the panel";go.disabled=false;go.onclick=()=>location.href="/";}
+  else{con.textContent="✗ "+((r&&r.log)||"restore failed");go.disabled=false;}}
+}
 </script></body></html>
