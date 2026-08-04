@@ -15,7 +15,7 @@
 #       watchdog, EEPROM, Wi-Fi powersave, temp/throttle (opt-in checklist)
 #   6.  Security — unattended-upgrades, journald cap, log2ram, ufw, fail2ban,
 #       SSH key-only (safe: only when keys are present)
-#   7.  Network shares — Samba / NFS to /mnt/storage + Avahi (mDNS)
+#   7.  Network shares — Samba to /mnt/storage + Avahi (mDNS)
 #   8.  Backups/monitoring — smartd alerts, health timer (disk/temperature),
 #       Notifications via Pushover. Plus api mode for the web UI (nas-web.py).
 #
@@ -171,7 +171,7 @@ nas-wizard.sh — NAS setup (Raspberry Pi / any Debian box)
   --stage docker      Stage 4: Docker (find compose folders and bring up)
   --stage pi          Stage 5: Pi tuning (PCIe, USB power, watchdog)
   --stage security    Stage 6: Security (ufw, fail2ban, SSH, journald)
-  --stage shares      Stage 7: Network shares (Samba/NFS/Avahi)
+  --stage shares      Stage 7: Network shares (Samba/Avahi)
   --stage backup      Stage 8: Backups and monitoring (SMART, health)
   -h, --help          This help
 EOF
@@ -2417,7 +2417,6 @@ sec_ufw() {
     run ufw allow 5353/udp    # mDNS (avahi) — otherwise <host>.local won't resolve
     # Open share ports if they are installed
     if dpkg -s samba >/dev/null 2>&1; then run ufw allow Samba 2>/dev/null || run ufw allow 445/tcp; fi
-    if dpkg -s nfs-kernel-server >/dev/null 2>&1; then run ufw allow 2049/tcp; run ufw allow 111/tcp; fi
     run ufw --force enable
     info "ufw enabled (panel :${WEBPORT}, SSH, shares — if present)"
     warn "docker publishes ports bypassing ufw (iptables) — keep that in mind"
@@ -2485,7 +2484,7 @@ Check:
 }
 
 # ---------------------------------------------------------------------------
-# STAGE 7: Network shares (Samba / NFS / Avahi) to /mnt/storage
+# STAGE 7: Network shares (Samba / Avahi) to /mnt/storage
 # ---------------------------------------------------------------------------
 shares_samba() {
     # Samba + macOS globals + Finder-icon avahi + the panel-managed include, and
@@ -2497,22 +2496,9 @@ shares_samba() {
     systemctl list-unit-files nmbd.service >/dev/null 2>&1 && enable_service nmbd
     info "Samba ready — create shares in the panel: Settings → Sharing (SMB)"
 }
-shares_nfs() {
-    install_packages "nfs" nfs-kernel-server
-    local cidr share="/mnt/storage"
-    cidr="$(detect_lan_cidr)"; [ -z "$cidr" ] && cidr="192.168.0.0/24"
-    cidr="$(ui_input "NFS" "Who may access (subnet):" "$cidr")" || return 0
-    local line="$share $cidr(rw,sync,no_subtree_check,root_squash)"
-    if ! grep -qsF "$share " /etc/exports; then
-        backup_file /etc/exports
-        append_line "$line" /etc/exports
-        run exportfs -ra
-    else
-        info "export $share already present in /etc/exports"
-    fi
-    enable_service nfs-server
-    info "NFS: $share -> $cidr"
-}
+# (NFS was removed deliberately, 2026-08-04: never used on any box — inactive, zero
+#  exports — and SMB already serves every client including Linux. A box that had it
+#  installed keeps working; we just no longer install or configure it.)
 shares_avahi() {
     install_packages "avahi" avahi-daemon
     enable_service avahi-daemon
@@ -2595,6 +2581,29 @@ EOF
     enable_service avahi-daemon
     [ "$DRY_RUN" -eq 0 ] && command -v testparm >/dev/null 2>&1 && testparm -s >/dev/null 2>>"$LOG" \
         && smbcontrol all reload-config >/dev/null 2>&1
+    # Recycle-bin sweep: shares recycle deleted files into .recycle/ (vfs_recycle,
+    # written per share by the panel) — this timer ages them out so a bin protects
+    # without growing forever. Retention lives in /etc/nas-os/smb-recycle.json.
+    write_file /etc/systemd/system/nas-recycle-sweep.service <<UNIT
+[Unit]
+Description=NAS: age out SMB recycle bins
+[Service]
+Type=oneshot
+Nice=10
+IOSchedulingClass=idle
+ExecStart=/usr/bin/python3 $SCRIPT_DIR/nas-web.py recycle-sweep
+UNIT
+    write_file /etc/systemd/system/nas-recycle-sweep.timer <<'UNIT'
+[Unit]
+Description=NAS: daily SMB recycle bin sweep
+[Timer]
+OnCalendar=*-*-* 03:40:00
+Persistent=true
+[Install]
+WantedBy=timers.target
+UNIT
+    run systemctl daemon-reload
+    run systemctl enable --now nas-recycle-sweep.timer
     info "Samba shares groundwork ready (manage from the panel: Settings → Sharing)"
 }
 
@@ -2773,20 +2782,17 @@ stage_shares() {
     log "--- stage_shares start ---"
     local raw
     raw="$(ui_checklist "Network shares" "Access to /mnt/storage over the network:" \
-        "samba" "Samba (SMB) — Windows/Mac/phone" OFF \
-        "nfs"   "NFS — Linux clients" OFF \
+        "samba" "Samba (SMB) — Windows/Mac/Linux/phone" OFF \
         "avahi" "Avahi/mDNS — visible as <host>.local" ON)" || { info "cancelled"; return 0; }
 
     local sel; sel="$(checklist_selected "$raw")"
     case "$sel" in *" samba "*) shares_samba ;; esac
-    case "$sel" in *" nfs "*)   shares_nfs ;; esac
     case "$sel" in *" avahi "*) shares_avahi ;; esac
 
     ui_msg "Summary: Network shares" "Done.
 
 Check:
   smbclient -L localhost -U <user>      (Samba)
-  showmount -e localhost                 (NFS)
   avahi-browse -a                        (mDNS)
 
 If ufw is enabled, the share ports are already open (on a repeated run of stage 6)."
@@ -2969,7 +2975,7 @@ main_menu() {
             "docker"   "Stage 4: Docker (find compose folders and bring them up)" \
             "pi"       "Stage 5: Pi tuning (PCIe, USB power, watchdog, temp)" \
             "security" "Stage 6: Security (ufw, fail2ban, SSH, journald)" \
-            "shares"   "Stage 7: Network shares (Samba/NFS/Avahi)" \
+            "shares"   "Stage 7: Network shares (Samba/Avahi)" \
             "backup"   "Stage 8: Backups and monitoring (SMART, health, restic)" \
             "quit"     "Exit")" || break
 
@@ -4229,7 +4235,7 @@ api_pi() {
 api_shares() {
     local k
     for k in ${NASW_KEYS:-}; do case "$k" in
-        samba) shares_samba ;; nfs) shares_nfs ;; avahi) shares_avahi ;;
+        samba) shares_samba ;; avahi) shares_avahi ;;
     esac; done
 }
 
@@ -4312,7 +4318,7 @@ api_state() {                  # brief state for the wizard (JSON)
     cl=/boot/firmware/cmdline.txt;  [ -f "$cl" ]  || cl=/boot/cmdline.txt
     # tuning items: report the ACTUAL on-disk/live state so the wizard's checkboxes
     # reflect reality instead of static defaults (t_* fields below)
-    printf '{"host":"%s","tz":"%s","iface":"%s","docker":%s,"data_disks":%s,"parity_disks":%s,"pool":%s,"snapraid":%s,"samba":%s,"nfs":%s,"fail2ban":%s,"ufw":%s,"smartd":%s,"unattended":%s,"avahi":%s,"journald":%s,"log2ram":%s,"spacetemp":%s,"t_usbpower":%s,"t_pcie3":%s,"t_cgroup":%s,"t_sysctl":%s,"t_zram":%s,"t_chrony":%s,"t_governor":%s}\n' \
+    printf '{"host":"%s","tz":"%s","iface":"%s","docker":%s,"data_disks":%s,"parity_disks":%s,"pool":%s,"snapraid":%s,"samba":%s,"fail2ban":%s,"ufw":%s,"smartd":%s,"unattended":%s,"avahi":%s,"journald":%s,"log2ram":%s,"spacetemp":%s,"t_usbpower":%s,"t_pcie3":%s,"t_cgroup":%s,"t_sysctl":%s,"t_zram":%s,"t_chrony":%s,"t_governor":%s}\n' \
         "$host" "$tz" "$iface" \
         "$(command -v docker >/dev/null 2>&1 && echo true || echo false)" \
         "$(mounted_data_disks | grep -c . )" \
@@ -4320,7 +4326,6 @@ api_state() {                  # brief state for the wizard (JSON)
         "$(findmnt -no TARGET "$STORAGE_MNT" >/dev/null 2>&1 && echo true || echo false)" \
         "$([ -f /etc/snapraid.conf ] && echo true || echo false)" \
         "$(systemctl is-active smbd >/dev/null 2>&1 && echo true || echo false)" \
-        "$(systemctl is-active nfs-kernel-server >/dev/null 2>&1 && echo true || echo false)" \
         "$(systemctl is-active fail2ban >/dev/null 2>&1 && echo true || echo false)" \
         "$(ufw status 2>/dev/null | grep -q 'Status: active' && echo true || echo false)" \
         "$(systemctl is-active smartmontools >/dev/null 2>&1 && echo true || echo false)" \
@@ -4373,6 +4378,7 @@ run_api() {
         syncthing)         install_syncthing ;;
         syncthing-update)  install_syncthing update ;;
         motd)           install_motd ;;
+        smb)            install_smb_shares ;;   # regen Samba groundwork + recycle-sweep timer
         tailscale)      mod_tailscale ;;
         staticip)       mod_staticip ;;
         screen)         api_screen ;;

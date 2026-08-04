@@ -5438,7 +5438,7 @@ function reniceDlg(p,after){const s=document.getElementById("scrim");
    <div class="r"><button class="btn" id="nx">Cancel</button><button class="btn pri" id="no">Apply</button></div></div>`;
   s.classList.add("show");s.querySelector("#nx").onclick=()=>s.classList.remove("show");
   s.querySelector("#no").onclick=async()=>{const r=await api("/api/process/renice",{method:"POST",body:JSON.stringify({pid:p.pid,nice:+s.querySelector("#nice").value})});toast(LIVE?(r&&r.ok?"Priority changed":"Error: "+((r&&r.log)||"")):"Demo");s.classList.remove("show");after&&after();};}
-const svcIsMine=u=>/^(nas-|docker|containerd|smartd|snapraid|tailscale|avahi|samba|smbd|nmbd|nfs)/.test(u);
+const svcIsMine=u=>/^(nas-|docker|containerd|smartd|snapraid|tailscale|avahi|samba|smbd|nmbd)/.test(u);
 function svcTab(tc,win){
  let mode="active",flt="";
  let created=new Set();
@@ -14625,7 +14625,10 @@ function sharingTab(tc){
   /* name/path/guest/sel/ro are closure state so the form survives a re-draw —
      needed both when toggling Guest/Users and when the folder picker (which
      shares #scrim) closes and we re-open this dialog. */
-  let name=sh.name||"",path=sh.path||"",guest=!!sh.guest,sel=new Set(sh.users||[]),ro=!!sh.readonly;
+  /* recycle defaults ON for NEW shares (protection is the default, opting out is
+     the choice); an EXISTING share shows its parsed state — pre-recycle shares come
+     back false and stay false until the user flips them. */
+  let name=sh.name||"",path=sh.path||"",guest=!!sh.guest,sel=new Set(sh.users||[]),ro=!!sh.readonly,rec=ed?!!sh.recycle:true;
   const draw=()=>{
    s.innerHTML=`<div class="dialog" style="max-width:460px"><h3>${ed?"Edit share":"New share"}</h3>
     <label class="smb-l">Name</label><input id="shn" placeholder="e.g. Media" ${ed?"disabled":""}>
@@ -14634,18 +14637,20 @@ function sharingTab(tc){
     <div class="seg" id="shacc"><button data-g="1" class="${guest?"on":""}">Open (guest)</button><button data-g="0" class="${guest?"":"on"}">Users</button></div>
     <div id="shusers" style="${guest?"display:none":""};margin-top:8px">${users.length?users.map(()=>`<label class="smb-uck"><input type="checkbox"><span></span></label>`).join(""):`<div class="nt-mut" style="padding:4px 0">No users yet — create one below, or use Open (guest).</div>`}</div>
     <label class="smb-uck" style="margin-top:12px"><input type="checkbox" id="shro" ${ro?"checked":""}><span>Read only</span></label>
+    <label class="smb-uck" style="margin-top:6px;${ro?"opacity:.5":""}"><input type="checkbox" id="shrec" ${rec&&!ro?"checked":""} ${ro?"disabled":""}><span>Recycle bin${tipHTML("Files deleted over the network go to a hidden .recycle folder inside the share instead of vanishing. They are removed for good after the retention period below the share list. A read-only share cannot delete, so it has no bin.")}</span></label>
     <div class="r"><button class="btn" id="shx">Cancel</button><button class="btn pri" id="shok">${ed?"Save":"Create"}</button></div></div>`;
    const nm=s.querySelector("#shn");nm.value=name;nm.oninput=e=>name=e.target.value;
    s.querySelector("#shp").value=path;
    s.querySelectorAll("#shusers .smb-uck").forEach((lab,i)=>{const u=users[i];lab.querySelector("span").textContent=u.name;const c=lab.querySelector("input");c.checked=sel.has(u.name);c.onchange=()=>{c.checked?sel.add(u.name):sel.delete(u.name);};});
    s.querySelector("#shpick").onclick=()=>pickFolder({title:"Share folder",start:path||start||HOME_DIR,onPick:p=>{path=p;},onClose:()=>show()});
    s.querySelectorAll("#shacc button").forEach(b=>b.onclick=()=>{guest=b.dataset.g==="1";draw();});
-   s.querySelector("#shro").onchange=e=>ro=e.target.checked;
+   s.querySelector("#shro").onchange=e=>{ro=e.target.checked;draw();};
+   const rc=s.querySelector("#shrec");if(rc)rc.onchange=e=>rec=e.target.checked;
    s.querySelector("#shx").onclick=()=>s.classList.remove("show");
    s.querySelector("#shok").onclick=async()=>{const nn=(ed?sh.name:name).trim();
     if(!nn)return toast("Enter a name");if(!path)return toast("Pick a folder");
     if(!guest&&!sel.size)return toast("Pick users, or make it Open (guest)");
-    const r=await api("/api/smb/share",{method:"POST",body:JSON.stringify({name:nn,old:ed?sh.name:"",path,guest,users:[...sel],readonly:ro})});
+    const r=await api("/api/smb/share",{method:"POST",body:JSON.stringify({name:nn,old:ed?sh.name:"",path,guest,users:[...sel],readonly:ro,recycle:rec&&!ro})});
     if(r&&r.ok){s.classList.remove("show");load();}else toast("Error: "+((r&&r.log)||"?"));};};
   const show=()=>{draw();s.classList.add("show");};
   show();};
@@ -14671,12 +14676,13 @@ function sharingTab(tc){
   const host=d.host||"nas",shares=d.shares||[],users=d.users||[];
   B().innerHTML=`<div class="set-grp">Shared folders</div><div id="shList"></div>
    <button class="btn sm pri" id="addShare" style="margin-top:10px">${svg("plus",14)} Add share</button>
+   <div class="srow" style="margin-top:14px"><div class="srow-l"><div class="srow-t">${svg("trash",13)} Recycle bin retention${tipHTML("How long deleted files stay in each share's .recycle folder before the nightly sweep removes them for good. 0 = keep forever (the bin only grows). Per-share bins are switched in the share's edit dialog.")}</div><div class="srow-d">deleted files are kept <b>${d.recycle_days===0?"forever":(d.recycle_days||30)+" days"}</b>, then swept nightly</div></div><div class="srow-c"><input class="mono" id="recDays" style="max-width:70px" value="${d.recycle_days??30}"><button class="btn sm" id="recDaysA">Apply</button></div></div>
    <div class="set-grp" style="margin-top:26px">Users</div><div id="usrList"></div>
    <button class="btn sm" id="addUser" style="margin-top:10px">${svg("plus",14)} Add user</button>
    <p class="set-sub" style="margin-top:20px">On a Mac: <b class="mono" id="smbHint"></b> in Finder → Go → Connect to Server (or it appears in Finder → Network).</p>`;
   const hint=B().querySelector("#smbHint");if(hint)hint.textContent="smb://"+host+".local";
   const sl=B().querySelector("#shList");
-  sl.innerHTML=shares.length?shares.map((s,i)=>`<div class="srow smb-row"><div class="srow-l"><div class="srow-t">${svg(s.guest?"globe":"shield",13)} <span class="smb-nm"></span>${s.readonly?` <span class="smb-tag">read-only</span>`:""}</div><div class="srow-d smb-pth"></div></div><div class="srow-c"><button class="iconbtn" data-ed="${i}" title="Edit">${svg("edit",15)}</button><button class="iconbtn" data-del="${i}" title="Delete">${svg("trash",15)}</button></div></div>`).join(""):`<div class="nt-mut" style="padding:8px 0">No shares yet. Add one below.</div>`;
+  sl.innerHTML=shares.length?shares.map((s,i)=>`<div class="srow smb-row"><div class="srow-l"><div class="srow-t">${svg(s.guest?"globe":"shield",13)} <span class="smb-nm"></span>${s.readonly?` <span class="smb-tag">read-only</span>`:""}${!s.readonly&&!s.recycle?` <span class="smb-tag" title="Deleted files vanish immediately on this share">no recycle bin</span>`:""}</div><div class="srow-d smb-pth"></div></div><div class="srow-c"><button class="iconbtn" data-ed="${i}" title="Edit">${svg("edit",15)}</button><button class="iconbtn" data-del="${i}" title="Delete">${svg("trash",15)}</button></div></div>`).join(""):`<div class="nt-mut" style="padding:8px 0">No shares yet. Add one below.</div>`;
   sl.querySelectorAll(".smb-row").forEach((row,i)=>{const s=shares[i];row.querySelector(".smb-nm").textContent=s.name;row.querySelector(".smb-pth").textContent=s.path+" · "+(s.guest?"everyone":((s.users||[]).join(", ")||"no users"));});
   sl.querySelectorAll("[data-ed]").forEach(b=>b.onclick=()=>shareDlg(shares[+b.dataset.ed],users));
   sl.querySelectorAll("[data-del]").forEach(b=>b.onclick=()=>{const s=shares[+b.dataset.del];confirmDlg("Delete share","«"+s.name+"» stops being shared. The folder and its files are NOT touched.",async()=>{const r=await api("/api/smb/share/delete",{method:"POST",body:JSON.stringify({name:s.name})});if(r&&r.ok)load();else toast("Error");},true);});
@@ -14687,7 +14693,10 @@ function sharingTab(tc){
   ul.querySelectorAll("[data-uch]").forEach(b=>b.onclick=()=>userDlg(users[+b.dataset.uch]));
   ul.querySelectorAll("[data-udel]").forEach(b=>b.onclick=()=>{const u=users[+b.dataset.udel];confirmDlg("Delete user","«"+u.name+"» loses SMB access.",async()=>{const r=await api("/api/smb/user/delete",{method:"POST",body:JSON.stringify({name:u.name})});if(r&&r.ok)load();else toast("Error");},true);});
   B().querySelector("#addShare").onclick=()=>shareDlg(null,users);
-  B().querySelector("#addUser").onclick=()=>userDlg(null);};
+  B().querySelector("#addUser").onclick=()=>userDlg(null);
+  const rb=B().querySelector("#recDaysA");if(rb)rb.onclick=async()=>{
+   const r=await api("/api/smb/recycle-days",{method:"POST",body:JSON.stringify({days:B().querySelector("#recDays").value})});
+   if(r&&r.ok){toast(r.log||"Saved");load();}else toast("Error: "+((r&&r.log)||"?"));};};
  load();
 }
 function motdTab(tc){

@@ -9449,7 +9449,8 @@ _BK_SECTIONS = (
                                                        "nas-config/icons/")),
     ("notify",    "Notifications",             False, ("nas-config/monitor.json", "etc/nas-wizard/notify.conf")),
     ("maint",     "Maintenance and schedules", False, ("nas-config/maintenance.json", "etc/nas-wizard/")),
-    ("samba",     "Shared folders (Samba)",    False, ("etc/samba/", "var/lib/samba/")),
+    ("samba",     "Shared folders (Samba)",    False, ("etc/samba/", "var/lib/samba/",
+                                                        "etc/nas-os/smb-recycle.json")),
     ("stacks",    "Docker stacks",             False, ("opt/stacks/",)),
     ("disks",     "Disks and pool",            False, ("nas-config/fstab.",)),
     ("webauth",   "Panel password",            True,  ("etc/nas-os/webauth.json",)),
@@ -20482,8 +20483,6 @@ def _ufw_managed_ports():
     add("5353/udp", "Discovery (mDNS / .local)")   # otherwise UFW cuts avahi → pi5.local drops off
     if shutil.which("smbd") or os.path.exists("/etc/samba/smb.conf"):
         add("445/tcp", "Files (Samba)")
-    if os.path.exists("/etc/exports") and os.path.getsize("/etc/exports") > 0:
-        add("2049/tcp", "Files (NFS)")
     try:                                   # kopia repository server, only while it is on
         if os.path.exists(KOPIA_CONF):
             ks = _kp_srv_cfg()
@@ -20540,6 +20539,23 @@ def _ufw_state():
 
 F2B_CONF = "/etc/fail2ban/jail.d/nas.conf"
 
+# The banned-IP list is the one expensive probe in the whole security tab:
+# fail2ban-client talks to its daemon over a socket and takes ~1.5 s — the ceiling
+# of the parallelized sysconf. It is purely informational (the ban is enforced by
+# fail2ban itself, not by the panel), so a minute of staleness costs nothing, and
+# no toggle needs to invalidate it: installed/active/maxretry stay live below.
+_F2B_BANNED = {"t": 0.0, "v": []}
+def _f2b_banned():
+    now = time.time()
+    if now - _F2B_BANNED["t"] < 60:
+        return _F2B_BANNED["v"]
+    banned = []
+    m = re.search(r"Banned IP list:\s*(.*)", _sc("fail2ban-client", "status", "sshd"))
+    if m:
+        banned = [x for x in m.group(1).split() if x]
+    _F2B_BANNED.update(t=now, v=banned)
+    return banned
+
 def _fail2ban_state():
     out = dict(_svc("fail2ban"))
     conf = _read(F2B_CONF)
@@ -20548,12 +20564,7 @@ def _fail2ban_state():
         return m.group(1) if m else d
     out["maxretry"] = g("maxretry", "5")
     out["bantime"] = g("bantime", "1h")
-    banned = []
-    if out.get("active"):
-        m = re.search(r"Banned IP list:\s*(.*)", _sc("fail2ban-client", "status", "sshd"))
-        if m:
-            banned = [x for x in m.group(1).split() if x]
-    out["banned"] = banned
+    out["banned"] = _f2b_banned() if out.get("active") else []
     return out
 
 def fail2ban_save(maxretry, bantime):
@@ -21105,7 +21116,8 @@ def _smb_parse(text):
         if line.startswith("[") and line.endswith("]"):
             nm = line[1:-1].strip()
             cur = None if (nm.lower() == "global" or nm.lower() in _SMB_DEFAULTS) else \
-                {"name": nm, "path": "", "guest": False, "users": [], "readonly": False}
+                {"name": nm, "path": "", "guest": False, "users": [], "readonly": False,
+                 "recycle": False}
             if cur is not None:
                 shares.append(cur)
             continue
@@ -21122,6 +21134,8 @@ def _smb_parse(text):
         elif k in ("read only", "writable", "writeable"):
             b = v.lower() in ("yes", "true", "1")
             cur["readonly"] = b if k == "read only" else (not b)
+        elif k == "vfs objects":
+            cur["recycle"] = "recycle" in v.lower()
     return shares
 
 def smb_get_shares():
@@ -21141,6 +21155,24 @@ def _smb_block(s):
     out.append("   read only = " + ("yes" if s.get("readonly") else "no"))
     if not s.get("readonly"):
         out += ["   create mask = 0664", "   directory mask = 0775"]
+    if s.get("recycle") and not s.get("readonly"):
+        # Network deletion is otherwise unrecoverable — the most common home-NAS
+        # accident. Deleted files land in .recycle/ inside the share, tree kept.
+        # touch_mtime is the load-bearing option: age in the bin must count from the
+        # moment of DELETION — by original mtime an old file would be swept at once.
+        # exclude_dir stops recursion: emptying the bin deletes for real.
+        out += ["   vfs objects = recycle",
+                "   recycle:repository = .recycle",
+                "   recycle:keeptree = yes",
+                "   recycle:versions = yes",
+                "   recycle:touch = yes",
+                "   recycle:touch_mtime = yes",
+                "   recycle:directory_mode = 0775",
+                "   recycle:exclude = *.tmp *.temp ~$* .DS_Store Thumbs.db",
+                "   recycle:exclude_dir = .recycle",
+                # keep the bin out of everyday listings; the panel file manager and
+                # "show hidden" still reach it for restores
+                "   hide files = /.recycle/"]
     return "\n".join(out) + "\n"
 
 def smb_write_shares(shares):
@@ -21221,6 +21253,69 @@ def smb_users():
                 names.add(n)
     return [{"name": n, "password": pw.get(n, "")} for n in sorted(names)]
 
+SMB_RECYCLE_FILE = "/etc/nas-os/smb-recycle.json"
+
+def smb_recycle_days():
+    try:
+        d = int(_json_load_strict(SMB_RECYCLE_FILE, {}).get("days", 30))
+        return max(0, min(3650, d))
+    except (ValueError, TypeError):
+        return 30
+
+def smb_recycle_days_set(days):
+    try:
+        d = max(0, min(3650, int(days)))
+    except (ValueError, TypeError):
+        return {"ok": False, "log": "days must be a number"}
+    _json_save(SMB_RECYCLE_FILE, {"days": d})
+    return {"ok": True, "days": d,
+            "log": ("recycle bins keep files forever (sweep off)" if d == 0
+                    else "recycle bins keep files for %d days" % d)}
+
+def smb_recycle_sweep():
+    """Age out .recycle/ in every share (nas-recycle-sweep.timer, daily).
+
+    Sweeps ANY share that has a bin on disk, including shares whose recycle toggle
+    was later switched off — the already-deleted files must still age out, or the
+    bin becomes a directory that only ever grows. mtime is the deletion time
+    (recycle:touch_mtime). days=0 = keep forever. Symlinks are never followed and
+    every removal is confined to the share's own .recycle realpath."""
+    days = smb_recycle_days()
+    if days == 0:
+        return {"ok": True, "removed": 0, "log": "sweep disabled (days=0)"}
+    cutoff = time.time() - days * 86400
+    removed = errors = 0
+    for sh in smb_get_shares():
+        bin_dir = os.path.join(sh.get("path") or "/nonexistent", ".recycle")
+        real = os.path.realpath(bin_dir)
+        if not os.path.isdir(bin_dir) or not real.startswith(os.path.realpath(sh["path"]) + os.sep):
+            continue
+        for root, dirs, files in os.walk(bin_dir, topdown=False, followlinks=False):
+            for f in files:
+                fp = os.path.join(root, f)
+                try:
+                    st_ = os.lstat(fp)
+                    if stat.S_ISREG(st_.st_mode) or stat.S_ISLNK(st_.st_mode):
+                        if st_.st_mtime < cutoff:
+                            os.unlink(fp)
+                            removed += 1
+                except OSError:
+                    errors += 1
+            for d in dirs:
+                dp = os.path.join(root, d)
+                try:
+                    os.rmdir(dp)          # only succeeds when empty — exactly right
+                except OSError:
+                    pass
+    return {"ok": errors == 0, "removed": removed, "errors": errors,
+            "days": days}
+
+def smb_recycle_sweep_cli():
+    r = smb_recycle_sweep()
+    print("recycle sweep: removed %s file(s), retention %s day(s)%s"
+          % (r.get("removed", 0), r.get("days", "?"),
+             (", %d error(s)" % r["errors"]) if r.get("errors") else ""))
+
 def smb_overview():
     if not _smb_installed():
         return {"ok": True, "installed": False, "shares": [], "users": [],
@@ -21233,6 +21328,7 @@ def smb_overview():
     return {"ok": True, "installed": True, "host": socket.gethostname(),
             "primary": _smb_primary_user(), "start": _smb_start_dir(),
             "running": _run(["systemctl", "is-active", "smbd"], timeout=6).get("code") == 0,
+            "recycle_days": smb_recycle_days(),
             "shares": smb_get_shares(), "users": smb_users()}
 
 def smb_share_set(b):
@@ -21255,8 +21351,11 @@ def smb_share_set(b):
         except OSError as e:
             return {"ok": False, "log": "cannot create folder: " + str(e)}
     shares = [s for s in smb_get_shares() if s["name"] != name and (not old or s["name"] != old)]
+    rec = b.get("recycle")
     shares.append({"name": name, "path": path, "guest": guest, "users": users,
-                   "readonly": bool(b.get("readonly"))})
+                   "readonly": bool(b.get("readonly")),
+                   # default ON: the recycle bin is protection, absence is the opt-in
+                   "recycle": True if rec is None else bool(rec)})
     smb_ensure()
     smb_write_shares(shares)
     r = smb_reload()
@@ -24305,6 +24404,8 @@ class H(BaseHTTPRequestHandler):
                 self._json(motd_save(self._body()))
             elif p == "/api/smb/share":
                 self._json(smb_share_set(self._body()))
+            elif p == "/api/smb/recycle-days":
+                self._json(smb_recycle_days_set(self._body().get("days")))
             elif p == "/api/smb/share/delete":
                 self._json(smb_share_del(self._body().get("name", "")))
             elif p == "/api/smb/user":
@@ -25087,6 +25188,8 @@ if __name__ == "__main__":
         _args = sys.argv[2:]
         _pid = next((a for a in _args if a != "deep"), NB_MAIN)
         nb_compare_run(_pid, deep=("deep" in _args))
+    elif len(sys.argv) > 1 and sys.argv[1] == "recycle-sweep":
+        smb_recycle_sweep_cli()   # nas-recycle-sweep.timer (see install_smb_shares)
     elif len(sys.argv) > 1 and sys.argv[1] == "backup-drill":
         _nb_drill_cli(sys.argv[2] if len(sys.argv) > 2 else NB_MAIN)
     elif len(sys.argv) > 1 and sys.argv[1] == "kopia-snap":

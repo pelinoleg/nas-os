@@ -270,7 +270,7 @@ const R={
    <div class="actions"><button class="btn pri" id="go">Configure SnapRAID</button></div><div class="console" id="con"></div>`;
   p.querySelector("#go").onclick=()=>run("snapraid",{sync:p.querySelector("[data-k=sync]").checked?"1":"0"});},
  shares(p){p.innerHTML=head("Network","File access","Share /mnt/storage over the network. (Apps like Scrutiny/Syncthing/Immich — including Dockge — are installed from the App Store in the panel's Docker window.)")+
-  `<div class="card" id="box">${chk("samba","Samba (SMB)","recommended · Windows, Mac, phone",STATE.samba,"share")}${chk("nfs","NFS","Linux clients",STATE.nfs,"share")}${chk("avahi","Avahi/mDNS","reach the box by name over mDNS (host.local)",STATE.avahi,"net")}</div>
+  `<div class="card" id="box">${chk("samba","Samba (SMB)","recommended · Windows, Mac, Linux, phone",STATE.samba,"share")}${chk("avahi","Avahi/mDNS","reach the box by name over mDNS (host.local)",STATE.avahi,"net")}</div>
    <div class="actions"><button class="btn pri" id="go">Apply</button></div><div class="console" id="con"></div>`;
   p.querySelector("#go").onclick=()=>run("shares",{keys:keys(p.querySelector("#box"))});},
  security(p){p.innerHTML=head("Security","Security &amp; remote access","Sensible defaults — the firewall opens SSH before enabling. Tailscale (below) gives secure remote access without opening any ports.")+
@@ -332,7 +332,7 @@ try{applyDeskTheme(JSON.parse(localStorage.getItem("nasdesk")||"{}"));}catch(e){
    DONE.disks=(STATE.data_disks||0)>0;
    DONE.mergerfs=!!STATE.pool;
    DONE.snapraid=!!STATE.snapraid;
-   DONE.shares=!!(STATE.samba||STATE.nfs);
+   DONE.shares=!!STATE.samba;
    DONE.security=!!(STATE.ufw||STATE.fail2ban);
    DONE.alerts=!!STATE.smartd;
    DONE.tuning=!!(STATE.t_usbpower||STATE.t_pcie3||STATE.t_cgroup||STATE.t_sysctl||STATE.t_zram||STATE.t_chrony||STATE.t_governor);}
