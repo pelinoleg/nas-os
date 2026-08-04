@@ -5115,7 +5115,11 @@ try{SNIPCOL=SET.snipCol||JSON.parse(localStorage.getItem("nassnipcol")||"{}");}c
 function saveCol(){SET.snipCol=SNIPCOL;saveSettings();}
 async function saveSnips(){try{localStorage.setItem("nassnips",JSON.stringify(SNIPS));}catch(e){}await api("/api/snippets",{method:"POST",body:JSON.stringify({snippets:SNIPS})});}
 function seedSnips(){const have=new Set(SNIPS.map(s=>(s.cat||"")+"|"+s.label+"|"+s.cmd));
- DEFAULT_SNIPS.forEach(([cat,items])=>items.forEach(([label,cmd])=>{if(!have.has(cat+"|"+label+"|"+cmd))SNIPS.push({label,cmd,cat});}));}
+ DEFAULT_SNIPS.forEach(([cat,items])=>items.forEach(([label,cmd])=>{
+  // vcgencmd answers only on a Pi — seeding it elsewhere plants a snippet that can
+  // only ever print "command not found" (the list is persisted, so decide here)
+  if(/vcgencmd/.test(cmd)&&LAST&&LAST.is_pi===false)return;
+  if(!have.has(cat+"|"+label+"|"+cmd))SNIPS.push({label,cmd,cat});}));}
 function snipCats(){const seen=[];SNIPS.forEach(s=>{const c=s.cat||"My";if(!seen.includes(c))seen.push(c);});if(!seen.length)seen.push("My");return seen;}
 function snipGroups(){const groups=[],by={};
  SNIPS.forEach((sn,i)=>{const cat=sn.cat||"My";let g=by[cat];if(!g){g={name:cat,items:[]};by[cat]=g;groups.push(g);}g.items.push({label:sn.label,cmd:sn.cmd,idx:i});});

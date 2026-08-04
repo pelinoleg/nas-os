@@ -367,7 +367,9 @@ report_skipped_packages() {
         [ "$DRY_RUN" -eq 0 ] && : > /var/lib/nas-wizard/skipped-packages
         return 0
     fi
-    [ "$DRY_RUN" -eq 0 ] && printf '%s\n' "${NASW_SKIPPED[@]}" > /var/lib/nas-wizard/skipped-packages
+    # same package can be skipped by several call sites (samba is attempted in three
+    # places) — write each line once, keeping first-seen order
+    [ "$DRY_RUN" -eq 0 ] && printf '%s\n' "${NASW_SKIPPED[@]}" | awk '!seen[$0]++' > /var/lib/nas-wizard/skipped-packages
     local s lvl pkg why req=() opt=() pi=()
     while IFS=$'\t' read -r lvl pkg _ why; do
         case "$lvl" in
@@ -375,7 +377,7 @@ report_skipped_packages() {
             pi)  pi+=("$pkg") ;;
             *)   opt+=("$pkg") ;;
         esac
-    done < <(printf '%s\n' "${NASW_SKIPPED[@]}")
+    done < <(printf '%s\n' "${NASW_SKIPPED[@]}" | awk '!seen[$0]++')
     [ "${#pi[@]}" -gt 0 ] && info "Pi-only packages skipped (fine on non-Pi hardware): ${pi[*]}"
     [ "${#opt[@]}" -gt 0 ] && warn "Optional packages unavailable (convenience features only): ${opt[*]}"
     if [ "${#req[@]}" -gt 0 ]; then
@@ -2226,7 +2228,8 @@ cpu_temp_mc() {
     [ -r /sys/class/thermal/thermal_zone0/temp ] && cat /sys/class/thermal/thermal_zone0/temp && return
     echo 0
 }
-temp=$(( $(cpu_temp_mc) / 1000 ))
+t="$(cpu_temp_mc)"; case "$t" in ''|*[!0-9]*) t=0 ;; esac
+temp=$(( t / 1000 ))
 thr_hex="$(vcgencmd get_throttled 2>/dev/null | sed 's/.*=//')"
 cur=$(( ${thr_hex:-0} & 0xf ))
 # The governor names are NOT universal: intel_pstate (any modern x86, N95/N100
@@ -2852,7 +2855,7 @@ EOF
 bk_spacetemp() {
     write_file /usr/local/bin/nas-health-check.sh <<'HEALTH'
 #!/usr/bin/env bash
-# nas-wizard: alert on pool fill and Pi temperature
+# nas-wizard: alert on pool fill and CPU temperature
 set -uo pipefail
 LOG=/var/log/nas-health.log
 DISK_PCT_MAX=90
@@ -2868,10 +2871,18 @@ if mountpoint -q /mnt/storage; then
     pct=$(df --output=pcent /mnt/storage 2>/dev/null | tr -dc '0-9')
     if [ -n "$pct" ] && [ "$pct" -ge "$DISK_PCT_MAX" ]; then alert=1; msg="$msg disk=${pct}%"; fi
 fi
-if command -v vcgencmd >/dev/null 2>&1; then
-    t=$(vcgencmd measure_temp 2>/dev/null | tr -dc '0-9.' | cut -d. -f1)
-    if [ -n "$t" ] && [ "$t" -ge "$TEMP_MAX" ]; then alert=1; msg="$msg temp=${t}C"; fi
-fi
+# CPU temp by hwmon NAME first (works on any board), vcgencmd as the Pi fallback —
+# without this the temperature half of the fallback watchdog silently ceased to
+# exist on non-Pi hardware while still looking installed
+t=""
+for h in /sys/class/hwmon/hwmon*; do
+  case "$(cat "$h/name" 2>/dev/null)" in
+    coretemp|k10temp|zenpower|cpu_thermal|soc_thermal|x86_pkg_temp)
+      t=$(( $(cat "$h/temp1_input" 2>/dev/null || echo 0) / 1000 )); break ;;
+  esac
+done
+[ -n "$t" ] || t=$(vcgencmd measure_temp 2>/dev/null | tr -dc '0-9.' | cut -d. -f1)
+if [ -n "$t" ] && [ "$t" -ge "$TEMP_MAX" ]; then alert=1; msg="$msg temp=${t}C"; fi
 if [ "$alert" -eq 1 ]; then
     echo "$(date '+%F %T') HEALTH ALERT:$msg" >> "$LOG"
     [ -x /usr/local/bin/nas-notify.sh ] && /usr/local/bin/nas-notify.sh "NAS: attention" "Threshold exceeded:$msg" 1 health "health:thr" || true
