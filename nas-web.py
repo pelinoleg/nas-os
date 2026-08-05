@@ -2696,15 +2696,18 @@ def _translit(s):
     return "".join(out)
 
 
-def glance_payload(lang="ru", screen=""):
+def glance_payload(lang="ru", screen="", only=None, slim=False):
     """Open status feed: ALL available tiles as one flat list (a metric may
     disappear — then it's simply gone), plus availability 24h/30d, status colors
     and an overall verdict. Layout is done by the device. Cache a couple of seconds,
     seq grows only on change (the screen isn't redrawn for nothing)."""
     en = (lang == "en")
     cfg = load_glance()
+    # The cache is keyed by language; a filtered view is a different document
+    # and must not be served to, or stored for, anyone who asked for the whole.
+    ckey = lang + ("|s" if slim else "") + ("|" + ",".join(sorted(only)) if only else "")
     with _GL_LOCK:
-        c = _GL_CACHE["langs"].get(lang)
+        c = _GL_CACHE["langs"].get(ckey)
         if c and time.time() - c["t"] < 3:
             return c["payload"]
     labels = {t[0]: (t[2] if en else t[1]) for t in glance_catalog()}
@@ -2744,6 +2747,19 @@ def glance_payload(lang="ru", screen=""):
     for t in tiles:
         if t["state"] in counts:
             counts[t["state"]] += 1
+    # A wall panel reads value/unit/state/note/label and nothing else, and shows
+    # a handful of tiles rather than all of them. Sending the rest is not free:
+    # the device parses the whole document every poll, and on a small MCU the
+    # heap that costs is the same heap the network stack needs. `raw` and
+    # `spark` together are about a quarter of the payload; the tiles a given
+    # page never shows are most of the rest.
+    if slim:
+        tiles = [{k: v for k, v in t.items() if k not in ("raw", "spark")}
+                 for t in tiles]
+    if only:
+        keep = set(only)
+        tiles = [t for t in tiles if t.get("id") in keep]
+
     payload = {"v": 4, "host": socket.gethostname(), "status": status,
                "problems": problems[:6], "tiles": tiles,
                # The same tiles keyed by id. `tiles` is an ordered list for
@@ -2765,7 +2781,7 @@ def glance_payload(lang="ru", screen=""):
                       cfg["actions"]],
                      sort_keys=True, ensure_ascii=False)
     with _GL_LOCK:
-        c = _GL_CACHE["langs"].setdefault(lang, {"t": 0, "sig": "", "seq": 0, "payload": None})
+        c = _GL_CACHE["langs"].setdefault(ckey, {"t": 0, "sig": "", "seq": 0, "payload": None})
         if sig != c["sig"]:
             c["seq"] += 1
             c["sig"] = sig
@@ -23007,7 +23023,7 @@ def _screen_usb_cfg():
             "dest_off": bool(dest and _dest_disk_absent(dest))}
 
 
-def screen_payload(lang="", p2=False, events_max=30):
+def screen_payload(lang="", p2=False, events_max=30, only=None):
     # the screen language comes from screen.json, not the kiosk browser; the UI is
     # English-only now, so lang is effectively always "en"
     cfg0 = load_screen()
@@ -23124,7 +23140,7 @@ def screen_payload(lang="", p2=False, events_max=30):
                 look[dst_k] = ds[src_k]
     cfg = load_screen()
     host = st.get("host") or socket.gethostname()
-    return {"host": host, "mdns": host + ".local", "ip": st.get("ip") or "",
+    out = {"host": host, "mdns": host + ".local", "ip": st.get("ip") or "",
             "iface": st.get("iface") or "", "net": st.get("net") or {"rx": 0, "tx": 0},
             "uptime": st.get("uptime") or 0, "cpu": st.get("cpu"),
             "temp": st.get("temp"), "load": st.get("load") or [],
@@ -23164,6 +23180,15 @@ def screen_payload(lang="", p2=False, events_max=30):
             "p2": (_safe(_screen_page2, {}) or {}) if p2 else None,
             "op": _safe(screen_op_state, {}) or {},   # background system-update progress (apt / images)
             "ts": int(time.time())}
+    # An external panel shows a couple of these sections and parses the lot on
+    # every poll. On a small MCU that parse costs the same heap the network
+    # stack needs, so `?only=` lets a device ask for what it draws. The keys a
+    # header always wants are kept whatever is asked for -- they are a handful
+    # of bytes and leaving them out only invites a second request.
+    if only:
+        keep = set(only) | {"host", "mdns", "ip", "iface", "overall", "uptime", "ts", "lang"}
+        out = {k: v for k, v in out.items() if k in keep}
+    return out
 
 
 SCREEN_OP_FILE = os.path.join(NAS_CONFIG, "screen-op.json")
@@ -24296,7 +24321,9 @@ class H(BaseHTTPRequestHandler):
             if not (tok_ok or self._authed()):
                 self._json({"error": "auth"}, 401); return
             lang = (q.get("lang") or ["ru"])[0]
-            pl = glance_payload(lang, (q.get("screen") or [""])[0])
+            only = [t for t in (q.get("tiles") or [""])[0].split(",") if t]
+            slim = (q.get("slim") or [""])[0] not in ("", "0")
+            pl = glance_payload(lang, (q.get("screen") or [""])[0], only, slim)
             if (q.get("all") or [""])[0] and self._authed():
                 # constructor palette: every possible tile with live values
                 pl = dict(pl, palette=glance_palette(lang))
@@ -24344,7 +24371,9 @@ class H(BaseHTTPRequestHandler):
                 self._json({"error": "auth"}, 401); return
             self._json(screen_payload((q.get("lang") or [""])[0],
                                       p2=bool((q.get("p2") or [""])[0]),
-                                      events_max=(q.get("events") or [30])[0])); return
+                                      events_max=(q.get("events") or [30])[0],
+                                      only=[k for k in (q.get("only") or [""])[0].split(",") if k]
+                                      )); return
         if p.startswith("/api/") and not self._authed():
             self._json({"error": "auth", "configured": auth_configured()}, 401); return
         try:
