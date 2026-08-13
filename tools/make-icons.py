@@ -15,23 +15,27 @@ Usage: python3 tools/make-icons.py [web_dir]
 import math, os, struct, sys, zlib
 
 # --- the mark ---------------------------------------------------------------
-# The letter N, with the diagonal carrying the colour: the stroke that crosses the box
-# is the data path through it, the two uprights are the box itself. A letterform is read
-# faster than any pictogram at 16 px, and it makes no claim about hardware — which is
-# what the raspberry it replaced was doing wrong.
+# Two stacked drive bays with a live indicator each — the mark that was already in the
+# panel header before the Raspberry Pi support came out, kept because it is the one that
+# looks right there. Berry red #c51a4a and the indicator green #6cc04a.
 #
-# Everything is drawn from LAYERS below, painted in order over the plate. Each layer is
-# a colour plus a signed distance function in the 256x256 mark space, so every size is
-# the same drawing rather than a resampled screenshot of a bigger one.
-GROUND = "#1E2329"      # graphite plate
-GLYPH  = "#EAF4F1"      # off-white uprights
-LIVE   = "#6CC04A"      # the diagonal — the live/data stroke
+# The art box is 256x232, NOT square, exactly as web/icon.svg has always been: the header
+# and every other CSS size rule are written against that viewBox. The square PNGs pad it
+# vertically instead of changing it, so the SVG stays byte-faithful to what the browser
+# has been rendering all along.
+#
+# Everything is drawn from LAYERS below, painted in order onto a TRANSPARENT ground. Each
+# layer is a colour, an opacity and a signed distance function in art-box units, so every
+# size is the same drawing rather than a resampled screenshot of a bigger one.
+RED   = "#c51a4a"
+GREEN = "#6cc04a"
 
-BOX     = 256.0
-PLATE_R = 56.0
-STROKE  = 26.0          # every stroke of the letter, round caps
-LX, RX  = 86.0, 170.0   # x of the left and right uprights
-TOP, BOT = 72.0, 184.0  # y of the letter's top and bottom
+ART_W, ART_H = 256.0, 232.0
+BAYS   = ((26.0, 34.0, 204.0, 72.0, 18.0), (26.0, 126.0, 204.0, 72.0, 18.0))
+BAY_W  = 14.0            # outline stroke width
+DOTS   = ((62.0, 70.0, 13.0), (62.0, 162.0, 13.0))
+SLOTS  = ((104.0, 62.0, 96.0, 16.0, 8.0), (104.0, 154.0, 96.0, 16.0, 8.0))
+SLOT_A = 0.55            # the slot fills are translucent
 
 
 def _hex(c):
@@ -55,15 +59,27 @@ def _sd_segment(x, y, ax, ay, bx, by):
     return math.hypot(pax - bax * h, pay - bay * h)
 
 
-def _sd_stroke(x, y, ax, ay, bx, by):
-    return _sd_segment(x, y, ax, ay, bx, by) - STROKE / 2.0
+def _sd_outline(x, y, rect, w):
+    """Distance to the OUTLINE of a rounded rect: the filled distance, mirrored."""
+    return abs(_sd_round_rect(x, y, *rect)) - w / 2.0
 
 
-# painted in order: the diagonal first, the uprights over it, so the joints stay clean
+def _sd_circle(x, y, cx, cy, r):
+    return math.hypot(x - cx, y - cy) - r
+
+
+def _sd_min(x, y, fns):
+    return min(f(x, y) for f in fns)
+
+
+# painted in order onto transparent: bay outlines, indicator dots, translucent slots
 LAYERS = (
-    (LIVE,  lambda x, y: _sd_stroke(x, y, LX, TOP, RX, BOT)),
-    (GLYPH, lambda x, y: min(_sd_stroke(x, y, LX, BOT, LX, TOP),
-                             _sd_stroke(x, y, RX, BOT, RX, TOP))),
+    (RED,   1.0,     lambda x, y: _sd_min(x, y, [
+        lambda x, y, r=r: _sd_outline(x, y, r, BAY_W) for r in BAYS])),
+    (GREEN, 1.0,     lambda x, y: _sd_min(x, y, [
+        lambda x, y, d=d: _sd_circle(x, y, *d) for d in DOTS])),
+    (RED,   SLOT_A,  lambda x, y: _sd_min(x, y, [
+        lambda x, y, s=s: _sd_round_rect(x, y, *s) for s in SLOTS])),
 )
 
 
@@ -74,29 +90,28 @@ def _cov(d, scale):
 
 
 def render(size):
-    """RGBA bytes for one square icon."""
-    ground = _hex(GROUND)
-    layers = [(_hex(c), f) for c, f in LAYERS]
-    scale = BOX / size                      # mark units per output pixel
+    """RGBA bytes for one square icon: the art box centred, transparent around it."""
+    layers = [(_hex(c), o, f) for c, o, f in LAYERS]
+    scale = ART_W / size                 # art units per output pixel
+    off_y = (ART_W - ART_H) / 2.0        # pad the shorter axis instead of stretching
     rows = []
     for py in range(size):
-        y = (py + 0.5) * scale
+        y = (py + 0.5) * scale - off_y
         row = bytearray()
         for px in range(size):
             x = (px + 0.5) * scale
-            a_plate = _cov(_sd_round_rect(x, y, 0.0, 0.0, BOX, BOX, PLATE_R), scale)
-            if a_plate <= 0.0:
-                row += b"\0\0\0\0"
-                continue
-            r, g, b = ground
-            for col, sdf in layers:
-                cov = _cov(sdf(x, y), scale)
-                if cov > 0.0:
-                    r = r + (col[0] - r) * cov
-                    g = g + (col[1] - g) * cov
-                    b = b + (col[2] - b) * cov
-            row += bytes((int(r + 0.5), int(g + 0.5), int(b + 0.5),
-                          int(a_plate * 255 + 0.5)))
+            r = g = b = a = 0.0
+            for col, op, sdf in layers:
+                sa = _cov(sdf(x, y), scale) * op
+                if sa <= 0.0:
+                    continue
+                # src-over, straight (not premultiplied) alpha
+                na = sa + a * (1.0 - sa)
+                r = (col[0] * sa + r * a * (1.0 - sa)) / na
+                g = (col[1] * sa + g * a * (1.0 - sa)) / na
+                b = (col[2] * sa + b * a * (1.0 - sa)) / na
+                a = na
+            row += bytes((int(r + 0.5), int(g + 0.5), int(b + 0.5), int(a * 255 + 0.5)))
         rows.append(bytes(row))
     return rows
 
@@ -116,18 +131,22 @@ def write_png(path, size):
     return len(png)
 
 
-SVG = '''<svg xmlns="http://www.w3.org/2000/svg" aria-label="NAS-OS" role="img" viewBox="0 0 256 256">
-  <!-- NAS-OS brand mark: the letter N, its diagonal carrying the colour — the data path
-       through the box, the uprights the box itself. Generated by tools/make-icons.py,
-       which renders every PNG size from these same numbers; edit the shape THERE, not
-       here, or the SVG and the icons drift apart. -->
-  <rect width="256" height="256" rx="{plate_r:g}" fill="{ground}"/>
-  <path d="M{lx:g} {top:g} L{rx:g} {bot:g}" fill="none" stroke="{live}"
-        stroke-width="{sw:g}" stroke-linecap="round"/>
-  <path d="M{lx:g} {bot:g} V{top:g}" fill="none" stroke="{glyph}"
-        stroke-width="{sw:g}" stroke-linecap="round"/>
-  <path d="M{rx:g} {bot:g} V{top:g}" fill="none" stroke="{glyph}"
-        stroke-width="{sw:g}" stroke-linecap="round"/>
+SVG = '''<svg xmlns="http://www.w3.org/2000/svg" aria-label="NAS" role="img" viewBox="0 0 {aw:g} {ah:g}">
+  <!-- NAS-OS brand mark: two stacked drive bays, one live indicator each. Generated by
+       tools/make-icons.py, which renders every PNG size from these same numbers; edit the
+       shape THERE, not here, or the SVG and the icons drift apart. -->
+  <g fill="none" stroke="{red}" stroke-width="{bw:g}" stroke-linejoin="round">
+    <rect x="{b0x:g}" y="{b0y:g}" width="{b0w:g}" height="{b0h:g}" rx="{b0r:g}"/>
+    <rect x="{b1x:g}" y="{b1y:g}" width="{b1w:g}" height="{b1h:g}" rx="{b1r:g}"/>
+  </g>
+  <g fill="{green}">
+    <circle cx="{d0x:g}" cy="{d0y:g}" r="{d0r:g}"/>
+    <circle cx="{d1x:g}" cy="{d1y:g}" r="{d1r:g}"/>
+  </g>
+  <g fill="{red}" opacity="{sa:g}">
+    <rect x="{s0x:g}" y="{s0y:g}" width="{s0w:g}" height="{s0h:g}" rx="{s0r:g}"/>
+    <rect x="{s1x:g}" y="{s1y:g}" width="{s1w:g}" height="{s1h:g}" rx="{s1r:g}"/>
+  </g>
 </svg>
 '''
 
@@ -136,8 +155,14 @@ def main():
     web = sys.argv[1] if len(sys.argv) > 1 else os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web")
     with open(os.path.join(web, "icon.svg"), "w") as f:
-        f.write(SVG.format(plate_r=PLATE_R, ground=GROUND, glyph=GLYPH, live=LIVE,
-                           lx=LX, rx=RX, top=TOP, bot=BOT, sw=STROKE))
+        f.write(SVG.format(
+            aw=ART_W, ah=ART_H, red=RED, green=GREEN, bw=BAY_W, sa=SLOT_A,
+            b0x=BAYS[0][0], b0y=BAYS[0][1], b0w=BAYS[0][2], b0h=BAYS[0][3], b0r=BAYS[0][4],
+            b1x=BAYS[1][0], b1y=BAYS[1][1], b1w=BAYS[1][2], b1h=BAYS[1][3], b1r=BAYS[1][4],
+            d0x=DOTS[0][0], d0y=DOTS[0][1], d0r=DOTS[0][2],
+            d1x=DOTS[1][0], d1y=DOTS[1][1], d1r=DOTS[1][2],
+            s0x=SLOTS[0][0], s0y=SLOTS[0][1], s0w=SLOTS[0][2], s0h=SLOTS[0][3], s0r=SLOTS[0][4],
+            s1x=SLOTS[1][0], s1y=SLOTS[1][1], s1w=SLOTS[1][2], s1h=SLOTS[1][3], s1r=SLOTS[1][4]))
     print("icon.svg")
     for name, size in (("favicon-16.png", 16), ("favicon-32.png", 32),
                        ("icon-16.png", 16), ("icon-32.png", 32),

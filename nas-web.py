@@ -22534,17 +22534,14 @@ def load_screen():
 
 
 def save_screen(d):
+    # No service to start or stop any more: the kiosk is gone and /screen is a page you
+    # open in a browser. This used to call engine("screen", ...) when `enabled` flipped —
+    # an action the wizard no longer has, so the call would fail every time it fired.
     cur = load_screen()
-    was = cur["enabled"]
     if isinstance(d, dict):
         cur.update({k: v for k, v in d.items() if k in cur})
     _json_save(SCREEN_FILE, cur, indent=2)
     _safe(lambda: _screen_apply(force=True))
-    if cur["enabled"] != was:
-        # the kiosk service itself is enabled/disabled by the engine (wizard), not the panel
-        threading.Thread(target=lambda: _safe(
-            lambda: engine("screen", {"enable": "1" if cur["enabled"] else "0"})),
-            daemon=True).start()
     return load_screen()
 
 
@@ -24261,9 +24258,7 @@ class H(BaseHTTPRequestHandler):
             elif p == "/api/screen/config":
                 # _run() returns a DICT {ok,code,log}: calling .strip() on it dropped the endpoint
                 # to 500, and the settings tab showed only the header
-                u = _run(["systemctl", "is-enabled", "nas-screen"], timeout=5)
-                self._json({"config": load_screen(), "present": bool(_bl_dir()),
-                            "unit": (u.get("log") or "").strip()})
+                self._json({"config": load_screen()})
             elif p == "/api/glance/config":
                 self._json({"config": load_glance()})
             elif p == "/api/avail":

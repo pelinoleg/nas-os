@@ -13834,12 +13834,13 @@ function winSettings(initTab){openWin("__set","Settings",body=>{
   {id:"maint",name:"Maintenance",ic:"heart"},
   {id:"usb",name:"USB import",ic:"usb"},
   {id:"glance",name:"API",ic:"gauge"},
+  {id:"scr",name:"Screen page",ic:"monitor"},
   {id:"motd",name:"SSH login message",ic:"term"},
   {sep:1},
   // 4 — data
   {id:"backup",name:"Settings backup",ic:"save"},
  ];
- const FN={look:lookTab,files:filesTab,notify:notifyTab,glance:glanceTab,nts:notesTab,timemachine:timemachineTab,system:systemTab,motd:motdTab,maint:maintTab,network:networkTab,sharing:sharingTab,security:securityTab,usb:usbTab,backup:backupTab,hw:hwTab,syncthing:syncthingTab};
+ const FN={look:lookTab,files:filesTab,notify:notifyTab,glance:glanceTab,scr:screenTab,nts:notesTab,timemachine:timemachineTab,system:systemTab,motd:motdTab,maint:maintTab,network:networkTab,sharing:sharingTab,security:securityTab,usb:usbTab,backup:backupTab,hw:hwTab,syncthing:syncthingTab};
  let footMo=null;
  const render=()=>{
   if(footMo){footMo.disconnect();footMo=null;}
@@ -14817,6 +14818,37 @@ function hwTab(tc){withSysc(tc,()=>{const p=SYSC.hw||{};const g=p.governor||{};
  wireSc(tc);
  tc.querySelectorAll("#pGov button").forEach(b=>b.onclick=async()=>{await sconf("governor",b.dataset.g);refreshSysc(rerSet);});
 });}
+
+/* --- settings: the /screen page ---
+   What came back after the kiosk was removed, and only what a page in a BROWSER can
+   honour: how often it asks for data, when it falls back to a clock, and whether its
+   buttons may act on the box. Brightness, night dimming and the sleep schedule are not
+   here — they drove a DSI panel's backlight, and this machine has none. */
+function screenTab(tc){
+ tc.innerHTML=`<div class="set-load">loading…</div>`;
+ api("/api/screen/config").then(r=>{
+  const c=(r&&r.config)||{};
+  tc.innerHTML=`
+  <h3 class="set-title">Screen page</h3><p class="set-sub">The dashboard served at <span class="mono">/screen</span> — a full-screen status page to leave open in a browser tab. It has no settings of its own; what it draws and how often it asks are set here.</p>
+  <div class="set-card">
+   <div class="srow"><div class="srow-l"><div class="srow-t">Refresh interval${tipHTML("How often the page asks the server for fresh data. Every poll is a request the panel serves — and the tiles change on the order of seconds, so there is nothing to win below a second or two.")}</div><div class="srow-d"><b id="scPollV">${((c.poll||1500)/1000).toFixed(1)}</b> s between polls</div></div><div class="srow-c"><input type="range" id="scPoll" min="500" max="30000" step="500" value="${c.poll||1500}" style="width:190px"></div></div>
+   <div class="srow"><div class="srow-l"><div class="srow-t">Idle clock${tipHTML("After this many minutes with no input the page switches to a large clock. 0 turns it off and the tiles stay up.")}</div><div class="srow-d">minutes, 0 = never</div></div><div class="srow-c"><input type="number" id="scClk" min="0" max="240" value="${c.clock_min!=null?c.clock_min:3}" style="width:84px"></div></div>
+   <div class="srow"><div class="srow-l"><div class="srow-t">Allow actions from the page</div><div class="srow-d">its buttons act on the box (reboot, power off). Off — the page only shows.</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="scAct" ${c.actions!==false?"checked":""}><span class="sl"></span></label></div></div>
+  </div>
+  <div style="display:flex;gap:8px;margin-top:12px">
+   <button class="btn pri" id="scSave">Save</button>
+   <button class="btn" id="scOpen">${svg("monitor",13)} Open the page</button></div>`;
+  const pv=tc.querySelector("#scPollV"),pr=tc.querySelector("#scPoll");
+  pr.oninput=()=>{pv.textContent=(pr.value/1000).toFixed(1);};
+  tc.querySelector("#scOpen").onclick=()=>window.open("/screen","_blank","noopener");
+  tc.querySelector("#scSave").onclick=async()=>{
+   const cfg={poll:+pr.value,clock_min:+tc.querySelector("#scClk").value,
+              actions:tc.querySelector("#scAct").checked};
+   const res=await api("/api/screen/config",{method:"POST",body:JSON.stringify({config:cfg})});
+   toast(res&&res.ok?"Saved":"Could not save");
+  };
+ });
+}
 
 /* widgets (right rail) */
 let NETH=[],NETT=[];
