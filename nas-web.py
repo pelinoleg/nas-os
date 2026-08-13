@@ -2384,6 +2384,25 @@ def _nb_configured():
     teaches its owner to ignore it before it ever has something real to say."""
     return bool(_safe(_nb_read_raw, None))
 
+def ui_colors():
+    """The four semantic colours, taken from the panel's own dark theme.
+
+    Published so an external device does not have to invent its own palette: it gets a
+    state (ok/warn/danger) next to every value and the hex to paint it with, and the
+    result matches the panel the owner is looking at — including after they change the
+    accent. Thresholds stay on THIS side on purpose: what counts as a hot disk is a
+    property of the box, not of whatever is drawing it."""
+    ds0 = _safe(load_settings, {}) or {}
+    dk0 = (ds0.get("themeProfiles") or {}).get("dark") or {}
+
+    def _hue(k, dflt):
+        v = dk0.get(k) or ds0.get(k) or dflt
+        return v if isinstance(v, str) and re.match(r"^#[0-9a-fA-F]{6}$", v) else dflt
+
+    return {"ok": _hue("goodHex", "#1FA971"), "warn": _hue("warnHex", "#CF881B"),
+            "danger": _hue("dangerHex", "#DE4E48"), "accent": _hue("accentHex", "#12B0A6")}
+
+
 def _gl_backup_tile(best, en):
     if not best:
         if not _nb_configured():
@@ -2750,13 +2769,7 @@ def glance_payload(lang="ru", screen="", only=None, slim=False):
         status = "warn"
     av = avail_bars(24, 96)
     av30 = avail_bars(720, 30)
-    ds0 = _safe(load_settings, {}) or {}
-    dk0 = (ds0.get("themeProfiles") or {}).get("dark") or {}
-    def _hue(k, dflt):
-        v = dk0.get(k) or ds0.get(k) or dflt
-        return v if isinstance(v, str) and re.match(r"^#[0-9a-fA-F]{6}$", v) else dflt
-    colors = {"ok": _hue("goodHex", "#1FA971"), "warn": _hue("warnHex", "#CF881B"),
-              "danger": _hue("dangerHex", "#DE4E48"), "accent": _hue("accentHex", "#12B0A6")}
+    colors = ui_colors()
     counts = {"ok": 0, "warn": 0, "danger": 0}
     for t in tiles:
         if t["state"] in counts:
@@ -22894,6 +22907,36 @@ def _screen_usb_cfg():
             "dest_off": bool(dest and _dest_disk_absent(dest))}
 
 
+def _disk_state(d):
+    """ok/warn/danger for ONE disk, by the same thresholds the tiles use: a failed SMART
+    verdict outranks everything, then space, then temperature. Sent alongside the numbers
+    so a display can colour a disk row without carrying a copy of these rules — a copy
+    that would quietly disagree with the panel the first time a threshold changes."""
+    if d.get("healthy") is False:
+        return "danger"
+    st, known = "ok", d.get("healthy") is True
+    pct = d.get("used_pct")
+    if isinstance(pct, (int, float)):
+        known = True
+        st = "danger" if pct >= 95 else ("warn" if pct >= 90 else st)
+    t = d.get("temp")
+    if isinstance(t, (int, float)):
+        known = True
+        if st != "danger":
+            try:
+                warn_at = int((load_monitor().get("events", {}).get("disktemp") or {}).get("threshold", 60))
+            except (TypeError, ValueError):
+                warn_at = 60
+            if t >= warn_at + 10:
+                st = "danger"
+            elif t >= warn_at and st == "ok":
+                st = "warn"
+    # Nothing was read: a sleeping disk reports no temperature and an unmounted one no
+    # usage. Returning "ok" there would paint a green light off an unread sensor — the
+    # key is left out instead, and a display simply has nothing to colour.
+    return st if known else None
+
+
 def screen_payload(lang="", p2=False, events_max=30, only=None):
     # the screen language comes from screen.json, not the kiosk browser; the UI is
     # English-only now, so lang is effectively always "en"
@@ -23017,6 +23060,9 @@ def screen_payload(lang="", p2=False, events_max=30, only=None):
             "temp": st.get("temp"), "load": st.get("load") or [],
             "mem": st.get("mem") or {}, "pool": st.get("disk_pool"),
             "root": st.get("disk_root"), "overall": hp.get("overall") or "ok",
+            # The palette that goes with every `state` in this document, straight from the
+            # panel's theme, so a display paints the same colours the owner already sees.
+            "colors": ui_colors(),
             "tiles": tiles, "problems": problems, "events": events, "backups": bks,
             # snapshot backups (Kopia) — its own card next to Mirror on the first page
             "kopia": _safe(_screen_kopia, []) or [],
@@ -23024,7 +23070,10 @@ def screen_payload(lang="", p2=False, events_max=30, only=None):
                       "pct": av.get("pct")},
             "avail30": {"bars": av30.get("bars") or [], "frac": av30.get("frac") or [],
                         "pct": av30.get("pct")}, "look": look,
-            "disks": hv.get("disks") or [], "containers": hv.get("containers") or [],
+            # each disk carries its own verdict next to its numbers (see _disk_state)
+            "disks": [dict(d, **({"state": _ds} if (_ds := _disk_state(d)) else {}))
+                      for d in (hv.get("disks") or [])],
+            "containers": hv.get("containers") or [],
             "stacks": hv.get("stacks") or [],
             "usb": _safe(lambda: usb_import_progress()["jobs"], []) or [],
             # import history survives reboot (ops-history.json), unlike /run
