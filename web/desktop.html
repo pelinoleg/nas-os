@@ -12935,7 +12935,7 @@ async function glanceTab(tc){
  const tok=cfg.token||"";
  const url=`http://${location.host}/api/glance?token=${tok||"TOKEN"}&lang=en`;
  tc.innerHTML=`
-  <div class="set-title">External display (API)</div>
+  <div class="set-title">Status API</div>
   <div class="set-sub">An open NAS status feed for any external device (ESP32, a microcontroller panel, a standalone display). The device polls the address below with a token and draws whatever it wants — the panel only serves data, you do the firmware and layout on your side.</div>
   <div class="set-h">Access</div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Serve data with a token</div><div class="srow-d">without a token this data is available only from the panel</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="glEn"${cfg.enabled?" checked":""}><span class="sl"></span></label></div></div>
@@ -13830,12 +13830,10 @@ function winSettings(initTab){openWin("__set","Settings",body=>{
   {sep:1},
   // 3 — system & hardware
   {id:"system",name:"System",ic:"activity"},
-  // Named after the board it is actually running on: on a non-Pi the Pi-only knobs
-  // promise hardware controls the machine does not have.
   {id:"hw",name:"Hardware",ic:"cpu"},
   {id:"maint",name:"Maintenance",ic:"heart"},
   {id:"usb",name:"USB import",ic:"usb"},
-  {id:"glance",name:"Display",ic:"gauge"},
+  {id:"glance",name:"API",ic:"gauge"},
   {id:"motd",name:"SSH login message",ic:"term"},
   {sep:1},
   // 4 — data
