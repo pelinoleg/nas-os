@@ -1993,16 +1993,44 @@ def _nb_next_run(cfg):
 
 # tile id -> history.json field for the 24h sparkline ("net" = rx+tx)
 GLANCE_SPARKS = {"cputemp": "temp", "cpu": "cpu", "ram": "mem",
-                 "netspeed": "net", "pool": "pool"}
+                 "netspeed": "net", "pool": "pool", "disktemp": "dtemp"}
+
+
+def _gl_spark_for(tid):
+    """Which 24h series belongs to this tile. dk:* gets its OWN disk's temperature —
+    the thing worth seeing on a disk is not today's number but that it has been climbing."""
+    if tid.startswith("dk:"):
+        dev = tid[3:]
+        return _gl_spark(lambda p, d=dev: (p.get("dt") or {}).get(d))
+    f = GLANCE_SPARKS.get(tid)
+    return _gl_spark(f) if f else None
 
 def _gl_spark(field, points=48):
+    """24h series for one tile, resampled to `points`. `field` is a history key or a
+    callable taking a point (per-disk series live in a nested dict)."""
     h = history_snapshot("24h").get("history") or []
     if len(h) < 4:
         return None
     if field == "net":
-        raw = [(p.get("rx") or 0) + (p.get("tx") or 0) for p in h]
+        vals = [(p.get("rx") or 0) + (p.get("tx") or 0) for p in h]
+    elif callable(field):
+        vals = [field(p) for p in h]
     else:
-        raw = [p.get(field) or 0 for p in h]
+        vals = [p.get(field) or 0 for p in h]
+    # A series that begins before its source existed (a disk added today, a key added by
+    # an update) starts with gaps. Drawing them as 0 is not neutral — a 0 °C disk reads as
+    # very cold, which is the opposite of unknown. Drop the leading gap, carry the last
+    # known value across the rest.
+    while vals and vals[0] is None:
+        vals.pop(0)
+    if len(vals) < 4:
+        return None
+    raw, last = [], 0
+    for v in vals:
+        if v is None:
+            v = last
+        last = v
+        raw.append(v)
     n = len(raw)
     out = []
     for i in range(points):
@@ -2411,7 +2439,7 @@ def _gl_backup_tile(best, en):
                 "note": "never ran" if not en else "never ran", "raw": None}
     age = time.time() - best
     st = "danger" if age > 7 * 86400 else ("warn" if age > 2 * 86400 else "ok")
-    return {"value": _gl_ago(age, en), "unit": "ago" if not en else "ago", "state": st,
+    return {"value": _gl_ago(age, en), "unit": "", "note": "ago", "state": st,
             "raw": {"ts": int(best), "age_s": int(age)}}
 
 # The cost of EACH response field is multiplied by the polling frequency (a trap from CLAUDE.md).
@@ -2438,6 +2466,44 @@ def _glance_tile_cached(tid, en):
     return d
 
 
+def _gauge(v, lo, hi, warn, danger, unit="", worse="up"):
+    """The numbers behind the verdict, so a bar or a dial is right BY CONSTRUCTION.
+
+    A client that only gets `state` has to invent its own scale, and an invented scale is
+    wrong in a way that looks deliberate: 45 °C on a 0..90 bar sits exactly at midpoint and
+    reads as alarming, when it is a cold disk. Publishing min/max/warnAt/dangerAt means the
+    panel and the box cannot drift apart, and it also settles colour — thresholds plus the
+    palette we already send are enough for the client to compute it.
+
+    `v` is the number to PLOT, which is not always the number we display: the pool tile
+    shows free terabytes but is graphed as percent used. `worse` says which end is bad, so
+    a free-space bar is not drawn as if empty were healthy."""
+    return {"v": round(v, 1) if isinstance(v, float) else v,
+            "min": lo, "max": hi, "warnAt": warn, "dangerAt": danger,
+            "unit": unit, "worse": worse}
+
+
+def _fs_list(paths):
+    """[{mount, size, used, free, pct}] for the mount points that exist.
+
+    List-shaped, like disktemp.raw.all: a client consumes it directly instead of guessing
+    how many keys to look for, and it keeps working when a disk is added or pulled."""
+    out = []
+    for mp in paths:
+        if not os.path.ismount(mp):
+            continue
+        di = _safe(lambda m=mp: disk_info(m))
+        if di:
+            out.append({"mount": mp, "size": di.get("total"), "used": di.get("used"),
+                        "free": di.get("free"), "pct": di.get("pct")})
+    return out
+
+
+def _pool_branches():
+    """The mergerfs branches, as a list. Mirrors what the pool tile aggregates."""
+    return _fs_list(sorted(glob.glob("/mnt/disk*")))
+
+
 def _glance_tile(tid, en):
     """Build one tile -> {value, unit, state, raw[, note]} or None to hide it.
     value/unit are display-ready strings; raw is the machine-readable source
@@ -2449,8 +2515,10 @@ def _glance_tile(tid, en):
                     "note": "pool not mounted" if not en else "pool not mounted", "raw": None}
         v, u = _gl_gb(di["free"], en)
         st = "danger" if di["pct"] >= 90 else ("warn" if di["pct"] >= 80 else "ok")
-        return {"value": v, "unit": u + (" free" if not en else " free"), "state": st,
-                "raw": {"free": di["free"], "used": di["used"], "pct": di["pct"]}}
+        return {"value": v, "unit": u, "note": "free", "state": st,
+                "gauge": _gauge(di["pct"], 0, 100, 80, 90, "%"),
+                "raw": {"free": di["free"], "used": di["used"], "pct": di["pct"],
+                        "all": _safe(_pool_branches, []) or []}}
     if tid == "backup":
         return _gl_backup_tile(max((_nb_last_ok(pr["id"]) for pr in nb_profiles()), default=0), en)
     if tid.startswith("nb:"):
@@ -2477,8 +2545,8 @@ def _glance_tile(tid, en):
             return {"value": "—", "unit": "", "state": "warn", "note": "never ran", "raw": None}
         age = time.time() - last_ok
         st_ = "danger" if bad else ("warn" if age > 2 * 86400 else "ok")
-        return {"value": _gl_ago(age, en), "unit": "ago", "state": st_,
-                "note": ("%d failing" % bad) if bad else "",
+        return {"value": _gl_ago(age, en), "unit": "", "state": st_,
+                "note": ("%d failing" % bad) if bad else "ago",
                 "raw": {"ts": int(last_ok), "age_s": int(age), "failing": bad}}
     if tid == "nbnext":
         best, name = None, ""
@@ -2489,7 +2557,7 @@ def _glance_tile(tid, en):
         if best is None:
             return None
         return {"value": _gl_ago(best - time.time(), en),
-                "unit": "until run" if not en else "until run", "state": "ok", "note": name,
+                "unit": "", "note": "until run · " + name, "state": "ok",
                 "raw": {"ts": int(best), "in_s": int(best - time.time()), "profile": name}}
     if tid.startswith("sc:"):
         s = next((x for x in _glance_scripts() if x["id"] == tid), None)
@@ -2508,8 +2576,13 @@ def _glance_tile(tid, en):
             return None
         pct = round(d0["used_pct"])
         st = "danger" if pct >= 95 else ("warn" if pct >= 90 else "ok")
-        return {"value": _fmt_b(d0.get("free") or 0), "unit": "free" if en else "free",
-                "state": st, "note": (d0.get("model") or d0.get("name") or ""),
+        fv, fu = _gl_gb(d0.get("free") or 0, en)
+        return {"value": fv, "unit": fu,
+                "state": st,
+                # "free" belongs with the number, the model belongs to the disk: both are
+                # qualifiers, so both live in note and the unit stays a unit
+                "note": "free · " + (d0.get("model") or d0.get("name") or ""),
+                "gauge": _gauge(pct, 0, 100, 90, 95, "%"),
                 "raw": {"pct": pct, "free": d0.get("free"), "used": d0.get("used"),
                         "size": d0.get("size"), "temp": d0.get("temp")}}
     if tid in ("avail", "avail30"):
@@ -2526,11 +2599,11 @@ def _glance_tile(tid, en):
         if av.get("cov_total", 1.0) < 0.5:
             return None
         st = "ok" if av["pct"] >= 99 else ("warn" if av["pct"] >= 95 else "danger")
-        unit = ("% / 24h" if not en else "% / 24h") if tid == "avail" else \
-               ("% / 30d" if not en else "% / 30d")
+        note = "24h" if tid == "avail" else "30d"
         # bars in raw: the availability tile can be placed/stretched like a normal one,
         # and the device draws uptime-kuma bars for it (bars view)
-        return {"value": "%.1f" % av["pct"], "unit": unit, "state": st,
+        return {"value": "%.1f" % av["pct"], "unit": "%", "note": note, "state": st,
+                "gauge": _gauge(av["pct"], 90, 100, 99, 95, "%", "down"),
                 "raw": {"pct": av["pct"], "hours": hours,
                         "bars": av.get("bars") or [], "frac": av.get("frac") or []}}
     if tid == "disktemp":
@@ -2544,12 +2617,16 @@ def _glance_tile(tid, en):
             warn_at = 60
         st = "danger" if t >= warn_at + 10 else ("warn" if t >= warn_at else "ok")
         return {"value": "%d" % round(t), "unit": "°C", "state": st, "note": dev,
+                # min is 20, not 0: a disk never sits at freezing, and a bar that starts
+                # there puts a cold drive in the middle of its own scale
+                "gauge": _gauge(t, 20, warn_at + 25, warn_at, warn_at + 10, "°C"),
                 "raw": {"c": round(t, 1), "dev": dev,
                         "all": [{"dev": d, "c": round(x, 1)} for d, x in temps]}}
     if tid == "cpu":
         pct = cpu_percent()
         st = "danger" if pct >= 95 else ("warn" if pct >= 80 else "ok")
-        return {"value": "%d" % round(pct), "unit": "%", "state": st, "raw": {"pct": pct}}
+        return {"value": "%d" % round(pct), "unit": "%", "state": st,
+                "gauge": _gauge(pct, 0, 100, 80, 95, "%"), "raw": {"pct": pct}}
     if tid == "netspeed":
         r = net_rate(default_iface()) or {}
         raw = {"rx": r.get("rx", 0), "tx": r.get("tx", 0)}
@@ -2575,18 +2652,20 @@ def _glance_tile(tid, en):
             return None
         st = "danger" if t >= 75 else ("warn" if t >= 65 else "ok")
         return {"value": "%d" % round(t), "unit": "°C", "state": st,
-                "raw": {"c": round(t, 1)}}
+                "gauge": _gauge(t, 20, 90, 65, 75, "°C"), "raw": {"c": round(t, 1)}}
     if tid == "load":
         la = os.getloadavg()[0]
         ncpu = os.cpu_count() or 4
         st = "danger" if la >= ncpu * 2 else ("warn" if la >= ncpu else "ok")
-        return {"value": "%.1f" % la, "unit": "load", "state": st,
+        return {"value": "%.1f" % la, "unit": "", "note": "1 min", "state": st,
+                "gauge": _gauge(la, 0, ncpu * 2, ncpu, ncpu * 2, "", "up"),
                 "raw": {"load1": round(la, 2), "ncpu": ncpu}}
     if tid == "ram":
         mi = mem_info()
         pct = mi["pct"]
         st = "danger" if pct >= 92 else ("warn" if pct >= 80 else "ok")
         return {"value": "%d" % round(pct), "unit": "%", "state": st,
+                "gauge": _gauge(pct, 0, 100, 80, 92, "%"),
                 "raw": {"pct": pct, "used": mi["used"], "total": mi["total"]}}
     if tid == "rootfs":
         di = disk_info("/")
@@ -2594,15 +2673,17 @@ def _glance_tile(tid, en):
             return None
         st = "danger" if di["pct"] >= 90 else ("warn" if di["pct"] >= 80 else "ok")
         v, u = _gl_gb(di["free"], en)
-        return {"value": v, "unit": u + (" free" if not en else " free"), "state": st,
-                "raw": {"free": di["free"], "used": di["used"], "pct": di["pct"]}}
+        return {"value": v, "unit": u, "note": "free", "state": st,
+                "gauge": _gauge(di["pct"], 0, 100, 80, 90, "%"),
+                "raw": {"free": di["free"], "used": di["used"], "pct": di["pct"],
+                        "all": _safe(lambda: _fs_list(["/", "/boot/efi"]), []) or []}}
     if tid == "uptime":
         up = uptime_s()
         return {"value": _gl_ago(up, en), "unit": "", "state": "ok", "raw": {"s": int(up)}}
     if tid == "net":
         ip = lan_ip()
         good = bool(ip) and not ip.startswith("127.")
-        return {"value": ip or "—", "unit": default_iface() or "",
+        return {"value": ip or "—", "unit": "", "note": default_iface() or "",
                 "state": "ok" if good else "danger",
                 "raw": {"ip": ip, "iface": default_iface(), "ok": good}}
     if tid == "inet":
@@ -2616,7 +2697,7 @@ def _glance_tile(tid, en):
         td = v.get("today") or {}
         return {"value": "↓%s ↑%s" % (_gl_bytes(td.get("rx"), en).replace(" ", ""),
                                        _gl_bytes(td.get("tx"), en).replace(" ", "")),
-                "unit": "today" if not en else "today", "state": "ok",
+                "unit": "", "note": "today", "state": "ok",
                 "raw": {"rx": td.get("rx", 0), "tx": td.get("tx", 0)}}
     if tid == "speed":
         m = _safe(myspeed_state) or {}
@@ -2646,11 +2727,11 @@ def _glance_tile(tid, en):
         if not w.get("ok"):
             return None
         n = w.get("count", 0)
-        return {"value": str(n), "unit": "upd" if not en else "upd",
+        return {"value": str(n), "unit": "", "note": "updates",
                 "state": "warn" if n else "ok", "raw": {"count": n}}
     if tid == "updates":
         n = _safe(_apt_upgradable, 0) or 0
-        return {"value": str(n), "unit": "apt", "state": "warn" if n > 20 else "ok",
+        return {"value": str(n), "unit": "", "note": "apt", "state": "warn" if n > 20 else "ok",
                 "raw": {"count": n}}
     if tid == "snapraid":
         sr = _safe(snapraid_status) or {}
@@ -2658,14 +2739,14 @@ def _glance_tile(tid, en):
             return None
         ls = sr.get("last_sync") or {}
         if not ls.get("date"):
-            return {"value": "—", "unit": "sync", "state": "warn", "raw": None}
+            return {"value": "—", "unit": "", "note": "never synced", "state": "warn", "raw": None}
         try:
             age = time.time() - time.mktime(time.strptime(ls["date"], "%Y-%m-%d %H:%M:%S"))
         except ValueError:
             age = 0
         st = "danger" if (ls.get("result") == "err" or sr.get("blocked")) else \
              ("warn" if age > 8 * 86400 else "ok")
-        return {"value": _gl_ago(age, en), "unit": "sync", "state": st,
+        return {"value": _gl_ago(age, en), "unit": "", "note": "since sync", "state": st,
                 "raw": {"age_s": int(age), "result": ls.get("result"),
                         "blocked": bool(sr.get("blocked"))}}
     if tid == "events":
@@ -2675,7 +2756,7 @@ def _glance_tile(tid, en):
             unseen = sum(1 for e in ev.get("items", []) if e.get("id", 0) > ev.get("seen", 0))
         except (OSError, ValueError):
             unseen = 0
-        return {"value": str(unseen), "unit": "new" if not en else "new", "state": "ok",
+        return {"value": str(unseen), "unit": "", "note": "new", "state": "ok",
                 "raw": {"unseen": unseen}}
     return None
 
@@ -2755,8 +2836,8 @@ def glance_payload(lang="ru", screen="", only=None, slim=False):
                 d["note"] = _translit(d["note"])
             if d.get("value") and not str(d["value"]).isascii():
                 d["value"] = _translit(str(d["value"]))
-        if tid in GLANCE_SPARKS:
-            sp = _safe(lambda t=tid: _gl_spark(GLANCE_SPARKS[t]))
+        if tid in GLANCE_SPARKS or tid.startswith("dk:"):
+            sp = _safe(lambda t=tid: _gl_spark_for(t))
             if sp:
                 d["spark"] = sp
         tiles.append(d)
@@ -2787,7 +2868,11 @@ def glance_payload(lang="ru", screen="", only=None, slim=False):
         keep = set(only)
         tiles = [t for t in tiles if t.get("id") in keep]
 
-    payload = {"v": 4, "host": socket.gethostname(), "status": status,
+    payload = {"v": 5, "host": socket.gethostname(),
+               # the stable name, so a display configured once by IP can be re-pointed at
+               # a name that survives a DHCP lease change. screen/data always had it.
+               "mdns": socket.gethostname() + ".local",
+               "status": status,
                "problems": problems[:6], "tiles": tiles,
                # The same tiles keyed by id. `tiles` is an ordered list for
                # rendering, but a client addressing it by index breaks the
@@ -4723,6 +4808,10 @@ def history_sample():
           "rx": (s.get("net") or {}).get("rx"), "tx": (s.get("net") or {}).get("tx"),
           "pool": (s.get("disk_pool") or {}).get("pct"),
           "dtemp": _safe(lambda: _main_disk_temp()[0]),   # main-storage disk temp (cached, backup-safe)
+          # per-disk temperatures, so every disk can carry its own 24h trend and not just
+          # the hottest one. Read from hwmon (drivetemp), which does NOT wake a sleeping
+          # disk — smartctl here would, and that is the whole reason drivetemp is installed.
+          "dt": {d: round(c, 1) for d, c in (_safe(_hwmon_disk_temps, []) or [])},
           "dio": s.get("dio")}                            # main-storage disk throughput B/s
     snap_long = None
     with _hist_lock:
