@@ -62,7 +62,7 @@ UI прячется, никаких ошибок): **Scrutiny** (здоровь�
 ЖИВОГО Docker через `docker_service_url(name, internal_port)` — менять порт в compose можно,
 панель подхватит сама. Сервисов нет → ненавязчивые бейджи-напоминалки со ссылкой в Dockge.
 **Glance / внешние экраны — открытый API** (`/api/glance`): плоский статус-фид NAS по read-only
-токену (до auth-гейта, `hmac.compare_digest`; конфиг `~/nas-config/glance.json` — только
+токену (до auth-гейта, `hmac.compare_digest`; конфиг `/var/lib/nas-os/glance.json` — только
 `{enabled, token, ping_interval}`; POST `/api/glance/config`). Сервер отдаёт ВСЕ доступные плитки
 одним списком `tiles[]` (каталог `GLANCE_TILES` + динамические `nb:<pid>`/`sc:<script>`/`dk:<disk>`,
 недоступный сервис → плитки нет), у каждой `value/unit/state/raw` (машинные числа) и у части `spark`
@@ -174,7 +174,7 @@ ip neigh` — тем самым `ip neigh` нашли скрытый роуте�
 обновлением — менять через Claude или по SSH. Проверено 6 ассертами (CLAUDE.md открывается, но
 `writable:false` с причиной; запись отклоняется; обычный файл пишется как прежде).
 
-**Кэш иконок ярлыков** (`/api/icon` → `~/nas-config/icons/`) и **лимит кэша миниатюр**
+**Кэш иконок ярлыков** (`/api/icon` → `/var/lib/nas-os/icons/`) и **лимит кэша миниатюр**
 (`maintenance.json:thumb_cache_mb`, GC в `maintenance_daily`).
 
 **ГРАБЛЯ UX: спрятать ярлык было можно, вернуть — нечем (2026-07-30, исправлено.)**

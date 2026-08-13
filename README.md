@@ -55,7 +55,7 @@ Then open `http://<hostname>.local` and go through the **wizard**: Disks → Poo
 
 ## What lives where
 - Code: `/opt/nas-os/` (`nas-web.py`, `nas-wizard.sh`, `web/`, `services/`)
-- Config/data (per-user): `~/nas-config` (desktop settings, access, snippets, favorites)
+- Config/data (panel-owned): `/var/lib/nas-os` (desktop settings, access, snippets, favorites)
 - Preview cache: `/var/cache/nas-thumbs` · docker stacks: `/opt/stacks`
 
 ## Update

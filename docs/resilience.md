@@ -33,7 +33,7 @@ monitor_loop, тик `_resil_tick` в monitor_loop. ЖЕЛЕЗНЫЙ принц�
   («initial snapshot») вместо списка объясняет, что это стартовая точка. ГРАБЛЯ вёрстки: паттерн
   `.nbmain`+`.set-nav` скроллит ТОЛЬКО .set-pane лишь если body окна — flex-колонка с overflow:hidden
   (`body.style.display="flex"` и т.д., как Settings/ФМ) — иначе скроллится всё окно вместе с сайдбаром.
-- **Disaster card** — авто-документ `~/nas-config/disaster-card.md` («бокс умер — что делать»: диски
+- **Disaster card** — авто-документ `/var/lib/nas-os/disaster-card.md` («бокс умер — что делать»: диски
   с серийниками, fstab, snapraid, шары, стеки+образы, профили бэкапа, шаги восстановления). Пересборка
   ежедневно; лежит в nas-config → уезжает с бэкапом настроек сам. UI: просмотр+Download+Rebuild.
 - **Log sentry** — детектор НОВЫХ паттернов ошибок в journald (`-p 3`, курсор в `logsentry.json`):

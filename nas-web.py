@@ -5,7 +5,7 @@ nas-web.py — web backend of the NAS setup wizard and desktop (Raspberry Pi 5).
 Python 3 standard library only (no pip). Serves static files from web/ and a JSON API:
   GET  /api/stats                 — live Pi metrics (CPU, temp, RAM, disk, network, uptime)
   GET  /api/desktop               — desktop shortcuts from docker labels web-desktop.*
-  GET/POST /api/creds             — credential store (~/nas-config/credentials.json, 0600)
+  GET/POST /api/creds             — credential store (/var/lib/nas-os/credentials.json, 0600)
   GET  /api/setup/state           — system state for the wizard
   POST /api/setup/<action>        — run a wizard step (delegates to nas-wizard.sh api)
 
@@ -30,7 +30,13 @@ def _uid1000_name():
         return "root"
 TARGET_USER = os.environ.get("SUDO_USER") or os.environ.get("USER") or _uid1000_name()
 HOME        = os.path.expanduser("~" + TARGET_USER)
-NAS_CONFIG  = os.path.join(HOME, "nas-config")
+# The panel's own state. It used to live in the panel user's home; it moved out on
+# 2026-08-13. The panel runs as root and starts before the pool is mounted, so its state
+# has no business depending on a home directory — or on that user existing at all after
+# a reinstall. /var/lib is where a service keeps what it owns. The system disk stays
+# expendable because all of this is in "Settings -> Settings backup", which lands on the pool.
+NAS_CONFIG  = os.environ.get("NAS_CONFIG_DIR") or "/var/lib/nas-os"
+LEGACY_NAS_CONFIG = os.path.join(HOME, "nas-config")
 CREDS_FILE  = os.path.join(NAS_CONFIG, "credentials.json")
 TRASH       = os.path.join(HOME, ".nas-trash")
 PORT        = int(os.environ.get("NAS_WEB_PORT", "8080"))
@@ -39,6 +45,35 @@ STORAGE_CONF = os.path.join(NAS_CONFIG, "storage.json")
 BODY_MAX    = 32 * 1024 * 1024   # JSON request body cap (wallpaper/base64 fits; larger — via _upload_raw)
 COMPOSE_NAMES = ("docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml")
 CRON_URL    = os.environ.get("CRONMASTER_URL", "http://127.0.0.1:8123")  # published cronmaster port
+
+def _migrate_nas_config():
+    """Move /var/lib/nas-os to NAS_CONFIG once, on the first start after the move.
+
+    Runs at import time, so it must never raise: a panel that refuses to start is a
+    far worse outcome than a config that stayed where it was. Anything that goes wrong
+    here leaves the old directory untouched and simply starts with fresh defaults —
+    recoverable from the settings backup, unlike a box with no web interface.
+
+    Deliberately no compatibility symlink left behind: the whole point of the move was
+    to get the panel's state out of the user's home, and a symlink would put it back."""
+    try:
+        if NAS_CONFIG == LEGACY_NAS_CONFIG or not os.path.isdir(LEGACY_NAS_CONFIG):
+            return
+        if os.path.isdir(NAS_CONFIG) and os.listdir(NAS_CONFIG):
+            return                                   # already migrated
+        os.makedirs(os.path.dirname(NAS_CONFIG) or "/", exist_ok=True)
+        if os.path.isdir(NAS_CONFIG):
+            os.rmdir(NAS_CONFIG)                     # empty leftover from a previous start
+        shutil.move(LEGACY_NAS_CONFIG, NAS_CONFIG)
+        os.chown(NAS_CONFIG, 0, 0)
+        os.chmod(NAS_CONFIG, 0o755)
+        sys.stderr.write("nas-web: moved %s -> %s\n" % (LEGACY_NAS_CONFIG, NAS_CONFIG))
+    except Exception as e:
+        try:
+            sys.stderr.write("nas-web: config move skipped (%s)\n" % e)
+        except Exception:
+            pass
+_migrate_nas_config()
 
 # --------------------------------------------------------------------------- #
 #  Metrics collection (read-only, no root needed)
@@ -1918,7 +1953,7 @@ GLANCE_DEF_TILES = ["pool", "backup", "avail", "cputemp", "net", "docker"]
 
 def glance_catalog():
     """Static tiles + one per backup profile (named like its tab) + one per
-    user check script in ~/nas-config/scripts/glance/."""
+    user check script in /var/lib/nas-os/scripts/glance/."""
     cat = []
     for t in GLANCE_TILES:
         cat.append(t)
@@ -1935,7 +1970,7 @@ def glance_catalog():
         cat.append(("dk:" + (d.get("name") or "?"), "Disk · " + nm, "Disk · " + nm))
     return cat
 
-# User check scripts: any executable in ~/nas-config/scripts/glance/ becomes a
+# User check scripts: any executable in /var/lib/nas-os/scripts/glance/ becomes a
 # tile. First stdout line: "ok|warn|danger <short text>"; otherwise the exit
 # code decides (0=ok, 1=warn, else danger). Refreshed in a background thread so
 # a slow script can never stall the glance response.
@@ -10162,7 +10197,7 @@ def settings_backup_restore(path, sections=None):
                 nm = m.name.lstrip("./")
                 parts = nm.split("/")
                 # reject non-files, path escapes, and any .git member (an old archive
-                # could otherwise spill a foreign git tree into ~/nas-config)
+                # could otherwise spill a foreign git tree into /var/lib/nas-os)
                 if not m.isreg() or ".." in parts or nm.startswith("/") or ".git" in parts:
                     continue
                 # an unchecked section is not an error but a deliberate choice: not in skipped
@@ -15214,7 +15249,7 @@ def confgit_filediff(h, path):
 # ---- disaster card ----------------------------------------------------------
 
 def disaster_build():
-    """Regenerate ~/nas-config/disaster-card.md — the "box is dead, now what"
+    """Regenerate /var/lib/nas-os/disaster-card.md — the "box is dead, now what"
     document. It lives in nas-config, so the settings backup carries it OFF-box
     automatically. Everything is read from the live system at build time."""
     host = socket.gethostname()
@@ -17781,7 +17816,7 @@ def discover_desktop_apps():
 
 # --------------------------------------------------------------------------- #
 #  Shortcut icon cache (web-desktop.icon).  The browser loads the icon not from the
-#  internet but from the NAS: the server fetches the image by URL once and stores it in ~/nas-config/icons/.
+#  internet but from the NAS: the server fetches the image by URL once and stores it in /var/lib/nas-os/icons/.
 #  The cache key = the URL itself, so changing the label (a new URL) = a fresh download,
 #  and the old file simply stops being used.
 # --------------------------------------------------------------------------- #
@@ -19179,7 +19214,7 @@ def fs_du(path):
 # --------------------------------------------------------------------------- #
 #  Disk usage analyzer (DaisyDisk-like). Background walk of a single volume (within
 #  one FS, like `du -x`), build a flat map of directories with sizes, cache it
-#  in ~/nas-config/duscan-<hash>.json. The frontend requests one node at a time (lazy
+#  in /var/lib/nas-os/duscan-<hash>.json. The frontend requests one node at a time (lazy
 #  drill-down) → small responses even on terabyte pools.
 # --------------------------------------------------------------------------- #
 DUSCAN_TOPF = 12     # keep the top-N largest files per directory
@@ -21323,7 +21358,7 @@ def sysconf_set(key, val, extra=None):
 
 # --------------------------------------------------------------------------- #
 #  Desktop wallpaper: upload from a PC (base64) or download by URL.
-#  The active image is cached locally (~/nas-config/wallpaper.<ext>) and
+#  The active image is cached locally (/var/lib/nas-os/wallpaper.<ext>) and
 #  served from /api/wallpaper/img — stable across reboots and clients.
 # --------------------------------------------------------------------------- #
 def _img_ext(data):

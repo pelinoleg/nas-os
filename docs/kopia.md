@@ -50,7 +50,7 @@ T7 (`/media/nas/t7-4TB/kopia-repo`, dest 0b08dd) + rclone-репо на pcloud (
 dest b3684c), пароль `nas-958b5442`. ГРАБЛИ: rclone-бэкенд kopia помечен «[Not maintained]» —
 работает (проверено), но при проблемах смотреть сюда; `content stats --json` не существует
 (парсим `--raw`). **Стадия 2 готова (2026-07-23): snapshot-раннер + 3-2-1.** CLI `kopia-snap`
-(env KPS_BID) → транзиент-юнит `nas-kopia-<bid>`; state/log `~/nas-config/kopia-run-<bid>.{json,log}`,
+(env KPS_BID) → транзиент-юнит `nas-kopia-<bid>`; state/log `/var/lib/nas-os/kopia-run-<bid>.{json,log}`,
 история `kopia-history.json` (100 записей, фазы snapshot/replicate). `_kp_policy_apply` — retention/
 compression(zstd)/ignores на каждую папку source (`kopia policy set`; ретеншен kopia применяет САМ
 после снапшота). Снапшот всех папок одной командой + `--tags nasbk:<bid>` (фильтр в Snapshots по

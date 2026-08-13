@@ -108,7 +108,7 @@ Restore). **Restore из облака (pull)** — `rcloneRestoreDlg`: брау�
 через `/api/backup/rclone/ls`), выбор папки + локального приёмника, `rclone copy` remote→local
 (ТОЛЬКО copy, никогда sync/delete — облако не трогается, локально файлы только добавляются/обновляются;
 приёмник обязан быть под /mnt|/media|/srv|/home). Свой транзиент-юнит `nas-rclone-restore` +
-state/log в `~/nas-config/rclone-restore.*`, драйвер `_rclone_restore_cli` (CLI `rclone-restore`,
+state/log в `/var/lib/nas-os/rclone-restore.*`, драйвер `_rclone_restore_cli` (CLI `rclone-restore`,
 пути через env `RCR_*`), прогресс тем же `_rclone_progress_line`; dry-run превью. API
 `/api/backup/rclone/restore/{start,status,cancel}`),
 обновления apt из UI, авто-ремоунт/термозащита/сводка/усиленный USB-импорт, английский UI
@@ -140,7 +140,7 @@ verify + speed limit — предпоследний шаг «Options» (`wizOpts
 tabConnPush — мёртвый код старой модели (не вызывается), не удалён.
 **Анализатор места** (DaisyDisk-стиль, `winDiskUsage`): фоновый скан тома в пределах одной ФС
 (`du -x` по `st_dev`; в mergerfs-пуле `st_dev` консистентен → работает и для пула/системы/USB), кэш
-в `~/nas-config/duscan-*.json` + ленивая отдача узлов (`/api/fs/duscan/{status,node,start,cancel}`),
+в `/var/lib/nas-os/duscan-*.json` + ленивая отдача узлов (`/api/fs/duscan/{status,node,start,cancel}`),
 sunburst 2 кольца с drill-down/подписями/подсветкой круг↔бары, возраст скана цветом.
 **ГРАБЛЯ:** живой киоск НЕ подхватывает правки `web/screen.html` — страница загружена один раз
 при старте; после правки `sudo systemctl restart nas-screen` (сервер-то отдаёт свежий файл сразу,
@@ -161,7 +161,7 @@ sunburst 2 кольца с drill-down/подписями/подсветкой к
 `_screen_tick()` в monitor_loop (тревога `health=bad` зажигает экран даже ночью; касание будит
 через `POST /api/screen/act {a:"touch"}`). Настройки → вкладка «Тачскрин».
 **Заметки** (`winNotes` + модуль notes в nas-web.py): обычные .md с frontmatter в
-`notes_root()` (дефолт `/mnt/storage/notes`, конфиг `~/nas-config/notes.json`, миграция
+`notes_root()` (дефолт `/mnt/storage/notes`, конфиг `/var/lib/nas-os/notes.json`, миграция
 `/api/notes/root`); `_assets/` для картинок, `.trash/` для удалённых. Редактор — vendored
 Toast UI (web/tui-editor*.js/css, MIT, офлайн — НЕ обновлять с CDN бездумно) + плагин
 подсветки кода (web/tui-hl.*). **Два типа заметки живут рядом**: markdown (`.md`,
@@ -183,14 +183,14 @@ Toast UI) и полный HTML (`.html`, редактор = исходник Cod
 `.history` (заметки нет нигде), несвязанные `_assets` (имени нет ни в одном .md,
 файл старше 7 дней).
 **SSH-серверы в ФМ**: секция «Серверы» в сайдбаре — sshfs-маунты в `/mnt/remote/<id>`
-(`~/nas-config/remotes.json` с паролями → секретная секция бэкапа; opts
+(`/var/lib/nas-os/remotes.json` с паролями → секретная секция бэкапа; opts
 reconnect+ServerAlive, allow_other; пакет sshfs в UTIL_PACKAGES визарда).
 Смонтированный сервер = обычная папка, все операции ФМ работают как есть.
 **Restore-drill (проверка восстановимости бэкапа, 2026-07-21/22).** Бэкап, который записан, но
 не доказано восстановим, — это надежда, а не бэкап. Drill тянет НЕСКОЛЬКО случайных файлов
 ОБРАТНО из приёмника и проверяет их. Движок в nas-web.py: `nb_drill_start/status/cancel`,
 CLI `backup-drill <pid>`, свой транзиент-юнит `nas-backup-drill[-<pid>]`, стейт
-`nas-backup-drill-<pid>.json`. READ-ONLY (пишет только временное под `~/nas-config/restore-drill/`).
+`nas-backup-drill-<pid>.json`. READ-ONLY (пишет только временное под `/var/lib/nas-os/restore-drill/`).
 `_nb_drill_local` — local-приёмник (sha256 при вычитывании), `_nb_drill_rclone` — облако
 (`rclone copyto`, rclone сам чек-суммит). **V2 — сверка с ИСТОЧНИКОМ (ловит тихий bit-rot на
 приёмнике):** после восстановления файла перечитывает оригинал через `_nb_src_meta` (local=hashlib;

@@ -12440,7 +12440,7 @@ function backupTab(tc){
 }
 let SYSC=null, PENDING_REBOOT=false;
 /* Settings tab «Display»: status feed for external displays (ESP32 etc.).
-   Config lives server-side (~/nas-config/glance.json): the device polls
+   Config lives server-side (/var/lib/nas-os/glance.json): the device polls
    /api/glance with a read-only token and just renders what the server sends,
    so changing tiles here never requires reflashing the device. */
 /* NB: distinct name — a global sparkSVG(data,color,max) already exists for the
@@ -15414,7 +15414,7 @@ function winNotif(){openWin("__notif","Notifications",async body=>{
 /* ---- operations center (queues, progress, cancel) ---- */
 const OPS={list:[],seq:0,paintT:0,autoClosed:false,autoOpened:false};
 
-/* Operation history now lives on the server (~/nas-config/ops-history.json), so it is
+/* Operation history now lives on the server (/var/lib/nas-os/ops-history.json), so it is
    the same in every browser and survives a reinstall through the settings backup.
    localStorage stays as an offline cache: if the API is unreachable we still show
    something. Running operations are never persisted — an upload dies with the page,

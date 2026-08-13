@@ -5,11 +5,11 @@ _Правила и грабли, которые важны ВСЕГДА, жив�
 
 **Реплика** (рецепт `meta.json:replica`, пока Immich) — ОСТАЛАСЬ, кнопка «Replica…» в детали
 установленного стека (`stReplicaDlg`): SSH-дамп Postgres с источника + rsync медиатеки
-(`/api/store/replica/run`, дамп в `~/nas-config/replica/<id>/`), восстановление поднимает
+(`/api/store/replica/run`, дамп в `/var/lib/nas-os/replica/<id>/`), восстановление поднимает
 стек ТОЙ ЖЕ версией, что источник (тег из `docker inspect` при синке → `IMMICH_VERSION` в
 .env). `store.json` = только replica-конфиги (пароль SSH → секретная секция бэкапа настроек).
 Реплика: `auto="HH:MM"` в конфиге — ежедневный автосинк (`_replica_tick` в
-monitor_loop, лог в `~/nas-config/replica/<id>/sync.log`, провал → уведомление).
+monitor_loop, лог в `/var/lib/nas-os/replica/<id>/sync.log`, провал → уведомление).
 **Бэкап Ugreen NAS (боевой профиль 1f0f2b, pull-ssh, 2026-07-22) — стратегия БД.** Файловая
 rsync-копия ЖИВОГО Postgres не восстанавливается (файлы копируются в разные моменты →
 рассогласованный снимок). Поэтому: **живые каталоги БД исключены** (`immich/postgres/`,
@@ -236,7 +236,7 @@ paperless/mail-archiver добавлен **sidecar `db-backup`** (`prodrigestivi
 
 **Проверка восстановимости Immich (2026-07-24) — репетиция на реальном дампе.**
 Вопрос был «упадёт основной NAS — поднимусь ли тут». Проверено не на глаз, а прогоном.
-- **Реплика (`stReplicaDlg`) на этом боксе НЕ настроена**: нет `store.json`, нет `~/nas-config/
+- **Реплика (`stReplicaDlg`) на этом боксе НЕ настроена**: нет `store.json`, нет `/var/lib/nas-os/
   replica/`, стек immich не установлен. То есть кнопки «Update replica» просто не из чего нажимать.
 - **Но данные есть и они хорошие**: rsync-профиль «Ugreen Nas to T7 SSD» держит библиотеку целиком
   (`home/Photos Immich`, 1.0 ТБ: library/upload/thumbs/encoded-video/profile) и 21 собственный дамп

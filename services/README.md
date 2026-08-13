@@ -5,7 +5,7 @@ Each service is a separate subfolder with a `docker-compose.yml` file
 
 `nas-wizard.sh --stage docker` scans this folder, shows a checklist of
 "which ones to bring up", and runs `docker compose up -d` for the selected ones (idempotent).
-`~/nas-config/scripts/deploy.sh` brings everything up at once.
+`/var/lib/nas-os/scripts/deploy.sh` brings everything up at once.
 
 ## Conventions (by spec)
 
