@@ -3424,7 +3424,7 @@ if [ "$need_containers" = "1" ] && command -v docker >/dev/null 2>&1; then
   V_CONT="$(timeout 3 docker ps -q 2>/dev/null | grep -c .)"
 fi
 
-# ---- logo. NAS-OS brand colours: #C51A4A and the indicator green #75A928 — the
+# ---- logo. NAS-OS brand colours: #C8506B and the indicator green #7BCB59 — the
 # same pair web/icon.svg is built from.
 # 24-bit codes only when the terminal announced them: ssh forwards TERM but not
 # COLORTERM, and Terminal.app cannot parse them. Otherwise nearest 256-palette.
@@ -3432,9 +3432,9 @@ if [ "${MOTD_LOGO:-1}" = "1" ]; then
   if [ -n "${NO_COLOR:-}" ]; then
     PIR=""; PIG=""; PID=""
   elif [ "${COLORTERM:-}" = "truecolor" ] || [ "${COLORTERM:-}" = "24bit" ]; then
-    PIR=$'\033[1;38;2;197;26;74m'; PIG=$'\033[1;38;2;117;169;40m'; PID=$'\033[2;37m'
+    PIR=$'\033[1;38;2;200;80;107m'; PIG=$'\033[1;38;2;123;203;89m'; PID=$'\033[2;37m'
   else
-    PIR=$'\033[1;38;5;161m'; PIG=$'\033[1;38;5;106m'; PID=$'\033[2;37m'
+    PIR=$'\033[1;38;5;168m'; PIG=$'\033[1;38;5;113m'; PID=$'\033[2;37m'
   fi
   printf '\n'
   printf '  %s╔╗╔╔═╗╔═╗%s    %s╔═╗╔═╗%s\n' "$PIR" "$R" "$PIG" "$R"
