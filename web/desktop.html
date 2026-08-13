@@ -13847,14 +13847,13 @@ function winSettings(initTab){openWin("__set","Settings",body=>{
   {id:"pi",name:(LAST&&LAST.is_pi===false)?"Hardware":"Raspberry Pi",ic:"cpu"},
   {id:"maint",name:"Maintenance",ic:"heart"},
   {id:"usb",name:"USB import",ic:"usb"},
-  {id:"tscr",name:"Touch screen",ic:"monitor"},
   {id:"glance",name:"Display",ic:"gauge"},
   {id:"motd",name:"SSH login message",ic:"term"},
   {sep:1},
   // 4 — data
   {id:"backup",name:"Settings backup",ic:"save"},
  ];
- const FN={look:lookTab,files:filesTab,notify:notifyTab,glance:glanceTab,tscr:screenTab,nts:notesTab,timemachine:timemachineTab,system:systemTab,motd:motdTab,maint:maintTab,network:networkTab,sharing:sharingTab,security:securityTab,usb:usbTab,backup:backupTab,pi:piTab,syncthing:syncthingTab};
+ const FN={look:lookTab,files:filesTab,notify:notifyTab,glance:glanceTab,nts:notesTab,timemachine:timemachineTab,system:systemTab,motd:motdTab,maint:maintTab,network:networkTab,sharing:sharingTab,security:securityTab,usb:usbTab,backup:backupTab,pi:piTab,syncthing:syncthingTab};
  let footMo=null;
  const render=()=>{
   if(footMo){footMo.disconnect();footMo=null;}
@@ -14077,20 +14076,6 @@ function lsWall(lb){lb.innerHTML=`
  renderBody();
  lb.querySelectorAll("#wpSrc button").forEach(b=>b.onclick=()=>{SET.wpType=b.dataset.s;lb.querySelectorAll("#wpSrc button").forEach(x=>x.classList.toggle("on",x.dataset.s===SET.wpType));renderBody();startSlideshow();});
  wireLook(lb);}
-// Touchscreen wallpaper block: source body (url/upload) + preview, wired like the desktop wallpaper but into scr* keys and the ?screen=1 copy.
-function scrWpRender(lb){
- const src=lb.querySelector("#scrWpSrc");if(!src)return;   // block hidden (scrWpOwn off)
- paintScrWpPrev(lb.querySelector("#scrWpPrev"));
- const body=()=>{const up=SET.scrWpType==="upload",wb=lb.querySelector("#scrWpBody");
-  if(up){wb.innerHTML=`<button class="btn sm pri" id="scrWpFileBtn">${svg("upload",13)} Choose an image…</button><input type="file" id="scrWpFile" accept="image/*" style="display:none"><div class="mon-note">JPG / PNG / WebP / GIF, up to 30 MB. Stored on the server and scaled to the panel.</div>`;
-   const fi=wb.querySelector("#scrWpFile");wb.querySelector("#scrWpFileBtn").onclick=()=>fi.click();fi.onchange=()=>uploadScrWallFile(fi.files[0],lb);
-  }else{wb.innerHTML=`<input class="mono" id="scrWpUrl" style="width:100%;margin-bottom:9px" value="${att(SET.scrWpUrl||"")}" placeholder="https://…"><div style="display:flex;gap:8px"><button class="btn sm pri" id="scrWpSet">Install</button><button class="btn sm" id="scrWpRef">${svg("refresh",13)} Refresh</button></div><div class="mon-note">A link to an image for the local touchscreen. Delivered as a reduced copy sized for the panel.</div>`;
-   wb.querySelector("#scrWpSet").onclick=async()=>{SET.scrWpUrl=wb.querySelector("#scrWpUrl").value.trim();await setScrWallUrl();paintScrWpPrev(lb.querySelector("#scrWpPrev"));};
-   wb.querySelector("#scrWpRef").onclick=async()=>{await setScrWallUrl(true);paintScrWpPrev(lb.querySelector("#scrWpPrev"));};
-  }};
- body();
- src.querySelectorAll("button").forEach(b=>b.onclick=()=>{SET.scrWpType=b.dataset.s;src.querySelectorAll("button").forEach(x=>x.classList.toggle("on",x.dataset.s===SET.scrWpType));saveSettings();body();});
-}
 function lsBar(lb){lb.innerHTML=`
   <div class="set-card">
    ${pSlider("Icon size","mbIcon",.8,1.5,.05,"pct","Scale of the icons in the top bar.")}
@@ -14240,41 +14225,8 @@ function lsWindows(lb){const cl=/^#[0-9a-f]{6}$/i;lb.innerHTML=`
 // Appearance → Touchscreen: everything about the local DSI panel's look in one place —
 // its wallpaper (own or inherited) and ONE shared glass material for every surface (bar + cards),
 // since the wall panel has no separate top bar to tune. All keys are global (scr*), not per-theme.
-function lsScreen(lb){lb.innerHTML=`
-  <div class="set-card"><div class="mon-note" style="margin:0">Look of the local touchscreen (the DSI panel on the box). It is always dark, independent of the browser theme. Off toggles = inherit the desktop dark look, as before.</div></div>
-  <div class="set-card"><div class="set-grp">Wallpaper</div>
-   ${pToggle("Separate wallpaper","Off — the touchscreen shows the desktop wallpaper, scaled to its panel. On — its own image and effects here, still delivered as a reduced copy sized for the panel.","scrWpOwn","own image and effects for the local screen")}
-   <div id="scrWpArea" style="${SET.scrWpOwn?"":"display:none"}">
-    <div class="wp-prev" id="scrWpPrev" style="margin-top:11px"></div>
-    <div class="seg" id="scrWpSrc" style="margin:11px 0 12px">
-     <button data-s="url" class="${SET.scrWpType!=="upload"?"on":""}">${svg("globe",14)} From URL</button>
-     <button data-s="upload" class="${SET.scrWpType==="upload"?"on":""}">${svg("upload",14)} From computer</button></div>
-    <div id="scrWpBody"></div>
-    <div class="set-grp" style="margin-top:14px">Effects — on top of the wallpaper</div>
-    ${fxSlider("Dimming","scrFxDim",0,80,"%","A dark layer over the touchscreen wallpaper.")}
-    ${fxSlider("Blur","scrFxBlur",0,100,"px","Blurs the touchscreen background.")}
-    ${fxSlider("Grain / noise","scrFxNoise",0,100,"%","Film grain — softens gradient banding.")}
-   </div>
-  </div>
-  <div class="set-card"><div class="set-grp">Glass — bar and cards together</div>
-   ${pToggle("Own material for the touchscreen","Off — inherit the desktop dark material. On — one shared glass for every surface on the screen (the top bar is not tuned separately here).","scrWdgOwn","one glass for the whole screen")}
-   <div id="scrWdgArea" style="${SET.scrWdgOwn?"":"display:none"}">
-    <div class="srow"><div class="srow-l"><div class="srow-t">Background color${tipHTML("Glass fill color for the touchscreen. Reset — derive it from the tint automatically.")}</div></div><div class="srow-c"><input type="color" id="scrWdgC" value="${/^#[0-9a-f]{6}$/i.test(SET.scrWdgColor||"")?SET.scrWdgColor:"#161e2a"}" class="ccell"><button class="btn sm" id="scrWdgCReset">Reset</button></div></div>
-    ${pSlider("Background opacity","scrWdgOp",0,100,1,"pctn","Density of the glass on the touchscreen. Lower — more see-through.")}
-    ${pSlider("Blur behind glass","scrWdgBlur",0,100,1,"px","Frosted blur of the wallpaper behind the cards and bar. 0 — no blur.")}
-    ${pSlider("Saturation","scrWdgSat",0,200,5,"pctn","Vibrancy of the background showing through: 100% — unchanged, lower — desaturates, higher — more vivid.")}
-   </div>
-  </div>`;
- scrWpRender(lb);
- const cc=lb.querySelector("#scrWdgC");if(cc){cc.oninput=()=>{SET.scrWdgColor=cc.value;};cc.onchange=()=>saveSettings();}
- const cr=lb.querySelector("#scrWdgCReset");if(cr)cr.onclick=()=>{SET.scrWdgColor="";saveSettings();lsScreen(lb);};
- wireLook(lb);
- // the "own" toggles show/hide their block and re-render (wireLook's generic handler only saves)
- const wp=lb.querySelector('input[data-pt="scrWpOwn"]');if(wp)wp.onchange=()=>{SET.scrWpOwn=wp.checked;saveSettings();lsScreen(lb);};
- const wd=lb.querySelector('input[data-pt="scrWdgOwn"]');if(wd)wd.onchange=()=>{SET.scrWdgOwn=wd.checked;saveSettings();lsScreen(lb);};
-}
-function lookTab(tc){const SUBS=[["theme","Theme","sun"],["wall","Wallpaper","image"],["bar","Bar","gauge"],["widgets","Widgets","grid"],["dock","Dock","cube"],["pop","Popovers","bell"],["win","Material","sidebar"],["screen","Touchscreen","monitor"],["icons","Icons","folder"],["misc","Other","cog"]];
- let sub=lookTab._sub||"theme";const FN={theme:lsTheme,wall:lsWall,bar:lsBar,widgets:lsWidgets,dock:lsDock,pop:lsPop,win:lsWindows,screen:lsScreen,icons:lsIcons,misc:lsMisc};
+function lookTab(tc){const SUBS=[["theme","Theme","sun"],["wall","Wallpaper","image"],["bar","Bar","gauge"],["widgets","Widgets","grid"],["dock","Dock","cube"],["pop","Popovers","bell"],["win","Material","sidebar"],["icons","Icons","folder"],["misc","Other","cog"]];
+ let sub=lookTab._sub||"theme";const FN={theme:lsTheme,wall:lsWall,bar:lsBar,widgets:lsWidgets,dock:lsDock,pop:lsPop,win:lsWindows,icons:lsIcons,misc:lsMisc};
  const render=()=>{tc.innerHTML=`<div class="ls-tabs">${SUBS.map(([id,nm,ic])=>`<button data-ls="${id}" class="${sub===id?"on":""}">${svg(ic,14)}<span>${nm}</span></button>`).join("")}</div><div id="lb"></div>`;
   tc.querySelectorAll(".ls-tabs button").forEach(b=>b.onclick=()=>{sub=b.dataset.ls;lookTab._sub=sub;render();});
   (FN[sub]||lsTheme)(tc.querySelector("#lb"));};
@@ -14726,60 +14678,6 @@ function usbTab(tc){tc.innerHTML=`<div class="set-load">loading…</div>`;
    toast(LIVE?(rr&&rr.ok?(rr.warn||"Saved ✓"):"Error: "+((rr&&rr.log)||"?")):"Demo");};
  });}
 /* --- settings: SSH login greeting --- */
-function screenTab(tc){
- tc.innerHTML=`<h3 class="set-title">Local screen</h3><p class="set-sub">A touch panel wired to the box itself: a kiosk dashboard (cage + chromium). It is always dark and asks for no password — it is reachable only from the NAS itself.</p>
-  <div id="scrNo" class="mon-note" style="display:none">${svg("info",13)} No screen attached — no DSI display and no backlight found.</div>
-  <div id="scrBody" style="display:none">
-  <div class="set-grp">Display</div>
-  <div class="srow"><div class="srow-l"><div class="srow-t">Show the dashboard</div><div class="srow-d">nas-screen service: cage + chromium on tty1</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="scEn"><span class="sl"></span></label></div></div>
-  <div class="srow"><div class="srow-l"><div class="srow-t">Actions from the screen</div><div class="srow-d">run a backup, reboot, power off — right from the screen</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="scAct"><span class="sl"></span></label></div></div>
-  <div class="srow"><div class="srow-l"><div class="srow-t">Brightness</div><div class="srow-d">daytime, 1–255</div></div><div class="srow-c"><input type="range" min="1" max="255" id="scBr" style="width:180px"><b id="scBrV" style="margin-left:8px;min-width:34px;display:inline-block"></b></div></div>
-  <div class="set-grp">Sleep</div>
-  <div class="srow"><div class="srow-l"><div class="srow-t">Dim at night</div><div class="srow-d">on a schedule; a failure (disk, backup, service) lights the screen up even at night</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="scN"><span class="sl"></span></label></div></div>
-  <div class="srow"><div class="srow-l"><div class="srow-t">Sleep at</div><div class="srow-d">when the backlight goes off</div></div><div class="srow-c"><input type="time" id="scFrom" class="inp" style="width:120px"></div></div>
-  <div class="srow"><div class="srow-l"><div class="srow-t">Wake at</div><div class="srow-d">when the backlight comes back</div></div><div class="srow-c"><input type="time" id="scTo" class="inp" style="width:120px"></div></div>
-  <div class="srow"><div class="srow-l"><div class="srow-t">Brightness at night</div><div class="srow-d">0 — off completely; a touch wakes it for a minute</div></div><div class="srow-c"><input type="range" min="0" max="255" id="scNb" style="width:180px"><b id="scNbV" style="margin-left:8px;min-width:34px;display:inline-block"></b></div></div>
-  <div class="srow"><div class="srow-l"><div class="srow-t">Dim when idle</div><div class="srow-d">minutes without a touch; 0 — never dim</div></div><div class="srow-c"><input type="number" min="0" max="240" id="scIdle" class="inp" style="width:90px"></div></div>
-  <div class="srow"><div class="srow-l"><div class="srow-t">Idle clock</div><div class="srow-d">minutes without touches before the big clock with core stats; 0 — never</div></div><div class="srow-c"><input type="number" min="0" max="240" id="scClk" class="inp" style="width:90px"></div></div>
-  <div class="srow"><div class="srow-l"><div class="srow-t">Sleep now</div><div class="srow-d">turn off until the first touch</div></div><div class="srow-c"><button class="btn sm" id="scSleep">${svg("moon",13)} Sleep</button></div></div>
-  <div class="set-grp">Data</div>
-  <div class="srow"><div class="srow-l"><div class="srow-t">Refresh interval</div><div class="srow-d">seconds between polls. Heavy sources (apt updates, disk temperature) are cached separately and are not affected</div></div><div class="srow-c"><input type="number" min="0.5" max="30" step="0.5" id="scPoll" class="inp" style="width:90px"></div></div>
-  <div class="srow"><div class="srow-l"><div class="srow-t">Mini panel address</div><div class="srow-d">the same page in a browser — no password on the NAS itself, a login is required from the LAN</div></div><div class="srow-c"><a class="btn sm" id="scUrl" target="_blank">Open</a></div></div>
-  </div>
-  <div class="set-savebar"><span class="sb-left">Local screen</span><button class="btn sm pri" id="scSave">${svg("save",13)} Save</button></div>`;
- const q=id=>tc.querySelector(id);
- const paint=c=>{
-  q("#scEn").checked=c.enabled!==false; q("#scAct").checked=c.actions!==false;
-  q("#scBr").value=c.bright||200; q("#scBrV").textContent=c.bright||200;
-  q("#scN").checked=!!c.night; q("#scFrom").value=c.night_from||"23:00"; q("#scTo").value=c.night_to||"07:00";
-  q("#scNb").value=c.night_bright||0; q("#scNbV").textContent=c.night_bright||0;
-  q("#scIdle").value=c.idle_min||0;
-  q("#scClk").value=c.clock_min!=null?c.clock_min:3;
-  q("#scPoll").value=((c.poll||1500)/1000).toFixed(1);
-  const u=location.origin+"/screen";
-  q("#scUrl").href=u; q("#scUrl").textContent=u.replace(/^https?:\/\//,"");
- };
- q("#scBr").oninput=()=>q("#scBrV").textContent=q("#scBr").value;
- q("#scNb").oninput=()=>q("#scNbV").textContent=q("#scNb").value;
- api("/api/screen/config").then(r=>{
-  const c=(r&&r.config)||{};
-  if(r&&r.present===false){ q("#scrNo").style.display=""; }
-  else { q("#scrBody").style.display=""; paint(c); }   // the id in markup is scrBody
- });
- q("#scSleep").onclick=async()=>{
-  const r=await api("/api/screen/act",{method:"POST",body:JSON.stringify({a:"sleep"})});
-  toast(r&&r.ok?"Screen turned off":"Failed");
- };
- q("#scSave").onclick=async()=>{
-  const cfg={enabled:q("#scEn").checked,actions:q("#scAct").checked,bright:+q("#scBr").value,
-    night:q("#scN").checked,night_from:q("#scFrom").value,night_to:q("#scTo").value,
-    night_bright:+q("#scNb").value,idle_min:+q("#scIdle").value,
-    clock_min:+q("#scClk").value,
-    poll:Math.round((+q("#scPoll").value||1.5)*1000)};
-  const r=await api("/api/screen/config",{method:"POST",body:JSON.stringify({config:cfg})});
-  toast(r&&r.ok?"Saved ✓":"Error");   // the kiosk service is started/stopped by the server (engine)
- };
-}
 function sharingTab(tc){
  tc.innerHTML=`<h3 class="set-title">Sharing (SMB)</h3><p class="set-sub">Shared folders for Windows, macOS and phones. Pick a folder, give it a name — done. Open shares need no user; private shares use the users below.</p><div id="smbBody"><div class="set-load">loading…</div></div>`;
  const B=()=>tc.querySelector("#smbBody"), scrim=()=>document.getElementById("scrim");

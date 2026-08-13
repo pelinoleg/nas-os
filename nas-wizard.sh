@@ -765,7 +765,6 @@ stage_system() {
     run apt-get update
     install_packages "NAS stack"   "${STACK_PACKAGES[@]}"
     install_smartd_guard   # smartmontools is installed right here — immediately clear failed with no disks
-    install_screen         # local touch screen: installed only if the panel is actually connected
     install_packages "utilities"    "${UTIL_PACKAGES[@]}"
     if is_pi; then
         if is_pi; then
@@ -2080,176 +2079,6 @@ RULES
     run udevadm control --reload-rules
     run udevadm trigger --subsystem-match=block --action=change 2>/dev/null || true
 }
-# ---------------------------------------------------------------------------
-# Local touch screen (DSI panel) — kiosk dashboard on the box itself
-# ---------------------------------------------------------------------------
-# No panel driver needed: on current PiOS it is brought up by the kernel
-# vc4 via display_auto_detect=1 (Waveshare 4.3" DSI 800x480 reports DSI-1 connected,
-# touch arrives as edt_ft5x06 on i2c). We install the RENDERER: cage (minimal
-# Wayland compositor for a kiosk, no desktop) + chromium pointed
-# at http://127.0.0.1/screen — nas-web serves this page BEFORE the auth gate, but only
-# on loopback, so the screen never asks for a password and it can't be opened from the LAN.
-screen_present() {
-    local f d drv
-    [ "${NASW_SCREEN:-}" = "1" ] && return 0        # explicit opt-in (headless box + a panel added later)
-    for f in /sys/class/drm/card*-DSI-*/status; do
-        [ -e "$f" ] && [ "$(cat "$f" 2>/dev/null)" = "connected" ] && return 0
-    done
-    # Some panels are visible only via the backlight — but "any backlight" is far too
-    # wide a net: every x86 laptop and many mini-PCs expose one, and they would then
-    # silently get a cage+chromium kiosk and its Chromium policy files installed on a
-    # box that has no touchscreen at all. Accept a backlight only when it belongs to a
-    # known DSI panel driver.
-    for d in /sys/class/backlight/*; do
-        [ -e "$d" ] || continue
-        drv="$(basename "$(readlink -f "$d/device/driver" 2>/dev/null)" 2>/dev/null)"
-        case "$drv" in rpi_touchscreen_attiny|*panel*|*dsi*) return 0 ;; esac
-    done
-    return 1
-}
-install_screen() {
-    if ! screen_present; then
-        info "screen not connected — not installing the kiosk"
-        return 0
-    fi
-    install_packages "screen" cage chromium seatd
-    # the kiosk session draws to DRM and reads touch directly
-    run usermod -aG video,input,render "$TARGET_USER"
-
-    # true backlight-off pokes the panel's ATTINY over /dev/i2c-* (PC_LED_EN bit:
-    # PWM=0 alone leaves a glow) — the i2c-dev char device must exist after boot
-    write_file /etc/modules-load.d/nas-screen.conf <<'EOF'
-i2c-dev
-EOF
-    run modprobe i2c-dev || true
-
-    # Chromium obeys ONLY managed policy: the --disable-features=Translate flags
-    # don't remove the translate bar (verified on 150.x). The kiosk must show
-    # NOTHING popping up — no translation, no password manager, no access prompts.
-    run mkdir -p /etc/chromium/policies/managed
-    write_file /etc/chromium/policies/managed/nas-kiosk.json <<'EOF'
-{
-  "TranslateEnabled": false,
-  "PasswordManagerEnabled": false,
-  "AutofillAddressEnabled": false,
-  "AutofillCreditCardEnabled": false,
-  "SpellcheckEnabled": false,
-  "SafeBrowsingEnabled": false,
-  "SyncDisabled": true,
-  "BrowserSignin": 0,
-  "MetricsReportingEnabled": false,
-  "SearchSuggestEnabled": false,
-  "BookmarkBarEnabled": false,
-  "ShowHomeButton": false,
-  "PromptForDownloadLocation": false,
-  "DefaultNotificationsSetting": 2,
-  "DefaultPopupsSetting": 2,
-  "DefaultGeolocationSetting": 2
-}
-EOF
-
-    # Backlight: sysfs is root-only, but night mode and the brightness slider in the
-    # panel must be able to change it without root.
-    write_file /etc/udev/rules.d/99-nas-backlight.rules <<'EOF'
-# nas-wizard: panel backlight — the video group can change brightness without root.
-SUBSYSTEM=="backlight", ACTION=="add", RUN+="/bin/chgrp video /sys/class/backlight/%k/brightness /sys/class/backlight/%k/bl_power", RUN+="/bin/chmod 0664 /sys/class/backlight/%k/brightness /sys/class/backlight/%k/bl_power"
-EOF
-    # A mouse cursor on the wall screen looks like a bug: the compositor draws a pointer
-    # as soon as a USB dongle is plugged into the box (keyboards declare themselves as a mouse too).
-    # CSS cursor:none and XCURSOR_SIZE don't remove it — we kill the pointer itself at the
-    # libinput level. Keyboard and touch keep working.
-    write_file /etc/udev/rules.d/99-nas-nopointer.rules <<'EOF'
-# nas-wizard: the kiosk needs ONLY a finger. We give the compositor nothing else.
-# Otherwise it draws a cursor: the pointer turns out to be the dongle's mouse, its "Consumer Control"
-# (which has relative axes but no ID_INPUT_MOUSE label), and even the HDMI jacks on Pi 4
-# (ID_INPUT_POINTINGSTICK). The rule affects only libinput (the kiosk session) —
-# console and SSH are untouched.
-SUBSYSTEM=="input", ENV{ID_INPUT}=="1", ENV{ID_INPUT_TOUCHSCREEN}!="1", ENV{LIBINPUT_IGNORE_DEVICE}="1"
-EOF
-    run udevadm control --reload-rules
-    run udevadm trigger --subsystem-match=backlight --action=add
-    run udevadm trigger --subsystem-match=input --action=add
-
-    # Empty cursor: wlroots draws a pointer in the center even when there's no mouse.
-    # Drop in a theme with a transparent 1x1 Xcursor (generated in place — no need for xcursorgen).
-    run mkdir -p /usr/share/icons/nas-blank/cursors
-    python3 - <<'PYCUR'
-import struct, os
-d = "/usr/share/icons/nas-blank/cursors"
-size, w, h = 24, 1, 1
-img = struct.pack("<IIIIIIIII", 36, 0xfffd0002, size, 1, w, h, 0, 0, 0) + struct.pack("<I", 0)
-hdr = struct.pack("<4sIII", b"Xcur", 16, 0x10000, 1)
-toc = struct.pack("<III", 0xfffd0002, size, 28)
-open(os.path.join(d, "left_ptr"), "wb").write(hdr + toc + img)
-for n in ("default", "pointer", "arrow", "text", "hand1", "hand2", "watch"):
-    p = os.path.join(d, n)
-    if not os.path.exists(p):
-        os.symlink("left_ptr", p)
-open("/usr/share/icons/nas-blank/index.theme", "w").write(
-    "[Icon Theme]\nName=nas-blank\nComment=Empty cursor for the NAS kiosk\n")
-PYCUR
-
-    run mkdir -p /var/lib/nas-screen
-    run chown "$TARGET_USER:$TARGET_USER" /var/lib/nas-screen
-    # the kiosk loads the panel on whatever port nas-web actually binds (default 80)
-    local SCR_PORT
-    SCR_PORT="$(sed -n 's/^Environment=NAS_WEB_PORT=//p' /etc/systemd/system/nas-web.service 2>/dev/null | tail -n1)"
-    SCR_PORT="${SCR_PORT:-80}"
-    write_file /etc/systemd/system/nas-screen.service <<EOF
-[Unit]
-Description=NAS local screen — cage + chromium kiosk on the DSI panel
-After=nas-web.service systemd-user-sessions.service
-Wants=nas-web.service
-# cage takes the VT — getty on tty1 would fight it for the screen
-Conflicts=getty@tty1.service
-After=getty@tty1.service
-
-[Service]
-Type=simple
-User=$TARGET_USER
-# PAMName=login gives the process a logind session on seat0 (libseat -> DRM master)
-PAMName=login
-TTYPath=/dev/tty1
-TTYReset=yes
-TTYVHangup=yes
-TTYVTDisallocate=yes
-StandardInput=tty-fail
-StandardOutput=journal
-StandardError=journal
-Environment=XDG_SESSION_TYPE=wayland
-# mouse cursor: the compositor draws its pointer if a USB mouse is plugged into the box
-# (a keyboard dongle counts as a mouse too). CSS cursor:none doesn't remove it — we kill it
-# via cursor size, while the mouse itself keeps working.
-Environment=XCURSOR_SIZE=1
-Environment=XCURSOR_THEME=nas-blank
-ExecStart=/usr/bin/cage -d -- /usr/bin/chromium \\
-  --kiosk --ozone-platform=wayland --touch-events=enabled \\
-  --user-data-dir=/var/lib/nas-screen/chromium \\
-  --no-first-run --no-default-browser-check --noerrdialogs --disable-infobars \\
-  --disable-session-crashed-bubble --hide-crash-restore-bubble --disable-pinch \\
-  --overscroll-history-navigation=0 --password-store=basic \\
-  --check-for-update-interval=31536000 --disable-component-update \\
-  http://127.0.0.1:${SCR_PORT}/screen
-Restart=always
-RestartSec=3
-
-[Install]
-WantedBy=multi-user.target
-EOF
-    run systemctl daemon-reload
-    enable_service nas-screen
-    info "screen enabled (cage+chromium -> http://127.0.0.1/screen, tty1)"
-}
-api_screen() {
-    if [ "${NASW_ENABLE:-1}" = "0" ]; then
-        run systemctl disable --now nas-screen
-        run systemctl start getty@tty1   # return the console to the panel
-        info "screen disabled"
-        return 0
-    fi
-    install_screen
-}
-
 # Accurate time: chrony instead of systemd-timesyncd
 pi_chrony() {
     install_packages "chrony" chrony
@@ -4121,7 +3950,6 @@ stage_system_apply() {
     run apt-get full-upgrade -y
     install_packages "NAS stack"  "${STACK_PACKAGES[@]}"
     install_smartd_guard   # smartmontools is installed here too — immediately clear 'failed' when there are no disks
-    install_screen         # local touchscreen: installed only if the panel is actually connected
     install_packages "utilities"   "${UTIL_PACKAGES[@]}"
     if is_pi; then
         install_packages "Pi packages" "${PI_PACKAGES[@]}"
@@ -4673,7 +4501,6 @@ run_api() {
         smb)            install_smb_shares ;;   # regen Samba groundwork + recycle-sweep timer
         tailscale)      mod_tailscale ;;
         staticip)       mod_staticip ;;
-        screen)         api_screen ;;
         *)              echo "unknown api action: $action" >&2; return 2 ;;
     esac
 }
