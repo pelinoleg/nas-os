@@ -105,13 +105,20 @@ class ScheduleTests(unittest.TestCase):
 
 class AlreadyRunningTests(unittest.TestCase):
     """A run that is ALREADY going satisfies its own schedule slot. Treating that as a failed
-    start raised «could not start» and re-attempted every minute until the run finished."""
+    start raised «could not start» and re-attempted every minute until the run finished.
+
+    The due slot is pinned instead of being derived from the wall clock: with a real 15:00
+    daily schedule the test only reached the branch it is about between 15:00 and 03:00, and
+    the rest of the day it failed on the unrelated «missed and too late to make up» path.
+    A test whose verdict depends on when it runs reports the suite, not the code."""
 
     def test_mirror_slot_is_marked_when_the_run_is_already_going(self):
         marks, notes = [], []
         profile = {"id": "p1", "name": "P", "saved": 0,
                    "schedule": {"enabled": True, "freq": "daily", "time": "15:00"}}
         with mock.patch.object(nas, "nb_profiles", lambda: [profile]), \
+             mock.patch.object(nas, "_nb_sched_last_due",
+                               lambda cfg, now: (now - 60, "15:00")), \
              mock.patch.object(nas, "nb_run_bg",
                                lambda pid, dry=False, allow_delete=False:
                                {"ok": False, "log": "already running"}), \

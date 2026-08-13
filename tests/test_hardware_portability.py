@@ -1,15 +1,15 @@
-"""Regression tests for running on hardware that is not a Raspberry Pi.
+"""Regression tests for the hardware assumptions this panel is allowed to make.
 
-The box this is developed on IS a Pi, so every non-Pi code path is, by definition,
-untested by simply using the panel. These tests pin the three things that would
-otherwise only be discovered on the new machine:
+They were written when the project still ran on a Raspberry Pi and had to be taught
+that a PC is not one. Raspberry Pi support is gone (2026-08-13, x86 only), but the
+three things pinned here are exactly the ones that broke during that move, and each
+is a claim the panel makes about hardware it did not verify:
 
-  * the CPU temperature must come from a sensor asked for BY NAME (on x86 the
-    thermal_zone0 fallback usually reads the chassis, not the CPU);
+  * the CPU temperature must come from a sensor asked for BY NAME — the thermal_zone0
+    fallback usually reads the chassis, not the CPU;
   * a skipped package must carry its LEVEL and its CONSEQUENCE all the way to the
     panel, and records written by an older install must still parse;
-  * the memory cgroup must be judged by the kernel, not by cmdline.txt, which does
-    not exist outside a Pi.
+  * the memory cgroup must be judged by the kernel, never by a bootloader file.
 """
 import importlib.util
 import os

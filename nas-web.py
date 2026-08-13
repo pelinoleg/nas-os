@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-nas-web.py — web backend of the NAS setup wizard and desktop (Raspberry Pi 5).
+nas-web.py — web backend of the NAS setup wizard and desktop (x86 Debian box).
 
 Python 3 standard library only (no pip). Serves static files from web/ and a JSON API:
   GET  /api/stats                 — live Pi metrics (CPU, temp, RAM, disk, network, uptime)
@@ -514,48 +514,6 @@ def uptime_s():
     except (ValueError, IndexError):
         return 0
 
-# get_throttled: bits 0-3 say "right now", bits 16-19 say "happened since boot".
-# Undervoltage and frequency capping are different faults with different fixes, so
-# they are reported apart. The flags live in firmware RAM and are wiped when power
-# is cut, hence a sag must reach the event log (which survives a reboot) while the
-# board is still up: after a brownout-triggered power-off nothing is left to read.
-_UV_MASK  = (1 << 0) | (1 << 16)                        # under-voltage
-_THR_MASK = sum(1 << b for b in (1, 2, 3, 17, 18, 19))  # freq cap / throttling / soft temp limit
-
-# USB-PD negotiation result, mA: 5000 = official 27 W PSU, 3000 = 15 W (or a weak
-# cable that dropped the PD talk) — under 3xNVMe + USB load the PMIC cuts power.
-# Static per boot, so read once at import.
-def _psu_max_current():
-    try:
-        with open("/proc/device-tree/chosen/power/max_current", "rb") as f:
-            return int.from_bytes(f.read(4), "big") or None
-    except OSError:
-        return None
-PSU_MA = _psu_max_current()
-
-# Is this a Raspberry Pi? Branch on the FACT of the hardware, never on the CPU
-# architecture — the question is always "is this knob real here". Everything Pi-only
-# (config.txt toggles, EEPROM, vcgencmd telemetry) hides itself on any other board:
-# a toggle that is present but cannot act is worse than one that is absent, because
-# it lies. Board identity does not change at runtime, so this is read once.
-def _detect_pi():
-    m = _read("/proc/device-tree/model", "")
-    if "raspberry" in m.lower():
-        return True
-    return bool(_read("/sys/firmware/devicetree/base/model", "").lower().count("raspberry"))
-IS_PI = _detect_pi()
-
-def throttled():
-    try:
-        out = subprocess.run(["vcgencmd", "get_throttled"], capture_output=True,
-                             text=True, timeout=3).stdout.strip()
-        val = out.split("=")[-1]
-        v = int(val, 16)
-    except (OSError, subprocess.SubprocessError, ValueError, IndexError):
-        return {"raw": None, "ok": True, "undervolt": False, "throttle": False}
-    return {"raw": val, "ok": v == 0,
-            "undervolt": bool(v & _UV_MASK), "throttle": bool(v & _THR_MASK)}
-
 def lan_ip():
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -1014,10 +972,6 @@ def _health_report_build():
     t = s.get("temp")
     add("CPU temperature", ("%s °C" % t) if t is not None else "—",
         "bad" if t and t >= 75 else "warn" if t and t >= 65 else "ok")
-    thr = s.get("throttled") or {}
-    add("Power and throttling", "sag/throttling" if not thr.get("ok", True) else "normal",
-        "bad" if not thr.get("ok", True) else "ok",
-        "PSU current shortage or overheating" if not thr.get("ok", True) else "")
     m = (s.get("mem") or {}).get("pct", 0)
     add("RAM", "%s%% used" % m, "warn" if m >= 90 else "ok")
     root = disk_info("/") or {}
@@ -2223,7 +2177,13 @@ def avail_bars(hours=24, slots=96, path=None):
     # The client dims the color toward "no data" proportionally to cov.
     cov = [round(min(1.0, kn_s[k] / slot_w), 4) if slot_w else 0 for k in range(slots)]
     pct = round(100.0 * up_t / known_t, 1) if known_t else None
-    return {"bars": bars, "frac": frac, "cov": cov, "pct": pct, "hours": hours,
+    # How much of the WINDOW the journal knows anything about. `pct` is honest about the
+    # time it measured, but it says nothing about how little that time was: a box
+    # installed this morning answers "37 % / 30d" with twelve hours of history. Callers
+    # that turn this into a verdict have to be able to see the difference.
+    cov_total = round(min(1.0, known_t / float(hours * 3600)), 4) if hours else 0.0
+    return {"bars": bars, "frac": frac, "cov": cov, "cov_total": cov_total,
+            "known_s": int(known_t), "pct": pct, "hours": hours,
             "start": start, "now": now,
             "events": events[-40:]}   # cap: tooltips only need recent detail
 
@@ -2414,8 +2374,20 @@ def _nb_last_ok(pid):
             return h.get("ts", 0)
     return 0
 
+def _nb_configured():
+    """True once backups have actually been set up.
+
+    nb_profiles() ALWAYS invents a "Default" profile so the UI has something to open —
+    but an invented profile that was never saved is not a backup that failed to run.
+    Reporting it is the same mistake as warning about SnapRAID parity on a box that has
+    none: not configured is not broken, and a status page that cries on a fresh install
+    teaches its owner to ignore it before it ever has something real to say."""
+    return bool(_safe(_nb_read_raw, None))
+
 def _gl_backup_tile(best, en):
     if not best:
+        if not _nb_configured():
+            return None
         return {"value": "—", "unit": "", "state": "warn",
                 "note": "never ran" if not en else "never ran", "raw": None}
     age = time.time() - best
@@ -2526,6 +2498,14 @@ def _glance_tile(tid, en):
         av = avail_bars(hours, 48 if tid == "avail" else 30)
         if av["pct"] is None:
             return None
+        # A window the journal barely covers cannot produce a verdict. A box installed
+        # this morning has no 30-day uptime: it has a few hours of history, most of them
+        # the install and the first reboot, and calling that "37 % / 30d" paints a
+        # brand-new NAS red on its first day. Not measured is not bad, exactly as
+        # elsewhere it is not good — the tile comes back by itself once there is enough
+        # history to judge, which is also when the number starts meaning something.
+        if av.get("cov_total", 1.0) < 0.5:
+            return None
         st = "ok" if av["pct"] >= 99 else ("warn" if av["pct"] >= 95 else "danger")
         unit = ("% / 24h" if not en else "% / 24h") if tid == "avail" else \
                ("% / 30d" if not en else "% / 30d")
@@ -2574,10 +2554,9 @@ def _glance_tile(tid, en):
         t = temp_c()
         if t is None:
             return None
-        thr = _safe(throttled) or {}
-        st = "danger" if (t >= 75 or thr.get("throttle")) else ("warn" if t >= 65 else "ok")
+        st = "danger" if t >= 75 else ("warn" if t >= 65 else "ok")
         return {"value": "%d" % round(t), "unit": "°C", "state": st,
-                "raw": {"c": round(t, 1), "throttle": bool(thr.get("throttle"))}}
+                "raw": {"c": round(t, 1)}}
     if tid == "load":
         la = os.getloadavg()[0]
         ncpu = os.cpu_count() or 4
@@ -3432,11 +3411,6 @@ def stats():
         "ip": lan_ip(),
         "cpu": cpu_percent(),
         "temp": temp_c(),
-        "throttled": throttled(),
-        "psu_ma": PSU_MA,
-        # constant for the life of the box, but it rides along with stats so the UI can
-        # decide synchronously what hardware controls even make sense to draw
-        "is_pi": IS_PI,
         "missing_pkgs": _safe(missing_base_packages, []),
         "mem": mem_info(),
         # no pool means no pool stats either (it used to silently substitute the
@@ -3502,10 +3476,8 @@ def _def_monitor():
         # --- space ---
         "pool":        {"on": True,  "priority": 1, "threshold": 90},
         "diskfull":    {"on": True,  "priority": 1, "threshold": 90},
-        # --- Pi: power/temperature/resources ---
+        # --- power / temperature / resources ---
         "temp":        {"on": True,  "priority": 1, "threshold": 75},
-        "throttle":    {"on": True,  "priority": 1},
-        "undervolt":   {"on": True,  "priority": 1},
         "cfg_corrupt": {"on": True,  "priority": 1},
         "mem":         {"on": False, "priority": 0, "threshold": 92},  # power-metrics: opt-in
         "swap":        {"on": False, "priority": 0, "threshold": 60},
@@ -3750,7 +3722,7 @@ for _k in ("disk_add", "disk_remove", "readonly", "fserror", "smart", "smart_wea
     _EVENT_KIND[_k] = "disk"
 for _k in ("pool", "diskfull", "root_full", "inodes", "docker_space"):
     _EVENT_KIND[_k] = "space"
-for _k in ("temp", "throttle", "undervolt", "mem", "swap", "load", "sustained_heat",
+for _k in ("temp", "mem", "swap", "load", "sustained_heat",
            "fan_stall", "proc_hog", "thermal_guard"):
     _EVENT_KIND[_k] = "power"
 _EVENT_KIND["dirty_boot"] = "power"
@@ -3782,7 +3754,7 @@ for _k in ("snap_ok", "snap_err", "scrub_err", "delete_block", "backup", "merger
 _EVENT_COND = {
     "updates", "sec_updates", "reboot_req", "root_full", "diskfull", "inodes", "docker_space",
     "mem", "swap", "load", "proc_hog", "slow_disk", "temp", "disktemp", "sustained_heat",
-    "undervolt", "throttle", "smart", "smart_wear", "sd_degrade", "fan_stall", "pool",
+    "smart", "smart_wear", "sd_degrade", "fan_stall", "pool",
     "mergerfs", "readonly", "fserror", "vpn_offline", "time_drift", "cfg_corrupt", "svcfail",
     "container_loop", "health", "write_load", "log_sentry",
     "nb_conn", "nb_srcmiss", "nb_stale", "nb_size", "nb_dumps", "nb_dest", "kp_stale",
@@ -4473,20 +4445,10 @@ def monitor_tick():
         if errs:
             fire("fserror", "NAS: disk errors in the kernel log", "\n".join(errs), pri("fserror"))
 
-    # --- Pi: temperature / throttling / memory / swap / load ---
+    # --- temperature / memory / swap / load ---
     t = s.get("temp")
     if on("temp") and t and t >= thr("temp", 75):
         fire("temp", "NAS: overheating", "Temperature %s°C (threshold %s°C)" % (t, thr("temp", 75)), pri("temp"))
-    tr = s.get("throttled") or {}
-    # Undervolt is about the power supply, throttling is about cooling. Different events:
-    # the undervolt flag clears only when power is removed, so report it right away.
-    if on("undervolt") and tr.get("undervolt"):
-        fire("undervolt", "NAS: undervoltage",
-             "The PSU cannot supply enough current (flags %s) — the board may power off without warning. "
-             "Check the PSU and cable." % tr.get("raw", ""), pri("undervolt"), lvl="warn")
-    if on("throttle") and tr.get("throttle"):
-        fire("throttle", "NAS: frequency throttling",
-             "CPU lowered its frequency (flags %s)" % tr.get("raw", ""), pri("throttle"))
     m = (s.get("mem") or {}).get("pct", 0)
     if on("mem") and m >= thr("mem", 92):
         fire("mem", "NAS: low memory", "RAM usage at %s%%" % m, pri("mem"))
@@ -4616,10 +4578,10 @@ def monitor_tick():
         if sd:
             fire("sderr", "NAS: SD card errors", "\n".join(sd), pri("sd_degrade"), ev_name="sd_degrade")
     if on("sustained_heat"):
-        hot = (t and t >= thr("temp", 75)) or not tr.get("ok", True)
+        hot = bool(t and t >= thr("temp", 75))
         _MON_HEAT = _MON_HEAT + 1 if hot else 0
         if _MON_HEAT >= thr("sustained_heat", 10):
-            fire("heat", "NAS: sustained overheating/throttling", "Already %d min in a row — check cooling/power" % _MON_HEAT, pri("sustained_heat"), ev_name="sustained_heat")
+            fire("heat", "NAS: sustained overheating", "Already %d min in a row — check cooling/power" % _MON_HEAT, pri("sustained_heat"), ev_name="sustained_heat")
     if on("fan_stall"):
         rpm = _safe(_fan_rpm)
         if rpm == 0 and t and t >= thr("temp", 75):
@@ -12609,7 +12571,7 @@ def kp_snap_ls(destid, oid, rel="", warm=False):
     `warm` marks a speculative read the panel fires in the background: it must never make a
     real click wait, so if this repository is already being read, the warm one is dropped
     rather than queued (each read spawns its own kopia — and for a cloud repo an rclone
-    bridge with it, which a Raspberry Pi feels)."""
+    bridge with it)."""
     cfg = kp_load()
     dest = _kp_find(cfg["dests"], str(destid or ""))
     if not dest:
@@ -14668,7 +14630,6 @@ def _bb_cpu_read():
     except (OSError, ValueError, IndexError):
         return None
 
-_BB_HAS = {"vcg": True, "pmic": True}   # probe once; don't spawn a failing binary every 10 s forever
 
 def _bb_sample(prev_cpu):
     s = {"t": int(time.time())}
@@ -14694,34 +14655,6 @@ def _bb_sample(prev_cpu):
     t = _safe(temp_c)
     if t is not None:
         s["temp"] = t
-    if _BB_HAS["vcg"]:
-        r = _run(["vcgencmd", "get_throttled"], timeout=5)
-        m = re.search(r"0x([0-9a-fA-F]+)", r.get("log") or "") if r.get("ok") else None
-        if m:
-            s["thr"] = int(m.group(1), 16)
-        else:
-            _BB_HAS["vcg"] = False
-    if _BB_HAS["pmic"]:
-        # 5V rail voltage straight from the PMIC (Pi 5 only) — the missing clue
-        # in every "died under load" mystery; on other boards the probe fails
-        # once and is never retried
-        r = _run(["vcgencmd", "pmic_read_adc", "EXT5V_V"], timeout=5)
-        m = re.search(r"=([\d.]+)V", r.get("log") or "") if r.get("ok") else None
-        if m:
-            s["volt"] = round(float(m.group(1)), 3)
-        else:
-            _BB_HAS["pmic"] = False
-    r = _run(["ps", "-eo", "pcpu,pmem,comm", "--sort=-pcpu", "--no-headers"], timeout=10)
-    top = []
-    for ln in (r.get("log") or "").splitlines()[:3]:
-        p = ln.split(None, 2)
-        try:
-            if len(p) == 3 and float(p[0]) >= 1.0:
-                top.append([p[2][:24], float(p[0]), float(p[1])])
-        except ValueError:
-            pass
-    if top:
-        s["top"] = top
     return s, cur
 
 def _bb_dmesg_tail(n=25):
@@ -20822,79 +20755,6 @@ def _backup(path):
     except OSError:
         pass
 
-def _boot_config():
-    for p in ("/boot/firmware/config.txt", "/boot/config.txt"):
-        if os.path.isfile(p):
-            return p
-    return ""
-
-def _cmdline_path():
-    for p in ("/boot/firmware/cmdline.txt", "/boot/cmdline.txt"):
-        if os.path.isfile(p):
-            return p
-    return ""
-
-def _cfg_has(path, prefix):
-    for l in _read(path).splitlines():
-        s = l.strip()
-        if s and not s.startswith("#") and s.startswith(prefix):
-            return True
-    return False
-
-def _cfg_set(path, prefix, line, on):
-    """Idempotently add/remove an active line in config.txt (with a backup)."""
-    if not path:
-        return {"ok": False, "log": "config.txt not found"}
-    lines = _read(path).split("\n")
-    kept = [l for l in lines
-            if not (l.strip().startswith(prefix) and not l.strip().startswith("#"))]
-    changed = len(kept) != len(lines)
-    if on and not any(l.strip() == line for l in kept):
-        while kept and kept[-1].strip() == "":
-            kept.pop()
-        kept.append(line)
-        changed = True
-    if changed:
-        _backup(path)
-        try:
-            with open(path, "w") as f:
-                f.write("\n".join(kept).rstrip("\n") + "\n")
-        except OSError as e:
-            return {"ok": False, "log": str(e)}
-    return {"ok": True, "reboot": True,
-            "log": "enabled (applies after a reboot)" if on else "disabled"}
-
-def _cmdline_set(add=(), remove_prefixes=()):
-    """Edit cmdline.txt (a single line, space-separated tokens)."""
-    path = _cmdline_path()
-    if not path:
-        return {"ok": False, "log": "cmdline.txt not found"}
-    line = (_read(path).split("\n") or [""])[0]
-    toks = [t for t in line.split()
-            if not any(t.startswith(p) for p in remove_prefixes)]
-    for a in add:
-        if a not in toks:
-            toks.append(a)
-    new = " ".join(toks)
-    if new != line:
-        _backup(path)
-        try:
-            with open(path, "w") as f:
-                f.write(new + "\n")
-        except OSError as e:
-            return {"ok": False, "log": str(e)}
-    return {"ok": True, "reboot": True,
-            "log": "applies after a reboot"}
-
-def _throttled_decode():
-    m = re.search(r"0x[0-9a-fA-F]+", _sc("vcgencmd", "get_throttled"))
-    v = int(m.group(0), 16) if m else 0
-    bits = {0: "undervoltage", 1: "frequency capped",
-            2: "throttling", 3: "near thermal limit"}
-    return {"raw": m.group(0) if m else "0x0",
-            "now": [bits[b] for b in bits if v & (1 << b)],
-            "ever": [bits[b] for b in bits if v & (1 << (b + 16))]}
-
 def _governor():
     base = "/sys/devices/system/cpu/cpu0/cpufreq/"
     return {"current": _read(base + "scaling_governor") or None,
@@ -21121,7 +20981,6 @@ def _par(thunks, workers=8):
 
 def sysconf():
     """Full current state of all configurable parameters."""
-    cfg, cl = _boot_config(), _cmdline_path()
     # only the probes that shell out are farmed to the pool; plain file reads and
     # os.path checks stay inline — a thread per stat() would be noise
     r = _par({
@@ -21139,9 +20998,6 @@ def sysconf():
         "ufw":         _ufw_state,
         "fail2ban":    _fail2ban_state,
         "log2ram":     lambda: _svc("log2ram"),
-        "firmware":    lambda: (_sc("vcgencmd", "version").splitlines() or [""])[0],
-        "eeprom":      lambda: (_sc("vcgencmd", "bootloader_version").splitlines() or [""])[0],
-        "throttled":   _throttled_decode,
         "zram":        _zram_status,
         "governor":    _governor,
     })
@@ -21162,24 +21018,16 @@ def sysconf():
             "fail2ban": r["fail2ban"],
             "log2ram": r["log2ram"],
         },
-        # "pi" carries BOTH the Pi-only knobs and three that exist on any board
-        # (watchdog, zram, governor). is_pi tells the UI which half to draw: on other
-        # hardware the config.txt toggles and the vcgencmd readings are not "off",
-        # they are meaningless, and a toggle that cannot act is a toggle that lies.
-        "pi": {
-            "is_pi": IS_PI,
+        # Hardware knobs that are real on this board. Nothing here is a claim the
+        # box cannot back up: a control that is shown but cannot act is worse than an
+        # absent one, because it lies.
+        "hw": {
             "model": _board_model(),
-            "firmware": r["firmware"],
-            "eeprom": r["eeprom"],
             "temp": temp_c(),
-            "throttled": r["throttled"],
-            "usbpower": _cfg_has(cfg, "usb_max_current_enable=1"),
-            "pcie3": _cfg_has(cfg, "dtparam=pciex1_gen=3"),
             "cgroup": _memory_cgroup_on(),
             "watchdog": os.path.isfile("/etc/systemd/system.conf.d/watchdog.conf"),
             "zram": r["zram"],
             "governor": r["governor"],
-            "config_path": cfg, "cmdline_path": cl,
         },
     }
 
@@ -21284,7 +21132,7 @@ def sysconf_set(key, val, extra=None):
             return _run(["systemctl", "restart", "systemd-journald"])
         if key == "chrony":
             if b:
-                return engine("pi", {"keys": "chrony"})
+                return engine("hw", {"keys": "chrony"})
             _svc_toggle("systemd-timesyncd", True)
             return _svc_toggle("chrony" if _svc("chrony")["installed"] else "chronyd", False)
         if key == "fstrim":
@@ -21319,21 +21167,12 @@ def sysconf_set(key, val, extra=None):
         if key == "log2ram":
             return engine("security", {"keys": "log2ram"}) if b \
                 else _svc_toggle("log2ram", False)
-        if key == "usbpower":
-            return _cfg_set(_boot_config(), "usb_max_current_enable",
-                            "usb_max_current_enable=1", b)
-        if key == "pcie3":
-            return _cfg_set(_boot_config(), "dtparam=pciex1_gen",
-                            "dtparam=pciex1_gen=3", b)
-        if key == "cgroup":
-            return _cmdline_set(add=["cgroup_enable=memory", "cgroup_memory=1"]) if b \
-                else _cmdline_set(remove_prefixes=["cgroup_enable=memory", "cgroup_memory=1"])
         if key == "watchdog":
             return _watchdog(b)
         if key == "zram":
-            return engine("pi", {"keys": "zram"}) if b else _zram_off()
+            return engine("hw", {"keys": "zram"}) if b else _zram_off()
         if key == "governor_adaptive":
-            return engine("pi", {"keys": "governor"}) if b \
+            return engine("hw", {"keys": "governor"}) if b \
                 else _svc_toggle("nas-governor.timer", False)
         if key == "governor":
             return _set_governor(val)
@@ -23200,7 +23039,6 @@ def screen_payload(lang="", p2=False, events_max=30, only=None):
             # the current state: "disk ejected, nowhere to import".
             "usbcfg": _safe(_screen_usb_cfg, {}) or {},
             "swap": (st.get("mem") or {}).get("swap_total"),
-            "throttled": st.get("throttled"), "psu_ma": st.get("psu_ma"),
             "dtemp": _dt[0], "dtemp_dev": _dt[1],   # main-storage disk temperature (+ short label)
             "dio": st.get("dio"),                   # main-storage disk throughput B/s (read+write)
             "storage_name": _safe(lambda: storage_conf().get("label") or _dt[1] or "storage"),
@@ -23716,12 +23554,12 @@ class H(BaseHTTPRequestHandler):
         if path == "/" or path == "":
             path = "/desktop.html"
         rel = path.lstrip("/")
-        # One URL that answers with the board's own mark. The berry logo is a statement
-        # about the HARDWARE, and setup.html needs it before any JS (or any auth) has
-        # run — so the server picks the file, not the client. Rewriting rel keeps the
-        # normal serving path; the ETag branch below covers .svg exactly for this URL.
+        # One URL for the brand mark, kept so setup.html can ask for it before any JS
+        # (or any auth) has run. There is a single mark now — the berry was a claim about
+        # HARDWARE and this is not that hardware — but the indirection stays: it is what
+        # lets the file be replaced without touching every page that shows it.
         if rel == "icon-brand.svg":
-            rel = "icon-flat.svg" if IS_PI else "icon-board.svg"
+            rel = "icon.svg"
         full = os.path.realpath(os.path.join(WEB_DIR, rel))
         root = os.path.realpath(WEB_DIR)
         # Graceful stub for the removed runtime i18n. Devices with a pre-english-only
@@ -24203,7 +24041,7 @@ class H(BaseHTTPRequestHandler):
                 if os.geteuid() == 0:      # if the server is root — drop privileges to the user
                     u = pwd.getpwnam(TARGET_USER)
                     # initgroups before setuid: otherwise the shell has no supplementary groups (video,
-                    # docker, gpio…) and vcgencmd/docker fail without sudo. setgid AFTER.
+                    # docker…) and docker fails without sudo. setgid AFTER.
                     try:
                         os.initgroups(TARGET_USER, u.pw_gid)
                     except OSError:
@@ -24658,7 +24496,7 @@ class H(BaseHTTPRequestHandler):
             elif p == "/api/sysconf":
                 self._json(sysconf())
             elif p == "/api/pkgs":
-                self._json({"missing": missing_pkgs_recheck(), "is_pi": IS_PI})
+                self._json({"missing": missing_pkgs_recheck()})
             elif p == "/api/usb-import":
                 self._json({"config": usb_import_load(), "drives": usb_removable()})
             elif p == "/api/usb-devices":

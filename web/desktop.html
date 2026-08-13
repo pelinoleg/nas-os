@@ -3947,8 +3947,8 @@ const MOCK={
  sysconf:{system:{hostname:"nas",timezone:"Etc/UTC",time_synced:true,chrony:{installed:false,active:false},fstrim:{installed:true,active:true,enabled:true},unattended:false,journald_max:""},
    network:{iface:"wlan0",ip:"192.168.1.10",prefix:"24",gw:"192.168.1.1",dns:"192.168.1.1",method:"auto",wifi:true,wifi_ps_off:true,avahi:{installed:true,active:true,enabled:true}},
    security:{ufw:{installed:false,active:false,ports:[]},fail2ban:{installed:false,active:false},log2ram:{installed:false,active:false}},
-   pi:{model:"Raspberry Pi 5 Model B Rev 1.0",firmware:"2026/05/26",eeprom:"2026/05/26",temp:52.4,throttled:{raw:"0x0",now:[],ever:[]},usbpower:false,pcie3:false,cgroup:false,watchdog:false,zram:{installed:false,active:false},governor:{current:"ondemand",available:["conservative","ondemand","userspace","powersave","performance","schedutil"],adaptive:{installed:false,active:false}}}},
- stats:{host:"nas",ip:"192.168.1.10",cpu:6.4,temp:55.1,throttled:{raw:"0x0",ok:true},psu_ma:5000,mem:{total:8455000000,used:760000000,pct:9},
+   hw:{model:"Beelink ME mini (N150)",temp:41.2,cgroup:true,watchdog:false,zram:{installed:false,active:false},governor:{current:"powersave",available:["powersave","performance"],adaptive:{installed:false,active:false}}}},
+ stats:{host:"nas",ip:"192.168.1.10",cpu:6.4,temp:55.1,mem:{total:8455000000,used:760000000,pct:9},
    disk_pool:{path:"/mnt/storage",total:1000000000000,used:3200000000,pct:0.3},net:{rx:184000,tx:42000},iface:"wlan0",uptime:19218},
  desktop:{apps:[
    {container:"dockge",name:"Dockge",url:"http://nas.local:5001",icon:"",running:true},
@@ -4602,7 +4602,6 @@ function winSystem(initTab){openWin("__sys","System",(body,win)=>{
 },{w:680,h:640});}
 function winMon(){winSystem("overview");}
 function winProc(){winSystem("proc");}
-const THR_HINT="Raspberry Pi undervoltage/throttling flags. If lit, the power supply can't deliver enough current or the CPU overheated and dropped its frequency.";
 function histChart(title,h,series,fmt,maxOverride){
  const W=560,H=104,pad=6,n=h.length;
  const vals=[];series.forEach(s=>h.forEach(p=>{if(p[s.key]!=null)vals.push(p[s.key]);}));
@@ -4638,7 +4637,7 @@ async function historyTab(tc,win){win._sub=null;clearInterval(win._pi);
   +(longRng&&h.some(p=>p.pool!=null)?histChart("Pool usage",h,[{key:"pool",color:"var(--good)",fill:1}],pf,100):"");
 }
 function overviewTab(tc,win){
- tc.innerHTML=`<div class="ov-health" id="ovHealth"></div><div class="ov-cards" id="ovCards"></div><div id="ovThr"></div>
+ tc.innerHTML=`<div class="ov-health" id="ovHealth"></div><div class="ov-cards" id="ovCards"></div>
   <div class="ov-sec"><div class="ov-sec-h">Memory and network</div><div class="krow" id="ovMem"></div><div class="bar" style="margin:5px 0 10px"><i id="ovMemBar"></i></div><div class="krow" id="ovNet"></div><div class="krow" id="ovUp"></div></div>
   <div class="ov-sec"><div class="ov-sec-h">Storage</div><div class="ov-disks" id="ovDisks"><div style="color:var(--mut);font-size:12px">loading…</div></div></div>
   <div class="ov-sec"><div class="ov-sec-h">Top processes <span style="color:var(--mut);text-transform:none;letter-spacing:0">— click opens the tab</span></div><div class="ov-top" id="ovTop"></div></div>`;
@@ -4649,19 +4648,12 @@ function overviewTab(tc,win){
      card("Temp.",s.temp?s.temp+"°":"—",s.temp?loadCol(tempLoad(s.temp),"win"):"var(--mut)",HIST.temp,s.temp?loadCol(tempLoad(s.temp),"win"):"var(--mut)",90)+
      card("RAM",s.mem.pct+"%",loadCol(s.mem.pct,"win"),HIST.mem,loadCol(s.mem.pct,"win"),100)+
      card("↓ Network",fmtR(s.net.rx),"",HIST.rx,"#5aa9ff");
-   // These flags come from vcgencmd, which exists only on a Pi. Elsewhere throttled()
-   // answers "raw:null" — meaning NOT MEASURED, not "fine". Printing a green "Power and
-   // frequency are normal" off an unread sensor is the panel making a claim it cannot
-   // support, so on such a board the block is not drawn at all.
-   const thr=s.throttled||{},ok=thr.ok!==false,thrKnown=!!thr.raw;const tb=tc.querySelector("#ovThr");
-   if(tb)tb.innerHTML=!thrKnown?"":`<div class="ov-thr ${ok?"good":"bad"}" title="${att(THR_HINT)}"><span class="dt"></span><div><b>${ok?"Power and frequency are normal":"Throttling / power sag"}</b><div class="sub">${esc(thr.raw)} · click for details</div></div></div>`;
    const q=(id,html)=>{const n=tc.querySelector(id);if(n)n.innerHTML=html;};
    q("#ovMem",`<span>Memory</span><b>${fmtB(s.mem.used)} / ${fmtB(s.mem.total)}</b>`);
    const mb=tc.querySelector("#ovMemBar");if(mb)mb.style.width=s.mem.pct+"%";
    q("#ovNet",`<span>Network (${s.iface||"—"})</span><b>↓ ${fmtR(s.net.rx)}  ↑ ${fmtR(s.net.tx)}</b>`);
    q("#ovUp",`<span>Uptime</span><b>${fmtUp(s.uptime)}</b>`);
  };
- const thrClick=()=>{const t=tc.querySelector(".ov-thr");if(t)t.onclick=()=>toast(THR_HINT);};
  async function paintDisks(){const d=await api("/api/disks");const box=tc.querySelector("#ovDisks");if(!box)return;
    const ds=(d.disks||[]).filter(x=>x.usage);if(!ds.length){box.innerHTML=`<div style="color:var(--mut);font-size:12px">no mounted disks</div>`;return;}
    box.innerHTML=ds.map(x=>{const p=x.usage.pct||0,c=p>=90?"var(--danger)":p>=75?"var(--warn)":roleColor(x.role);
@@ -4680,8 +4672,8 @@ function overviewTab(tc,win){
      <button class="btn sm" id="ovhR" style="margin-left:auto">${svg("refresh",12)}</button></div>
      <div class="ovh-list">${ch.map(c=>`<div class="ovh-row"><span class="ovh-dot" style="background:${lc[c.lvl]}"></span><span class="ovh-n">${esc(c.name)}</span><span class="ovh-v" style="color:${c.lvl==="ok"?"var(--dim)":lc[c.lvl]}" title="${att(c.hint||"")}">${esc(c.value)}</span></div>`).join("")}</div>`;
    const rb=box.querySelector("#ovhR");if(rb)rb.onclick=()=>{box.querySelector(".ovh-list").style.opacity=".5";paintHealth();};}
- draw(LAST||MOCK.stats);thrClick();paintDisks();paintTop();paintHealth();
- win._sub=s=>{draw(s);thrClick();};
+ draw(LAST||MOCK.stats);paintDisks();paintTop();paintHealth();
+ win._sub=s=>{draw(s);};
  const iv=win._refresh();if(iv){win._pi=setInterval(()=>{if(!document.body.contains(tc)){clearInterval(win._pi);return;}paintDisks();paintTop();},Math.max(iv,5000));}}
 
 const roleColor=r=>r==="data"?"#34C6BE":r==="parity"?"#5AA9FF":r==="pool"?"#46B98A":r==="system"?"#7183a0":r==="removable"?"#8a7dff":"#e7b14a";
@@ -5223,8 +5215,8 @@ const DEFAULT_SNIPS=[
   ["Kernel errors","sudo dmesg -T --level=err,warn | tail -40"],
   ["Failed services","systemctl --failed"],
   ["Journal of a service","sudo journalctl -u {unit} -n 100 --no-pager"],
-  // was there a voltage dip since boot — what killed pi5 under load
-  ["Pi power & throttling","vcgencmd get_throttled; vcgencmd measure_volts; vcgencmd measure_temp"]]],
+  // the failure mode that actually happens here: swap thrash with no OOM kill
+  ["Memory pressure since boot","journalctl -k --no-pager | grep -iE 'oom|memory pressure' | tail -30"]]],
  ["Disks",[
   // TRAN is the column that matters here: it says which disk sits behind a USB bridge
   ["Disks: labels, fs, bus","lsblk -o NAME,LABEL,FSTYPE,SIZE,TRAN,MOUNTPOINT"],
@@ -5243,7 +5235,7 @@ const DEFAULT_SNIPS=[
 const LEGACY_SNIPS=["df -h","lsblk -f","sudo smartctl -a /dev/nvme0n1",
  "sudo smartctl -a /dev/sda | grep -i temp","docker ps","docker compose ls",
  "docker stats --no-stream","docker logs --tail 50 -f","sudo snapraid status",
- "sudo snapraid diff","sudo snapraid sync","htop","free -h","vcgencmd measure_temp",
+ "sudo snapraid diff","sudo snapraid sync","htop","free -h",
  "systemctl list-timers","uptime","du -sh /mnt/storage/* 2>/dev/null | sort -h"];
 let SNIPS=[],SNIPCOL={};
 try{SNIPCOL=SET.snipCol||JSON.parse(localStorage.getItem("nassnipcol")||"{}");}catch(e){}
@@ -5251,9 +5243,6 @@ function saveCol(){SET.snipCol=SNIPCOL;saveSettings();}
 async function saveSnips(){try{localStorage.setItem("nassnips",JSON.stringify(SNIPS));}catch(e){}await api("/api/snippets",{method:"POST",body:JSON.stringify({snippets:SNIPS})});}
 function seedSnips(){const have=new Set(SNIPS.map(s=>(s.cat||"")+"|"+s.label+"|"+s.cmd));
  DEFAULT_SNIPS.forEach(([cat,items])=>items.forEach(([label,cmd])=>{
-  // vcgencmd answers only on a Pi — seeding it elsewhere plants a snippet that can
-  // only ever print "command not found" (the list is persisted, so decide here)
-  if(/vcgencmd/.test(cmd)&&LAST&&LAST.is_pi===false)return;
   if(!have.has(cat+"|"+label+"|"+cmd))SNIPS.push({label,cmd,cat});}));}
 function snipCats(){const seen=[];SNIPS.forEach(s=>{const c=s.cat||"My";if(!seen.includes(c))seen.push(c);});if(!seen.length)seen.push("My");return seen;}
 function snipGroups(){const groups=[],by={};
@@ -10901,7 +10890,7 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
      <button class="btn sm" id="kPwSet">${D.dests&&D.dests.length?"Change…":"Set my own"}</button></div>
     <p style="font-size:11.5px;color:var(--win-dim,var(--dim));margin:9px 0 0;line-height:1.5">One password unlocks <b>every</b> repository — there is only this one, nothing hidden elsewhere. It is shown openly on purpose: it must never be lost, or the backups become unreadable. A copy travels inside every settings backup and in the disaster card, so you don't have to memorize it.${D.dests&&D.dests.length?" Changing it re-keys every connected repository — they must all be reachable.":""}</p></div>
    <div class="kp-sec"><h4>${svg("gauge",13)} Performance</h4>
-    <div class="srow"><div class="srow-l"><div class="srow-t">Parallel uploads</div><div class="srow-d">How many files kopia hashes and sends at once. Higher is faster on big machines, but uses more CPU and memory — 2 suits a Raspberry Pi.</div></div>
+    <div class="srow"><div class="srow-l"><div class="srow-t">Parallel uploads</div><div class="srow-d">How many files kopia hashes and sends at once. Higher is faster on big machines, but uses more CPU and memory — 2 suits a small box.</div></div>
      <div class="srow-c"><input id="kO_par" type="number" min="1" max="16" class="mono" style="width:70px"></div></div>
     <div class="srow"><div class="srow-l"><div class="srow-t">Upload limit</div><div class="srow-d">Caps how fast a backup writes to its repository, so it doesn't saturate the connection — or hammer a USB bridge. Applies to <b>every</b> destination, cloud and local disk alike, and is stored inside each repository. 0 = no limit.</div></div>
      <div class="srow-c"><input id="kO_bw" type="number" min="0" class="mono" style="width:90px"><span style="font-size:11.5px;color:var(--win-dim,var(--dim))">KB/s</span></div></div>
@@ -12947,7 +12936,7 @@ async function glanceTab(tc){
  const url=`http://${location.host}/api/glance?token=${tok||"TOKEN"}&lang=en`;
  tc.innerHTML=`
   <div class="set-title">External display (API)</div>
-  <div class="set-sub">An open NAS status feed for any external device (ESP32, Raspberry Pi Pico, a standalone display). The device polls the address below with a token and draws whatever it wants — the panel only serves data, you do the firmware and layout on your side.</div>
+  <div class="set-sub">An open NAS status feed for any external device (ESP32, a microcontroller panel, a standalone display). The device polls the address below with a token and draws whatever it wants — the panel only serves data, you do the firmware and layout on your side.</div>
   <div class="set-h">Access</div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Serve data with a token</div><div class="srow-d">without a token this data is available only from the panel</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="glEn"${cfg.enabled?" checked":""}><span class="sl"></span></label></div></div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Token</div><div class="srow-d mono">${tok?esc(tok):"— not created —"}</div></div><div class="srow-c"><button class="btn sm" id="glNew">${tok?"Reissue":"Create"}</button><button class="btn sm" id="glCopy"${tok?"":" disabled"}>Copy URL</button><button class="btn sm warn" id="glRev"${tok?"":" disabled"}>Revoke</button></div></div>
@@ -13842,9 +13831,8 @@ function winSettings(initTab){openWin("__set","Settings",body=>{
   // 3 — system & hardware
   {id:"system",name:"System",ic:"activity"},
   // Named after the board it is actually running on: on a non-Pi the Pi-only knobs
-  // are hidden inside the tab (see piTab), so calling it "Raspberry Pi" there would
   // promise hardware controls the machine does not have.
-  {id:"pi",name:(LAST&&LAST.is_pi===false)?"Hardware":"Raspberry Pi",ic:"cpu"},
+  {id:"hw",name:"Hardware",ic:"cpu"},
   {id:"maint",name:"Maintenance",ic:"heart"},
   {id:"usb",name:"USB import",ic:"usb"},
   {id:"glance",name:"Display",ic:"gauge"},
@@ -13853,7 +13841,7 @@ function winSettings(initTab){openWin("__set","Settings",body=>{
   // 4 — data
   {id:"backup",name:"Settings backup",ic:"save"},
  ];
- const FN={look:lookTab,files:filesTab,notify:notifyTab,glance:glanceTab,nts:notesTab,timemachine:timemachineTab,system:systemTab,motd:motdTab,maint:maintTab,network:networkTab,sharing:sharingTab,security:securityTab,usb:usbTab,backup:backupTab,pi:piTab,syncthing:syncthingTab};
+ const FN={look:lookTab,files:filesTab,notify:notifyTab,glance:glanceTab,nts:notesTab,timemachine:timemachineTab,system:systemTab,motd:motdTab,maint:maintTab,network:networkTab,sharing:sharingTab,security:securityTab,usb:usbTab,backup:backupTab,hw:hwTab,syncthing:syncthingTab};
  let footMo=null;
  const render=()=>{
   if(footMo){footMo.disconnect();footMo=null;}
@@ -14252,16 +14240,14 @@ const EVMETA=[
  {grp:"Space"},
  {k:"pool",t:"Pool is full",d:"mergerfs /mnt/storage above the threshold",thr:"%",dp:0},
  {k:"diskfull",t:"Disk filling up",d:"any /mnt/diskN above the threshold",thr:"%",dp:0},
- {k:"root_full",t:"Low space on the system card",d:"the / partition (SD card) above the threshold",thr:"%",dp:1},
+ {k:"root_full",t:"Low space on the system disk",d:"the / partition above the threshold",thr:"%",dp:1},
  {k:"inodes",t:"Running out of inodes",d:"there is space, but new files cannot be created",thr:"%",dp:1},
- {grp:"Raspberry Pi: power and resources"},
+ {grp:"Power, temperature and resources"},
  {k:"temp",t:"CPU overheating",d:"temperature above the threshold",thr:"°C",dp:1},
- {k:"undervolt",t:"Undervoltage",d:"the PSU cannot supply enough current — risk of a sudden power-off",dp:2},
- {k:"throttle",t:"Frequency throttling",d:"CPU dropped its clock: overheating or a firmware cap",dp:1},
  {k:"thermal_guard",t:"Thermal guard",d:"overheating: warning or auto container throttling",dp:1},
- {k:"sustained_heat",t:"Sustained overheating/throttling",d:"heat or throttling does not subside for N minutes straight",thr:"min",dp:1},
+ {k:"sustained_heat",t:"Sustained overheating",d:"the temperature does not come down for N minutes straight",thr:"min",dp:1},
  {k:"fan_stall",t:"Fan stopped",d:"0 RPM at high temperature",dp:1},
- {k:"sd_degrade",t:"SD card failures",d:"boot card read/write errors in the kernel log",dp:1},
+ {k:"sd_degrade",t:"System disk failures",d:"read/write errors of the boot disk in the kernel log",dp:1},
  {k:"mem",t:"Low RAM",d:"RAM usage above the threshold",thr:"%",dp:0},
  {k:"swap",t:"Active swap",d:"swap above the threshold — not enough RAM",thr:"%",dp:0},
  {k:"load",t:"High load",d:"1-min load average above the threshold",thr:"",dp:0},
@@ -14408,7 +14394,7 @@ function maintTab(tc){
    <div class="srow"><div class="srow-l"><div class="srow-t">Scrub — weekly${tipHTML("Checks data for hidden corruption (bit rot). Once a week on the chosen day and time.")}</div><div class="srow-d">day and time</div></div><div class="srow-c"><select id="stSnDow" class="ev-prio">${[["Mon","Mon"],["Tue","Tue"],["Wed","Wed"],["Thu","Thu"],["Fri","Fri"],["Sat","Sat"],["Sun","Sun"]].map(([v,l])=>`<option value="${v}">${l}</option>`).join("")}</select><input class="mono" id="stSnScrub" style="max-width:90px" placeholder="05:00"></div></div>
    <div class="set-h">Reliability & reports</div>
    <div class="mon-row"><span>Auto-reconnect disk${tipHTML("If a data disk suddenly drops (a common USB-SATA bridge problem), the NAS tries to remount it every 5 minutes and notifies you when it succeeds. Without this, a backup could silently stop working until you noticed.")}</span><label class="tgl"><input type="checkbox" id="stAmr"><span class="sl"></span></label></div>
-   <div class="mon-row"><span>Active thermal protection${tipHTML("On sustained Pi 5 overheating (parity/load) the NAS acts, not just warns. «Warn» sends a notification. «Auto» throttles or pauses the most CPU-hungry container until it cools (leaves databases alone), then restores it.")}</span><div class="seg" id="stTh"><button data-v="off">Off</button><button data-v="warn">Warn</button><button data-v="auto">Auto</button></div></div>
+   <div class="mon-row"><span>Active thermal protection${tipHTML("On sustained overheating (parity/load) the NAS acts, not just warns. «Warn» sends a notification. «Auto» throttles or pauses the most CPU-hungry container until it cools (leaves databases alone), then restores it.")}</span><div class="seg" id="stTh"><button data-v="off">Off</button><button data-v="warn">Warn</button><button data-v="auto">Auto</button></div></div>
    <div class="srow" id="stThRow"><div class="srow-l"><div class="srow-t">Temperature thresholds</div><div class="srow-d">«hot» · «critical» (pause in Auto mode), °C</div></div><div class="srow-c"><input class="mono" id="stThHot" style="max-width:60px"><span style="color:var(--mut);font-size:12px">°C</span><input class="mono" id="stThCrit" style="max-width:60px"><span style="color:var(--mut);font-size:12px">°C</span></div></div>
    <div class="mon-row"><span>Status summary${tipHTML("Once a day or week the NAS sends a short summary (temperature, memory, space, health, backup result). Delivery is via notifications: toggle Pushover in Settings → Notifications → «Status summary».")}</span><label class="tgl"><input type="checkbox" id="stSumOn"><span class="sl"></span></label></div>
    <div class="srow" id="stSumRow"><div class="srow-l"><div class="srow-t">When to send</div></div><div class="srow-c"><div class="seg" id="stSumFreq"><button data-v="daily">Daily</button><button data-v="weekly">Weekly</button></div><select id="stSumDow" class="ev-prio">${[["Mon","Mon"],["Tue","Tue"],["Wed","Wed"],["Thu","Thu"],["Fri","Fri"],["Sat","Sat"],["Sun","Sun"]].map(([v,l])=>`<option value="${v}">${l}</option>`).join("")}</select><input class="mono" id="stSumTime" style="max-width:80px" placeholder="09:00"></div></div>
@@ -14766,7 +14752,7 @@ function sharingTab(tc){
 function motdTab(tc){
  tc.innerHTML=`<h3 class="set-title">SSH login message</h3><p class="set-sub">What you see in the terminal when you log in. It is assembled from several sources: our block, the kernel line and «Last login» from sshd.</p>
   <div class="set-grp">What to show${tipHTML("What you see in the terminal when logging in over SSH. Rendered by pam_motd via /etc/update-motd.d/20-nas-os.")}</div>
-  <div class="srow"><div class="srow-l"><div class="srow-t">Logo</div><div class="srow-d">NAS-OS banner in Raspberry Pi colours</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="moG"><span class="sl"></span></label></div></div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">Logo</div><div class="srow-d">NAS-OS banner in the panel's own colours</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="moG"><span class="sl"></span></label></div></div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Custom text</div><div class="srow-d">free-form header shown above the summary</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="moT"><span class="sl"></span></label></div></div>
   <div class="srow"><div class="srow-l"><div class="srow-t">System summary</div><div class="srow-d">uptime, temperature, memory, pool, address, containers</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="moI"><span class="sl"></span></label></div></div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Kernel line${tipHTML("The first line «Linux nas 6.18… aarch64». Printed by /etc/update-motd.d/10-uname — we clear its execute bit, the file stays in place.")}</div><div class="srow-d">Linux nas … aarch64</div></div><div class="srow-c"><label class="tgl"><input type="checkbox" id="moU"><span class="sl"></span></label></div></div>
@@ -14808,45 +14794,30 @@ function motdTab(tc){
     if(rr&&rr.ok)flashSaved(sv);
     toast(LIVE?(rr&&rr.ok?"Saved ✓":"Error: "+((rr&&rr.log)||"?")):"Demo");};}
 }
-/* --- settings: Raspberry Pi --- */
-function piTab(tc){withSysc(tc,()=>{const p=SYSC.pi||{};const g=p.governor||{};const thr=p.throttled||{};
- // Everything below splits in two: knobs that exist only on a Raspberry Pi (config.txt,
- // EEPROM, vcgencmd telemetry) and knobs every Linux box has (governor, watchdog, zram).
- // On other hardware the first group is not "off" — it is meaningless, so it is not drawn
- // at all. A toggle that is shown but cannot act is a lie, and the memory-cgroup row used
- // to be exactly that: it answered "config.txt not found" on a box where the controller
- // had been enabled by the kernel all along.
- const isPi=p.is_pi!==false;
- const chips=(arr,cls)=>arr&&arr.length?arr.map(x=>`<span class="sbadge ${cls}">${esc(x)}</span>`).join(""):`<span class="sbadge ok">no</span>`;
+/* --- settings: hardware --- */
+function hwTab(tc){withSysc(tc,()=>{const p=SYSC.hw||{};const g=p.governor||{};
+ // Only knobs that are REAL on this machine. The tab used to carry a second half for
+ // Raspberry Pi (config.txt, EEPROM, vcgencmd telemetry) and hide it elsewhere; the box
+ // is x86 now and that half is gone rather than hidden. The rule it was built on stays:
+ // a control that is shown but cannot act is a lie, which is why the memory-cgroup row
+ // below is a READOUT, not a switch — on this kernel the controller is already on and
+ // there is nothing here to toggle.
  const govBtns=(g.available||[]).map(x=>`<button data-g="${x}" class="${g.current===x?"on":""}">${esc(x)}</button>`).join("")||"—";
  tc.innerHTML=`${rebootBan()}
-  <h3 class="set-title">${isPi?"Raspberry Pi":"Hardware"}</h3><p class="set-sub">Hardware parameters of the board.${isPi?" Many apply only after a reboot.":""}</p>
+  <h3 class="set-title">Hardware</h3><p class="set-sub">What this machine can actually be told to do.</p>
   <div class="pi-card">
    <div class="pi-head"><img src="/icon-brand.svg" alt="">
-    <div><div class="pi-model">${esc(p.model||(isPi?"Raspberry Pi":"This machine"))}</div>
-     <div class="pi-temp"><b style="color:${p.temp>=70?'var(--danger)':p.temp>=60?'var(--warn)':'var(--good)'}">${p.temp!=null?p.temp+"°":"—"}</b> CPU temp</div></div></div>
-   ${isPi?`<div class="pi-kv">
-    <div class="row"><span>Firmware</span><b>${esc(p.firmware||"—")}</b></div>
-    <div class="row"><span>EEPROM</span><b>${esc(p.eeprom||"—")}</b></div>
-    <div class="row"><span>Throttling now</span><div class="thr-chips">${chips(thr.now,"bad")}</div></div>
-    <div class="row"><span>Throttling occurred</span><div class="thr-chips">${chips(thr.ever,"warn")}</div></div>
-   </div>`:""}</div>
-  ${isPi?`<div class="set-grp">Power and bus <span class="pill-rb">after reboot</span></div>
-  ${tglRow("Full USB current","Allows the Pi 5 USB ports to supply full current (1.6 A instead of 600 mA). Needed for USB SSD/HDD without external power — otherwise voltage dips and disk dropouts. usb_max_current_enable.","usbpower",p.usbpower,"powers USB disks without dips")}
-  ${tglRow("PCIe Gen 3 for NVMe","Speeds the NVMe slot up from Gen2 to Gen3 — a noticeably faster disk. Formally out of the Pi 5 spec: stable on most boards, but some SSDs may glitch.","pcie3",p.pcie3,"speeds up NVMe (out of spec)")}
-  ${tglRow("Memory cgroup for Docker","Enables the memory cgroup in the kernel — without it docker can't limit container RAM (mem_limit). Edits cmdline.txt.","cgroup",p.cgroup,"container memory limits")}`
-  :`<div class="set-grp">Docker</div>
-  <div class="srow is-gated"><div class="srow-l"><div class="srow-t">Memory cgroup for Docker${tipHTML("Lets docker cap a container's RAM (mem_limit). On this board the kernel enables the memory controller itself — there is nothing to switch.")}</div><div class="srow-d">${p.cgroup?"enabled by the kernel — nothing to do":"NOT enabled: add cgroup_enable=memory to the kernel command line in your bootloader"}</div></div><div class="srow-c"><span class="sbadge ${p.cgroup?"ok":"warn"}">${p.cgroup?"on":"off"}</span></div></div>`}
+    <div><div class="pi-model">${esc(p.model||"This machine")}</div>
+     <div class="pi-temp"><b style="color:${p.temp>=70?'var(--danger)':p.temp>=60?'var(--warn)':'var(--good)'}">${p.temp!=null?p.temp+"°":"—"}</b> CPU temp</div></div></div></div>
+  <div class="set-grp">Docker</div>
+  <div class="srow is-gated"><div class="srow-l"><div class="srow-t">Memory cgroup for Docker${tipHTML("Lets docker cap a container's RAM (mem_limit). On this kernel the memory controller is enabled by default — there is nothing to switch.")}</div><div class="srow-d">${p.cgroup?"enabled by the kernel — nothing to do":"NOT enabled: add cgroup_enable=memory to GRUB_CMDLINE_LINUX and run update-grub"}</div></div><div class="srow-c"><span class="sbadge ${p.cgroup?"ok":"warn"}">${p.cgroup?"on":"off"}</span></div></div>
   <div class="set-grp">Thermals and performance</div>
-  ${svcRow("Adaptive CPU governor","Every 2 min: at ≥80 °C or throttling → the coolest governor this kernel offers, otherwise the balanced one. The names are not universal — intel_pstate boards only have powersave/performance — so the script picks from what the kernel actually lists. For fanless cases, so the board doesn't overheat.","governor_adaptive",g.adaptive,"auto frequency reduction when hot")}
+  ${svcRow("Adaptive CPU governor","Every 2 min: at \u226580 °C → the coolest governor this kernel offers, otherwise the balanced one. The names are not universal — intel_pstate boards only have powersave/performance — so the script picks from what the kernel actually lists. For fanless cases, so the box does not cook itself.","governor_adaptive",g.adaptive,"auto frequency reduction when hot")}
   <div class="srow"><div class="srow-l"><div class="srow-t">CPU governor mode${tipHTML("CPU frequency policy. ondemand — by load (balanced), performance — always max (hotter), powersave — always minimum (cooler/slower). Applied immediately.")}</div><div class="srow-d">now: ${esc(g.current||"?")}</div></div><div class="srow-c"><div class="seg" id="pGov" style="flex-wrap:wrap;max-width:340px">${govBtns}</div></div></div>
-  ${tglRow("Watchdog (auto-reboot on hang)","A hardware watchdog: if the system stops responding, the Pi reboots automatically. Useful for a NAS without a monitor and keyboard.","watchdog",p.watchdog,"reboots on a complete hang")}
-  ${svcRow("zram (compressed swap in RAM)",`Compressed swap in RAM (zstd, 50% of RAM) instead of the disk — smoother under load, and ${isPi?"it protects the SD card":"it spares the system SSD"} from swap writes. Costs a bit of CPU for compression.`,"zram",p.zram,isPi?"compressed swap, protects the SD card":"compressed swap, spares the system disk")}
-  ${isPi?`<div class="set-grp">Firmware</div>
-  <div class="srow"><div class="srow-l"><div class="srow-t">Update the bootloader (EEPROM)${tipHTML("Updates the Pi bootloader firmware (rpi-eeprom). Sometimes fixes NVMe/USB compatibility and power consumption. Requires a reboot.")}</div></div><div class="srow-c"><button class="btn sm" id="pEep">${svg("refresh",13)} Refresh</button></div></div>`:""}`;
+  ${tglRow("Watchdog (auto-reboot on hang)","A hardware watchdog: if the system stops responding, the box reboots itself. Useful for a NAS with no monitor and no keyboard.","watchdog",p.watchdog,"reboots on a complete hang")}
+  ${svcRow("zram (compressed swap in RAM)","Compressed swap in RAM (zstd, 50% of RAM) instead of the disk — smoother under load, and it spares the system SSD the swap writes. Costs a bit of CPU for compression.","zram",p.zram,"compressed swap, spares the system disk")}`;
  wireSc(tc);
  tc.querySelectorAll("#pGov button").forEach(b=>b.onclick=async()=>{await sconf("governor",b.dataset.g);refreshSysc(rerSet);});
- const ee=tc.querySelector("#pEep");if(ee)ee.onclick=()=>confirmDlg("EEPROM","Update the bootloader firmware? Applies after a reboot.",async()=>{await sconf("eeprom_update",1);});
 });}
 
 /* widgets (right rail) */
@@ -14973,7 +14944,6 @@ function paintSys(s){const m=document.getElementById("wg-sys");if(!m)return;
   <div class="krow" style="margin-top:12px"><span>${svg("clock",13)} Uptime</span><b>${fmtUp(s.uptime)}</b></div>
   <div class="krow"><span>${svg("activity",13)} Load 1m / 5m</span><b>${s.load?s.load[0].toFixed(2)+" / "+s.load[1].toFixed(2):"—"}</b></div>
   ${DISK_TEMP_MAX!=null?`<div class="krow"><span>${svg("thermo",13)} Disk temp</span><b style="color:${diskTcol(DISK_TEMP_MAX)}">${DISK_TEMP_MAX}°C</b></div>`:""}
-  ${s.psu_ma?`<div class="krow" title="${att("Power supply current negotiated over USB-PD. Normal is 5000 mA (27 W PSU): at 3000 mA (15 W or a weak cable) the PMIC shuts the board down under load.")}"><span>${svg("zap",13)} Power</span><b style="color:${s.psu_ma>=5000?"var(--good)":"var(--warn)"}">${(s.psu_ma/1000).toFixed(0)} A${s.psu_ma>=5000?"":" — need 5 A"}</b></div>`:""}
   ${thr?`<div class="krow" style="color:var(--warn)"><span>⚠ throttling</span><b>${esc(s.throttled.raw)}</b></div>`:""}`;
  const ns=document.getElementById("wg-nets");if(ns)ns.innerHTML=
   `<span style="color:var(--good)">↓ ${fmtR(s.net.rx)}</span><span style="color:var(--danger)">↑ ${fmtR(s.net.tx)}</span>`;

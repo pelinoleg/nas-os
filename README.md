@@ -1,14 +1,13 @@
 # NAS-OS
 
-A lightweight "NAS operating system" on top of Debian / Raspberry Pi OS Lite (Pi and
-plain x86 boxes alike — the installer adapts to the board): a browser-based desktop
+A lightweight "NAS operating system" on top of Debian on an x86 box: a browser-based desktop
 (monitoring, disks/SMART, docker stacks, file manager with previews and a player, terminal,
 Pushover notifications) + a step-by-step setup wizard. Backend — Python standard library
 (no pip), engine — bash. Runs as root (SMART, docker, mounting, power, PTY).
 
 ## Easiest install on x86: a flash-and-forget USB stick
 
-Debian's installer asks twenty questions. This repo ships its own "Raspberry Pi
+Debian's installer asks twenty questions. This repo ships its own "
 Imager": a script that builds a USB image with every answer baked in **plus**
 NAS-OS itself. Runs on **macOS** (`brew install xorriso`) or any Linux —
 including an existing NAS box:
@@ -19,7 +18,7 @@ including an existing NAS box:
 
 It asks for a password (that becomes the SSH/panel user), downloads the current
 Debian netinst, verifies its checksum, and produces `nas-os-installer.iso`.
-Flash it with balenaEtcher or Raspberry Pi Imager ("Use custom"), plug the
+Flash it with balenaEtcher ("Use custom"), plug the
 stick into the new box with an **ethernet cable**, boot from USB, and walk
 away. Debian installs onto the eMMC (or the smallest disk) — the data disks are
 untouched — the box reboots, NAS-OS installs itself, and the panel appears on
@@ -33,7 +32,7 @@ The stick is only needed for the install; pull it out afterwards.
 curl -fsSL https://raw.githubusercontent.com/pelinoleg/nas-os/main/install.sh | sudo bash
 ```
 
-The same command works on a Raspberry Pi and on any x86 Debian box. For a box you
+The command works on any x86 Debian box. For a box you
 depend on, pin the install to a tested release instead of whatever `main` is right now:
 
 ```bash

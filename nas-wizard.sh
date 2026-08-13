@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# nas-wizard.sh — NAS setup wizard (Raspberry Pi / any Debian box)
+# nas-wizard.sh — NAS setup wizard (x86 Debian box)
 #
 # Implemented stages (per spec):
 #   1.  System preparation (NAS stack + utilities + Pi packages, docker,
@@ -12,7 +12,7 @@
 #   4.  Docker — reads ./services/<service>/*.yml NEXT TO THE SCRIPT, checklist
 #       "which to bring up", up/down, generates deploy.sh ("apply everything at once")
 #   5.  Pi tuning — PCIe Gen3, USB max current, memory cgroup, sysctl, zram,
-#       watchdog, EEPROM, Wi-Fi powersave, temp/throttle (opt-in checklist)
+#       watchdog, Wi-Fi powersave, CPU governor by temperature (opt-in checklist)
 #   6.  Security — unattended-upgrades, journald cap, log2ram, ufw, fail2ban,
 #       SSH key-only (safe: only when keys are present)
 #   7.  Network shares — Samba to /mnt/storage + Avahi (mDNS)
@@ -44,7 +44,7 @@ SERVICES_SRC="$SCRIPT_DIR/services"
 # --- Packages (we don't install whiptail — it's needed for this script to work at all) ---
 # NAS stack
 # docker-ce/compose-plugin are installed separately from the official Docker repo (see ensure_docker_repo) —
-# they aren't in the Debian/RPi OS repos. Here only packages available in the stock repositories.
+# they aren't in the Debian repos. Here only packages available in the stock repositories.
 STACK_PACKAGES=(mergerfs snapraid smartmontools)
 # General-purpose utilities — what a server/NAS almost always needs
 UTIL_PACKAGES=(
@@ -74,9 +74,6 @@ UTIL_PACKAGES=(
   unattended-upgrades apt-listchanges
   ffmpeg poppler-utils
 )
-# Pi-specific. Absent on any other board — install_packages tags these skips as
-# level "pi" so they never reach the panel or the loud summary (see pkg_level).
-PI_PACKAGES=(libraspberrypi-bin raspi-config rpi-eeprom)
 
 # --- Which skipped packages actually matter -------------------------------------
 # A package renamed in a newer Debian is skipped silently by apt-cache and the
@@ -119,10 +116,9 @@ REQUIRED_PKGS=(
   "openssl|the Kopia repository server cannot get its TLS identity"
   "unattended-upgrades|security updates stop arriving — the box quietly collects CVEs"
 )
-# pkg_level <pkg> -> req|opt|pi
+# pkg_level <pkg> -> req|opt
 pkg_level() {
     local p="$1" r
-    for r in "${PI_PACKAGES[@]}"; do [ "$r" = "$p" ] && { echo pi; return; }; done
     for r in "${REQUIRED_PKGS[@]}"; do [ "${r%%|*}" = "$p" ] && { echo req; return; }; done
     echo opt
 }
@@ -133,15 +129,6 @@ pkg_why() {
     echo ""
 }
 
-# --- Board detection --------------------------------------------------------
-# Branch on the FACT of hardware, never on the architecture: an arm64 board that is
-# not a Pi has no config.txt either, and the question is always "is this knob real
-# here", not "which CPU is this". A toggle that is present but cannot act is worse
-# than one that is absent — it lies (see the Pi tab on x86).
-is_pi() {
-    [ -n "$(boot_config_path)" ] && command -v vcgencmd >/dev/null 2>&1 && return 0
-    grep -qs -i raspberry /proc/device-tree/model 2>/dev/null
-}
 
 # Mount points / directories
 STORAGE_MNT="/mnt/storage"
@@ -161,7 +148,7 @@ NAS_CONFIG="/var/lib/nas-os"    # panel state, root-owned (see 0.6)
 # ---------------------------------------------------------------------------
 usage() {
     cat <<EOF
-nas-wizard.sh — NAS setup (Raspberry Pi / any Debian box)
+nas-wizard.sh — NAS setup (x86 Debian box)
 
   --dry-run           Print commands, change nothing
   --stage system      Stage 1: system preparation
@@ -429,7 +416,7 @@ report_skipped_packages() {
 # ---------------------------------------------------------------------------
 # ensure_docker_repo — hook up the official Docker CE repository and install the engine.
 # Why: docker-compose-plugin (v2, «docker compose») and docker-ce are NOT in the
-# Debian/Raspberry Pi OS repositories — they live only on download.docker.com. Without this repo
+# Debian repositories — they live only on download.docker.com. Without this repo
 # docker_compose_cmd is empty → Stage 4, Dockge, deploy.sh, nas-stacks.service — no-op on
 # a clean machine. Idempotent: a repeat run only recreates what's missing.
 # ---------------------------------------------------------------------------
@@ -440,7 +427,7 @@ ensure_docker_repo() {
     arch="$(dpkg --print-architecture)"
     codename="$(. /etc/os-release && echo "${VERSION_CODENAME:-bookworm}")"
 
-    # curl + ca-certificates are needed to download the GPG key (usually already present on RPi OS)
+    # curl + ca-certificates are needed to download the GPG key
     install_packages "Docker: dependencies" ca-certificates curl
 
     # Docker doesn't publish every Debian release right away. If there's no repository
@@ -475,7 +462,7 @@ ensure_docker_repo() {
 
 # ---------------------------------------------------------------------------
 # ensure_gh — GitHub CLI (gh) from the official repository cli.github.com.
-# gh is NOT in the Debian/Raspberry Pi OS repositories — it needs its own source.
+# gh is NOT in the Debian repositories — it needs its own source.
 # Handy for pushing panel code to github.com/pelinoleg/nas-os straight
 # from the box. Idempotent: if gh is already installed — exit right away.
 # ---------------------------------------------------------------------------
@@ -766,15 +753,6 @@ stage_system() {
     install_packages "NAS stack"   "${STACK_PACKAGES[@]}"
     install_smartd_guard   # smartmontools is installed right here — immediately clear failed with no disks
     install_packages "utilities"    "${UTIL_PACKAGES[@]}"
-    if is_pi; then
-        if is_pi; then
-        install_packages "Pi packages" "${PI_PACKAGES[@]}"
-    else
-        info "not a Raspberry Pi — Pi-only packages (${PI_PACKAGES[*]}) not needed"
-    fi
-    else
-        info "not a Raspberry Pi — Pi-only packages (${PI_PACKAGES[*]}) not needed"
-    fi
     ensure_docker_repo   # docker-ce + compose-plugin from the official Docker repo
     ensure_gh            # GitHub CLI (for pushing panel code from the box)
 
@@ -815,11 +793,14 @@ stage_system() {
     iface="$(ip route show default 2>/dev/null | awk '/default/{print $5; exit}')"
     if [ -z "$iface" ]; then
         warn "could not determine the default network interface"
-    elif [ "$iface" = "end0" ]; then
-        info "network interface: end0 (standard for Pi5/Bookworm)"
     else
-        warn "default network interface: '$iface' (expected end0 on Pi5/Bookworm)."
-        ui_msg "Network" "Primary interface: $iface\n\nOn Raspberry Pi 5 / Bookworm the wired one is usually named end0. If you use Wi-Fi ('$iface' looks like a wireless one) — note that a stable wired link is preferred for a NAS.\n\nThe interface name isn't hardcoded anywhere — just a warning."
+        info "default network interface: $iface"
+        case "$iface" in
+            wl*)
+                warn "the default route goes over Wi-Fi ('$iface')"
+                ui_msg "Network" "Primary interface: $iface\n\nThe default route currently goes over Wi-Fi. A NAS is much happier on a cable: the link survives interference, and netguard can only fail OVER to Wi-Fi if there is a wire to fail over from.\n\nNothing is hardcoded — this is just a warning."
+                ;;
+        esac
     fi
 
     # 0.6 directory structure
@@ -1743,11 +1724,6 @@ backup_file() {
     _bak_take "$f" && info "backup: $f -> $BAKDIR"
 }
 
-boot_config_path() {
-    if   [ -f /boot/firmware/config.txt ]; then echo /boot/firmware/config.txt
-    elif [ -f /boot/config.txt ];          then echo /boot/config.txt
-    else echo ""; fi
-}
 
 # LAN subnet like 192.168.1.0/24 (from the connected route)
 detect_lan_cidr() {
@@ -1759,15 +1735,8 @@ detect_lan_cidr() {
 checklist_selected() { printf ' %s ' "$(printf '%s' "$1" | tr -d '"')"; }
 
 # ---------------------------------------------------------------------------
-# STAGE 5: Pi tuning (hardware). config.txt edits require a reboot.
+# STAGE 5: hardware tuning.
 # ---------------------------------------------------------------------------
-pi_pcie3() {
-    local cfg="$1"
-    if [ -z "$cfg" ]; then warn "config.txt not found — PCIe Gen3 skipped"; return 0; fi
-    backup_file "$cfg"
-    append_line "dtparam=pciex1_gen=3" "$cfg"
-    info "PCIe Gen3 for NVMe added to $cfg (takes effect after reboot)"
-}
 pi_wifi_powersave_off() {
     run mkdir -p /etc/NetworkManager/conf.d
     write_file /etc/NetworkManager/conf.d/wifi-powersave-off.conf <<'EOF'
@@ -1787,20 +1756,11 @@ EOF
     run systemctl daemon-reexec
     info "watchdog enabled (RuntimeWatchdogSec=15s)"
 }
-# USB max current — on Pi5, without this the total USB current is capped at 600mA => brownouts on USB-SSD
-pi_usb_power() {
-    local cfg="$1"
-    if [ -z "$cfg" ]; then warn "config.txt not found — USB power skipped"; return 0; fi
-    backup_file "$cfg"
-    append_line "usb_max_current_enable=1" "$cfg"
-    info "usb_max_current_enable=1 (power for USB disks; takes effect after reboot)"
-}
-# Memory cgroup for docker limits (editing cmdline.txt — a SINGLE-line file!)
+# Memory cgroup for docker limits
 pi_cgroup() {
     # Ask the kernel, not the bootloader: on cgroup v2 (every non-Pi Debian) the
     # memory controller is on by default and there is nothing to enable. The old
-    # code only knew how to look in cmdline.txt, so on such a box it answered
-    # "cmdline.txt not found" — which reads as "broken" when the answer is "already on".
+    # The answer lives in the kernel, not in a bootloader file.
     # v2: the root cgroup has no memory.max, the controller list is the honest source.
     # v1: /proc/cgroups has an "enabled" column. Check both — a box can be on either.
     if grep -qws memory /sys/fs/cgroup/cgroup.controllers 2>/dev/null \
@@ -1808,18 +1768,7 @@ pi_cgroup() {
         info "memory cgroup already enabled by the kernel — nothing to do"
         return 0
     fi
-    local cl=/boot/firmware/cmdline.txt
-    [ -f "$cl" ] || cl=/boot/cmdline.txt
-    [ -f "$cl" ] || { warn "no cmdline.txt and the memory cgroup is off — enable it in your bootloader (GRUB: cgroup_enable=memory)"; return 0; }
-    if grep -qs 'cgroup_enable=memory' "$cl"; then info "memory cgroup already enabled"; return 0; fi
-    backup_file "$cl"
-    if [ "$DRY_RUN" -eq 1 ]; then
-        info "[DRY-RUN] add cgroup_enable=memory cgroup_memory=1 to $cl"
-        return 0
-    fi
-    sed -i 's/\bcgroup_disable=memory\b//g; s/[[:space:]]\+/ /g; s/[[:space:]]*$//' "$cl"
-    sed -i '1 s|$| cgroup_enable=memory cgroup_memory=1|' "$cl"
-    info "memory cgroup enabled in $cl (reboot needed; memory limits in docker-compose)"
+    warn "the memory cgroup is off — add cgroup_enable=memory to the kernel command line (GRUB_CMDLINE_LINUX), otherwise docker memory limits do nothing"
 }
 pi_sysctl() {
     write_file /etc/sysctl.d/99-nas.conf <<'EOF'
@@ -1834,7 +1783,7 @@ EOF
     info "sysctl tuning applied (swappiness=10, somaxconn=512, tcp keepalive)"
 }
 # Silence the legacy zramswap.service (zram-tools package). On modern
-# Raspberry Pi OS zram-swap is brought up by systemd-zram-generator/rpi-swap, and
+# Modern Debian brings zram-swap up via systemd-zram-generator, and
 # zramswap.service FIGHTS it over /dev/zram0: "Device or resource busy",
 # "zram0 is mounted; will not make swapspace" — endless failed spam in the journal.
 zram_disable_zramtools() {
@@ -1851,7 +1800,6 @@ zram_disable_zramtools() {
 # Is there a native zram generator (modern Pi OS Bookworm+)?
 zram_have_native() {
     [ -e /usr/lib/systemd/system/systemd-zram-setup@.service ] \
-    || [ -f /etc/rpi/swap.conf ] \
     || [ -f /etc/systemd/zram-generator.conf ] \
     || [ -f /usr/lib/systemd/zram-generator.conf ]
 }
@@ -1861,17 +1809,6 @@ pi_zram() {
         zram_disable_zramtools
         # 2) configure native zram: ~50% RAM (cap 4 GiB), zstd (kernel default)
         if [ "$DRY_RUN" -eq 0 ]; then
-            if [ -f /etc/rpi/swap.conf ]; then
-                run mkdir -p /etc/rpi/swap.conf.d
-                cat > /etc/rpi/swap.conf.d/60-nas-os.conf <<'EOF'
-# NAS-OS: zram-swap enabled (~50% RAM, cap 4 GiB). See swap.conf(5).
-[Main]
-Mechanism=zram+file
-[Zram]
-RamMultiplier=0.5
-MaxSizeMiB=4096
-EOF
-            else
                 run mkdir -p /etc/systemd
                 cat > /etc/systemd/zram-generator.conf <<'EOF'
 # NAS-OS: zram-swap (zstd, ~50% RAM, cap 4 GiB). See zram-generator.conf(5).
@@ -1879,7 +1816,6 @@ EOF
 zram-size = min(ram / 2, 4096)
 compression-algorithm = zstd
 EOF
-            fi
             # Switching the swap mechanism restarts dev-zram0.swap in a burst →
             # start-limit-hit: a transient "failed" that self-heals but trips the
             # panel's failed-unit monitor. Disable the rate limiter for this
@@ -1927,32 +1863,6 @@ detect_usb_storage_ids() {
         done
     done | sort -u
 }
-# Seed usb-storage.quirks in cmdline with the bridges attached right now, so they come up
-# on usb-storage from the very first boot. Everything plugged in LATER is handled at runtime
-# by the udev hook (nas-uas-off.sh) — see install_uas_off().
-uas_seed_cmdline() {
-    local cl=/boot/firmware/cmdline.txt
-    [ -f "$cl" ] || cl=/boot/cmdline.txt
-    [ -f "$cl" ] || { warn "cmdline.txt not found — UAS quirks skipped"; return 0; }
-    local ids; ids="${NASW_QUIRKS:-$(detect_usb_storage_ids)}"
-    [ -n "$ids" ] || { info "no USB disks right now — udev adds quirks on plug-in"; return 0; }
-    local want="" id
-    for id in $ids; do want="${want:+$want,}${id}:u"; done
-    local line cur merged
-    line="$(head -1 "$cl")"
-    cur="$(printf '%s\n' "$line" | grep -o 'usb-storage\.quirks=[^ ]*' | head -1 | sed 's/usb-storage\.quirks=//')"
-    merged="$(printf '%s,%s' "$cur" "$want" | tr ',' '\n' | sed '/^$/d' | sort -u | paste -sd, -)"
-    if [ -n "$cur" ] && [ "$cur" = "$merged" ]; then info "usb-storage.quirks already configured ($cur)"; return 0; fi
-    backup_file "$cl"
-    if [ "$DRY_RUN" -eq 1 ]; then info "[DRY-RUN] usb-storage.quirks=$merged in $cl"; return 0; fi
-    if [ -n "$cur" ]; then
-        line="$(printf '%s\n' "$line" | sed "s#usb-storage\.quirks=[^ ]*#usb-storage.quirks=$merged#")"
-    else
-        line="$line usb-storage.quirks=$merged"
-    fi
-    printf '%s\n' "$line" > "$cl"
-    info "UAS disabled for USB bridges: $merged (in $cl; reboot needed)"
-}
 # Disable UAS for every USB-SATA bridge — current and future. NOT optional, on purpose.
 #
 # Why UAS must go: its error recovery resets the WHOLE usb device. One command that hangs
@@ -1974,9 +1884,9 @@ install_uas_off() {
     # every bridge, present and future — no VID:PID bookkeeping, no re-enumeration.
     # Install it in ADDITION to the hook (the hook then finds nothing bound to uas
     # and exits early), so a box that somehow loads uas anyway is still covered.
-    # `modinfo uas` prints "filename: (builtin)" on a Pi and an absolute /lib/modules
-    # path where it is a real module — that is the whole test.
-    if ! is_pi && modinfo uas 2>/dev/null | grep -qE '^filename:[[:space:]]*/'; then
+    # `modinfo uas` prints an absolute /lib/modules path where uas is a real module —
+    # that is the whole test, and on any x86 board it is.
+    if modinfo uas 2>/dev/null | grep -qE '^filename:[[:space:]]*/'; then
         run mkdir -p /etc/modprobe.d
         local _uas_conf=/etc/modprobe.d/nas-uas-off.conf _uas_had=0
         [ -f "$_uas_conf" ] && _uas_had=1
@@ -2000,8 +1910,10 @@ EOF
     write_file /usr/local/bin/nas-uas-off.sh <<'UASOFF'
 #!/bin/sh
 # nas-wizard: disable UAS for one USB mass-storage bridge (from udev via systemd-run).
-# Adds VID:PID to the live usb-storage quirks parameter AND to cmdline.txt, then
-# re-enumerates the device so it re-probes and lands on usb-storage instead of uas.
+# Adds VID:PID to the live usb-storage quirks parameter, then re-enumerates the device
+# so it re-probes and lands on usb-storage instead of uas. The permanent half of the job
+# is done by the modprobe blacklist in install_uas_off(); this hook covers a bridge that
+# is plugged in while the box is already running.
 # Runs once per bridge: on every later plug the quirk is already there and we exit early.
 set -u
 VID="${1:-}"; PID="${2:-}"; DEV="${3:-}"
@@ -2017,16 +1929,6 @@ cur="$(tr -d '\n' <"$Q" 2>/dev/null)"
 case ",$cur," in *",$VID:$PID:u,"*) exit 0 ;; esac
 new="${cur:+$cur,}$VID:$PID:u"
 printf '%s' "$new" >"$Q" 2>/dev/null || { log "cannot write $Q"; exit 0; }
-
-CL=/boot/firmware/cmdline.txt; [ -f "$CL" ] || CL=/boot/cmdline.txt
-if [ -f "$CL" ]; then
-  line="$(head -1 "$CL")"
-  case "$line" in
-    *usb-storage.quirks=*) line="$(printf '%s' "$line" | sed "s#usb-storage\.quirks=[^ ]*#usb-storage.quirks=$new#")" ;;
-    *)                     line="$line usb-storage.quirks=$new" ;;
-  esac
-  printf '%s\n' "$line" >"$CL" 2>/dev/null || log "cannot write $CL"
-fi
 
 # The bridge is bound to uas right now; only a re-enumeration makes the kernel re-probe it.
 # We run at plug time, so nothing should be using the disk — but the automount hook fires on
@@ -2059,7 +1961,6 @@ UASOFF
 ACTION=="add", SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ENV{ID_USB_INTERFACES}=="*:080662:*", RUN+="/usr/bin/systemd-run --no-block /usr/local/bin/nas-uas-off.sh $env{ID_VENDOR_ID} $env{ID_MODEL_ID} %k"
 RULES
     run udevadm control --reload-rules
-    uas_seed_cmdline
 }
 
 install_usb_timeout() {
@@ -2114,8 +2015,6 @@ cpu_temp_mc() {
 }
 t="$(cpu_temp_mc)"; case "$t" in ''|*[!0-9]*) t=0 ;; esac
 temp=$(( t / 1000 ))
-thr_hex="$(vcgencmd get_throttled 2>/dev/null | sed 's/.*=//')"
-cur=$(( ${thr_hex:-0} & 0xf ))
 # The governor names are NOT universal: intel_pstate (any modern x86, N95/N100
 # included) offers only powersave/performance — writing "ondemand" there fails
 # silently and the timer becomes a no-op that still looks enabled. Pick the
@@ -2128,7 +2027,7 @@ has ondemand || { if has schedutil; then norm=schedutil
                   elif has powersave; then norm=powersave
                   else norm="$cool"; fi; }
 gov="$norm"
-if [ "$temp" -ge 80 ] || [ "$cur" -ne 0 ]; then gov="$cool"; fi
+if [ "$temp" -ge 80 ]; then gov="$cool"; fi
 [ -n "$gov" ] || exit 0
 for g in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
     [ -w "$g" ] && echo "$gov" > "$g" 2>/dev/null || true
@@ -2156,24 +2055,14 @@ EOF
     info "adaptive CPU governor enabled (every 2 min: ≥80°C or throttle → powersave, else ondemand)"
 }
 
-stage_pi() {
-    echo; echo "=== Stage 5: Pi tuning ==="
-    log "--- stage_pi start ---"
-    local cfg temp throttled
-    cfg="$(boot_config_path)"
-    temp="$(vcgencmd measure_temp 2>/dev/null | sed 's/temp=//')"
-    throttled="$(vcgencmd get_throttled 2>/dev/null)"
+stage_hw() {
+    echo; echo "=== Stage 5: hardware tuning ==="
+    log "--- stage_hw start ---"
+    local temp
+    temp="$(cpu_temp_mc)"; temp=$(( ${temp:-0} / 1000 ))
 
-    # The checklist follows the board: config.txt / EEPROM entries exist only on a Pi,
-    # and a checkbox that cannot act is worse than an absent one — it lies (same rule
-    # as the panel's Hardware tab). The universal rows are identical on either list.
     local items=()
-    if is_pi; then
-        items+=("usbpower" "USB max current — power for USB disks (Pi5)" ON)
-        items+=("pcie3"    "PCIe Gen3 for NVMe — faster, but out of spec" OFF)
-        items+=("cgroup"   "Memory cgroup — memory limits for docker" OFF)
-        items+=("eeprom"   "Update EEPROM firmware (rpi-eeprom)" OFF)
-    fi
+    items+=("cgroup"   "Memory cgroup — memory limits for docker" OFF)
     items+=("trim"     "Enable fstrim.timer (TRIM for SSD/NVMe)" ON)
     items+=("sysctl"   "Sysctl tuning (swappiness, somaxconn, tcp)" OFF)
     items+=("zram"     "zram-swap (zstd, 50% RAM)" OFF)
@@ -2181,38 +2070,32 @@ stage_pi() {
     items+=("governor" "Adaptive CPU governor by temperature" OFF)
     items+=("wifips"   "Disable Wi-Fi power-save (stability)" OFF)
     items+=("watchdog" "Watchdog: auto-reboot on hang" ON)
-    local head_line="Check the actions to apply:"
-    is_pi && head_line="Current temp: ${temp:-?}  throttle: ${throttled:-?}\nCheck the actions (config.txt/cmdline edits require a reboot):"
+    local head_line="Current CPU temp: ${temp:-?}C\nCheck the actions to apply:"
     local raw
-    raw="$(ui_checklist "$(is_pi && echo "Pi tuning (hardware)" || echo "Hardware tuning")" \
+    raw="$(ui_checklist "Hardware tuning" \
         "$head_line" "${items[@]}")" || { info "cancelled"; return 0; }
 
     local sel; sel="$(checklist_selected "$raw")"
     local need_reboot=0
-    case "$sel" in *" usbpower "*) pi_usb_power "$cfg"; need_reboot=1 ;; esac
     case "$sel" in *" trim "*)     enable_service fstrim.timer ;; esac
-    case "$sel" in *" pcie3 "*)    pi_pcie3 "$cfg"; need_reboot=1 ;; esac
     case "$sel" in *" cgroup "*)   pi_cgroup; need_reboot=1 ;; esac
     case "$sel" in *" sysctl "*)   pi_sysctl ;; esac
     case "$sel" in *" zram "*)     pi_zram ;; esac
     case "$sel" in *" chrony "*)   pi_chrony ;; esac
     case "$sel" in *" governor "*) pi_governor ;; esac
-    case "$sel" in *" eeprom "*)   run rpi-eeprom-update -a; need_reboot=1 ;; esac
     case "$sel" in *" wifips "*)   pi_wifi_powersave_off ;; esac
     case "$sel" in *" watchdog "*) pi_watchdog ;; esac
 
-    commit_config "pi-tuning"
+    commit_config "hw-tuning"
     local extra=""
     [ "$need_reboot" -eq 1 ] && extra="
 
-WARNING: config.txt/EEPROM changes take effect after a REBOOT."
+WARNING: kernel command line changes take effect after a REBOOT."
     ui_msg "Summary: Pi tuning" "Done.$extra
 
 Check:
-  vcgencmd measure_temp
-  vcgencmd get_throttled   (0x0 = all good)
   sudo lspci -vv | grep -i speed   (after reboot for PCIe)"
-    log "--- stage_pi end ---"
+    log "--- stage_hw end ---"
 }
 
 # ---------------------------------------------------------------------------
@@ -2230,8 +2113,8 @@ EOF
 sec_journald() {
     run mkdir -p /etc/systemd/journald.conf.d
     # Drop-ins are merged in filename order across /usr/lib and /etc, last wins.
-    # Raspberry Pi OS ships 40-rpi-volatile-storage.conf (Storage=volatile) to spare
-    # the SD card, so ours must sort after it — hence the 99- prefix, not 00-.
+    # A distribution drop-in may set Storage=volatile, so ours must sort after
+    # anything shipped by the system — hence the 99- prefix, not 00-.
     run rm -f /etc/systemd/journald.conf.d/00-nas.conf
     write_file /etc/systemd/journald.conf.d/99-nas.conf <<'EOF'
 [Journal]
@@ -2770,7 +2653,7 @@ if mountpoint -q /mnt/storage; then
     pct=$(df --output=pcent /mnt/storage 2>/dev/null | tr -dc '0-9')
     if [ -n "$pct" ] && [ "$pct" -ge "$DISK_PCT_MAX" ]; then alert=1; msg="$msg disk=${pct}%"; fi
 fi
-# CPU temp by hwmon NAME first (works on any board), vcgencmd as the Pi fallback —
+# CPU temp by hwmon NAME first: on x86 thermal_zone0 is usually the chassis, not the CPU —
 # without this the temperature half of the fallback watchdog silently ceased to
 # exist on non-Pi hardware while still looking installed
 t=""
@@ -2782,7 +2665,6 @@ for h in /sys/class/hwmon/hwmon*; do
       break ;;
   esac
 done
-[ -n "$t" ] || t=$(vcgencmd measure_temp 2>/dev/null | tr -dc '0-9.' | cut -d. -f1)
 if [ -n "$t" ] && [ "$t" -ge "$TEMP_MAX" ]; then alert=1; msg="$msg temp=${t}C"; fi
 if [ "$alert" -eq 1 ]; then
     echo "$(date '+%F %T') HEALTH ALERT:$msg" >> "$LOG"
@@ -2862,7 +2744,7 @@ main_menu() {
             mergerfs) stage_mergerfs ;;
             snapraid) stage_snapraid ;;
             docker)   stage_docker ;;
-            pi)       stage_pi ;;
+            pi)       stage_hw ;;
             security) stage_security ;;
             shares)   stage_shares ;;
             backup)   stage_backup ;;
@@ -3012,7 +2894,7 @@ install_netguard() {
 # (has carrier, an address and the gateway answers) — Wi-Fi is off. As soon as the
 # wire is gone or stalls (macb on Pi 5 sometimes has a TX stall) — Wi-Fi comes back.
 set -u
-# never hardcode the NIC name: it's eth0 on older Pi but end0 on Pi5/Bookworm, and
+# never hardcode the NIC name: predictable names (enp1s0, eno1) differ per board, and
 # varies by board/kernel. Detect at runtime — first physical non-wireless non-virtual
 # iface = wired; first with a wireless/ dir = Wi-Fi. NAS_ETH/NAS_WIFI override.
 _ng_eth() {
@@ -3542,16 +3424,17 @@ if [ "$need_containers" = "1" ] && command -v docker >/dev/null 2>&1; then
   V_CONT="$(timeout 3 docker ps -q 2>/dev/null | grep -c .)"
 fi
 
-# ---- logo. Raspberry Pi brand colours: berry #C51A4A, leaves #75A928.
+# ---- logo. NAS-OS brand colours: teal #0E4F55 (lightened for a dark terminal) and
+# the live-indicator green #7DC855 — the same pair the panel icon is built from.
 # 24-bit codes only when the terminal announced them: ssh forwards TERM but not
 # COLORTERM, and Terminal.app cannot parse them. Otherwise nearest 256-palette.
 if [ "${MOTD_LOGO:-1}" = "1" ]; then
   if [ -n "${NO_COLOR:-}" ]; then
     PIR=""; PIG=""; PID=""
   elif [ "${COLORTERM:-}" = "truecolor" ] || [ "${COLORTERM:-}" = "24bit" ]; then
-    PIR=$'\033[1;38;2;197;26;74m'; PIG=$'\033[1;38;2;117;169;40m'; PID=$'\033[2;37m'
+    PIR=$'\033[1;38;2;53;160;168m'; PIG=$'\033[1;38;2;125;200;85m'; PID=$'\033[2;37m'
   else
-    PIR=$'\033[1;38;5;161m'; PIG=$'\033[1;38;5;106m'; PID=$'\033[2;37m'
+    PIR=$'\033[1;38;5;73m'; PIG=$'\033[1;38;5;113m'; PID=$'\033[2;37m'
   fi
   printf '\n'
   printf '  %s╔╗╔╔═╗╔═╗%s    %s╔═╗╔═╗%s\n' "$PIR" "$R" "$PIG" "$R"
@@ -3757,48 +3640,6 @@ install_kopia() {
 # chrony then stepped the clock forward by ten days. Anything that stamps a file in
 # those first seconds — the availability log, the black box, schedulers — writes a
 # time from the past, and comparing «now» against a stored mark stops working.
-# fake-hwclock (the Raspberry Pi OS standard) saves the time hourly and at shutdown
-# and restores it at boot, so the clock starts minutes off instead of days.
-# ---------------------------------------------------------------------------
-install_fake_hwclock() {
-    # Only boards WITHOUT a battery-backed clock need this. Any ordinary x86 box has
-    # a real RTC, and installing a fake one there adds a second writer to the system
-    # clock for no benefit — the whole reason this exists is that a Pi boots days in
-    # the past. (The stale-clock guard in nas-netguard.sh stays either way: it costs
-    # nothing and protects against a clock that is wrong for any other reason.)
-    # NB: a Pi 5 DOES expose /dev/rtc0, but it only keeps time with a battery on the
-    # connector — so "has an RTC device" is not enough to skip this on a Pi. Skip only
-    # on non-Pi hardware, where an RTC is genuinely battery-backed.
-    if ! is_pi && { [ -e /dev/rtc0 ] || [ -e /dev/rtc ]; }; then
-        info "board has a battery-backed RTC — fake-hwclock not needed"
-        return 0
-    fi
-    install_packages "clock" fake-hwclock
-    command -v fake-hwclock >/dev/null 2>&1 || return 0
-    run fake-hwclock save
-    enable_service fake-hwclock-save.timer
-    # the load/save pair is enabled by the package; make sure a stale floor file
-    # cannot drag the clock backwards if timesyncd was removed at some point
-    [ -f /var/lib/systemd/timesync/clock ] && run touch /var/lib/systemd/timesync/clock
-    # The packaged fake-hwclock-load.service is Type=oneshot WITHOUT RemainAfterExit, so
-    # it falls back to «inactive» the moment it finishes. It is WantedBy=sysinit.target,
-    # and every unit that pulls sysinit.target in during early boot re-queues a start job
-    # for it: five land inside systemd's default 10s window, the sixth trips the start
-    # rate limit and the box comes up with a RED fake-hwclock-load.service — even though
-    # every single run exited 0 and the clock was restored correctly. Staying active after
-    # the (idempotent) restore makes the extra pulls no-ops. Same family as the smartd
-    # guard: a false alarm on a freshly booted box teaches the user to ignore red.
-    run mkdir -p /etc/systemd/system/fake-hwclock-load.service.d
-    write_file /etc/systemd/system/fake-hwclock-load.service.d/nas-remain.conf <<'EOF'
-# NAS-OS: oneshot without RemainAfterExit + WantedBy=sysinit.target = repeated starts
-# during boot -> start rate limit -> «failed» after five SUCCESSFUL runs.
-[Service]
-RemainAfterExit=yes
-EOF
-    run systemctl daemon-reload
-    systemctl is-failed fake-hwclock-load.service >/dev/null 2>&1 && run systemctl reset-failed fake-hwclock-load.service
-    info "fake-hwclock: clock saved ($(cat /etc/fake-hwclock.data 2>/dev/null))"
-}
 
 # ---------------------------------------------------------------------------
 # Syncthing — continuous file sync with laptops/phones/other boxes. A SYSTEM
@@ -3823,7 +3664,7 @@ ensure_syncthing_repo() {
             || { warn "Syncthing: could not download the release key (no network?)"; return 1; }
         run chmod a+r "$keyring"
     fi
-    # arch= matters: RPi OS 64-bit keeps armhf as a foreign architecture, and without
+    # arch= matters: a box may keep a foreign architecture enabled, and without
     # the pin apt fetches an armhf index it will never install from
     local want="deb [arch=${arch} signed-by=${keyring}] https://apt.syncthing.net/ syncthing stable-v2"
     if [ "$(cat "$list" 2>/dev/null)" != "$want" ]; then
@@ -3937,13 +3778,13 @@ install_syncthing() {
 # ---------------------------------------------------------------------------
 stage_system_apply() {
     export DEBIAN_FRONTEND=noninteractive
-    # NAS-OS targets Debian / Raspberry Pi OS. On anything else (Ubuntu etc.) the
+    # NAS-OS targets Debian. On anything else (Ubuntu etc.) the
     # Docker repo silently falls back to Debian packages and nothing is tested —
     # say so up front (install.sh asks interactively; here we can only warn).
     local _osid; _osid="$(. /etc/os-release 2>/dev/null && echo "${ID:-}")"
     case "$_osid" in
         debian|raspbian) ;;
-        *) warn "OS '$_osid' is not supported — NAS-OS targets Debian / Raspberry Pi OS (Ubuntu is untested); consider reinstalling the system before going further" ;;
+        *) warn "OS '$_osid' is not supported — NAS-OS targets Debian (Ubuntu is untested); consider reinstalling the system before going further" ;;
     esac
     # first thing — update the whole system (as requested: apt update && full-upgrade)
     run apt-get update
@@ -3951,11 +3792,6 @@ stage_system_apply() {
     install_packages "NAS stack"  "${STACK_PACKAGES[@]}"
     install_smartd_guard   # smartmontools is installed here too — immediately clear 'failed' when there are no disks
     install_packages "utilities"   "${UTIL_PACKAGES[@]}"
-    if is_pi; then
-        install_packages "Pi packages" "${PI_PACKAGES[@]}"
-    else
-        info "not a Raspberry Pi — Pi-only packages (${PI_PACKAGES[*]}) not needed"
-    fi
     ensure_docker_repo   # docker-ce + compose-plugin from the official Docker repo
     ensure_gh            # GitHub CLI (to push panel code from the box)
     install_rclone       # cloud engine for the «Backup» app (latest official binary; selfupdate-able)
@@ -3975,7 +3811,6 @@ stage_system_apply() {
     # recovery resets the whole device and takes a running backup down with it. See install_uas_off().
     install_uas_off
     install_usb_timeout      # 180s USB SCSI timeout — always on, independent of automount
-    install_fake_hwclock     # a Pi has no RTC: without this the clock boots days in the past
     # Time Machine target: rebuild the SMB share + Avahi advert if it was configured
     # before (settings backup restores /etc/nas-wizard/timemachine.conf).
     tm_reapply_if_configured
@@ -4255,11 +4090,10 @@ api_automount() {
     install_automount "$user" "$base"
     echo "automount enabled (USB media -> $base)"
 }
-api_pi() {
-    local cfg k; cfg="$(boot_config_path)"
+api_hw() {
+    local k
     for k in ${NASW_KEYS:-}; do case "$k" in
-        usbpower) pi_usb_power "$cfg" ;;   pcie3) pi_pcie3 "$cfg" ;;
-        trim)     enable_service fstrim.timer ;; eeprom) run rpi-eeprom-update -a ;;
+        trim)     enable_service fstrim.timer ;;
         cgroup)   pi_cgroup ;;  sysctl) pi_sysctl ;;  zram) pi_zram ;;
         chrony)   pi_chrony ;;  governor) pi_governor ;;
         wifips)   pi_wifi_powersave_off ;;  watchdog) pi_watchdog ;;
@@ -4428,15 +4262,13 @@ api_notify() {                 # Pushover in /etc/nas-wizard/notify.conf
     echo "Pushover configured"
 }
 api_state() {                  # brief state for the wizard (JSON)
-    local host tz iface cfg cl
+    local host tz iface
     host="$(hostnamectl --static 2>/dev/null || hostname)"
     tz="$(timedatectl show -p Timezone --value 2>/dev/null)"
     iface="$(ip route show default 2>/dev/null | awk '/default/{print $5; exit}')"
-    cfg=/boot/firmware/config.txt;  [ -f "$cfg" ] || cfg=/boot/config.txt
-    cl=/boot/firmware/cmdline.txt;  [ -f "$cl" ]  || cl=/boot/cmdline.txt
     # tuning items: report the ACTUAL on-disk/live state so the wizard's checkboxes
     # reflect reality instead of static defaults (t_* fields below)
-    printf '{"host":"%s","tz":"%s","iface":"%s","docker":%s,"data_disks":%s,"parity_disks":%s,"pool":%s,"snapraid":%s,"samba":%s,"fail2ban":%s,"ufw":%s,"smartd":%s,"unattended":%s,"avahi":%s,"journald":%s,"log2ram":%s,"spacetemp":%s,"t_usbpower":%s,"t_pcie3":%s,"t_cgroup":%s,"t_sysctl":%s,"t_zram":%s,"t_chrony":%s,"t_governor":%s}\n' \
+    printf '{"host":"%s","tz":"%s","iface":"%s","docker":%s,"data_disks":%s,"parity_disks":%s,"pool":%s,"snapraid":%s,"samba":%s,"fail2ban":%s,"ufw":%s,"smartd":%s,"unattended":%s,"avahi":%s,"journald":%s,"log2ram":%s,"spacetemp":%s,"t_cgroup":%s,"t_sysctl":%s,"t_zram":%s,"t_chrony":%s,"t_governor":%s}\n' \
         "$host" "$tz" "$iface" \
         "$(command -v docker >/dev/null 2>&1 && echo true || echo false)" \
         "$(mounted_data_disks | grep -c . )" \
@@ -4452,9 +4284,7 @@ api_state() {                  # brief state for the wizard (JSON)
         "$([ -f /etc/systemd/journald.conf.d/99-nas.conf ] && echo true || echo false)" \
         "$(systemctl is-enabled log2ram >/dev/null 2>&1 && echo true || echo false)" \
         "$(systemctl is-active nas-health.timer >/dev/null 2>&1 && echo true || echo false)" \
-        "$(grep -qs 'usb_max_current_enable=1' "$cfg" && echo true || echo false)" \
-        "$(grep -qs 'pciex1_gen=3' "$cfg" && echo true || echo false)" \
-        "$(grep -qs 'cgroup_enable=memory' "$cl" && echo true || echo false)" \
+        "$(grep -qws memory /sys/fs/cgroup/cgroup.controllers 2>/dev/null && echo true || echo false)" \
         "$([ -f /etc/sysctl.d/99-nas.conf ] && echo true || echo false)" \
         "$(swapon --show 2>/dev/null | grep -q zram && echo true || echo false)" \
         "$(systemctl is-active chrony >/dev/null 2>&1 && echo true || echo false)" \
@@ -4481,7 +4311,7 @@ run_api() {
         mergerfs)       generate_mergerfs ;;
         snapraid)       ensure_snapraid_conf && { setup_snapraid_notify_noninteractive; install_snapraid_wrapper; install_snapraid_timers; [ "${NASW_SYNC:-0}" = "1" ] && run_visible snapraid sync; } ;;
         snapraid-sync)  if [ -x /usr/local/bin/nas-snapraid.sh ]; then run_visible /usr/local/bin/nas-snapraid.sh "${NASW_KIND:-sync}"; else echo "SnapRAID not configured — run the Wizard first (SnapRAID stage)"; exit 2; fi ;;
-        pi)             api_pi ;;
+        pi)             api_hw ;;
         security)       api_keys_run sec ;;
         shares)         api_shares ;;
         timemachine)    tm_apply ;;
@@ -4527,7 +4357,7 @@ main() {
         mergerfs) stage_mergerfs ;;
         snapraid) stage_snapraid ;;
         docker)   stage_docker ;;
-        pi)       stage_pi ;;
+        pi)       stage_hw ;;
         security) stage_security ;;
         shares)   stage_shares ;;
         backup)   stage_backup ;;
