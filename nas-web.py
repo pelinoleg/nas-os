@@ -2129,6 +2129,12 @@ def save_glance(d):
     raw = dict(raw) if isinstance(raw, dict) else {}
     raw.update(cur)
     _json_save(GLANCE_FILE, raw, indent=2)
+    # the file carries the read-only display token: 0644 made it readable by every
+    # local process, and the token is checked BEFORE the session gate
+    try:
+        os.chmod(GLANCE_FILE, 0o600)
+    except OSError:
+        pass
     with _GL_LOCK:
         _GL_CACHE["langs"].clear()
     return cur
@@ -4113,12 +4119,31 @@ def events_clear():
 _SYSD_RU = {"start": "start", "stop": "stop", "restart": "restart",
             "enable": "autostart on", "disable": "autostart off", "reload": "reload"}
 
+def _safe_untar(src, dest):
+    """unpack_archive, but a tar can never escape `dest`.
+
+    shutil hands zip to _unpack_zipfile, which sanitises names itself, and tar to
+    tarfile.extractall — whose default extraction filter on this Python is still
+    `fully_trusted`. So ".." members, absolute paths and symlink members are honoured,
+    and this runs as root. `filter="data"` is the fix Python ships for exactly this;
+    settings-restore in this file has used it all along, the file manager did not.
+    """
+    if tarfile.is_tarfile(src):
+        with tarfile.open(src) as tf:
+            tf.extractall(dest, filter="data")
+        return
+    shutil.unpack_archive(src, dest)
+
 def _act_title(p, b):
     """Log entry title for the action, or None if the action isn't logged."""
     g = lambda k: str(b.get(k) or "")
     if p == "/api/power":
         return {"reboot": "Reboot by command from the panel",
                 "poweroff": "Shutdown by command from the panel"}.get(g("action"))
+    if p == "/api/glance/act":
+        # a read-only token authorises these, so they have no session behind them —
+        # the log line is the only trace of who did what
+        return "Glance display: %s%s" % (g("a"), (" " + g("name")) if g("name") else "")
     if p == "/api/systemd":
         return "Service %s: %s" % (g("unit"), _SYSD_RU.get(g("action"), g("action")))
     if p == "/api/stack/action":
@@ -19166,7 +19191,9 @@ def _fsjob_run(job, items, dest, name, policy):
             else:
                 # tar.*: no cheap member progress — one indeterminate step
                 job["cur"] = os.path.basename(src)
-                shutil.unpack_archive(src, dest)
+                # filter="data": an archive is INPUT, even one of ours. Without it a
+                # member named ../../etc/sudoers.d/x is written exactly there, as root
+                _safe_untar(src, dest)
         job["state"] = "done"
     except _FsCancelled:
         job["state"] = "cancelled"
@@ -20725,7 +20752,7 @@ def fs_unzip(path, dest=None):
     dest = os.path.realpath(dest) if dest else os.path.dirname(path)
     try:
         os.makedirs(dest, exist_ok=True)
-        shutil.unpack_archive(path, dest)
+        _safe_untar(path, dest)
     except (shutil.ReadError, OSError, ValueError) as e:
         return {"ok": False, "log": "cannot extract: " + str(e)}
     return {"ok": True, "path": dest}
@@ -20763,7 +20790,33 @@ AUTH_FILE   = "/etc/nas-os/webauth.json"
 SESS_FILE   = "/etc/nas-os/sessions.json"   # sessions survive a service restart
 SESSION_TTL = 30 * 86400
 _sess_lock  = threading.Lock()
-_login_fail = {"n": 0, "t": 0.0}        # anti-bruteforce: pause after a run of failures
+# anti-bruteforce, PER CLIENT ADDRESS. A single process-wide counter was a free
+# permanent lockout: eight wrong guesses a minute from any device on the LAN blocked
+# the owner too, because the gate is checked before the password is. The address comes
+# from the socket (X-Forwarded-For is deliberately ignored), so it cannot be spoofed.
+_login_fail = {}                        # ip -> {"n": int, "t": float}
+_LOGIN_FAIL_MAX = 200                   # bound the dict: a scan from many IPs must not grow it forever
+
+def _login_gate(ip):
+    """(blocked, ) for this address; prunes windows older than a minute."""
+    now = time.time()
+    for k in [k for k, v in _login_fail.items() if now - v["t"] > 60]:
+        del _login_fail[k]
+    e = _login_fail.get(ip)
+    return bool(e and e["n"] >= 8)
+
+def _login_miss(ip):
+    """Count one failure for this address and return the running total."""
+    now = time.time()
+    e = _login_fail.get(ip)
+    if not e or now - e["t"] > 60:
+        if len(_login_fail) >= _LOGIN_FAIL_MAX:
+            _login_fail.pop(min(_login_fail, key=lambda k: _login_fail[k]["t"]), None)
+        e = {"n": 0, "t": now}
+        _login_fail[ip] = e
+    e["n"] += 1
+    e["t"] = now
+    return e["n"]
 _login_lock = threading.Lock()
 
 def _load_sessions():
@@ -23565,17 +23618,15 @@ class H(BaseHTTPRequestHandler):
             b = self._body()
             # anti-bruteforce under lock: gate BEFORE checking the password, so parallel
             # requests don't slip through in a batch (ThreadingHTTPServer)
+            fip = self._client_ip() or "?"
             with _login_lock:
-                now = time.time()
-                if now - _login_fail["t"] > 60:           # attempt window — one minute
-                    _login_fail["n"] = 0
-                blocked = _login_fail["n"] >= 8
+                blocked = _login_gate(fip)
             if blocked:
                 time.sleep(1.0)
                 self._json({"ok": False, "log": "too many attempts, wait a minute"}, 429)
             elif auth_configured() and auth_check_password(b.get("password", "")):
                 with _login_lock:
-                    _login_fail["n"] = 0
+                    _login_fail.pop(fip, None)
                 ip = self._client_ip()
                 if ip and ip not in _known_ips():         # login from a new address
                     _remember_ip(ip)
@@ -23585,7 +23636,7 @@ class H(BaseHTTPRequestHandler):
                 self._json({"ok": True}, cookie=self._session_cookie(session_new()))
             else:
                 with _login_lock:
-                    _login_fail["n"] += 1; _login_fail["t"] = time.time(); n = _login_fail["n"]
+                    n = _login_miss(fip)
                 if n >= load_monitor().get("events", {}).get("panel_fail", {}).get("threshold", 5):
                     threading.Thread(target=mon_notify, args=("panel_fail",
                         "NAS: panel password guessing attempt", "%d failed login attempts (last from %s)"

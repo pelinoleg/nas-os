@@ -1,4 +1,4 @@
-# Scrutiny — SMART disk health monitoring (omnibus: web+InfluxDB). http://<pi>:8084
+# Scrutiny — SMART disk health monitoring (omnibus: web+InfluxDB). http://127.0.0.1:8084
 # IMPORTANT: list your disks under devices. NVMe needs the SYS_ADMIN cap.
 # The panel finds Scrutiny by container name and actual port — so
 # the web port can be changed here freely, no need to touch the panel.
@@ -13,9 +13,17 @@ services:
       - "web-desktop.icon=https://cdn.jsdelivr.net/gh/selfhst/icons@main/svg/scrutiny.svg"
     cap_add:
       - SYS_RAWIO
-      - SYS_ADMIN            # needed for NVMe disks
+      # SYS_ADMIN is what NVMe SMART needs — but it also removes the container
+      # boundary as a security control, so it stays commented out until real
+      # devices are passed through below. With no devices there is nothing for
+      # it to read: it was granted while the summary sat empty.
+      # - SYS_ADMIN          # uncomment together with the NVMe devices
     ports:
-      - "8084:8080"          # web (8080 is taken by Dozzle -> moved to 8084)
+      # LOOPBACK ONLY. Scrutiny ships with no authentication of any kind, so on
+      # 0.0.0.0 every device on the LAN gets the disk dashboard of a container
+      # that runs as root with SYS_RAWIO. Reach it from another machine over an
+      # SSH tunnel:  ssh -L 8084:127.0.0.1:8084 <user>@<nas>
+      - "127.0.0.1:8084:8080"  # web (8080 is taken by Dozzle -> moved to 8084)
       # InfluxDB (8086) is not published: in omnibus it's only needed inside
       # the container, and on 0.0.0.0 it would be an open database on the LAN.
     volumes:
