@@ -4807,7 +4807,10 @@ function scrubLine(snap){
 // (default 60 °C) is warn, threshold + 10 is danger — see _disktemp_state in nas-web.py.
 // These two used to disagree: the badge said 62 °C was "warm" while the number next to
 // it was painted danger-red, because the colour helper carried its own 50/60 pair.
-const DISK_T_WARN=60,DISK_T_DANGER=DISK_T_WARN+10;
+let DISK_T_WARN=60,DISK_T_DANGER=70;   // seeded from the server on every stats poll
+function applyDiskTemps(st){ if(!st)return;
+ if(typeof st.disktemp_warn==="number"&&st.disktemp_warn>0){DISK_T_WARN=st.disktemp_warn;
+  DISK_T_DANGER=(typeof st.disktemp_danger==="number"&&st.disktemp_danger>0)?st.disktemp_danger:DISK_T_WARN+10;}}
 function diskState(x){
  const t=(x.smart&&x.smart.temp)||x.temp_hw||0,w=x.smart&&x.smart.wear;
  if(x.missing)return{cls:"bad",badge:"Missing",why:"pool branch is not mounted — disk pulled or dead"};
@@ -15527,7 +15530,7 @@ function syncUsbOps(jobs){
    delete USB_OPS[j.dev];
   }});}
 
-async function poll(){const s=await api("/api/stats");LAST=s;pushHist(s);paintTray(s);paintSys(s);paintBasePkgs(s);
+async function poll(){const s=await api("/api/stats");LAST=s;applyDiskTemps(s);pushHist(s);paintTray(s);paintSys(s);paintBasePkgs(s);
  const bn=document.getElementById("brandName");if(bn)bn.textContent=(s.host||location.hostname.split(".")[0]||"nas")+".local";
  const nr=!!(s&&s.nb_running);if(nr!==NB_RUNNING){NB_RUNNING=nr;renderDock();}
  syncUsbOps(s&&s.usb_import);

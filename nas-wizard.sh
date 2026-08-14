@@ -2986,7 +2986,8 @@ fix_onlink "$ACTIVE"
 #   local = box alive but no usable network (e.g. stuck in comitup hotspot)
 #   off   = gap between heartbeats (powered off / crashed), written on wake
 avail_track(){
-  local now state ip gw beat last boot
+  local now state ip gw beat last boot sync_ok up_s off_at wrote_off mark
+  wrote_off=0
   now="$(date +%s)"
   state=local
   ip="$(ip4 "$ACTIVE")"
@@ -3009,8 +3010,25 @@ avail_track(){
   # when systemd-time-wait-sync is enabled, and that unit delays boot until the network
   # answers — a bad trade on a Wi-Fi-only NAS. Skipping a few early runs costs nothing:
   # the guard runs every 15-30 s and the very next one records the state.
-  if [ ! -e /run/systemd/timesync/synchronized ] \
-     && [ "$(timedatectl show -p NTPSynchronized --value 2>/dev/null)" != "yes" ]; then
+  # ...but the wait is BOUNDED. A box with no NTP source at all (LAN-only, no route out)
+  # would otherwise never write again, and a frozen journal is not read as "no data": the
+  # reader extends the last record to the present, so a journal stuck on "up" five days
+  # ago reports 100 % availability and hides every real outage in between. Silence is the
+  # worse lie. After ten minutes of uptime we record with whatever clock we have — a
+  # record from a broken clock is something the reader knows how to drop, silence is not.
+  sync_ok=0
+  [ -e /run/systemd/timesync/synchronized ] && sync_ok=1
+  if [ "$sync_ok" -eq 0 ]; then
+    # `timeout`: this unit is Type=oneshot with TimeoutStartUSec=infinity and holds the
+    # guard's flock, so a hung timedated would stall Wi-Fi failover and the panel
+    # watchdog along with it — forever, and invisibly
+    case "$(timeout 5 timedatectl show -p NTPSynchronized --value 2>/dev/null)" in
+      yes) sync_ok=1 ;;
+    esac
+  fi
+  up_s="$(cut -d. -f1 /proc/uptime 2>/dev/null)"
+  case "$up_s" in ''|*[!0-9]*) up_s=0 ;; esac
+  if [ "$sync_ok" -eq 0 ] && [ "$up_s" -lt 600 ]; then
     return 0
   fi
   mkdir -p "$(dirname "$AVLOG")" 2>/dev/null || true
@@ -3040,10 +3058,20 @@ avail_track(){
     last_ts="$(tail -n1 "$AVLOG" 2>/dev/null | awk '{print $1}')"
     case "$last_ts" in ''|*[!0-9]*) last_ts=0 ;; esac
     [ "$off_at" -gt "$last_ts" ] || off_at=$(( last_ts + 1 ))
-    [ "$off_at" -lt "$now" ] && printf '%s off\n' "$off_at" >> "$AVLOG"
+    [ "$off_at" -lt "$now" ] && { printf '%s off\n' "$off_at" >> "$AVLOG"; wrote_off=1; }
   fi
   last="$(tail -n1 "$AVLOG" 2>/dev/null | awk '{print $2}')"
-  [ "$last" = "$state" ] || printf '%s %s\n' "$now" "$state" >> "$AVLOG"
+  # An outage ends when the box BOOTS, and /proc/uptime knows that moment exactly —
+  # without asking the clock, which is the one thing we cannot trust here. Stamping the
+  # recovery with `now` instead made every boot that preceded the first NTP answer look
+  # like a multi-hour outage: the box was up and serving the LAN for four hours, and the
+  # journal claimed six hours of downtime because no line had been written since.
+  mark="$now"
+  if [ "${wrote_off:-0}" -eq 1 ] && [ -n "$boot" ] \
+     && [ "$boot" -gt "$off_at" ] && [ "$boot" -lt "$now" ]; then
+    mark="$boot"
+  fi
+  [ "$last" = "$state" ] || printf '%s %s\n' "$mark" "$state" >> "$AVLOG"
   printf '%s' "$now" > "$BEAT"
   # trim: transitions are rare, 20k lines is years of history
   if [ "$(wc -l < "$AVLOG" 2>/dev/null || echo 0)" -gt 20000 ]; then

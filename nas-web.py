@@ -3610,7 +3610,14 @@ def _install_missing_locked():
 
 def stats():
     iface = default_iface()
+    _dt_warn = _disktemp_warn_at()
     return {
+        # the owner's disk-temperature threshold, so the panel colours disks by the same
+        # number the server judges and notifies by. It used to carry its own constant and
+        # drift: set the threshold to 45 and the box called a 50 °C disk warm while the
+        # Storage window still painted it normal until 60
+        "disktemp_warn": _dt_warn,
+        "disktemp_danger": _dt_warn + 10,
         "host": socket.gethostname(),
         "ip": lan_ip(),
         "cpu": cpu_percent(),
@@ -4128,11 +4135,12 @@ def _safe_untar(src, dest):
     and this runs as root. `filter="data"` is the fix Python ships for exactly this;
     settings-restore in this file has used it all along, the file manager did not.
     """
-    if tarfile.is_tarfile(src):
-        with tarfile.open(src) as tf:
-            tf.extractall(dest, filter="data")
-        return
-    shutil.unpack_archive(src, dest)
+    # One call, no second path. The earlier version only applied the filter when
+    # tarfile.is_tarfile() said so and fell back to a plain unpack_archive otherwise —
+    # and that fallback was verified to extract "../escaped" outside the destination.
+    # is_tarfile() reads the file separately from the extractor, so a file on a Samba
+    # share could be swapped between the two reads to reach the unsafe branch.
+    shutil.unpack_archive(src, dest, filter="data")
 
 def _act_title(p, b):
     """Log entry title for the action, or None if the action isn't logged."""
@@ -10415,7 +10423,13 @@ def settings_backup_restore(path, sections=None):
                     shutil.copyfileobj(src, f)
                 # secrets: the panel password, Pushover keys, the main NAS password
                 if any(x in dest for x in ("webauth", "notify.conf", "nas-backup.json",
-                                           "store.json", "remotes.json", "credentials.json")):
+                                           "store.json", "remotes.json", "credentials.json",
+                                           # glance.json carries the read-only display
+                                           # token, which authorises actions BEFORE the
+                                           # session gate — restore used to hand it back
+                                           # at 0644 and nothing re-chmodded it until the
+                                           # owner next saved the Glance tab
+                                           "glance.json")):
                     os.chmod(dest, 0o600)
                 # Syncthing's identity: private key 0600 in a 0700 directory —
                 # syncthing refuses to start on a world-readable key
@@ -20761,7 +20775,7 @@ def fs_unzip(path, dest=None):
     try:
         os.makedirs(dest, exist_ok=True)
         _safe_untar(path, dest)
-    except (shutil.ReadError, OSError, ValueError) as e:
+    except (shutil.ReadError, OSError, ValueError, tarfile.TarError) as e:
         return {"ok": False, "log": "cannot extract: " + str(e)}
     return {"ok": True, "path": dest}
 
@@ -20802,29 +20816,49 @@ _sess_lock  = threading.Lock()
 # permanent lockout: eight wrong guesses a minute from any device on the LAN blocked
 # the owner too, because the gate is checked before the password is. The address comes
 # from the socket (X-Forwarded-For is deliberately ignored), so it cannot be spoofed.
-_login_fail = {}                        # ip -> {"n": int, "t": float}
-_LOGIN_FAIL_MAX = 200                   # bound the dict: a scan from many IPs must not grow it forever
+_login_fail = {}                        # ip -> {"n": int, "t": float}: throttling, per address
+_login_all = {"n": 0, "t": 0.0}         # every failure, whatever the address: the ALARM
+_LOGIN_FAIL_MAX = 200                   # bound the dict so a scan cannot grow it forever
+_LOGIN_BLOCK_AT = 8
 
 def _login_gate(ip):
-    """(blocked, ) for this address; prunes windows older than a minute."""
+    """Is this address blocked? Prunes windows older than a minute on the way through."""
     now = time.time()
     for k in [k for k, v in _login_fail.items() if now - v["t"] > 60]:
         del _login_fail[k]
     e = _login_fail.get(ip)
-    return bool(e and e["n"] >= 8)
+    return bool(e and e["n"] >= _LOGIN_BLOCK_AT)
 
 def _login_miss(ip):
-    """Count one failure for this address and return the running total."""
+    """Count one failure. Returns the total across ALL addresses in this window.
+
+    Throttling is per address — one device's guessing must not lock the owner out, which
+    is what a single process-wide counter did. But the ALARM has to be global, or it
+    stops existing: a machine with SLAAC has a /64 of addresses, so six hundred guesses
+    become six hundred counters of one, and nothing ever reaches the notify threshold.
+    Per-address to decide who to stop, global to decide when to shout.
+    """
     now = time.time()
+    if now - _login_all["t"] > 60:
+        _login_all["n"] = 0
+    _login_all["n"] += 1
+    _login_all["t"] = now
+
     e = _login_fail.get(ip)
     if not e or now - e["t"] > 60:
         if len(_login_fail) >= _LOGIN_FAIL_MAX:
-            _login_fail.pop(min(_login_fail, key=lambda k: _login_fail[k]["t"]), None)
+            # never evict an address that is currently BLOCKED — evicting it is how an
+            # attacker buys their way back in: fill the table, push the block out, resume
+            free = [k for k, v in _login_fail.items() if v["n"] < _LOGIN_BLOCK_AT]
+            if free:
+                _login_fail.pop(min(free, key=lambda k: _login_fail[k]["t"]), None)
+            else:
+                return _login_all["n"]     # table full of blocked addresses: track no more
         e = {"n": 0, "t": now}
         _login_fail[ip] = e
     e["n"] += 1
     e["t"] = now
-    return e["n"]
+    return _login_all["n"]
 _login_lock = threading.Lock()
 
 def _load_sessions():
@@ -21371,7 +21405,11 @@ def sysconf_set(key, val, extra=None):
                 return {"ok": False, "log": "size like 200M / 1G"}
             os.makedirs("/etc/systemd/journald.conf.d", exist_ok=True)
             with open("/etc/systemd/journald.conf.d/99-nas.conf", "w") as f:
-                f.write("[Journal]\nSystemMaxUse=%s\nSystemMaxFileSize=50M\n" % val)
+                # Storage=persistent is why this drop-in exists at all — it outranks a
+                # distribution drop-in that sets Storage=volatile. Writing only the size
+                # keys into the same filename silently deleted it.
+                f.write("[Journal]\nStorage=persistent\nSystemMaxUse=%s\n"
+                        "SystemMaxFileSize=50M\n" % val)
             return _run(["systemctl", "restart", "systemd-journald"])
         if key == "fstrim":
             return _svc_toggle("fstrim.timer", b)
@@ -21400,19 +21438,25 @@ def sysconf_set(key, val, extra=None):
             if not b:
                 return _run(["ufw", "--force", "disable"])
             r = engine("security", {"keys": "ufw"})
+            if not r.get("ok"):
+                # sec_ufw RESETS the rule set before adding the allow rules for SSH, the
+                # panel port, mDNS and shares. A run that dies in between (apt lock, OOM,
+                # timeout) leaves default-deny with nothing allowed — enabling that from
+                # here cuts off SSH and the panel of the box being administered remotely.
+                return r
             global _ufw_sync_last
             _ufw_sync_last = 0
             _safe(ufw_autosync)      # open docker ports at once, don't wait for the tick
             en = _run(["ufw", "--force", "enable"])
-            if not en.get("ok"):
-                return en
-            return r
+            return r if en.get("ok") else en
         if key == "fail2ban":
             if not b:
                 return _svc_toggle("fail2ban", False)
             r = engine("security", {"keys": "fail2ban"})
+            if not r.get("ok"):
+                return r          # no jail written — starting it would guard nothing
             en = _svc_toggle("fail2ban", True)
-            return en if not en.get("ok") else r
+            return r if en.get("ok") else en
         if key == "watchdog":
             return _watchdog(b)
         if key == "governor":
@@ -23635,6 +23679,7 @@ class H(BaseHTTPRequestHandler):
             elif auth_configured() and auth_check_password(b.get("password", "")):
                 with _login_lock:
                     _login_fail.pop(fip, None)
+                    _login_all["n"] = 0
                 ip = self._client_ip()
                 if ip and ip not in _known_ips():         # login from a new address
                     _remember_ip(ip)
