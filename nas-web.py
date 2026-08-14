@@ -2281,6 +2281,14 @@ def save_glance(d):
         cur["enabled"] = bool(d["enabled"])
     if "actions" in d:
         want = d.get("actions")
+        # reboot/poweroff are the two that end the box's day, and they came back on their
+        # own once already today: the list was trimmed to touch/sleep in the morning and was
+        # full again by evening, with nobody having asked for it. Granting them now takes a
+        # second, explicit flag in the same request, so a blanket "save the whole catalogue"
+        # cannot re-arm them.
+        if not d.get("allow_power"):
+            want = [a for a in (want if isinstance(want, list) else [])
+                    if a not in ("reboot", "poweroff")]
         # filtered against the catalogue rather than stored as sent: this list
         # is what authorises a request later, so an unknown name must never
         # reach it.
@@ -10150,6 +10158,10 @@ _BK_SECTIONS = (
                                                        "nas-config/wallpaper.", "nas-config/fm-favorites.json",
                                                        "nas-config/icons/")),
     ("notify",    "Notifications",             False, ("nas-config/monitor.json", "etc/nas-wizard/notify.conf")),
+    # The display token authorises actions BEFORE the session gate, so restoring an old
+    # archive used to hand back a revoked token together with whatever action list it had —
+    # undoing a rotation without anyone touching the Glance tab. Secret: unchecked by default.
+    ("glance",    "Glance display token",      True,  ("nas-config/glance.json",)),
     ("maint",     "Maintenance and schedules", False, ("nas-config/maintenance.json", "etc/nas-wizard/")),
     ("samba",     "Shared folders (Samba)",    False, ("etc/samba/", "var/lib/samba/",
                                                         "etc/nas-os/smb-recycle.json")),
@@ -15751,8 +15763,13 @@ def confgit_snapshot(reason="manual"):
           "--include=docker-compose*.y*ml", "--include=.env", "--exclude=*",
           "--prune-empty-dirs", STACKS_DIR + "/",
           os.path.join(CONFGIT_DIR, "stacks/")], timeout=60)
-    # panel configs: top-level json only, minus journals/caches (noise, size)
+    # panel configs: top-level json only, minus journals/caches (noise, size) and minus the
+    # secrets — the /etc copy above already excludes its own, and this half was missed:
+    # glance.json (the display token) and credentials.json (the password store) were being
+    # committed here every day, where a rotation cannot reach them and the panel serves the
+    # diffs to any session.
     _run(["rsync", "-a", "--delete", "--exclude=events.json",
+          "--exclude=glance.json", "--exclude=credentials.json", "--exclude=disaster-card.md",
           "--exclude=nas-backup-history*.json", "--exclude=nas-backup-changes*.json",
           "--exclude=duscan-*.json", "--exclude=rclone-du-*.json",
           "--exclude=rclone-copy.json", "--exclude=rclone-restore.json",

@@ -12959,7 +12959,10 @@ async function glanceTab(tc){
   <div class="set-h">Availability</div>
   <div class="set-sub">The journal is kept by the network guard: it pings the gateway and records the state (online / no network / powered off) — this is <span class="mono">avail</span> in the response and the "Availability" widgets on the desktop.</div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Probe interval</div><div class="srow-d">more often — finer bars, less often — less background work</div></div><div class="srow-c"><div class="seg" id="glPing">${[15,30,60,120].map(v=>`<button data-v="${v}" class="${(cfg.ping_interval||30)===v?"on":""}">${v}s</button>`).join("")}</div></div></div>`;
- const post=async d=>api("/api/glance/config",{method:"POST",body:JSON.stringify(d)});
+ // reboot/poweroff need an explicit flag alongside the list: the server drops them
+ // otherwise, so that a bulk save can never hand back the power switch by accident
+ const post=async d=>{if(Array.isArray(d.actions)&&d.actions.some(a=>a==="reboot"||a==="poweroff"))d.allow_power=true;
+  return api("/api/glance/config",{method:"POST",body:JSON.stringify(d)});};
  const rer=()=>glanceTab(tc);
  tc.querySelector("#glEn").onchange=e=>post({enabled:e.target.checked});
  tc.querySelector("#glNew").onclick=async()=>{await post({token_action:"new"});rer();};
