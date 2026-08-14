@@ -622,6 +622,41 @@ def _size_bytes(s):
     except ValueError:
         return 0
 
+def _pool_branch(path):
+    """Which mergerfs branch a pool path actually lives on, or None outside a pool.
+
+    st_dev CANNOT answer this: every branch of a FUSE union shares the mount's device
+    number, so `os.stat(a).st_dev == os.stat(b).st_dev` is true for two files on two
+    different physical disks. Three checks in this file used st_dev to decide "same disk?"
+    and were therefore always answering yes. That was harmless while the create policy was
+    mfs and a move inside the pool was usually an in-branch rename; since the pool became
+    path preserving (category.create=epmfs) a move between two folders is a move between
+    two disks, and the wrong answer starts costing real copies and failed renames.
+
+    mergerfs answers it itself through an xattr, which is also the only answer that stays
+    correct when branches are added or reordered."""
+    try:
+        return os.getxattr(path, "user.mergerfs.basepath").decode() or None
+    except OSError:
+        return None                       # not a pool path, or mergerfs too old for the xattr
+
+
+def _same_disk(a, b):
+    """True when both paths sit on the same physical filesystem — branch-aware inside a pool.
+
+    When the branch of one side cannot be read (an unreadable directory, a mergerfs too old
+    for the xattr) the answer is "different disks". Both callers treat that as the expensive
+    case — count the full size, refuse to move the library — which is the safe direction to
+    be wrong in."""
+    ba, bb = _pool_branch(a), _pool_branch(b)
+    if ba is not None or bb is not None:
+        return ba == bb
+    try:
+        return os.stat(a).st_dev == os.stat(b).st_dev
+    except OSError:
+        return False
+
+
 def _missing_branches():
     """/mnt/disk* fstab entries whose mountpoint is not currently mounted."""
     mounted = set()
@@ -16876,7 +16911,11 @@ def imsb_promote(library="", move_to="", start=True):
         while probe != "/" and not os.path.exists(probe):
             probe = os.path.dirname(probe)
         try:
-            same = os.stat(probe).st_dev == os.stat(src_lib).st_dev
+            # branch-aware: both halves may sit in the same mergerfs pool and still be on
+            # two different disks, in which case the os.rename below returns EXDEV — and it
+            # runs AFTER imsb_down(), so a wrong answer here leaves the standby stopped and
+            # the library unmoved.
+            same = _same_disk(probe, src_lib)
         except OSError as e:
             return {"ok": False, "log": str(e)}
         if not same:
@@ -19225,11 +19264,14 @@ def _fsjob_run(job, items, dest, name, policy):
             job["cur"] = "calculating size…"
             job["total_bytes"] = _fsjob_tree_size(items, job)
             job["total_items"] = len(items)
-            # will it fit? for a move only what crosses onto another device counts
+            # will it fit? for a move only what crosses onto another disk counts — and inside
+            # a path-preserving pool "another disk" means another BRANCH, which st_dev does
+            # not see (see _pool_branch). Judging by st_dev made every move inside the pool
+            # look free, so the check silently skipped itself on exactly the moves that now
+            # copy every byte.
             try:
-                ddev = os.stat(dest).st_dev
                 need = job["total_bytes"] if op == "copy" else _fsjob_tree_size(
-                    [p for p in items if os.stat(p).st_dev != ddev], job)
+                    [p for p in items if not _same_disk(p, dest)], job)
                 free = shutil.disk_usage(dest).free
                 if need and free < need + 64 * 2**20:
                     raise OSError(f"not enough space: need {need // 2**20} MB, "

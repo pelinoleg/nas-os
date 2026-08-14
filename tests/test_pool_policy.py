@@ -39,13 +39,23 @@ class PoolCreatePolicy(unittest.TestCase):
             self.assertNotIn("category.create=mfs", opts,
                              "%s fell back to the spreading policy" % name)
 
-    def test_enospc_rescue_is_on(self):
-        # Path preservation means a folder's branch can fill while the pool has room. This
-        # rescues the write case (mergerfs default is false); a create still fails, which is
-        # the accepted price.
+    def test_free_space_is_reported_per_branch(self):
+        # Without this, statvfs() inside a folder pinned to one disk reports the whole pool
+        # and every space check in the panel promises room that folder does not have.
         for name in ("MERGERFS_OPTS", "MERGERFS_SVC_OPTS"):
-            self.assertIn("moveonenospc=true", _opts(name),
-                          "%s: a full branch would fail writes with no attempt to move" % name)
+            self.assertIn("statfs=full", _opts(name),
+                          "%s: space checks would see the sum of all branches" % name)
+
+    def test_no_option_that_silently_clones_folders(self):
+        # Both of these end path preservation the moment it matters — one when a branch
+        # fills, the other on any cross-folder move — by cloning the folder onto a second
+        # branch. Verified on a throwaway pool, not assumed.
+        for name in ("MERGERFS_OPTS", "MERGERFS_SVC_OPTS"):
+            opts = _opts(name)
+            self.assertNotIn("moveonenospc", opts,
+                             "%s: a full branch would scatter the folder instead of failing" % name)
+            self.assertNotIn("ignorepponrename", opts,
+                             "%s: a move would clone the destination folder onto a second disk" % name)
 
     def test_branch_wait_survived(self):
         # The service opts also carry the fix for the boot race that could build the pool on

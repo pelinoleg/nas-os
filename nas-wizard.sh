@@ -1145,12 +1145,32 @@ Configs in git: $NAS_CONFIG"
 #     already falls back to copy+delete (fs_move and the trash use shutil.move,
 #     _fsjob_move_entry catches OSError from os.rename), so this is invisible there — but a
 #     naive client that treats rename(2) as infallible is not.
-#   * when the branch holding a folder fills up, new files in THAT folder fail while the
-#     pool still has room elsewhere. moveonenospc rescues the half of that we can rescue:
-#     a WRITE that hits ENOSPC moves the file to another branch and retries (mergerfs
-#     default is false; true means the mfs policy). A create that finds no branch with
-#     minfreespace left still fails, and that is the price of path preservation.
-MERGERFS_OPTS="defaults,nofail,allow_other,use_ino,category.create=epmfs,minfreespace=20G,moveonenospc=true,fsname=mergerfs"
+#   * when the branch holding a folder fills up, new files in THAT folder fail with ENOSPC
+#     while the pool still reports room elsewhere. That is the price of path preservation
+#     and it is paid on purpose: a loud failure the owner can see and fix by moving the
+#     folder, instead of a silent drift back into scattered files.
+#
+# statfs=full — REQUIRED with a path-preserving policy, not decoration. The default (base)
+# sums every branch, so statvfs() inside a folder pinned to one disk reports the whole pool.
+# Six separate space checks read that number (the file-manager copy job, Time Machine, the
+# backup-target monitor, kopia, the USB import, the motd) and every one of them promised
+# terabytes into a folder that could take gigabytes. Measured on a throwaway two-branch pool:
+# a folder living on the 32 MB branch reported 73.2 MB free with statfs=base and 23.0 MB —
+# the truth — with statfs=full. The pool root still reports the sum, because the root exists
+# on every branch, so the pool tile and plain `df /mnt/storage` do not change.
+#
+# Deliberately NOT set, both verified on that same throwaway pool rather than argued:
+#   * moveonenospc=true — on ENOSPC it moves the file to another branch, which CLONES the
+#     folder onto that branch. The folder is then on two disks and the invariant this policy
+#     exists for is quietly gone, precisely when the pool is under pressure and nobody is
+#     watching. Worse, once a path exists on two branches, a later rename that succeeds on
+#     one and fails on the other makes mergerfs DELETE the copy it could not rename (see the
+#     rename algorithm in its README) — a shadow copy that vanishes without a word.
+#   * ignorepponrename=true — the option mergerfs itself suggests when software trips over
+#     EXDEV. It does stop the EXDEV, by cloning the destination path onto the source branch:
+#     the moved file stays put and the destination folder ends up on two disks. Same loss of
+#     the invariant, for the convenience of code that already handles EXDEV correctly here.
+MERGERFS_OPTS="defaults,nofail,allow_other,use_ino,category.create=epmfs,minfreespace=20G,statfs=full,fsname=mergerfs"
 
 remove_fstab_mergerfs() {
     if [ "$DRY_RUN" -eq 1 ]; then
@@ -1164,7 +1184,7 @@ remove_fstab_mergerfs() {
 # branches-mount-timeout: wait for each branch to actually BE a mount before serving.
 # mergerfs ships this option for precisely the race above; 0 (its default) means
 # "trust whatever is in the directory right now".
-MERGERFS_SVC_OPTS="allow_other,use_ino,category.create=epmfs,minfreespace=20G,moveonenospc=true,branches-mount-timeout=30,fsname=mergerfs"
+MERGERFS_SVC_OPTS="allow_other,use_ino,category.create=epmfs,minfreespace=20G,statfs=full,branches-mount-timeout=30,fsname=mergerfs"
 MERGERFS_UNIT="/etc/systemd/system/nas-mergerfs.service"
 # Keep the mergerfs pool as a systemd SERVICE with Restart=always, NOT an fstab line. Reason:
 # the FUSE process may crash ("Transport endpoint is not connected"), and an fstab mount is then
