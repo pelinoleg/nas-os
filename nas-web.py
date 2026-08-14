@@ -10147,7 +10147,9 @@ _BK_SECTIONS = (
     ("maint",     "Maintenance and schedules", False, ("nas-config/maintenance.json", "etc/nas-wizard/")),
     ("samba",     "Shared folders (Samba)",    False, ("etc/samba/", "var/lib/samba/",
                                                         "etc/nas-os/smb-recycle.json")),
-    ("stacks",    "Docker stacks",             False, ("opt/stacks/",)),
+    # .env carries database passwords and API keys, so this is a secret section: restoring it
+    # must be an explicit choice, not a box already ticked
+    ("stacks",    "Docker stacks",             True,  ("opt/stacks/",)),
     ("disks",     "Disks and pool",            False, ("nas-config/fstab.",)),
     ("webauth",   "Panel password",            True,  ("etc/nas-os/webauth.json",)),
     ("nasbackup", "Main NAS backup",           True,  ("etc/nas-os/nas-backup.json", "nas-config/nas-backup-",
@@ -17658,6 +17660,13 @@ def stack_save(name, compose, env, create=False):
     cp = _compose_path(name)
     if create and os.path.isdir(d) and os.path.isfile(cp):
         return {"ok": False, "log": "stack already exists"}
+    # stack_delete has always resolved the path before touching it; saving did not, so a
+    # symlink in /opt/stacks pointing anywhere wrote the compose file AND the .env — with
+    # its passwords — outside the stacks directory, and the resulting stack could then not
+    # be deleted from the panel at all, because delete refused what save had accepted.
+    rp = os.path.realpath(d)
+    if rp != os.path.realpath(STACKS_DIR) and not rp.startswith(os.path.realpath(STACKS_DIR) + os.sep):
+        return {"ok": False, "log": "path outside the stacks directory"}
     try:
         os.makedirs(d, exist_ok=True)
         if os.path.isfile(cp):
@@ -17670,6 +17679,10 @@ def stack_save(name, compose, env, create=False):
                 shutil.copy2(ep, ep + ".bak")
             with open(ep, "w") as f:
                 f.write(env)
+            # database passwords, API keys, APP_SECRET — written 0644 under the umask into a
+            # 0755 directory until now, i.e. readable by every local user. The panel's own
+            # store.json has been 0600 all along; the stacks' .env was simply forgotten.
+            _safe(lambda: os.chmod(ep, 0o600))
     except OSError as e:
         return {"ok": False, "log": str(e)}
     return {"ok": True, "name": name, "path": cp}
@@ -17873,6 +17886,13 @@ def stack_recipe(sid):
     return {"ok": True, "compose": _read_file(src),
             "env": ("\n".join(env) + "\n") if env else ""}
 
+def _env_600(path):
+    """Create/truncate a stack .env owner-only before anything is written into it."""
+    _safe(lambda: os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)))
+    _safe(lambda: os.chmod(path, 0o600))
+    return path
+
+
 def stack_install(sid, values, compose=None, env_text=None):
     """Copy a recipe into /opt/stacks + write .env, then the caller streams
     `compose up` via /api/stack/stream. `compose`/`env_text` (if given) are the
@@ -17893,7 +17913,7 @@ def stack_install(sid, values, compose=None, env_text=None):
         with open(os.path.join(dst, "compose.yaml"), "w") as fh:
             fh.write(compose if compose.endswith("\n") else compose + "\n")
     if env_text is not None:                # user edited raw .env — write verbatim
-        with open(os.path.join(dst, ".env"), "w") as fh:
+        with open(_env_600(os.path.join(dst, ".env")), "w") as fh:
             fh.write(env_text if env_text.endswith("\n") else env_text + "\n")
     else:
         # .env: dialog values win, empty ones fall back to meta defaults; merge over
@@ -17913,7 +17933,7 @@ def stack_install(sid, values, compose=None, env_text=None):
                     _chown_user(v)
                 except OSError:
                     pass
-        with open(os.path.join(dst, ".env"), "w") as fh:   # env_file: .env must exist
+        with open(_env_600(os.path.join(dst, ".env")), "w") as fh:   # env_file: .env must exist
             fh.write("\n".join("%s=%s" % kv for kv in env.items()) + "\n")
     log_event("action", "Install %s" % (m.get("name") or sid), "", "ok",
               kind="svc", desk=False)
