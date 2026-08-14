@@ -1453,12 +1453,12 @@ def systemd_units(kind="service"):
 def systemd_action(unit, action):
     if action not in ("start", "stop", "restart", "enable", "disable"):
         return {"ok": False, "log": "invalid action"}
-    if not re.match(r"^[\w@.:-]+$", unit or ""):
+    if not re.match(r"^[\w@.:][\w@.:-]*$", unit or ""):
         return {"ok": False, "log": "invalid unit name"}
     return _run(["systemctl", action, unit], timeout=30)
 
 def systemd_journal(unit, lines=200):
-    if not re.match(r"^[\w@.:-]+$", unit or ""):
+    if not re.match(r"^[\w@.:][\w@.:-]*$", unit or ""):
         return {"ok": False, "log": "invalid unit"}
     try:
         n = max(10, min(2000, int(lines)))
@@ -4425,6 +4425,16 @@ def _act_title(p, b):
     if p == "/api/power":
         return {"reboot": "Reboot by command from the panel",
                 "poweroff": "Shutdown by command from the panel"}.get(g("action"))
+    if p == "/api/unit/delete":
+        return "Service unit deleted: " + g("unit")
+    if p in ("/api/unit/save", "/api/unit/create"):
+        return "Service unit written: " + g("unit")
+    if p == "/api/process/kill":
+        return "Process killed: %s (%s)" % (g("pid"), g("name"))
+    if p == "/api/sysconf":
+        # hostname, timezone, journald size, ufw, fail2ban, unattended-upgrades — all of it
+        # went unrecorded, while "disk renamed" and "trash emptied" were logged
+        return "Setting %s = %s" % (g("key"), g("value") or g("val"))
     if p == "/ws/term":
         # The most powerful thing in the panel — a shell on the box, in a group with docker
         # and sudo — left no trace in the action history at all: the only record was
@@ -4468,7 +4478,8 @@ def _act_title(p, b):
     return None
 
 _ACT_KIND = {"/api/disk/": "disk", "/api/fs/": "files", "/api/power": "svc",
-             "/ws/term": "svc",
+             "/ws/term": "svc", "/api/unit/": "svc", "/api/process/": "svc",
+             "/api/sysconf": "svc",
              "/api/systemd": "svc", "/api/stack": "svc", "/api/container": "svc",
              "/api/docker": "svc", "/api/usb-import": "disk"}
 
@@ -4763,6 +4774,13 @@ def _apt_updates_run(refresh=False):
     if refresh:
         _run(["apt-get", "update"], timeout=180)
     r = _run(["apt-get", "-s", "-o", "Debug::NoLocking=true", "upgrade"], timeout=60)
+    if not r.get("ok"):
+        # A locked dpkg, broken lists or no network produced an empty package list, which the
+        # panel drew as a green "everything is up to date" — and cached that for five minutes,
+        # so the owner was told there was nothing to update precisely when the check could not
+        # run. Failures are reported and NOT cached.
+        return {"ok": False, "count": 0, "packages": [],
+                "log": (r.get("log") or "apt-get failed")[-300:]}
     pkgs = []
     for l in (r.get("log") or "").splitlines():
         # format: Inst bash [5.2.15-2] (5.2.15-3 Debian:12/stable [arm64])
