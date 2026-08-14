@@ -731,6 +731,25 @@ def _same_disk(a, b):
         return False
 
 
+def _pool_makedirs_beside(path, sibling):
+    """Create `path` on the same branch as `sibling`, not wherever the policy would put it.
+
+    Under a path-preserving policy the branch of a NEW directory is chosen by free space,
+    so creating the destination's parent through the pool can land it on a different disk
+    than the file about to be renamed into it — and rename then returns EXDEV. Asking a
+    guard about the nearest EXISTING ancestor cannot see this: the parent that decides the
+    answer does not exist yet at the time of the question. Measured: a library on disk3
+    moved to a new folder at the pool root, whose parent was created on disk2."""
+    br = _pool_branch(sibling)
+    mp = _pool_mount_of(path)
+    if br and mp:
+        rel = os.path.relpath(path, mp)
+        if not rel.startswith(".."):
+            os.makedirs(os.path.join(br, rel), exist_ok=True)
+            return
+    os.makedirs(path, exist_ok=True)
+
+
 def _rename_stays_put(src, dst_parent):
     """Will rename(src, dst_parent/...) stay on one disk, i.e. avoid EXDEV?
 
@@ -17194,11 +17213,21 @@ def imsb_promote(library="", move_to="", start=True):
             return {"ok": False, "log": "the new library path must be absolute"}
         if os.path.exists(move_to) and os.listdir(move_to):
             return {"ok": False, "log": "%s already has something in it" % move_to}
-        # the target's parent may not exist yet — walk up to whatever does, or the answer to
-        # «same disk?» is a confusing «No such file or directory»
-        probe = os.path.dirname(move_to) or "/"
-        while probe != "/" and not os.path.exists(probe):
-            probe = os.path.dirname(probe)
+        if os.path.exists(move_to) and not os.path.isdir(move_to):
+            return {"ok": False, "log": "%s is a file, not a folder" % move_to}
+        # The parent may not exist yet, and creating it through the pool would let the
+        # create policy pick its branch by free space — which is how a guard that asked
+        # about the nearest existing ancestor could answer "same disk" and still hit EXDEV.
+        # Build it on the library's own branch first, THEN ask, and do both before anything
+        # is stopped: everything below this point is irreversible for the standby.
+        parent = os.path.dirname(move_to) or "/"
+        made_parent = not os.path.exists(parent)
+        try:
+            if made_parent:
+                _pool_makedirs_beside(parent, src_lib)
+        except OSError as e:
+            return {"ok": False, "log": "could not prepare %s: %s" % (parent, e)}
+        probe = parent
         try:
             # The question is not "are these two paths on one disk" but "will the rename
             # below survive": it runs AFTER imsb_down(), so a wrong answer leaves the
@@ -17209,6 +17238,8 @@ def imsb_promote(library="", move_to="", start=True):
         except OSError as e:
             return {"ok": False, "log": str(e)}
         if not same:
+            if made_parent:
+                _safe(lambda: os.rmdir(parent))     # leave no trace of a refused promotion
             return {"ok": False, "log": "%s is on a different disk than the backup. Moving a "
                     "library of this size across disks is not something a button should start — "
                     "copy it yourself, then promote with «use the library where it is»" % move_to}
@@ -17219,6 +17250,26 @@ def imsb_promote(library="", move_to="", start=True):
     else:
         return {"ok": False, "log": "say where the photos should live"}
 
+    # The database moves too, and it had no guard at all — so a promotion could stop the
+    # standby, move the library, and only then discover the database could not follow,
+    # leaving the box half promoted with no way to retry. Same question, same answer, asked
+    # while nothing has been touched yet.
+    db_dir = os.path.join(os.path.dirname(cfg["work"]), "immich", "db")
+    db_parent = os.path.dirname(db_dir)
+    made_db_parent = not os.path.exists(db_parent)
+    try:
+        if made_db_parent:
+            _pool_makedirs_beside(db_parent, p["db"])
+    except OSError as e:
+        return {"ok": False, "log": "could not prepare %s: %s" % (db_parent, e)}
+    if os.path.exists(db_dir):
+        return {"ok": False, "log": "%s already exists" % db_dir}
+    if not _rename_stays_put(p["db"], db_parent):
+        if made_db_parent:
+            _safe(lambda: os.rmdir(db_parent))
+        return {"ok": False, "log": "the restored database is on a different disk than %s — "
+                "the move would have to copy it, which a button should not start" % db_parent}
+
     # from here on it changes the box: stop the copy first so nothing holds the files
     imsb_down()
     if move_to:
@@ -17227,11 +17278,7 @@ def imsb_promote(library="", move_to="", start=True):
             os.rename(src_lib, move_to)       # same filesystem: instant, no copying
         except OSError as e:
             return {"ok": False, "log": "could not move the library: %s" % e}
-    db_dir = os.path.join(os.path.dirname(cfg["work"]), "immich", "db")
     try:
-        os.makedirs(os.path.dirname(db_dir), exist_ok=True)
-        if os.path.exists(db_dir):
-            return {"ok": False, "log": "%s already exists" % db_dir}
         os.rename(p["db"], db_dir)            # the warm database becomes the real one
     except OSError as e:
         return {"ok": False, "log": "could not move the database: %s" % e}
