@@ -31,9 +31,12 @@ def make_archive(d, files):
 
 
 class DrillTests(unittest.TestCase):
-    def _drill(self, d):
+    def _drill(self, d, live_net=()):
+        # live_net is what the BOX has: the network check compares the archive against it,
+        # so it is pinned here instead of letting the test machine's own wiring decide.
         with mock.patch.object(nas, "settings_backup_dir", return_value=d), \
                 mock.patch.object(nas, "SB_DRILL_FILE", os.path.join(d, "drill.json")), \
+                mock.patch.object(nas, "_live_net_profiles", lambda: list(live_net)), \
                 mock.patch.object(nas, "log_event", lambda *a, **k: None):
             return nas.settings_backup_drill()
 
@@ -148,3 +151,50 @@ class ResurrectionScanTests(unittest.TestCase):
                     {"rel": "x.txt"}, {"dev": "dev; rm -rf /", "rel": "a.tar.gz"}):
             r = nas.setup_restore_backup(bad)
             self.assertFalse(r["ok"], bad)
+
+
+class NetworkProfileCheck(unittest.TestCase):
+    """The one omission that makes a restore unusable rather than incomplete.
+
+    2026-08-14 the archive carried no network settings for a full day and this drill
+    passed the whole time: it only ever looked for fstab and snapraid.conf. On a box whose
+    only link is Wi-Fi, a restore without the profile has no way onto the network — and no
+    way to reach the archive holding everything else."""
+
+    def _drill(self, d, live_net=()):
+        with mock.patch.object(nas, "settings_backup_dir", return_value=d), \
+                mock.patch.object(nas, "SB_DRILL_FILE", os.path.join(d, "drill.json")), \
+                mock.patch.object(nas, "_live_net_profiles", lambda: list(live_net)), \
+                mock.patch.object(nas, "log_event", lambda *a, **k: None):
+            return nas.settings_backup_drill()
+
+    def _by(self, res, name):
+        return next(c for c in res["checks"] if c["name"] == name)
+
+    _MIN = {"manifest.json": json.dumps({"version": 1, "files": ["a"]}).encode(),
+            "etc/nas-os/webauth.json": json.dumps({"salt": "ab", "hash": "cd"}).encode()}
+
+    def test_box_has_a_profile_but_the_archive_does_not(self):
+        with tempfile.TemporaryDirectory() as d:
+            make_archive(d, dict(self._MIN))
+            r = self._drill(d, live_net=["/etc/NetworkManager/system-connections/home-wifi"])
+        self.assertFalse(self._by(r, "network profile")["ok"])
+        self.assertFalse(r["ok"], "an archive that cannot bring the network back must fail")
+
+    def test_archive_carries_the_profile(self):
+        with tempfile.TemporaryDirectory() as d:
+            files = dict(self._MIN)
+            files["reference/etc/NetworkManager/system-connections/home-wifi.nmconnection"] = \
+                b"[wifi]\nssid=x\n"
+            make_archive(d, files)
+            r = self._drill(d, live_net=["/etc/NetworkManager/system-connections/home-wifi"])
+        self.assertTrue(self._by(r, "network profile")["ok"])
+        self.assertIn("home-wifi.nmconnection", self._by(r, "network profile")["note"])
+        self.assertTrue(r["ok"], r)
+
+    def test_a_box_without_any_profile_is_not_punished(self):
+        with tempfile.TemporaryDirectory() as d:
+            make_archive(d, dict(self._MIN))
+            r = self._drill(d, live_net=[])
+        self.assertIsNone(self._by(r, "network profile")["ok"])
+        self.assertTrue(r["ok"])

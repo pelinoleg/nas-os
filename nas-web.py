@@ -10041,6 +10041,15 @@ def _drill_check(name, ok, note=""):
     is NOT a failure: the July rule — no data about a check is not a failed check."""
     return {"name": name, "ok": ok, "note": note}
 
+def _live_net_profiles():
+    """The network profiles this box actually has, which decide whether an archive
+    without any is merely thin or unusable. A separate function so the drill can be
+    tested against a synthetic archive without the test host's own network deciding
+    the verdict."""
+    return glob.glob("/etc/NetworkManager/system-connections/*") + \
+        glob.glob("/etc/netplan/*.yaml")
+
+
 def settings_backup_drill(name=None):
     """Prove the settings archive can actually bring a box back up — with FACTS.
 
@@ -10209,8 +10218,7 @@ def settings_backup_drill(name=None):
         net = [p for d in ("reference/etc/NetworkManager/system-connections",
                            "reference/etc/netplan")
                for p in sorted(glob.glob(os.path.join(j(d), "*")))]
-        live = glob.glob("/etc/NetworkManager/system-connections/*") + \
-            glob.glob("/etc/netplan/*.yaml")
+        live = _live_net_profiles()
         if net:
             checks.append(_drill_check("network profile", True,
                                        "%d file(s): %s" % (len(net),
