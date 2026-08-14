@@ -5406,13 +5406,36 @@ def rclone_conf_read():
         return ""
 
 def rclone_conf_write(txt):
-    """Save the pasted rclone.conf (root 600). Returns True on success."""
+    """Save the pasted rclone.conf (root 600). Returns True on success.
+
+    This file is where every cloud token on the box lives, so three things matter here and
+    each of them was wrong: the temp file was created by plain open() — 0644 under the
+    umask, in a 0755 directory, and left behind at 0644 if the write died; an empty or
+    mangled paste was accepted and wiped every token with no copy kept; and nothing warned
+    that Kopia and Mirror read this same file."""
+    txt = txt if (txt.endswith("\n") or not txt) else txt + "\n"
+    if txt.strip() and not re.search(r"^\s*\[[^\]]+\]", txt, re.M):
+        return False                       # not an rclone.conf: refuse rather than wipe
     try:
         os.makedirs(os.path.dirname(RCLONE_CONF), exist_ok=True)
+        if os.path.isfile(RCLONE_CONF):    # one step back is always available
+            try:
+                shutil.copy2(RCLONE_CONF, RCLONE_CONF + ".prev")
+                os.chmod(RCLONE_CONF + ".prev", 0o600)
+            except OSError:
+                pass
         tmp = RCLONE_CONF + ".tmp"
-        with open(tmp, "w") as f:
-            f.write(txt if txt.endswith("\n") or not txt else txt + "\n")
-        os.chmod(tmp, 0o600); os.replace(tmp, RCLONE_CONF)
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            with os.fdopen(fd, "w") as f:
+                f.write(txt)
+            os.replace(tmp, RCLONE_CONF)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
         return True
     except OSError:
         return False
@@ -5424,7 +5447,11 @@ def rclone_remotes():
     try:
         r = subprocess.run([_rclone_bin(), "--config", RCLONE_CONF, "listremotes"],
                            capture_output=True, text=True, timeout=12)
-        return [x.strip().rstrip(":") for x in (r.stdout or "").split() if x.strip().endswith(":")]
+        # by LINES: a remote may legitimately be named "Backup Drive", and splitting on
+        # whitespace turned it into two — the real one unreachable from the panel (every
+        # call checks `remote in rclone_remotes()`), plus a phantom that passed the checks
+        # and failed inside rclone with "didn't find section in config file"
+        return [x.strip().rstrip(":") for x in (r.stdout or "").splitlines() if x.strip().endswith(":")]
     except (OSError, subprocess.SubprocessError):
         return []
 
@@ -10600,6 +10627,10 @@ def settings_backup_make(auto=False):
     path = os.path.join(d, name)
     added = []
     try:
+        # 0600 from creation, not after: the archive holds the panel password hash and the
+        # Samba password database, and the directory it lands in is on a shared pool. The
+        # chmod below stays as a belt for archives written by older code paths.
+        os.close(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600))
         with tarfile.open(path, "w:gz") as tar:
             for src, arc in _bk_sources():
                 if _bk_add_file(tar, src, arc):
@@ -10676,7 +10707,18 @@ def settings_backup_restore(path, sections=None):
                    ("var/lib/syncthing/", ST_HOME),
                    ("opt/stacks/", STACKS_DIR),
                    ("root/.ssh/nas-backup", "/root/.ssh/nas-backup"),
-                   ("root/.ssh/nas-backup.pub", "/root/.ssh/nas-backup.pub")]
+                   ("root/.ssh/nas-backup.pub", "/root/.ssh/nas-backup.pub"),
+                   # These are collected by _bk_sources and were silently dropped on the way
+                   # back: the restore dialog offered the section, the archive carried the
+                   # file, and the map had no entry — so after a real restore the cloud
+                   # tokens, the kopia repository, the SMB passwords and the Immich standby
+                   # config were simply absent, and every profile pointing at them was dead.
+                   ("etc/nas-os/rclone.conf", "/etc/nas-os/rclone.conf"),
+                   ("etc/nas-os/kopia.json", "/etc/nas-os/kopia.json"),
+                   ("etc/nas-os/kopia/", "/etc/nas-os/kopia"),
+                   ("etc/nas-os/immich-standby.json", "/etc/nas-os/immich-standby.json"),
+                   ("etc/nas-os/smb-users.json", "/etc/nas-os/smb-users.json"),
+                   ("etc/nas-os/smb-recycle.json", "/etc/nas-os/smb-recycle.json")]
     restored, skipped, deselected = [], [], 0
     try:
         with tarfile.open(path, "r:gz") as tar:
@@ -10713,6 +10755,8 @@ def settings_backup_restore(path, sections=None):
                     shutil.copyfileobj(src, f)
                 # secrets: the panel password, Pushover keys, the main NAS password
                 if any(x in dest for x in ("webauth", "notify.conf", "nas-backup.json",
+                                           "rclone.conf", "kopia.json", "smb-users.json",
+                                           "passdb.tdb", "immich-standby.json",
                                            "store.json", "remotes.json", "credentials.json",
                                            # glance.json carries the read-only display
                                            # token, which authorises actions BEFORE the
@@ -20208,6 +20252,11 @@ def duscan_dups(root):
 FSW_DB  = os.path.join(NAS_CONFIG, "fswatch.db")
 FSW_CFG = os.path.join(NAS_CONFIG, "fswatch.json")
 FSW_DEF_EXCLUDE = [".trash", ".nas-trash", ".recycle", "#recycle", "@eaDir", "lost+found",
+                   # Syncthing's own bookkeeping: every kept version and every conflict copy
+                   # was counted as a file of the owner's, hashed, and re-verified for bitrot
+                   # forever after — and a normal spread of deletions tripped the mass-loss
+                   # guard, because the versions directory fills as the originals disappear.
+                   ".stversions", ".stfolder", ".stignore", "*.sync-conflict-*",
                    ".Trash-*", "node_modules", ".git", "__pycache__",
                    ".DS_Store", "._*", "Thumbs.db", "desktop.ini",
                    "*.tmp", "*.part", "*.crdownload", "*.!qB", "~$*"]
