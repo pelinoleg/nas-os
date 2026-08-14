@@ -3,7 +3,7 @@
 # nas-wizard.sh — NAS setup wizard (x86 Debian box)
 #
 # Implemented stages (per spec):
-#   1.  System preparation (NAS stack + utilities + Pi packages, docker,
+#   1.  System preparation (NAS stack + utilities, docker,
 #       groups, fstrim, directories, hostname/tz)
 #   2.  Disk handling (format -> fstab -> mount), data OR parity
 #   2b. mergerfs — pool of >=2 data disks (auto when a 2nd disk is added)
@@ -11,9 +11,9 @@
 #       systemd timers (sync daily / scrub weekly), notifications
 #   4.  Docker — reads ./services/<service>/*.yml NEXT TO THE SCRIPT, checklist
 #       "which to bring up", up/down, generates deploy.sh ("apply everything at once")
-#   5.  Pi tuning — PCIe Gen3, USB max current, memory cgroup, sysctl, zram,
-#       watchdog, Wi-Fi powersave, CPU governor by temperature (opt-in checklist)
-#   6.  Security — unattended-upgrades, journald cap, log2ram, ufw, fail2ban,
+#   5.  Hardware tuning — memory cgroup, fstrim, sysctl, Wi-Fi power-save off,
+#       watchdog (opt-in checklist)
+#   6.  Security — unattended-upgrades, journald cap, ufw, fail2ban,
 #       SSH key-only (safe: only when keys are present)
 #   7.  Network shares — Samba to /mnt/storage + Avahi (mDNS)
 #   8.  Backups/monitoring — smartd alerts, health timer (disk/temperature),
@@ -54,6 +54,9 @@ UTIL_PACKAGES=(
   dialog
   libheif-examples   # heif-convert: iPhone HEIC is sliced into tiles, ffmpeg takes only one
   eject              # soft media ejection after USB import (power-off kills the whole reader)
+  iw                 # the ONLY way to read and set Wi-Fi power-save; the panel's own
+                     # toggle shells out to it, and without the package that switch
+                     # wrote a NetworkManager config and silently changed nothing live
   iputils-arping     # nas-netguard: fallback gateway check when it stays silent on ICMP
   curl wget ca-certificates gnupg
   git rsync sshpass openssh-client
@@ -156,7 +159,7 @@ nas-wizard.sh — NAS setup (x86 Debian box)
   --stage mergerfs    Stage 2b: build/update the mergerfs pool
   --stage snapraid    Stage 3: SnapRAID (conf, sync, timers)
   --stage docker      Stage 4: Docker (find compose folders and bring up)
-  --stage pi          Stage 5: Pi tuning (PCIe, USB power, watchdog)
+  --stage hw          Stage 5: Hardware tuning (cgroup, fstrim, sysctl, watchdog)
   --stage security    Stage 6: Security (ufw, fail2ban, SSH, journald)
   --stage shares      Stage 7: Network shares (Samba/Avahi)
   --stage backup      Stage 8: Backups and monitoring (SMART, health)
@@ -373,9 +376,8 @@ install_packages() {
 }
 
 # report_skipped_packages — one loud block at the very end of the base install,
-# where the eye lands anyway. "Pi packages" missing on non-Pi hardware is expected
-# and only mentioned in passing; anything else skipped means a feature is silently
-# absent (renamed package in a new Debian, missing repo) and deserves attention.
+# where the eye lands anyway. Anything skipped means a feature is silently absent
+# (renamed package in a new Debian, missing repo) and deserves attention.
 # The list is persisted so the panel can surface it later if needed.
 report_skipped_packages() {
     run mkdir -p /var/lib/nas-wizard
@@ -386,15 +388,13 @@ report_skipped_packages() {
     # same package can be skipped by several call sites (samba is attempted in three
     # places) — write each line once, keeping first-seen order
     [ "$DRY_RUN" -eq 0 ] && printf '%s\n' "${NASW_SKIPPED[@]}" | awk '!seen[$0]++' > /var/lib/nas-wizard/skipped-packages
-    local s lvl pkg why req=() opt=() pi=()
+    local s lvl pkg why req=() opt=()
     while IFS=$'\t' read -r lvl pkg _ why; do
         case "$lvl" in
             req) req+=("$pkg|$why") ;;
-            pi)  pi+=("$pkg") ;;
             *)   opt+=("$pkg") ;;
         esac
     done < <(printf '%s\n' "${NASW_SKIPPED[@]}" | awk '!seen[$0]++')
-    [ "${#pi[@]}" -gt 0 ] && info "Pi-only packages skipped (fine on non-Pi hardware): ${pi[*]}"
     [ "${#opt[@]}" -gt 0 ] && warn "Optional packages unavailable (convenience features only): ${opt[*]}"
     if [ "${#req[@]}" -gt 0 ]; then
         # Loud, last, and it names the consequence — a count teaches nothing, and this
@@ -748,7 +748,7 @@ stage_system() {
         info "system update skipped"
     fi
 
-    # 0.2 software install: NAS stack + utilities + Pi-specific (idempotent, unavailable ones skipped)
+    # 0.2 software install: NAS stack + utilities (idempotent, unavailable ones skipped)
     run apt-get update
     install_packages "NAS stack"   "${STACK_PACKAGES[@]}"
     install_smartd_guard   # smartmontools is installed right here — immediately clear failed with no disks
@@ -1737,7 +1737,7 @@ checklist_selected() { printf ' %s ' "$(printf '%s' "$1" | tr -d '"')"; }
 # ---------------------------------------------------------------------------
 # STAGE 5: hardware tuning.
 # ---------------------------------------------------------------------------
-pi_wifi_powersave_off() {
+hw_wifi_powersave_off() {
     run mkdir -p /etc/NetworkManager/conf.d
     write_file /etc/NetworkManager/conf.d/wifi-powersave-off.conf <<'EOF'
 [connection]
@@ -1746,7 +1746,7 @@ EOF
     systemctl is-active NetworkManager >/dev/null 2>&1 && run systemctl restart NetworkManager
     info "Wi-Fi power-save disabled"
 }
-pi_watchdog() {
+hw_watchdog() {
     run mkdir -p /etc/systemd/system.conf.d
     write_file /etc/systemd/system.conf.d/watchdog.conf <<'EOF'
 [Manager]
@@ -1757,7 +1757,7 @@ EOF
     info "watchdog enabled (RuntimeWatchdogSec=15s)"
 }
 # Memory cgroup for docker limits
-pi_cgroup() {
+hw_cgroup() {
     # Ask the kernel, not the bootloader: on cgroup v2 (every non-Pi Debian) the
     # memory controller is on by default and there is nothing to enable. The old
     # The answer lives in the kernel, not in a bootloader file.
@@ -1770,7 +1770,7 @@ pi_cgroup() {
     fi
     warn "the memory cgroup is off — add cgroup_enable=memory to the kernel command line (GRUB_CMDLINE_LINUX), otherwise docker memory limits do nothing"
 }
-pi_sysctl() {
+hw_sysctl() {
     write_file /etc/sysctl.d/99-nas.conf <<'EOF'
 # nas-wizard: tuning for NAS
 vm.swappiness = 10
@@ -1781,71 +1781,6 @@ net.ipv4.tcp_keepalive_probes = 3
 EOF
     run sysctl --system
     info "sysctl tuning applied (swappiness=10, somaxconn=512, tcp keepalive)"
-}
-# Silence the legacy zramswap.service (zram-tools package). On modern
-# Modern Debian brings zram-swap up via systemd-zram-generator, and
-# zramswap.service FIGHTS it over /dev/zram0: "Device or resource busy",
-# "zram0 is mounted; will not make swapspace" — endless failed spam in the journal.
-zram_disable_zramtools() {
-    if systemctl list-unit-files 2>/dev/null | grep -q '^zramswap\.service' \
-       || [ -e /etc/systemd/system/zramswap.service ]; then
-        run systemctl stop zramswap.service 2>/dev/null || true
-        run systemctl disable zramswap.service 2>/dev/null || true
-        # home-grown override unit in /etc (from older versions) — remove it
-        [ -e /etc/systemd/system/zramswap.service ] && run rm -f /etc/systemd/system/zramswap.service
-        run systemctl daemon-reload 2>/dev/null || true
-        run systemctl mask zramswap.service 2>/dev/null || true
-    fi
-}
-# Is there a native zram generator (modern Pi OS Bookworm+)?
-zram_have_native() {
-    [ -e /usr/lib/systemd/system/systemd-zram-setup@.service ] \
-    || [ -f /etc/systemd/zram-generator.conf ] \
-    || [ -f /usr/lib/systemd/zram-generator.conf ]
-}
-pi_zram() {
-    if zram_have_native; then
-        # 1) silence the conflicting zramswap.service so it doesn't touch zram0
-        zram_disable_zramtools
-        # 2) configure native zram: ~50% RAM (cap 4 GiB), zstd (kernel default)
-        if [ "$DRY_RUN" -eq 0 ]; then
-                run mkdir -p /etc/systemd
-                cat > /etc/systemd/zram-generator.conf <<'EOF'
-# NAS-OS: zram-swap (zstd, ~50% RAM, cap 4 GiB). See zram-generator.conf(5).
-[zram0]
-zram-size = min(ram / 2, 4096)
-compression-algorithm = zstd
-EOF
-            # Switching the swap mechanism restarts dev-zram0.swap in a burst →
-            # start-limit-hit: a transient "failed" that self-heals but trips the
-            # panel's failed-unit monitor. Disable the rate limiter for this
-            # generated unit so the live switch is quiet.
-            run mkdir -p /etc/systemd/system/dev-zram0.swap.d
-            cat > /etc/systemd/system/dev-zram0.swap.d/nas-startlimit.conf <<'EOF'
-[Unit]
-StartLimitIntervalSec=0
-EOF
-            run systemctl daemon-reload 2>/dev/null || true
-            # apply live (best-effort; fully from the next boot).
-            # reset-failed — otherwise a quick .swap restart hits start-limit and
-            # leaves the system with no swap at all.
-            run systemctl reset-failed dev-zram0.swap systemd-zram-setup@zram0.service 2>/dev/null || true
-            run systemctl restart dev-zram0.swap 2>/dev/null \
-                || run systemctl start dev-zram0.swap 2>/dev/null || true
-        fi
-        info "zram-swap: zstd, ~50% RAM (native systemd-zram-generator)"
-        return 0
-    fi
-    # Legacy system without a generator — install zram-tools
-    install_packages "zram" zram-tools
-    if [ -f /etc/default/zramswap ] && [ "$DRY_RUN" -eq 0 ]; then
-        backup_file /etc/default/zramswap
-        sed -i 's/^#\?ALGO=.*/ALGO=zstd/; s/^#\?PERCENT=.*/PERCENT=50/' /etc/default/zramswap
-        grep -qs '^ALGO=' /etc/default/zramswap || echo "ALGO=zstd" >> /etc/default/zramswap
-        grep -qs '^PERCENT=' /etc/default/zramswap || echo "PERCENT=50" >> /etc/default/zramswap
-        run systemctl enable --now zramswap 2>/dev/null || run systemctl restart zramswap 2>/dev/null || true
-    fi
-    info "zram-swap: zstd, 50% RAM (zram-tools)"
 }
 # VID:PID of USB storage devices (for usb-storage.quirks) — one per line, unique
 detect_usb_storage_ids() {
@@ -1980,80 +1915,6 @@ RULES
     run udevadm control --reload-rules
     run udevadm trigger --subsystem-match=block --action=change 2>/dev/null || true
 }
-# Accurate time: chrony instead of systemd-timesyncd
-pi_chrony() {
-    install_packages "chrony" chrony
-    if [ "$DRY_RUN" -eq 0 ]; then
-        if systemctl list-unit-files systemd-timesyncd.service >/dev/null 2>&1; then
-            systemctl is-active  systemd-timesyncd >/dev/null 2>&1 && run systemctl stop    systemd-timesyncd
-            systemctl is-enabled systemd-timesyncd >/dev/null 2>&1 && run systemctl disable systemd-timesyncd
-        fi
-        if   systemctl list-unit-files chrony.service  >/dev/null 2>&1; then enable_service chrony
-        elif systemctl list-unit-files chronyd.service >/dev/null 2>&1; then enable_service chronyd; fi
-    fi
-    info "chrony enabled, systemd-timesyncd disabled (accurate time sync)"
-}
-# Adaptive CPU governor by temperature/throttling (for a fanless case)
-pi_governor() {
-    write_file /usr/local/bin/nas-governor.sh <<'EOF'
-#!/bin/bash
-# nas-wizard: adaptive CPU governor by temperature/throttling
-# CPU temperature: the Pi has it on thermal_zone0, but on a generic x86 board zone0
-# is usually the ACPI chassis zone (or absent) while the real sensor is a hwmon named
-# coretemp/k10temp. Ask by NAME, take thermal_zone0 only as a last resort.
-cpu_temp_mc() {
-    local h n
-    for h in /sys/class/hwmon/hwmon*; do
-        n="$(cat "$h/name" 2>/dev/null)"
-        case "$n" in
-            coretemp|k10temp|zenpower|cpu_thermal|soc_thermal|x86_pkg_temp)
-                [ -r "$h/temp1_input" ] && { cat "$h/temp1_input"; return; } ;;
-        esac
-    done
-    [ -r /sys/class/thermal/thermal_zone0/temp ] && cat /sys/class/thermal/thermal_zone0/temp && return
-    echo 0
-}
-t="$(cpu_temp_mc)"; case "$t" in ''|*[!0-9]*) t=0 ;; esac
-temp=$(( t / 1000 ))
-# The governor names are NOT universal: intel_pstate (any modern x86, N95/N100
-# included) offers only powersave/performance — writing "ondemand" there fails
-# silently and the timer becomes a no-op that still looks enabled. Pick the
-# coolest and the balanced name that this kernel actually offers.
-avail="$(cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors 2>/dev/null)"
-has(){ case " $avail " in *" $1 "*) return 0 ;; esac; return 1; }
-cool=powersave; has powersave || cool="$(printf '%s' "$avail" | awk '{print $1}')"
-norm=ondemand
-has ondemand || { if has schedutil; then norm=schedutil
-                  elif has powersave; then norm=powersave
-                  else norm="$cool"; fi; }
-gov="$norm"
-if [ "$temp" -ge 80 ]; then gov="$cool"; fi
-[ -n "$gov" ] || exit 0
-for g in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
-    [ -w "$g" ] && echo "$gov" > "$g" 2>/dev/null || true
-done
-EOF
-    run chmod +x /usr/local/bin/nas-governor.sh
-    write_file /etc/systemd/system/nas-governor.service <<'EOF'
-[Unit]
-Description=NAS adaptive CPU governor (temp/throttle)
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/nas-governor.sh
-EOF
-    write_file /etc/systemd/system/nas-governor.timer <<'EOF'
-[Unit]
-Description=Periodic NAS adaptive CPU governor
-[Timer]
-OnBootSec=1min
-OnUnitActiveSec=2min
-[Install]
-WantedBy=timers.target
-EOF
-    run systemctl daemon-reload
-    enable_service nas-governor.timer
-    info "adaptive CPU governor enabled (every 2 min: ≥80°C or throttle → powersave, else ondemand)"
-}
 
 stage_hw() {
     echo; echo "=== Stage 5: hardware tuning ==="
@@ -2065,10 +1926,11 @@ stage_hw() {
     items+=("cgroup"   "Memory cgroup — memory limits for docker" OFF)
     items+=("trim"     "Enable fstrim.timer (TRIM for SSD/NVMe)" ON)
     items+=("sysctl"   "Sysctl tuning (swappiness, somaxconn, tcp)" OFF)
-    items+=("zram"     "zram-swap (zstd, 50% RAM)" OFF)
-    items+=("chrony"   "chrony instead of timesyncd (accurate time)" OFF)
-    items+=("governor" "Adaptive CPU governor by temperature" OFF)
-    items+=("wifips"   "Disable Wi-Fi power-save (stability)" OFF)
+    # ON by default: a NAS is mains-powered and always-on, so the tens-of-milliseconds
+    # the card saves by sleeping between beacons buy nothing and cost stalled SMB
+    # transfers and a laggy SSH. On a Wi-Fi-only box it is the difference between
+    # "the NAS is slow" and "the NAS is asleep"
+    items+=("wifips"   "Disable Wi-Fi power-save (stability)" ON)
     items+=("watchdog" "Watchdog: auto-reboot on hang" ON)
     local head_line="Current CPU temp: ${temp:-?}C\nCheck the actions to apply:"
     local raw
@@ -2078,20 +1940,17 @@ stage_hw() {
     local sel; sel="$(checklist_selected "$raw")"
     local need_reboot=0
     case "$sel" in *" trim "*)     enable_service fstrim.timer ;; esac
-    case "$sel" in *" cgroup "*)   pi_cgroup; need_reboot=1 ;; esac
-    case "$sel" in *" sysctl "*)   pi_sysctl ;; esac
-    case "$sel" in *" zram "*)     pi_zram ;; esac
-    case "$sel" in *" chrony "*)   pi_chrony ;; esac
-    case "$sel" in *" governor "*) pi_governor ;; esac
-    case "$sel" in *" wifips "*)   pi_wifi_powersave_off ;; esac
-    case "$sel" in *" watchdog "*) pi_watchdog ;; esac
+    case "$sel" in *" cgroup "*)   hw_cgroup; need_reboot=1 ;; esac
+    case "$sel" in *" sysctl "*)   hw_sysctl ;; esac
+    case "$sel" in *" wifips "*)   hw_wifi_powersave_off ;; esac
+    case "$sel" in *" watchdog "*) hw_watchdog ;; esac
 
     commit_config "hw-tuning"
     local extra=""
     [ "$need_reboot" -eq 1 ] && extra="
 
 WARNING: kernel command line changes take effect after a REBOOT."
-    ui_msg "Summary: Pi tuning" "Done.$extra
+    ui_msg "Summary: Hardware tuning" "Done.$extra
 
 Check:
   sudo lspci -vv | grep -i speed   (after reboot for PCIe)"
@@ -2126,7 +1985,10 @@ SystemMaxFileSize=50M
 EOF
     run mkdir -p /var/log/journal
     run systemd-tmpfiles --create --prefix /var/log/journal
-    # log2ram keeps /var/log on tmpfs, so the journal would never reach the disk
+    # NAS-OS does not install log2ram — it exists to spare SD cards and this is an
+    # x86 box with an NVMe/SSD root. But an owner may have added it themselves, and it
+    # keeps /var/log on tmpfs: the journal we just sized would never reach the disk,
+    # and a power cut would take exactly the logs that explain the power cut.
     if systemctl is-enabled log2ram >/dev/null 2>&1; then
         warn "log2ram keeps /var/log in RAM — the journal won't survive a power-off"
         run systemctl disable --now log2ram
@@ -2135,37 +1997,18 @@ EOF
     run systemctl restart systemd-journald
     info "journald: persistent journal, 200M limit"
 }
-sec_log2ram() {
-    # log2ram spares an SD card from write wear. On an NVMe/SSD root it buys nothing
-    # and costs every log written since the last sync whenever power is cut — which
-    # is precisely when the logs matter. Refuse instead of silently losing them.
-    local rootdev
-    rootdev="$(findmnt -no SOURCE / 2>/dev/null | sed 's|^/dev/||')"
-    case "$rootdev" in
-        mmcblk*) ;;
-        *) warn "root is not on an SD card (/dev/${rootdev:-?}) — log2ram is unneeded and costs you logs on an emergency power-off"
-           return 0 ;;
-    esac
-    if ! dpkg -s log2ram >/dev/null 2>&1; then
-        info "adding the external azlux repository for log2ram"
-        run mkdir -p /usr/share/keyrings
-        if [ "$DRY_RUN" -eq 1 ]; then
-            info "[DRY-RUN] add azlux key+repo, apt install log2ram"; return 0
-        fi
-        wget -qO- https://azlux.fr/repo.gpg 2>>"$LOG" | gpg --dearmor > /usr/share/keyrings/azlux.gpg 2>>"$LOG" || { warn "failed to fetch azlux key"; return 1; }
-        echo "deb [signed-by=/usr/share/keyrings/azlux.gpg] http://packages.azlux.fr/debian/ stable main" > /etc/apt/sources.list.d/azlux.list
-        run apt-get update
-        run apt-get install -y log2ram || { warn "log2ram install failed"; return 1; }
-    fi
-    # ALWAYS enable it — the package doesn't enable itself, and it's harmless to
-    # re-enable an already-installed one (this is why a re-run must not return early).
-    [ "$DRY_RUN" -eq 0 ] && enable_service log2ram
-    info "log2ram enabled (logs in RAM, flushed to disk on a timer; full effect after a reboot)"
-}
 sec_ufw() {
+    # Installs and PRE-LOADS the rules, then leaves the firewall OFF. A firewall is
+    # useless on a box behind NAT and dangerous the day it is needed in a hurry: the
+    # classic failure is enabling it without allowing 22 and 80 and losing both SSH and
+    # the panel at once. Shipping the ruleset ready-made turns that into one safe
+    # command the owner can run when the box is actually exposed.
     install_packages "firewall" ufw
-    # FIRST allow SSH, then enable — so we don't lock ourselves out
-    run ufw --force reset
+    local was_active=0
+    ufw status 2>/dev/null | head -1 | grep -qi 'active' && was_active=1
+    # A re-run must never disarm a firewall the owner turned on themselves: `reset`
+    # also DISABLES ufw, so it is only safe while it is already off
+    [ "$was_active" -eq 0 ] && run ufw --force reset
     run ufw default deny incoming
     run ufw default allow outgoing
     if ufw app list 2>/dev/null | grep -q OpenSSH; then run ufw allow OpenSSH; else run ufw allow 22/tcp; fi
@@ -2176,11 +2019,20 @@ sec_ufw() {
     run ufw allow 5353/udp    # mDNS (avahi) — otherwise <host>.local won't resolve
     # Open share ports if they are installed
     if dpkg -s samba >/dev/null 2>&1; then run ufw allow Samba 2>/dev/null || run ufw allow 445/tcp; fi
-    run ufw --force enable
-    info "ufw enabled (panel :${WEBPORT}, SSH, shares — if present)"
+    if [ "$was_active" -eq 1 ]; then
+        info "ufw was already active — rules refreshed, left enabled"
+    else
+        info "ufw installed, rules ready (panel :${WEBPORT}, SSH, mDNS, shares — if present), firewall left OFF"
+        info "turn it on when the box is exposed:  sudo ufw enable"
+    fi
     warn "docker publishes ports bypassing ufw (iptables) — keep that in mind"
 }
 sec_fail2ban() {
+    # Same deal as ufw: installed and armed, but not running. Bans only mean something
+    # once SSH is reachable from outside; until then the jail is a service to feed and
+    # a log to read. Debian's package starts on install, so leaving it off is an act.
+    local pre_enabled=0
+    dpkg -s fail2ban >/dev/null 2>&1 && systemctl is-enabled fail2ban >/dev/null 2>&1 && pre_enabled=1
     install_packages "fail2ban" fail2ban
     write_file /etc/fail2ban/jail.d/nas.conf <<'EOF'
 [sshd]
@@ -2188,8 +2040,14 @@ enabled = true
 maxretry = 5
 bantime = 1h
 EOF
-    enable_service fail2ban
-    info "fail2ban enabled (jail sshd)"
+    if [ "$pre_enabled" -eq 1 ]; then
+        run systemctl restart fail2ban
+        info "fail2ban was already enabled — sshd jail refreshed"
+    else
+        run systemctl disable --now fail2ban 2>/dev/null || true
+        info "fail2ban installed, sshd jail ready (5 tries, 1h ban), service left OFF"
+        info "turn it on when SSH faces the internet:  sudo systemctl enable --now fail2ban"
+    fi
 }
 sec_sshkeys() {
     local akeys="$TARGET_HOME/.ssh/authorized_keys"
@@ -2197,7 +2055,7 @@ sec_sshkeys() {
         ui_msg "SSH: unsafe" "User $TARGET_USER has NO SSH keys ($akeys is empty/missing).
 
 Disabling password login would LOCK YOU OUT. Skipping — add a key first:
-  ssh-copy-id $TARGET_USER@<pi>"
+  ssh-copy-id $TARGET_USER@<nas>"
         warn "no SSH keys found — password login NOT disabled (lockout protection)"
         return 0
     fi
@@ -2217,22 +2075,29 @@ stage_security() {
     local raw
     raw="$(ui_checklist "Security / basic settings" "Check what to configure:" \
         "unattended" "Auto security updates (unattended-upgrades)" ON \
-        "journald"   "journald 200M limit (less SD wear)" ON \
-        "log2ram"    "log2ram: logs in RAM (external repository)" OFF \
-        "ufw"        "ufw firewall (SSH, shares)" OFF \
-        "fail2ban"   "fail2ban for SSH" OFF \
+        "journald"   "journald 200M limit (keeps the journal bounded)" ON \
+        "ufw"        "ufw firewall: install + rules, left OFF" ON \
+        "fail2ban"   "fail2ban: install + sshd jail, left OFF" ON \
         "sshkeys"    "SSH: disable password (keys required!)" OFF)" || { info "cancelled"; return 0; }
 
     local sel; sel="$(checklist_selected "$raw")"
     case "$sel" in *" unattended "*) sec_unattended ;; esac
     case "$sel" in *" journald "*)   sec_journald ;; esac
-    case "$sel" in *" log2ram "*)    sec_log2ram ;; esac
     case "$sel" in *" fail2ban "*)   sec_fail2ban ;; esac
     case "$sel" in *" ufw "*)        sec_ufw ;; esac   # ufw after shares/fail2ban, to open their ports
     case "$sel" in *" sshkeys "*)    sec_sshkeys ;; esac
 
     commit_config "security"
     ui_msg "Summary: Security" "Done.
+
+ufw and fail2ban are INSTALLED AND CONFIGURED, but deliberately NOT running:
+behind a router neither has anything to do, and both are one command away
+the day this box gets a public address or a forwarded port.
+
+  sudo ufw enable                        turn the firewall on
+                                         (SSH, panel, mDNS and shares
+                                          are already allowed)
+  sudo systemctl enable --now fail2ban   turn SSH ban rules on
 
 Check:
   sudo ufw status verbose
@@ -2701,7 +2566,7 @@ stage_backup() {
     local raw
     raw="$(ui_checklist "Backups and monitoring" "What to configure:" \
         "smartd"    "SMART disk monitoring + alert" ON \
-        "spacetemp" "Alert: disk fill and Pi temperature" ON)" || { info "cancelled"; return 0; }
+        "spacetemp" "Alert: disk fill and CPU temperature" ON)" || { info "cancelled"; return 0; }
 
     local sel; sel="$(checklist_selected "$raw")"
     case "$sel" in *" smartd "*)    bk_smartd ;; esac
@@ -2732,7 +2597,7 @@ main_menu() {
             "mergerfs" "Stage 2b: build/update the mergerfs pool (>=2 disks)" \
             "snapraid" "Stage 3: SnapRAID (conf, sync, timers, notifications)" \
             "docker"   "Stage 4: Docker (find compose folders and bring them up)" \
-            "pi"       "Stage 5: Pi tuning (PCIe, USB power, watchdog, temp)" \
+            "hw"       "Stage 5: Hardware tuning (cgroup, fstrim, sysctl, watchdog)" \
             "security" "Stage 6: Security (ufw, fail2ban, SSH, journald)" \
             "shares"   "Stage 7: Network shares (Samba/Avahi)" \
             "backup"   "Stage 8: Backups and monitoring (SMART, health, restic)" \
@@ -2744,7 +2609,7 @@ main_menu() {
             mergerfs) stage_mergerfs ;;
             snapraid) stage_snapraid ;;
             docker)   stage_docker ;;
-            pi)       stage_hw ;;
+            hw|pi)    stage_hw ;;
             security) stage_security ;;
             shares)   stage_shares ;;
             backup)   stage_backup ;;
@@ -3290,8 +3155,13 @@ install_memory_guard() {
 [Slice]
 MemoryMax=70%
 MemorySwapMax=2G
-# honoured only when systemd-oomd is installed; harmless otherwise
-ManagedOOMSwapPolicy=kill
+# honoured only when systemd-oomd is installed; harmless otherwise.
+# The directive is ManagedOOMSwap, NOT ManagedOOMSwapPolicy — the latter is what the
+# oomd.conf(5) *setting* is called, and systemd logs "Unknown key ... ignoring" for it
+# and carries on with the default of `auto`, i.e. no swap-based kill at all. That is the
+# half that matters here: the incident this guard exists for was 11 GB of swap eaten
+# with the kernel OOM killer never firing once.
+ManagedOOMSwap=kill
 ManagedOOMMemoryPressure=kill
 ManagedOOMMemoryPressureLimit=60%
 MEMG
@@ -3806,7 +3676,7 @@ stage_system_apply() {
     # Hardware watchdog: if the kernel hangs, the Pi auto-reboots instead of sitting
     # dead until someone hits the power button. Applied by default for reliability
     # (still listed in pi-tuning so it can be toggled). Harmless without a watchdog device.
-    pi_watchdog
+    hw_watchdog
     # USB-SATA bridges always go through usb-storage, never UAS. Not a toggle: UAS error
     # recovery resets the whole device and takes a running backup down with it. See install_uas_off().
     install_uas_off
@@ -4094,9 +3964,8 @@ api_hw() {
     local k
     for k in ${NASW_KEYS:-}; do case "$k" in
         trim)     enable_service fstrim.timer ;;
-        cgroup)   pi_cgroup ;;  sysctl) pi_sysctl ;;  zram) pi_zram ;;
-        chrony)   pi_chrony ;;  governor) pi_governor ;;
-        wifips)   pi_wifi_powersave_off ;;  watchdog) pi_watchdog ;;
+        cgroup)   hw_cgroup ;;  sysctl) hw_sysctl ;;
+        wifips)   hw_wifi_powersave_off ;;  watchdog) hw_watchdog ;;
     esac; done
 }
 # ---------------------------------------------------------------------------
@@ -4245,7 +4114,7 @@ api_dockge() {
     info "Dockge → $dir/dockge/compose.yaml"
     DC="$(docker_compose_cmd)"; [ -n "$DC" ] || { echo "docker compose unavailable — run the «System» stage first"; return 2; }
     run_visible $DC -f "$dir/dockge/compose.yaml" up -d
-    echo "Dockge started → http://<pi>:5001 (manages stacks in $dir)"
+    echo "Dockge started → http://<nas>:5001 (manages stacks in $dir)"
 }
 # Copy the selected bundled stacks (NASW_KEYS) into the Dockge directory. We don't start them — start from Dockge.
 # run a set of functions by keys from NASW_KEYS (space-separated)
@@ -4268,7 +4137,7 @@ api_state() {                  # brief state for the wizard (JSON)
     iface="$(ip route show default 2>/dev/null | awk '/default/{print $5; exit}')"
     # tuning items: report the ACTUAL on-disk/live state so the wizard's checkboxes
     # reflect reality instead of static defaults (t_* fields below)
-    printf '{"host":"%s","tz":"%s","iface":"%s","docker":%s,"data_disks":%s,"parity_disks":%s,"pool":%s,"snapraid":%s,"samba":%s,"fail2ban":%s,"ufw":%s,"smartd":%s,"unattended":%s,"avahi":%s,"journald":%s,"log2ram":%s,"spacetemp":%s,"t_cgroup":%s,"t_sysctl":%s,"t_zram":%s,"t_chrony":%s,"t_governor":%s}\n' \
+    printf '{"host":"%s","tz":"%s","iface":"%s","docker":%s,"data_disks":%s,"parity_disks":%s,"pool":%s,"snapraid":%s,"samba":%s,"fail2ban":%s,"ufw":%s,"smartd":%s,"unattended":%s,"avahi":%s,"journald":%s,"spacetemp":%s,"t_cgroup":%s,"t_sysctl":%s}\n' \
         "$host" "$tz" "$iface" \
         "$(command -v docker >/dev/null 2>&1 && echo true || echo false)" \
         "$(mounted_data_disks | grep -c . )" \
@@ -4282,13 +4151,9 @@ api_state() {                  # brief state for the wizard (JSON)
         "$([ -f /etc/apt/apt.conf.d/20auto-upgrades ] && echo true || echo false)" \
         "$(systemctl is-active avahi-daemon >/dev/null 2>&1 && echo true || echo false)" \
         "$([ -f /etc/systemd/journald.conf.d/99-nas.conf ] && echo true || echo false)" \
-        "$(systemctl is-enabled log2ram >/dev/null 2>&1 && echo true || echo false)" \
         "$(systemctl is-active nas-health.timer >/dev/null 2>&1 && echo true || echo false)" \
         "$(grep -qws memory /sys/fs/cgroup/cgroup.controllers 2>/dev/null && echo true || echo false)" \
-        "$([ -f /etc/sysctl.d/99-nas.conf ] && echo true || echo false)" \
-        "$(swapon --show 2>/dev/null | grep -q zram && echo true || echo false)" \
-        "$(systemctl is-active chrony >/dev/null 2>&1 && echo true || echo false)" \
-        "$([ -f /usr/local/bin/nas-governor.sh ] && echo true || echo false)"
+        "$([ -f /etc/sysctl.d/99-nas.conf ] && echo true || echo false)"
 }
 
 run_api() {
@@ -4311,7 +4176,7 @@ run_api() {
         mergerfs)       generate_mergerfs ;;
         snapraid)       ensure_snapraid_conf && { setup_snapraid_notify_noninteractive; install_snapraid_wrapper; install_snapraid_timers; [ "${NASW_SYNC:-0}" = "1" ] && run_visible snapraid sync; } ;;
         snapraid-sync)  if [ -x /usr/local/bin/nas-snapraid.sh ]; then run_visible /usr/local/bin/nas-snapraid.sh "${NASW_KIND:-sync}"; else echo "SnapRAID not configured — run the Wizard first (SnapRAID stage)"; exit 2; fi ;;
-        pi)             api_hw ;;
+        hw|pi)          api_hw ;;
         security)       api_keys_run sec ;;
         shares)         api_shares ;;
         timemachine)    tm_apply ;;
@@ -4357,7 +4222,7 @@ main() {
         mergerfs) stage_mergerfs ;;
         snapraid) stage_snapraid ;;
         docker)   stage_docker ;;
-        pi)       stage_hw ;;
+        hw|pi)    stage_hw ;;
         security) stage_security ;;
         shares)   stage_shares ;;
         backup)   stage_backup ;;

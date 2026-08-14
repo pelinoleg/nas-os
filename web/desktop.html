@@ -3944,12 +3944,12 @@ function saveSettings(){themeSnapshot(CUR_THEME);
 
 /* api with mock */
 const MOCK={
- sysconf:{system:{hostname:"nas",timezone:"Etc/UTC",time_synced:true,chrony:{installed:false,active:false},fstrim:{installed:true,active:true,enabled:true},unattended:false,journald_max:""},
-   network:{iface:"wlan0",ip:"192.168.1.10",prefix:"24",gw:"192.168.1.1",dns:"192.168.1.1",method:"auto",wifi:true,wifi_ps_off:true,avahi:{installed:true,active:true,enabled:true}},
-   security:{ufw:{installed:false,active:false,ports:[]},fail2ban:{installed:false,active:false},log2ram:{installed:false,active:false}},
-   hw:{model:"Beelink ME mini (N150)",temp:41.2,cgroup:true,watchdog:false,zram:{installed:false,active:false},governor:{current:"powersave",available:["powersave","performance"],adaptive:{installed:false,active:false}}}},
+ sysconf:{system:{hostname:"nas",timezone:"Etc/UTC",time_synced:true,fstrim:{installed:true,active:true,enabled:true},unattended:false,journald_max:""},
+   network:{iface:"wlp1s0",ip:"192.168.1.10",prefix:"24",gw:"192.168.1.1",dns:"192.168.1.1",method:"auto",wifi:true,wifi_ps_off:true,avahi:{installed:true,active:true,enabled:true}},
+   security:{ufw:{installed:false,active:false,ports:[]},fail2ban:{installed:false,active:false}},
+   hw:{model:"Beelink ME mini (N150)",temp:41.2,cgroup:true,watchdog:false,governor:{current:"powersave",available:["powersave","performance"]}}},
  stats:{host:"nas",ip:"192.168.1.10",cpu:6.4,temp:55.1,mem:{total:8455000000,used:760000000,pct:9},
-   disk_pool:{path:"/mnt/storage",total:1000000000000,used:3200000000,pct:0.3},net:{rx:184000,tx:42000},iface:"wlan0",uptime:19218},
+   disk_pool:{path:"/mnt/storage",total:1000000000000,used:3200000000,pct:0.3},net:{rx:184000,tx:42000},iface:"wlp1s0",uptime:19218},
  desktop:{apps:[
    {container:"dockge",name:"Dockge",url:"http://nas.local:5001",icon:"",running:true},
    {container:"cronmaster",name:"Cronmaster",url:"http://nas.local:8123",icon:"",running:true},
@@ -14175,7 +14175,7 @@ function lsIcons(lb){lb.innerHTML=`
  wireLook(lb);}
 function lsMisc(lb){lb.innerHTML=`
   <div class="set-card">
-   ${pToggle("Performance mode","Disables all blur and animations — smoother on the Pi and weak devices. Blur strength is configured separately: Bar / Dock / Widgets / Material (windows).","perf","less GPU load")}
+   ${pToggle("Performance mode","Disables all blur and animations — smoother on weak devices. Blur strength is configured separately: Bar / Dock / Widgets / Material (windows).","perf","less GPU load")}
   </div>`;
  wireLook(lb);}
 function lsWindows(lb){const cl=/^#[0-9a-f]{6}$/i;lb.innerHTML=`
@@ -14292,7 +14292,7 @@ const EVMETA=[
  {k:"reboot_req",t:"Reboot required",d:"kernel/libc updates are waiting for a reboot",dp:-1},
  {k:"updates",t:"Updates available",d:"how many apt packages can be updated (checked hourly)",dp:-1},
  {k:"sec_updates",t:"Security updates applied",d:"unattended-upgrades installed something",dp:-1},
- {k:"time_drift",t:"Time not synchronized",d:"the clock may drift (chrony/timesyncd)",dp:0},
+ {k:"time_drift",t:"Time not synchronized",d:"the clock may drift (systemd-timesyncd)",dp:0},
  {k:"health",t:"Health-check thresholds",d:"hourly check — a temperature/space threshold was crossed",dp:1},
  {k:"weekly",t:"Weekly report",d:"once a week: «alive», uptime/temp/space",dp:-1},
  {k:"daily_summary",t:"Status summary",d:"daily/weekly summary: temp, memory, space, health, backup",dp:-1},
@@ -14464,11 +14464,11 @@ function systemTab(tc){withSysc(tc,()=>{const s=SYSC.system||{};
   <div class="srow"><div class="srow-l"><div class="srow-t">Hostname${tipHTML("Network name of the NAS. The server is visible as <name>.local (mDNS) and in Samba. Changes /etc/hostname.")}</div><div class="srow-d">now: ${esc(s.hostname||"?")}</div></div><div class="srow-c"><input class="mono" id="stHost" value="${att(s.hostname||"")}"><button class="btn sm" id="stHostA">Apply</button></div></div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Time zone${tipHTML("Local time in logs, cron and timers. Area/City format, e.g. Europe/London.")}</div><div class="srow-d">now: ${esc(s.timezone||"?")}</div></div><div class="srow-c"><input class="mono" id="stTz" value="${att(s.timezone||"")}" placeholder="Europe/London"><button class="btn sm" id="stTzA">Apply</button></div></div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Pool alias${tipHTML("An extra name for the /mnt/storage pool in the system root — a symlink, both paths work at once. Handy if the pool on another NAS is called /volume2: scripts and paths will match. Empty field — alias disabled.")}</div><div class="srow-d" id="stAliasCur">…</div></div><div class="srow-c"><input class="mono" id="stAlias" placeholder="/volume2 (empty = off)"><button class="btn sm" id="stAliasA">Apply</button></div></div>
-  ${svcRow("Time synchronization (chrony)","Keeps the Pi clock accurate via the internet; replaces systemd-timesyncd. Important for backup timestamps, logs and TLS.","chrony",s.chrony,"accurate-time NTP client"+(s.time_synced?" · synchronized":""))}
+  <div class="srow"><div class="srow-l"><div class="srow-t">Time synchronization${tipHTML("The clock is kept accurate over the internet by systemd-timesyncd, which is built into the system — nothing to install or switch on. Accurate time matters for backup timestamps, log order and TLS. A hardware clock that is wrong at boot is corrected here, but anything written BEFORE the correction carries the wrong stamp.")}</div><div class="srow-d">systemd-timesyncd${s.time_synced?" · synchronized":" · NOT synchronized"}</div></div><div class="srow-c"><span class="sbadge ${s.time_synced?'ok':'off'}">${s.time_synced?"in sync":"drifting"}</span></div></div>
   ${tglRow("Scheduled TRIM","Weekly frees unused SSD/NVMe blocks — maintains write speed and lifespan. For SSD/NVMe, not for HDD.","fstrim",s.fstrim&&s.fstrim.active,"fstrim.timer, weekly TRIM")}
   ${tglRow("Automatic security updates","unattended-upgrades installs security patches by itself. Less manual work and fewer holes; the downside — occasional unexpected updates.","unattended",s.unattended,"unattended-upgrades (security only)")}
   <div class="srow"><div class="srow-l"><div class="srow-t">Docker storage${tipHTML("Where docker keeps images/layers (data-root) and where /opt/docker app data lives. On an eMMC/SD system disk these are the two biggest writers — move them to a data disk branch (/mnt/diskN). The mergerfs pool itself is refused: overlay2 cannot run on FUSE. Containers stop for the move and start again.")}</div><div class="srow-d">now: <span class="mono">${esc(s.docker_root||"/var/lib/docker")}</span>${(s.docker_root||"").startsWith("/var/lib/docker")?" · on the system disk":""}</div></div><div class="srow-c"><button class="btn sm" id="stDkr">${svg("folder",13)} Move…</button></div></div>
-  <div class="srow"><div class="srow-l"><div class="srow-t">systemd journal limit${tipHTML("Maximum space for journald logs — protects the SD card from overflowing. Empty = system default.")}</div><div class="srow-d">now: ${esc(s.journald_max||"default")}</div></div><div class="srow-c"><input class="mono" id="stJ" style="max-width:90px" value="${att(s.journald_max||"")}" placeholder="200M"><button class="btn sm" id="stJA">Apply</button></div></div>
+  <div class="srow"><div class="srow-l"><div class="srow-t">systemd journal limit${tipHTML("Maximum space for journald logs — keeps logs from filling the system disk. Empty = system default.")}</div><div class="srow-d">now: ${esc(s.journald_max||"default")}</div></div><div class="srow-c"><input class="mono" id="stJ" style="max-width:90px" value="${att(s.journald_max||"")}" placeholder="200M"><button class="btn sm" id="stJA">Apply</button></div></div>
   <div class="set-grp">Maintenance</div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Package updates${tipHTML("Shows the list of available apt updates (what, from which version to which) and installs them with the «Update all» button. Security updates are marked.")}</div><div class="srow-d">${s.updates!=null?(s.updates?s.updates+" available":"up to date"):"view and install"}</div></div><div class="srow-c"><button class="btn sm" id="mChk">${svg("download",13)} Updates</button></div></div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Restart the panel${tipHTML("Restarts the nas-web service (the web interface). The connection will drop briefly.")}</div></div><div class="srow-c"><button class="btn sm" id="mWeb">Restart nas-web</button></div></div>
@@ -14517,7 +14517,7 @@ function networkTab(tc){withSysc(tc,()=>{const n=SYSC.network||{};const manual=n
   <div class="set-grp">Display</div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Network speed units${tipHTML("MB/s — megabytes, like a file copy shows. Mbit/s — megabits, like your ISP counts. 7 MB/s = 56 Mbit/s. Affects the Network widget, the menu bar and the external display's Net speed tile.")}</div><div class="srow-d">7 MB/s = 56 Mbit/s</div></div><div class="srow-c"><div class="seg" id="nUnits"><button data-u="bytes" class="${SET.netUnits!=="bits"?"on":""}">MB/s</button><button data-u="bits" class="${SET.netUnits==="bits"?"on":""}">Mbit/s</button></div></div></div>
   <div class="set-grp">Wireless network</div>
-  ${n.wifi?tglRow("Disable Wi-Fi power saving","RECOMMENDED. When idle, the Pi's Wi-Fi chip sleeps between beacons → periodic SSH/web drops. Disabling removes the drops at the cost of ~0.1 W. This is exactly what fixed the connection drops.","wifi_ps_off",n.wifi_ps_off,"removes periodic connection drops"):`<div class="srow"><div class="srow-l"><div class="srow-d">Wired connection (${esc(n.iface||"")}) — Wi-Fi power saving is not applicable.</div></div></div>`}
+  ${n.wifi?tglRow("Disable Wi-Fi power saving","RECOMMENDED. When idle, the Wi-Fi chip sleeps between beacons → periodic SSH/web drops. Disabling removes the drops at the cost of ~0.1 W. This is exactly what fixed the connection drops.","wifi_ps_off",n.wifi_ps_off,"removes periodic connection drops"):`<div class="srow"><div class="srow-l"><div class="srow-d">Wired connection (${esc(n.iface||"")}) — Wi-Fi power saving is not applicable.</div></div></div>`}
   <div class="set-grp">Network discovery</div>
   ${svcRow("mDNS / .local (Avahi)","Lets you reach the server by the name <host>.local without memorizing the IP. Handy for access from phones and Macs.","avahi",n.avahi,"access by the name "+host+".local")}`;
  wireSc(tc);
@@ -14537,7 +14537,6 @@ function securityTab(tc){withSysc(tc,()=>{const s=SYSC.security||{};const u=s.uf
   ${svcRow("Brute-force protection (fail2ban)","Bans an IP after several failed SSH logins. Basic brute-force protection, especially if the server is reachable from outside.","fail2ban",s.fail2ban,"bans IPs after failed SSH logins")}
   ${(s.fail2ban&&s.fail2ban.installed)?`<div id="f2bBox" style="margin:2px 0 4px"></div>`:""}
   <div class="set-h">Logs</div>
-  ${svcRow("Logs in RAM (log2ram)","Keeps /var/log in RAM and flushes it to disk on a timer — less SD card wear from constant log writes.","log2ram",s.log2ram,"protects the SD card from log wear")}
   <div class="mon-note">SSH key login, port change and remote access (Tailscale) are handled separately — not configurable here yet.</div>`;
  wireSc(tc);
  // UFW ports: list with removal + adding
@@ -14811,10 +14810,9 @@ function hwTab(tc){withSysc(tc,()=>{const p=SYSC.hw||{};const g=p.governor||{};
   <div class="set-grp">Docker</div>
   <div class="srow is-gated"><div class="srow-l"><div class="srow-t">Memory cgroup for Docker${tipHTML("Lets docker cap a container's RAM (mem_limit). On this kernel the memory controller is enabled by default — there is nothing to switch.")}</div><div class="srow-d">${p.cgroup?"enabled by the kernel — nothing to do":"NOT enabled: add cgroup_enable=memory to GRUB_CMDLINE_LINUX and run update-grub"}</div></div><div class="srow-c"><span class="sbadge ${p.cgroup?"ok":"warn"}">${p.cgroup?"on":"off"}</span></div></div>
   <div class="set-grp">Thermals and performance</div>
-  ${svcRow("Adaptive CPU governor","Every 2 min: at \u226580 °C → the coolest governor this kernel offers, otherwise the balanced one. The names are not universal — intel_pstate boards only have powersave/performance — so the script picks from what the kernel actually lists. For fanless cases, so the box does not cook itself.","governor_adaptive",g.adaptive,"auto frequency reduction when hot")}
   <div class="srow"><div class="srow-l"><div class="srow-t">CPU governor mode${tipHTML("CPU frequency policy. ondemand — by load (balanced), performance — always max (hotter), powersave — always minimum (cooler/slower). Applied immediately.")}</div><div class="srow-d">now: ${esc(g.current||"?")}</div></div><div class="srow-c"><div class="seg" id="pGov" style="flex-wrap:wrap;max-width:340px">${govBtns}</div></div></div>
   ${tglRow("Watchdog (auto-reboot on hang)","A hardware watchdog: if the system stops responding, the box reboots itself. Useful for a NAS with no monitor and no keyboard.","watchdog",p.watchdog,"reboots on a complete hang")}
-  ${svcRow("zram (compressed swap in RAM)","Compressed swap in RAM (zstd, 50% of RAM) instead of the disk — smoother under load, and it spares the system SSD the swap writes. Costs a bit of CPU for compression.","zram",p.zram,"compressed swap, spares the system disk")}`;
+`;
  wireSc(tc);
  tc.querySelectorAll("#pGov button").forEach(b=>b.onclick=async()=>{await sconf("governor",b.dataset.g);refreshSysc(rerSet);});
 });}
@@ -15134,9 +15132,9 @@ function ruWhen(ts){ // human-readable date from unix seconds: "today 14:32", "7
  return d.getDate()+" "+MONTHS[d.getMonth()]+(d.getFullYear()!==now.getFullYear()?" "+d.getFullYear():"")+" "+hm;}
 function tickClock(){const d=new Date(),dd=["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
  const c=document.getElementById("clock");if(c)c.innerHTML=`${String(d.getHours()).padStart(2,"0")}:${String(d.getMinutes()).padStart(2,"0")}<small>${dd[d.getDay()]}, ${d.getDate()} ${MONTHS[d.getMonth()]}</small>`;}
-function reboot(){confirmDlg("Reboot the NAS?","All services will be stopped and the Pi will reboot.",async()=>{
+function reboot(){confirmDlg("Reboot the NAS?","All services will be stopped and the NAS will reboot.",async()=>{
   const r=await api("/api/power",{method:"POST",body:JSON.stringify({action:"reboot"})});toast(LIVE&&r.ok?"Rebooting…":"Demo: unavailable");},true);}
-function poweroff(){confirmDlg("Power off the NAS?","The Pi will be powered off. It can only be turned back on physically.",async()=>{
+function poweroff(){confirmDlg("Power off the NAS?","The NAS will be powered off. It can only be turned back on physically.",async()=>{
   const r=await api("/api/power",{method:"POST",body:JSON.stringify({action:"poweroff"})});toast(LIVE&&r.ok?"Powering off…":"Demo: unavailable");},true);}
 
 /* ===================== top bar: health · operations · notifications ===================== */

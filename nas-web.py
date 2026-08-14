@@ -976,8 +976,9 @@ def _health_report_build():
     add("RAM", "%s%% used" % m, "warn" if m >= 90 else "ok")
     root = disk_info("/") or {}
     rp = root.get("pct", 0)
-    add("System card /", "%s%% used" % rp, "bad" if rp >= 95 else "warn" if rp >= 90 else "ok",
-        "Free %s" % _fmt_b(root.get("total", 0) - root.get("used", 0)) if root else "")
+    add("System disk /", "%s%% used" % rp, "bad" if rp >= 95 else "warn" if rp >= 90 else "ok",
+        ("%s · Free %s" % (_sysdisk_kind(),
+                           _fmt_b(root.get("total", 0) - root.get("used", 0)))) if root else "")
     pool = s.get("disk_pool") or {}
     if pool.get("path") == "/mnt/storage":
         pp = pool.get("pct", 0)
@@ -4763,7 +4764,7 @@ def monitor_tick():
     # --- maintenance ---
     root = _safe(lambda: disk_info("/")) or {}
     if on("root_full") and root.get("pct", 0) >= thr("root_full", 90):
-        fire("rootfull", "NAS: low space on the system card", "Partition / usage at %s%%" % root.get("pct"), pri("root_full"), ev_name="root_full")
+        fire("rootfull", "NAS: low space on the system disk", "Partition / usage at %s%%" % root.get("pct"), pri("root_full"), ev_name="root_full")
     if on("sd_degrade"):
         sd = _safe(_sd_errors, [])
         if sd:
@@ -4782,7 +4783,7 @@ def monitor_tick():
         if cf:
             fire("cron", "NAS: scheduled task failed", "Error: " + ", ".join(map(str, cf)), pri("cron_failed"), ev_name="cron_failed")
     if on("time_drift") and _safe(_ntp_unsynced):
-        fire("ntp", "NAS: time not synchronized", "The clock may drift — check chrony/timesyncd", pri("time_drift"), ev_name="time_drift")
+        fire("ntp", "NAS: time not synchronized", "The clock may drift — check systemd-timesyncd", pri("time_drift"), ev_name="time_drift")
     if on("updates") and _hourly("updates"):
         n = _safe(_apt_upgradable, 0) or 0
         if n > 0:
@@ -11099,7 +11100,7 @@ def kp_dest_connected(destid):
     return os.path.exists(_kp_cfg_file(destid))
 
 def _kp_cache_dir(destid):
-    """Kopia cache must NOT live on the SD card if we can help it: content cache
+    """Kopia cache must NOT live on the system disk if we can help it: content cache
     can grow to gigabytes and the card is the box's most wear-prone medium."""
     root = storage_root()
     if root:
@@ -11190,7 +11191,7 @@ def _kp(destid, args, timeout=120, extra_env=None):
     Returns {ok, code, out, err}."""
     if not kopia_installed():
         return {"ok": False, "code": -1, "out": "", "err": "kopia is not installed"}
-    # logs go next to the cache (off the SD card when storage is mounted); kopia
+    # logs go next to the cache (off the system disk when storage is mounted); kopia
     # rotates them itself, this only picks WHERE they live
     cmd = [_kopia_bin(), "--config-file", _kp_cfg_file(destid),
            "--log-dir", os.path.join(_kp_cache_dir(destid), "logs")] + list(args)
@@ -11256,7 +11257,7 @@ def _kp_repo_args(dest, op):
     # the before/after-snapshot commands a backup may define. We are root here and
     # the only commands are the ones typed into our own UI.
     if cache.startswith("/var/cache/"):
-        # falling back to the SD card — cap the cache hard (content 2G / metadata 1G)
+        # falling back to the system disk — cap the cache hard (content 2G / metadata 1G)
         a += ["--content-cache-size-mb", "2000", "--metadata-cache-size-mb", "1000"]
     return a
 
@@ -15671,7 +15672,7 @@ def sentry_mute(key):
     _json_save(SENTRY_FILE, st)
     return {"ok": True}
 
-# ---- write load: who is wearing out the SD card / system disk --------------
+# ---- write load: who is wearing out the system disk ------------------------
 
 WRITELOG = "/var/lib/nas-wizard/writelog.json"
 BOOTLOG  = "/var/lib/nas-wizard/bootlog.jsonl"
@@ -15685,6 +15686,31 @@ def _sys_disk():
     m = (re.match(r"^(mmcblk[0-9]+|nvme[0-9]+n[0-9]+)p[0-9]+$", src)
          or re.match(r"^(sd[a-z]+)[0-9]+$", src))
     return m.group(1) if m else (src or "?")
+
+_SYSDISK_KIND = {"t": 0.0, "v": None}
+
+def _sysdisk_kind():
+    """What the system disk IS, in words its owner recognises: "NVMe SSD", "SSD",
+    "HDD", "SD card".
+
+    The panel used to call it "System card" everywhere — a Raspberry Pi leftover that
+    outlived the hardware. On a box whose root is an NVMe drive that name is simply
+    false, and a status line that misnames the disk teaches its reader to distrust the
+    lines next to it. Cached for an hour: the root device does not change while we run,
+    and finding out shells out to findmnt and lsblk.
+    """
+    if _SYSDISK_KIND["v"] and time.time() - _SYSDISK_KIND["t"] < 3600:
+        return _SYSDISK_KIND["v"]
+    dev = _safe(_sys_disk, "?") or "?"
+    if dev.startswith("mmcblk"):
+        kind = "SD card"
+    elif dev.startswith("nvme"):
+        kind = "NVMe SSD"
+    else:
+        r = _safe(lambda: _run(["lsblk", "-dno", "ROTA", "/dev/" + dev], timeout=5), {})
+        kind = "HDD" if ((r or {}).get("log") or "").strip() == "1" else "SSD"
+    _SYSDISK_KIND.update(t=time.time(), v=kind)
+    return kind
 
 def _writes_sample():
     """Accumulate per-disk and per-process write deltas into daily buckets.
@@ -15820,9 +15846,8 @@ def _resil_writes_calc():
             size = int(p[0])
         except ValueError:
             pass
-    kind = ("SD card" if sysdev.startswith("mmcblk") else
-            "NVMe SSD" if sysdev.startswith("nvme") else
-            "HDD" if len(p) > 1 and p[1] == "1" else "SSD/USB disk")
+    # one answer to "what is this disk", shared with the status line
+    kind = _sysdisk_kind()
     pdays = st.get("pdays") or {}
     today = time.strftime("%Y-%m-%d")
     def top(agg):
@@ -20897,52 +20922,6 @@ def _svc(units):
 def _svc_toggle(unit, on):
     return _run(["systemctl", "enable" if on else "disable", "--now", unit], timeout=40)
 
-def _zram_swap_active():
-    """Whether there is an active zram swap in /proc/swaps."""
-    for l in _read("/proc/swaps").splitlines():
-        if l.startswith("/dev/zram"):
-            return True
-    return False
-
-def _zram_status():
-    """zram-swap state: standard (systemd-zram-generator/rpi-swap) or
-    legacy zram-tools (zramswap.service). On modern Pi OS zram is brought up by
-    the generator, while we mute zramswap.service — so we take the status by fact."""
-    for u in ("dev-zram0.swap", "systemd-zram-setup@zram0.service"):
-        s = _svc(u)
-        if s["installed"]:
-            # generated/static units: "enabled" by fact of an active swap
-            s["enabled"] = s["active"] or _zram_swap_active()
-            return s
-    return _svc("zramswap")
-
-def _zram_off():
-    """Disable zram-swap: both the standard generator and legacy zramswap."""
-    # legacy
-    if _svc("zramswap")["installed"]:
-        _svc_toggle("zramswap", False)
-    # standard: remove zram on the next boot
-    try:
-        if os.path.isfile("/etc/rpi/swap.conf"):
-            os.makedirs("/etc/rpi/swap.conf.d", exist_ok=True)
-            with open("/etc/rpi/swap.conf.d/60-nas-os.conf", "w") as f:
-                f.write("# NAS-OS: zram-swap disabled from the web panel. See swap.conf(5).\n"
-                        "[Main]\nMechanism=swapfile\n")
-        elif os.path.isfile("/etc/systemd/zram-generator.conf") or \
-                os.path.isfile("/usr/lib/systemd/zram-generator.conf"):
-            with open("/etc/systemd/zram-generator.conf", "w") as f:
-                f.write("# NAS-OS: zram-swap disabled (no [zram0] section).\n")
-    except OSError:
-        pass
-    _run(["systemctl", "daemon-reload"], timeout=20)
-    # take it down live (best-effort)
-    _run(["swapoff", "/dev/zram0"], timeout=20)
-    for u in ("dev-zram0.swap", "systemd-zram-setup@zram0.service"):
-        _run(["systemctl", "stop", u], timeout=20)
-    _run(["systemctl", "reset-failed", "dev-zram0.swap",
-          "systemd-zram-setup@zram0.service"], timeout=20)
-    return {"ok": True, "reboot": False}
-
 def _backup(path):
     try:
         if os.path.isfile(path):
@@ -20951,10 +20930,16 @@ def _backup(path):
         pass
 
 def _governor():
+    """CPU frequency policy: what it is now and what this kernel actually offers.
+
+    `available` is read, never assumed: intel_pstate boards list only
+    powersave/performance, so a hardcoded ondemand button would be a control that
+    cannot act. The adaptive-by-temperature timer that used to live beside this was
+    removed — on x86 the CPU throttles itself in hardware, more precisely than a
+    two-minute timer ever could."""
     base = "/sys/devices/system/cpu/cpu0/cpufreq/"
     return {"current": _read(base + "scaling_governor") or None,
-            "available": _read(base + "scaling_available_governors").split(),
-            "adaptive": _svc("nas-governor.timer")}
+            "available": _read(base + "scaling_available_governors").split()}
 
 def _board_model():
     """Human name of the board. Device-tree on a Pi, DMI on a PC — a NAS panel that
@@ -21184,7 +21169,6 @@ def sysconf():
                                or _read("/etc/timezone"),
         "time_synced": lambda: _sc("timedatectl", "show", "-p",
                                    "NTPSynchronized", "--value") == "yes",
-        "chrony":      lambda: _svc(["chrony", "chronyd"]),
         "fstrim":      lambda: _svc("fstrim.timer"),
         "journald_max": _journald_max,
         "docker_root": lambda: (_sc("docker", "info", "-f", "{{.DockerRootDir}}")
@@ -21192,16 +21176,12 @@ def sysconf():
         "network":     _net_state,
         "ufw":         _ufw_state,
         "fail2ban":    _fail2ban_state,
-        "log2ram":     lambda: _svc("log2ram"),
-        "zram":        _zram_status,
-        "governor":    _governor,
     })
     return {
         "system": {
             "hostname": r["hostname"],
             "timezone": r["timezone"],
             "time_synced": r["time_synced"],
-            "chrony": r["chrony"],
             "fstrim": r["fstrim"],
             "unattended": _unattended_on(),
             "journald_max": r["journald_max"],
@@ -21211,7 +21191,6 @@ def sysconf():
         "security": {
             "ufw": r["ufw"],
             "fail2ban": r["fail2ban"],
-            "log2ram": r["log2ram"],
         },
         # Hardware knobs that are real on this board. Nothing here is a claim the
         # box cannot back up: a control that is shown but cannot act is worse than an
@@ -21221,8 +21200,7 @@ def sysconf():
             "temp": temp_c(),
             "cgroup": _memory_cgroup_on(),
             "watchdog": os.path.isfile("/etc/systemd/system.conf.d/watchdog.conf"),
-            "zram": r["zram"],
-            "governor": r["governor"],
+            "governor": _governor(),
         },
     }
 
@@ -21274,9 +21252,12 @@ def _set_governor(val):
         except OSError:
             pass
     note = ""
-    if _svc("nas-governor.timer")["active"]:
+    # NAS-OS no longer ships the adaptive-by-temperature timer, but a box set up by an
+    # older version may still be running it — and it would quietly overwrite whatever
+    # was just chosen here on its next tick. Retire it instead of losing the setting.
+    if _svc("nas-governor.timer")["installed"]:
         _svc_toggle("nas-governor.timer", False)
-        note = " (adaptive governor disabled — otherwise it would overwrite)"
+        note = " (retired the old adaptive-governor timer — it would have overwritten this)"
     return {"ok": n > 0, "log": f"governor={val} on {n} cores" + note}
 
 def _net_apply(method, extra):
@@ -21325,11 +21306,6 @@ def sysconf_set(key, val, extra=None):
             with open("/etc/systemd/journald.conf.d/00-nas.conf", "w") as f:
                 f.write("[Journal]\nSystemMaxUse=%s\nSystemMaxFileSize=50M\n" % val)
             return _run(["systemctl", "restart", "systemd-journald"])
-        if key == "chrony":
-            if b:
-                return engine("hw", {"keys": "chrony"})
-            _svc_toggle("systemd-timesyncd", True)
-            return _svc_toggle("chrony" if _svc("chrony")["installed"] else "chronyd", False)
         if key == "fstrim":
             return _svc_toggle("fstrim.timer", b)
         if key == "unattended":
@@ -21359,22 +21335,10 @@ def sysconf_set(key, val, extra=None):
         if key == "fail2ban":
             return engine("security", {"keys": "fail2ban"}) if b \
                 else _svc_toggle("fail2ban", False)
-        if key == "log2ram":
-            return engine("security", {"keys": "log2ram"}) if b \
-                else _svc_toggle("log2ram", False)
         if key == "watchdog":
             return _watchdog(b)
-        if key == "zram":
-            return engine("hw", {"keys": "zram"}) if b else _zram_off()
-        if key == "governor_adaptive":
-            return engine("hw", {"keys": "governor"}) if b \
-                else _svc_toggle("nas-governor.timer", False)
         if key == "governor":
             return _set_governor(val)
-        if key == "eeprom_update":
-            r = _run(["rpi-eeprom-update", "-a"], timeout=120)
-            r["reboot"] = True
-            return r
         if key == "check_updates":
             _run(["apt-get", "update"], timeout=180)
             n = len(re.findall(r"^Inst ", _sc("apt-get", "-s", "upgrade"), re.M))
