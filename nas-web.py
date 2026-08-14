@@ -1875,6 +1875,9 @@ GLANCE_ACTIONS = ("touch", "sleep", "speed", "backup", "backup_stop",
                   "apt_update", "img_update", "fsw_accept",
                   "reboot", "poweroff")
 AVAIL_LOG = "/var/lib/nas-wizard/avail.log"   # written by nas-netguard.sh
+_AVAIL_SKEW = 60   # tolerance for a record ahead of `now`: NTP nudges and the second
+                   # or two between the guard writing a line and us reading it are
+                   # normal; hours ahead means the clock was broken (see _avail_segments)
 
 # (id, label-ru, label-en) — every tile the server can build. Collectors may
 # return None (service absent) — the tile silently disappears from the feed.
@@ -2129,8 +2132,23 @@ def _avail_segments(path=None):
     tooltip showed two overlapping outages, and an hour for which 2 minutes are
     known was painted fully red.
 
+    The mirror image is a record from the FUTURE, and it is worse. A box whose RTC
+    is wrong (real case 2026-08-13: hardware clock 12 h off, AM/PM) boots, reads the
+    bogus clock and stamps "up" hours ahead; NTP then pulls the clock back. The
+    journal now ends with a record beyond `now`, so the PRECEDING state — an "off"
+    from the crash that caused the reboot — was read as lasting "until the next
+    line", i.e. right up to the present: eight hours painted red on a box that had
+    been up the whole time.
+
+    Clamping such a record forward to `now` does not help (the outage still reaches
+    the present) and neither does dropping it (same). The timestamp is not merely
+    skewed, it is unknowable — so we drop the record and mark everything from the
+    last trustworthy one as a "?" gap: no bars, no uptime %, no tooltip. Truthful
+    and self-healing — records written once the clock is fixed close the gap.
+
     We fix it on read: time is monotonic (a record from the past is clamped to the
-    previous one), consecutive identical states are collapsed."""
+    previous one), a record from the future opens an unknown gap, consecutive
+    identical states are collapsed."""
     raw = []
     try:
         with open(path or AVAIL_LOG) as f:
@@ -2140,12 +2158,24 @@ def _avail_segments(path=None):
                     raw.append((int(p[0]), p[1]))
     except OSError:
         return []
+    now = int(time.time())
     fixed = []
     prev_t = 0
+    gap = False                     # a future record was dropped, the trail is unknown
     for t, s in raw:
+        if t > now + _AVAIL_SKEW:
+            gap = True              # written under a broken clock — the moment is lost
+            continue
         t = max(t, prev_t)          # a record "from the past" does not move time backward
+        if gap:
+            # everything between the last good record and this one is unverifiable:
+            # the state changed somewhere in there, but the journal cannot say when
+            fixed.append((prev_t, "?"))
+            gap = False
         prev_t = t
         fixed.append((t, s))
+    if gap:
+        fixed.append((prev_t, "?"))   # nothing trustworthy after it — unknown up to now
     segs = []
     for i, (t, s) in enumerate(fixed):
         nxt = fixed[i + 1][0] if i + 1 < len(fixed) else None
@@ -2180,6 +2210,9 @@ def avail_bars(hours=24, slots=96, path=None):
         a, b = max(t, start), min(t2, now)
         if b <= a:
             continue
+        if s == "?":
+            continue    # unverifiable stretch (broken clock): it must not count as
+                        # known time, or 'off' would be the default reading of it
         known_t += b - a
         if s == "up":
             up_t += b - a
