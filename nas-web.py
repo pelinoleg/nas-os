@@ -12120,6 +12120,10 @@ def kp_source_delete(kid):
     return {"ok": True}
 
 def _kp_norm_retention(d):
+    # every sibling normaliser starts by coercing a non-dict to {}; this one did not, so a
+    # retention field sent as a string, a number or a list reached .get() and the handler
+    # answered 500 with an AttributeError in the body
+    d = d if isinstance(d, dict) else {}
     out = dict(_KP_RETENTION)
     for k in out:
         try:
@@ -13665,6 +13669,11 @@ def _kp_restore_job(j):
     return {"arg": arg, "target": final, "label": leaf or os.path.basename(final) or final}
 
 def kp_restore_jobs(destid, items, overwrite=False):
+    if not kopia_installed():
+        # without this the call started a transient unit and failed with
+        # "nothing to restore" — a box rebuilt from a settings archive has the
+        # config back before the engine, and that is exactly when this is hit
+        return {"ok": False, "log": "kopia is not installed"}
     """Restore one OR MANY objects (multi-select) in a single transient unit, each into
     its own target. Copy-only; the repository is never written. `overwrite` replaces
     files that already exist on the target — the deliberate choice when restoring
@@ -13860,6 +13869,11 @@ def _kp_mnt_unit(destid):
     return "nas-kopia-mnt-%s" % destid
 
 def kp_mount_start(destid):
+    if not kopia_installed():
+        # without this the call started a transient unit and failed with
+        # "nothing to restore" — a box rebuilt from a settings archive has the
+        # config back before the engine, and that is exactly when this is hit
+        return {"ok": False, "log": "kopia is not installed"}
     """Mount ALL snapshots of a repo read-only at /mnt/kopia/<dest> — its own
     transient unit (survives panel restarts, same lesson as the sshfs mounts)."""
     cfg = kp_load()
@@ -15657,7 +15671,12 @@ def confgit_snapshot(reason="manual"):
             "--exclude=*.swp", "--exclude=*.dpkg-new", "--exclude=*.dpkg-old",
             "--exclude=ld.so.cache", "--exclude=blkid.tab*", "--exclude=.etckeeper",
             "--exclude=lvm/archive", "--exclude=lvm/backup",
-            "--exclude=ssl/private"]     # private keys have no business in a diff viewer
+            "--exclude=ssl/private",     # private keys have no business in a diff viewer
+            # Same argument, one directory over: git objects outlive a chmod on the working
+            # file, so a rotated password stays readable in history forever — and the panel
+            # serves these diffs to any session through /api/resil/confgit/filediff.
+            "--exclude=nas-os/kopia.json", "--exclude=nas-os/kopia/server",
+            "--exclude=nas-os/rclone.conf", "--exclude=nas-os/smb-users.json"]
     r = _run(["rsync", "-a", "--delete", *excl, "/etc/",
               os.path.join(CONFGIT_DIR, "etc/")], timeout=180)
     if not r.get("ok"):
@@ -20257,6 +20276,7 @@ FSW_DEF_EXCLUDE = [".trash", ".nas-trash", ".recycle", "#recycle", "@eaDir", "lo
                    # forever after — and a normal spread of deletions tripped the mass-loss
                    # guard, because the versions directory fills as the originals disappear.
                    ".stversions", ".stfolder", ".stignore", "*.sync-conflict-*",
+                   ".kopia-cache",   # rewritten constantly; hashing it is pure waste
                    ".Trash-*", "node_modules", ".git", "__pycache__",
                    ".DS_Store", "._*", "Thumbs.db", "desktop.ini",
                    "*.tmp", "*.part", "*.crdownload", "*.!qB", "~$*"]
