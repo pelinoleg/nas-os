@@ -19264,6 +19264,17 @@ def _fsjob_need_bytes(items, dest, op, policy, job=None):
         # `skip` has taken items out of it
         return _fsjob_tree_size(items, job) if policy == "skip" else (job or {}).get(
             "total_bytes", 0) or _fsjob_tree_size(items, job)
+    # The destination's pool and branch are the same for every file, so they are resolved
+    # once: asking per file meant re-reading /proc/mounts a hundred thousand times on a
+    # large tree, purely to re-learn something that cannot change mid-job.
+    dpool = _pool_mount_of(dest)
+    dbr = _pool_branch(dest) if dpool else None
+
+    def _crosses(p):
+        if dpool:
+            return dbr is None or _pool_branch(p) != dbr
+        return not _same_disk(p, dest)
+
     out = 0
     for p in items:
         if os.path.isdir(p) and not os.path.islink(p):
@@ -19272,12 +19283,12 @@ def _fsjob_need_bytes(items, dest, op, policy, job=None):
                     raise _FsCancelled()
                 for nm in files:
                     fp = os.path.join(root, nm)
-                    if not _same_disk(fp, dest):
+                    if _crosses(fp):
                         try:
                             out += os.lstat(fp).st_size
                         except OSError:
                             pass
-        elif not _same_disk(p, dest):
+        elif _crosses(p):
             out += _fsjob_tree_size([p], job)
     return out
 
