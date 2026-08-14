@@ -4415,6 +4415,11 @@ def _act_title(p, b):
     if p == "/api/power":
         return {"reboot": "Reboot by command from the panel",
                 "poweroff": "Shutdown by command from the panel"}.get(g("action"))
+    if p == "/ws/term":
+        # The most powerful thing in the panel — a shell on the box, in a group with docker
+        # and sudo — left no trace in the action history at all: the only record was
+        # ~/.bash_history, which anyone holding that shell can erase.
+        return "Terminal opened" + ((" in container %s" % g("exec")) if g("exec") else "")
     if p == "/api/glance/act":
         # a read-only token authorises these, so they have no session behind them —
         # the log line is the only trace of who did what
@@ -4453,6 +4458,7 @@ def _act_title(p, b):
     return None
 
 _ACT_KIND = {"/api/disk/": "disk", "/api/fs/": "files", "/api/power": "svc",
+             "/ws/term": "svc",
              "/api/systemd": "svc", "/api/stack": "svc", "/api/container": "svc",
              "/api/docker": "svc", "/api/usb-import": "disk"}
 
@@ -25003,7 +25009,15 @@ class H(BaseHTTPRequestHandler):
                                    # the global timeout=30 (anti-slowloris) would tear it every 30s
         ex = (parse_qs(urlparse(self.path).query).get("exec") or [""])[0]
         ex = ex if re.match(r"^[a-zA-Z0-9_.-]+$", ex or "") else ""
+        _safe(lambda: log_action("/ws/term", {"exec": ex}, {"ok": True}))
         pid, master = pty.fork()
+        if pid > 0:
+            # os.forkpty() hands back the master WITHOUT close-on-exec, so the next terminal
+            # session's shell inherited this one's master fd — demonstrated: `echo cmd >&7`
+            # in the second tab typed and RAN that command in the first, and could read what
+            # was being typed there. Both shells run as the same user, so this is not a
+            # privilege escalation; it is tabs not being separate windows.
+            _safe(lambda: os.set_inheritable(master, False))
         if pid == 0:                       # child -> bash or docker exec
             os.environ["TERM"] = "xterm-256color"
             if ex:                         # exec into a container — stay root (need access to docker.sock)
