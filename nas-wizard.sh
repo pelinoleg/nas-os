@@ -1737,6 +1737,29 @@ checklist_selected() { printf ' %s ' "$(printf '%s' "$1" | tr -d '"')"; }
 # ---------------------------------------------------------------------------
 # STAGE 5: hardware tuning.
 # ---------------------------------------------------------------------------
+# CPU temperature in millidegrees, or 0. Used by the hardware-tuning checklist header.
+#
+# It used to exist ONLY inside the heredoc that generated the adaptive-governor script,
+# so removing the governor took the definition with it and left stage_hw calling a
+# function that no longer existed — "command not found" and a header reading 0C on a
+# box running at 52C. Defined here, in the wizard itself, where its caller lives.
+#
+# By sensor NAME, not thermal_zone0: on a generic x86 board zone0 is usually the ACPI
+# chassis zone (or missing), while the real reading sits in a hwmon called coretemp or
+# k10temp. Same list the MOTD uses.
+cpu_temp_mc() {
+    local h t=""
+    for h in /sys/class/hwmon/hwmon*; do
+        case "$(cat "$h/name" 2>/dev/null)" in
+            coretemp|k10temp|zenpower|cpu_thermal|soc_thermal|x86_pkg_temp)
+                [ -r "$h/temp1_input" ] && { t="$(cat "$h/temp1_input" 2>/dev/null)"; break; } ;;
+        esac
+    done
+    [ -n "$t" ] || t="$(cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null)"
+    case "$t" in ''|*[!0-9]*) t=0 ;; esac
+    printf '%s' "$t"
+}
+
 hw_wifi_powersave_off() {
     run mkdir -p /etc/NetworkManager/conf.d
     write_file /etc/NetworkManager/conf.d/wifi-powersave-off.conf <<'EOF'
@@ -2005,7 +2028,10 @@ sec_ufw() {
     # command the owner can run when the box is actually exposed.
     install_packages "firewall" ufw
     local was_active=0
-    ufw status 2>/dev/null | head -1 | grep -qi 'active' && was_active=1
+    # "Status: active" in full, anchored: `grep -qi active` also matches the word
+    # inACTIVE, so it was true on a disabled firewall — the reset below never ran and
+    # the log claimed the firewall was already on while it was off
+    ufw status 2>/dev/null | head -1 | grep -q 'Status: active' && was_active=1
     # A re-run must never disarm a firewall the owner turned on themselves: `reset`
     # also DISABLES ufw, so it is only safe while it is already off
     [ "$was_active" -eq 0 ] && run ufw --force reset
@@ -2969,6 +2995,22 @@ avail_track(){
         || arping -c1 -w2 -I "$ACTIVE" "$gw" >/dev/null 2>&1; }; then
       state=up
     fi
+  fi
+  # Do not touch the journal until the clock is trustworthy. A wrong RTC (real case
+  # 2026-08-13: hardware clock 12 h out, AM/PM in firmware) makes the box stamp records
+  # HOURS AHEAD; NTP then pulls the clock back and the journal is left with a record
+  # from the future. The reader drops such a record, but only until wall time catches
+  # up with it — after that it reads as a genuine "up" and everything before it becomes
+  # one long false outage. The only place this can be fixed for good is here, before
+  # the bad timestamp is ever written.
+  #
+  # Checked at RUN time, not through After=time-sync.target: that target is only reached
+  # when systemd-time-wait-sync is enabled, and that unit delays boot until the network
+  # answers — a bad trade on a Wi-Fi-only NAS. Skipping a few early runs costs nothing:
+  # the guard runs every 15-30 s and the very next one records the state.
+  if [ ! -e /run/systemd/timesync/synchronized ] \
+     && [ "$(timedatectl show -p NTPSynchronized --value 2>/dev/null)" != "yes" ]; then
+    return 0
   fi
   mkdir -p "$(dirname "$AVLOG")" 2>/dev/null || true
   beat="$(cat "$BEAT" 2>/dev/null || true)"

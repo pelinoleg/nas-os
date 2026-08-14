@@ -2198,6 +2198,12 @@ def _avail_segments(path=None):
         if t > now + _AVAIL_SKEW:
             gap = True              # written under a broken clock — the moment is lost
             continue
+        if gap and t <= prev_t:
+            # still inside the unverifiable stretch: this record does not advance time
+            # past the last trustworthy one, so it cannot tell us when the gap ended.
+            # Letting it through would close the gap at zero length and republish its
+            # own state as fact — a confident outage over a period we know nothing about
+            continue
         t = max(t, prev_t)          # a record "from the past" does not move time backward
         if gap:
             # everything between the last good record and this one is unverifiable:
@@ -21324,6 +21330,11 @@ def sysconf_set(key, val, extra=None):
         if key == "avahi":
             return engine("shares", {"keys": "avahi"}) if b \
                 else _svc_toggle("avahi-daemon", False)
+        # The engine INSTALLS and pre-loads rules but deliberately leaves both services
+        # off — that is the right default for a box behind NAT. A toggle here is not a
+        # default, it is the owner asking for it now, so we arm the service afterwards.
+        # Without this the switch is a lie: it reports ok, the service stays off, and the
+        # checkbox springs back — worse than having no switch at all.
         if key == "ufw":
             if not b:
                 return _run(["ufw", "--force", "disable"])
@@ -21331,10 +21342,16 @@ def sysconf_set(key, val, extra=None):
             global _ufw_sync_last
             _ufw_sync_last = 0
             _safe(ufw_autosync)      # open docker ports at once, don't wait for the tick
+            en = _run(["ufw", "--force", "enable"])
+            if not en.get("ok"):
+                return en
             return r
         if key == "fail2ban":
-            return engine("security", {"keys": "fail2ban"}) if b \
-                else _svc_toggle("fail2ban", False)
+            if not b:
+                return _svc_toggle("fail2ban", False)
+            r = engine("security", {"keys": "fail2ban"})
+            en = _svc_toggle("fail2ban", True)
+            return en if not en.get("ok") else r
         if key == "watchdog":
             return _watchdog(b)
         if key == "governor":
