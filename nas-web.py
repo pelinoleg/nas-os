@@ -18960,7 +18960,7 @@ def fs_list(path):
 _FS_PROTECTED = (HERE, "/etc", "/usr", "/bin", "/sbin", "/lib", "/lib64",
                  "/boot", "/proc", "/sys", "/dev", "/run", "/var")
 
-def _fs_guard(path, into=False):
+def _fs_guard(path, into=False, follow=True):
     """Normalise a user path for a MUTATING operation.
     → (realpath, None) if allowed, else (None, error message).
 
@@ -18971,10 +18971,28 @@ def _fs_guard(path, into=False):
       into=True  — we only CREATE something inside the path (mkdir, upload,
         restore from trash). The container is not touched, so depth-1 is fine:
         making /home/backups is as harmless as making /home/oleg/backups.
-        Blocked here: the root itself and the protected system trees."""
+        Blocked here: the root itself and the protected system trees.
+
+    And a third, added 2026-08-14 after an audit demonstrated the cost of not asking it:
+      follow=False — the operation acts on the OBJECT AT THIS PATH, not on whatever it
+        points at (delete, trash, move, rename). Resolving the leaf turned a symlink into
+        its target, so deleting a shortcut deleted the FILE IT POINTED TO — measured:
+        the shortcut stayed on disk and the original vanished; a shortcut to a folder
+        took the entire folder; and a broken shortcut could not be deleted at all,
+        because realpath led nowhere and the existence check said "already deleted".
+        The parent is still resolved, so `..` games and protected trees stay blocked —
+        and not following the leaf is itself the protection, since what gets unlinked
+        or moved is then the link, never its target.
+    Writers keep follow=True on purpose: open(path,"w") DOES follow the link, so the
+    target is what must be judged there."""
     if not path or not str(path).strip():
         return None, "empty path"
-    rp = os.path.realpath(path)
+    p = str(path).rstrip("/") or "/"
+    if follow or p == "/":
+        rp = os.path.realpath(p)
+    else:
+        parent, leaf = os.path.split(p)
+        rp = os.path.join(os.path.realpath(parent or "/"), leaf)
     if rp == "/" or (not into and rp.count("/") < 2):
         return None, "path is too dangerous: " + rp
     for prot in _FS_PROTECTED:
@@ -19131,7 +19149,7 @@ def fs_mkdir(path, name):
     return {"ok": True, "path": d}
 
 def fs_rename(src, name):
-    src, err = _fs_guard(src)
+    src, err = _fs_guard(src, follow=False)   # rename the shortcut, not what it points at
     if err:
         return {"ok": False, "log": err}
     base = os.path.basename((name or "").strip())
@@ -19147,7 +19165,7 @@ def fs_rename(src, name):
     return {"ok": True, "path": dst}
 
 def fs_delete(path):
-    path, err = _fs_guard(path)
+    path, err = _fs_guard(path, follow=False)  # deleting a shortcut must not delete its target
     if err:
         return {"ok": False, "log": err}
     try:
@@ -19211,7 +19229,8 @@ def fs_copy(src, dst_dir):
     return {"ok": True, "path": dst}
 
 def fs_move(src, dst_dir):
-    src, err = _fs_guard(src)          # the source is moved away — guard against system trees
+    src, err = _fs_guard(src, follow=False)   # the source is moved away — guard against system
+                                              # trees, and move the link itself, not its target
     if err:
         return {"ok": False, "log": err}
     dst_dir = os.path.realpath(dst_dir)
@@ -19570,7 +19589,7 @@ def fs_job_start(op, items, dest="", name="", policy=""):
             if os.path.isdir(p) and _into_self(p, dest):
                 return {"ok": False, "log": "cannot copy into itself"}
             if op == "move":
-                _, err = _fs_guard(p)
+                _, err = _fs_guard(p, follow=False)
                 if err:
                     return {"ok": False, "log": err}
         # conflicts are decided by the USER, not by a silent "name (1)"
@@ -20849,14 +20868,24 @@ def _mount_of(path):
     return "/"
 
 def _vol_trash_dir(path):
-    """The trash 'files' dir on the SAME filesystem as `path` — so moving to the trash is an
-    instant rename, not a cross-device copy. Deleting a big folder on a USB/data disk used to
-    copy every byte onto the system SD card (slow, SD wear, and it failed outright when the item
-    was bigger than the free space on /). Items already on the system disk keep the central trash
-    (same fs → the move is a rename there too). Falls back to central when a per-volume dir can't
-    be created (read-only mount, no permission)."""
+    """The trash 'files' dir on the SAME DISK as `path` — so moving to the trash is an instant
+    rename, not a cross-device copy. Deleting a big folder on a data disk used to copy every
+    byte onto the system disk (slow, wear, and it failed outright when the item was bigger than
+    the free space on /). Items already on the system disk keep the central trash. Falls back to
+    central when a per-volume dir cannot be created (read-only mount, no permission).
+
+    Inside a mergerfs pool the disk is the BRANCH, not the mount: st_dev is identical for every
+    branch of the union, so the old check ("confirm the rename really stays on one device")
+    was true by construction and one trash served the whole pool. Measured on this box: with
+    the trash landing on disk2, deleting 250 MB from disk3 copied every byte — 0.53 s inside
+    the HTTP request on NVMe, minutes on spinning rust — and restoring copied them back."""
     central = os.path.join(TRASH, "files")
     try:
+        br = _pool_branch(path)
+        if br:                                # a pool path: keep the trash on its own branch
+            cand = os.path.join(br, ".nas-trash", "files")
+            os.makedirs(cand, exist_ok=True)
+            return cand
         pdev = os.stat(path).st_dev
         if pdev == os.stat(HOME).st_dev:
             return central
@@ -20875,6 +20904,13 @@ def _trash_store_dirs():
     for pat in ("/media/*/.nas-trash/files", "/media/*/*/.nas-trash/files",
                 "/mnt/*/.nas-trash/files", "/srv/*/.nas-trash/files"):
         out += glob.glob(pat)
+    # A pool and its branches show the SAME directory under two names — /mnt/storage/.nas-trash
+    # and /mnt/diskN/.nas-trash — and realpath cannot collapse them, so every item there was
+    # counted twice: doubled sizes, duplicate rows sharing one id, and "empty the trash"
+    # reporting three times what it deleted. The branch is where the files really are.
+    pools = {mp for mp in (_pool_mount_of(d) for d in out) if mp}
+    if pools:
+        out = [d for d in out if _pool_mount_of(d) is None]
     seen, uniq = set(), []
     for d in out:
         rp = os.path.realpath(d)
@@ -20930,7 +20966,7 @@ def _dir_size(p):
     return total
 
 def fs_trash(path, size=None):
-    path, err = _fs_guard(path)
+    path, err = _fs_guard(path, follow=False)   # trash the shortcut, never what it points at
     if err:
         return {"ok": False, "log": err}
     if not os.path.lexists(path):
