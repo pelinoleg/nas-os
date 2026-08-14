@@ -641,20 +641,89 @@ def _pool_branch(path):
         return None                       # not a pool path, or mergerfs too old for the xattr
 
 
+def _pool_paths(path):
+    """Every branch copy of a pool path (mergerfs answers with a NUL-separated list).
+
+    A directory can exist on several branches at once, which is what decides whether a
+    rename into it can stay on one disk."""
+    try:
+        v = os.getxattr(path, "user.mergerfs.allpaths").decode()
+    except OSError:
+        return []
+    return [p for p in v.split("\0") if p]
+
+
+def _pool_mount_of(path):
+    """The mergerfs mountpoint this path lives under, or None. Works without the xattr."""
+    try:
+        rp = os.path.realpath(path)
+    except OSError:
+        return None
+    for ln in _read("/proc/mounts").splitlines():
+        f = ln.split()
+        if len(f) >= 3 and f[2] == "fuse.mergerfs":
+            mp = f[1].replace("\\040", " ")
+            if rp == mp or rp.startswith(mp.rstrip("/") + "/"):
+                return mp
+    return None
+
+
+def _in_pool(path):
+    """True when the path is under a mounted mergerfs pool, xattr or no xattr."""
+    return _pool_mount_of(path) is not None
+
+
+def _pool_branch_dirs(mp):
+    """The branches of the pool mounted at `mp`, asked of the pool itself.
+
+    Not a glob of /mnt/disk*: the branch list is whatever mergerfs was started with, and a
+    guess that happens to be right on this box would be silently wrong on any other."""
+    try:
+        v = os.getxattr(os.path.join(mp, ".mergerfs"), "user.mergerfs.branches").decode()
+    except OSError:
+        return []
+    out = []
+    for part in v.split(":"):
+        p = part.split("=")[0].strip()
+        if p:
+            out.append(p)
+    return out
+
+
 def _same_disk(a, b):
     """True when both paths sit on the same physical filesystem — branch-aware inside a pool.
 
-    When the branch of one side cannot be read (an unreadable directory, a mergerfs too old
-    for the xattr) the answer is "different disks". Both callers treat that as the expensive
-    case — count the full size, refuse to move the library — which is the safe direction to
-    be wrong in."""
-    ba, bb = _pool_branch(a), _pool_branch(b)
-    if ba is not None or bb is not None:
-        return ba == bb
+    Inside a pool the xattr is the only truthful answer. When it cannot be read the answer
+    is "different disks", never a fall back to st_dev: st_dev says "same" for every pair in
+    the union, which is the very failure this function exists to end. That mattered — an
+    earlier version of it fell through to st_dev whenever BOTH sides were silent, which is
+    exactly what a mergerfs without the xattr (or a mount with xattr=nosys) produces, so
+    the bug came back whole and quiet. Only when neither path is in a pool at all does
+    st_dev get to answer, and there it is correct."""
+    if _in_pool(a) or _in_pool(b):
+        ba, bb = _pool_branch(a), _pool_branch(b)
+        return ba is not None and ba == bb
     try:
         return os.stat(a).st_dev == os.stat(b).st_dev
     except OSError:
         return False
+
+
+def _rename_stays_put(src, dst_parent):
+    """Will rename(src, dst_parent/...) stay on one disk, i.e. avoid EXDEV?
+
+    Inside a path-preserving pool that is true when the destination directory already
+    exists on the branch holding the source — mergerfs then renames within that branch.
+    Comparing the two paths' own branches instead gets this wrong in the common case: the
+    pool ROOT resolves to the first branch by search policy, so a library on any other
+    branch looks "on a different disk" while the rename would have succeeded instantly."""
+    if _in_pool(src) or _in_pool(dst_parent):
+        br = _pool_branch(src)
+        if br is None:
+            return False
+        pre = br.rstrip("/") + "/"
+        return any(p == br or p.startswith(pre) for p in _pool_paths(dst_parent))
+    return _same_disk(src, dst_parent)
 
 
 def _missing_branches():
@@ -1022,6 +1091,19 @@ def _health_report_build():
         pp = pool.get("pct", 0)
         add("Storage (pool)", "%s%% used" % pp, "bad" if pp >= 95 else "warn" if pp >= 90 else "ok",
             "Free %s" % _fmt_b(pool.get("total", 0) - pool.get("used", 0)))
+        # The pool percentage is the SUM of the branches, and since the create policy became
+        # path preserving (category.create=epmfs) a folder cannot spill onto a neighbour: the
+        # branch holding it fills, writes there start failing with ENOSPC, and the line above
+        # still reads "5% used, ok". The daily digest is built from this report, so without
+        # the worst branch it would report all normal while the owner cannot save a file.
+        br = _safe(_pool_branches, []) or []
+        worst = max(br, key=lambda b: b.get("pct", 0), default=None)
+        if worst:
+            wp = worst.get("pct", 0)
+            add("Pool branch (fullest)", "%s %s%% used" % (worst.get("mount", "?"), wp),
+                "bad" if wp >= 95 else "warn" if wp >= 90 else "ok",
+                "Free %s · a folder lives on ONE branch, so this is the real ceiling for it"
+                % _fmt_b(worst.get("free", 0)))
     # disks: SMART health and temperature
     ds = disks()
     bad = [d["name"] for d in ds if (d.get("smart") or {}).get("healthy") is False]
@@ -16917,11 +16999,12 @@ def imsb_promote(library="", move_to="", start=True):
         while probe != "/" and not os.path.exists(probe):
             probe = os.path.dirname(probe)
         try:
-            # branch-aware: both halves may sit in the same mergerfs pool and still be on
-            # two different disks, in which case the os.rename below returns EXDEV — and it
-            # runs AFTER imsb_down(), so a wrong answer here leaves the standby stopped and
-            # the library unmoved.
-            same = _same_disk(probe, src_lib)
+            # The question is not "are these two paths on one disk" but "will the rename
+            # below survive": it runs AFTER imsb_down(), so a wrong answer leaves the
+            # standby stopped and the library unmoved. Asking it as "same disk" refused
+            # every library that was not on the pool's first branch, because the pool root
+            # resolves there by search policy while the rename would have worked fine.
+            same = _rename_stays_put(src_lib, probe)
         except OSError as e:
             return {"ok": False, "log": str(e)}
         if not same:
@@ -19139,6 +19222,66 @@ def _fsjob_public(j):
     return {k: j[k] for k in ("id", "op", "label", "state", "cur", "done_bytes",
                               "total_bytes", "done_items", "total_items", "log")}
 
+def _fsjob_free_at(dest):
+    """Bytes a single new folder under `dest` can actually grow to.
+
+    statfs=full makes an existing pool folder report its own branch, but the pool ROOT
+    exists on every branch and so still reports the sum — and under a path-preserving
+    policy nothing created there can span more than one branch. Capping by the roomiest
+    branch turns "2.2 TB free" back into the truth, and is a no-op for a folder that is
+    already pinned, whose statvfs is its branch and therefore never larger than the cap."""
+    free = shutil.disk_usage(dest).free
+    mp = _pool_mount_of(dest)
+    if mp:
+        best = 0
+        for br in _pool_branch_dirs(mp):
+            try:
+                st = os.statvfs(br)
+                best = max(best, st.f_bavail * st.f_frsize)
+            except OSError:
+                pass
+        if best:
+            free = min(free, best)
+    return free
+
+
+def _fsjob_need_bytes(items, dest, op, policy, job=None):
+    """Bytes the job will really write into `dest`.
+
+    A copy writes everything. A move writes only what has to change disk — which inside a
+    pool is decided per file, not per item: asking the top directory gives one branch for a
+    tree that may be spread over three, and that single answer is wrong in both directions.
+    It undercounted to zero (skipping the check on exactly the moves that copy every byte)
+    and it overcounted whole trees that were never going to move.
+
+    Items that `skip` will leave untouched are excluded from both, because a conflict
+    policy of "keep what is already there" writes nothing at all."""
+    if policy == "skip":
+        items = [p for p in items
+                 if not os.path.lexists(os.path.join(dest, os.path.basename(p.rstrip("/"))))]
+    if op == "copy":
+        # the caller already walked the same tree for the progress total; only re-walk when
+        # `skip` has taken items out of it
+        return _fsjob_tree_size(items, job) if policy == "skip" else (job or {}).get(
+            "total_bytes", 0) or _fsjob_tree_size(items, job)
+    out = 0
+    for p in items:
+        if os.path.isdir(p) and not os.path.islink(p):
+            for root, _dirs, files in os.walk(p):
+                if job and job["cancel"].is_set():
+                    raise _FsCancelled()
+                for nm in files:
+                    fp = os.path.join(root, nm)
+                    if not _same_disk(fp, dest):
+                        try:
+                            out += os.lstat(fp).st_size
+                        except OSError:
+                            pass
+        elif not _same_disk(p, dest):
+            out += _fsjob_tree_size([p], job)
+    return out
+
+
 def _fsjob_tree_size(paths, job=None):
     total = 0
     for p in paths:
@@ -19270,15 +19413,14 @@ def _fsjob_run(job, items, dest, name, policy):
             job["cur"] = "calculating size…"
             job["total_bytes"] = _fsjob_tree_size(items, job)
             job["total_items"] = len(items)
-            # will it fit? for a move only what crosses onto another disk counts — and inside
-            # a path-preserving pool "another disk" means another BRANCH, which st_dev does
-            # not see (see _pool_branch). Judging by st_dev made every move inside the pool
-            # look free, so the check silently skipped itself on exactly the moves that now
-            # copy every byte.
+            # will it fit? for a move only what crosses onto another disk counts — and
+            # inside a path-preserving pool "another disk" means another BRANCH, which
+            # st_dev cannot see (see _pool_branch) and which a whole tree does not answer
+            # with one value: a folder built while the pool still spread files lives on
+            # several branches at once, so the question has to be asked per FILE.
             try:
-                need = job["total_bytes"] if op == "copy" else _fsjob_tree_size(
-                    [p for p in items if not _same_disk(p, dest)], job)
-                free = shutil.disk_usage(dest).free
+                need = _fsjob_need_bytes(items, dest, op, policy, job)
+                free = _fsjob_free_at(dest)
                 if need and free < need + 64 * 2**20:
                     raise OSError(f"not enough space: need {need // 2**20} MB, "
                                   f"free {free // 2**20} MB")

@@ -4874,7 +4874,7 @@ function bayStrip(disks,missing,sel,onSel){
   c.onclick=()=>onSel(x.path);
   cards.appendChild(c);});
  (missing||[]).forEach(m=>{
-  const c=el(`<div class="dcard bad" title="This pool branch is in fstab but nothing is mounted there — the disk was pulled or died. Part of /mnt/storage content is INVISIBLE until it returns; snapraid fix can rebuild it onto a replacement.">
+  const c=el(`<div class="dcard bad" title="This pool branch is in fstab but nothing is mounted there — the disk was pulled or died. Part of /mnt/storage content is INVISIBLE until it returns. With SnapRAID parity configured, snapraid fix can rebuild it onto a replacement; WITHOUT parity those files exist only on that disk. A folder lives on one branch, so what is missing is whole folders.">
    <div class="dc-top"><span class="dc-nm"></span><span class="dc-badge">Missing</span></div>
    <div class="dc-sub">pool branch · was <b class="mono">${esc(m.src||"?")}</b></div></div>`);
   c.querySelector(".dc-nm").textContent=m.mnt;
