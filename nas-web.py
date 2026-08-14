@@ -10196,6 +10196,32 @@ def settings_backup_drill(name=None):
         # -- 10. reference files exist (informational) -----------------------
         refs = [x for x in ("fstab", "snapraid.conf") if os.path.isfile(j("reference/etc", x))]
         checks.append(_drill_check("reference", None, ", ".join(refs) or "none"))
+
+        # -- 11. the network profile, which the drill used to ignore ---------
+        # 2026-08-14: the archive carried no network settings at all for a day — the
+        # collector still looked only at /etc/netplan, which does not exist on a
+        # NetworkManager box — and this drill would have passed the whole time, because
+        # it only ever looked for fstab and snapraid.conf. That is the one omission that
+        # makes a restore unusable rather than incomplete: this box has no cable, so a
+        # machine brought back without the Wi-Fi profile has no way onto the network and
+        # no way to reach the archive holding everything else. It is a FAILURE when the
+        # box has a profile and the archive does not, and informational otherwise.
+        net = [p for d in ("reference/etc/NetworkManager/system-connections",
+                           "reference/etc/netplan")
+               for p in sorted(glob.glob(os.path.join(j(d), "*")))]
+        live = glob.glob("/etc/NetworkManager/system-connections/*") + \
+            glob.glob("/etc/netplan/*.yaml")
+        if net:
+            checks.append(_drill_check("network profile", True,
+                                       "%d file(s): %s" % (len(net),
+                                                           ", ".join(os.path.basename(p) for p in net))))
+        elif live:
+            checks.append(_drill_check(
+                "network profile", False,
+                "the box has %d network profile(s) but the archive carries none — a restored "
+                "box would come up with no way onto the network" % len(live)))
+        else:
+            checks.append(_drill_check("network profile", None, "none on the box either"))
     return _drill_finish(name, checks)
 
 def _drill_finish(name, checks):
