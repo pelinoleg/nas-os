@@ -10409,6 +10409,12 @@ def settings_backup_make(auto=False):
                   "%s · files: %d" % (path, len(added)), "ok", kind="action", desk=False)
     except Exception:
         pass
+    # The disaster card names the newest archive and lists what it does and does not hold,
+    # so every new archive makes the card on disk describe the wrong one — the previous.
+    # Rebuilding here keeps the card the owner reads on a dead box in step with the archive
+    # they are about to restore from. (The copy sealed INSIDE this archive necessarily
+    # describes its predecessor; the card is packed before it can know its own size.)
+    _safe(lambda: disaster_build())
     return {"ok": True, "name": name, "files": len(added), "dir": d}
 
 def settings_backup_list():
