@@ -391,7 +391,7 @@ try{applyDeskTheme(JSON.parse(localStorage.getItem("nasdesk")||"{}"));}catch(e){
    DONE.shares=!!STATE.samba;
    DONE.security=!!(STATE.ufw||STATE.fail2ban);
    DONE.alerts=!!STATE.smartd;
-   DONE.tuning=!!(STATE.t_usbpower||STATE.t_pcie3||STATE.t_cgroup||STATE.t_sysctl);}
+   DONE.tuning=!!(STATE.t_cgroup||STATE.t_sysctl);}
  else document.getElementById("hostlbl").textContent="demo (no backend)";renderRail();renderPanel();
  scanOldBox();})();
 

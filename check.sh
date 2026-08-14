@@ -123,9 +123,16 @@ fi
 if has js || has css; then
   head "Web"
   RUN=1
-  if split_html web/desktop.html 2>"$TMP/css.err"; then ok "desktop.html: CSS balanced"
-  else bad "desktop.html: $(cat "$TMP/css.err")"; fi
-  has js && node_check "$TMP/inline.js" "desktop.html: inline JS"
+  # every page we ship, not just the big one: setup.html and screen.html carry inline
+  # JS too, and a syntax error there is just as fatal — the setup wizard and the display
+  # are the two surfaces an owner meets when the panel is not yet usable. They were
+  # edited for a release with nothing checking them at all.
+  for _pg in web/desktop.html web/setup.html web/screen.html; do
+    [ -f "$_pg" ] || continue
+    if split_html "$_pg" 2>"$TMP/css.err"; then ok "$(basename "$_pg"): CSS balanced"
+    else bad "$(basename "$_pg"): $(cat "$TMP/css.err")"; fi
+    has js && node_check "$TMP/inline.js" "$(basename "$_pg"): inline JS"
+  done
   has js && node_check web/sw.js web/sw.js
 fi
 

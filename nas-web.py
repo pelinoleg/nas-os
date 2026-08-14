@@ -2974,7 +2974,7 @@ def glance_payload(lang="ru", screen="", only=None, slim=False):
         keep = set(only)
         tiles = [t for t in tiles if t.get("id") in keep]
 
-    payload = {"v": 5, "host": socket.gethostname(),
+    payload = {"v": 6, "host": socket.gethostname(),
                # the stable name, so a display configured once by IP can be re-pointed at
                # a name that survives a DHCP lease change. screen/data always had it.
                "mdns": socket.gethostname() + ".local",
@@ -10662,7 +10662,7 @@ def _nb_drill_sched_tick():
 # and then the one that mattered is missed too.
 _PUSH_NOW = {
     "readonly", "fserror", "smart", "sd_degrade", "diskfull", "root_full", "inodes",
-    "undervolt", "sustained_heat", "fan_stall", "cfg_corrupt", "delete_block", "nb_guard",
+    "sustained_heat", "fan_stall", "cfg_corrupt", "delete_block", "nb_guard",
     "nb_change",
     "pool", "mergerfs", "disk_remove", "dirty_boot",
 }
@@ -15737,9 +15737,17 @@ def _sysdisk_kind():
         kind = "SD card"
     elif dev.startswith("nvme"):
         kind = "NVMe SSD"
+    elif dev in ("", "?"):
+        # findmnt gave us nothing. Saying "SSD" here would be the exact failure this
+        # function exists to prevent — a status line naming the disk something it may
+        # not be. Not knowing is a fine thing to publish; guessing is not.
+        kind = "system disk"
     else:
+        rota = ""
         r = _safe(lambda: _run(["lsblk", "-dno", "ROTA", "/dev/" + dev], timeout=5), {})
-        kind = "HDD" if ((r or {}).get("log") or "").strip() == "1" else "SSD"
+        if (r or {}).get("ok"):
+            rota = ((r or {}).get("log") or "").strip()
+        kind = "HDD" if rota == "1" else ("SSD" if rota == "0" else "system disk")
     _SYSDISK_KIND.update(t=time.time(), v=kind)
     return kind
 
@@ -21200,7 +21208,7 @@ def _unattended_on():
     return 'Unattended-Upgrade "1"' in _read("/etc/apt/apt.conf.d/20auto-upgrades")
 
 def _journald_max():
-    for l in _read("/etc/systemd/journald.conf.d/00-nas.conf").splitlines():
+    for l in _read("/etc/systemd/journald.conf.d/99-nas.conf").splitlines():
         if l.strip().startswith("SystemMaxUse"):
             return l.split("=", 1)[-1].strip()
     return ""
@@ -21314,7 +21322,7 @@ def _set_governor(val):
     # NAS-OS no longer ships the adaptive-by-temperature timer, but a box set up by an
     # older version may still be running it — and it would quietly overwrite whatever
     # was just chosen here on its next tick. Retire it instead of losing the setting.
-    if _svc("nas-governor.timer")["installed"]:
+    if _svc("nas-governor.timer")["enabled"] or _svc("nas-governor.timer")["active"]:
         _svc_toggle("nas-governor.timer", False)
         note = " (retired the old adaptive-governor timer — it would have overwritten this)"
     return {"ok": n > 0, "log": f"governor={val} on {n} cores" + note}
@@ -21362,7 +21370,7 @@ def sysconf_set(key, val, extra=None):
             if not SIZE_RE.match(str(val or "")):
                 return {"ok": False, "log": "size like 200M / 1G"}
             os.makedirs("/etc/systemd/journald.conf.d", exist_ok=True)
-            with open("/etc/systemd/journald.conf.d/00-nas.conf", "w") as f:
+            with open("/etc/systemd/journald.conf.d/99-nas.conf", "w") as f:
                 f.write("[Journal]\nSystemMaxUse=%s\nSystemMaxFileSize=50M\n" % val)
             return _run(["systemctl", "restart", "systemd-journald"])
         if key == "fstrim":

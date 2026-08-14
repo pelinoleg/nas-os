@@ -4802,14 +4802,19 @@ function scrubLine(snap){
 /* Drive bays + status cards — the hardware picture on top of the Storage window.
    Groups: M.2 (nvme) · Drive slots (sata/usb) · SD/eMMC (mmc). Unmounted fstab
    branches show as red GHOST slots: a hole in the pool must be impossible to miss.
-   Status: bad = SMART fail / emergency-ro / missing / ≥70°; warn = ≥60° or wear ≥80%. */
+   Status: bad = SMART fail / emergency-ro / missing / ≥danger; warn = ≥warn or wear ≥80%. */
+// One verdict on "how hot is too hot", mirroring the server: the owner's threshold
+// (default 60 °C) is warn, threshold + 10 is danger — see _disktemp_state in nas-web.py.
+// These two used to disagree: the badge said 62 °C was "warm" while the number next to
+// it was painted danger-red, because the colour helper carried its own 50/60 pair.
+const DISK_T_WARN=60,DISK_T_DANGER=DISK_T_WARN+10;
 function diskState(x){
  const t=(x.smart&&x.smart.temp)||x.temp_hw||0,w=x.smart&&x.smart.wear;
  if(x.missing)return{cls:"bad",badge:"Missing",why:"pool branch is not mounted — disk pulled or dead"};
  if(x.smart&&x.smart.healthy===false)return{cls:"bad",badge:"SMART fail",why:"the disk reports imminent failure — replace it"};
  if(x.ro)return{cls:"bad",badge:"Read-only",why:"filesystem dropped to read-only after an I/O error — run e2fsck"};
- if(t>=70)return{cls:"bad",badge:t+"° hot",why:"critical temperature"};
- if(t>=60)return{cls:"warn",badge:t+"° warm",why:"high temperature"};
+ if(t>=DISK_T_DANGER)return{cls:"bad",badge:t+"° hot",why:"critical temperature"};
+ if(t>=DISK_T_WARN)return{cls:"warn",badge:t+"° warm",why:"high temperature"};
  if(typeof w==="number"&&w>=80)return{cls:"warn",badge:"worn "+w+"%",why:"SSD wear is high — plan a replacement"};
  return{cls:"ok",badge:"Normal",why:""};
 }
@@ -5013,7 +5018,7 @@ function diskDetail(x,reload){
    sd.querySelector("#ddSpin").onchange=async e=>{const r=await api("/api/disk/spindown",{method:"POST",body:JSON.stringify({dev:x.path,minutes:+e.target.value})});toast(LIVE?((r&&r.ok)?r.log:("Error: "+((r&&r.log)||""))):"Demo");};
    box.appendChild(sd);
  }
- // speed: the last measurement is always visible; the system SD card can be measured too
+ // speed: the last measurement is always visible; the system disk can be measured too
  {
    const sp=el(`<div class="dd-spd"></div>`);
    let cur=x.speedtest;
@@ -5024,7 +5029,7 @@ function diskDetail(x,reload){
         :`<span class="dd-spd-t" style="color:var(--mut)">This disk's speed has not been measured yet</span>`)
       +`<span class="grow"></span>`;
      const b=el(`<button class="btn sm"${busy?" disabled":""}>${busy?"measuring…":svg("gauge",13)+" "+(cur?"Measure again":"Speed test")}</button>`);
-     b.title=nasTr("Sequential read from the device + writing a temporary file (deleted right away)"+(x.role==="system"?". For the system card, writes go to the temporary directory /var/tmp":""));
+     b.title=nasTr("Sequential read from the device + writing a temporary file (deleted right away)"+(x.role==="system"?". For the system disk, writes go to the temporary directory /var/tmp":""));
      b.onclick=async()=>{paintSpd(true);
        const r=await api("/api/disk/speedtest",{method:"POST",body:JSON.stringify({dev:x.path})});
        if(LIVE&&r&&r.ok){cur={read:r.read_mbps,write:r.write_mbps,t:r.t};}
@@ -8489,8 +8494,7 @@ function winResil(initTab){openWin("__resil","Resilience",(body,win)=>{
   const d=await api("/api/resil/blackbox");
   if(!d){tc.innerHTML='<div class="set-load">failed to load</div>';return;}
   const KEYS=[["load","Load","","--win-accent,var(--accent)"],["cpu","CPU","%","--win-accent,var(--accent)"],
-   ["temp","Temp","°C","--win-warn,var(--warn)"],["mem","Memory","%","--win-good,var(--good)"],
-   ["volt","5V rail","V","--win-danger,var(--danger)"]];
+   ["temp","Temp","°C","--win-warn,var(--warn)"],["mem","Memory","%","--win-good,var(--good)"]];
   const graphs=(smp)=>{const last=smp[smp.length-1]||{};
    return KEYS.filter(([k])=>smp.some(x=>typeof x[k]==="number"))
     .map(([k,lab,un,cv])=>`<div class="rs-g"><div class="rs-gl">${lab}<span class="mono">${last[k]??"—"}${un}</span></div>${spark(smp.map(x=>x[k]),`var(${cv})`)}</div>`).join("");};
@@ -10897,7 +10901,7 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
     <div class="srow"><div class="srow-l"><div class="srow-t">Download limit</div><div class="srow-d">The same cap in the other direction: restores, verification and browsing. 0 = no limit.</div></div>
      <div class="srow-c"><input id="kO_dn" type="number" min="0" class="mono" style="width:90px"><span style="font-size:11.5px;color:var(--win-dim,var(--dim))">KB/s</span></div></div></div>
    <div class="kp-sec"><h4>${svg("layers",13)} Cache</h4>
-    <p style="font-size:11.5px;color:var(--win-dim,var(--dim));margin:0 0 10px;line-height:1.5">Kopia keeps a local cache to avoid re-reading the repository. It lives on the main storage (<span class="mono">.kopia-cache/</span>), off the SD card, and rebuilds itself if cleared. Caps below stop it growing without bound — 0 leaves kopia's own default. Per-repository size and a Clear button are on each destination.</p>
+    <p style="font-size:11.5px;color:var(--win-dim,var(--dim));margin:0 0 10px;line-height:1.5">Kopia keeps a local cache to avoid re-reading the repository. It lives on the main storage (<span class="mono">.kopia-cache/</span>), off the system disk, and rebuilds itself if cleared. Caps below stop it growing without bound — 0 leaves kopia's own default. Per-repository size and a Clear button are on each destination.</p>
     <div class="srow"><div class="srow-l"><div class="srow-t">Content cache limit</div><div class="srow-d">The bulk of the cache — file data blocks.</div></div>
      <div class="srow-c"><input id="kO_cc" type="number" min="0" class="mono" style="width:90px"><span style="font-size:11.5px;color:var(--win-dim,var(--dim))">MB</span></div></div>
     <div class="srow"><div class="srow-l"><div class="srow-t">Metadata cache limit</div><div class="srow-d">Directory listings and indexes — small.</div></div>
@@ -12390,7 +12394,7 @@ function backupTab(tc){
   hide.checked=!!mm.settings_backup_hide;
   dir.placeholder=r.dir||"/mnt/storage/nas-settings-backup";   // we show the ACTUAL path, not a dream about the pool
   const eph=tc.querySelector("#bkEph");
-  if(r.ephemeral){eph.style.display="";eph.innerHTML=nasTr("The pool is not mounted — the backup currently sits on the system card (<b>"+esc(r.dir)+"</b>) and will NOT survive an OS reinstall. Set an external disk as primary storage — then the backup and everything else moves onto it.")+` <button class="btn sm" id="bkStMain" style="margin-top:6px">${svg("star",13)} Choose storage</button>`;
+  if(r.ephemeral){eph.style.display="";eph.innerHTML=nasTr("The pool is not mounted — the backup currently sits on the system disk (<b>"+esc(r.dir)+"</b>) and will NOT survive an OS reinstall. Set an external disk as primary storage — then the backup and everything else moves onto it.")+` <button class="btn sm" id="bkStMain" style="margin-top:6px">${svg("star",13)} Choose storage</button>`;
    const bs=eph.querySelector("#bkStMain");if(bs)bs.onclick=()=>storageDlg(load);}
   else eph.style.display="none";
   note.textContent=nasTr(`Folder: ${r.dir} · ${r.days?`automatically every ${r.days} d`:"auto-backup disabled"} · kept ${r.keep} most recent`);
@@ -12816,7 +12820,7 @@ function winFsHistory(){openWin("__fsw","File history",(body,win)=>{
     <div class="field" style="flex:1;min-width:120px"><label>Re-read cycle, days</label><input class="mono" id="fwVd" value="${att(c.verify_days)}"></div>
     <div class="field" style="flex:1;min-width:120px"><label>Re-read per night, minutes</label><input class="mono" id="fwVm" value="${att(c.verify_minutes)}"></div>
     <div class="field" style="flex:1;min-width:120px"><label>Deletion guard, %</label><input class="mono" id="fwGp" value="${att(c.guard_pct)}"></div></div>
-   <div class="set-sub">Scan frequency: 1 = every night, 7 = weekly, 14 = every two weeks. Less often means fewer writes to the SD card — pick what fits how often your files change.</div>
+   <div class="set-sub">Scan frequency: 1 = every night, 7 = weekly, 14 = every two weeks. Less often means fewer writes to the system disk — pick what fits how often your files change.</div>
    <div class="set-sub">Guard: if more than this percentage of files (and at least 20) vanish in one scan, the deletions are NOT recorded and a red banner appears — protection against a dropped-off disk and against mass “deleted itself”. A threshold of 0 disables the guard.</div>
    <div class="set-sub">Push alerts (bitrot, mass disappearance, unavailable folder, many deletions) are configured in “Settings → Notifications”, the “Data protection” group.</div>
    <div class="set-savebar"><span class="sb-left" id="fwStat2"></span><button class="btn sm pri" id="fwSave2">${svg("save",13)} Save</button></div>
@@ -14529,14 +14533,13 @@ function networkTab(tc){withSysc(tc,()=>{const n=SYSC.network||{};const manual=n
 /* --- settings: Security --- */
 function securityTab(tc){withSysc(tc,()=>{const s=SYSC.security||{};const u=s.ufw||{};
  tc.innerHTML=`${rebootBan()}
-  <h3 class="set-title">Security</h3><p class="set-sub">Firewall, brute-force protection, logs.</p>
+  <h3 class="set-title">Security</h3><p class="set-sub">Firewall and brute-force protection.</p>
   <div class="set-h">Firewall</div>
   <div class="srow"><div class="srow-l"><div class="srow-t">Firewall (UFW)${tipHTML("Closes all incoming ports except the allowed ones (SSH, shares). Enabling opens SSH first so you don't get locked out. Note: docker publishes ports bypassing UFW.")}</div><div class="srow-d">${u.active?"active · ports: "+((u.ports||[]).join(", ")||"—"):"disabled"}</div></div><div class="srow-c">${u.active?'<span class="sbadge ok">active</span>':(u.installed?'<span class="sbadge off">off</span>':'<span class="sbadge na">not installed</span>')}<label class="tgl"><input type="checkbox" data-sc="ufw"${u.active?" checked":""}><span class="sl"></span></label></div></div>
   ${u.active?`<div id="ufwPorts" style="margin:6px 0 4px"></div>`:""}
   <div class="set-h">Protection against password brute-forcing</div>
   ${svcRow("Brute-force protection (fail2ban)","Bans an IP after several failed SSH logins. Basic brute-force protection, especially if the server is reachable from outside.","fail2ban",s.fail2ban,"bans IPs after failed SSH logins")}
   ${(s.fail2ban&&s.fail2ban.installed)?`<div id="f2bBox" style="margin:2px 0 4px"></div>`:""}
-  <div class="set-h">Logs</div>
   <div class="mon-note">SSH key login, port change and remote access (Tailscale) are handled separately — not configurable here yet.</div>`;
  wireSc(tc);
  // UFW ports: list with removal + adding
@@ -14963,7 +14966,6 @@ function paintVols(){const box=document.getElementById("wg-vols");if(!box)return
   box.appendChild(it);});
 }
 function paintSys(s){const m=document.getElementById("wg-sys");if(!m)return;
- const thr=s.throttled&&s.throttled.raw&&s.throttled.raw!=="0x0";
  m.innerHTML=`
   <div class="gauges">
    <div class="gauge">${ring(s.cpu,loadCol(s.cpu))}<div class="gc" style="color:${loadCol(s.cpu)}">${svg("cpu",17)}<div class="v">${s.cpu}%</div></div><div class="l">CPU</div></div>
@@ -14972,7 +14974,7 @@ function paintSys(s){const m=document.getElementById("wg-sys");if(!m)return;
   <div class="krow" style="margin-top:12px"><span>${svg("clock",13)} Uptime</span><b>${fmtUp(s.uptime)}</b></div>
   <div class="krow"><span>${svg("activity",13)} Load 1m / 5m</span><b>${s.load?s.load[0].toFixed(2)+" / "+s.load[1].toFixed(2):"—"}</b></div>
   ${DISK_TEMP_MAX!=null?`<div class="krow"><span>${svg("thermo",13)} Disk temp</span><b style="color:${diskTcol(DISK_TEMP_MAX)}">${DISK_TEMP_MAX}°C</b></div>`:""}
-  ${thr?`<div class="krow" style="color:var(--warn)"><span>⚠ throttling</span><b>${esc(s.throttled.raw)}</b></div>`:""}`;
+  `;
  const ns=document.getElementById("wg-nets");if(ns)ns.innerHTML=
   `<span style="color:var(--good)">↓ ${fmtR(s.net.rx)}</span><span style="color:var(--danger)">↑ ${fmtR(s.net.tx)}</span>`;
  const n2=document.getElementById("wg-net2");if(n2)n2.innerHTML=
@@ -15065,7 +15067,7 @@ function drawNet(){const cv=document.getElementById("wg-net");if(!cv)return;cons
 }
 const DROLE_COL={system:"var(--mut)",data:"var(--accent)",pool:"var(--good)",parity:"var(--accent-2)",removable:"#8a7dff",free:"var(--warn)"};
 let DISK_TEMP_MAX=null;   // the hottest disk temperature — for the "System" widget
-const diskTcol=t=>t==null?"":t>=60?"var(--danger)":t>=50?"var(--warn)":"var(--good)";
+const diskTcol=t=>t==null?"":t>=DISK_T_DANGER?"var(--danger)":t>=DISK_T_WARN?"var(--warn)":"var(--good)";
 const barCol=p=>p>=90?"var(--danger)":p>=75?"var(--warn)":"var(--good)";
 function dRow(role,name,pct,free,temp,sys,sub){
  const mark=sys?`<img class="ddot-pi" src="${BRANDICO()}" alt="">`:`<span class="ddot" style="background:${DROLE_COL[role]||"var(--mut)"}"></span>`;

@@ -26,7 +26,7 @@
 #   sudo ./nas-wizard.sh                   # interactive menu
 #   sudo ./nas-wizard.sh --dry-run         # changes nothing, prints the action plan
 #   sudo ./nas-wizard.sh --stage snapraid  # run only one stage
-#     (stages: system | disk | mergerfs | snapraid | docker)
+#     (stages: system | disk | mergerfs | snapraid | docker | hw | security | shares | backup)
 #
 set -o pipefail
 
@@ -159,7 +159,7 @@ nas-wizard.sh — NAS setup (x86 Debian box)
   --stage mergerfs    Stage 2b: build/update the mergerfs pool
   --stage snapraid    Stage 3: SnapRAID (conf, sync, timers)
   --stage docker      Stage 4: Docker (find compose folders and bring up)
-  --stage hw          Stage 5: Hardware tuning (cgroup, fstrim, sysctl, watchdog)
+  --stage hw          Stage 5: Hardware tuning (cgroup, fstrim, sysctl, Wi-Fi power-save, watchdog)
   --stage security    Stage 6: Security (ufw, fail2ban, SSH, journald)
   --stage shares      Stage 7: Network shares (Samba/Avahi)
   --stage backup      Stage 8: Backups and monitoring (SMART, health)
@@ -1976,7 +1976,8 @@ WARNING: kernel command line changes take effect after a REBOOT."
     ui_msg "Summary: Hardware tuning" "Done.$extra
 
 Check:
-  sudo lspci -vv | grep -i speed   (after reboot for PCIe)"
+  cat /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
+  systemctl status nas-netguard.timer"
     log "--- stage_hw end ---"
 }
 
@@ -2626,7 +2627,7 @@ main_menu() {
             "hw"       "Stage 5: Hardware tuning (cgroup, fstrim, sysctl, watchdog)" \
             "security" "Stage 6: Security (ufw, fail2ban, SSH, journald)" \
             "shares"   "Stage 7: Network shares (Samba/Avahi)" \
-            "backup"   "Stage 8: Backups and monitoring (SMART, health, restic)" \
+            "backup"   "Stage 8: Backups and monitoring (SMART, health, Kopia)" \
             "quit"     "Exit")" || break
 
         case "$choice" in
@@ -3695,8 +3696,8 @@ stage_system_apply() {
     # say so up front (install.sh asks interactively; here we can only warn).
     local _osid; _osid="$(. /etc/os-release 2>/dev/null && echo "${ID:-}")"
     case "$_osid" in
-        debian|raspbian) ;;
-        *) warn "OS '$_osid' is not supported — NAS-OS targets Debian (Ubuntu is untested); consider reinstalling the system before going further" ;;
+        debian) ;;
+        *) warn "OS '$_osid' is not supported — NAS-OS targets Debian on x86 (Ubuntu is untested); consider reinstalling the system before going further" ;;
     esac
     # first thing — update the whole system (as requested: apt update && full-upgrade)
     run apt-get update
@@ -3715,9 +3716,9 @@ stage_system_apply() {
     local svc
     for svc in docker; do enable_service "$svc"; done
     systemctl list-unit-files fstrim.timer >/dev/null 2>&1 && enable_service fstrim.timer
-    # Hardware watchdog: if the kernel hangs, the Pi auto-reboots instead of sitting
+    # Hardware watchdog: if the kernel hangs, the box auto-reboots instead of sitting
     # dead until someone hits the power button. Applied by default for reliability
-    # (still listed in pi-tuning so it can be toggled). Harmless without a watchdog device.
+    # (still listed in hardware tuning so it can be toggled). Harmless without a device.
     hw_watchdog
     # USB-SATA bridges always go through usb-storage, never UAS. Not a toggle: UAS error
     # recovery resets the whole device and takes a running backup down with it. See install_uas_off().
@@ -4160,7 +4161,7 @@ api_dockge() {
 }
 # Copy the selected bundled stacks (NASW_KEYS) into the Dockge directory. We don't start them — start from Dockge.
 # run a set of functions by keys from NASW_KEYS (space-separated)
-api_keys_run() {               # $1=prefix (pi|sec|...) ; calls <prefix>_<key>
+api_keys_run() {               # $1=prefix (hw|sec|...) ; calls <prefix>_<key>
     local prefix="$1" k
     for k in ${NASW_KEYS:-}; do
         if declare -F "${prefix}_${k}" >/dev/null; then "${prefix}_${k}"; fi
@@ -4269,7 +4270,7 @@ main() {
         shares)   stage_shares ;;
         backup)   stage_backup ;;
         "")       main_menu ;;
-        *)        die "unknown stage: $FORCE_STAGE (system|disk|mergerfs|snapraid|docker|pi|security|shares|backup)" ;;
+        *)        die "unknown stage: $FORCE_STAGE (system|disk|mergerfs|snapraid|docker|hw|security|shares|backup)" ;;
     esac
 }
 

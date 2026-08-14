@@ -28,7 +28,7 @@ die(){ printf '\033[31m✗ %s\033[0m\n' "$*" >&2; exit 1; }
 OS_ID="$(. /etc/os-release 2>/dev/null && echo "${ID:-unknown}")"
 OS_NAME="$(. /etc/os-release 2>/dev/null && echo "${PRETTY_NAME:-$OS_ID}")"
 case "$OS_ID" in
-  debian|raspbian) ;;
+  debian) ;;
   *)
     printf '\033[33;1m'
     echo "⚠  This system is: $OS_NAME"
@@ -126,7 +126,7 @@ if systemctl is-active --quiet nas-web.service; then
   printf '\033[32m✔ NAS-OS is ready.\033[0m  Desktop:  http://%s.local' "$HOST"
   [ -n "$IP" ] && printf '   (http://%s)' "$IP"
   [ "$PORT" != "80" ] && printf '   port %s' "$PORT"
-  echo; echo "  Next — open it in a browser and go through the wizard (Disks → Shares → Apps)."
+  echo; echo "  Next — open it in a browser and go through the wizard (Disks → Pool → Access → Security)."
 else
   die "Service failed to start. Check: journalctl -u nas-web -n 50"
 fi

@@ -243,7 +243,10 @@ running-but-disabled юнит → дрель флагает с fixa → drill_fi
 Аварий нет: `systemctl --failed` пуст, ни одного warning/error у nas-web/nas-syncthing/nas-screen/
 nas-netguard/nas-blackbox/smbd/docker/avahi, 4 контейнера живы, FUSE-маунты (pcloud, sshfs Ugreen,
 T7) отвечают на statvfs, T7 SMART PASSED, бэкапы ok, apt пуст.
-- **ГРАБЛЯ (исправлена): часы при загрузке уезжали на 10 суток назад.** chronyd штатно шагал время
+- **ГРАБЛЯ (исправлена): часы при загрузке уезжали на 10 суток назад.** *(Разбор про ДРУГУЮ
+  машину и прежнюю схему времени. На боксе mininas с 2026-08-14 chrony НЕ ставится вовсе —
+  время даёт встроенный `systemd-timesyncd`, а RTC переведён в UTC. Свежие случаи ухода
+  часов — в `docs/incidents.md`.)* chronyd штатно шагал время
   на 874407 с через ~18 с после старта; `journalctl --list-boots` показывал ВСЕ загрузки как
   «13 июля 13:33», `who -b` врал, vnstat ругался «database update is in the future». Причина: RTC
   нет, `systemd-timesyncd` УДАЛЁН (время даёт chrony), `fake-hwclock` не стоял, а осиротевший файл

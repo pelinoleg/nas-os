@@ -45,7 +45,7 @@ The script:
 3. brings up the `nas-web` service (port 80, root) with autostart;
 4. prints the address.
 
-Then open `http://<hostname>.local` and go through the **wizard**: Disks → Pool/Parity → Apps → Access → Security → Tuning → Notifications → Backups (hardware-dependent and optional — not installed automatically).
+Then open `http://<hostname>.local` and go through the **wizard**: System → Disks → Pool → Parity → Access → Security → Hardware → Alerts. Apps live in the panel's own App Store, and file backups are set up there too — neither is a wizard step.
 
 ### Install parameters (env)
 - `NASOS_DEST` — directory (default `/opt/nas-os`)
