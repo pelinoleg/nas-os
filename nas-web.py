@@ -946,7 +946,9 @@ _C_ENV = dict(os.environ, LC_ALL="C", LANG="C")   # stable (English) utility out
 
 def _run(cmd, timeout=40, env=None, cwd=None):
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
+        # errors="replace": a config snapshot diff containing a .gpg keyring or a gzipped
+        # console font used to raise UnicodeDecodeError straight out of the handler as a 500
+        p = subprocess.run(cmd, capture_output=True, text=True, errors="replace", timeout=timeout,
                            env=env or _C_ENV, cwd=cwd)
         return {"ok": p.returncode == 0, "code": p.returncode, "log": (p.stdout + p.stderr).strip()}
     except (OSError, subprocess.SubprocessError) as e:
@@ -15444,10 +15446,31 @@ def blackbox_daemon():
                        "interval": BB_INTERVAL, "samples": ring, "dmesg": dm}
             _json_save(os.path.join(BB_RUN, "current.json"), payload)
             if n % 3 == 0:
-                _json_save(curf, payload)   # the on-disk copy is what survives a power cut
-        except Exception:
-            pass
+                # `curf` was a local of _bb_rollover, so this line raised NameError on every
+                # pass and the bare except below swallowed it: /run is tmpfs, so the ring the
+                # recorder exists to preserve — the last seconds before a power cut — was
+                # never written to disk at all. Symptom on the box: 21 h of uptime, the
+                # service running, /run/nas-blackbox/current.json alive with 90 samples, and
+                # /var/lib/nas-wizard/blackbox EMPTY. With no on-disk ring there is no
+                # rollover on boot either, so boots.jsonl stayed empty and the dirty_boot
+                # alarm could never fire.
+                _json_save(os.path.join(BB_VAR, "current.json"), payload)
+        except Exception as e:
+            _bb_note_error(e)
         time.sleep(BB_INTERVAL)
+
+_BB_ERR = {"seen": False}
+
+def _bb_note_error(e):
+    """The recorder's loop swallowed everything, which is how a NameError lived in it for
+    a day. Report the first failure once — a flight recorder that is quietly not recording
+    is worse than none."""
+    if _BB_ERR["seen"]:
+        return
+    _BB_ERR["seen"] = True
+    _safe(lambda: log_event("blackbox", "Black box is not recording",
+                            "%s: %s" % (type(e).__name__, e), "err", kind="cond"))
+
 
 def blackbox_status():
     live = (_json_load_strict(os.path.join(BB_RUN, "current.json"), None)
@@ -15530,6 +15553,14 @@ def drill_run():
                 why + " — it will not come back after a reboot.",
                 "systemctl enable --now " + u,
                 fixa={"a": "enable_now", "unit": u} if st == "disabled" else None)
+        elif st in ("not-found", "") or st.startswith("Failed"):
+            # `systemctl is-enabled` answers "not-found" with exit code 0, so a unit that does
+            # not exist at all slipped past the check above and the drill scored a clean
+            # 100/100 while nas-stacks.service — "brings docker stacks back up after boot" —
+            # was simply absent from the box.
+            add("bad", "services", "%s is missing" % u,
+                why + " — the unit does not exist on this box, so nothing will bring it back.",
+                "reinstall it: nas-wizard.sh api " + u.split(".")[0].replace("nas-", ""))
 
     # mounts: fstab promises vs reality, both directions
     fstab, fsmp = [], {}
@@ -15754,7 +15785,13 @@ def confgit_snapshot(reason="manual"):
             # file, so a rotated password stays readable in history forever — and the panel
             # serves these diffs to any session through /api/resil/confgit/filediff.
             "--exclude=nas-os/kopia.json", "--exclude=nas-os/kopia/server",
-            "--exclude=nas-os/rclone.conf", "--exclude=nas-os/smb-users.json"]
+            "--exclude=nas-os/rclone.conf", "--exclude=nas-os/smb-users.json",
+            # The ones that actually mattered, and were still going in: the panel serves
+            # these diffs to any session, and the repo tracked the password database, the
+            # Wi-Fi PSK and the panel's own password hash.
+            "--exclude=shadow", "--exclude=shadow-", "--exclude=gshadow", "--exclude=gshadow-",
+            "--exclude=NetworkManager/system-connections", "--exclude=nas-os/webauth.json",
+            "--exclude=nas-os/sessions.json"]
     r = _run(["rsync", "-a", "--delete", *excl, "/etc/",
               os.path.join(CONFGIT_DIR, "etc/")], timeout=180)
     if not r.get("ok"):
@@ -24454,11 +24491,20 @@ class H(BaseHTTPRequestHandler):
         deadline = threading.Timer(timeout, lambda: p.poll() is None and p.kill())
         deadline.daemon = True; deadline.start()
         try:
+            gone = False
             for line in iter(p.stdout.readline, ""):
+                if gone:
+                    continue          # keep draining so the command can finish
                 try:
                     self.wfile.write(line.encode()); self.wfile.flush()
                 except (BrokenPipeError, ConnectionResetError):
-                    p.kill(); break
+                    # The client leaving is not a reason to SIGKILL the work. This path streams
+                    # `apt-get upgrade`, `docker compose up`, snapraid sync — and it killed them the
+                    # moment a tab closed, a laptop slept or the Wi-Fi blinked. For apt that means
+                    # dpkg interrupted mid-transaction ("you must manually run dpkg --configure -a",
+                    # at worst a half-installed kernel), and the dialog even renames its Close button
+                    # to "In background". The timeout above still bounds the run.
+                    gone = True
             p.wait()
         finally:
             deadline.cancel()
