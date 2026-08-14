@@ -2008,6 +2008,37 @@ def _gl_spark_for(tid):
     f = GLANCE_SPARKS.get(tid)
     return _gl_spark(f) if f else None
 
+
+def _gl_spark_scale(tid, tile=None):
+    """The axis the 24h series must be drawn against, units included.
+
+    A client cannot deduce it from the tile, because a spark does not always measure
+    what the tile displays. dk:* is the case that bites: the tile reads "205 GB free"
+    with a percent-USED gauge (0..100), and the series plotted under it is that disk's
+    TEMPERATURE. Drawn against the tile's own scale, 55 °C lands at the "55 % full"
+    mark — not a glitch a viewer can spot, just a wrong line that looks deliberate.
+
+    Where the series has no fixed range — network throughput — `max` stays null and the
+    client autoscales; the unit alone is still enough to label the axis. Everywhere
+    else the series does match the tile, and we hand back the gauge's own scale so
+    both are drawn against one axis instead of two that merely look alike."""
+    if tid.startswith("dk:"):
+        w = _disktemp_warn_at()
+        # the disktemp scale, not the disk's: a spark is worth reading against the
+        # point where the owner said a disk is too hot
+        return {"unit": "°C", "min": 20, "max": w + 25,
+                "warnAt": w, "dangerAt": w + 10, "worse": "up"}
+    if tid == "netspeed":
+        # history stores rx+tx in bytes/s. The tile may DISPLAY bits — that is a
+        # rendering choice on top of this number, and converting the axis silently
+        # would make the two disagree by a factor of eight
+        return {"unit": "B/s", "min": 0, "max": None,
+                "warnAt": None, "dangerAt": None, "worse": "up"}
+    g = (tile or {}).get("gauge")
+    if not g:
+        return None
+    return {k: g.get(k) for k in ("unit", "min", "max", "warnAt", "dangerAt", "worse")}
+
 def _gl_spark(field, points=48):
     """24h series for one tile, resampled to `points`. `field` is a history key or a
     callable taking a point (per-disk series live in a nested dict)."""
@@ -2516,6 +2547,25 @@ def _gauge(v, lo, hi, warn, danger, unit="", worse="up"):
             "unit": unit, "worse": worse}
 
 
+def _disktemp_warn_at():
+    """The owner's disk-temperature threshold, or 60 °C. One reader for a number that
+    three call sites used to parse for themselves — a tile, its per-disk list and the
+    screen's disk light. Three copies of the same try/except are three chances to
+    disagree about what "hot" means on the same box."""
+    try:
+        return int((load_monitor().get("events", {}).get("disktemp") or {}).get("threshold", 60))
+    except (TypeError, ValueError):
+        return 60
+
+
+def _disktemp_state(c, warn_at=None):
+    """ok/warn/danger for ONE disk temperature. `danger` is the threshold + 10: the
+    owner sets the point where a disk is too hot, and ten degrees past it is the point
+    where nobody should have to be told twice."""
+    warn_at = _disktemp_warn_at() if warn_at is None else warn_at
+    return "danger" if c >= warn_at + 10 else ("warn" if c >= warn_at else "ok")
+
+
 def _fs_list(paths):
     """[{mount, size, used, free, pct}] for the mount points that exist.
 
@@ -2644,17 +2694,21 @@ def _glance_tile(tid, en):
         if not temps:
             return None
         dev, t = max(temps, key=lambda x: x[1])
-        try:
-            warn_at = int((load_monitor().get("events", {}).get("disktemp") or {}).get("threshold", 60))
-        except (TypeError, ValueError):
-            warn_at = 60
-        st = "danger" if t >= warn_at + 10 else ("warn" if t >= warn_at else "ok")
+        warn_at = _disktemp_warn_at()
+        st = _disktemp_state(t, warn_at)
         return {"value": "%d" % round(t), "unit": "°C", "state": st, "note": dev,
                 # min is 20, not 0: a disk never sits at freezing, and a bar that starts
                 # there puts a cold drive in the middle of its own scale
                 "gauge": _gauge(t, 20, warn_at + 25, warn_at, warn_at + 10, "°C"),
+                # every disk carries its OWN state. The tile's state belongs to the
+                # hottest one, and a client that paints the whole list with it shows a
+                # 44 °C drive in the colour earned by the 55 °C drive next to it —
+                # the one reading that matters is then indistinguishable from the rest
                 "raw": {"c": round(t, 1), "dev": dev,
-                        "all": [{"dev": d, "c": round(x, 1)} for d, x in temps]}}
+                        "warnAt": warn_at, "dangerAt": warn_at + 10,
+                        "all": [{"dev": d, "c": round(x, 1),
+                                 "state": _disktemp_state(x, warn_at)}
+                                for d, x in temps]}}
     if tid == "cpu":
         pct = cpu_percent()
         st = "danger" if pct >= 95 else ("warn" if pct >= 80 else "ok")
@@ -2873,6 +2927,10 @@ def glance_payload(lang="ru", screen="", only=None, slim=False):
             sp = _safe(lambda t=tid: _gl_spark_for(t))
             if sp:
                 d["spark"] = sp
+                # the series travels with its own axis — see _gl_spark_scale
+                sc = _safe(lambda t=tid, tl=d: _gl_spark_scale(t, tl))
+                if sc:
+                    d["sparkScale"] = sc
         tiles.append(d)
         if d["state"] != "ok":
             problems.append("%s: %s %s" % (d["label"], d["value"], d.get("note") or d.get("unit") or ""))
@@ -2895,7 +2953,9 @@ def glance_payload(lang="ru", screen="", only=None, slim=False):
     # `spark` together are about a quarter of the payload; the tiles a given
     # page never shows are most of the rest.
     if slim:
-        tiles = [{k: v for k, v in t.items() if k not in ("raw", "spark")}
+        # sparkScale goes out with the spark it describes — a lone axis for a series
+        # the client was never sent is bytes on the wire and nothing on the screen
+        tiles = [{k: v for k, v in t.items() if k not in ("raw", "spark", "sparkScale")}
                  for t in tiles]
     if only:
         keep = set(only)
@@ -23045,13 +23105,12 @@ def _disk_state(d):
     if isinstance(t, (int, float)):
         known = True
         if st != "danger":
-            try:
-                warn_at = int((load_monitor().get("events", {}).get("disktemp") or {}).get("threshold", 60))
-            except (TypeError, ValueError):
-                warn_at = 60
-            if t >= warn_at + 10:
+            # same verdict as the disktemp tile publishes, so the screen light and the
+            # tile cannot call the same disk different names
+            hot = _disktemp_state(t)
+            if hot == "danger":
                 st = "danger"
-            elif t >= warn_at and st == "ok":
+            elif hot == "warn" and st == "ok":
                 st = "warn"
     # Nothing was read: a sleeping disk reports no temperature and an unmounted one no
     # usage. Returning "ok" there would paint a green light off an unread sensor — the
