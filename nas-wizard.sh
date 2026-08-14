@@ -1133,7 +1133,24 @@ Configs in git: $NAS_CONFIG"
 # nofail — do not block boot in emergency mode if the pool did not mount.
 # x-systemd.requires=<branch> is added to each branch dynamically in generate_mergerfs
 # (disk paths are not static), so the pool mounts ONLY after its branches, not over empty /mnt/diskN.
-MERGERFS_OPTS="defaults,nofail,allow_other,use_ino,category.create=mfs,minfreespace=20G,fsname=mergerfs"
+#
+# category.create=epmfs — PATH PRESERVING: a new file goes only to a branch where its
+# directory already exists (of those, the one with the most free space). Chosen 2026-08-14
+# over mfs, deliberately, because this box has no SnapRAID parity: a dead branch takes its
+# files with it either way, and the only question is WHICH files. Under mfs one folder is
+# scattered over every branch, so losing a disk punches a random hole in EVERY folder;
+# under epmfs a folder lives on one branch and the loss is whole folders — something the
+# owner can name and re-fetch instead of swiss cheese. Two consequences come with it:
+#   * rename ACROSS branches now returns EXDEV. Everything in the panel that moves files
+#     already falls back to copy+delete (fs_move and the trash use shutil.move,
+#     _fsjob_move_entry catches OSError from os.rename), so this is invisible there — but a
+#     naive client that treats rename(2) as infallible is not.
+#   * when the branch holding a folder fills up, new files in THAT folder fail while the
+#     pool still has room elsewhere. moveonenospc rescues the half of that we can rescue:
+#     a WRITE that hits ENOSPC moves the file to another branch and retries (mergerfs
+#     default is false; true means the mfs policy). A create that finds no branch with
+#     minfreespace left still fails, and that is the price of path preservation.
+MERGERFS_OPTS="defaults,nofail,allow_other,use_ino,category.create=epmfs,minfreespace=20G,moveonenospc=true,fsname=mergerfs"
 
 remove_fstab_mergerfs() {
     if [ "$DRY_RUN" -eq 1 ]; then
@@ -1147,7 +1164,7 @@ remove_fstab_mergerfs() {
 # branches-mount-timeout: wait for each branch to actually BE a mount before serving.
 # mergerfs ships this option for precisely the race above; 0 (its default) means
 # "trust whatever is in the directory right now".
-MERGERFS_SVC_OPTS="allow_other,use_ino,category.create=mfs,minfreespace=20G,branches-mount-timeout=30,fsname=mergerfs"
+MERGERFS_SVC_OPTS="allow_other,use_ino,category.create=epmfs,minfreespace=20G,moveonenospc=true,branches-mount-timeout=30,fsname=mergerfs"
 MERGERFS_UNIT="/etc/systemd/system/nas-mergerfs.service"
 # Keep the mergerfs pool as a systemd SERVICE with Restart=always, NOT an fstab line. Reason:
 # the FUSE process may crash ("Transport endpoint is not connected"), and an fstab mount is then
