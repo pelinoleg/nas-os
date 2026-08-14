@@ -952,9 +952,23 @@ def _run(cmd, timeout=40, env=None, cwd=None):
     except (OSError, subprocess.SubprocessError) as e:
         return {"ok": False, "code": -1, "log": str(e)}
 
+_UNMOUNT_PROTECTED_RE = re.compile(r"^/mnt/(disk|parity)\d+$")
+
 def disk_mount(target, unmount=False):
     if not re.match(r"^/[\w/.+-]+$", target or ""):
         return {"ok": False, "log": "invalid path"}
+    if unmount:
+        # The only check here used to be the shape of the path, and the panel draws an
+        # Unmount button for every disk without partitions — which is exactly what the pool
+        # branches are. One click took a branch out of /mnt/storage: the pool stays "healthy"
+        # while that disk's files vanish from it, and new writes land on the now-empty
+        # mountpoint on the SYSTEM disk. That is the failure the unit's RequiresMountsFor
+        # exists to prevent, reachable from a button with no confirmation. /boot/efi went
+        # the same way.
+        t = os.path.realpath(target).rstrip("/") or "/"
+        if t in _SYS_MPS or t == STORAGE or _UNMOUNT_PROTECTED_RE.match(t):
+            return {"ok": False, "log": "%s is part of the system or the pool — "
+                                        "unmounting it here would break the box" % t}
     r = _run(["umount" if unmount else "mount", target])
     if r["ok"] and not r["log"]:
         r["log"] = "unmounted" if unmount else "mounted"
@@ -4476,7 +4490,17 @@ def _smart_scan():
             temp = (j.get("temperature") or {}).get("current")
         if isinstance(temp, int) and temp > 200:      # some firmwares put garbage in raw
             temp = temp & 0xff
-        res[dev] = {"passed": passed, "realloc": realloc, "pending": pending, "temp": temp}
+        # NVMe has none of the ATA attributes above, so on an all-NVMe box this scan produced
+        # nothing but "passed" and the wear alarm could never fire — while smartctl was
+        # reporting Percentage Used and Available Spare all along. These are the numbers an
+        # NVMe actually dies by.
+        nl = j.get("nvme_smart_health_information_log") or {}
+        res[dev] = {"passed": passed, "realloc": realloc, "pending": pending, "temp": temp,
+                    "wear": nl.get("percentage_used"),
+                    "spare": nl.get("available_spare"),
+                    "spare_min": nl.get("available_spare_threshold"),
+                    "media_errors": nl.get("media_errors"),
+                    "critical_warning": nl.get("critical_warning")}
     return res
 
 def _block_volumes():
@@ -4990,6 +5014,21 @@ def monitor_tick():
                     bad.append("reallocated sectors: %d" % d["realloc"])
                 if isinstance(d.get("pending"), int) and d["pending"] >= thr("smart_wear", 1):
                     bad.append("pending: %d" % d["pending"])
+                # NVMe reports none of the above and dies by these instead. Collected but
+                # never read until now, so on an all-NVMe box this alarm could not fire at
+                # all. The thresholds are the drive's own: spare below the firmware's own
+                # minimum, any media error, any critical warning flag — plus 80 % of rated
+                # life, which is a warning rather than a verdict.
+                if isinstance(d.get("spare"), int) and isinstance(d.get("spare_min"), int) \
+                        and d["spare_min"] and d["spare"] <= d["spare_min"]:
+                    bad.append("spare blocks down to %d%% (firmware minimum %d%%)"
+                               % (d["spare"], d["spare_min"]))
+                if isinstance(d.get("media_errors"), int) and d["media_errors"] > 0:
+                    bad.append("media errors: %d" % d["media_errors"])
+                if isinstance(d.get("critical_warning"), int) and d["critical_warning"]:
+                    bad.append("critical warning flag: 0x%x" % d["critical_warning"])
+                if isinstance(d.get("wear"), int) and d["wear"] >= 80:
+                    bad.append("%d%% of rated write life used" % d["wear"])
                 if bad:
                     fire("wear:" + dev, "NAS: disk wear", "%s — %s" % (dev, ", ".join(bad)), pri("smart_wear"), ev_name="smart_wear")
             if isinstance(d.get("temp"), int) and d["temp"] > 0:
@@ -18563,14 +18602,25 @@ def cron_stats():
     r = _cron("GET", "/api/system-stats")      # flat object {uptime, memory, cpu, network}
     return {"ok": True, "stats": r["data"]} if r.get("ok") else r
 
+def _cron_jid_ok(jid):
+    """`..` passed the id pattern, so a job id could walk to a neighbouring endpoint."""
+    return bool(jid) and ".." not in str(jid)
+
+
 def cron_run(jid):
+    if not _cron_jid_ok(jid):
+        return {"ok": False, "log": "bad job id"}
     return _cron("GET", "/api/cronjobs/%s/execute?runInBackground=true" % jid)
 
 def cron_update(jid, body):
+    if not _cron_jid_ok(jid):
+        return {"ok": False, "log": "bad job id"}
     keep = {k: body[k] for k in ("schedule", "command", "comment", "logsEnabled") if k in body}
     return _cron("PATCH", "/api/cronjobs/%s" % jid, keep)
 
 def cron_delete(jid):
+    if not _cron_jid_ok(jid):
+        return {"ok": False, "log": "bad job id"}
     return _cron("DELETE", "/api/cronjobs/%s" % jid)
 
 def cron_scripts():

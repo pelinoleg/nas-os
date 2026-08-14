@@ -1,5 +1,9 @@
 # Cronmaster — manages HOST cron jobs (web UI + REST API). http://<pi>:8123
-# Open access on the LAN: AUTH_PASSWORD and API_KEY are NOT set → no password (as agreed).
+# LOOPBACK ONLY. This container edits the HOST root crontab and holds docker.sock, and it
+# ships without AUTH_PASSWORD/API_KEY — published on 0.0.0.0 that is a password-free root
+# shell for anyone on the LAN, which is the opposite of every other decision on this box
+# (Scrutiny was moved to loopback, the display token was cut back). Reach it through an SSH
+# tunnel, or put a password on it before exposing it.
 # Manages the host's cron directly → needs privileged, pid:host and docker.sock (standard for cronmaster).
 # Data/scripts/snippets live next to the stack (./data ./scripts ./snippets in the Dockge folder).
 services:
@@ -9,7 +13,7 @@ services:
     user: "root"
     restart: unless-stopped
     ports:
-      - "8123:3000"
+      - "127.0.0.1:8123:3000"
     environment:
       - NODE_ENV=production
       - HOST_CRONTAB_USER=root
