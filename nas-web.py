@@ -3246,6 +3246,14 @@ def notes_tree():
             stats["dirs"] += 1
         for f in sorted(fn):
             fp = os.path.join(dp, f)
+            # A symlink in the notes folder used to be read like any note: the tree preview
+            # opened it directly, so a link named leak.md pointing at /etc/shadow put the
+            # first 2 KB of the shadow file into the notes list. The panel runs as root and
+            # the notes folder is owned by the user and exported over SMB, so anyone who can
+            # write there could read any file on the box. note_get and search already refuse
+            # symlinks by resolving them; only this listing did not.
+            if os.path.islink(fp):
+                continue
             try:
                 st = os.stat(fp)
             except OSError:
@@ -3458,13 +3466,31 @@ def note_get(rel):
     return {"path": rel.strip("/"), "title": title, "tags": tags, "md": body,
             "kind": _note_kind(rel),
             "pinned": _note_meta(text).get("pinned") == "1",
-            "mtime": int(os.stat(p).st_mtime)}
+            "mtime": int(os.stat(p).st_mtime), "mtime_ns": os.stat(p).st_mtime_ns,
+            "rev": _note_rev(p)}
 
 def _note_slug(name):
     name = re.sub(r"[\\/:*?\"<>|\n\r\t]", "", str(name or "").strip())
     return name[:80] or "Note"
 
-def note_save(rel, title, tags, md, pinned=False, base_mtime=0, force=False, conflict_copy=False):
+def _note_rev(path):
+    """What the client last saw, as something the filesystem cannot lie about.
+
+    The note lock used to compare mtimes, and on a mergerfs pool that comparison is blind:
+    attributes are cached for a second, so a stat taken immediately after another device's
+    save returns the mtime from BEFORE it. Measured — the second writer sailed through the
+    check and the first writer's text was overwritten with no conflict dialog. Content is
+    not cached, so a hash of it answers honestly and costs a read of a file that is, by
+    definition, small enough to edit in a browser."""
+    try:
+        with open(path, "rb") as f:
+            return hashlib.sha1(f.read()).hexdigest()[:16]
+    except OSError:
+        return ""
+
+
+def note_save(rel, title, tags, md, pinned=False, base_mtime=0, force=False, conflict_copy=False,
+               base_rev=""):
     p = _notes_abs(rel)
     lp = p.lower()
     if not (lp.endswith(".md") or lp.endswith(".html")):
@@ -3477,10 +3503,34 @@ def note_save(rel, title, tags, md, pinned=False, base_mtime=0, force=False, con
         base_mtime = int(base_mtime or 0)
     except (TypeError, ValueError):
         base_mtime = 0
-    if base_mtime and not force and os.path.isfile(p) \
-            and int(os.stat(p).st_mtime) > base_mtime:
+    # Seconds were too coarse and ">" was the wrong question: two saves inside one second
+    # both won, and once a client held an mtime equal to the file's, every later save of
+    # its stale copy passed the check and overwrote the other device's text with no
+    # conflict dialog. Nanoseconds, and "changed" rather than "newer".
+    def _stale(path, base):
+        st = os.stat(path)
+        # A client that still speaks seconds keeps the old, coarse check; one that sends
+        # nanoseconds (anything past the year 33658 in seconds is not a timestamp) gets the
+        # exact one. Both ask "changed?", not "newer?".
+        return st.st_mtime_ns != base if base > 10 ** 12 else int(st.st_mtime) != base
+
+    # A timestamp cannot answer this on the pool at all: mergerfs caches attributes for a
+    # second by default, and a stat taken right after another writer's save was measured
+    # returning the OLD mtime — so the lock silently let the second writer through and the
+    # first one's text was gone. File CONTENT is not cached (cache.files is off), so the
+    # revision the client last saw is the honest question. base_mtime stays as the fallback
+    # for a client that has not sent a revision yet.
+    if base_rev and not force and os.path.isfile(p) and _note_rev(p) != str(base_rev):
+        stale = True
+    elif base_mtime and not force and not base_rev and os.path.isfile(p) \
+            and _stale(p, int(base_mtime)):
+        stale = True
+    else:
+        stale = False
+    if stale:
         if not conflict_copy:
-            return {"ok": False, "conflict": True, "mtime": int(os.stat(p).st_mtime)}
+            return {"ok": False, "conflict": True, "mtime": int(os.stat(p).st_mtime),
+                    "mtime_ns": os.stat(p).st_mtime_ns, "rev": _note_rev(p)}
         # unload-flush can't ask the user — park this client's text in a sibling;
         # the file name is a disk artifact, so it follows the UI language
         word = "conflict" if (load_settings().get("lang") or "en") == "ru" else "conflict"
@@ -3502,6 +3552,8 @@ def note_save(rel, title, tags, md, pinned=False, base_mtime=0, force=False, con
     os.replace(tmp, p)
     _chown_user(p)
     out["mtime"] = int(os.stat(p).st_mtime)
+    out["mtime_ns"] = os.stat(p).st_mtime_ns
+    out["rev"] = _note_rev(p)
     return out
 
 def note_new(folder, title, kind="md"):
@@ -3526,6 +3578,23 @@ def note_mkdir(folder, name):
     _chown_user(d)
     return {"ok": True}
 
+def _nt_relocate(src, dst):
+    """Move a note or a folder, across mergerfs branches if it comes to that.
+
+    os.rename between two branches of the pool returns EXDEV, and since the pool became
+    path preserving that is the normal case for FOLDERS: measured, moving a notes folder
+    from disk1 to a parent living on disk2 raised OSError(18) straight through the API as
+    a 500 with repr(e) in it, and the same happened when deleting a folder into .trash.
+    Files survive it (mergerfs recreates their path on the source branch); directories do
+    not."""
+    try:
+        os.rename(src, dst)
+    except OSError as e:
+        if e.errno != errno.EXDEV:
+            raise
+        shutil.move(src, dst)
+
+
 def note_move(rel, to):
     src, dst = _notes_abs(rel), _notes_abs(to)
     if not os.path.exists(src):
@@ -3533,13 +3602,15 @@ def note_move(rel, to):
     if os.path.exists(dst):
         raise ValueError("that name is already taken")
     os.makedirs(os.path.dirname(dst), exist_ok=True)
-    os.rename(src, dst)
+    _nt_relocate(src, dst)
     hd = _nt_hist_dir(rel)                      # history follows the note
     if os.path.isdir(hd):
         nh = _nt_hist_dir(to)
-        os.makedirs(os.path.dirname(nh), exist_ok=True)
+        # the note itself has already moved: losing its version history must not turn a
+        # completed move into an error the owner cannot retry ("no source" on the retry)
+        _safe(lambda: os.makedirs(os.path.dirname(nh), exist_ok=True))
         if not os.path.exists(nh):
-            os.rename(hd, nh)
+            _safe(lambda: _nt_relocate(hd, nh))
     return {"ok": True}
 
 def note_delete(rel):
@@ -3554,7 +3625,7 @@ def note_delete(rel):
     while os.path.exists(dst):
         i += 1
         dst = os.path.join(tr, "%s (%d)%s" % (stem, i, ext))
-    os.rename(p, dst)
+    _nt_relocate(p, dst)
     # remember the source folder so restore can put the item back where it lived
     og = os.path.join(tr, ".origins.json")
     m = _json_load_strict(og, {})
@@ -25421,7 +25492,8 @@ class H(BaseHTTPRequestHandler):
                 self._json(note_save(b.get("path", ""), b.get("title", ""),
                                      b.get("tags") or [], b.get("md", ""),
                                      bool(b.get("pinned")), b.get("base_mtime", 0),
-                                     bool(b.get("force")), bool(b.get("conflict_copy"))))
+                                     bool(b.get("force")), bool(b.get("conflict_copy")),
+                                     str(b.get("base_rev") or "")))
             elif p == "/api/notes/restore":
                 b = self._body()
                 self._json(notes_restore(b.get("path", ""), b.get("v", "")))

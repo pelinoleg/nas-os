@@ -13080,7 +13080,7 @@ function loadNotesLibs(){
  NT_LIBS=js("/tui-editor.js").then(()=>Promise.all([js("/tui-hl.js")]));
  return NT_LIBS;
 }
-let NT_ED=null,NT_PATH=null,NT_SAVE_T=null,NT_DIRTY=false,NT_PIN=false,NT_TAGS=[],NT_MTIME=0;
+let NT_ED=null,NT_PATH=null,NT_SAVE_T=null,NT_DIRTY=false,NT_PIN=false,NT_TAGS=[],NT_MTIME=0,NT_REV="";
 /* A note is either markdown (Toast UI, NT_ED) or full HTML (CodeMirror source in
    NT_CM + a sandboxed preview iframe). NT_KIND says which; the content accessors
    below hide the difference from the save/flush paths so they stay editor-agnostic. */
@@ -13103,8 +13103,8 @@ function ntFlushPage(){
   const t=document.getElementById("ntTitle");
   fetch("/api/notes/save",{method:"POST",keepalive:true,headers:{"Content-Type":"application/json"},
    body:JSON.stringify({path:NT_PATH,title:t?t.value.trim():"",tags:NT_TAGS.slice(),pinned:NT_PIN,
-    md:ntGetContent(),base_mtime:NT_MTIME,conflict_copy:true})})
-   .then(x=>x.json()).then(r=>{if(r&&r.ok&&r.mtime)NT_MTIME=r.mtime;   // page survived (tab switch) — stay in sync
+    md:ntGetContent(),base_mtime:NT_MTIME,base_rev:NT_REV,conflict_copy:true})})
+   .then(x=>x.json()).then(r=>{if(r&&r.ok&&(r.mtime_ns||r.mtime))NT_MTIME=r.mtime_ns||r.mtime;if(r&&r.rev)NT_REV=r.rev;   // page survived (tab switch) — stay in sync
     if(r&&r.conflict_copy)toast("Version conflict: the text was saved as a copy «"+r.conflict_copy+"»");})
    .catch(()=>{NT_DIRTY=true;});
  }catch(e){}}
@@ -13415,7 +13415,7 @@ function winNotes(){openWin("__notes","Notes",async body=>{
   NT_DIRTY=false;clearTimeout(NT_SAVE_T);
   const title=q("#ntTitle")?q("#ntTitle").value.trim():"";
   const tags=NT_TAGS.slice();
-  const r=await api("/api/notes/save",{method:"POST",body:JSON.stringify({path:NT_PATH,title,tags,pinned:NT_PIN,md:ntGetContent(),base_mtime:NT_MTIME,force:!!force})});
+  const r=await api("/api/notes/save",{method:"POST",body:JSON.stringify({path:NT_PATH,title,tags,pinned:NT_PIN,md:ntGetContent(),base_mtime:NT_MTIME,base_rev:NT_REV,force:!!force})});
   if(r&&r.conflict){   // somebody saved this note from another window/device meanwhile
    NT_DIRTY=true;ntConflict=true;
    const s=document.getElementById("scrim"),pth=NT_PATH;
@@ -13425,7 +13425,8 @@ function winNotes(){openWin("__notes","Notes",async body=>{
    s.querySelector("#ntCF").onclick=()=>{s.classList.remove("show");ntConflict=false;NT_DIRTY=false;openNote(pth);};
    s.querySelector("#ntCO").onclick=()=>{s.classList.remove("show");ntConflict=false;saveNow(true);};
    return;}
-  if(r&&r.ok&&r.mtime)NT_MTIME=r.mtime;
+  if(r&&r.ok&&(r.mtime_ns||r.mtime))NT_MTIME=r.mtime_ns||r.mtime;
+  if(r&&r.rev)NT_REV=r.rev;   // the revision the server confirmed: mtime is cached by the pool and lies
   const st=q("#ntSt");if(st)st.textContent=r&&r.ok?nasTr("saved ")+new Date().toTimeString().slice(0,5):nasTr("save failed");
   const n=TREE.notes.find(x=>x.path===NT_PATH);
   if(n){n.title=title||n.title;n.tags=tags;n.pinned=NT_PIN;n.mtime=Math.floor(Date.now()/1000);paintSide();paintList();}};
@@ -13436,7 +13437,7 @@ function winNotes(){openWin("__notes","Notes",async body=>{
   const r=await api("/api/notes/get?path="+encodeURIComponent(p));
   if(!r||!r.path){toast("Cannot open: "+((r&&r.error)||"no answer from the server"));return;}
   r.tags=r.tags||[];r.md=r.md||"";r.title=r.title||"";
-  NT_PATH=p;NT_MTIME=r.mtime||0;NT_KIND=r.kind||"md";NT_CM=null;NT_PREV=null;
+  NT_PATH=p;NT_MTIME=r.mtime_ns||r.mtime||0;NT_REV=r.rev||"";NT_KIND=r.kind||"md";NT_CM=null;NT_PREV=null;
   if(SET.notesLast!==p){SET.notesLast=p;saveSettings();}   // server-side (desktop.json): same last note in every browser
   // selection in the tree and the list follows the open note; expand the folder
   // chain so the sidebar highlight is actually visible (it used to go stale
