@@ -85,7 +85,7 @@ def _read(path, default=""):
     except OSError:
         return default
 
-def _json_save(path, obj, indent=None):
+def _json_save(path, obj, indent=None, mode=None):
     """Write JSON through a temp file + rename. A plain open("w") truncates the file
     first, so a power cut mid-write leaves valid-looking garbage — and every loader
     here answers a parse error with silent defaults, quietly wiping the user's
@@ -95,11 +95,33 @@ def _json_save(path, obj, indent=None):
     # saving the same file took the same temp path — the second open() truncated what
     # the first was still writing, and os.replace published the interleaved bytes.
     tmp = "%s.tmp.%d.%d" % (path, os.getpid(), threading.get_ident())
-    with open(tmp, "w") as f:
-        json.dump(obj, f, ensure_ascii=False, indent=indent)
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(tmp, path)
+    # The temp file is born 0600 and only widened to the mode the real file is meant to
+    # have. It used to be created by plain open(), i.e. 0644 under the server's umask, and
+    # callers chmod'ed the TARGET afterwards — so every secret written here (the display
+    # token, the credential store) was world-readable for the length of the write, and
+    # FOREVER if json.dump raised: measured, a failed save left a 0644 leftover with the
+    # secret in it. Same class as the config repo leak found the same day.
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(obj, f, ensure_ascii=False, indent=indent)
+            f.flush()
+            os.fsync(f.fileno())
+        want = mode
+        if want is None:                      # keep whatever the existing file had
+            try:
+                want = os.stat(path).st_mode & 0o777
+            except OSError:
+                want = 0o644
+        if want != 0o600:
+            os.chmod(tmp, want)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)                    # no half-written leftovers, secret or not
+        except OSError:
+            pass
+        raise
 
 _BAD_CONFIGS = []      # basenames of corrupt config files, drained by monitor_tick
 
@@ -2258,7 +2280,7 @@ def save_glance(d):
     raw = _json_load_strict(GLANCE_FILE, {})
     raw = dict(raw) if isinstance(raw, dict) else {}
     raw.update(cur)
-    _json_save(GLANCE_FILE, raw, indent=2)
+    _json_save(GLANCE_FILE, raw, indent=2, mode=0o600)   # secret: never widen it
     # the file carries the read-only display token: 0644 made it readable by every
     # local process, and the token is checked BEFORE the session gate
     try:
@@ -4270,7 +4292,18 @@ def _safe_untar(src, dest):
     # and that fallback was verified to extract "../escaped" outside the destination.
     # is_tarfile() reads the file separately from the extractor, so a file on a Samba
     # share could be swapped between the two reads to reach the unsafe branch.
-    shutil.unpack_archive(src, dest, filter="data")
+    try:
+        shutil.unpack_archive(src, dest, filter="data")
+    except TypeError:
+        # Only the TAR unpacker takes a filter; shutil hands .zip to _unpack_zipfile, which
+        # rejects the keyword outright — so every zip through here raised TypeError, which
+        # nothing caught, and the endpoint answered 500. Retrying through shutil would
+        # re-dispatch on the filename and could extract a swapped-in TAR unfiltered, which
+        # is the hole this function exists to close; zipfile is named explicitly instead,
+        # and ZipFile.extract sanitises member names itself.
+        import zipfile as _zf
+        with _zf.ZipFile(src) as z:
+            z.extractall(dest)
 
 def _act_title(p, b):
     """Log entry title for the action, or None if the action isn't logged."""
@@ -19692,7 +19725,10 @@ def fs_search(path, query, limit=400, kind="", minsize=0, days=0):
     return {"ok": True, "entries": out, "query": q}
 
 def fs_chmod(path, mode, recursive=False):
-    path = os.path.realpath(path)
+    # the leaf is NOT resolved: chmod/chown on a shortcut used to change the mode and
+    # owner of the file it pointed at, somewhere else entirely
+    path = os.path.join(os.path.realpath(os.path.dirname(path.rstrip('/')) or '/'),
+                        os.path.basename(path.rstrip('/')))
     if path == "/" or path.count("/") < 2:
         return {"ok": False, "log": "path is too dangerous: " + path}
     try:
@@ -19726,7 +19762,10 @@ def _resolve_gid(group):
     return int(s) if s.isdigit() else grp.getgrnam(s).gr_gid
 
 def fs_chown(path, owner, group, recursive=False):
-    path = os.path.realpath(path)
+    # the leaf is NOT resolved: chmod/chown on a shortcut used to change the mode and
+    # owner of the file it pointed at, somewhere else entirely
+    path = os.path.join(os.path.realpath(os.path.dirname(path.rstrip('/')) or '/'),
+                        os.path.basename(path.rstrip('/')))
     if path == "/" or path.count("/") < 2:
         return {"ok": False, "log": "path is too dangerous: " + path}
     try:
@@ -20097,7 +20136,7 @@ def duscan_dups(root):
 # --------------------------------------------------------------------------- #
 FSW_DB  = os.path.join(NAS_CONFIG, "fswatch.db")
 FSW_CFG = os.path.join(NAS_CONFIG, "fswatch.json")
-FSW_DEF_EXCLUDE = [".trash", ".recycle", "#recycle", "@eaDir", "lost+found",
+FSW_DEF_EXCLUDE = [".trash", ".nas-trash", ".recycle", "#recycle", "@eaDir", "lost+found",
                    ".Trash-*", "node_modules", ".git", "__pycache__",
                    ".DS_Store", "._*", "Thumbs.db", "desktop.ini",
                    "*.tmp", "*.part", "*.crdownload", "*.!qB", "~$*"]
@@ -21151,23 +21190,23 @@ HP_CATALOG = [
     ("Syncthing",    8384, False, "syncthing",  "File synchronization"),
     ("NextExplorer", 3000, False, "mdi-folder", "File manager"),
 ]
+_CREDS_LOCK = threading.Lock()
+
 def load_creds():
-    try:
-        with open(CREDS_FILE) as f:
-            return json.load(f)
-    except (OSError, json.JSONDecodeError):
-        return []
+    """A corrupt store is kept aside as .bad and reported, never silently emptied: the
+    panel would have shown an empty list and the next "add" would have written that empty
+    list back over the owner's passwords."""
+    d = _json_load_strict(CREDS_FILE, [])
+    return d if isinstance(d, list) else []
 
 def save_creds(data):
+    if not isinstance(data, list):
+        raise ValueError("credentials must be a list")
     os.makedirs(NAS_CONFIG, exist_ok=True)
-    tmp = CREDS_FILE + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, CREDS_FILE)
-    try:
-        os.chmod(CREDS_FILE, 0o600)
-    except OSError:
-        pass
+    # 0600 from the first byte, and one writer at a time: two panel threads writing this
+    # file lost half the entries in a measured run (80 concurrent appends -> 41 stored).
+    with _CREDS_LOCK:
+        _json_save(CREDS_FILE, data, indent=2, mode=0o600)
 
 # --------------------------------------------------------------------------- #
 #  Web UI authentication: password (PBKDF2 on disk) + in-memory sessions.
@@ -25352,7 +25391,13 @@ class H(BaseHTTPRequestHandler):
         self._body, self._json = _body_cached, _json_logged
         try:
             if p == "/api/creds":
-                b = self._body(); save_creds(b.get("creds", []))
+                # A body without "creds" used to mean "save an empty list", i.e. one
+                # malformed request wiped every stored password; a string body was stored
+                # as-is and then broke the panel that tried to iterate it.
+                b = self._body() or {}
+                if not isinstance(b.get("creds"), list):
+                    self._json({"ok": False, "log": "creds must be a list"}, 400); return
+                save_creds(b["creds"])
                 self._json({"ok": True})
             elif p == "/api/resil/drill/run":
                 self._json(drill_run())
