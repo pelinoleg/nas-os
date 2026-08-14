@@ -1144,7 +1144,10 @@ remove_fstab_mergerfs() {
 }
 
 # mergerfs options for the COMMAND line (-o ...): without the fstab constructs defaults/nofail.
-MERGERFS_SVC_OPTS="allow_other,use_ino,category.create=mfs,minfreespace=20G,fsname=mergerfs"
+# branches-mount-timeout: wait for each branch to actually BE a mount before serving.
+# mergerfs ships this option for precisely the race above; 0 (its default) means
+# "trust whatever is in the directory right now".
+MERGERFS_SVC_OPTS="allow_other,use_ino,category.create=mfs,minfreespace=20G,branches-mount-timeout=30,fsname=mergerfs"
 MERGERFS_UNIT="/etc/systemd/system/nas-mergerfs.service"
 # Keep the mergerfs pool as a systemd SERVICE with Restart=always, NOT an fstab line. Reason:
 # the FUSE process may crash ("Transport endpoint is not connected"), and an fstab mount is then
@@ -1167,6 +1170,8 @@ generate_mergerfs() {
 
     local branchspec mergerfs_bin
     branchspec="$(IFS=:; printf '%s' "${branches[*]}")"
+    # same list, space-separated, for RequiresMountsFor in the unit below
+    mountsfor="${branches[*]}"
     mergerfs_bin="$(command -v mergerfs 2>/dev/null || echo /usr/bin/mergerfs)"
 
     # migration from the old scheme: remove the pool line from fstab (the service now runs the pool).
@@ -1184,6 +1189,14 @@ generate_mergerfs() {
 Description=NAS mergerfs pool (${STORAGE_MNT})
 After=local-fs.target
 Wants=local-fs.target
+# The branches, by name. local-fs.target is NOT enough: every branch carries nofail,
+# and systemd.mount(5) drops the Before=local-fs.target ordering for exactly those — so
+# the target does not wait for them. Without this line mergerfs could start while a slow
+# branch was still mounting and take its EMPTY MOUNTPOINT on the root filesystem as the
+# branch: the pool comes up "healthy", the files on that disk vanish from it, and the
+# create policy eventually starts writing new data onto the system disk underneath the
+# mountpoint. The margin on the last boot was 0.32 s.
+RequiresMountsFor=${mountsfor}
 StartLimitIntervalSec=0
 
 [Service]

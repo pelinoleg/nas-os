@@ -212,5 +212,96 @@ class DiskTemperatureVerdict(unittest.TestCase):
                          "a cold disk must not inherit the hot one's colour")
 
 
+class SecondAuditFixes(unittest.TestCase):
+    """The second audit found defects in the FIRST audit's fixes. These pin the repairs.
+
+    Every case fails against the code as it stood after the first round.
+    """
+
+    def setUp(self):
+        nas._login_fail.clear()
+        nas._login_all.update(n=0, t=0.0)
+
+    def tearDown(self):
+        nas._login_fail.clear()
+        nas._login_all.update(n=0, t=0.0)
+
+    def test_brute_force_alarm_survives_address_rotation(self):
+        # a machine with SLAAC has a /64 of addresses; per-address counters alone turned
+        # 600 guesses into 600 counters of one and the alarm never fired
+        total = 0
+        for i in range(600):
+            total = nas._login_miss("2001:db8::%x" % i)
+        self.assertGreaterEqual(total, 5, "the alarm counts every failure, whatever the address")
+
+    def test_flooding_cannot_free_a_blocked_address(self):
+        for _ in range(8):
+            nas._login_miss("192.168.1.66")
+        self.assertTrue(nas._login_gate("192.168.1.66"))
+        for i in range(400):
+            nas._login_miss("10.9.%d.%d" % (i // 256, i % 256))
+        self.assertTrue(nas._login_gate("192.168.1.66"),
+                        "evicting a blocked entry is how an attacker buys their way back in")
+        self.assertLessEqual(len(nas._login_fail), nas._LOGIN_FAIL_MAX)
+
+    def test_owner_is_not_locked_out_by_someone_else(self):
+        for _ in range(20):
+            nas._login_miss("192.168.1.66")
+        self.assertFalse(nas._login_gate("192.168.1.230"))
+
+    def test_temp_file_name_is_unique_per_thread(self):
+        # one process, many threads: a PID-only temp name let one thread truncate what
+        # another was still writing, and os.replace published the mix
+        import threading as _t
+        names = set()
+        def grab():
+            names.add("%d.%d" % (os.getpid(), _t.get_ident()))
+        ts = [_t.Thread(target=grab) for _ in range(8)]
+        [t.start() for t in ts]
+        [t.join() for t in ts]
+        self.assertEqual(len(names), 8, "temp paths must not collide between threads")
+
+    def test_cancelled_copy_leaves_the_existing_target_intact(self):
+        import threading as _t
+        work = tempfile.mkdtemp()
+        src = os.path.join(work, "src.bin")
+        dst = os.path.join(work, "dst.bin")
+        with open(src, "wb") as f:
+            f.write(b"N" * (4 * 1024 * 1024))
+        with open(dst, "w") as f:
+            f.write("OLD VERSION")
+        job = {"cancel": _t.Event(), "done_bytes": 0}
+        job["cancel"].set()
+        with self.assertRaises(Exception):
+            nas._fsjob_copy_file(src, dst, job)
+        with open(dst) as f:
+            self.assertEqual(f.read(), "OLD VERSION",
+                             "Cancel is offered as a safe way back — it must be one")
+        self.assertEqual([f for f in os.listdir(work) if "nasos-part" in f], [],
+                         "no partial file may be left behind")
+
+    def test_same_named_items_from_different_folders_are_refused(self):
+        work = tempfile.mkdtemp()
+        a, b, d = (os.path.join(work, x) for x in ("a", "b", "d"))
+        for x in (a, b, d):
+            os.makedirs(x)
+        for x in (a, b):
+            with open(os.path.join(x, "report.txt"), "w") as f:
+                f.write(x)
+        r = nas.fs_job_start("move", [os.path.join(a, "report.txt"),
+                                      os.path.join(b, "report.txt")], d)
+        self.assertFalse(r.get("ok"), "they would silently overwrite each other")
+        self.assertTrue(os.path.exists(os.path.join(a, "report.txt")))
+        self.assertTrue(os.path.exists(os.path.join(b, "report.txt")))
+
+    def test_job_destination_is_guarded(self):
+        work = tempfile.mkdtemp()
+        src = os.path.join(work, "x.txt")
+        with open(src, "w") as f:
+            f.write("x")
+        r = nas.fs_job_start("copy", [src], "/etc")
+        self.assertFalse(r.get("ok"), "the panel runs as root; /etc is not a destination")
+
+
 if __name__ == "__main__":
     unittest.main()

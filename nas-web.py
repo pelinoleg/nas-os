@@ -91,7 +91,10 @@ def _json_save(path, obj, indent=None):
     here answers a parse error with silent defaults, quietly wiping the user's
     settings. Rename is atomic, so the old file survives until the new one is whole."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = "%s.tmp.%d" % (path, os.getpid())   # per-PID temp: the driver process and the panel can write the same target without colliding on one ".tmp"
+    # PID *and* thread: the panel is a ThreadingHTTPServer, so two of its own threads
+    # saving the same file took the same temp path — the second open() truncated what
+    # the first was still writing, and os.replace published the interleaved bytes.
+    tmp = "%s.tmp.%d.%d" % (path, os.getpid(), threading.get_ident())
     with open(tmp, "w") as f:
         json.dump(obj, f, ensure_ascii=False, indent=indent)
         f.flush()
@@ -998,6 +1001,16 @@ def _health_report_build():
     if ro:
         add("Filesystem read-only", ", ".join(ro), "bad",
             "A disk went read-only after an I/O error — unmount and run e2fsck")
+    # A pool branch that failed to mount is the quietest way to lose data on this box:
+    # mergerfs still serves /mnt/storage, just without that disk's files, and the pool
+    # simply reports a smaller size. This check lived only in /api/disks and the monitor
+    # tick, so the daily digest — built from this report — said "Health: all normal"
+    # while part of the data was gone.
+    miss = _safe(_mergerfs_missing, []) or []
+    if miss:
+        add("Pool branch missing", ", ".join(miss), "bad",
+            "mergerfs is serving the pool WITHOUT this disk — its files are not visible "
+            "and new writes may land on the system disk under the mountpoint")
     # critical disk temperature (≥65 screams; 60-64 is a quiet warn)
     dtc = [d["name"] for d in ds if isinstance((d.get("smart") or {}).get("temp"), int) and d["smart"]["temp"] >= 65]
     dth = [d["name"] for d in ds if isinstance((d.get("smart") or {}).get("temp"), int) and 60 <= d["smart"]["temp"] < 65]
@@ -4519,6 +4532,11 @@ def _ntp_unsynced():
         log = r.get("log") or ""
         if "Leap status" in log:
             return "Not synchronised" in log
+    # the cheap answer first: systemd-timesyncd drops this flag file the moment it is
+    # synchronised. Asking timedatectl instead activates systemd-timedated over dbus on
+    # every tick — five journal lines a minute, about a quarter of everything the box logs
+    if os.path.exists("/run/systemd/timesync/synchronized"):
+        return False
     r = _run(["timedatectl", "show", "-p", "NTPSynchronized", "--value"], timeout=6)
     return (r.get("log") or "").strip() == "no"
 
@@ -10298,6 +10316,17 @@ def _bk_sources():
     # after a reinstall is priceless (otherwise the NAS may be left without network).
     for np in sorted(glob.glob("/etc/netplan/*.yaml")):
         out.append((np, "reference/etc/netplan/" + os.path.basename(np)))
+    # ...and NetworkManager, which is what actually holds the Wi-Fi on this class of box.
+    # Collecting only netplan meant that on a NetworkManager machine — the default — the
+    # archive carried NO network settings at all: /etc/netplan is simply empty. Restore a
+    # Wi-Fi-only NAS from such an archive and it comes up mute, with no way in but a
+    # keyboard on the spot. Same secret class as netplan (the PSK is in the file), same
+    # reference/ treatment: profiles are tied to interface names and UUIDs, so they are
+    # restored by hand, not applied blindly over a fresh image.
+    for nm in sorted(glob.glob("/etc/NetworkManager/system-connections/*")):
+        if os.path.isfile(nm):
+            out.append((nm, "reference/etc/NetworkManager/system-connections/"
+                            + os.path.basename(nm)))
     if os.path.isdir(STACKS_DIR):            # stack compose/env (not volume data)
         for root, _, files in os.walk(STACKS_DIR):
             for fn in files:
@@ -15422,6 +15451,36 @@ def confgit_filediff(h, path):
 
 # ---- disaster card ----------------------------------------------------------
 
+def _disaster_archive_line():
+    """One sentence describing what the NEWEST settings archive actually holds.
+
+    Read from the archive's own manifest, so it cannot drift from reality the way a
+    hand-written list does."""
+    try:
+        arcs = sorted(glob.glob(os.path.join(settings_backup_dir(), "nas-settings-*.tar.gz")))
+        if not arcs:
+            return ("NO settings archive exists yet — make one from Settings → Settings "
+                    "backup BEFORE you need it.")
+        with tarfile.open(arcs[-1]) as tf:
+            names = tf.getnames()
+        have, missing = [], []
+        for label, probe in (("this card", "disaster-card"),
+                             ("panel password", "webauth"),
+                             ("Samba config + users", "samba"),
+                             ("Syncthing identity", "syncthing"),
+                             ("Wi-Fi / network profiles", "NetworkManager"),
+                             ("stack composes", "stacks/"),
+                             ("backup profiles", "nas-backup.json"),
+                             ("SSH keys", ".ssh/")):
+            (have if any(probe in n for n in names) else missing).append(label)
+        line = "The archive (%s, %d files) holds: %s." % (
+            os.path.basename(arcs[-1]), len(names), ", ".join(have) or "nothing recognisable")
+        if missing:
+            line += " It does NOT hold: %s — restore those by hand." % ", ".join(missing)
+        return line
+    except (OSError, tarfile.TarError, ValueError):
+        return "Could not read the settings archive to list its contents — check it exists."
+
 def disaster_build():
     """Regenerate /var/lib/nas-os/disaster-card.md — the "box is dead, now what"
     document. It lives in nas-config, so the settings backup carries it OFF-box
@@ -15441,8 +15500,13 @@ def disaster_build():
          "whole files per branch, nothing is striped.",
          "2. Reinstall NAS-OS on a fresh box: "
          "`curl -fsSL https://raw.githubusercontent.com/pelinoleg/nas-os/main/install.sh | sudo bash`",
-         "3. Restore panel settings from **Settings → Settings backup** (the archive contains this "
-         "card, Samba config+users, stack composes, backup profiles, SSH keys).",
+         # Built from the archive that EXISTS, not from a hopeful list. The static
+         # sentence here used to promise stack composes, backup profiles and SSH keys —
+         # none of which were in it — and said nothing about the Wi-Fi password, whose
+         # absence is what leaves a restored Wi-Fi-only box with no network at all. A
+         # recovery instruction that misdescribes the archive is worse than none: it is
+         # read under pressure, by someone who cannot check it.
+         "3. Restore panel settings from **Settings → Settings backup**. " + _disaster_archive_line(),
          "4. Reattach the disks and rebuild the pool from the actually mounted branches: "
          "`nas-wizard.sh api mergerfs`.",
          "5. Databases inside file backups are LOGICAL DUMPS (live DB dirs are excluded on purpose): "
@@ -19050,9 +19114,18 @@ def _fsjob_tree_size(paths, job=None):
     return total
 
 def _fsjob_copy_file(src, dst, job):
-    # chunked copy: byte progress + cancel mid-file; a half-written target is removed
+    """Chunked copy: byte progress and cancel mid-file.
+
+    Written to a sibling temp and renamed at the end, because the destination may
+    ALREADY EXIST — this is the "replace" policy's path. Writing straight into `dst`
+    truncated the old file on open, and cancelling then unlinked what was left: the
+    owner asked to copy a newer version over an older one, pressed Cancel halfway, and
+    was left with neither. Cancel is offered as a safe way back; it has to be one.
+    Rename within the directory is atomic, so the old file survives until the new one
+    is whole."""
+    tmp = "%s.nasos-part.%d.%d" % (dst, os.getpid(), threading.get_ident())
     try:
-        with open(src, "rb") as fi, open(dst, "wb") as fo:
+        with open(src, "rb") as fi, open(tmp, "wb") as fo:
             while True:
                 if job["cancel"].is_set():
                     raise _FsCancelled()
@@ -19061,10 +19134,11 @@ def _fsjob_copy_file(src, dst, job):
                     break
                 fo.write(buf)
                 job["done_bytes"] += len(buf)
-        shutil.copystat(src, dst, follow_symlinks=False)
+        shutil.copystat(src, tmp, follow_symlinks=False)
+        os.replace(tmp, dst)
     except (_FsCancelled, OSError):
         try:
-            os.unlink(dst)
+            os.unlink(tmp)
         except OSError:
             pass
         raise
@@ -19236,7 +19310,27 @@ def fs_job_start(op, items, dest="", name="", policy=""):
         dest = os.path.dirname(items[0])
     if not os.path.isdir(dest):
         return {"ok": False, "log": "target is not a directory"}
+    # The DESTINATION was never checked here, only the sources of a move. This is the
+    # most destructive entry point in the file manager — it copies with a "replace"
+    # policy and merges directories — and the panel runs as root, so an unguarded dest
+    # meant a copy into /etc or /usr could overwrite system files.
+    _, derr = _fs_guard(dest, into=True)
+    if derr:
+        return {"ok": False, "log": derr}
     if op in ("copy", "move"):
+        # Conflicts were only looked for between an item and the destination, never
+        # BETWEEN the selected items. Search results span directories and are selectable,
+        # so four different report.txt could be cut and pasted together: three were
+        # deleted from their sources and one survived, silently, with no dialog at all.
+        seen = {}
+        for p in items:
+            base = os.path.basename(p.rstrip("/"))
+            if base in seen:
+                return {"ok": False,
+                        "log": "two selected items are both named '%s' (%s and %s) — "
+                               "they would overwrite each other; rename or move them "
+                               "separately" % (base, seen[base], os.path.dirname(p))}
+            seen[base] = os.path.dirname(p)
         for p in items:
             if os.path.isdir(p) and _into_self(p, dest):
                 return {"ok": False, "log": "cannot copy into itself"}
