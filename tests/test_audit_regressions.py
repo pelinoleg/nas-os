@@ -249,17 +249,36 @@ class SecondAuditFixes(unittest.TestCase):
             nas._login_miss("192.168.1.66")
         self.assertFalse(nas._login_gate("192.168.1.230"))
 
-    def test_temp_file_name_is_unique_per_thread(self):
-        # one process, many threads: a PID-only temp name let one thread truncate what
-        # another was still writing, and os.replace published the mix
+    def test_concurrent_saves_never_publish_broken_json(self):
+        # One process, many threads: a PID-only temp name meant they all opened the SAME
+        # temp file, so one truncated what another was still writing and os.replace
+        # published the mixture. Asserted on the OUTCOME, not on the temp name — thread
+        # ids are reused once a thread exits, so comparing them proves nothing.
+        import json as _json
         import threading as _t
-        names = set()
-        def grab():
-            names.add("%d.%d" % (os.getpid(), _t.get_ident()))
-        ts = [_t.Thread(target=grab) for _ in range(8)]
+        work = tempfile.mkdtemp()
+        target = os.path.join(work, "state.json")
+        payload = {"k": ["v"] * 4000}          # big enough that a write is interruptible
+        start = _t.Barrier(8)
+        errors = []
+
+        def writer():
+            start.wait()
+            for _ in range(12):
+                try:
+                    nas._json_save(target, payload)
+                except OSError as e:
+                    errors.append(e)
+
+        ts = [_t.Thread(target=writer) for _ in range(8)]
         [t.start() for t in ts]
         [t.join() for t in ts]
-        self.assertEqual(len(names), 8, "temp paths must not collide between threads")
+
+        with open(target) as f:
+            _json.load(f)                      # raises if the file was published torn
+        self.assertEqual(errors, [], "a losing thread must not fail on a vanished temp")
+        self.assertEqual([f for f in os.listdir(work) if ".tmp." in f], [],
+                         "no temp file may be left behind")
 
     def test_cancelled_copy_leaves_the_existing_target_intact(self):
         import threading as _t
