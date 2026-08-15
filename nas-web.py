@@ -4530,6 +4530,36 @@ def _smart_scan():
                     "critical_warning": nl.get("critical_warning")}
     return res
 
+
+def _wear_alarms(d, sector_thr=1):
+    """Why this disk is wearing out, in words — empty when it is fine.
+
+    The reasons are ATA first (reallocated and pending sectors), then the NVMe ones, which
+    the same alarm was blind to for as long as it existed. The thresholds are the drive's
+    own: spare below the firmware's declared minimum, ANY media error, ANY critical warning
+    flag — plus 80 % of rated write life, which is a warning rather than a verdict.
+
+    Separate from monitor_tick because this is the entire content of the alarm and the only
+    part of it that can be checked without a dying disk."""
+    bad = []
+    if isinstance(d.get("realloc"), int) and d["realloc"] >= sector_thr:
+        bad.append("reallocated sectors: %d" % d["realloc"])
+    if isinstance(d.get("pending"), int) and d["pending"] >= sector_thr:
+        bad.append("pending: %d" % d["pending"])
+    # spare_min 0 means the firmware declares no minimum — comparing against it would
+    # fire on every healthy drive that reports a spare of 0 %, i.e. on nothing real.
+    if isinstance(d.get("spare"), int) and isinstance(d.get("spare_min"), int) \
+            and d["spare_min"] and d["spare"] <= d["spare_min"]:
+        bad.append("spare blocks down to %d%% (firmware minimum %d%%)"
+                   % (d["spare"], d["spare_min"]))
+    if isinstance(d.get("media_errors"), int) and d["media_errors"] > 0:
+        bad.append("media errors: %d" % d["media_errors"])
+    if isinstance(d.get("critical_warning"), int) and d["critical_warning"]:
+        bad.append("critical warning flag: 0x%x" % d["critical_warning"])
+    if isinstance(d.get("wear"), int) and d["wear"] >= 80:
+        bad.append("%d%% of rated write life used" % d["wear"])
+    return bad
+
 def _block_volumes():
     """Devices with a filesystem: path → label (for attached/detached events)."""
     vols = {}
@@ -5043,26 +5073,10 @@ def monitor_tick():
             if on("smart") and d.get("passed") is False:
                 fire("smart:" + dev, "NAS: disk failed SMART", "%s — SMART FAIL, replace the disk" % dev, pri("smart"))
             if on("smart_wear"):
-                bad = []
-                if isinstance(d.get("realloc"), int) and d["realloc"] >= thr("smart_wear", 1):
-                    bad.append("reallocated sectors: %d" % d["realloc"])
-                if isinstance(d.get("pending"), int) and d["pending"] >= thr("smart_wear", 1):
-                    bad.append("pending: %d" % d["pending"])
-                # NVMe reports none of the above and dies by these instead. Collected but
-                # never read until now, so on an all-NVMe box this alarm could not fire at
-                # all. The thresholds are the drive's own: spare below the firmware's own
-                # minimum, any media error, any critical warning flag — plus 80 % of rated
-                # life, which is a warning rather than a verdict.
-                if isinstance(d.get("spare"), int) and isinstance(d.get("spare_min"), int) \
-                        and d["spare_min"] and d["spare"] <= d["spare_min"]:
-                    bad.append("spare blocks down to %d%% (firmware minimum %d%%)"
-                               % (d["spare"], d["spare_min"]))
-                if isinstance(d.get("media_errors"), int) and d["media_errors"] > 0:
-                    bad.append("media errors: %d" % d["media_errors"])
-                if isinstance(d.get("critical_warning"), int) and d["critical_warning"]:
-                    bad.append("critical warning flag: 0x%x" % d["critical_warning"])
-                if isinstance(d.get("wear"), int) and d["wear"] >= 80:
-                    bad.append("%d%% of rated write life used" % d["wear"])
+                # NVMe reports none of the ATA attributes and dies by its own numbers
+                # instead; they were collected but never read, so on an all-NVMe box this
+                # alarm could not fire at all. Both sets live in _wear_alarms now.
+                bad = _wear_alarms(d, thr("smart_wear", 1))
                 if bad:
                     fire("wear:" + dev, "NAS: disk wear", "%s — %s" % (dev, ", ".join(bad)), pri("smart_wear"), ev_name="smart_wear")
             if isinstance(d.get("temp"), int) and d["temp"] > 0:
@@ -15451,31 +15465,39 @@ def blackbox_daemon():
     except OSError:
         boot_id = "?"
     _bb_rollover(boot_id)
-    ring, dm, prev_cpu, n = [], [], _bb_cpu_read(), 0
+    st = {"boot_id": boot_id, "ring": [], "dmesg": [], "cpu": _bb_cpu_read(), "n": 0}
     time.sleep(2)             # first CPU delta needs a baseline
     while True:
         try:
-            s, prev_cpu = _bb_sample(prev_cpu)
-            ring = (ring + [s])[-BB_KEEP:]
-            n += 1
-            if n % 3 == 1:
-                dm = _bb_dmesg_tail()
-            payload = {"boot_id": boot_id, "updated": int(time.time()),
-                       "interval": BB_INTERVAL, "samples": ring, "dmesg": dm}
-            _json_save(os.path.join(BB_RUN, "current.json"), payload)
-            if n % 3 == 0:
-                # `curf` was a local of _bb_rollover, so this line raised NameError on every
-                # pass and the bare except below swallowed it: /run is tmpfs, so the ring the
-                # recorder exists to preserve — the last seconds before a power cut — was
-                # never written to disk at all. Symptom on the box: 21 h of uptime, the
-                # service running, /run/nas-blackbox/current.json alive with 90 samples, and
-                # /var/lib/nas-wizard/blackbox EMPTY. With no on-disk ring there is no
-                # rollover on boot either, so boots.jsonl stayed empty and the dirty_boot
-                # alarm could never fire.
-                _json_save(os.path.join(BB_VAR, "current.json"), payload)
+            _bb_tick(st)
         except Exception as e:
             _bb_note_error(e)
         time.sleep(BB_INTERVAL)
+
+
+def _bb_tick(st):
+    """One pass of the recorder: sample, ring, and the two writes.
+
+    Outside the daemon loop because the loop cannot be entered by anything but the daemon,
+    and the write below is the one thing the recorder exists for. It was missing: `curf`
+    was a local of _bb_rollover, so this line raised NameError on every pass and the
+    daemon's bare except swallowed it. /run is tmpfs, so the ring the recorder exists to
+    preserve — the last seconds before a power cut — was never written to disk at all.
+    Symptom on the box: 21 h of uptime, the service running, /run/nas-blackbox/current.json
+    alive with 90 samples, and /var/lib/nas-wizard/blackbox EMPTY. With no on-disk ring
+    there is no rollover on boot either, so boots.jsonl stayed empty and the dirty_boot
+    alarm could never fire."""
+    s, st["cpu"] = _bb_sample(st["cpu"])
+    st["ring"] = (st["ring"] + [s])[-BB_KEEP:]
+    st["n"] += 1
+    if st["n"] % 3 == 1:
+        st["dmesg"] = _bb_dmesg_tail()
+    payload = {"boot_id": st["boot_id"], "updated": int(time.time()),
+               "interval": BB_INTERVAL, "samples": st["ring"], "dmesg": st["dmesg"]}
+    _json_save(os.path.join(BB_RUN, "current.json"), payload)      # tmpfs: dies with the box
+    if st["n"] % 3 == 0:
+        _json_save(os.path.join(BB_VAR, "current.json"), payload)  # disk: survives it
+    return payload
 
 _BB_ERR = {"seen": False}
 
