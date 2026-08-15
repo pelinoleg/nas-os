@@ -228,6 +228,24 @@ class DisasterCardTellsTheTruth(unittest.TestCase):
         self.assertIn("stack composes", line.split("NOT hold")[1],
                       "an absent section was listed as present")
 
+    def test_it_names_the_directory_the_archive_lives_in(self):
+        # read on a dead box: a file name nobody can locate is not an instruction
+        self.archive(["etc/nas-os/webauth.json"])
+        self.assertIn(self.d, nas._disaster_archive_line())
+
+    def test_it_says_the_wifi_profile_will_not_restore_itself(self):
+        # The archive carries the profile, the restore never writes it back (it is tied to
+        # this machine's hardware), and the dialog never even offers it. On a box whose
+        # only link is Wi-Fi, "holds Wi-Fi profiles" alone reads as "the network comes
+        # back" — and the owner finds out with no panel to ask.
+        self.archive(["etc/nas-os/webauth.json", "reference/etc/fstab",
+                      "reference/etc/NetworkManager/system-connections/home-wifi"])
+        line = nas._disaster_archive_line()
+        self.assertIn("READING ONLY", line)
+        self.assertIn("home-wifi", line)
+        self.assertIn("/etc/NetworkManager/system-connections/", line,
+                      "the card does not say where to put it by hand")
+
     def test_a_complete_archive_promises_nothing_extra(self):
         self.archive(["nas-config/disaster-card.md", "etc/nas-os/webauth.json",
                       "etc/samba/smb.conf", "var/lib/syncthing/config.xml",

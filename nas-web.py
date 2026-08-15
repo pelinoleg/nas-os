@@ -3025,7 +3025,10 @@ def _glance_tile(tid, en):
         return {"value": str(n), "unit": "", "note": "updates",
                 "state": "warn" if n else "ok", "raw": {"count": n}}
     if tid == "updates":
-        n = _safe(_apt_upgradable, 0) or 0
+        n = _safe(_apt_upgradable, None)
+        if n is None:      # a check that could not run is not "0 updates"
+            return {"value": "—", "unit": "", "note": "apt check failed", "state": "warn",
+                    "raw": {"count": None}}
         return {"value": str(n), "unit": "", "note": "apt", "state": "warn" if n > 20 else "ok",
                 "raw": {"count": n}}
     if tid == "snapraid":
@@ -4795,7 +4798,15 @@ def _docker_reclaimable_gb():
     return round(total, 1)
 
 def _apt_upgradable():
+    """How many packages can be upgraded — None when the check could not run.
+
+    Counting the lines of a FAILED apt run gives zero, and zero here reads as "everything
+    is up to date": the same lie _apt_updates_run was fixed for on 2026-08-14, still living
+    in this second, simpler counter. It feeds the panel tile and the monitor, so a locked
+    dpkg or broken lists painted a green tile and silenced the updates alarm at once."""
     r = _run(["apt-get", "-s", "-o", "Debug::NoLocking=true", "upgrade"], timeout=40)
+    if not r.get("ok"):
+        return None
     return sum(1 for l in (r.get("log") or "").splitlines() if l.startswith("Inst "))
 
 _APT_CACHE = {"t": 0.0, "d": None}
@@ -5183,7 +5194,7 @@ def monitor_tick():
     if on("time_drift") and _safe(_ntp_unsynced):
         fire("ntp", "NAS: time not synchronized", "The clock may drift — check systemd-timesyncd", pri("time_drift"), ev_name="time_drift")
     if on("updates") and _hourly("updates"):
-        n = _safe(_apt_upgradable, 0) or 0
+        n = _safe(_apt_upgradable, None) or 0     # None = the check failed, not "nothing to do"
         if n > 0:
             fire("upd", "NAS: updates available", "Packages available to update: %d" % n, pri("updates"), ev_name="updates")
     if on("sec_updates") and _hourly("sec_updates"):
@@ -15992,10 +16003,25 @@ def _disaster_archive_line():
                              ("backup profiles", "nas-backup.json"),
                              ("SSH keys", ".ssh/")):
             (have if any(probe in n for n in names) else missing).append(label)
-        line = "The archive (%s, %d files) holds: %s." % (
-            os.path.basename(arcs[-1]), len(names), ", ".join(have) or "nothing recognisable")
+        # The DIRECTORY, not just the file name: read on a dead box, "nas-settings-*.tar.gz"
+        # is useless if nobody remembers which branch to look for it on.
+        line = "The newest archive is %s (%d files) in %s. It holds: %s." % (
+            os.path.basename(arcs[-1]), len(names), os.path.dirname(arcs[-1]),
+            ", ".join(have) or "nothing recognisable")
         if missing:
             line += " It does NOT hold: %s — restore those by hand." % ", ".join(missing)
+        # Everything under reference/ is carried but NOT restored by the panel: those files
+        # are tied to this machine's hardware and UUIDs, so the restore dialog never offers
+        # them. Saying "holds Wi-Fi profiles" without this reads as "the network comes
+        # back", and on a box whose only link is Wi-Fi that is the difference between a
+        # restore and a box nobody can reach.
+        ref = sorted({os.path.basename(n) for n in names if n.startswith("reference/")})[:8]
+        if ref:
+            line += (" Carried FOR READING ONLY (the restore never writes these back — copy "
+                     "them by hand, they are under reference/ in the archive): %s. "
+                     "The Wi-Fi profile goes to "
+                     "/etc/NetworkManager/system-connections/ as root, chmod 600, then "
+                     "`nmcli connection reload`." % ", ".join("reference/" + r for r in ref))
         return line
     except (OSError, tarfile.TarError, ValueError):
         return "Could not read the settings archive to list its contents — check it exists."

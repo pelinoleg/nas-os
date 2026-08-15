@@ -81,6 +81,16 @@ class AptUpdates(unittest.TestCase):
         self.assertEqual(r["packages"][1]["cur"], "5.2.15-2")
         self.assertEqual(r["packages"][1]["new"], "5.2.15-3")
 
+    def test_the_simple_counter_does_not_read_a_failure_as_zero(self):
+        # _apt_upgradable feeds the panel tile and the updates alarm. Counting the lines of
+        # a FAILED apt run gives 0, and 0 there is drawn as a green "up to date" tile — the
+        # same lie apt_updates was fixed for, living in the second, simpler counter.
+        self.apt(False, "E: Could not get lock")
+        self.assertIsNone(nas._apt_upgradable(),
+                          "a check that could not run was reported as 0 updates")
+        self.apt(True, UPGRADE_OUT)
+        self.assertEqual(nas._apt_upgradable(), 2)
+
     def test_nothing_to_upgrade_is_still_a_real_answer(self):
         self.apt(True, "")
         r = nas.apt_updates()
