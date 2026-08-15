@@ -4114,11 +4114,25 @@ def save_notify(user, token):
         return out
     lines = setkv(lines, "PUSHOVER_USER", user or "")
     lines = setkv(lines, "PUSHOVER_TOKEN", token or "")
+    # 0600 from the first byte, not after the write: this file holds the Pushover
+    # application token, and a plain open() creates it 0644 under the umask — readable by
+    # every local process for the length of the write, and forever if the write dies
+    # between open() and chmod. Written through a temp file for the same reason the
+    # rclone config is: a half-written notify.conf loses the OTHER settings living in it.
     try:
         os.makedirs(os.path.dirname(NOTIFY_CONF), exist_ok=True)
-        with open(NOTIFY_CONF, "w") as f:
-            f.write("\n".join(l for l in lines if l is not None) + "\n")
-        os.chmod(NOTIFY_CONF, 0o600)
+        tmp = NOTIFY_CONF + ".tmp"
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        try:
+            with os.fdopen(fd, "w") as f:
+                f.write("\n".join(l for l in lines if l is not None) + "\n")
+            os.replace(tmp, NOTIFY_CONF)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
     except OSError as e:
         return {"ok": False, "log": str(e)}
     return {"ok": True}
