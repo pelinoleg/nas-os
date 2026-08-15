@@ -10801,6 +10801,51 @@ def settings_backup_list():
             "ephemeral": ephemeral, "custom": custom,
             "pool": bool(storage_root())}
 
+def _bk_dest(nm):
+    """Where an archive member is restored to — None when nothing claims it.
+
+    The other half of _bk_sources, and the half that fails silently: a file the archive
+    carries but the map does not name is simply skipped, so the restore reports success
+    and the setting is gone. That happened to the cloud tokens, the kopia repository, the
+    SMB passwords and the Immich standby config at once — the dialog offered the section,
+    the archive held the file, and the map had no entry.
+
+    A function rather than a constant because the destinations below are module globals
+    defined further down this file (STACKS_DIR among them), so the list can only be built
+    when it is asked for. reference/* deliberately resolves to None: those files are for a
+    human to read, not to be written back over a fresh system."""
+    if nm.startswith("nas-config/"):
+        return os.path.join(NAS_CONFIG, nm[len("nas-config/"):])
+    for pref, root in (("etc/nas-wizard/", "/etc/nas-wizard"),
+                       ("etc/nas-os/webauth.json", "/etc/nas-os/webauth.json"),
+                       ("etc/nas-os/nas-backup.json", "/etc/nas-os/nas-backup.json"),
+                       ("etc/samba/smb.conf", "/etc/samba/smb.conf"),
+                       # The shares themselves. smb.conf carries `include =
+                       # /etc/samba/nas-shares.conf` and this file is where every
+                       # panel-managed share is actually defined, so a restore that brought
+                       # back smb.conf without it produced a Samba that starts, serves
+                       # nothing, and points at a file that is not there. It was collected
+                       # into every archive and even validated by the backup drill; only the
+                       # way back was missing.
+                       ("etc/samba/nas-shares.conf", "/etc/samba/nas-shares.conf"),
+                       ("var/lib/samba/private/passdb.tdb", "/var/lib/samba/private/passdb.tdb"),
+                       ("var/lib/syncthing/", ST_HOME),
+                       ("opt/stacks/", STACKS_DIR),
+                       ("root/.ssh/nas-backup", "/root/.ssh/nas-backup"),
+                       ("root/.ssh/nas-backup.pub", "/root/.ssh/nas-backup.pub"),
+                       ("etc/nas-os/rclone.conf", "/etc/nas-os/rclone.conf"),
+                       ("etc/nas-os/kopia.json", "/etc/nas-os/kopia.json"),
+                       ("etc/nas-os/kopia/", "/etc/nas-os/kopia"),
+                       ("etc/nas-os/immich-standby.json", "/etc/nas-os/immich-standby.json"),
+                       ("etc/nas-os/smb-users.json", "/etc/nas-os/smb-users.json"),
+                       ("etc/nas-os/smb-recycle.json", "/etc/nas-os/smb-recycle.json")):
+        if nm == pref:
+            return root
+        if pref.endswith("/") and nm.startswith(pref):
+            return os.path.join(root, nm[len(pref):])
+    return None
+
+
 def settings_backup_restore(path, sections=None):
     """Restore from an archive. Check every member: regular files only,
     no ../, only known prefixes, a sane size. reference/* is not touched.
@@ -10810,27 +10855,6 @@ def settings_backup_restore(path, sections=None):
     sel = None if sections is None else {s for s in sections if isinstance(s, str)}
     if sel is not None and not sel:
         return {"ok": False, "log": "no section selected"}
-    # archive prefixes → where to restore (STACKS_DIR is defined further down the file)
-    restore_map = [("etc/nas-wizard/", "/etc/nas-wizard"),
-                   ("etc/nas-os/webauth.json", "/etc/nas-os/webauth.json"),
-                   ("etc/nas-os/nas-backup.json", "/etc/nas-os/nas-backup.json"),
-                   ("etc/samba/smb.conf", "/etc/samba/smb.conf"),
-                   ("var/lib/samba/private/passdb.tdb", "/var/lib/samba/private/passdb.tdb"),
-                   ("var/lib/syncthing/", ST_HOME),
-                   ("opt/stacks/", STACKS_DIR),
-                   ("root/.ssh/nas-backup", "/root/.ssh/nas-backup"),
-                   ("root/.ssh/nas-backup.pub", "/root/.ssh/nas-backup.pub"),
-                   # These are collected by _bk_sources and were silently dropped on the way
-                   # back: the restore dialog offered the section, the archive carried the
-                   # file, and the map had no entry — so after a real restore the cloud
-                   # tokens, the kopia repository, the SMB passwords and the Immich standby
-                   # config were simply absent, and every profile pointing at them was dead.
-                   ("etc/nas-os/rclone.conf", "/etc/nas-os/rclone.conf"),
-                   ("etc/nas-os/kopia.json", "/etc/nas-os/kopia.json"),
-                   ("etc/nas-os/kopia/", "/etc/nas-os/kopia"),
-                   ("etc/nas-os/immich-standby.json", "/etc/nas-os/immich-standby.json"),
-                   ("etc/nas-os/smb-users.json", "/etc/nas-os/smb-users.json"),
-                   ("etc/nas-os/smb-recycle.json", "/etc/nas-os/smb-recycle.json")]
     restored, skipped, deselected = [], [], 0
     try:
         with tarfile.open(path, "r:gz") as tar:
@@ -10846,15 +10870,7 @@ def settings_backup_restore(path, sections=None):
                     deselected += 1; continue
                 if m.size > 16 * 1024 * 1024:
                     skipped.append(nm); continue
-                dest = None
-                if nm.startswith("nas-config/"):
-                    dest = os.path.join(NAS_CONFIG, nm[len("nas-config/"):])
-                else:
-                    for pref, root in restore_map:
-                        if nm == pref:
-                            dest = root; break
-                        if pref.endswith("/") and nm.startswith(pref):
-                            dest = os.path.join(root, nm[len(pref):]); break
+                dest = _bk_dest(nm)
                 if not dest:
                     if nm != "manifest.json":
                         skipped.append(nm)
@@ -23436,6 +23452,20 @@ def usb_import_run(dev):
 #  Native terminal: WebSocket <-> PTY (bash), no password, as the current user
 # --------------------------------------------------------------------------- #
 _WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+def _pty_fork():
+    """pty.fork(), with the parent's master fd kept out of every later exec.
+
+    os.forkpty() hands back the master WITHOUT close-on-exec, so the next terminal
+    session's shell inherited this one's master fd — demonstrated: `echo cmd >&7` in the
+    second tab typed and RAN that command in the first, and could read what was being
+    typed there. Both shells run as the same user, so this is not a privilege escalation;
+    it is tabs not being separate windows."""
+    pid, master = pty.fork()
+    if pid > 0:
+        _safe(lambda: os.set_inheritable(master, False))
+    return pid, master
+
+
 def _ws_accept(key):
     return base64.b64encode(hashlib.sha1((key + _WS_GUID).encode()).digest()).decode()
 
@@ -25113,14 +25143,7 @@ class H(BaseHTTPRequestHandler):
         ex = (parse_qs(urlparse(self.path).query).get("exec") or [""])[0]
         ex = ex if re.match(r"^[a-zA-Z0-9_.-]+$", ex or "") else ""
         _safe(lambda: log_action("/ws/term", {"exec": ex}, {"ok": True}))
-        pid, master = pty.fork()
-        if pid > 0:
-            # os.forkpty() hands back the master WITHOUT close-on-exec, so the next terminal
-            # session's shell inherited this one's master fd — demonstrated: `echo cmd >&7`
-            # in the second tab typed and RAN that command in the first, and could read what
-            # was being typed there. Both shells run as the same user, so this is not a
-            # privilege escalation; it is tabs not being separate windows.
-            _safe(lambda: os.set_inheritable(master, False))
+        pid, master = _pty_fork()
         if pid == 0:                       # child -> bash or docker exec
             os.environ["TERM"] = "xterm-256color"
             if ex:                         # exec into a container — stay root (need access to docker.sock)

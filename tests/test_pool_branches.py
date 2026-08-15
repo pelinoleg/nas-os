@@ -251,6 +251,47 @@ class NeedBytesForAMove(PoolCase):
         self.assertEqual(nas._fsjob_need_bytes(items, target, "move", "skip"), 0)
 
 
+class MakeTheParentBesideTheSource(PoolCase):
+    """The other half of the Immich promotion guard, and the half that is invisible: the
+    destination's PARENT usually does not exist yet, and creating it through the pool lets
+    the create policy pick its branch by free space. The guard then asks about the nearest
+    existing ancestor, answers "same disk", and the rename — which runs after the standby
+    has already been stopped — returns EXDEV anyway. Measured on the box: a library on
+    disk3 moved to a new folder whose parent had been created on disk2."""
+
+    def test_a_new_parent_lands_on_the_sources_branch(self):
+        src = self.put(self.br2, "library/photo.jpg", 10)
+        parent = os.path.join(self.pool, "new-home")
+        nas._pool_makedirs_beside(parent, src)
+        self.assertTrue(os.path.isdir(os.path.join(self.br2, "new-home")),
+                        "the parent was not created beside the library")
+        self.assertFalse(os.path.isdir(os.path.join(self.br1, "new-home")),
+                         "the parent landed on another disk — the move will hit EXDEV")
+
+    def test_and_the_guard_then_agrees_the_move_will_stay_put(self):
+        # the two halves are only worth anything together
+        src = self.put(self.br2, "library/photo.jpg", 10)
+        parent = os.path.join(self.pool, "new-home")
+        nas._pool_makedirs_beside(parent, src)
+        self.assertTrue(nas._rename_stays_put(src, parent))
+
+    def test_a_deep_parent_is_created_whole(self):
+        src = self.put(self.br2, "library/photo.jpg", 10)
+        parent = os.path.join(self.pool, "a", "b", "c")
+        nas._pool_makedirs_beside(parent, src)
+        self.assertTrue(os.path.isdir(os.path.join(self.br2, "a/b/c")))
+
+    def test_outside_a_pool_it_is_an_ordinary_makedirs(self):
+        plain = os.path.join(self.d, "plain", "deep")
+        nas._pool_makedirs_beside(plain, self.d)
+        self.assertTrue(os.path.isdir(plain))
+
+    def test_an_existing_directory_is_not_an_error(self):
+        src = self.put(self.br2, "library/photo.jpg", 10)
+        parent = self.mkdir(self.br1, "already-there")
+        nas._pool_makedirs_beside(parent, src)     # must not raise
+
+
 class TheShippedPolicyIsPathPreserving(PoolCase):
     """test_pool_policy locks the option string; this checks that the string still buys
     what it was chosen for on the mergerfs build actually installed here."""
