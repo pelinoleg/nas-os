@@ -175,6 +175,24 @@ class WhatMayRingThePhone(unittest.TestCase):
             self.assertTrue(nas._push_allowed(name, 1, self.mode("important")),
                             "%s waits for the evening digest" % name)
 
+    def test_a_backup_that_did_not_happen_rings(self):
+        # The one failure whose silence is indistinguishable from success. All of it was
+        # held back for the evening digest — which itself could not be delivered.
+        for name in ("nb_missed", "nb_stale", "nb_verify", "kp_err", "kp_stale"):
+            self.assertTrue(nas._push_allowed(name, 1, self.mode("important")),
+                            "%s waits for a digest nobody gets" % name)
+
+    def test_a_failed_service_rings(self):
+        self.assertTrue(nas._push_allowed("svcfail", 1, self.mode("important")))
+
+    def test_the_digest_itself_can_be_delivered(self):
+        # 23 switched-on events are deliberately held back "for the evening digest", so a
+        # digest that cannot ring turns that promise into silence.
+        cat = nas._def_monitor()["events"]["daily_summary"]
+        self.assertTrue(cat["on"], "the digest is switched off in the catalogue")
+        self.assertTrue(nas._push_allowed("daily_summary", cat["priority"], self.mode("important")))
+        self.assertLess(cat["priority"], 0, "the digest should arrive quietly, not as an alarm")
+
     def test_the_narrow_list_only_names_events_that_exist(self):
         # the panel draws its "rings" marker from this list; a name that no longer matches
         # an event silently downgrades that alarm to the evening digest
@@ -239,6 +257,38 @@ class TheLogIsKeptWhateverHappens(unittest.TestCase):
         nas.notify_event("readonly", "ro:/mnt/disk1", "NAS: read-only", "disk1")
         nas.notify_event("readonly", "ro:/mnt/disk2", "NAS: read-only", "disk2")
         self.assertEqual(len(self.logged), 2, "the second disk was swallowed by the first")
+
+
+class TheDigestDoesNotRepeatItself(unittest.TestCase):
+    """The slot already sent is remembered across restarts.
+
+    It used to live only in the process, while the tick owes a slot that went by while the
+    panel was down (up to six hours) — so every restart re-sent it. The log holds six
+    copies of the 08-14 summary inside 55 minutes."""
+
+    def setUp(self):
+        self.d = tempfile.mkdtemp()
+        self._state, self._last = nas.SUMMARY_STATE, nas._LAST_SUMMARY
+        nas.SUMMARY_STATE = os.path.join(self.d, "summary-state.json")
+        nas._LAST_SUMMARY = ""
+
+    def tearDown(self):
+        nas.SUMMARY_STATE, nas._LAST_SUMMARY = self._state, self._last
+        shutil.rmtree(self.d, ignore_errors=True)
+
+    def test_the_slot_survives_a_restart(self):
+        nas._summary_mark("2026-08-15T20:00")
+        nas._LAST_SUMMARY = ""                      # the panel restarts
+        self.assertEqual(nas._summary_last(), "2026-08-15T20:00",
+                         "the digest would be sent again after every restart")
+
+    def test_nothing_sent_yet_is_not_a_slot(self):
+        self.assertEqual(nas._summary_last(), "")
+
+    def test_a_corrupt_state_file_does_not_break_the_tick(self):
+        with open(nas.SUMMARY_STATE, "w") as f:
+            f.write("{not json")
+        self.assertEqual(nas._summary_last(), "")
 
 
 if __name__ == "__main__":

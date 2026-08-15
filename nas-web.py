@@ -343,6 +343,38 @@ def disk_info(path):
     return {"path": path, "total": total, "used": used, "free": free,
             "pct": round(100 * used / denom, 1) if denom else 0}
 
+def pool_info():
+    """Pool space, including the number that actually constrains a write.
+
+    statvfs on the pool reports the SUM of the branches — and since the create policy
+    became path preserving, nothing created there can span more than one of them. Measured
+    on this box: 2172 GiB reported free, while one new folder could grow to 849. A panel
+    that promises 2.5x the room the next copy has is not a rounding error, it is the
+    difference between a job that finishes and a job that dies at ENOSPC.
+
+    So the sum stays (it is the honest total across many folders) and two truthful numbers
+    are added beside it: `free_new` — what a single new folder can grow to — and
+    `pct_worst`, the fullest branch, which is what fills first and what an alarm must
+    watch. Branches are asked of mergerfs itself, never guessed from a glob."""
+    di = disk_info(STORAGE) if os.path.ismount(STORAGE) else None
+    if not di:
+        return None
+    free_new, pct_worst = 0, 0
+    for br in (_safe(lambda: _pool_branch_dirs(STORAGE), []) or []):
+        try:
+            s = os.statvfs(br)
+        except OSError:
+            continue
+        avail = s.f_bavail * s.f_frsize
+        used = (s.f_blocks - s.f_bfree) * s.f_frsize
+        denom = used + avail
+        free_new = max(free_new, avail)
+        pct_worst = max(pct_worst, round(100 * used / denom, 1) if denom else 0)
+    di["free_new"] = free_new or di["free"]
+    di["pct_worst"] = pct_worst or di["pct"]
+    return di
+
+
 def default_iface():
     for line in _read("/proc/net/route").splitlines()[1:]:
         f = line.split()
@@ -2800,15 +2832,19 @@ def _glance_tile(tid, en):
     value/unit are display-ready strings; raw is the machine-readable source
     for anyone building their own UI on top of /api/glance."""
     if tid == "pool":
-        di = disk_info(STORAGE) if os.path.ismount(STORAGE) else None
+        di = _safe(pool_info)
         if not di:
             return {"value": "—", "unit": "", "state": "danger",
                     "note": "pool not mounted" if not en else "pool not mounted", "raw": None}
-        v, u = _gl_gb(di["free"], en)
-        st = "danger" if di["pct"] >= 90 else ("warn" if di["pct"] >= 80 else "ok")
-        return {"value": v, "unit": u, "note": "free", "state": st,
-                "gauge": _gauge(di["pct"], 0, 100, 80, 90, "%"),
-                "raw": {"free": di["free"], "used": di["used"], "pct": di["pct"],
+        # the tile shows what ONE folder can still grow to, not the sum of the branches:
+        # a display that promises the sum sends someone to start a copy that cannot fit
+        v, u = _gl_gb(di["free_new"], en)
+        pct = max(di["pct"], di["pct_worst"])
+        st = "danger" if pct >= 90 else ("warn" if pct >= 80 else "ok")
+        return {"value": v, "unit": u, "note": "free for one folder", "state": st,
+                "gauge": _gauge(pct, 0, 100, 80, 90, "%"),
+                "raw": {"free": di["free_new"], "free_total": di["free"],
+                        "used": di["used"], "pct": pct, "pct_total": di["pct"],
                         "all": _safe(_pool_branches, []) or []}}
     if tid == "backup":
         return _gl_backup_tile(max((_nb_last_ok(pr["id"]) for pr in nb_profiles()), default=0), en)
@@ -3895,7 +3931,7 @@ def stats():
         "mem": mem_info(),
         # no pool means no pool stats either (it used to silently substitute the
         # system card, and "pool usage" showed nonsense)
-        "disk_pool": disk_info(STORAGE) if os.path.ismount(STORAGE) else None,
+        "disk_pool": _safe(pool_info),
         "disk_root": disk_info("/"),
         "net": net_rate(iface),
         "dio": _safe(lambda: disk_io_rate(_main_disk_devs()), 0),   # primary-storage disk throughput B/s
@@ -4031,7 +4067,7 @@ def _def_monitor():
         # --- active thermal protection (warning/action) ---
         "thermal_guard":{"on": True, "priority": 1, "desk": True},
         # --- daily status summary (silent; weekly is the heartbeat) ---
-        "daily_summary":{"on": False, "priority": -1, "desk": False},
+        "daily_summary":{"on": True,  "priority": -1, "desk": False},   # quiet, but it must arrive
         # --- Kopia app (snapshot backups) ---
         "kp_run":      {"on": False, "priority": 0, "desk": True},     # routine run result → desk
         "kp_err":      {"on": True,  "priority": 1, "desk": True},     # snapshot / spare copy / destination problem
@@ -5065,8 +5101,13 @@ def monitor_tick():
 
     # --- space: pool + individual disks ---
     pool = s.get("disk_pool") or {}
-    if on("pool") and pool.get("pct", 0) >= thr("pool", 90):
-        fire("pool", "NAS: storage full", "%s usage at %s%%" % (pool.get("path", "pool"), pool.get("pct")), pri("pool"))
+    # the fullest BRANCH, not the sum: a folder lives on one branch, so that branch
+    # hitting the threshold is when writes into it start failing — the pool as a whole
+    # can read 60% while the disk holding the folder is out of room
+    pool_pct = max(pool.get("pct", 0), pool.get("pct_worst", 0))
+    if on("pool") and pool_pct >= thr("pool", 90):
+        fire("pool", "NAS: storage full", "%s usage at %s%% (fullest branch)"
+             % (pool.get("path", "pool"), pool_pct), pri("pool"))
     if on("diskfull"):
         for mp, pct in _safe(_data_mounts_usage, []):
             if mp == "/mnt/storage":
@@ -11162,6 +11203,15 @@ def _nb_drill_sched_tick():
 # The list is deliberately short — an alert channel that fires for everything gets switched off,
 # and then the one that mattered is missed too.
 _PUSH_NOW = {
+    # A backup that did not run, is too old, or failed verification is the one thing whose
+    # silence is indistinguishable from success — and all of it was held back for the
+    # evening digest, which itself never rang (daily_summary below). Same for a failed
+    # service: the box keeps answering while a piece of it is down.
+    "nb_missed", "nb_stale", "nb_verify", "kp_err", "kp_stale", "svcfail",
+    # The digest is the other half of this gate: 29 switched-on events are deliberately
+    # held back "for the evening digest", so a digest that cannot be delivered turns that
+    # promise into silence. It rings quietly (priority -1) — a summary, not an alarm.
+    "daily_summary",
     # smart_wear rings for the same reason smart does, and the owner decided so on
     # 2026-08-15: media errors, an exhausted spare-block reserve or 80 % of rated write
     # life are not a trend to read in the evening digest — they are "replace this disk",
@@ -11327,7 +11377,28 @@ def _pool_recovery():
     return st
 
 # ---- daily/weekly status summary ----
+SUMMARY_STATE = os.path.join(NAS_CONFIG, "summary-state.json")
 _LAST_SUMMARY = ""
+
+
+def _summary_last():
+    """The slot already sent — remembered ACROSS restarts.
+
+    It used to live only in this process, and the tick owes a slot that went by while the
+    panel was down (up to six hours). Restart the panel three times in an evening and the
+    same digest is sent three times: on 08-14 the log holds six copies inside 55 minutes.
+    A summary that repeats is a summary people stop reading."""
+    global _LAST_SUMMARY
+    if not _LAST_SUMMARY:
+        d = _json_load_strict(SUMMARY_STATE, {})
+        _LAST_SUMMARY = (d or {}).get("slot") or ""
+    return _LAST_SUMMARY
+
+
+def _summary_mark(slot):
+    global _LAST_SUMMARY
+    _LAST_SUMMARY = slot
+    _safe(lambda: _json_save(SUMMARY_STATE, {"slot": slot, "t": int(time.time())}))
 
 def _events_digest(hours=24):
     """«What happened» in the words of the log itself — one line per kind of thing, conditions
@@ -11403,7 +11474,6 @@ def _build_summary():
     return "NAS: summary (%s)" % host, "\n".join(lines) or "no data"
 
 def _summary_tick():
-    global _LAST_SUMMARY
     m = load_maintenance()
     if not m.get("summary_enabled"):
         return
@@ -11417,9 +11487,9 @@ def _summary_tick():
     due, slot = sched_last_due(now, m.get("summary_time", "09:00"), wd)
     # the same rule as every other schedule here: a slot that went by while the panel was
     # restarting is still owed, up to a point — but a digest older than six hours is stale news
-    if not due or slot == _LAST_SUMMARY or now - due > 6 * 3600:
+    if not due or slot == _summary_last() or now - due > 6 * 3600:
         return
-    _LAST_SUMMARY = slot
+    _summary_mark(slot)
     title, body = _build_summary()
     dig = _events_digest(24 if m.get("summary_freq") != "weekly" else 24 * 7)
     if dig:
@@ -24432,11 +24502,26 @@ def _wallpaper_screen(w=800, h=480):
 
 class H(BaseHTTPRequestHandler):
     server_version = "nas-web"
+    sys_version = ""            # the Python build was announced BEFORE authentication
     # Socket timeout: without it a hung/slow connection (slowloris) holds a
     # thread forever. The thread pool is unbounded, so eternal threads = crash.
     timeout = 30
     def log_message(self, *a):  # quiet
         pass
+
+    def end_headers(self):
+        """Three headers on every response, including errors and static files.
+
+        The panel serves the owner's own files back to the owner's own browser on the
+        origin their session cookie lives on, so a file that arrives here from anywhere
+        else — a share, an upload, a sync — is content the browser must not be talked into
+        executing. nosniff stops a .txt from being re-interpreted as HTML, the frame rule
+        stops the panel being embedded and clicked through, and the referrer rule keeps
+        local paths out of any request that leaves the box."""
+        self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("X-Frame-Options", "SAMEORIGIN")
+        self.send_header("Referrer-Policy", "same-origin")
+        BaseHTTPRequestHandler.end_headers(self)
 
     def _json(self, obj, code=200, cookie=None):
         body = json.dumps(obj, ensure_ascii=False).encode()
@@ -24795,6 +24880,14 @@ class H(BaseHTTPRequestHandler):
         except OSError:
             self.send_error(500); return
         ctype = mimetypes.guess_type(path)[0] or "application/octet-stream"
+        # A file that reaches this box (a share, an upload, a sync) and comes back as
+        # text/html RUNS on the panel's origin — the one the session cookie belongs to.
+        # Serving it as a download instead costs a preview nobody asked for and closes the
+        # only path from "someone put a file on the NAS" to "script in the panel".
+        active = ctype in ("text/html", "application/xhtml+xml", "image/svg+xml",
+                           "application/xml", "text/xml", "application/xhtml")
+        if active:
+            ctype = "application/octet-stream"
         # HTTP Range → video/audio seeking works + streaming without loading the file into memory
         start, end, partial = 0, size - 1, False
         rng = self.headers.get("Range")
@@ -24816,6 +24909,8 @@ class H(BaseHTTPRequestHandler):
         length = end - start + 1
         self.send_response(206 if partial else 200)
         self.send_header("Content-Type", ctype)
+        if active:      # a unique origin even if a browser decides to render it anyway
+            self.send_header("Content-Security-Policy", "sandbox")
         self.send_header("Accept-Ranges", "bytes")
         if partial:
             self.send_header("Content-Range", "bytes %d-%d/%d" % (start, end, size))
@@ -24987,6 +25082,14 @@ class H(BaseHTTPRequestHandler):
             d = sub
         dest = _uniq(os.path.join(d, name))
         n = int(self.headers.get("Content-Length", 0) or 0)
+        # Nothing bounded this: the only limit was the disk, so an upload could fill the
+        # branch (and, on the system disk, the whole box) and be discovered as ENOSPC in
+        # something unrelated. A pool folder lives on ONE branch, so the room to check
+        # against is that branch's, not the union's — _fsjob_free_at knows the difference.
+        free = _safe(lambda: _fsjob_free_at(d))
+        if free is not None and n > max(0, free - 64 * 1024 * 1024):
+            return {"ok": False, "log": "not enough room: %s needed, %s free here"
+                                        % (_fmt_b(n), _fmt_b(free))}
         got = 0
         try:
             with open(dest, "wb") as f:

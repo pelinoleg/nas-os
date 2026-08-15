@@ -29,6 +29,7 @@ import shutil
 import subprocess
 import tempfile
 import unittest
+from unittest import mock
 
 ROOT = os.path.dirname(os.path.dirname(__file__))
 SPEC = importlib.util.spec_from_file_location("nas_web", os.path.join(ROOT, "nas-web.py"))
@@ -292,6 +293,50 @@ class MakeTheParentBesideTheSource(PoolCase):
         nas._pool_makedirs_beside(parent, src)     # must not raise
 
 
+class HonestFreeSpace(PoolCase):
+    """What the panel is allowed to call "free".
+
+    statvfs on the pool answers with the SUM of the branches, and under a path-preserving
+    policy nothing created there can span more than one. Measured on the box: 2172 GiB
+    reported, 849 GiB actually reachable by one new folder — a promise 2.5x larger than
+    the room the next copy has."""
+
+    def setUp(self):
+        super().setUp()
+        self._storage = nas.STORAGE
+        nas.STORAGE = self.pool
+
+    def tearDown(self):
+        nas.STORAGE = self._storage
+
+    def test_free_new_is_one_branch_not_the_union(self):
+        # This fixture's branches share one filesystem (mergerfs counts such a filesystem
+        # once, so there is no sum to catch here) — the arithmetic against a real sum is
+        # checked in HonestFreeSpaceArithmetic below. What this proves is that the number
+        # comes from a BRANCH: ask mergerfs for the branches, statvfs each, take the best.
+        di = nas.pool_info()
+        one = os.statvfs(self.br1)
+        self.assertEqual(di["free_new"], one.f_bavail * one.f_frsize,
+                         "free_new is not the room a single folder has")
+
+    def test_the_tile_shows_what_one_folder_can_use(self):
+        tile = nas._glance_tile("pool", True)
+        self.assertIn("free", tile["note"])
+        self.assertEqual(tile["raw"]["free"], nas.pool_info()["free_new"])
+        self.assertEqual(tile["raw"]["free_total"], nas.pool_info()["free"],
+                         "the total was dropped instead of being kept beside the truth")
+
+    def test_the_fullest_branch_is_carried_for_the_alarm(self):
+        # the alarm has to watch the branch that fills first: the pool can read 60 % while
+        # the disk holding the folder is out of room
+        di = nas.pool_info()
+        self.assertGreaterEqual(di["pct_worst"], di["pct"])
+
+    def test_outside_a_pool_nothing_is_invented(self):
+        nas.STORAGE = self.d          # a plain directory, not a mount
+        self.assertIsNone(nas.pool_info())
+
+
 class TheShippedPolicyIsPathPreserving(PoolCase):
     """test_pool_policy locks the option string; this checks that the string still buys
     what it was chosen for on the mergerfs build actually installed here."""
@@ -304,6 +349,59 @@ class TheShippedPolicyIsPathPreserving(PoolCase):
                         "the file did not land beside its folder")
         self.assertFalse(os.path.exists(os.path.join(self.br1, "movies")),
                          "the folder was cloned onto a second branch")
+
+
+class HonestFreeSpaceArithmetic(unittest.TestCase):
+    """The aggregation itself, against a pool that really does report the sum.
+
+    Runs everywhere: the branches are ordinary directories and the union figure is
+    supplied, which is exactly the shape mergerfs produces on a box with three separate
+    filesystems (2172 GiB reported, 849 reachable)."""
+
+    def setUp(self):
+        self.d = tempfile.mkdtemp()
+        self.brs = [os.path.join(self.d, "disk1"), os.path.join(self.d, "disk2")]
+        for b in self.brs:
+            os.makedirs(b)
+        self._storage, self._info, self._dirs = nas.STORAGE, nas.disk_info, nas._pool_branch_dirs
+        nas.STORAGE = os.path.join(self.d, "storage")
+        nas._pool_branch_dirs = lambda mp: list(self.brs)
+        one = os.statvfs(self.brs[0])
+        self.avail = one.f_bavail * one.f_frsize
+        # what the union answers: both branches added together, as a real pool does
+        nas.disk_info = lambda p: {"path": p, "total": self.avail * 2, "used": 0,
+                                   "free": self.avail * 2, "pct": 0.0}
+
+    def tearDown(self):
+        nas.STORAGE, nas.disk_info, nas._pool_branch_dirs = self._storage, self._info, self._dirs
+        shutil.rmtree(self.d, ignore_errors=True)
+
+    def info(self):
+        with mock.patch.object(nas.os.path, "ismount", return_value=True):
+            return nas.pool_info()
+
+    def test_the_sum_is_kept_and_the_truth_added(self):
+        di = self.info()
+        self.assertEqual(di["free"], self.avail * 2, "the honest total was thrown away")
+        self.assertEqual(di["free_new"], self.avail,
+                         "one folder was still promised the whole union")
+
+    def test_the_tile_stops_promising_the_union(self):
+        with mock.patch.object(nas.os.path, "ismount", return_value=True):
+            tile = nas._glance_tile("pool", True)
+        self.assertEqual(tile["raw"]["free"], self.avail)
+        self.assertEqual(tile["raw"]["free_total"], self.avail * 2)
+
+    def test_an_unreadable_branch_does_not_zero_the_answer(self):
+        nas._pool_branch_dirs = lambda mp: ["/does/not/exist"] + self.brs
+        self.assertEqual(self.info()["free_new"], self.avail)
+
+    def test_with_no_branch_list_the_union_figure_stands(self):
+        # mergerfs too old for the xattr: better the old number than a zero that would
+        # read as "the pool is full"
+        nas._pool_branch_dirs = lambda mp: []
+        di = self.info()
+        self.assertEqual(di["free_new"], di["free"])
 
 
 if __name__ == "__main__":
