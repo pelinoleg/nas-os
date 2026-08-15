@@ -382,6 +382,17 @@ docker_compose_cmd() {
 # apt output is as good as no warn, so stage_system_apply prints a final summary
 # (a package renamed in a future Debian release must not vanish silently).
 NASW_SKIPPED=()
+# Base-install failures. The panel marks a wizard stage «done» on exit code 0 and
+# nothing else, so a step that only warn'ed and carried on used to read as success:
+# the System stage stayed green even when docker or a backup engine never installed.
+# Everything that leaves the box unable to do a job it advertises lands here, and
+# stage_system_apply exits non-zero with the list.
+NASW_BASE_FAIL=()
+base_fail() {
+    # --dry-run installs nothing by definition — a plan preview must not report failures
+    [ "$DRY_RUN" -eq 1 ] && return 0
+    NASW_BASE_FAIL+=("$1")
+}
 install_packages() {
     local label="$1"; shift
     local to_install=() pkg
@@ -445,6 +456,30 @@ report_skipped_packages() {
         warn "  SSH login banner, until the packages are actually installed."
         warn "==================================================================="
     fi
+}
+
+# report_base_failures — the exit code of the base install. Everything above only
+# warns and carries on (correctly: one dead download must not abort a 20-minute
+# install), so without this the stage always returned 0 and the panel painted it
+# «done» — the failure was visible only to whoever was still watching the console.
+# Returns 1 if anything essential did not make it, after naming each one.
+report_base_failures() {
+    local s lvl pkg why
+    # a REQUIRED package that never installed is a base failure as well: the loud block
+    # from report_skipped_packages returns 0, and the panel reads the code, not the console
+    for s in "${NASW_SKIPPED[@]}"; do
+        IFS=$'\t' read -r lvl pkg _ why <<<"$s"
+        [ "$lvl" = req ] && base_fail "package $pkg — $why"
+    done
+    [ "${#NASW_BASE_FAIL[@]}" -eq 0 ] && return 0
+    warn "==================================================================="
+    warn "  System preparation did NOT complete: ${#NASW_BASE_FAIL[@]} failure(s)."
+    warn ""
+    for s in "${NASW_BASE_FAIL[@]}"; do warn "    • $s"; done
+    warn ""
+    warn "  Most of these are a network hiccup — run the stage again."
+    warn "==================================================================="
+    return 1
 }
 
 # ---------------------------------------------------------------------------
@@ -789,6 +824,12 @@ stage_system() {
     install_packages "utilities"    "${UTIL_PACKAGES[@]}"
     ensure_docker_repo   # docker-ce + compose-plugin from the official Docker repo
     ensure_gh            # GitHub CLI (for pushing panel code from the box)
+    # Same three engines the panel's wizard puts in the base — a box set up from the
+    # terminal must not end up with a different set of apps than one set up from the
+    # browser. Each only warns on failure; the panel path turns that into an exit code.
+    install_rclone
+    install_kopia
+    install_syncthing
 
     # 0.3 enable/start services (idempotent)
     local svc
@@ -3614,8 +3655,12 @@ install_rclone() {
 # snapshots, 3-2-1 spare copies via `repository sync-to`). Debian has no kopia
 # package, so we install the OFFICIAL GitHub release binary. Kopia has no
 # selfupdate — `update` simply re-downloads the latest release over the binary.
-# NOT part of auto-base: installed on demand by the app's «Install kopia» button
-# (api kopia) — a box that never opens the app should not carry the binary.
+# PART OF AUTO-BASE, next to rclone. It used to be install-on-demand ("a box that
+# never opens the app should not carry the binary") — inconsistent: rclone is fetched
+# exactly the same way, a binary off the vendor's site, and has always been in the
+# base. A backup engine discovered missing on the day it is needed is the one failure
+# a NAS must not have; ~30 MB is not a reason. The app's «Install kopia» button
+# (api kopia) stays as the retry path for when the download failed.
 # install_kopia [ensure|update]:
 #   ensure (default) — install only if missing;
 #   update (api kopia-update) — replace with the latest release.
@@ -3819,9 +3864,15 @@ stage_system_apply() {
     install_smartd_guard   # smartmontools is installed here too — immediately clear 'failed' when there are no disks
     install_packages "utilities"   "${UTIL_PACKAGES[@]}"
     ensure_docker_repo   # docker-ce + compose-plugin from the official Docker repo
+    command -v docker >/dev/null 2>&1 || base_fail "docker — the Apps section and every container stack stay dead"
     ensure_gh            # GitHub CLI (to push panel code from the box)
-    install_rclone       # cloud engine for the «Backup» app (latest official binary; selfupdate-able)
-    install_syncthing    # file sync with other machines — a system service, GUI proxied by the panel
+    # The three engines behind the panel's backup/sync apps. All base, none optional:
+    # a box is set up once, and the day one of these is needed is not the day to find
+    # out it was never installed. Each comes from a vendor binary or repo, so each can
+    # fail on the network alone — and then the stage says so instead of going green.
+    install_rclone    || base_fail "rclone — the Backup app cannot reach any cloud (S3/B2/Drive/WebDAV/SFTP)"
+    install_kopia     || base_fail "kopia — the Kopia app has no engine: no snapshot backups, no 3-2-1 copies"
+    install_syncthing || base_fail "syncthing — no file sync with laptops, phones or other boxes"
     # Automatic security updates are part of the base: a box that nobody touches for
     # a year must not sit on unpatched CVEs. Security-only channel (Debian default
     # origins), so nothing feature-breaking arrives; panel Settings can toggle it off.
@@ -3923,6 +3974,7 @@ UNIT
     run systemctl enable --now nas-settings-drill.timer
     run systemctl enable --now nas-thumbs.timer
     report_skipped_packages
+    report_base_failures || return 1
     echo "system prepared"
 }
 # Mount a removable medium into the automount base (explicit action: format/mount).
@@ -4388,4 +4440,6 @@ main() {
     esac
 }
 
-main "$@"
+# Sourcing the script must not run the wizard: the tests call individual functions
+# (report_base_failures, pkg_level, …) and would otherwise launch a whole install.
+[ -n "${NASW_NO_MAIN:-}" ] || main "$@"
