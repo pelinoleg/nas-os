@@ -166,6 +166,15 @@ class WhatMayRingThePhone(unittest.TestCase):
         self.assertTrue(nas._push_allowed("write_load", 2, self.mode("important")),
                         "an explicitly critical event was held back")
 
+    def test_a_dying_disk_rings_however_it_is_dying(self):
+        # An ATA disk usually fails the overall SMART health check; an NVMe usually does
+        # not — it reports media errors, an exhausted spare reserve and rated life used up
+        # while still answering "passed". Both mean the same thing to the owner, so both
+        # ring. (Owner's decision, 2026-08-15.)
+        for name in ("smart", "smart_wear"):
+            self.assertTrue(nas._push_allowed(name, 1, self.mode("important")),
+                            "%s waits for the evening digest" % name)
+
     def test_the_narrow_list_only_names_events_that_exist(self):
         # the panel draws its "rings" marker from this list; a name that no longer matches
         # an event silently downgrades that alarm to the evening digest

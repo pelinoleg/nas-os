@@ -11151,7 +11151,12 @@ def _nb_drill_sched_tick():
 # The list is deliberately short — an alert channel that fires for everything gets switched off,
 # and then the one that mattered is missed too.
 _PUSH_NOW = {
-    "readonly", "fserror", "smart", "sd_degrade", "diskfull", "root_full", "inodes",
+    # smart_wear rings for the same reason smart does, and the owner decided so on
+    # 2026-08-15: media errors, an exhausted spare-block reserve or 80 % of rated write
+    # life are not a trend to read in the evening digest — they are "replace this disk",
+    # the same sentence a SMART FAIL delivers. It is also the alarm an all-NVMe box gets
+    # INSTEAD of smart, because NVMe drives rarely fail the overall health check first.
+    "readonly", "fserror", "smart", "smart_wear", "sd_degrade", "diskfull", "root_full", "inodes",
     "sustained_heat", "fan_stall", "cfg_corrupt", "delete_block", "nb_guard",
     "nb_change",
     "pool", "mergerfs", "disk_remove", "dirty_boot",
