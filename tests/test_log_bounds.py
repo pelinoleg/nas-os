@@ -4,7 +4,7 @@ The journal is capped (`install_journal_caps`: 512M, one month), container logs 
 (`install_docker_logcaps`), and everything Debian ships arrives with its own logrotate
 snippet. `/var/log/nas-wizard.log` had none: it grew forever, on the system NVMe, which is
 the disk this project already watches for wear. It came out of the 200-point readiness
-audit as one of the "мелочи" — the kind that is only small until the day it is not.
+audit as one of the small items — the kind that is only small until the day it is not.
 
 What is pinned here:
 

@@ -4,7 +4,7 @@ Every alarm here is produced by `monitor_tick`, running as a daemon thread insid
 So the monitor is the only component whose failure is silent BY CONSTRUCTION: when the loop
 dies or wedges, the box stops complaining about anything, and a box that has stopped
 complaining is exactly what a healthy box looks like. The readiness audit filed this as
-"над монитором нет сторожа (умрёт — тишина неотличима от здоровья)".
+"nothing watches the monitor — when it dies, the silence is indistinguishable from health".
 
 The recorder (`nas-blackbox.service`) is the only other thing here with its own unit, its own
 process and a tick of its own, so the watch lives there. What these tests pin down:
