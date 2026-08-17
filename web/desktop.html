@@ -14319,6 +14319,7 @@ const EVMETA=[
  {k:"resil_drill",t:"Reboot drill blockers",d:"the weekly readiness audit found things that won't survive a reboot",dp:0},
  {k:"log_sentry",t:"New error pattern in logs",d:"the log sentry saw a repeating error this box never produced before",dp:0},
  {k:"write_load",t:"Heavy writes to system disk",d:"more than the threshold written per day, 3 days straight (SD wear)",thr:"GB",dp:0},
+ {k:"monitor_dead",t:"Monitoring has stopped",d:"the panel is down, or it is up and its monitor loop stopped ticking — raised by the black box, the only watcher that outlives the panel",dp:2},
 ];
 const PRIO=[[2,"Emergency"],[1,"Important"],[0,"Normal"],[-1,"Quiet"],[-2,"Badge"]];
 function notifyTab(tc){tc.innerHTML=`<div style="color:var(--mut);font-size:12px">loading…</div>`;

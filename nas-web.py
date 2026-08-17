@@ -4080,6 +4080,10 @@ def _def_monitor():
         "resil_drill": {"on": True,  "priority": 0, "desk": True},     # weekly readiness audit found blockers
         "log_sentry":  {"on": True,  "priority": 0, "desk": True},     # new error pattern in the journal
         "write_load":  {"on": True,  "priority": 0, "threshold": 20, "desk": True},  # GB/day to the system disk, 3 days straight
+        # The watchdog over the monitor itself, raised by the RECORDER process. Every alarm
+        # above is produced by monitor_tick, so when that loop dies its silence is
+        # indistinguishable from a healthy box. Priority 2: nothing else can report this.
+        "monitor_dead":{"on": True,  "priority": 2, "desk": True},
     }}
 
 def _monitor_defaults_desk(d):
@@ -4263,7 +4267,7 @@ for _k in ("svcfail", "container", "container_loop", "cron_failed", "boot",
     _EVENT_KIND[_k] = "svc"
 for _k in ("panel_new", "panel_fail", "ssh_login"):
     _EVENT_KIND[_k] = "access"
-for _k in ("resil_drill", "log_sentry", "health"):
+for _k in ("resil_drill", "log_sentry", "health", "monitor_dead"):
     _EVENT_KIND[_k] = "svc"
 for _k in ("ip_changed", "link_changed", "vpn_offline", "traffic"):
     _EVENT_KIND[_k] = "net"
@@ -4286,7 +4290,7 @@ _EVENT_COND = {
     "mem", "swap", "load", "proc_hog", "slow_disk", "temp", "disktemp", "sustained_heat",
     "smart", "smart_wear", "sd_degrade", "fan_stall", "pool",
     "mergerfs", "readonly", "fserror", "vpn_offline", "time_drift", "cfg_corrupt", "svcfail",
-    "container_loop", "health", "write_load", "log_sentry",
+    "container_loop", "health", "write_load", "log_sentry", "monitor_dead",
     "nb_conn", "nb_srcmiss", "nb_stale", "nb_size", "nb_dumps", "nb_dest", "kp_stale",
 }
 COND_KEEP_DAYS = 30          # after this long without a repeat, a condition starts a new record
@@ -11221,6 +11225,9 @@ _PUSH_NOW = {
     "sustained_heat", "fan_stall", "cfg_corrupt", "delete_block", "nb_guard",
     "nb_change",
     "pool", "mergerfs", "disk_remove", "dirty_boot",
+    # the monitor is what rings every other bell on this list — its own death must ring
+    # even in "important" mode, and it is the one alarm that cannot wait for the digest
+    "monitor_dead",
 }
 
 def _push_allowed(name, priority, cfg=None):
@@ -15397,6 +15404,23 @@ def kp_update_info(force=False, net=True):
 POKE_FILE = "/run/nas-web-refresh"
 _mon_wake = threading.Event()
 
+# Heartbeat of monitor_loop, read by the RECORDER process (see _mon_watch). /run is tmpfs,
+# so the file cannot survive a boot and be mistaken for a live monitor.
+MON_BEAT = "/run/nas-web-monitor.beat"
+MON_STALE   = 300           # a beat older than this: the loop (60 s cadence) is not turning
+MON_CONFIRM = 120           # ...and the verdict must hold this long before it is believed
+MON_REPEAT  = 6 * 3600      # re-ring while it stays true
+
+def _mon_beat():
+    """One line of proof that monitor_loop went round. Written on EVERY iteration, poked or
+    full: the question the watchdog asks is 'is the loop turning', not 'did it run the whole
+    catalogue'."""
+    try:
+        with open(MON_BEAT, "w") as f:
+            f.write("%d\n" % int(time.time()))
+    except OSError:
+        pass
+
 def _poke_watcher():
     last = None
     while True:
@@ -15588,6 +15612,7 @@ def blackbox_daemon():
             _bb_tick(st)
         except Exception as e:
             _bb_note_error(e)
+        _safe(lambda: _mon_watch(st))   # nothing else outlives the panel to notice its silence
         time.sleep(BB_INTERVAL)
 
 
@@ -15624,8 +15649,68 @@ def _bb_note_error(e):
     if _BB_ERR["seen"]:
         return
     _BB_ERR["seen"] = True
+    _safe(_bb_events_reset)
     _safe(lambda: log_event("blackbox", "Black box is not recording",
                             "%s: %s" % (type(e).__name__, e), "err", kind="cond"))
+
+
+def _bb_events_reset():
+    """The recorder is a SECOND process writing the panel's event file. `_events` is a
+    per-process cache: loaded once, never re-read. So a second write from this process would
+    save a snapshot taken before everything the panel logged in between — silently dropping
+    those events. The panel owns the file; drop our copy and let the next write re-read it."""
+    global _events
+    with _events_lock:
+        _events = None
+
+
+def _mon_watch(st, mono=None):
+    """Watchdog over the monitor, run by the RECORDER — because a loop cannot report its own
+    death. Every alarm this box raises comes out of monitor_tick, so when that thread dies or
+    wedges, the box goes quiet — and quiet is exactly what a healthy box looks like. The
+    recorder is the only other thing here with its own unit, its own process and a 10 s tick.
+
+    Two verdicts, because they ask two different things of the owner: the panel process is
+    gone (systemd was supposed to bring it back), or the process is up and its loop stopped.
+
+    Ordered cheap-first: a stat of the heartbeat every tick, and systemd is only asked once
+    something already looks wrong.
+
+    Guarded against a clock jump — the beat carries wall-clock time, and this box has booted
+    12 h in the future once already (RTC in local time). A jump makes a fresh beat look
+    ancient for one beat interval at most, so a verdict is only believed after it has held
+    for MON_CONFIRM seconds of the recorder's own monotonic clock. A beat from the future
+    (clock jumped back) is not evidence of death either, and counts as healthy."""
+    if mono is None:
+        mono = time.monotonic()
+    try:
+        age = time.time() - os.path.getmtime(MON_BEAT)
+    except OSError:
+        age = None                      # never beat: the loop never started, or an old build
+    if age is not None and age < MON_STALE:
+        st["mon_bad"] = None            # healthy — re-arm, so a SECOND death is reported too
+        return None
+    act = (_run(["systemctl", "is-active", "nas-web.service"], timeout=5).get("log") or "").strip()
+    if act in ("active", "activating", "reloading"):
+        title = "Monitoring has stopped"
+        why = ("The panel is running, but its monitor has not ticked for %d min. "
+               "No alarm on this box can fire." % (age // 60)) if age is not None else \
+              ("The panel is running, but its monitor has never ticked. "
+               "No alarm on this box can fire.")
+    else:
+        title = "The panel is not running"
+        why = ("nas-web.service is %s. The panel is down and every alarm with it."
+               % (act or "not answering"))
+    bad = st.get("mon_bad")
+    if not bad or bad[0] != title:
+        st["mon_bad"] = (title, mono)   # a changed verdict starts its own confirmation window
+        return None
+    if mono - bad[1] < MON_CONFIRM:
+        return None
+    _bb_events_reset()
+    notify_event("monitor_dead", "monitor_dead:" + title, title, why, "crit",
+                 cooldown=MON_REPEAT)
+    return title
 
 
 def blackbox_status():
@@ -17672,6 +17757,7 @@ def monitor_loop():
                 fn()
             except Exception:
                 pass
+        _mon_beat()      # after the work, not before: a loop that wedges inside a check is dead too
 
 # --------------------------------------------------------------------------- #
 #  Docker services / stacks (GUI manager)

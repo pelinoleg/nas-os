@@ -831,6 +831,21 @@ stage_system() {
     install_rclone
     install_kopia
     install_syncthing
+    install_logrotate    # this script's own log; unbounded on both paths until now
+    # Reliability the browser wizard puts in EVERY box from boot one, and this path left
+    # to a stage the operator might never open — or to no stage at all. The black box is
+    # the one that matters most here: it is the only thing that survives the panel, so
+    # without it a box has no crash forensics AND no watchdog over its own monitor.
+    install_blackbox
+    install_uas_off      # USB bridges that lie about UAS: a reset takes a running backup down
+    install_usb_timeout  # 180s SCSI timeout, independent of automount
+    install_notify_helper
+    install_netguard     # one active link at a time, Wi-Fi failover, availability log
+    install_memory_guard # the slice limits added after the box thrashed itself for an hour
+    install_motd
+    # All of the above are idempotent (write_file + enable), which is what makes them safe
+    # to reach twice: bk_smartd (Stage 8) calls four of them as well, and every one has an
+    # `api` action for re-running it on a live box.
 
     # 0.3 enable/start services (idempotent)
     local svc
@@ -1727,17 +1742,63 @@ PYJ
 # NAS whose system disk is also where docker, the panel and every config live, that is
 # gigabytes reserved for logs nobody reads. A persistent journal is worth keeping (it is
 # what survives a crash and explains it), just not an unbounded one.
+# The wizard's own log is the one log on this box nothing bounded: the journal is capped
+# (install_journal_caps), container logs are capped (install_docker_logcaps), every log
+# Debian ships rotates itself — and /var/log/nas-wizard.log just grew, forever, on the
+# system disk. Every write here is a plain `>>` from a short-lived shell (see LOG at the top
+# of this script), so nothing holds the file open across a rotation and copytruncate — which
+# would cost a full copy of the file — is not needed.
+install_logrotate() {
+    run mkdir -p /etc/logrotate.d
+    write_file /etc/logrotate.d/nas-os <<'EOF'
+# nas-wizard: the wizard's own log. 0640 root root matches what the wizard creates itself.
+/var/log/nas-wizard.log {
+    weekly
+    rotate 8
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 0640 root root
+}
+EOF
+}
+
+# The journal, bounded and persistent. This used to exist TWICE — here for the browser
+# wizard, and as sec_journald() for the terminal one — with different filenames, different
+# limits and only one of the two doing the things below. sec_journald now calls this.
 install_journal_caps() {
     run mkdir -p /etc/systemd/journald.conf.d
-    write_file /etc/systemd/journald.conf.d/50-nas.conf <<'EOF'
+    # Drop-ins merge in filename order across /usr/lib and /etc, and the LAST one wins. A
+    # distribution drop-in may set Storage=volatile, so ours has to sort after anything the
+    # system ships — hence 99-, not 50-. The terminal path had worked this out and written
+    # 99-nas.conf; the browser path — the one nearly every box actually uses — wrote
+    # 50-nas.conf, where a stock drop-in could silently overrule it.
+    run rm -f /etc/systemd/journald.conf.d/00-nas.conf /etc/systemd/journald.conf.d/50-nas.conf
+    write_file /etc/systemd/journald.conf.d/99-nas.conf <<'EOF'
 # nas-wizard: keep the journal persistent but bounded.
 [Journal]
+# Persistent. Without this the journal lives in /run and evaporates on power loss —
+# exactly the case where it is the only way to learn what happened.
 Storage=persistent
 SystemMaxUse=512M
+SystemMaxFileSize=50M
 SystemKeepFree=1G
 MaxRetentionSec=1month
 EOF
+    run mkdir -p /var/log/journal
+    run systemd-tmpfiles --create --prefix /var/log/journal
+    # NAS-OS does not install log2ram — it exists to spare SD cards and this is an x86 box
+    # with an NVMe/SSD root. But an owner may have added it themselves, and it keeps
+    # /var/log on tmpfs: the journal we just sized would never reach the disk, and a power
+    # cut would take exactly the logs that explain the power cut.
+    if systemctl is-enabled log2ram >/dev/null 2>&1; then
+        warn "log2ram keeps /var/log in RAM — the journal won't survive a power-off"
+        run systemctl disable --now log2ram
+        info "log2ram disabled for a persistent journal"
+    fi
     run systemctl restart systemd-journald
+    info "journald: persistent journal, 512M limit"
 }
 
 # Avahi answers on EVERY interface it can see, docker bridges included — so `mininas.local`
@@ -2207,33 +2268,10 @@ APT::Periodic::AutocleanInterval "7";
 EOF
     info "unattended-upgrades enabled (security only by default)"
 }
+# One implementation, called from both wizards. Kept as a name of its own because the
+# terminal menu addresses stages by these sec_*/bk_* handles.
 sec_journald() {
-    run mkdir -p /etc/systemd/journald.conf.d
-    # Drop-ins are merged in filename order across /usr/lib and /etc, last wins.
-    # A distribution drop-in may set Storage=volatile, so ours must sort after
-    # anything shipped by the system — hence the 99- prefix, not 00-.
-    run rm -f /etc/systemd/journald.conf.d/00-nas.conf
-    write_file /etc/systemd/journald.conf.d/99-nas.conf <<'EOF'
-[Journal]
-# Persistent journal. Without it the log lives in /run and evaporates on power
-# loss — exactly the case where the log is the only way to learn what happened.
-Storage=persistent
-SystemMaxUse=200M
-SystemMaxFileSize=50M
-EOF
-    run mkdir -p /var/log/journal
-    run systemd-tmpfiles --create --prefix /var/log/journal
-    # NAS-OS does not install log2ram — it exists to spare SD cards and this is an
-    # x86 box with an NVMe/SSD root. But an owner may have added it themselves, and it
-    # keeps /var/log on tmpfs: the journal we just sized would never reach the disk,
-    # and a power cut would take exactly the logs that explain the power cut.
-    if systemctl is-enabled log2ram >/dev/null 2>&1; then
-        warn "log2ram keeps /var/log in RAM — the journal won't survive a power-off"
-        run systemctl disable --now log2ram
-        info "log2ram disabled for a persistent journal"
-    fi
-    run systemctl restart systemd-journald
-    info "journald: persistent journal, 200M limit"
+    install_journal_caps
 }
 sec_ufw() {
     # Installs and PRE-LOADS the rules, then leaves the firewall OFF. A firewall is
@@ -2316,7 +2354,7 @@ stage_security() {
     local raw
     raw="$(ui_checklist "Security / basic settings" "Check what to configure:" \
         "unattended" "Auto security updates (unattended-upgrades)" ON \
-        "journald"   "journald 200M limit (keeps the journal bounded)" ON \
+        "journald"   "journald 512M limit (persistent, but bounded)" ON \
         "ufw"        "ufw firewall: install + rules, left OFF" ON \
         "fail2ban"   "fail2ban: install + sshd jail, left OFF" ON \
         "sshkeys"    "SSH: disable password (keys required!)" OFF)" || { info "cancelled"; return 0; }
@@ -2367,6 +2405,11 @@ shares_samba() {
 shares_avahi() {
     install_packages "avahi" avahi-daemon
     enable_service avahi-daemon
+    # Scoping belongs HERE, not in the caller: enabling avahi without it is what makes
+    # <host>.local answer with a docker bridge address (172.18.0.1) and the name simply
+    # not work in the house. The browser wizard has always done both; this path enabled
+    # the daemon and stopped, so the same box set up from the terminal got the bug.
+    install_mdns_scope
     info "Avahi/mDNS enabled: $(hostname).local"
 }
 
@@ -4005,6 +4048,7 @@ EOF
     # Black box flight recorder (Resilience app): crash forensics from boot one.
     install_blackbox
     install_journal_caps
+    install_logrotate
     install_mdns_scope
     id -nG "$TARGET_USER" 2>/dev/null | tr ' ' '\n' | grep -qx docker || run usermod -aG docker "$TARGET_USER"
     run mkdir -p "$STORAGE_MNT" "$DOCKER_ROOT" "$SERVICES_SRC"
@@ -4496,6 +4540,7 @@ run_api() {
         stacks)         generate_deploy_script; install_stacks_autostart ;;   # boot-time bring-up of /opt/stacks
         dockerlogs)     install_docker_logcaps ;;
         journal)        install_journal_caps ;;
+        logrotate)      install_logrotate ;;
         mdns)           install_mdns_scope ;;
         tailscale)      mod_tailscale ;;
         staticip)       mod_staticip ;;
