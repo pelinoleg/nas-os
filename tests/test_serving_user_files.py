@@ -140,9 +140,18 @@ class UploadsFitWhereTheyLand(unittest.TestCase):
         shutil.rmtree(self.d, ignore_errors=True)
 
     def test_the_room_is_measured_where_the_file_lands(self):
+        # Three readings of a LIVE filesystem. Comparing two of them exactly made this test
+        # flaky on CI: the runner wrote 8 KB between the two calls and the assertion read
+        # that drift as the panel overstating free space. The claim being tested is that
+        # _fsjob_free_at does not report MORE room than the filesystem where the file lands
+        # actually has — a union figure would be wrong by the size of a disk, not by 8 KB —
+        # so bracketing the call and taking the larger reading keeps the claim and drops
+        # the race.
+        before = shutil.disk_usage(self.d).free
         free = nas._fsjob_free_at(self.d)
+        after = shutil.disk_usage(self.d).free
         self.assertGreater(free, 0)
-        self.assertLessEqual(free, shutil.disk_usage(self.d).free)
+        self.assertLessEqual(free, max(before, after))
 
 
 if __name__ == "__main__":
