@@ -447,35 +447,65 @@ class HonestFreeSpaceArithmetic(unittest.TestCase):
         nas.STORAGE, nas.disk_info, nas._pool_branch_dirs = self._storage, self._info, self._dirs
         shutil.rmtree(self.d, ignore_errors=True)
 
+    def _avail(self):
+        st = os.statvfs(self.brs[0])
+        return st.f_bavail * st.f_frsize
+
     def info(self):
+        """pool_info(), bracketed by two readings of the filesystem it measures."""
+        lo = self._avail()
         with mock.patch.object(nas.os.path, "ismount", return_value=True):
-            return nas.pool_info()
+            di = nas.pool_info()
+        self._lo, self._hi = sorted((lo, self._avail()))
+        return di
+
+    def tile(self):
+        lo = self._avail()
+        with mock.patch.object(nas.os.path, "ismount", return_value=True):
+            t = nas._glance_tile("pool", True)
+        self._lo, self._hi = sorted((lo, self._avail()))
+        return t
+
+    def assertSpans(self, value, per_branch, msg=""):
+        """`value` must be what the branches could honestly have answered DURING the call.
+
+        These branches are real directories on a live filesystem, and setUp's reading is not
+        the reading the code makes. On a CI runner 8 KB was written between the two and an
+        exact comparison read that drift as the panel lying about free space (2026-08-17, and
+        again 2026-08-28 in a sibling test). The claim worth testing is an order of magnitude
+        — a union figure would be wrong by a whole disk — so bracket the call instead."""
+        # plus a slack the claim can afford: free space can also move BETWEEN the two
+        # readings and back, so the middle one is not strictly bracketed. A branch's worth of
+        # error is gigabytes — 16 MiB of give costs the test nothing.
+        slack = 16 << 20
+        self.assertGreaterEqual(value, per_branch(self._lo) - slack, msg)
+        self.assertLessEqual(value, per_branch(self._hi) + slack, msg)
 
     def test_the_sum_is_kept_and_the_reserve_taken_off(self):
         di = self.info()
         self.assertEqual(di["free"], self.avail * 2, "the honest total was thrown away")
-        self.assertEqual(di["free_new"], self.avail * 2,
+        self.assertSpans(di["free_new"], lambda a: a * 2,
                          "the reachable space is the branches added up")
 
     def test_the_unreachable_reserve_is_not_promised(self):
         # a branch under minfreespace takes no new files at all, so nothing left on it is
         # reachable — on the box that is 3 x 20 GiB the panel would otherwise promise
-        with mock.patch.object(nas, "_pool_minfree", return_value=self.avail // 4):
+        reserve = self.avail // 4
+        with mock.patch.object(nas, "_pool_minfree", return_value=reserve):
             di = self.info()
-        self.assertEqual(di["free_new"], 2 * (self.avail - self.avail // 4))
+        self.assertSpans(di["free_new"], lambda a: 2 * (a - reserve))
         with mock.patch.object(nas, "_pool_minfree", return_value=self.avail * 2):
             self.assertEqual(self.info()["free_new"], 0,
                              "a pool no write can reach still reported room")
 
     def test_the_tile_stops_promising_the_unreachable(self):
-        with mock.patch.object(nas.os.path, "ismount", return_value=True):
-            tile = nas._glance_tile("pool", True)
-        self.assertEqual(tile["raw"]["free"], self.avail * 2)
+        tile = self.tile()
+        self.assertSpans(tile["raw"]["free"], lambda a: a * 2)
         self.assertEqual(tile["raw"]["free_total"], self.avail * 2)
 
     def test_an_unreadable_branch_does_not_zero_the_answer(self):
         nas._pool_branch_dirs = lambda mp: ["/does/not/exist"] + self.brs
-        self.assertEqual(self.info()["free_new"], self.avail * 2)
+        self.assertSpans(self.info()["free_new"], lambda a: a * 2)
 
     def test_the_fullest_branch_alone_does_not_colour_the_tile(self):
         # The mirror keeps disk1 at 98 % while the pool sits at 40 %. Under the spreading
