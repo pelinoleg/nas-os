@@ -49,10 +49,11 @@ STACK_PACKAGES=(mergerfs snapraid smartmontools)
 # General-purpose utilities — what a server/NAS almost always needs
 UTIL_PACKAGES=(
   vnstat              # per-interface traffic counter («Traffic» widget in the panel)
-  sshfs               # «Servers» in the panel file manager: SSH mounts in /mnt/remote
-  cifs-utils          # «Servers» over SMB — the transport a NAS actually serves well. sshfs to
-                      # the Ugreen dropped its SFTP session about once a second under a backup's
-                      # reading (2026-08-27); the same reads over SMB failed zero times
+  cifs-utils          # «Servers» in the panel file manager: SMB mounts in /mnt/remote. It is
+                      # the only mount transport left — sshfs was removed on 2026-08-28 after
+                      # the Ugreen dropped its SFTP session about once a second under a
+                      # backup's reading (101 errors in 400 files) while the same reads over
+                      # SMB failed zero times, and nothing on this box mounts SFTP any more
   smbclient           # lists the shares a server offers, so the dialog can offer tick-boxes
   openssl             # TLS certificate for the Kopia backup server (clients pin its fingerprint)
   dialog
@@ -95,9 +96,8 @@ REQUIRED_PKGS=(
   "snapraid|no parity: a dead disk takes its files with it"
   "smartmontools|no SMART: a disk that is dying gives no warning"
   "rsync|the Mirror backup app cannot copy anything at all"
-  "openssh-client|no backups to another machine, no SSH mounts in the file manager"
-  "sshfs|the file manager cannot mount other servers (Servers section)"
-  "cifs-utils|the file manager cannot mount SMB servers — the only reliable transport for some NAS boxes"
+  "openssh-client|no backups to or from another machine over ssh"
+  "cifs-utils|the file manager cannot mount other servers at all (Servers section)"
   "avahi-daemon|<host>.local stops resolving and the NAS disappears from Finder → Network"
   "libnss-mdns|<host>.local stops resolving on this box itself"
   "samba|network shares (SMB) cannot be served at all"

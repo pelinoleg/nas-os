@@ -6865,7 +6865,7 @@ def _nb_defaults():
          # provider: "" = a regular server, "rsyncnet" = an rsync.net account (restricted
          # shell, paths FROM the HOME folder, no retention needed — they have ZFS snapshots).
          "auth": "password", "provider": "",
-         "dst2": {},          # SSH destination for a pull profile (SSH→SSH bridge mode)
+         "dst2": {},          # the DESTINATION cloud remote of a cloud→cloud profile
          "remote_sudo": False,
          "dest_mode": "single", "dest_base": (storage_sub("nas-backup") or "/mnt/storage/nas-backup"),
          "jobs": [],
@@ -6915,6 +6915,14 @@ def nb_profiles():
         d.update(it)
         d["id"] = pid
         d["name"] = (str(it.get("name") or "").strip() or "Backup")[:40]
+        if _nb_stored_ssh2ssh(d):
+            # SSH→SSH is gone. Its destination paths belong to ANOTHER server, so reading it
+            # as an ordinary pull would aim them at this box — /volume1/… under /. Clear the
+            # destination instead: the profile then reads as "no destination selected", which
+            # is the truth, and the panel already refuses to run without one.
+            d["dst2"] = {}
+            d["dest_base"] = ""
+            d["jobs"] = []
         out.append(d)
     if not out:
         d = _nb_defaults(); d.update({"id": NB_MAIN, "name": "Default"}); out = [d]
@@ -6993,29 +7001,30 @@ def _nb_sides(cfg):
         dst["base"] = cfg.get("dest_base") or ""
         return src, dst
     else:
+        # pull: a remote source, and the copy lands HERE. A remote destination as well would
+        # be SSH→SSH, which rsync cannot do directly — it was carried by an sshfs mount of the
+        # source, and sshfs is exactly the transport that lost a 1.8 TB backup on this box
+        # (see the Servers note). Removed root and branch on 2026-08-28 at the owner's request:
+        # "same problems will happen there". A profile stored in that shape is disarmed in
+        # nb_load rather than quietly redirected at a local path.
         src = dict(conn, kind=("rsyncd" if tr == "rsync" else "ssh"))
-        # a pull profile's destination can also be remote — that is SSH→SSH
-        d2 = cfg.get("dst2") or {}
-        if d2.get("kind") == "ssh":
-            dst = {"kind": "ssh", "host": d2.get("host", ""), "user": d2.get("user", ""),
-                   "password": d2.get("password", ""), "port": int(d2.get("port", 22) or 22),
-                   "auth": d2.get("auth") or "password", "sudo": False,
-                   "provider": d2.get("provider") or ""}
-        else:
-            dst = {"kind": "local"}
+        dst = {"kind": "local"}
     dst["base"] = cfg.get("dest_base") or ""
     return src, dst
 
 
-def _nb_remote_both(cfg):
-    """SSH→SSH: rsync can't do this ("source and destination cannot both be
-    remote"), so we mount the source over sshfs and copy as if from a local
-    folder. Data goes through the NAS — a cost the panel warns about.
-    rclone is NEVER this: it does remote→remote directly (cloud→cloud), no sshfs bridge."""
+def _nb_stored_ssh2ssh(cfg):
+    """A profile saved by an older build as SSH→SSH (pull, with a remote destination).
+
+    The mode is gone (see _nb_sides), and the raw config is the only place it still shows.
+    It matters because the destination paths in such a profile belong to ANOTHER server:
+    reading its `dst2` as "no remote destination" would point them at this box, and
+    /volume1/backup would start filling the system disk. So it is detected and disarmed,
+    not reinterpreted."""
     if _nb_rclone_any(cfg):
-        return False
-    src, dst = _nb_sides(cfg)
-    return src["kind"] != "local" and dst["kind"] != "local"
+        return False           # dst2 also carries the cloud→cloud destination — not this
+    return (cfg or {}).get("direction") != "push" and \
+        ((cfg or {}).get("dst2") or {}).get("kind") == "ssh"
 
 
 def _nb_valid_dest(p):
@@ -7030,11 +7039,11 @@ def _nb_push_ssh(cfg):
 
 def _nb_dest_ssh(cfg):
     """The destination is a remote SSH server — a push to SSH, OR a pull whose destination
-    bridges to another SSH server (SSH→SSH via dst2). Both want the same handling: mkdir over
+    is a remote SSH server (push over ssh). That wants: mkdir over
     SSH, remote age-only archive pruning, no local --chown, no local FS/mount probing. This is
     what the runner already does at nb_run (push_ssh |= dst kind ssh); the helper carries the
     same test to the places that only looked at _nb_push_ssh (push-only) and so mis-treated a
-    pull SSH→SSH destination as a local disk."""
+    a remote destination as a local disk."""
     return _nb_sides(cfg or {})[1].get("kind") == "ssh"
 
 def _nb_rclone(cfg):
@@ -7193,14 +7202,7 @@ def nb_save(patch, pid=None):
             cur["transport"] = "rsync" if cs["kind"] == "rsyncd" else "ssh"
             far = cs
             cur["remote"] = ""; cur["remote_path"] = ""   # not a cloud mode
-            # a pull profile's remote destination = SSH→SSH (bridge through the NAS)
-            cur["dst2"] = {k: cd.get(k, "") for k in
-                           ("host", "user", "password", "port", "auth", "provider")} \
-                if cd["kind"] == "ssh" else {}
-            if cur["dst2"]:
-                cur["dst2"]["kind"] = "ssh"
-                try: cur["dst2"]["port"] = max(1, min(65535, int(cur["dst2"].get("port") or 22)))
-                except (TypeError, ValueError): cur["dst2"]["port"] = 22   # clamp: a negative/huge port would reach ssh -p
+            cur["dst2"] = {}      # a pull copies HERE — a remote destination was SSH→SSH, gone
         if far:
             cur["host"] = str(far.get("host", ""))
             cur["user"] = str(far.get("user", ""))
@@ -7338,16 +7340,11 @@ def nb_public(cfg=None):
     for sd in (src, dst):
         sd["has_password"] = bool(sd.pop("password", ""))
     c["src"], c["dst"] = src, dst                # free sides for the UI
-    # the SSH→SSH destination server's password lives in the parallel raw dst2 field — the
-    # shallow dict() copy above shares it, so strip it here too (mirror the src/dst treatment),
-    # or GET/POST /api/backup/config would return it in cleartext for a pull SSH→SSH profile
+    # dst2 (the cloud→cloud destination, and whatever an older SSH→SSH profile left behind)
+    # is shared by the shallow dict() copy above, so strip its password here too — mirror the
+    # src/dst treatment, or GET/POST /api/backup/config would hand it back in cleartext
     if isinstance(c.get("dst2"), dict):
         d2 = dict(c["dst2"]); d2["has_password"] = bool(d2.pop("password", "")); c["dst2"] = d2
-    # "both remote" = the sshfs bridge (SSH→SSH): rsync can't do remote→remote, so we mount
-    # the source on the NAS and copy through it. rclone does remote→remote DIRECTLY (cloud→
-    # cloud, no bridge), so it is NEVER "both_remote" — otherwise the UI shows a bogus
-    # "flows through this NAS via sshfs" warning on a cloud→cloud profile.
-    c["both_remote"] = _nb_remote_both(cfg or nb_load())
     # the ACTUAL storage root (pool, or the chosen USB path on a pool-less box) so the UI's
     # destFor strips the same prefix the server's _nb_dest_for does — otherwise a per-source
     # dest preview on a pool-less box would carry the wrong prefix
@@ -7663,18 +7660,6 @@ def nb_test(cfg=None):
     """Connectivity test + module list (for rsync daemon). For push-local —
     checks that a destination folder is chosen and its disk is mounted."""
     cfg = cfg or nb_load()
-    if _nb_remote_both(cfg):
-        # SSH→SSH: check both sides, each in its own way
-        src, dst = _nb_sides(cfg)
-        a1 = _nb_test_side(cfg, src, "src")
-        if not a1.get("ok"):
-            return {"ok": False, "log": "source: " + (a1.get("log") or "")}
-        a2 = _nb_test_side(cfg, dst, "dst")
-        if not a2.get("ok"):
-            return {"ok": False, "log": "destination: " + (a2.get("log") or "")}
-        if not shutil.which("sshfs"):
-            return {"ok": False, "log": "SSH to SSH mode requires sshfs"}
-        return {"ok": True, "log": "both sides are reachable · the copy will go through this NAS"}
     if _nb_rclone_any(cfg):
         if not rclone_installed():
             return {"ok": False, "log": "rclone is not installed — install it from the rclone.conf panel"}
@@ -7953,11 +7938,10 @@ def _nb_deleted_day_bucket(cfg):
     return ("{date}" in leaf) or ("{datetime}" in leaf) or \
            ("{year}" in leaf and "{month}" in leaf and "{day}" in leaf)
 
-def nb_build_cmd(cfg, job, dry, prev_files=0, mkpath=False, allow_delete=False, stage=None):
+def nb_build_cmd(cfg, job, dry, prev_files=0, mkpath=False, allow_delete=False):
     """rsync command (+env) for one job. prev_files — the number of files in the
-    previous run (for the percentage --max-delete guard). stage — sshfs mount of
-    the source (SSH→SSH mode)."""
-    env, rsh = _nb_cmd_ctx(cfg, stage)
+    previous run (for the percentage --max-delete guard)."""
+    env, rsh = _nb_cmd_ctx(cfg)
     dest = job["dest"].rstrip("/") + "/"
     owner = TARGET_USER
     limited = nb_dest_fs(cfg, job.get("dest")) in NB_FS_LIMITED
@@ -8008,12 +7992,12 @@ def nb_build_cmd(cfg, job, dry, prev_files=0, mkpath=False, allow_delete=False, 
         args.append("--mkpath")   # forced daemon: rsync itself creates module folders (≥3.2.3)
     if dry:
         args.append("--dry-run")
-    args += _nb_src_dst(cfg, job, stage)
+    args += _nb_src_dst(cfg, job)
     return args, env
 
 NB_DEST_SCAN_CAP = 2_000_000   # stop counting the copy here — the count only becomes a percentage
 
-def _nb_src_probe(cfg, job, stage=None, timeout=90):
+def _nb_src_probe(cfg, job, timeout=90):
     """How many entries the SOURCE folder holds, listed WITHOUT walking it: a
     non-recursive `rsync --list-only` over the same transport, with the same excludes.
 
@@ -8021,7 +8005,7 @@ def _nb_src_probe(cfg, job, stage=None, timeout=90):
     source is not visible locally and the deletion guard would otherwise have to take the
     user's word for it. None = could not be listed (unreachable, wrong path, no permission);
     that is not proof of anything, and the caller must read it as "do not delete"."""
-    env, rsh = _nb_cmd_ctx(cfg, stage)
+    env, rsh = _nb_cmd_ctx(cfg)
     args = ["rsync", "-d", "--list-only"] + rsh
     for ex in cfg.get("excludes", []):
         args.append("--exclude=" + ex)
@@ -8029,7 +8013,7 @@ def _nb_src_probe(cfg, job, stage=None, timeout=90):
         args.append("--exclude=" + str(ex))
     if cfg.get("transport") == "ssh" and cfg.get("remote_sudo"):
         args.append("--rsync-path=sudo rsync")
-    args += _nb_src_dst(cfg, job, stage)[:2]   # ["--", source] — no destination: this only lists
+    args += _nb_src_dst(cfg, job)[:2]   # ["--", source] — no destination: this only lists
     r = _run(args, timeout=timeout, env=env)
     if r.get("code") != 0:
         return None
@@ -8057,74 +8041,10 @@ def _nb_dest_files(dest, skip=None, cap=NB_DEST_SCAN_CAP):
     return n
 
 
-NB_STAGE_DIR = "/mnt/nb-src"
-
-
-def _nb_stage_mount(cfg, pid, writer):
-    """Mount the remote SOURCE over sshfs (read-only) — this turns SSH→SSH into
-    a "local folder → remote destination", which rsync can do. The daemon lives
-    in its own transient unit: a panel restart (our usual development cycle) must
-    not tear the mount away mid-run."""
-    src, _ = _nb_sides(cfg)
-    if src["kind"] != "ssh":
-        return None, "a source over an rsync daemon cannot be mounted — choose SSH"
-    if not shutil.which("sshfs"):
-        return None, "sshfs is missing (reinstall the system — the wizard installs the package)"
-    mp = os.path.join(NB_STAGE_DIR, re.sub(r"[^\w-]", "", str(pid))[:24] or "x")
-    _nb_stage_umount(pid)
-    os.makedirs(mp, mode=0o755, exist_ok=True)
-    unit = "nas-nbsrc-" + os.path.basename(mp)
-    opts = ["reconnect", "ServerAliveInterval=15", "ServerAliveCountMax=3",
-            "ro", "allow_other", "StrictHostKeyChecking=accept-new",
-            "port=%d" % int(src.get("port", 22) or 22)]
-    argv = ["systemd-run", "--unit", unit, "--collect",
-            "--property=Restart=on-failure",
-            "--property=ExecStopPost=/bin/umount -l " + shlex.quote(mp)]
-    penv = None
-    if src.get("auth") == "key" and nb_key_info()["exists"]:
-        opts.append("IdentityFile=" + NB_KEY)
-    else:
-        pw = src.get("password") or ""
-        if not pw:
-            return None, "the source needs a password or a key"
-        # password — via the unit's environment (only root reads it), NOT in argv:
-        # /proc/<pid>/cmdline is visible to everyone. --setenv=NAME (no value) makes
-        # systemd-run import it from OUR env, so the value never touches any argv.
-        argv.append("--setenv=SSHFS_PW")
-        opts.append("password_stdin")
-        penv = dict(_C_ENV, SSHFS_PW=pw)
-    tgt = "%s@%s:%s" % (src.get("user", ""), src.get("host", ""), "/")
-    cmd = "sshfs -f -o " + ",".join(opts) + " " + shlex.quote(tgt) + " " + shlex.quote(mp)
-    if "password_stdin" in opts:
-        cmd = "printf '%s\n' \"$SSHFS_PW\" | " + cmd
-    r = _run(argv + ["/bin/bash", "-c", cmd], timeout=40, env=penv)
-    if not r["ok"]:
-        return None, (r.get("log") or "").strip()[-200:]
-    for _ in range(30):                       # wait until the mount actually appears
-        time.sleep(0.4)
-        try:
-            os.statvfs(mp)
-            if os.path.ismount(mp):
-                writer("source mounted (sshfs): %s@%s" % (src.get("user"), src.get("host")))
-                return mp, ""
-        except OSError:
-            pass
-    _nb_stage_umount(pid)
-    return None, "could not mount the source over sshfs"
-
-
-def _nb_stage_umount(pid):
-    mp = os.path.join(NB_STAGE_DIR, re.sub(r"[^\w-]", "", str(pid))[:24] or "x")
-    _run(["systemctl", "stop", "nas-nbsrc-" + os.path.basename(mp)], timeout=20)
-    _run(["umount", "-l", mp], timeout=20)
-
-
-def _nb_cmd_ctx(cfg, stage=None):
-    """(env, extra rsync args) for the run. After the sshfs stage there can be only
-    ONE remote side — rsync won't accept more than one «-e» anyway."""
+def _nb_cmd_ctx(cfg):
+    """(env, extra rsync args) for the run. Exactly one side can be remote — rsync
+    won't accept more than one «-e» anyway."""
     src, dst = _nb_sides(cfg)
-    if stage:
-        src = {"kind": "local"}
     side = None
     if src["kind"] != "local":
         side = src
@@ -8136,15 +8056,12 @@ def _nb_cmd_ctx(cfg, stage=None):
     return (env, rsh)
 
 
-def _nb_src_dst(cfg, job, stage=None):
-    """[src, dst] for rsync from the profile's sides. stage — the sshfs mount path
-    of the source (SSH→SSH): then the source looks like a local folder."""
+def _nb_src_dst(cfg, job):
+    """[src, dst] for rsync from the profile's sides."""
     src, dst = _nb_sides(cfg)
     sp, _, _ = _nb_side_env(src)
     dp, _, _ = _nb_side_env(dst)
-    if stage:
-        s = stage.rstrip("/") + "/" + str(job["src"]).lstrip("/") + "/"
-    elif src["kind"] == "local":
+    if src["kind"] == "local":
         s = "/" + str(job["src"]).lstrip("/") + "/"
     else:
         s = sp + job["src"] + "/"
@@ -8153,10 +8070,10 @@ def _nb_src_dst(cfg, job, stage=None):
     # be read by rsync as an option — the src/dst are always the trailing positionals
     return ["--", s, d]
 
-def nb_verify_cmd(cfg, job, stage=None):
+def nb_verify_cmd(cfg, job):
     """Post-run verify command: rsync --checksum --dry-run re-reads files on both
     sides; every «>f…» line = a file whose content differs from the source."""
-    env, rsh = _nb_cmd_ctx(cfg, stage)
+    env, rsh = _nb_cmd_ctx(cfg)
     args = ["rsync", "-rltDn", "--checksum", "--out-format=%i %n"] + rsh
     if cfg.get("delete_mode", "archive") == "archive":
         args.append("--exclude=/" + nb_deleted_top(cfg))
@@ -8166,7 +8083,7 @@ def nb_verify_cmd(cfg, job, stage=None):
         args.append("--exclude=" + str(ex))
     if cfg.get("transport") == "ssh" and cfg.get("remote_sudo"):
         args.append("--rsync-path=sudo rsync")
-    args += _nb_src_dst(cfg, job, stage)
+    args += _nb_src_dst(cfg, job)
     return args, env
 
 def _mountpoint_of(p):
@@ -8612,15 +8529,6 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None, allow_delete=Fal
         prevf = {}
     t0 = time.time()
     push, push_ssh = _nb_push(cfg), _nb_push_ssh(cfg)
-    # SSH→SSH: rsync can't do this — mount the source over sshfs and copy as if
-    # from a local folder (data goes through the NAS, which the panel warns about)
-    stage = None
-    if _nb_remote_both(cfg):
-        writer("source and destination are both remote — bringing up a bridge through this NAS")
-        stage, err = _nb_stage_mount(cfg, pid, writer)
-        if not stage:
-            writer("could not mount the source: %s" % err)
-            return {"ok": False, "jobs": []}
     sides_dst = _nb_sides(cfg)[1]
     push_ssh = push_ssh or (sides_dst["kind"] == "ssh")   # remote destination — the same branch
     shell_fs = None   # push-ssh: real FS (mkdir over SSH) vs forced daemon (--mkpath)
@@ -8662,11 +8570,9 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None, allow_delete=Fal
         # SAFETY — never let a deleting sync (mirror/archive) run against a wiped/empty/unmounted
         # source: --delete would erase the whole destination copy, and --max-delete doesn't engage
         # on the first run (prev_files=0). The rclone runner guards ALL directions; the rsync runner
-        # must too. The source is locally visible for push (the NAS folder) and for SSH→SSH (the
-        # sshfs stage). For a plain pull it lives only on the remote — there we refuse an uncapped
-        # delete against an already-populated destination when there is no guard baseline yet.
-        src_local = ("/" + j["src"].lstrip("/")) if push else \
-                    (stage.rstrip("/") + "/" + j["src"].lstrip("/")) if stage else None
+        # must too. For a push the source is a folder of this NAS and can simply be looked at; for
+        # a pull it lives only on the remote, and the no-baseline branch below lists it instead.
+        src_local = ("/" + j["src"].lstrip("/")) if push else None
         deleting = (not dry and cfg.get("delete_mode", "archive") in ("mirror", "archive") and not allow_delete)
         # the deletion guard's baseline: how many files the copy is expected to hold. Normally
         # the previous run's count; for a first run it can also be measured on the copy itself
@@ -8706,7 +8612,7 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None, allow_delete=Fal
             try: dst_has = bool([n for n in os.listdir(dst) if n != arch]) if os.path.isdir(dst) else False
             except OSError: dst_has = False
             if dst_has:
-                seen = _nb_src_probe(cfg, j, stage)
+                seen = _nb_src_probe(cfg, j)
                 if not seen:
                     writer("⚠ SKIPPED: there is no deletion-guard baseline yet, the destination already holds "
                            "a copy, and the source %s. Refusing a mirror/archive that would delete that copy. %s"
@@ -8750,7 +8656,7 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None, allow_delete=Fal
                 writer("could not create the folder: %s" % e); emit({"src": j["src"], "ok": False}); continue
         args, env = nb_build_cmd(cfg, j, dry, prev_files=pf_base,
                                  mkpath=bool(push_ssh and not shell_fs),
-                                 allow_delete=allow_delete, stage=stage)
+                                 allow_delete=allow_delete)
         # ---- mass-CHANGE guard (pre-flight, nothing written yet) -----------------
         # Ransomware rewrites files instead of deleting them: --max-delete never fires
         # and a mirror faithfully replaces the copy with encrypted garbage (archive
@@ -8914,7 +8820,7 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None, allow_delete=Fal
                 res["fs_files"] = fs_files
                 res["fs"] = dest_fs
         if ok and not dry and cfg.get("verify") and not cancel():
-            vb, vn, ve = _nb_verify_job(cfg, j, writer, cancel, stage=stage)
+            vb, vn, ve = _nb_verify_job(cfg, j, writer, cancel)
             res["verify_bad"], res["verify_new"], res["verify_err"] = vb, vn, ve
         emit(res)
         extra = " · %d files, transferred %s" % (stt.get("xfer", 0), fmt_bytes(stt.get("xfer_bytes", 0))) if stt else ""
@@ -8925,9 +8831,6 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None, allow_delete=Fal
     stopped = cancel()          # stopped by the user — this is not a "backup with errors"
     allok = (all(r["ok"] for r in results) and len(results) == len(jobs)
              and not vbad and not verr and not stopped)
-    if stage:
-        _safe(lambda: _nb_stage_umount(pid))
-        writer("source bridge unmounted")
     if not dry:
         try: pruned = _nb_prune_remote(cfg, writer, shell_fs) if push_ssh else _nb_prune(cfg)
         except Exception: pruned = 0
@@ -8951,12 +8854,12 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None, allow_delete=Fal
     return {"ok": allok, "jobs": results, "verify_bad": vbad, "verify_err": verr,
             "stopped": stopped}
 
-def _nb_verify_job(cfg, job, writer, cancel, stage=None):
+def _nb_verify_job(cfg, job, writer, cancel):
     """Post-run verify of one job: rsync -c -n re-reads both sides and compares
     checksums. Returns (mismatches, new-after-run, verify-error).
     «>f» without «+» = content differs; «>f+++» = the file appeared after the run."""
     writer("— checksum verification (re-reads all files — may take a while)…")
-    args, env = nb_verify_cmd(cfg, job, stage)
+    args, env = nb_verify_cmd(cfg, job)
     try:
         p = subprocess.Popen(args, env=env, stdout=subprocess.PIPE,
                              stderr=subprocess.STDOUT, text=True, bufsize=1)
@@ -9391,7 +9294,7 @@ def _nb_health_one(cfg, many, fire, ev, pri, thr, now):
     def fire_p(key, title, msg, priority, ev_name=None, lvl=None):
         fire(key + ":" + pid, title + sfx, msg, priority, ev_name=ev_name or key, lvl=lvl)
     jobs = [j for j in cfg.get("jobs", []) if j.get("enabled", True)]
-    push, push_ssh = _nb_push(cfg), _nb_dest_ssh(cfg)   # "dest is a remote SSH server" (incl. pull SSH→SSH)
+    push, push_ssh = _nb_push(cfg), _nb_dest_ssh(cfg)   # "dest is a remote SSH server"
     # a cloud (rclone) profile has no host but IS reachable (nb_test / nb_stale work), so don't
     # bail on it — otherwise the "never run / stale / unreachable" alerts never fire for any cloud backup
     if not jobs or (not cfg.get("host") and not (push and cfg.get("transport") == "local")
@@ -9983,10 +9886,10 @@ def _systemd_active(unit):
     except (OSError, subprocess.SubprocessError):
         return False
 
-def nb_compare_cmd(cfg, job, deep, stage=None):
+def nb_compare_cmd(cfg, job, deep):
     """rsync dry-run that only REPORTS differences (never writes). %i|%l|%n =
     itemize flags | length | name — enough to classify new/changed/deleted + size."""
-    env, rsh = _nb_cmd_ctx(cfg, stage)
+    env, rsh = _nb_cmd_ctx(cfg)
     # mirror the real run's fs-aware flags: on FAT/exFAT/NTFS the run uses -rt with
     # --modify-window=1 and drops -l/-D — without matching that, compare flags routine
     # 2s-rounded times and skipped symlinks/specials as differences (false non-identical)
@@ -10003,7 +9906,7 @@ def nb_compare_cmd(cfg, job, deep, stage=None):
         args.append("--exclude=" + str(ex))
     if cfg.get("transport") == "ssh" and cfg.get("remote_sudo"):
         args.append("--rsync-path=sudo rsync")
-    args += _nb_src_dst(cfg, job, stage)
+    args += _nb_src_dst(cfg, job)
     return args, env
 
 _CMP_DEPTH = 7          # aggregate the folder tree down to this many levels (deeper rolls up)
@@ -10203,12 +10106,6 @@ def nb_compare_state(pid=None):
 
 def nb_compare_bg(pid=None, deep=False):
     cfg = nb_load(pid); pid = cfg["id"]
-    # rclone profiles compare via `rclone check` (handled in the driver). The one shape that has
-    # no compare is SSH→SSH (both sides remote): rsync can't itemize remote↔remote, and staging
-    # the source over sshfs just to dry-run it isn't worth it — the tab shows a "not supported"
-    # note instead.
-    if _nb_remote_both(cfg):
-        return {"ok": False, "log": "compare isn't available in this mode (both source and destination are remote SSH servers)"}
     if nb_compare_state(pid).get("running"):
         return {"ok": False, "log": "compare already running"}
     try:
@@ -12559,29 +12456,61 @@ def kp_source_save(d):
             "nested": [{"path": c, "inside": a} for c, a in nested],
             "dropped_excludes": xdrop}
 
+KP_SIZE_BUDGET = 25        # seconds the "how big is this source" button may take
+
+
+def _kp_bytes_until(path, deadline):
+    """Bytes under a path, giving up at `deadline`. -> (bytes, finished).
+
+    Deliberately a walk rather than `du`: a killed du returns NOTHING, and a source can be a
+    network share (this box's is a 1.8 TB NAS over SMB) where an exact answer takes many
+    minutes. A floor delivered now beats an exact number that never arrives."""
+    total, n, stack = 0, 0, [path]
+    while stack:
+        d = stack.pop()
+        try:
+            with os.scandir(d) as it:
+                for e in it:
+                    n += 1
+                    if not n % 256 and time.time() > deadline:
+                        return total, False
+                    try:
+                        if e.is_dir(follow_symlinks=False):
+                            stack.append(e.path)
+                        elif e.is_file(follow_symlinks=False):
+                            total += e.stat(follow_symlinks=False).st_size
+                    except OSError:
+                        pass          # vanished or unreadable — not worth failing the count
+        except OSError:
+            pass
+        if time.time() > deadline:
+            return total, False
+    return total, True
+
+
 def kp_source_size(kid):
-    """du -sb of every folder in the source — on demand only (can be slow)."""
+    """How much a source holds — on demand, and time-boxed.
+
+    It used to shell out to `du -sb -x` with a 120 s timeout per folder and the panel awaited
+    it with none of its own, so on a network source the button sat on "measuring…" for
+    minutes and then showed nothing (2026-08-28, the owner: "some buttons in kopia didn't
+    work"). Two things were wrong and both are fixed here: the wait, and `-x` — which skips
+    anything on another filesystem, and since Servers moved to SMB every share IS another
+    filesystem, so it walked into the mountpoint and counted almost zero."""
     src = _kp_find(kp_load()["sources"], str(kid or ""))
     if not src:
         return {"ok": False, "log": "no such source"}
-    total = 0
-    partial = False
-
-    def _du(p):
-        r = subprocess.run(["du", "-sb", "-x", p], capture_output=True, text=True, timeout=120)
-        return int((r.stdout or "0").split()[0])
-
+    deadline = time.time() + KP_SIZE_BUDGET
+    total, partial = 0, False
     for f in src.get("folders") or []:
-        try:
-            total += _du(f)
-        except (OSError, subprocess.SubprocessError, ValueError, IndexError):
-            partial = True
+        b, done = _kp_bytes_until(f, deadline)
+        total += b
+        partial = partial or not done
     # what the tree unticked is not backed up — count it out, or the figure lies
     for xp in src.get("exclude_paths") or []:
-        try:
-            total -= _du(xp)
-        except (OSError, subprocess.SubprocessError, ValueError, IndexError):
-            partial = True
+        b, done = _kp_bytes_until(xp, deadline)
+        total -= b
+        partial = partial or not done
     return {"ok": True, "bytes": max(0, total), "partial": partial}
 
 def kp_source_delete(kid):

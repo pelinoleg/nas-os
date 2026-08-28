@@ -9811,7 +9811,10 @@ function winKopia(initTab){openWin("__kopia","Kopia",(body,win)=>{
   tc.querySelectorAll("[data-sz]").forEach(b=>b.onclick=async ev=>{ev.stopPropagation();
    const wrap=tc.querySelector(`[data-szv="${b.dataset.sz}"]`);if(wrap)wrap.innerHTML=`${svg("gauge",11)} measuring…`;
    const r=await kP("/api/kopia/source/size",{id:b.dataset.sz});
-   if(wrap)wrap.innerHTML=`${svg("gauge",11)} ${r&&r.ok?fmtB(r.bytes)+(r.partial?" (partial)":""):"failed"}`;});
+   // a network source cannot be measured exactly in a few seconds — the server returns the
+   // floor it reached rather than making the button look dead (see kp_source_size)
+   if(wrap)wrap.innerHTML=`${svg("gauge",11)} ${r&&r.ok?(r.partial?`over ${fmtB(r.bytes)}`:fmtB(r.bytes)):"failed"}`;
+   if(wrap&&r&&r.ok&&r.partial)wrap.title="Still counting — too big to measure quickly (usually a network share). This is a floor, not the total.";});
   tc.querySelectorAll("[data-use]").forEach(b=>b.onclick=ev=>{ev.stopPropagation();
    kpNewWiz({source:b.dataset.use});});
   tc.querySelectorAll("[data-rm]").forEach(b=>b.onclick=ev=>{ev.stopPropagation();if(b.disabled)return;
@@ -11188,7 +11191,7 @@ function winBackup(){openWin("__nasbak","Mirror",(body,win)=>{
  const isRcloneAny=()=>CFG.transport==="rclone";
  const isC2C=()=>isRcloneSrc()&&(CFG.dst||{}).kind==="rclone";    // cloud → cloud (dst2 remote)
  const c2cDst=()=>{const d=CFG.dst||{};return (d.remote||"?")+":"+((d.remote_path||"").replace(/^\/+|\/+$/g,""));};
- const isDstSsh=()=>(CFG.dst||{}).kind==="ssh";   // destination is a remote SSH server (push-ssh OR pull SSH→SSH)
+ const isDstSsh=()=>(CFG.dst||{}).kind==="ssh";   // destination is a remote SSH server (push over ssh)
  // strip the ACTUAL storage root (server sends it) — hardcoding /mnt/storage was wrong on a
  // pool-less box whose root is a mounted USB path
  const stripRoot=rel=>{const r=CFG.storage_root||"mnt/storage";return rel===r?"":rel.startsWith(r+"/")?rel.slice(r.length+1):rel;};
@@ -11207,19 +11210,20 @@ function winBackup(){openWin("__nasbak","Mirror",(body,win)=>{
  /* ── Destination (push: where to send from this NAS) ── */
  // (legacy push-only tabConnPush removed — active Connection tab is tabConn/sideCard)
  /* ── Connection ── */
- /* ── Connections: TWO independent sides. Source — this NAS, an SSH server or
-    rsync daemon; destination — this NAS or an SSH server (including rsync.net). Both are remote
-    (SSH→SSH) rsync can't do it directly, so the source is mounted via sshfs, and copy
-    runs on this NAS — we say so right in the card. ── */
+ /* ── Connections: TWO independent sides. Source — this NAS, an SSH server, an rsync
+    daemon or a cloud remote; destination — this NAS, or (when the source is this NAS) an
+    SSH server or cloud. Exactly one side may be remote: a remote→remote copy needs the
+    source mounted here over sshfs, and that transport is gone. ── */
  const KINDS_SRC=[["local","This NAS"],["ssh","SSH server"],["rsyncd","rsync daemon"],["rclone","Cloud (rclone)"]];
  const KINDS_DST=[["local","This NAS"],["ssh","SSH server"],["rclone","Cloud (rclone)"]];
  // valid DESTINATION kinds depend on the source: a cloud (rclone) source pulls to a LOCAL
  // folder only; any other pull can also bridge to SSH; only a local source (push) can target
  // Cloud. Offering the wrong kind would silently flip the whole profile's direction.
+ // pull: the copy lands HERE, always. A remote destination as well was SSH→SSH, carried by
+ // an sshfs mount of the source — the transport that lost a 1.8 TB backup on this box —
+ // and it was removed root and branch on 2026-08-28.
  const dstKinds=()=>isRcloneSrc()?[["local","This NAS"],["rclone","Cloud (rclone)"]]
-   :isPush()?KINDS_DST
-   // pull: an rsyncd source can't be sshfs-mounted, so SSH→SSH is impossible from it — offer local only
-   :(CFG.src||{}).kind==="rsyncd"?[["local","This NAS"]]:[["local","This NAS"],["ssh","SSH server"]];
+   :isPush()?KINDS_DST:[["local","This NAS"]];
  const DST_LBL={local:"This NAS",ssh:"SSH server",rclone:"Cloud"};
  // rclone destination body (dst side only) — just pick the remote + base path. What happens
  // to deleted files (Copy/Mirror/Archive = delete_mode) lives ONLY on the «Deleted files»
@@ -11274,7 +11278,7 @@ function winBackup(){openWin("__nasbak","Mirror",(body,win)=>{
     limit move to the wizard's late "Options" step so the first screen stays small. */
  function tabConn(tc,part){const c=CFG;
   const again=()=>tabConn(tc,part);
-  const both=c.both_remote,sides=part==="sides";
+  const sides=part==="sides";
   // rclone destination needs the remotes list / version — fetch once, then re-render
   // always refetch the remotes list (it's edited in the separate Cloud app) — re-render only if it changed, so no loop
   if((c.dst&&c.dst.kind==="rclone")||(c.src&&c.src.kind==="rclone")){const was=JSON.stringify((RCLONE||{}).remotes||null);api("/api/backup/rclone").then(r=>{RCLONE=r||{};if(JSON.stringify(RCLONE.remotes||null)!==was)again();});}
@@ -11282,7 +11286,6 @@ function winBackup(){openWin("__nasbak","Mirror",(body,win)=>{
    ${sideCard("src")}
    <div class="nb-arrow-row">${svg("arrowup",16)}</div>
    ${sideCard("dst")}
-   ${both?`<div class="nb-dwarn">Both sides are remote. rsync cannot do that directly, so the source is mounted on this NAS (sshfs) and the data flows THROUGH it: speed is limited by its link and the traffic is counted twice.</div>`:""}
    ${(sides||isRcloneAny())?"":verifyRow(c)}
    ${sides?"":`<div class="srow"><div class="srow-l"><div class="srow-t">Speed limit${tipHTML(isRcloneAny()?"Speed cap for THIS backup's transfers. Write the unit — «50 MB/s», «512 KB/s»; a bare number is read as KB/s. 0 — no limit. Restore/mount use the global limit in the Rclone app.":"Transfer speed limit for this backup. Write the unit — «50 MB/s», «512 KB/s»; a bare number is read as KB/s. 0 — no limit.")}</div></div><div class="srow-c"><input class="mono" id="cBw" style="max-width:110px" value="${bwTxt(c.bwlimit)}"><span style="color:var(--mut);font-size:12px">0 = no limit</span></div></div>`}
    <div class="set-savebar"><span class="sb-left nb-saved" id="cSaved"></span><button class="btn sm" id="cTest">${svg("refresh",13)} Check</button></div>
@@ -11438,7 +11441,7 @@ function winBackup(){openWin("__nasbak","Mirror",(body,win)=>{
   const bb=g("#sBase");if(bb)bb.onchange=()=>saveDest(bb.value.trim());
   const bbB=g("#sBaseB");if(bbB)bbB.onclick=()=>{
    if(remoteDest()){
-    // the destination server is CFG.dst (= the connection for push-ssh, dst2 for pull SSH→SSH) —
+    // the destination server is CFG.dst (the connection itself, for a push over ssh) —
     // NOT CFG.host/user, which is the SOURCE on a pull profile
     if(!(CFG.dst||{}).host||!(CFG.dst||{}).user){toast("Fill in the destination server first (address and user)");return;}
     nbPickDest(bb.value.trim(),p=>{bb.value=p;saveDest(p);});
@@ -11789,7 +11792,7 @@ function winBackup(){openWin("__nasbak","Mirror",(body,win)=>{
     const srcT=isRcloneSrc()?((CFG.remote||"remote")+":"+j.src):(push?"/":"")+j.src;
     // "open and see for yourself": the LOCAL end of the pipe. push-local opens the local
     // destination; push-ssh & push-rclone open the local SOURCE (it lives on THIS NAS);
-    // pull to a local disk opens the destination. cloud→cloud and SSH→SSH have no local
+    // pull to a local disk opens the destination. cloud→cloud has no local
     // end at all — a "remote:path"/remote server folder isn't openable, so: no button.
     const dstSsh=(CFG.dst||{}).kind==="ssh";
     const localPath=push?((isPushSsh()||isRclone())?"/"+j.src:j.dest):(isC2C()||dstSsh)?"":j.dest;
@@ -12239,9 +12242,8 @@ function winBackup(){openWin("__nasbak","Mirror",(body,win)=>{
    else{wizOn=true;CFG.setup_started=true;saveCfg({setup_started:true});}
   }
   if(wizOn){renderWizard();return;}
-  // Compare is shown for every mode: rsync profiles itemize a dry-run, cloud (rclone) profiles
-  // run `rclone check`. The one unsupported mode is SSH→SSH (both sides remote) — the tab still
-  // shows, but with a "not supported in this mode" note (handled inside tabCompare).
+  // Compare is shown for every mode: rsync profiles itemize a dry-run, cloud (rclone)
+  // profiles run `rclone check`.
   const CATv=CATS;
   if(!CATv.some(x=>x.id===tab))tab="overview";      // current tab was filtered out → fall back
   // "Delete profile" deliberately NOT in the nav: destructive actions live in the
@@ -12262,9 +12264,6 @@ function winBackup(){openWin("__nasbak","Mirror",(body,win)=>{
 // by folder so it's readable, filters out identical/noise. Top-level so it's hoisted into
 // winBackup's TABS; it only needs NB_PID (global) + shared helpers.
 function tabCompare(tc){
- // SSH→SSH (both sides remote) can't be compared — rsync doesn't itemize remote↔remote. Show a
- // note instead of a dead/broken screen; every other mode (incl. cloud via rclone check) works.
- if(NB_CFG.both_remote){tc.innerHTML=`<div class="cmp-wrap"><h3 class="set-title" style="margin:0 0 3px">Compare</h3><div class="mon-note" style="margin-top:6px">Compare isn't supported in this mode — both the source and the destination are remote SSH servers, and rsync can't itemize a remote-to-remote pair. Check these backups by spot-checking the files on the servers themselves.</div></div>`;return;}
  const rcl=NB_CFG.transport==="rclone";   // tabCompare is outside winBackup's scope — read the mirrored config, not CFG
  let showAll=false, filt="", timer=null, findT=null, LAST={};
  const bp=(path,b)=>api(path,{method:"POST",body:JSON.stringify(Object.assign({p:NB_PID},b||{}))});

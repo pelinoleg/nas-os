@@ -94,5 +94,52 @@ class TheRootDoesNotExpandIntoItself(unittest.TestCase):
         self.assertFalse(nas.kp_browse("/mnt/../etc")["ok"])
 
 
+class MeasuringASourceAnswers(unittest.TestCase):
+    """"How big is this source?" used to be a button that sat there.
+
+    It shelled out to `du -sb -x` with a 120 s timeout PER FOLDER and the panel awaited it
+    with no limit of its own. On a network source that is minutes of "measuring…", and then
+    nothing: a killed du prints no total. `-x` made it worse — it stops at a filesystem
+    boundary, and since Servers moved to SMB every share is one, so the walk stopped at the
+    mountpoint and reported almost zero."""
+
+    def setUp(self):
+        import tempfile, shutil
+        self.td = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.td, True)
+        os.makedirs(os.path.join(self.td, "keep", "deep"))
+        os.makedirs(os.path.join(self.td, "drop"))
+        for path, size in (("keep/a", 1000), ("keep/deep/b", 2000), ("drop/c", 500)):
+            with open(os.path.join(self.td, path), "wb") as f:
+                f.write(b"x" * size)
+
+    def size(self, src):
+        with mock.patch.object(nas, "kp_load", return_value={"sources": [src]}), \
+                mock.patch.object(nas.subprocess, "run",
+                                  side_effect=AssertionError("spawned du again")):
+            return nas.kp_source_size(src["id"])
+
+    def test_nested_folders_are_counted(self):
+        r = self.size({"id": "s", "folders": [os.path.join(self.td, "keep")]})
+        self.assertTrue(r["ok"])
+        self.assertEqual(r["bytes"], 3000, "the walk stopped before the nested folder")
+        self.assertFalse(r["partial"])
+
+    def test_what_the_tree_unticked_is_subtracted(self):
+        r = self.size({"id": "s", "folders": [self.td],
+                       "exclude_paths": [os.path.join(self.td, "drop")]})
+        self.assertEqual(r["bytes"], 3000)
+
+    def test_running_out_of_time_returns_a_floor_not_a_failure(self):
+        with mock.patch.object(nas, "KP_SIZE_BUDGET", -1):
+            r = self.size({"id": "s", "folders": [self.td]})
+        self.assertTrue(r["ok"], "the button failed instead of answering")
+        self.assertTrue(r["partial"], "a partial count must say so — the UI prints «over N»")
+
+    def test_an_unreadable_folder_does_not_sink_the_count(self):
+        r = self.size({"id": "s", "folders": [self.td, "/nope/nothing/here"]})
+        self.assertEqual(r["bytes"], 3500)
+
+
 if __name__ == "__main__":
     unittest.main()

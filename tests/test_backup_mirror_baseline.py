@@ -244,5 +244,59 @@ class TheSpeedLimitTakesTheUnitYouMean(unittest.TestCase):
         self.assertEqual(out["bwlimit"], 51200)
 
 
+class ServerToServerIsGone(unittest.TestCase):
+    """A pull copies HERE. It cannot also copy to another server.
+
+    rsync refuses remote→remote, so that mode was carried by mounting the source over sshfs
+    and copying "locally" through this box — the same transport that dropped its session
+    about once a second under a backup's reading and cost a 1.8 TB backup. Removed root and
+    branch on 2026-08-28 at the owner's request: "same problems will happen there".
+
+    The dangerous part is not the mode, it is a profile ALREADY saved in it: its destination
+    paths belong to another machine (/volume1/backup), so reading it as an ordinary pull
+    would aim them at this box's root filesystem."""
+
+    SSH2SSH = {"id": "main", "name": "old", "direction": "pull", "transport": "ssh",
+               "host": "10.0.0.1", "user": "root", "dest_base": "/volume1/backup",
+               "jobs": [{"src": "home", "dest": "/volume1/backup/home", "enabled": True}],
+               "dst2": {"kind": "ssh", "host": "10.0.0.2", "user": "root", "port": 22}}
+
+    def test_a_pull_destination_is_local_whatever_the_config_says(self):
+        src, dst = nas._nb_sides(dict(self.SSH2SSH))
+        self.assertEqual(src["kind"], "ssh")
+        self.assertEqual(dst["kind"], "local", "the remote destination came back to life")
+
+    def test_a_stored_profile_is_disarmed_rather_than_redirected(self):
+        with mock.patch.object(nas, "_nb_read_raw",
+                               return_value={"profiles": [dict(self.SSH2SSH)]}):
+            prof = nas.nb_profiles()[0]
+        self.assertEqual(prof["dst2"], {})
+        self.assertEqual(prof["dest_base"], "",
+                         "another server's path would have been created on this box")
+        self.assertEqual(prof["jobs"], [])
+
+    def test_a_cloud_to_cloud_profile_keeps_its_second_remote(self):
+        # dst2 carries the cloud→cloud destination too — disarming that would break rclone
+        c2c = {"id": "main", "name": "c2c", "direction": "pull", "transport": "rclone",
+               "remote": "src", "dst2": {"kind": "rclone", "remote": "dst", "remote_path": "b"}}
+        with mock.patch.object(nas, "_nb_read_raw", return_value={"profiles": [dict(c2c)]}):
+            prof = nas.nb_profiles()[0]
+        self.assertEqual(prof["dst2"]["remote"], "dst")
+
+    def test_saving_one_is_impossible(self):
+        cur = dict(nas._nb_defaults(), id="main", name="T")
+        with mock.patch.object(nas, "nb_load", return_value=cur), \
+                mock.patch.object(nas, "nb_profiles", return_value=[cur]), \
+                mock.patch.object(nas, "_nb_write_profiles"):
+            out = nas.nb_save({"src": {"kind": "ssh", "host": "10.0.0.1", "user": "root"},
+                               "dst": {"kind": "ssh", "host": "10.0.0.2", "user": "root"}}, "main")
+        self.assertEqual(out["dst2"], {})
+        self.assertEqual(nas._nb_sides(out)[1]["kind"], "local")
+
+    def test_the_bridge_itself_is_not_in_the_code(self):
+        for gone in ("_nb_stage_mount", "_nb_stage_umount", "NB_STAGE_DIR", "_nb_remote_both"):
+            self.assertFalse(hasattr(nas, gone), gone + " is still there")
+
+
 if __name__ == "__main__":
     unittest.main()
