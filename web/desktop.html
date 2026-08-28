@@ -6766,7 +6766,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    <div class="fm-fav-list" id="fFav"></div>
    <div id="fVolsWrap" style="display:none;flex:none"><div class="fm-fav-h"><span>Disks</span></div>
    <div id="fVols" style="margin:0 -4px"></div></div>
-   <div id="fRemWrap" style="flex:none"><div class="fm-fav-h"><span>Servers</span><button class="iconbtn" id="fRemAdd" title="Add a server (SFTP or SMB)">+</button></div>
+   <div id="fRemWrap" style="flex:none"><div class="fm-fav-h"><span>Servers</span><button class="iconbtn" id="fRemAdd" title="Add a server (SMB)">+</button></div>
    <div id="fRem" style="margin:0 -4px"></div></div>
    <div id="fCloudWrap" style="display:none;flex:none"><div class="fm-fav-h"><span>Cloud</span><button class="iconbtn" id="fCloudAdd" title="Manage cloud remotes (Rclone app)">${svg("cog",14)}</button></div>
    <div id="fCloud" style="margin:0 -4px"></div></div>
@@ -6914,18 +6914,20 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
        await ejectVolume(v);renderVols();};
      c.appendChild(it);});}
  win._vols=renderVols;
- /* ---- Servers: SFTP (sshfs) or SMB (cifs) under /mnt/remote — after that, ordinary folders.
-    SMB puts one share per subfolder, so the connection root looks the same either way. ---- */
+ /* ---- Servers: SMB (cifs) mounts under /mnt/remote — after that, ordinary folders.
+    One share per subfolder, so the connection root looks the same as the SFTP mounts this
+    replaced (see remDlg for why SFTP is gone). ---- */
  let REMS=[];
  async function renderRemotes(fetchNew){
    const c=body.querySelector("#fRem");if(!c)return;
    if(fetchNew!==false){const r=await api("/api/remotes");if(!body.isConnected&&!document.body.contains(body))return;REMS=(r&&r.remotes)||[];}
    c.innerHTML="";
    REMS.forEach(rm=>{const on=rm.mounted&&(cwd===rm.mount||cwd.startsWith(rm.mount+"/"));
-     const where=rm.kind==="smb"?("//"+rm.host+" · "+((rm.shares||[]).join(", ")||"no shares"))
-                                :(rm.user+"@"+rm.host+":"+rm.path);
+     const where=rm.legacy?(rm.user+"@"+rm.host+" · SFTP — open «Edit…» and pick the shares to convert it")
+                          :("//"+rm.host+" · "+((rm.shares||[]).join(", ")||"no shares"));
      const it=el(`<div class="fm-fav-i${on?" on":""}" title="${att(where+(rm.mounted?"":" · not connected"))}"><span class="fi" style="${rm.mounted?"":"opacity:.45"}">${svg("net",15)}</span><span class="fn">${esc(rm.name)}</span>${rm.mounted?`<button class="fx fx-eject" title="Disconnect">${svg("eject",13)}</button>`:""}</div>`);
      const open=async()=>{
+       if(rm.legacy&&!rm.mounted){remDlg(rm);return;}   // nothing to connect to until it is SMB
        if(!rm.mounted){toast("Connecting to "+rm.name+"…");
          const r2=await api("/api/remotes/mount",{method:"POST",body:JSON.stringify({id:rm.id})});
          if(!(r2&&r2.ok)){toast("Error: "+((r2&&r2.log)||"could not connect"));renderRemotes();return;}}
@@ -6947,43 +6949,34 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
      ]);};
      c.appendChild(it);});
  }
- /* Two protocols, on purpose. SFTP reaches any Linux box; SMB is what a NAS actually serves
-    well — the Ugreen's SFTP session collapsed about once a second under a backup's reading
-    while the identical reads over SMB failed zero times (2026-08-27). SMB mounts one share
-    per subfolder of the mountpoint, so <mount>/<Share>/… matches what SFTP showed and a
-    backup pointed at the mountpoint keeps working across a switch. */
+ /* SMB, and only SMB. SFTP (sshfs) was the other option until 2026-08-28: the Ugreen NAS
+    drops its SFTP session about once a second under a backup's reading, sshfs hides every
+    drop behind EIO, and a 1.8 TB source came out as 4068 files. The identical reads over SMB
+    failed zero times. The option is gone rather than merely discouraged, at the owner's
+    request — an option that is there gets picked again. SMB mounts one share per subfolder
+    of the mountpoint, so <mount>/<Share>/… is exactly what SFTP showed and anything pointed
+    at the mountpoint survives the switch. */
  function remDlg(rm){
    const s=document.getElementById("scrim");
-   let kind=(rm&&rm.kind)||"sshfs",picked=((rm&&rm.shares)||[]).slice(),found=null;
+   let picked=((rm&&rm.shares)||[]).slice(),found=null;
+   const legacy=!!(rm&&rm.legacy);
    const draw=()=>{
-    const smb=kind==="smb";
     s.innerHTML=`<div class="dialog" style="max-width:560px;width:92vw"><h3>${rm?"Edit server":"New server"}</h3>
-     <div class="field"><label>Protocol</label><div class="seg" id="rmK">
-       <button data-k="sshfs"${smb?"":' class="on"'}>SFTP (SSH)</button><button data-k="smb"${smb?' class="on"':""}>SMB</button></div>
-       <div style="color:var(--mut);font-size:12px;margin-top:4px">${smb?"What a NAS serves best — pick the shares below.":"Any Linux box over SSH. If reads fail under load, try SMB."}</div></div>
+     ${legacy?`<div class="nb-dwarn wrn" style="margin-bottom:12px"><b>This connection was saved over SFTP</b>, which this box no longer mounts: the session drops under load and sshfs turns every drop into a read error — that is how a 1.8 TB backup came out holding 4068 files. Scan the server below and tick the shares. <b>The folder paths do not change</b>, so backups and favourites pointed at it keep working.</div>`:""}
      <div class="field"><label>Name</label><input id="rmN" value="${att((rm&&rm.name)||"")}" placeholder="Main NAS"></div>
      <div class="field"><label>Address</label><input id="rmH" class="mono" value="${att((rm&&rm.host)||"")}" placeholder="192.168.1.95"></div>
-     <div class="field" style="display:flex;gap:8px"><div style="flex:1"><label>User</label><input id="rmU" class="mono" value="${att((rm&&rm.user)||"")}" placeholder="${smb?"oleg":"root"}"></div>
-       <div style="width:90px"><label>Port</label><input id="rmP" class="mono" value="${att((rm&&rm.port)||(smb?445:22))}"></div></div>
-     <div class="field"><label>Password <span style="color:var(--mut);font-weight:400">— ${rm&&rm.has_pass?"set; empty = keep":(smb?"empty = guest":"empty = key-based login")}</span></label><input id="rmW" type="password" autocomplete="new-password"></div>
-     ${smb?`<div class="field"><label>Shares <span style="color:var(--mut);font-weight:400">— each one becomes a folder inside the connection</span></label>
+     <div class="field" style="display:flex;gap:8px"><div style="flex:1"><label>User</label><input id="rmU" class="mono" value="${att((rm&&rm.user)||"")}" placeholder="oleg"></div>
+       <div style="width:90px"><label>Port</label><input id="rmP" class="mono" value="${att((rm&&rm.port)||445)}"></div></div>
+     <div class="field"><label>Password <span style="color:var(--mut);font-weight:400">— ${rm&&rm.has_pass?"set; empty = keep":"empty = guest"}</span></label><input id="rmW" type="password" autocomplete="new-password"></div>
+     <div class="field"><label>Shares <span style="color:var(--mut);font-weight:400">— each one becomes a folder inside the connection</span></label>
        <div style="display:flex;gap:8px;align-items:center"><button class="btn sm" id="rmScan">${svg("net",13)} Scan the server</button><span id="rmScanS" style="color:var(--mut);font-size:12px"></span></div>
-       <div id="rmSh" style="margin-top:8px;max-height:190px;overflow:auto"></div></div>`
-      :`<div class="field"><label>Folder on the server <span style="color:var(--mut);font-weight:400">— empty = home folder (e.g. rsync.net)</span></label><input id="rmD" class="mono" value="${att((rm&&rm.path)||"")}" placeholder="/ or /volume2/… or empty"></div>`}
+       <div id="rmSh" style="margin-top:8px;max-height:190px;overflow:auto"></div></div>
      <div class="field" style="flex-direction:row;align-items:center;gap:10px"><label style="margin:0;flex:1">Connect automatically <span style="color:var(--mut);font-weight:400">— the panel mounts it by itself (incl. after a reboot)</span></label><label class="tgl" style="flex:none"><input type="checkbox" id="rmA"${rm&&rm.auto?" checked":""}><span class="sl"></span></label></div>
      <div class="r"><button class="btn" id="rmX">Cancel</button><button class="btn pri" id="rmOk">Save</button></div></div>`;
-    s.querySelectorAll("#rmK button").forEach(b=>b.onclick=()=>{
-      if(b.dataset.k===kind)return;
-      const cur=grab();kind=b.dataset.k;draw();fill(cur);});
-    if(smb){drawShares();s.querySelector("#rmScan").onclick=scan;}
+    drawShares();s.querySelector("#rmScan").onclick=scan;
     s.querySelector("#rmX").onclick=()=>s.classList.remove("show");
     s.querySelector("#rmOk").onclick=save;
    };
-   /* keep what was typed when the protocol segment flips the form */
-   const grab=()=>({n:s.querySelector("#rmN").value,h:s.querySelector("#rmH").value,
-     u:s.querySelector("#rmU").value,w:s.querySelector("#rmW").value});
-   const fill=v=>{s.querySelector("#rmN").value=v.n;s.querySelector("#rmH").value=v.h;
-     s.querySelector("#rmU").value=v.u;s.querySelector("#rmW").value=v.w;};
    const drawShares=()=>{
      const box=s.querySelector("#rmSh");if(!box)return;
      const names=found?found.map(x=>x.name):picked.slice();
@@ -7003,10 +6996,9 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
      else st.textContent=(r&&r.log)||"could not read the share list";
    };
    const save=async()=>{
-     const b={id:(rm&&rm.id)||"",kind:kind,name:s.querySelector("#rmN").value.trim(),host:s.querySelector("#rmH").value.trim(),
+     const b={id:(rm&&rm.id)||"",kind:"smb",name:s.querySelector("#rmN").value.trim(),host:s.querySelector("#rmH").value.trim(),
        user:s.querySelector("#rmU").value.trim(),port:s.querySelector("#rmP").value.trim(),
-       auto:s.querySelector("#rmA").checked};
-     if(kind==="smb")b.shares=picked;else b.path=s.querySelector("#rmD").value.trim();
+       auto:s.querySelector("#rmA").checked,shares:picked};
      const pw=s.querySelector("#rmW").value;if(pw)b.pass=pw;
      const r=await api("/api/remotes/save",{method:"POST",body:JSON.stringify(b)});
      if(r&&r.ok){s.classList.remove("show");toast("Saved");renderRemotes();}
@@ -8098,7 +8090,7 @@ function kpPickSource(preselected,preExcl,onPick){
    for(const x of sel){if(full.startsWith(x+"/"))return"covered";}
    for(const x of sel){if(x.startsWith(full+"/"))return"indet";}return"none";};
  s.innerHTML=`<div class="dialog nb-pick"><h3>${svg("folder",16)} Choose folders to back up</h3>
-   <div class="mon-note" style="margin:0 0 8px">Expand folders ▸ and tick what to protect at any level. A check on a folder takes the whole folder, including whatever appears in it later. Unticking something nested leaves it out — new folders next to it are still backed up.</div>
+   <div class="mon-note" style="margin:0 0 8px">Start from a place — a disk on this NAS, or a share of a server connected in <b>Files</b> (SMB). Expand folders ▸ and tick what to protect at any level. A check on a folder takes the whole folder, including whatever appears in it later. Unticking something nested leaves it out — new folders next to it are still backed up.</div>
    <div class="nb-tree" id="kpTree"><div class="nb-load">Reading folders…</div></div>
    <div class="r"><span class="nb-selc" id="kpSelInfo"></span><button class="btn" id="kpsX">Cancel</button><button class="btn pri" id="kpsO">Use these folders</button></div></div>`;
  s.classList.add("show");
@@ -8111,7 +8103,7 @@ function kpPickSource(preselected,preExcl,onPick){
  const buildRows=(path,depth,out)=>{const list=kids[path];
    if(list===null){out.push({err:1,depth});return;}
    if(!list)return;
-   list.forEach(e=>{const full=child(path,e.name);out.push({e,full,depth});
+   list.forEach(e=>{const full=e.path||child(path,e.name);out.push({e,full,depth});
      if(e.dir&&expanded.has(full))buildRows(full,depth+1,out);});};
  function refresh(){
    const info=s.querySelector("#kpSelInfo");
@@ -8123,7 +8115,7 @@ function kpPickSource(preselected,preExcl,onPick){
    out.forEach(row=>{
      if(row.err){treeEl.appendChild(el(`<div class="nb-trow locked" style="padding-left:${row.depth*18+34}px;font-size:11.5px;color:var(--mut)">access denied</div>`));return;}
      const {e,full,depth}=row,st=state(full),exp=expanded.has(full);
-     const n=el(`<div class="nb-trow ${st}" style="padding-left:${depth*18+10}px"><span class="nb-tw">${e.dir?`<button class="nb-tchev ${exp?"open":""}" title="Expand">${svg("chev",14)}</button>`:""}</span><input type="checkbox" class="nb-tck" style="pointer-events:none">${fmIcon(e.name,e.dir?"dir":"file",15)}<span class="nb-tn">${esc(e.name)}</span></div>`);
+     const n=el(`<div class="nb-trow ${st}" style="padding-left:${depth*18+10}px"><span class="nb-tw">${e.dir?`<button class="nb-tchev ${exp?"open":""}" title="Expand">${svg("chev",14)}</button>`:""}</span><input type="checkbox" class="nb-tck" style="pointer-events:none">${e.place?svg(e.place==="remote"?"net":e.place==="root"?"sys":"hdd",15):fmIcon(e.name,e.dir?"dir":"file",15)}<span class="nb-tn">${esc(e.name)}</span>${e.path?`<span class="mono" style="color:var(--mut);font-size:11px;margin-left:8px">${esc(e.path)}</span>`:""}</div>`);
      const ck=n.querySelector(".nb-tck");ck.checked=(st==="checked"||st==="covered");ck.indeterminate=(st==="indet");
      if(st==="covered")n.title="protected by a folder above — untick to leave just this one out";
      else if(st==="excluded")n.title="left out of the backup — click to put it back";

@@ -103,11 +103,19 @@ class SaveTests(unittest.TestCase):
         self.assertEqual(lst[0]["port"], 445)
         self.assertEqual(lst[0]["kind"], "smb")
 
-    def test_sftp_still_defaults_to_port_22(self):
-        res, lst = self._save({"host": "10.0.0.2", "user": "root"})
+    def test_a_save_can_no_longer_produce_an_sftp_connection(self):
+        """2026-08-28: the owner asked for the option to be GONE, not discouraged —
+        «otherwise I will forget and pick it again». A save that asks for SFTP, from an
+        old browser tab or a scripted call, must not create one."""
+        res, lst = self._save({"host": "10.0.0.2", "user": "root", "kind": "sshfs",
+                               "shares": ["Cloud"]})
         self.assertTrue(res["ok"])
-        self.assertEqual(lst[0]["port"], 22)
-        self.assertEqual(lst[0]["kind"], "sshfs")
+        self.assertEqual(lst[0]["kind"], "smb")
+        self.assertEqual(lst[0]["port"], 445)
+
+    def test_a_save_with_no_shares_is_refused_whatever_it_calls_itself(self):
+        res, _ = self._save({"host": "10.0.0.2", "user": "root", "kind": "sshfs"})
+        self.assertFalse(res["ok"])
 
     def test_switching_protocol_unmounts_the_old_layout(self):
         # one mount vs one-per-share: leaving the old shape mounted would strand it
@@ -120,6 +128,42 @@ class SaveTests(unittest.TestCase):
             nas.remotes_save({"id": "ug", "host": "192.168.1.95", "user": "oleg",
                               "name": "Ugreen", "kind": "smb", "shares": ["Cloud"]})
         self.assertEqual(calls, ["ug"])
+
+
+class LegacySftpConnectionTests(unittest.TestCase):
+    """Connections stored by an older build stay visible, and stay unmountable.
+
+    Deleting them outright would strip a mounted server out from under whatever points at
+    it; mounting them is the thing that cost a backup. So: listed, flagged, refused, and one
+    edit away from SMB — with the same mountpoint, so nothing that references a path breaks."""
+
+    LEGACY = [{"id": "ug", "name": "Ugreen", "kind": "sshfs", "host": "192.168.1.95",
+               "user": "oleg", "path": ""}]
+
+    def test_it_is_refused_without_touching_the_system(self):
+        ran = []
+        with mock.patch.object(nas, "_remotes_load", return_value=list(self.LEGACY)), \
+                mock.patch.object(nas, "_remote_mounted", return_value=False), \
+                mock.patch.object(nas, "_remote_unstale", return_value=False), \
+                mock.patch.object(nas, "_run", side_effect=lambda *a, **k: ran.append(a)), \
+                mock.patch.object(nas.subprocess, "run", side_effect=AssertionError("spawned")):
+            res = nas.remote_mount("ug")
+        self.assertFalse(res["ok"])
+        self.assertIn("SFTP", res["log"])
+        self.assertEqual(ran, [], "a refusal should not run anything")
+
+    def test_the_list_flags_it_for_the_ui(self):
+        with mock.patch.object(nas, "_remotes_load", return_value=list(self.LEGACY)), \
+                mock.patch.object(nas, "_remote_mounted", return_value=False):
+            out = nas.remotes_list()["remotes"]
+        self.assertTrue(out[0]["legacy"])
+        self.assertEqual(out[0]["kind"], "sshfs")
+
+    def test_an_smb_connection_is_not_flagged(self):
+        with mock.patch.object(nas, "_remotes_load", return_value=[dict(SMB)]), \
+                mock.patch.object(nas, "_remote_mounted", return_value=True):
+            out = nas.remotes_list()["remotes"]
+        self.assertFalse(out[0]["legacy"])
 
 
 class MountPasswordTests(unittest.TestCase):

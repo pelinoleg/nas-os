@@ -12960,9 +12960,49 @@ def kp_status():
             "update": kp_update_info(net=False) if kopia_installed() else {},
             "rclone_remotes": rclone_remotes() if rclone_installed() else []}
 
+def _kp_places():
+    """The starting points the Source picker offers instead of the filesystem root.
+
+    Kopia will take any path, so the picker opened at "/" — an honest answer to "what CAN
+    be backed up" and a useless one to "where is my data?". 2026-08-28, the owner, about
+    setting up his first backup: "I didn't understand how to pick the data — it should say
+    plainly, local paths or SMB, and you choose inside that." So the two answers that exist
+    on this box are named: what is on the box, and what a connected server offers. The whole
+    filesystem stays reachable, as one clearly-labelled entry at the bottom."""
+    out, seen = [], set()
+    mps = _mount_points()
+
+    def add(path, label, kind):
+        if path in seen or not os.path.isdir(path):
+            return
+        seen.add(path)
+        out.append({"name": label, "path": path, "dir": True, "place": kind})
+
+    if os.path.ismount(STORAGE):
+        add(STORAGE, "This NAS — the pool", "local")
+    add(HOME, "This NAS — home folder", "local")
+    for mp in sorted(mps):          # USB / extra disks the panel mounts outside the pool
+        if mp.startswith("/media/") and mp.count("/") >= 2:
+            add(mp, "This NAS — disk «%s»" % os.path.basename(mp), "local")
+    for r in _remotes_load():       # one entry per CONNECTED share: a share is the unit
+        nm = r.get("name") or r.get("host") or r["id"]
+        for t in _remote_targets(r):
+            if t in mps:
+                add(t, "%s — «%s» over SMB" % (nm, os.path.basename(t)), "remote")
+    add("/", "Everything on this box (advanced)", "root")
+    return out
+
+
 def kp_browse(path):
-    """Local folder listing for the Source picker (path='' → filtered root)."""
-    path = str(path or "").strip().strip("/")
+    """Local folder listing for the Source picker.
+
+    path "" → the named starting points (see _kp_places); "/" → the filtered filesystem
+    root, which is what the "everything" place expands into. The two must stay distinct or
+    that place would expand into itself."""
+    raw = str(path or "").strip()
+    if not raw:
+        return {"ok": True, "path": "", "abs": True, "places": True, "entries": _kp_places()}
+    path = raw.strip("/")
     if ".." in path:
         return {"ok": False, "log": "invalid path"}
     base = "/" + path if path else "/"
@@ -18771,8 +18811,18 @@ def _replica_tick():
         threading.Thread(target=run, daemon=True).start()
 
 # --------------------------------------------------------------------------- #
-#  External SSH servers in the file manager: sshfs mounts in /mnt/remote/<id>.
+#  External NAS servers in the file manager: SMB (CIFS) mounts under /mnt/remote/<id>.
 #  A mounted server is a regular folder; all FM operations work as-is.
+#
+#  SFTP (sshfs) used to be the other option here and is gone as of 2026-08-28, by the
+#  owner's decision — "delete it so it can't get in my way, or I will pick it again".
+#  It was not a preference: the Ugreen NAS this box backs up drops its SFTP session about
+#  once a second under sustained reading (101 read errors in 400 files; single-stream ssh
+#  to the same box carried 1.5 GB without a blink, and the identical reads over CIFS failed
+#  zero times), and sshfs's `reconnect` hides every drop behind EIO — which is how a backup
+#  of a 1.8 TB source came out holding 4068 files and called itself a warning.
+#  Connections stored by an older build are still listed, unmounted and deleted; they just
+#  cannot be mounted until their shares are picked and they become SMB.
 # --------------------------------------------------------------------------- #
 REMOTES_FILE = os.path.join(NAS_CONFIG, "remotes.json")
 REMOTE_MNT = "/mnt/remote"
@@ -18792,7 +18842,9 @@ def _remote_mp(rid):
 def _remote_unit(rid):
     return "nas-remote-%s.service" % rid
 
-_REMOTE_KINDS = ("sshfs", "smb")
+# Only SMB is mountable now. "sshfs" survives as a READ-ONLY marker for connections saved
+# by an older build, so they can still be recognised, unmounted and converted.
+_REMOTE_KINDS = ("smb",)
 # A share name is a name, not a path: no separators, no NT-illegal characters. It becomes a
 # directory under the mountpoint, so "." / ".." / anything with a slash must never get through.
 _SHARE_RE = re.compile(r'^[^/\\:*?"<>|\x00]{1,80}$')
@@ -18887,9 +18939,11 @@ def remotes_list():
                     "host": r.get("host", ""), "user": r.get("user", ""),
                     "port": r.get("port") or 22, "path": r.get("path") or "",
                     "kind": _remote_kind(r), "shares": _remote_shares(r),
+                    # saved by an older build over SFTP: listed, unmountable, one edit from SMB
+                    "legacy": _remote_kind(r) != "smb",
                     "has_pass": bool(r.get("pass")), "auto": bool(r.get("auto")),
                     "mounted": _remote_mounted(r["id"], r), "mount": _remote_mp(r["id"])})
-    return {"ok": True, "remotes": out, "sshfs": bool(shutil.which("sshfs")),
+    return {"ok": True, "remotes": out,
             "smb": os.path.exists("/sbin/mount.cifs") or os.path.exists("/usr/sbin/mount.cifs")}
 
 def remotes_save(d):
@@ -18908,13 +18962,13 @@ def remotes_save(d):
             rid = "%s-%d" % (base, i)
         cur = {"id": rid}
         lst.append(cur)
-    kind = d.get("kind") if d.get("kind") in _REMOTE_KINDS else "sshfs"
+    kind = "smb"                       # the only protocol this box mounts — see the note above
     try:
-        port = int(d.get("port") or (445 if kind == "smb" else 22))
+        port = int(d.get("port") or 445)
     except (TypeError, ValueError):
-        port = 445 if kind == "smb" else 22
+        port = 445
     shares = _remote_shares(d)
-    if kind == "smb" and not shares:
+    if not shares:
         return {"ok": False, "log": "pick at least one share"}
     if kind != _remote_kind(cur) and cur.get("name"):
         # the mountpoint layout differs between the two (one mount vs one per share) —
@@ -19050,67 +19104,14 @@ def remote_mount(rid):
             log_event("action", "Server connected: %s" % (r.get("name") or r["host"]), "", "ok",
                       kind="files", desk=False)
         return res
-    if not shutil.which("sshfs"):
-        return {"ok": False, "log": "sshfs is not installed: sudo apt install sshfs"}
-    mp = _remote_mp(rid)
-    os.makedirs(mp, exist_ok=True)
-    # reconnect+ServerAlive: a wandering Wi-Fi doesn't leave a "dead" mount, a listing
-    # fails with an error in seconds instead of hanging; allow_other — the folder is visible to samba/oleg too
-    opts = ("reconnect,ServerAliveInterval=15,ServerAliveCountMax=3,allow_other,"
-            "default_permissions,StrictHostKeyChecking=accept-new,ConnectTimeout=10")
-    if r.get("pass"):
-        opts += ",password_stdin"
-    src = "%s@%s:%s" % (r.get("user") or "root", r["host"], r.get("path") or "")
-    # Own systemd unit per server, NOT a child of nas-web. A child would live in the
-    # nas-web.service cgroup, and systemd kills that whole cgroup on restart — so every
-    # `systemctl restart nas-web` silently killed the sshfs daemons and left stale
-    # mountpoints behind (2026-07-12). As a unit it survives our restarts, and systemd
-    # brings it back by itself if the daemon dies. sshfs runs with -f (foreground) so
-    # systemd can actually supervise it instead of losing track after it daemonizes.
-    unit = _remote_unit(rid)
-    _run(["systemctl", "reset-failed", unit], timeout=10)
-    inner = " ".join(shlex.quote(a) for a in
-                     ["sshfs", "-f", src, mp, "-p", str(r.get("port") or 22), "-o", opts])
-    cmd = ["systemd-run", "--unit", unit, "--collect",
-           "--property=Restart=on-failure", "--property=RestartSec=5",
-           "--property=ExecStopPost=/bin/umount -l %s" % mp]
-    penv = None
-    if r.get("pass"):
-        # The password goes through the unit's environment, never argv — argv is readable
-        # by anyone via /proc, the environment only by root. systemd re-applies it on every
-        # restart, so a reconnect is fed the password as well. (StandardInputText would be
-        # the obvious way, but systemd-run refuses it on a transient unit.)
-        # --setenv=NAME (no value) imports it from OUR env, so it never lands in any argv.
-        inner = 'printf %s "$NAS_SSHFS_PW" | ' + inner
-        cmd += ["--setenv=NAS_SSHFS_PW"]
-        penv = dict(os.environ, NAS_SSHFS_PW=r["pass"])
-    cmd += ["/bin/sh", "-c", inner]
-    try:
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=30, env=penv)
-    except subprocess.TimeoutExpired:
-        return {"ok": False, "log": "the server did not respond within 30s"}
-    except OSError as e:
-        return {"ok": False, "log": str(e)}
-    # systemd-run returns as soon as the unit starts; the mount appears a moment later.
-    ok = False
-    for _ in range(50):
-        if _remote_mounted(rid):
-            ok = True
-            break
-        time.sleep(0.2)
-    if not ok:
-        msg = (_run(["systemctl", "status", "--no-pager", "-n", "10", unit],
-                    timeout=10).get("log") or p.stderr or p.stdout
-               or "failed to mount").strip()[-300:]
-        _run(["systemctl", "stop", unit], timeout=15)
-        # sshfs = SFTP: if SSH lets you in but no data flows, the server most
-        # likely has the SFTP service disabled (common on Synology)
-        if "Input/output error" in msg or "Connection reset" in msg:
-            msg += " — looks like SFTP is disabled on the server. Synology: Control Panel → File Services → FTP → enable SFTP."
-        return {"ok": False, "log": msg}
-    log_event("action", "Server connected: %s" % (r.get("name") or r["host"]), "", "ok",
-              kind="files", desk=False)
-    return {"ok": True, "mount": mp}
+    # a connection stored by an older build, over SFTP. Not mounted, on purpose: this is the
+    # transport that quietly cost a 1.8 TB backup (see the module note). One edit turns it
+    # into SMB, and because each share becomes a subfolder of the SAME mountpoint, every path
+    # under it — a backup source, a favourite — keeps working.
+    return {"ok": False, "log": "this connection still uses SFTP, which this box no longer "
+                                "mounts: its session drops under load and hides the drops as "
+                                "read errors. Open the server, scan it and tick the shares — "
+                                "the folder paths stay exactly the same."}
 
 # auto-mount: those flagged auto connect themselves (after a reboot, dropout, unavailability);
 # 5-minute backoff so we don't hammer a powered-off server on every tick
