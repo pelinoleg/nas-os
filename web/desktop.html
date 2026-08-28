@@ -4019,6 +4019,11 @@ async function logout(){try{await fetch("/api/auth/logout",{method:"POST"});}cat
 
 /* helpers */
 const el=h=>{const t=document.createElement("template");t.innerHTML=h.trim();return t.content.firstChild;};
+// A speed limit is stored in KB/s (that is what rsync and rclone take), but nobody types a
+// backup speed in kilobytes: "50" in a KB/s field meant 50 KB/s and read as "the limit does
+// nothing" (2026-08-28). The fields now accept "50 MB/s" and are shown back the same way.
+const bwTxt=kb=>{kb=+kb||0;return !kb?"0":(kb>=1048576&&kb%1048576===0)?(kb/1048576)+" GB/s"
+ :(kb>=1024&&kb%1024===0)?(kb/1024)+" MB/s":kb+" KB/s";};
 const fmtB=n=>{if(n==null)return"—";const u=["B","KB","MB","GB","TB"];let i=0;n=+n;while(n>=1024&&i<4){n/=1024;i++;}return n.toFixed(n<10&&i>0?1:0)+" "+u[i];};
 /* network rate: user-selectable units (Settings → Network). Bytes are what a
    file copy shows, bits are what the ISP sells — 7 MB/s and 56 Mbit/s are the same thing */
@@ -6761,7 +6766,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    <div class="fm-fav-list" id="fFav"></div>
    <div id="fVolsWrap" style="display:none;flex:none"><div class="fm-fav-h"><span>Disks</span></div>
    <div id="fVols" style="margin:0 -4px"></div></div>
-   <div id="fRemWrap" style="flex:none"><div class="fm-fav-h"><span>Servers</span><button class="iconbtn" id="fRemAdd" title="Add an SSH server">+</button></div>
+   <div id="fRemWrap" style="flex:none"><div class="fm-fav-h"><span>Servers</span><button class="iconbtn" id="fRemAdd" title="Add a server (SFTP or SMB)">+</button></div>
    <div id="fRem" style="margin:0 -4px"></div></div>
    <div id="fCloudWrap" style="display:none;flex:none"><div class="fm-fav-h"><span>Cloud</span><button class="iconbtn" id="fCloudAdd" title="Manage cloud remotes (Rclone app)">${svg("cog",14)}</button></div>
    <div id="fCloud" style="margin:0 -4px"></div></div>
@@ -6909,14 +6914,17 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
        await ejectVolume(v);renderVols();};
      c.appendChild(it);});}
  win._vols=renderVols;
- /* ---- SSH servers: sshfs mounts under /mnt/remote, after that they're ordinary folders ---- */
+ /* ---- Servers: SFTP (sshfs) or SMB (cifs) under /mnt/remote — after that, ordinary folders.
+    SMB puts one share per subfolder, so the connection root looks the same either way. ---- */
  let REMS=[];
  async function renderRemotes(fetchNew){
    const c=body.querySelector("#fRem");if(!c)return;
    if(fetchNew!==false){const r=await api("/api/remotes");if(!body.isConnected&&!document.body.contains(body))return;REMS=(r&&r.remotes)||[];}
    c.innerHTML="";
    REMS.forEach(rm=>{const on=rm.mounted&&(cwd===rm.mount||cwd.startsWith(rm.mount+"/"));
-     const it=el(`<div class="fm-fav-i${on?" on":""}" title="${att(rm.user+"@"+rm.host+":"+rm.path+(rm.mounted?"":" · not connected"))}"><span class="fi" style="${rm.mounted?"":"opacity:.45"}">${svg("net",15)}</span><span class="fn">${esc(rm.name)}</span>${rm.mounted?`<button class="fx fx-eject" title="Disconnect">${svg("eject",13)}</button>`:""}</div>`);
+     const where=rm.kind==="smb"?("//"+rm.host+" · "+((rm.shares||[]).join(", ")||"no shares"))
+                                :(rm.user+"@"+rm.host+":"+rm.path);
+     const it=el(`<div class="fm-fav-i${on?" on":""}" title="${att(where+(rm.mounted?"":" · not connected"))}"><span class="fi" style="${rm.mounted?"":"opacity:.45"}">${svg("net",15)}</span><span class="fn">${esc(rm.name)}</span>${rm.mounted?`<button class="fx fx-eject" title="Disconnect">${svg("eject",13)}</button>`:""}</div>`);
      const open=async()=>{
        if(!rm.mounted){toast("Connecting to "+rm.name+"…");
          const r2=await api("/api/remotes/mount",{method:"POST",body:JSON.stringify({id:rm.id})});
@@ -6939,27 +6947,72 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
      ]);};
      c.appendChild(it);});
  }
+ /* Two protocols, on purpose. SFTP reaches any Linux box; SMB is what a NAS actually serves
+    well — the Ugreen's SFTP session collapsed about once a second under a backup's reading
+    while the identical reads over SMB failed zero times (2026-08-27). SMB mounts one share
+    per subfolder of the mountpoint, so <mount>/<Share>/… matches what SFTP showed and a
+    backup pointed at the mountpoint keeps working across a switch. */
  function remDlg(rm){
    const s=document.getElementById("scrim");
-   s.innerHTML=`<div class="dialog" style="max-width:560px;width:92vw"><h3>${rm?"Edit server":"New SSH server"}</h3>
+   let kind=(rm&&rm.kind)||"sshfs",picked=((rm&&rm.shares)||[]).slice(),found=null;
+   const draw=()=>{
+    const smb=kind==="smb";
+    s.innerHTML=`<div class="dialog" style="max-width:560px;width:92vw"><h3>${rm?"Edit server":"New server"}</h3>
+     <div class="field"><label>Protocol</label><div class="seg" id="rmK">
+       <button data-k="sshfs"${smb?"":' class="on"'}>SFTP (SSH)</button><button data-k="smb"${smb?' class="on"':""}>SMB</button></div>
+       <div style="color:var(--mut);font-size:12px;margin-top:4px">${smb?"What a NAS serves best — pick the shares below.":"Any Linux box over SSH. If reads fail under load, try SMB."}</div></div>
      <div class="field"><label>Name</label><input id="rmN" value="${att((rm&&rm.name)||"")}" placeholder="Main NAS"></div>
      <div class="field"><label>Address</label><input id="rmH" class="mono" value="${att((rm&&rm.host)||"")}" placeholder="192.168.1.95"></div>
-     <div class="field" style="display:flex;gap:8px"><div style="flex:1"><label>User</label><input id="rmU" class="mono" value="${att((rm&&rm.user)||"")}" placeholder="root"></div>
-       <div style="width:90px"><label>Port</label><input id="rmP" class="mono" value="${att((rm&&rm.port)||22)}"></div></div>
-     <div class="field"><label>Password <span style="color:var(--mut);font-weight:400">— ${rm&&rm.has_pass?"set; empty = keep":"empty = key-based login"}</span></label><input id="rmW" type="password" autocomplete="new-password"></div>
-     <div class="field"><label>Folder on the server <span style="color:var(--mut);font-weight:400">— empty = home folder (e.g. rsync.net)</span></label><input id="rmD" class="mono" value="${att((rm&&rm.path)||"")}" placeholder="/ or /volume2/… or empty"></div>
+     <div class="field" style="display:flex;gap:8px"><div style="flex:1"><label>User</label><input id="rmU" class="mono" value="${att((rm&&rm.user)||"")}" placeholder="${smb?"oleg":"root"}"></div>
+       <div style="width:90px"><label>Port</label><input id="rmP" class="mono" value="${att((rm&&rm.port)||(smb?445:22))}"></div></div>
+     <div class="field"><label>Password <span style="color:var(--mut);font-weight:400">— ${rm&&rm.has_pass?"set; empty = keep":(smb?"empty = guest":"empty = key-based login")}</span></label><input id="rmW" type="password" autocomplete="new-password"></div>
+     ${smb?`<div class="field"><label>Shares <span style="color:var(--mut);font-weight:400">— each one becomes a folder inside the connection</span></label>
+       <div style="display:flex;gap:8px;align-items:center"><button class="btn sm" id="rmScan">${svg("net",13)} Scan the server</button><span id="rmScanS" style="color:var(--mut);font-size:12px"></span></div>
+       <div id="rmSh" style="margin-top:8px;max-height:190px;overflow:auto"></div></div>`
+      :`<div class="field"><label>Folder on the server <span style="color:var(--mut);font-weight:400">— empty = home folder (e.g. rsync.net)</span></label><input id="rmD" class="mono" value="${att((rm&&rm.path)||"")}" placeholder="/ or /volume2/… or empty"></div>`}
      <div class="field" style="flex-direction:row;align-items:center;gap:10px"><label style="margin:0;flex:1">Connect automatically <span style="color:var(--mut);font-weight:400">— the panel mounts it by itself (incl. after a reboot)</span></label><label class="tgl" style="flex:none"><input type="checkbox" id="rmA"${rm&&rm.auto?" checked":""}><span class="sl"></span></label></div>
      <div class="r"><button class="btn" id="rmX">Cancel</button><button class="btn pri" id="rmOk">Save</button></div></div>`;
-   s.classList.add("show");
-   s.querySelector("#rmX").onclick=()=>s.classList.remove("show");
-   s.querySelector("#rmOk").onclick=async()=>{
-     const b={id:(rm&&rm.id)||"",name:s.querySelector("#rmN").value.trim(),host:s.querySelector("#rmH").value.trim(),
-       user:s.querySelector("#rmU").value.trim(),port:s.querySelector("#rmP").value.trim(),path:s.querySelector("#rmD").value.trim(),
+    s.querySelectorAll("#rmK button").forEach(b=>b.onclick=()=>{
+      if(b.dataset.k===kind)return;
+      const cur=grab();kind=b.dataset.k;draw();fill(cur);});
+    if(smb){drawShares();s.querySelector("#rmScan").onclick=scan;}
+    s.querySelector("#rmX").onclick=()=>s.classList.remove("show");
+    s.querySelector("#rmOk").onclick=save;
+   };
+   /* keep what was typed when the protocol segment flips the form */
+   const grab=()=>({n:s.querySelector("#rmN").value,h:s.querySelector("#rmH").value,
+     u:s.querySelector("#rmU").value,w:s.querySelector("#rmW").value});
+   const fill=v=>{s.querySelector("#rmN").value=v.n;s.querySelector("#rmH").value=v.h;
+     s.querySelector("#rmU").value=v.u;s.querySelector("#rmW").value=v.w;};
+   const drawShares=()=>{
+     const box=s.querySelector("#rmSh");if(!box)return;
+     const names=found?found.map(x=>x.name):picked.slice();
+     if(!names.length){box.innerHTML=`<div style="color:var(--mut);font-size:12px">Scan the server, or save and come back — nothing picked yet.</div>`;return;}
+     box.innerHTML=names.map(n=>{const cm=(found||[]).find(x=>x.name===n);
+       return `<label style="display:flex;align-items:center;gap:8px;padding:3px 0"><input type="checkbox" data-s="${att(n)}"${picked.indexOf(n)>=0?" checked":""}><span class="mono">${esc(n)}</span>${cm&&cm.comment?`<span style="color:var(--mut);font-size:12px">${esc(cm.comment)}</span>`:""}</label>`;}).join("");
+     box.querySelectorAll("input[data-s]").forEach(c=>c.onchange=()=>{
+       const n=c.dataset.s,i=picked.indexOf(n);
+       if(c.checked&&i<0)picked.push(n);else if(!c.checked&&i>=0)picked.splice(i,1);});
+   };
+   const scan=async()=>{
+     const st=s.querySelector("#rmScanS");st.textContent="scanning…";
+     const b={id:(rm&&rm.id)||"",host:s.querySelector("#rmH").value.trim(),user:s.querySelector("#rmU").value.trim()};
+     const pw=s.querySelector("#rmW").value;if(pw)b.pass=pw;
+     const r=await api("/api/remotes/shares",{method:"POST",body:JSON.stringify(b)});
+     if(r&&r.ok){found=r.shares||[];st.textContent=found.length+" share(s)";drawShares();}
+     else st.textContent=(r&&r.log)||"could not read the share list";
+   };
+   const save=async()=>{
+     const b={id:(rm&&rm.id)||"",kind:kind,name:s.querySelector("#rmN").value.trim(),host:s.querySelector("#rmH").value.trim(),
+       user:s.querySelector("#rmU").value.trim(),port:s.querySelector("#rmP").value.trim(),
        auto:s.querySelector("#rmA").checked};
+     if(kind==="smb")b.shares=picked;else b.path=s.querySelector("#rmD").value.trim();
      const pw=s.querySelector("#rmW").value;if(pw)b.pass=pw;
      const r=await api("/api/remotes/save",{method:"POST",body:JSON.stringify(b)});
-     s.classList.remove("show");
-     if(r&&r.ok){toast("Saved");renderRemotes();}else toast("Error: "+((r&&r.log)||"?"));};
+     if(r&&r.ok){s.classList.remove("show");toast("Saved");renderRemotes();}
+     else toast("Error: "+((r&&r.log)||"?"));};
+   draw();
+   s.classList.add("show");
  }
  const remAdd=body.querySelector("#fRemAdd");if(remAdd)remAdd.onclick=()=>remDlg(null);
  /* ---- Cloud (rclone) mounts: appear here while mounted, gone when unmounted ---- */
@@ -11092,7 +11145,7 @@ function winRclone(initTab){openWin("__rclone","Rclone",(body,win)=>{
   tc.innerHTML=`<h3 class="set-title">Options</h3><p class="set-sub">Global rclone settings — applied to every transfer, restore and mount.</p>
     <div class="srow"><div class="srow-l"><div class="srow-t">Parallel transfers</div><div class="srow-d">files copied at once (--transfers)</div></div><div class="srow-c"><input class="mono" id="oT" style="max-width:80px" value="${o.transfers}"></div></div>
     <div class="srow"><div class="srow-l"><div class="srow-t">Checkers</div><div class="srow-d">parallel comparisons (--checkers)</div></div><div class="srow-c"><input class="mono" id="oC" style="max-width:80px" value="${o.checkers}"></div></div>
-    <div class="srow"><div class="srow-l"><div class="srow-t">Speed limit</div><div class="srow-d">global cap for restore/mount; 0 = unlimited</div></div><div class="srow-c"><input class="mono" id="oB" style="max-width:90px" value="${o.bwlimit}"><span style="color:var(--mut);font-size:12px"> KB/s</span></div></div>
+    <div class="srow"><div class="srow-l"><div class="srow-t">Speed limit</div><div class="srow-d">global cap for restore/mount; «50 MB/s», a bare number = KB/s, 0 = unlimited</div></div><div class="srow-c"><input class="mono" id="oB" style="max-width:110px" value="${bwTxt(o.bwlimit)}"></div></div>
     <div class="srow"><div class="srow-l"><div class="srow-t">Bandwidth schedule${tipHTML("Time-based cap (rclone --bwlimit). e.g. «08:00,512 19:00,off» — 512 KB/s from 8am, unlimited from 7pm. Applies to restore/mount and to backups that have no limit of their own; overrides the flat limit above. Blank = off.")}</div><div class="srow-d">e.g. 08:00,512 19:00,off — throttle by day, full at night</div></div><div class="srow-c"><input class="mono" id="oBs" style="max-width:230px" placeholder="08:00,512 19:00,off" value="${att(o.bwlimit_schedule||"")}"></div></div>
     <div class="set-h">Mounts</div>
     <div class="srow"><div class="srow-l"><div class="srow-t">VFS cache mode${tipHTML("How a mounted cloud caches files locally. writes = safe & fast for editing (default). full = also cache reads. off = stream directly (lowest disk use).")}</div></div><div class="srow-c"><div class="seg" id="oVfs">${["off","minimal","writes","full"].map(v=>`<button data-v="${v}" class="${o.vfs_cache_mode===v?"on":""}">${v}</button>`).join("")}</div></div></div>
@@ -11101,7 +11154,7 @@ function winRclone(initTab){openWin("__rclone","Rclone",(body,win)=>{
   let vfs=o.vfs_cache_mode;
   tc.querySelectorAll("#oVfs button").forEach(b=>b.onclick=()=>{vfs=b.dataset.v;tc.querySelectorAll("#oVfs button").forEach(x=>x.classList.toggle("on",x===b));});
   tc.querySelector("#oSave").onclick=async()=>{const msg=tc.querySelector("#oMsg");msg.textContent="saving…";
-    const body={transfers:+tc.querySelector("#oT").value||4,checkers:+tc.querySelector("#oC").value||8,bwlimit:+tc.querySelector("#oB").value||0,bwlimit_schedule:tc.querySelector("#oBs").value.trim(),vfs_cache_mode:vfs,vfs_cache_max_size:tc.querySelector("#oVsz").value.trim()||"2G"};
+    const body={transfers:+tc.querySelector("#oT").value||4,checkers:+tc.querySelector("#oC").value||8,bwlimit:tc.querySelector("#oB").value,bwlimit_schedule:tc.querySelector("#oBs").value.trim(),vfs_cache_mode:vfs,vfs_cache_max_size:tc.querySelector("#oVsz").value.trim()||"2G"};
     const rr=await rcloneP("/api/backup/rclone/opts",body);msg.textContent=rr&&rr.ok?"saved":"failed";toast("Options saved");};
  }
 
@@ -11239,7 +11292,7 @@ function winBackup(){openWin("__nasbak","Mirror",(body,win)=>{
    ${sideCard("dst")}
    ${both?`<div class="nb-dwarn">Both sides are remote. rsync cannot do that directly, so the source is mounted on this NAS (sshfs) and the data flows THROUGH it: speed is limited by its link and the traffic is counted twice.</div>`:""}
    ${(sides||isRcloneAny())?"":verifyRow(c)}
-   ${sides?"":`<div class="srow"><div class="srow-l"><div class="srow-t">Speed limit${tipHTML(isRcloneAny()?"Speed cap for THIS backup's transfers, in KB/s (rclone --bwlimit). 0 — no limit. Restore/mount use the global limit in the Rclone app.":"Transfer speed limit for this backup, in KB/s (rsync --bwlimit). 0 — no limit.")}</div></div><div class="srow-c"><input class="mono" id="cBw" style="max-width:90px" value="${c.bwlimit||0}"><span style="color:var(--mut);font-size:12px">KB/s</span></div></div>`}
+   ${sides?"":`<div class="srow"><div class="srow-l"><div class="srow-t">Speed limit${tipHTML(isRcloneAny()?"Speed cap for THIS backup's transfers. Write the unit — «50 MB/s», «512 KB/s»; a bare number is read as KB/s. 0 — no limit. Restore/mount use the global limit in the Rclone app.":"Transfer speed limit for this backup. Write the unit — «50 MB/s», «512 KB/s»; a bare number is read as KB/s. 0 — no limit.")}</div></div><div class="srow-c"><input class="mono" id="cBw" style="max-width:110px" value="${bwTxt(c.bwlimit)}"><span style="color:var(--mut);font-size:12px">0 = no limit</span></div></div>`}
    <div class="set-savebar"><span class="sb-left nb-saved" id="cSaved"></span><button class="btn sm" id="cTest">${svg("refresh",13)} Check</button></div>
    <div class="nb-testr" id="cTestR"></div>`;
   const g=q=>tc.querySelector(q);
@@ -11270,7 +11323,10 @@ function winBackup(){openWin("__nasbak","Mirror",(body,win)=>{
     toast(r&&r.ok?"Key installed ✓":((r&&r.log)||"failed"));};
   });
   {const su=g("#su_src");if(su)su.onchange=()=>saveCfg({remote_sudo:su.checked});}
-  {const bw=g("#cBw");if(bw)bw.onchange=()=>saveCfg({bwlimit:+bw.value||0});}
+  {const bw=g("#cBw");if(bw)bw.onchange=async()=>{const c2=await saveCfg({bwlimit:bw.value});
+    // the server is the one that resolves "50 MB/s" → KB/s, so show back what it STORED
+    // rather than what was typed: a value it could not read must not look accepted
+    bw.value=bwTxt((c2||{}).bwlimit);};}
   // rclone destination controls (dst side): pick a remote/path/mode; config is shared (Cloud tab)
   {const rem=g("#rc_remote");if(rem)rem.onchange=()=>saveCfg({remote:rem.value}).then(()=>{JOBS=(CFG.jobs||[]).slice();again();});
    const rp=g("#rc_path");if(rp)rp.onchange=()=>saveCfg({remote_path:rp.value.trim()}).then(()=>{JOBS=(CFG.jobs||[]).slice();again();});
@@ -11593,7 +11649,8 @@ function winBackup(){openWin("__nasbak","Mirror",(body,win)=>{
    255:"SSH could not connect — check the address, the port and the password or key"};
   /* short label for the badge in the folder row; full breakdown — in the tooltip (jobIssue) */
   const jobTag=j=>j.src_missing?"source does not exist":j.not_mounted?"no disk"
-   :j.src_block?(j.block==="nobaseline"?"no baseline":"source empty")
+   :j.src_block?(j.block==="nobaseline"?"source unverified":"source empty")
+   :j.nospc?"destination full"
    :(j.stopped||(j.code!=null&&j.code<0))?"stopped":j.code===25?"guard"
    :j.fs_limit?`FS rejected ${j.fs_limit}`
    :j.verify_err?"verification":j.verify_bad?`≠ ${j.verify_bad}`:`code ${j.code==null?"?":j.code}`;
@@ -11604,8 +11661,9 @@ function winBackup(){openWin("__nasbak","Mirror",(body,win)=>{
    if(j.src_missing)return "the source is missing on this NAS: the folder was deleted or the disk is not mounted";
    if(j.not_mounted)return "the destination disk is not mounted, the folder was skipped";
    if(j.src_block)return j.block==="nobaseline"
-     ? "no delete-guard baseline yet and the destination already holds a copy — the sync was refused so it can't wipe the copy if the source turns out empty (use «sync anyway» only if the source is intact)"
+     ? "the source could not be listed (unreachable, wrong path, or no permission) and there is no baseline to cap deletions — the sync was refused so it can't wipe the copy"
      : "the source is empty or unavailable — the sync was refused, because in mirror/archive mode it would then delete the whole destination copy";
+   if(j.nospc)return "the destination ran out of space — the folder stopped at the first failed write. What was already copied is intact, but this copy is INCOMPLETE until the destination has room";
    if(j.stopped||(j.code!=null&&j.code<0))return "you stopped it — whatever was already copied stays in place";
    if(j.fs_limit)return `copied, but ${j.fs_limit} files were rejected by the destination: its filesystem ${j.fs||""} cannot hold such names (with «:» or a line break), symlinks or special files`;
    if(j.verify_err)return "the checksum verify could not finish";
@@ -11637,7 +11695,9 @@ function winBackup(){openWin("__nasbak","Mirror",(body,win)=>{
    if(!cur||Math.abs(e-cur)/cur>0.08)nbTot[src]=e;
    return nbTot[src];};
   const runSumm=(jobs,ts,result,total)=>{jobs=jobs||[];
-   const isStop=j=>j.stopped||(j.code!=null&&j.code<0);   // killed by our own "Stop" — not an error
+   // killed by our own "Stop" — not an error. A full destination is ALSO killed by us
+   // (there is nothing left to do), and that one IS the error.
+   const isStop=j=>!j.nospc&&(j.stopped||(j.code!=null&&j.code<0));
    const tot=total||jobs.length,okN=jobs.filter(j=>j.ok).length;
    const bad=jobs.filter(j=>!j.ok&&!isStop(j)&&!jobFsOnly(j)),killed=jobs.filter(isStop);
    const fsj=jobs.filter(jobFsOnly),fsn=fsj.reduce((a,j)=>a+(+j.fs_limit||0),0);
@@ -11688,11 +11748,11 @@ function winBackup(){openWin("__nasbak","Mirror",(body,win)=>{
      +`<div style="margin-top:6px">A legitimate backup rarely rewrites half the copy at once — this is the signature of <b>encryption malware</b> or bulk corruption on the source. Check the source computer first: open a few of these files there. If the change is really yours (mass conversion, re-tagging), run once with the guard off.</div>`;}
    if(emptyJ.length||baseJ.length){const noBase=baseJ.length&&!emptyJ.length;
     html+=`${chgJ.length?'<hr style="border:none;border-top:1px solid var(--line);margin:10px 0">':''}`
-     +`<b>Backup refused — the copy is untouched.</b> ${noBase?"There's no deletion-guard baseline yet (first run, or the status was reset) and the destination already holds a copy":"The source is EMPTY or unavailable (the folder was emptied, or its disk is not mounted)"}: `
+     +`<b>Backup refused — the copy is untouched.</b> ${noBase?"The source could not be listed (unreachable, wrong path, or no permission) and there is no deletion-guard baseline to cap the damage":"The source is EMPTY or unavailable (the folder was emptied, or its disk is not mounted)"}: `
      +`<span class="mono">${nm(emptyJ.concat(baseJ))}</span>.`
-     +`<div style="margin-top:6px">In <b>mirror/archive</b> mode a sync against ${noBase?"a source with no verified baseline":"an empty"} source would delete the destination copy${arch?" (moved to the deleted-files archive)":" — permanently"}. The run was stopped so that couldn't happen. ${noBase?"If the source is intact, run once with the guard off to establish the baseline.":"Fix the source (mount the disk / restore the folder) and run again."}</div>`
+     +`<div style="margin-top:6px">In <b>mirror/archive</b> mode a sync against ${noBase?"a source that cannot be read":"an empty"} source would delete the destination copy${arch?" (moved to the deleted-files archive)":" — permanently"}. The run was stopped so that couldn't happen. ${noBase?"Check the connection and the source path, then run again — a first run no longer needs anything ticked here: the panel lists the source itself and, if it has content, arms the guard from the copy.":"Fix the source (mount the disk / restore the folder) and run again."}</div>`
      +`<div style="margin-top:8px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">`
-     +`<button class="btn sm dng" id="oAllowSrc">${svg("check",13)} ${noBase?"The source is intact — sync now":"The source really is empty — sync anyway"}</button></div>`;}
+     +`<button class="btn sm dng" id="oAllowSrc">${svg("check",13)} ${noBase?"Sync anyway — the source is intact":"The source really is empty — sync anyway"}</button></div>`;}
    if(real.length){const pct=real[0].guard_pct||20,lim=real[0].guard_limit||0;
     html+=`${src.length?'<hr style="border:none;border-top:1px solid var(--line);margin:10px 0">':''}`
      +`<b>Deletion stopped by the guard.</b> The copy held more surplus files than the threshold allows`
@@ -11707,7 +11767,7 @@ function winBackup(){openWin("__nasbak","Mirror",(body,win)=>{
    // a no-baseline sync is normal IF the source is intact; a real trip uncaps surplus deletion).
    const parts=[];
    if(emptyJ.length)parts.push(`sync the empty/unavailable source of «${emptyJ.map(j=>j.src).join(", ")}» → their ENTIRE destination copy ${arch?"moves to the deleted-files archive (recoverable)":"is deleted permanently"}`);
-   if(baseJ.length)parts.push(`run the first sync of «${baseJ.map(j=>j.src).join(", ")}» with no baseline guard — normal if the source is intact, but if it is actually empty the copy would be deleted`);
+   if(baseJ.length)parts.push(`sync «${baseJ.map(j=>j.src).join(", ")}» with no baseline guard although the source could not be listed — if it is actually empty or wrongly addressed, the copy would be deleted`);
    if(real.length)parts.push(`lift the mass-deletion guard for «${real.map(j=>j.src).join(", ")}» → surplus files ${arch?"move to the archive":"are erased for good"}`);
    if(chgJ.length)parts.push(`lift the mass-change guard for «${chgJ.map(j=>j.src).join(", ")}» → the copy IS REWRITTEN with the source's current content${arch?" (old versions go to the deleted-files archive)":" — the old content is gone for good"}`);
    const doAllow=()=>confirmDlg("Run without the safety guards?",
@@ -11776,10 +11836,13 @@ function winBackup(){openWin("__nasbak","Mirror",(body,win)=>{
     else sn.textContent=nasTr("never run yet");}
    // hero verdict from the same data the details below are painted from
    {const jobsAll=(st&&st.jobs)||[];
-    const isStop=j=>j.stopped||(j.code!=null&&j.code<0);
+    const isStop=j=>!j.nospc&&(j.stopped||(j.code!=null&&j.code<0));
     const bad=jobsAll.filter(j=>!j.ok&&!isStop(j)&&!jobFsOnly(j)).length;
     const vbad=jobsAll.some(j=>j.verify_bad||j.verify_err);
-    if(st&&st.running)setHero("accent","<b>Backup is running…</b>");
+    if(st&&st.running&&st.cur_errn)setHero("danger",
+      `<b>Backup is running, and failing</b> — ${st.cur_errn} error${st.cur_errn>1?"s":""} so far`
+      +`${st.cur?` in «${esc(st.cur)}»`:""}${st.cur_err?`<div style="margin-top:4px;font-weight:500;font-family:var(--mono);font-size:11.5px">${esc(String(st.cur_err))}</div>`:""}`);
+    else if(st&&st.running)setHero("accent","<b>Backup is running…</b>");
     else if(st&&st.queued)setHero("warn","<b>Waiting in the queue</b> — another backup is running");
     else if(ds&&ds.unset&&!(c.jobs||[]).length&&!st?.ts)setHero("mut","<b>Not set up yet</b> — follow the steps below");
     else if(notMnt)setHero("danger","<b>Destination disk is not mounted</b> — the backup cannot run");
@@ -12113,9 +12176,10 @@ function winBackup(){openWin("__nasbak","Mirror",(body,win)=>{
  const wizOpts=tc=>{const c=CFG,rcl=isRcloneAny();
   tc.innerHTML=`<h3 class="set-title">Options</h3><p class="set-sub">${rcl?"Optional — a speed cap for this backup (rclone already checksums every file it transfers).":"Both are optional — safe to leave as they are (changeable later on the Connection tab)."}</p>
    ${rcl?"":verifyRow(c)}
-   <div class="srow"><div class="srow-l"><div class="srow-t">Speed limit${tipHTML(rcl?"Speed cap for this backup's transfers, in KB/s (rclone --bwlimit). 0 — no limit. Restore/mount use the global limit in the Rclone app.":"Transfer speed limit in KB/s (rsync --bwlimit) so the backup doesn't hog the network and disk. 0 — no limit.")}</div><div class="srow-d">so it doesn't hog the network/disk</div></div><div class="srow-c"><input class="mono" id="cBw" style="max-width:90px" value="${c.bwlimit||0}"><span style="color:var(--mut);font-size:12px">KB/s</span></div></div>`;
+   <div class="srow"><div class="srow-l"><div class="srow-t">Speed limit${tipHTML(rcl?"Speed cap for this backup's transfers. Write the unit — «50 MB/s», «512 KB/s»; a bare number is read as KB/s. 0 — no limit. Restore/mount use the global limit in the Rclone app.":"Transfer speed limit so the backup doesn't hog the network and disk. Write the unit — «50 MB/s», «512 KB/s»; a bare number is read as KB/s. 0 — no limit.")}</div><div class="srow-d">so it doesn't hog the network/disk</div></div><div class="srow-c"><input class="mono" id="cBw" style="max-width:110px" value="${bwTxt(c.bwlimit)}"><span style="color:var(--mut);font-size:12px">0 = no limit</span></div></div>`;
   wireVerify(tc);
-  const bw=tc.querySelector("#cBw");if(bw)bw.onchange=()=>saveCfg({bwlimit:+bw.value||0});};
+  const bw=tc.querySelector("#cBw");if(bw)bw.onchange=async()=>{const c2=await saveCfg({bwlimit:bw.value});
+    bw.value=bwTxt((c2||{}).bwlimit);};};        // echo back what the server stored — see bwTxt
  const WPANE={conn:tc=>tabConn(tc,"sides"),folders:tc=>tabSources(tc,"folders"),dest:tc=>tabSources(tc,"dest"),
   excl:tc=>tabSources(tc,"excl"),deleted:tc=>TABS.deleted(tc),sched:tc=>TABS.sched(tc),opts:wizOpts};
  function renderWizDone(tc){const c=CFG,push=isPush();

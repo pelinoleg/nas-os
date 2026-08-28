@@ -50,6 +50,10 @@ STACK_PACKAGES=(mergerfs snapraid smartmontools)
 UTIL_PACKAGES=(
   vnstat              # per-interface traffic counter («Traffic» widget in the panel)
   sshfs               # «Servers» in the panel file manager: SSH mounts in /mnt/remote
+  cifs-utils          # «Servers» over SMB — the transport a NAS actually serves well. sshfs to
+                      # the Ugreen dropped its SFTP session about once a second under a backup's
+                      # reading (2026-08-27); the same reads over SMB failed zero times
+  smbclient           # lists the shares a server offers, so the dialog can offer tick-boxes
   openssl             # TLS certificate for the Kopia backup server (clients pin its fingerprint)
   dialog
   libheif-examples   # heif-convert: iPhone HEIC is sliced into tiles, ffmpeg takes only one
@@ -93,6 +97,7 @@ REQUIRED_PKGS=(
   "rsync|the Mirror backup app cannot copy anything at all"
   "openssh-client|no backups to another machine, no SSH mounts in the file manager"
   "sshfs|the file manager cannot mount other servers (Servers section)"
+  "cifs-utils|the file manager cannot mount SMB servers — the only reliable transport for some NAS boxes"
   "avahi-daemon|<host>.local stops resolving and the NAS disappears from Finder → Network"
   "libnss-mdns|<host>.local stops resolving on this box itself"
   "samba|network shares (SMB) cannot be served at all"
@@ -1226,43 +1231,40 @@ Configs in git: $NAS_CONFIG"
 # x-systemd.requires=<branch> is added to each branch dynamically in generate_mergerfs
 # (disk paths are not static), so the pool mounts ONLY after its branches, not over empty /mnt/diskN.
 #
-# category.create=epmfs — PATH PRESERVING: a new file goes only to a branch where its
-# directory already exists (of those, the one with the most free space). Chosen 2026-08-14
-# over mfs, deliberately, because this box has no SnapRAID parity: a dead branch takes its
-# files with it either way, and the only question is WHICH files. Under mfs one folder is
-# scattered over every branch, so losing a disk punches a random hole in EVERY folder;
-# under epmfs a folder lives on one branch and the loss is whole folders — something the
-# owner can name and re-fetch instead of swiss cheese. Two consequences come with it:
-#   * rename ACROSS branches now returns EXDEV. Everything in the panel that moves files
-#     already falls back to copy+delete (fs_move and the trash use shutil.move,
-#     _fsjob_move_entry catches OSError from os.rename), so this is invisible there — but a
-#     naive client that treats rename(2) as infallible is not.
-#   * when the branch holding a folder fills up, new files in THAT folder fail with ENOSPC
-#     while the pool still reports room elsewhere. That is the price of path preservation
-#     and it is paid on purpose: a loud failure the owner can see and fix by moving the
-#     folder, instead of a silent drift back into scattered files.
+# category.create=mfs — NOT path preserving: a new file goes to the branch with the most
+# free space, so one folder may end up spread over several branches. This REPLACED epmfs on
+# 2026-08-27, by the owner's decision, after the Ugreen mirror hit the wall epmfs was always
+# going to build: Mirror/Ugreen/home is 1.77 TB and the largest branch is 916 GiB. Under a
+# path-preserving policy that folder can never finish: the only candidate branch is the one
+# the folder already lives on, and once it drops below minfreespace every create returns
+# ENOSPC while the pool still reports 1.3 TB free. The run of 2026-08-27 died at 33 % with
+# 16310 ENOSPC errors and kept "running" for two more hours writing nothing.
 #
-# statfs=full — REQUIRED with a path-preserving policy, not decoration. The default (base)
-# sums every branch, so statvfs() inside a folder pinned to one disk reports the whole pool.
-# Six separate space checks read that number (the file-manager copy job, Time Machine, the
-# backup-target monitor, kopia, the USB import, the motd) and every one of them promised
-# terabytes into a folder that could take gigabytes. Measured on a throwaway two-branch pool:
-# a folder living on the 32 MB branch reported 73.2 MB free with statfs=base and 23.0 MB —
-# the truth — with statfs=full. The pool root still reports the sum, because the root exists
-# on every branch, so the pool tile and plain `df /mnt/storage` do not change.
+# What was given up, knowingly — the 2026-08-14 reasoning, which is still correct where it
+# applies: with no SnapRAID parity a dead branch takes its files either way, and under mfs
+# those files are scattered, so losing a disk punches a hole in EVERY folder instead of
+# taking whole folders the owner can name and re-fetch. What makes that acceptable HERE is
+# what the pool holds: ~99 % of it is a mirror of another NAS, i.e. the one kind of data
+# that is re-fetchable by definition (765 GiB of Mirror against a few MB of everything else
+# when the switch was made). If single-copy data ever lands on this pool, this decision has
+# to be revisited — and the real answer then is parity, not a create policy.
 #
-# Deliberately NOT set, both verified on that same throwaway pool rather than argued:
-#   * moveonenospc=true — on ENOSPC it moves the file to another branch, which CLONES the
-#     folder onto that branch. The folder is then on two disks and the invariant this policy
-#     exists for is quietly gone, precisely when the pool is under pressure and nobody is
-#     watching. Worse, once a path exists on two branches, a later rename that succeeds on
-#     one and fails on the other makes mergerfs DELETE the copy it could not rename (see the
-#     rename algorithm in its README) — a shadow copy that vanishes without a word.
-#   * ignorepponrename=true — the option mergerfs itself suggests when software trips over
-#     EXDEV. It does stop the EXDEV, by cloning the destination path onto the source branch:
-#     the moved file stays put and the destination folder ends up on two disks. Same loss of
-#     the invariant, for the convenience of code that already handles EXDEV correctly here.
-MERGERFS_OPTS="defaults,nofail,allow_other,use_ino,category.create=epmfs,minfreespace=20G,statfs=full,fsname=mergerfs"
+# moveonenospc=mfs — allowed BECAUSE the create policy is no longer path preserving. Under
+# epmfs it was banned: on ENOSPC it clones the folder onto a second branch, which ended the
+# invariant precisely when the pool was under pressure. With mfs there is no such invariant
+# left to break, and it closes the one hole the create policy cannot: a file already open
+# for writing when its branch crosses minfreespace is relocated instead of dying half-written.
+#
+# statfs=full — kept, and still not decoration. The default (base) sums every branch, so
+# statvfs() inside a folder reports the whole pool; full counts only the branches the path
+# actually exists on. Six separate space checks read that number (the file-manager copy job,
+# Time Machine, the backup-target monitor, kopia, the USB import, the motd). Under mfs a
+# folder grows onto more branches over time, so the two numbers converge — but a NEW folder
+# still lives on one branch, and that is exactly when a space check is asked.
+#
+# Deliberately NOT set: ignorepponrename=true. With mfs it is pointless (renames no longer
+# need it) and it still clones the destination folder onto the source branch.
+MERGERFS_OPTS="defaults,nofail,allow_other,use_ino,category.create=mfs,minfreespace=20G,moveonenospc=mfs,statfs=full,fsname=mergerfs"
 
 remove_fstab_mergerfs() {
     if [ "$DRY_RUN" -eq 1 ]; then
@@ -1276,7 +1278,7 @@ remove_fstab_mergerfs() {
 # branches-mount-timeout: wait for each branch to actually BE a mount before serving.
 # mergerfs ships this option for precisely the race above; 0 (its default) means
 # "trust whatever is in the directory right now".
-MERGERFS_SVC_OPTS="allow_other,use_ino,category.create=epmfs,minfreespace=20G,statfs=full,branches-mount-timeout=30,fsname=mergerfs"
+MERGERFS_SVC_OPTS="allow_other,use_ino,category.create=mfs,minfreespace=20G,moveonenospc=mfs,statfs=full,branches-mount-timeout=30,fsname=mergerfs"
 MERGERFS_UNIT="/etc/systemd/system/nas-mergerfs.service"
 # Keep the mergerfs pool as a systemd SERVICE with Restart=always, NOT an fstab line. Reason:
 # the FUSE process may crash ("Transport endpoint is not connected"), and an fstab mount is then

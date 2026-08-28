@@ -343,23 +343,39 @@ def disk_info(path):
     return {"path": path, "total": total, "used": used, "free": free,
             "pct": round(100 * used / denom, 1) if denom else 0}
 
+def _pool_minfree(path):
+    """The minfreespace mergerfs is actually running with, in bytes.
+
+    A branch below it is not a candidate for a new file, so that much of the free space
+    statvfs reports is unreachable. Asked of mergerfs through its control file rather than
+    parsed out of the unit — the mount is the thing that decides, not the file that started it."""
+    try:
+        return int(os.getxattr(os.path.join(path, ".mergerfs"), "user.mergerfs.minfreespace"))
+    except (OSError, ValueError):
+        return 0
+
 def pool_info():
     """Pool space, including the number that actually constrains a write.
 
-    statvfs on the pool reports the SUM of the branches — and since the create policy
-    became path preserving, nothing created there can span more than one of them. Measured
-    on this box: 2172 GiB reported free, while one new folder could grow to 849. A panel
-    that promises 2.5x the room the next copy has is not a rounding error, it is the
-    difference between a job that finishes and a job that dies at ENOSPC.
+    statvfs on the pool reports the SUM of the branches. Under the spreading create policy
+    (category.create=mfs) that sum is very nearly the truth — a new file goes to whichever
+    branch has the most room, so one folder can grow across all of them. The part that is
+    NOT true is minfreespace: a branch below it is skipped for new files, and mergerfs still
+    counts its remaining space in the sum. On this box that is 3 x 20 GiB the panel would
+    promise and no write could use.
 
-    So the sum stays (it is the honest total across many folders) and two truthful numbers
-    are added beside it: `free_new` — what a single new folder can grow to — and
-    `pct_worst`, the fullest branch, which is what fills first and what an alarm must
-    watch. Branches are asked of mergerfs itself, never guessed from a glob."""
+    So the sum stays as `free`/`pct` (it is the honest total on disk) and two numbers are
+    added beside it: `free_new` — free space new files can actually reach, the sum of each
+    branch's headroom above minfreespace — and `pct_worst`, the fullest branch. Under the
+    earlier path-preserving policy pct_worst WAS the ceiling for the folder living on that
+    branch; it is now only a heads-up about which branch stops taking new files first, and
+    it must not on its own raise an alarm. Branches are asked of mergerfs itself, never
+    guessed from a glob."""
     di = disk_info(STORAGE) if os.path.ismount(STORAGE) else None
     if not di:
         return None
-    free_new, pct_worst = 0, 0
+    minfree = _pool_minfree(STORAGE)
+    usable, pct_worst, seen = 0, 0, False
     for br in (_safe(lambda: _pool_branch_dirs(STORAGE), []) or []):
         try:
             s = os.statvfs(br)
@@ -368,10 +384,12 @@ def pool_info():
         avail = s.f_bavail * s.f_frsize
         used = (s.f_blocks - s.f_bfree) * s.f_frsize
         denom = used + avail
-        free_new = max(free_new, avail)
+        seen = True
+        usable += max(0, avail - minfree)      # a branch under minfreespace contributes nothing
         pct_worst = max(pct_worst, round(100 * used / denom, 1) if denom else 0)
-    di["free_new"] = free_new or di["free"]
+    di["free_new"] = usable if seen else di["free"]      # 0 is a real answer: the pool is full
     di["pct_worst"] = pct_worst or di["pct"]
+    di["minfree"] = minfree
     return di
 
 
@@ -682,10 +700,9 @@ def _pool_branch(path):
     st_dev CANNOT answer this: every branch of a FUSE union shares the mount's device
     number, so `os.stat(a).st_dev == os.stat(b).st_dev` is true for two files on two
     different physical disks. Three checks in this file used st_dev to decide "same disk?"
-    and were therefore always answering yes. That was harmless while the create policy was
-    mfs and a move inside the pool was usually an in-branch rename; since the pool became
-    path preserving (category.create=epmfs) a move between two folders is a move between
-    two disks, and the wrong answer starts costing real copies and failed renames.
+    and were therefore always answering yes. Any create policy that can put two folders on
+    two branches — the pool has run under both epmfs and mfs — makes a move between them a
+    move between disks, and the wrong answer starts costing real copies and failed renames.
 
     mergerfs answers it itself through an xattr, which is also the only answer that stays
     correct when branches are added or reordered."""
@@ -1180,18 +1197,20 @@ def _health_report_build():
         pp = pool.get("pct", 0)
         add("Storage (pool)", "%s%% used" % pp, "bad" if pp >= 95 else "warn" if pp >= 90 else "ok",
             "Free %s" % _fmt_b(pool.get("total", 0) - pool.get("used", 0)))
-        # The pool percentage is the SUM of the branches, and since the create policy became
-        # path preserving (category.create=epmfs) a folder cannot spill onto a neighbour: the
-        # branch holding it fills, writes there start failing with ENOSPC, and the line above
-        # still reads "5% used, ok". The daily digest is built from this report, so without
-        # the worst branch it would report all normal while the owner cannot save a file.
+        # The line above is the SUM of the branches, which under the spreading create policy
+        # (category.create=mfs) is what decides whether a write fits. The fullest branch is
+        # still worth naming — it is the one that will stop taking new files first, and once
+        # it drops below minfreespace its remaining space is unreachable — but on its own it
+        # is NOT a failure: the mirror keeps disk1 at 98% while the pool is at 40%, and a red
+        # row there would sit red forever and train the owner to skip this report. So it goes
+        # bad only when the pool as a whole is also running out.
         br = _safe(_pool_branches, []) or []
         worst = max(br, key=lambda b: b.get("pct", 0), default=None)
         if worst:
             wp = worst.get("pct", 0)
             add("Pool branch (fullest)", "%s %s%% used" % (worst.get("mount", "?"), wp),
-                "bad" if wp >= 95 else "warn" if wp >= 90 else "ok",
-                "Free %s · a folder lives on ONE branch, so this is the real ceiling for it"
+                "bad" if (wp >= 95 and pp >= 90) else "warn" if (wp >= 95 and pp >= 80) else "ok",
+                "Free %s · new files skip a branch below minfreespace and land on the others"
                 % _fmt_b(worst.get("free", 0)))
     # disks: SMART health and temperature
     ds = disks()
@@ -2836,12 +2855,16 @@ def _glance_tile(tid, en):
         if not di:
             return {"value": "—", "unit": "", "state": "danger",
                     "note": "pool not mounted" if not en else "pool not mounted", "raw": None}
-        # the tile shows what ONE folder can still grow to, not the sum of the branches:
-        # a display that promises the sum sends someone to start a copy that cannot fit
+        # the tile shows the space new files can actually reach — the sum minus the
+        # minfreespace reserve on every branch — not the raw statvfs sum, which promises
+        # room no write can use. The state follows the POOL: under the spreading create
+        # policy one full branch is not a failure, files simply go to another one, and a
+        # tile that went red on the fullest branch would sit red for as long as the mirror
+        # lives on disk1.
         v, u = _gl_gb(di["free_new"], en)
-        pct = max(di["pct"], di["pct_worst"])
+        pct = di["pct"]
         st = "danger" if pct >= 90 else ("warn" if pct >= 80 else "ok")
-        return {"value": v, "unit": u, "note": "free for one folder", "state": st,
+        return {"value": v, "unit": u, "note": "free for new files", "state": st,
                 "gauge": _gauge(pct, 0, 100, 80, 90, "%"),
                 "raw": {"free": di["free_new"], "free_total": di["free"],
                         "used": di["used"], "pct": pct, "pct_total": di["pct"],
@@ -4226,26 +4249,85 @@ _events_lock = threading.Lock()
 # the panel learns of an event instantly, not on the next poll.
 _events_cond = threading.Condition(_events_lock)
 
+_events_stat = None       # identity of the file the cache was read from (see _events_load)
+
+def _events_ident():
+    """(inode, mtime_ns, size) of events.json, or None when it isn't there. _events_save
+    goes through os.replace, so every write lands on a NEW inode — comparing this against
+    what the cache was read from detects a write by ANOTHER process for certain, without
+    depending on clock granularity."""
+    try:
+        st = os.stat(EVENTS_FILE)
+        return (st.st_ino, st.st_mtime_ns, st.st_size)
+    except OSError:
+        return None
+
+class _EventsFileLock:
+    """Cross-process lock around read-modify-write of events.json.
+
+    The panel is NOT the only writer: the snapshot driver (`nas-web.py kopia-snap`, its own
+    systemd unit), the black-box recorder and the settings-drill unit are separate processes
+    with their own `_events` cache. `_events_lock` is a THREAD lock and guards none of that,
+    so whoever saved last silently overwrote the others' entries — that is why a Kopia run
+    that finished with errors never appeared in the journal (2026-08-27: three failed runs,
+    zero events, while the panel's own «missed run» event was there). flock + the identity
+    check in _events_load make the append atomic between processes too.
+
+    A missing/unwritable lock file is not fatal: we degrade to the old thread-only
+    behaviour rather than lose the event entirely."""
+    def __enter__(self):
+        self.f = None
+        try:
+            os.makedirs(NAS_CONFIG, exist_ok=True)
+            self.f = open(EVENTS_FILE + ".lock", "a")
+            os.fchmod(self.f.fileno(), 0o600)
+            fcntl.flock(self.f, fcntl.LOCK_EX)
+        except OSError:
+            if self.f:
+                try:
+                    self.f.close()
+                except OSError:
+                    pass
+            self.f = None
+        return self
+
+    def __exit__(self, *exc):
+        if self.f:
+            try:
+                fcntl.flock(self.f, fcntl.LOCK_UN)
+                self.f.close()
+            except OSError:
+                pass
+        return False
+
 def _events_load():
-    global _events
-    if _events is None:
+    """Return the cache, re-reading the file whenever another process has rewritten it.
+    Callers that mutate MUST hold _events_lock and _events_flock() across load+save."""
+    global _events, _events_stat
+    ident = _events_ident()
+    if _events is None or ident != _events_stat:
+        ev = None
         try:
             with open(EVENTS_FILE) as f:
-                _events = json.load(f)
+                ev = json.load(f)
         except (OSError, ValueError):
-            _events = None
-        if not isinstance(_events, dict) or not isinstance(_events.get("items"), list):
-            _events = {"seq": 0, "seen": 0, "items": []}
-        _events.setdefault("seq", 0); _events.setdefault("seen", 0)
+            ev = None
+        if not isinstance(ev, dict) or not isinstance(ev.get("items"), list):
+            ev = {"seq": 0, "seen": 0, "items": []}
+        ev.setdefault("seq", 0); ev.setdefault("seen", 0)
+        _events, _events_stat = ev, ident
     return _events
 
 def _events_save(ev):
+    global _events, _events_stat
     try:
         os.makedirs(NAS_CONFIG, exist_ok=True)
-        tmp = EVENTS_FILE + ".tmp"
+        tmp = EVENTS_FILE + ".tmp.%d" % os.getpid()   # per-pid: two writers, two temp files
         with open(tmp, "w") as f:
             json.dump(ev, f, ensure_ascii=False)
         os.replace(tmp, EVENTS_FILE)
+        _events = ev
+        _events_stat = _events_ident()     # ours now — don't re-read it on the next load
     except OSError:
         pass
 
@@ -4314,7 +4396,7 @@ def _events_merge_conditions():
     record today, so the existing log still holds «security updates applied» four times over. The
     merge keeps the newest record (its id, so read/unread stays meaningful), sums the counts and
     takes the earliest first-seen — otherwise «going on for N days» would lie about the age."""
-    with _events_lock:
+    with _events_lock, _EventsFileLock():
         ev = _events_load()
         if ev.get("condv"):
             return 0
@@ -4354,7 +4436,7 @@ def log_event(event, title, msg="", lvl=None, kind=None, desk=None):
         desk = bool(evc.get("desk", evc.get("priority", 0) >= 1))
     now = int(time.time())
     title = str(title or "")[:160]; msg = str(msg or "")[:500]
-    with _events_lock:
+    with _events_lock, _EventsFileLock():
         ev = _events_load()
         # prune FIRST, and on every call: the condition branch below returns early, so a prune
         # left at the end of the function simply never ran on a box whose events are mostly
@@ -4431,14 +4513,14 @@ def events_seen(eid):
         eid = int(eid)
     except (ValueError, TypeError):
         return {"ok": False, "log": "bad id"}
-    with _events_lock:
+    with _events_lock, _EventsFileLock():
         ev = _events_load()
         ev["seen"] = max(ev["seen"], min(eid, ev["seq"]))
         _events_save(ev)
         return {"ok": True, "seen": ev["seen"]}
 
 def events_clear():
-    with _events_lock:
+    with _events_lock, _EventsFileLock():
         ev = _events_load()
         ev["items"] = []
         ev["seen"] = ev["seq"]
@@ -5105,10 +5187,13 @@ def monitor_tick():
 
     # --- space: pool + individual disks ---
     pool = s.get("disk_pool") or {}
-    # the fullest BRANCH, not the sum: a folder lives on one branch, so that branch
-    # hitting the threshold is when writes into it start failing — the pool as a whole
-    # can read 60% while the disk holding the folder is out of room
-    pool_pct = max(pool.get("pct", 0), pool.get("pct_worst", 0))
+    # the SUM, not the fullest branch. Under the spreading create policy (category.create=mfs)
+    # a new file goes to whichever branch has room, so a single full branch is normal — the
+    # mirror pins disk1 at 98% while the pool sits at 40%, and alarming on that would fire
+    # every hour forever and teach the owner to ignore the alarm. What actually stops writes
+    # is every branch being out of room, which is what the sum says. The fullest branch is
+    # still reported in the health check, as a heads-up rather than a failure.
+    pool_pct = pool.get("pct", 0)
     if on("pool") and pool_pct >= thr("pool", 90):
         fire("pool", "NAS: storage full", "%s usage at %s%% (fullest branch)"
              % (pool.get("path", "pool"), pool_pct), pri("pool"))
@@ -5538,10 +5623,14 @@ def rclone_opts_get():
 
 def rclone_opts_set(d):
     cur = rclone_opts_get()
-    for k in ("transfers", "checkers", "bwlimit"):
+    for k in ("transfers", "checkers"):
         if k in d:
             try: cur[k] = int(d[k])
             except (TypeError, ValueError): pass
+    if "bwlimit" in d:                      # same field, same units, same trap — see _nb_bw_kb
+        v = _nb_bw_kb(d["bwlimit"])
+        if v is not None:
+            cur["bwlimit"] = v
     if "bwlimit_schedule" in d:
         s = str(d.get("bwlimit_schedule") or "").strip()
         cur["bwlimit_schedule"] = s if (s == "" or _RCLONE_BWSCHED_RE.match(s)) else cur.get("bwlimit_schedule", "")
@@ -7147,10 +7236,14 @@ def nb_save(patch, pid=None):
         if v and "{" in v.split("/")[0]:
             v = "_deleted/" + v
         cur["deleted_dir"] = v or "_deleted/{date}"
-    for k in ("ssh_port", "retention_days", "retention_gb", "bwlimit"):
+    for k in ("ssh_port", "retention_days", "retention_gb"):
         if k in patch:
             try: cur[k] = max(0, int(patch[k]))
             except (ValueError, TypeError): pass
+    if "bwlimit" in patch:
+        v = _nb_bw_kb(patch["bwlimit"])
+        if v is not None:
+            cur["bwlimit"] = v
     if "change_guard_pct" in patch:
         try: cur["change_guard_pct"] = max(0, min(100, int(patch["change_guard_pct"])))
         except (TypeError, ValueError): pass
@@ -7918,6 +8011,52 @@ def nb_build_cmd(cfg, job, dry, prev_files=0, mkpath=False, allow_delete=False, 
     args += _nb_src_dst(cfg, job, stage)
     return args, env
 
+NB_DEST_SCAN_CAP = 2_000_000   # stop counting the copy here — the count only becomes a percentage
+
+def _nb_src_probe(cfg, job, stage=None, timeout=90):
+    """How many entries the SOURCE folder holds, listed WITHOUT walking it: a
+    non-recursive `rsync --list-only` over the same transport, with the same excludes.
+
+    It answers one question — "is the source actually empty?" — for a pull, where the
+    source is not visible locally and the deletion guard would otherwise have to take the
+    user's word for it. None = could not be listed (unreachable, wrong path, no permission);
+    that is not proof of anything, and the caller must read it as "do not delete"."""
+    env, rsh = _nb_cmd_ctx(cfg, stage)
+    args = ["rsync", "-d", "--list-only"] + rsh
+    for ex in cfg.get("excludes", []):
+        args.append("--exclude=" + ex)
+    for ex in job.get("excludes", []):
+        args.append("--exclude=" + str(ex))
+    if cfg.get("transport") == "ssh" and cfg.get("remote_sudo"):
+        args.append("--rsync-path=sudo rsync")
+    args += _nb_src_dst(cfg, job, stage)[:2]   # ["--", source] — no destination: this only lists
+    r = _run(args, timeout=timeout, env=env)
+    if r.get("code") != 0:
+        return None
+    n = 0
+    for l in (r.get("log") or "").splitlines():
+        # "drwxr-xr-x  4,096 2026/08/27 11:00:03 Documents" — the last field is the name,
+        # and "." is the folder itself rather than something inside it
+        f = l.split(None, 4)
+        if len(f) == 5 and f[0][:1] in "-dlbcps" and f[4] != ".":
+            n += 1
+    return n
+
+
+def _nb_dest_files(dest, skip=None, cap=NB_DEST_SCAN_CAP):
+    """How many files the destination copy already holds — the deletion-guard baseline
+    when no completed run has left one. Counting stops at `cap`: the number only ever
+    becomes a percentage, and a copy of millions of files does not need it exact."""
+    n = 0
+    for root, dirs, files in os.walk(dest):
+        if skip and os.path.normpath(root) == os.path.normpath(dest) and skip in dirs:
+            dirs.remove(skip)          # the deleted-files archive is not part of the copy
+        n += len(files)
+        if n >= cap:
+            return cap
+    return n
+
+
 NB_STAGE_DIR = "/mnt/nb-src"
 
 
@@ -8047,6 +8186,10 @@ NB_FS_FAT     = {"vfat", "msdos", "fat", "fat32"}   # hard 4 GiB per-file cap �
 # the FS lacks the capability (ENOSYS)
 _NB_FS_ERR_RX = re.compile(r"failed: (Invalid argument \(22\)|Operation not permitted \(1\)|"
                            r"Function not implemented)")
+# ENOSPC is not one error among many: after it NOTHING can be written, so the run has ended
+# whether or not rsync agrees. It keeps going through the file list instead, failing every
+# write — see the abort in the read loop.
+_NB_NOSPC_RX = re.compile(r"No space left on device|Disk quota exceeded")
 
 def _fs_type(path):
     """FS type for a path (from /proc/mounts, nearest mount point). "" — unknown."""
@@ -8441,10 +8584,12 @@ def _nb_rclone_prune(cfg, writer):
             removed += 1
     return removed
 
-def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None, allow_delete=False):
+def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None, allow_delete=False, on_stat=None):
     """Run all enabled jobs. writer(line) — output; cancel() — interruption.
     on_job(done, total) — after every finished job, so the UI can paint folder dots
     live instead of waiting for the whole run to end.
+    on_stat(info) — DURING a job, when something the user must not wait for the end to
+    learn happens (so far: errors are piling up).
     allow_delete — a ONE-TIME permission from the user: lift the --max-delete guard for
     this run (they deleted many files on the source themselves and confirmed it in the panel).
     NOT written to the config: the next run is guarded again."""
@@ -8523,6 +8668,11 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None, allow_delete=Fal
         src_local = ("/" + j["src"].lstrip("/")) if push else \
                     (stage.rstrip("/") + "/" + j["src"].lstrip("/")) if stage else None
         deleting = (not dry and cfg.get("delete_mode", "archive") in ("mirror", "archive") and not allow_delete)
+        # the deletion guard's baseline: how many files the copy is expected to hold. Normally
+        # the previous run's count; for a first run it can also be measured on the copy itself
+        # (see the no-baseline branch below), and then it is NOT evidence of what changed.
+        pf_base = int(prevf.get(j["src"], 0) or 0)
+        pf_from_dest = False
         if src_local is not None:
             if not os.path.exists(src_local):
                 writer("⚠ SKIPPED: the source is missing (%s) — the folder was deleted or the disk "
@@ -8537,21 +8687,42 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None, allow_delete=Fal
                            "with «I deleted these myself», or use «Copy» mode (never deletes)." % src_local)
                     emit({"src": j["src"], "ok": False, "code": 25, "src_block": True, "block": "empty",
                           "guard_pct": int(cfg.get("max_delete_pct", 20) or 0)}); continue
-        elif deleting and int(prevf.get(j["src"], 0) or 0) == 0:
+        elif deleting and pf_base == 0:
             # plain pull: the remote source is not locally visible and there is NO delete-guard
             # baseline (first run, or the status file was lost on a reinstall). An uncapped --delete
-            # against an already-populated destination would wipe it if the remote source is empty/
-            # gone. Refuse until the user confirms the source is intact.
+            # against an already-populated destination would wipe it if the remote source were
+            # empty or gone.
+            #
+            # Refusing outright was the first answer, and it made a folder that never once
+            # finished unbackupable FOREVER: the baseline only comes from a completed run, a
+            # SCHEDULED run cannot tick "the source is intact", so every night refused the same
+            # folder again (2026-08-28: `home`, 1.6 TB, refused every night since the first run —
+            # the panel called it a warning and the owner had no working copy at all).
+            # So prove the premise instead of asking the user to. A non-recursive --list-only of
+            # the remote source answers "is it empty?" in a second, and the destination's own file
+            # count is a perfectly good percentage baseline for --max-delete. Refuse only when the
+            # source really is empty, or cannot be listed at all.
             dst = j.get("dest") or ""; arch = nb_deleted_top(cfg)
             try: dst_has = bool([n for n in os.listdir(dst) if n != arch]) if os.path.isdir(dst) else False
             except OSError: dst_has = False
             if dst_has:
-                writer("⚠ SKIPPED: no deletion-guard baseline yet (first run, or the status was reset) and "
-                       "the destination already holds a copy — refusing an uncapped mirror/archive that could "
-                       "wipe it if the remote source is empty. Run once with «I deleted these myself» to confirm "
-                       "the source is intact, or use «Copy» mode (never deletes).")
-                emit({"src": j["src"], "ok": False, "code": 25, "src_block": True, "block": "nobaseline",
-                      "guard_pct": int(cfg.get("max_delete_pct", 20) or 0)}); continue
+                seen = _nb_src_probe(cfg, j, stage)
+                if not seen:
+                    writer("⚠ SKIPPED: there is no deletion-guard baseline yet, the destination already holds "
+                           "a copy, and the source %s. Refusing a mirror/archive that would delete that copy. %s"
+                           % ("is EMPTY" if seen == 0 else "COULD NOT BE LISTED (unreachable, wrong path, or no "
+                              "permission)",
+                              "If you really did empty it, run once with the guard off."  if seen == 0 else
+                              "Check the connection to the source and run again."))
+                    emit({"src": j["src"], "ok": False, "code": 25, "src_block": True,
+                          "block": "empty" if seen == 0 else "nobaseline",
+                          "guard_pct": int(cfg.get("max_delete_pct", 20) or 0)}); continue
+                pf_base = _nb_dest_files(dst, skip=arch)
+                pf_from_dest = True
+                writer("no completed run to take the deletion guard from — the source lists %d entr%s, so it is "
+                       "not empty; the guard is armed from the copy itself instead (%d files, cap %d%%)."
+                       % (seen, "y" if seen == 1 else "ies", pf_base,
+                          int(cfg.get("max_delete_pct", 20) or 0)))
         if push_ssh:
             # plain server: mkdir over SSH (works with any remote rsync).
             # Forced daemon (UGREEN/Synology): the shell lives in a DIFFERENT path
@@ -8577,7 +8748,7 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None, allow_delete=Fal
                 os.makedirs(j["dest"], exist_ok=True)
             except OSError as e:
                 writer("could not create the folder: %s" % e); emit({"src": j["src"], "ok": False}); continue
-        args, env = nb_build_cmd(cfg, j, dry, prev_files=prevf.get(j["src"], 0),
+        args, env = nb_build_cmd(cfg, j, dry, prev_files=pf_base,
                                  mkpath=bool(push_ssh and not shell_fs),
                                  allow_delete=allow_delete, stage=stage)
         # ---- mass-CHANGE guard (pre-flight, nothing written yet) -----------------
@@ -8589,7 +8760,10 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None, allow_delete=Fal
         # override and banner flow as the deletion guard. No baseline (first run) —
         # nothing to compare against, the probe is skipped.
         _chg_pct = int(cfg.get("change_guard_pct", 50) or 0)
-        _prev = int(prevf.get(j["src"], 0) or 0)
+        # only a COMPLETED run is evidence of what the copy looked like. A baseline measured on
+        # a half-filled copy would read the rest of the first fill as "the source rewrote itself"
+        # and refuse the very run that is supposed to finish it.
+        _prev = 0 if pf_from_dest else pf_base
         if not dry and not allow_delete and _chg_pct > 0 and _prev >= NB_CHANGE_MIN:
             limit = _nb_change_limit(_prev, cfg)
             probe = [a for a in args
@@ -8625,7 +8799,7 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None, allow_delete=Fal
                     except OSError: pass
                     return
         threading.Thread(target=_watch_cancel, daemon=True).start()
-        err_lines, errs, fs_bad, fs_files = [], 0, 0, []
+        err_lines, errs, fs_bad, fs_files, nospc = [], 0, 0, [], False
         chg = {"a": [], "c": [], "d": [], "an": 0, "cn": 0, "dn": 0}
         try:
             for line in iter(p.stdout.readline, ""):
@@ -8650,6 +8824,27 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None, allow_delete=Fal
                     errs += 1
                     if len(err_lines) < 3:
                         err_lines.append(line.strip())
+                    if on_stat and (errs == 1 or errs % 50 == 0):
+                        # a job that is failing on every file must stop looking like a job in
+                        # progress: the panel showed a plain "Backup is running…" through two
+                        # hours and 16 310 write failures (2026-08-27), because nothing about a
+                        # job reached the status file until the job ENDED.
+                        _safe(lambda: on_stat({"src": j["src"], "errn": errs,
+                                               "err": err_lines[0][:180]}))
+                    if _NB_NOSPC_RX.search(line):
+                        # the destination is FULL. rsync does not stop for that — it walks the
+                        # rest of the file list failing every single write, which on this box
+                        # meant two hours of writing nothing at all. Nothing after this point can
+                        # succeed, so end the folder here and say why.
+                        nospc = True
+                        writer("⚠ THE DESTINATION IS OUT OF SPACE — %s"
+                               % line.strip()[:160])
+                        writer("   stopping this folder: every remaining file would fail the same way. "
+                               "Free space on the destination (or add a disk to the pool) and run again — "
+                               "what is already copied stays in place.")
+                        try: p.kill()
+                        except OSError: pass
+                        break
                     if _NB_FS_ERR_RX.search(line):
                         # the destination physically cannot accept this file (name with «:» or CR,
                         # symlink, socket) — not a breakage, but the limit of its filesystem
@@ -8671,7 +8866,7 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None, allow_delete=Fal
             writer("hint: if «unknown option» appears above — the destination has an old rsync "
                    "without --mkpath; create the folders on it manually (with the NAS file manager)")
         if p.returncode == 25:           # the --max-delete guard tripped
-            pf = prevf.get(j["src"], 0)
+            pf = pf_base
             pctv = int(cfg.get("max_delete_pct", 20) or 0)
             res_limit = max(1, int(pf * pctv / 100.0)) if (pf and pctv) else 0
             stt.setdefault("guard_limit", res_limit)
@@ -8698,7 +8893,13 @@ def nb_run(cfg, dry, writer, cancel=lambda: False, on_job=None, allow_delete=Fal
         if p.returncode == 25:      # the UI shows the threshold that applied and offers to allow deletion
             res["guard_limit"] = stt.get("guard_limit", 0)
             res["guard_pct"] = stt.get("guard_pct", 0)
-        if cancel():
+        if nospc:
+            # we killed rsync ourselves too, but for the opposite reason: this is the loudest
+            # failure the backup has, and it must never be painted as "you stopped it"
+            res["ok"] = False; res["nospc"] = True
+            res["err"] = (err_lines[0][:180] if err_lines else "No space left on device")
+            res["errn"] = errs
+        elif cancel():
             # we killed rsync ourselves on "Stop" — not a transfer error (otherwise the panel
             # would show "rsync error, code -9", and good luck guessing it was your own stop)
             res["stopped"] = True
@@ -8867,6 +9068,30 @@ def _nb_changes_write(pid, run_ts, per_job):
     except OSError: pass
 
 NB_CHANGE_MIN = 200   # below this baseline the %-guard is noise, not protection
+
+_NB_BW_RX = re.compile(r"^\s*([\d]+(?:[.,][\d]+)?)\s*([kmg])?\s*(?:i?b)?\s*(?:/s|ps)?\s*$", re.I)
+
+def _nb_bw_kb(v):
+    """A speed limit the way a person writes it → KB/s (what rsync/rclone are given).
+    None = unparseable, and the caller keeps the previous value.
+
+    The field has always been KB/s and only KB/s, so "50" in it meant 50 KB/s while the
+    person meant 50 MB/s — a thousand-fold error in the direction that makes a backup look
+    broken rather than slow (2026-08-28: 5000 was typed for "5 GB/s-ish", and 1 TB at the
+    resulting 5 MB/s is 60 hours). A bare number still means KB/s; a unit now wins over that."""
+    if v is None:
+        return None
+    if isinstance(v, (int, float)):
+        return max(0, int(v))
+    if not str(v).strip():
+        return 0                     # the field cleared out means "no limit", not "unchanged"
+    m = _NB_BW_RX.match(str(v))
+    if not m:
+        return None
+    try: num = float(m.group(1).replace(",", "."))
+    except ValueError: return None
+    return max(0, int(num * {"k": 1, "m": 1024, "g": 1024 * 1024}.get((m.group(2) or "k").lower(), 1)))
+
 
 def _nb_change_limit(prev_files, cfg):
     """How many rewritten files a run may carry before the mass-change guard trips."""
@@ -9644,11 +9869,19 @@ def nb_run_cli(pid=None, dry=False, allow_delete=False):
         st = _nb_run_state_read(pid)
         st["jobs"] = [{k: r.get(k) for k in ("src", "ok", "code", "xfer", "xfer_bytes",
                                              "size", "verify_bad", "verify_err",
-                                             "src_missing", "not_mounted", "stopped",
+                                             "src_missing", "not_mounted", "stopped", "nospc",
                                              "err", "errn", "fs_limit", "fs_files", "fs",
                                              "guard_limit", "guard_pct", "src_block", "block")}
                       for r in done]
         st["total"] = total
+        st.pop("cur_errn", None); st.pop("cur_err", None)   # they belonged to the folder just finished
+        _nb_run_state_write(pid, st)
+    def on_stat(info):
+        """Something is going wrong INSIDE the current folder. The run status is the only
+        thing the panel reads while a run lasts, so it has to say so there and then."""
+        st = _nb_run_state_read(pid)
+        st["cur_errn"] = int(info.get("errn") or 0)
+        st["cur_err"] = info.get("err") or ""
         _nb_run_state_write(pid, st)
     def cancel():
         return os.path.exists(nb_run_cancel(pid))
@@ -9656,7 +9889,7 @@ def nb_run_cli(pid=None, dry=False, allow_delete=False):
     title = ("Backup from this NAS" if push else "Main NAS backup") + sfx
     res = None
     try:
-        r = nb_run(cfg, dry, w, cancel, on_job, allow_delete)
+        r = nb_run(cfg, dry, w, cancel, on_job, allow_delete, on_stat)
         res = ("ok" if r.get("ok") else "stopped" if r.get("stopped")
                else "unreachable" if r.get("unreachable") else "warn")
         if not dry and r.get("stopped"):
@@ -9689,6 +9922,15 @@ def nb_run_cli(pid=None, dry=False, allow_delete=False):
                                   "destination copy. Check the source is mounted and intact.",
                                   "crit", cooldown=0)
                 except Exception: pass
+            full = [j.get("src") for j in r.get("jobs", []) if j.get("nospc")]
+            if full:     # the copy cannot be finished at all until someone frees space
+                try: notify_event("nb_nospc", "nb_nospc:" + pid, "Backup: the destination is FULL" + sfx,
+                                  "Out of space while copying: " + ", ".join(full) +
+                                  ". The folder was stopped at the first failure — what was already "
+                                  "copied is intact, but the backup is INCOMPLETE and will stay that "
+                                  "way until the destination has room.",
+                                  "crit", cooldown=0)
+                except Exception: pass
             vbad, verr = int(r.get("verify_bad") or 0), bool(r.get("verify_err"))
             if vbad or verr:      # checksum verify found mismatches / could not finish
                 try: notify_event("nb_verify", "nb_verify:" + pid, "Backup: verification found problems" + sfx,
@@ -9699,7 +9941,8 @@ def nb_run_cli(pid=None, dry=False, allow_delete=False):
                 except Exception: pass
             msg = ("all tasks done" + (" · verification OK" if cfg.get("verify") and not vbad and not verr else "")) if r.get("ok") \
                 else (("destination unreachable — skipped" if push else "main NAS unreachable — skipped") if r.get("unreachable")
-                      else ("verification: %d mismatches" % vbad if vbad else "some tasks had errors"))
+                      else ("out of space on the destination: " + ", ".join(full) if full
+                            else "verification: %d mismatches" % vbad if vbad else "some tasks had errors"))
             try: log_event("nas_backup", title, msg, "ok" if r.get("ok") else "warn", kind="backup", desk=True)
             except Exception: pass
     except Exception as e:
@@ -13175,6 +13418,112 @@ def kp_history():
     h = _json_load_strict(KP_HIST_FILE, [])
     return h if isinstance(h, list) else []
 
+def _kp_remote_incomplete(folders):
+    """"" if every remote connection these source folders sit on is fully mounted, else the
+    sentence to refuse the run with.
+
+    The empty-folder check above cannot see this. An SMB connection mounts one share per
+    subfolder of its mountpoint, so a source pointed at the mountpoint stays non-empty when a
+    single share fails to mount — and the snapshot comes out quietly short by everything that
+    share held, which retention then ages the good snapshots out behind. Same shape as the
+    mergerfs boot race of 2026-08-14, one layer up."""
+    try:
+        rems = _remotes_load()
+    except Exception:
+        return ""
+    bad = []
+    for r in rems:
+        mp = _remote_mp(r["id"])
+        touched = any(f == mp or f.startswith(mp + os.sep)
+                      or mp.startswith(f.rstrip("/") + os.sep) for f in folders)
+        if touched and not _remote_mounted(r["id"], r):
+            bad.append(r.get("name") or r["id"])
+    if not bad:
+        return ""
+    return ("the source lives on a connection that is not fully mounted (%s) — refusing, a "
+            "half-mounted server would store a snapshot short by whatever is missing"
+            % ", ".join(bad[:3]))
+
+def _kp_verdict(bk, bid, started, files, size, failed, folders, retried, rc):
+    """Grade a finished snapshot: (result, error sentence). Pure — everything it reads comes
+    from its arguments and the run history — so the decision table is testable on its own.
+
+    kopia calls an unreadable file or directory a FATAL error unless the backup opted in to
+    ignoring them, and an unreadable DIRECTORY takes its whole subtree with it — invisibly,
+    because numFailed counts the entry, not the files underneath it. All of that used to land
+    as "warn" beside a green restore drill: on 2026-08-26 three runs of a ~1.8 TB source stored
+    3745 / 205 / 4068 files (the sshfs link to the source NAS was collapsing about once a
+    second) and the app called every one of them a warning, while the repository quietly filled
+    with 452 GB no snapshot referenced. A backup whose failure is indistinguishable from
+    success is the single failure mode this app exists to prevent — so an incomplete snapshot
+    is an ERROR, and the two `rules` toggles are how the owner says "those unreadable entries
+    are expected"."""
+    rules = _kp_norm_rules(bk.get("rules"))
+    ignoring = rules["ignore_file_errors"] and rules["ignore_dir_errors"]
+    plural = "y" if failed == 1 else "ies"
+    if failed and not ignoring:
+        return "error", ("%d entr%s could not be read — the snapshot does NOT cover the whole "
+                         "source. Fix the source, or accept it in the backup's rules (ignore "
+                         "unreadable files/folders)" % (failed, plural))
+    shrink = _kp_shrink(bid, started, files, size)
+    if shrink:
+        return "error", shrink
+    if not files and folders:
+        # nothing at all, and kopia did not call it an error: an unmounted source reads as an
+        # empty directory, and an empty snapshot would happily rotate the good ones out
+        return "error", ("the snapshot is empty — is the source mounted? (%s)"
+                         % ", ".join(folders[:3]))
+    if failed:
+        return "warn", ("%d entr%s could not be read (the backup's rules say to ignore them)"
+                        % (failed, plural))
+    if retried:
+        # the first attempt died on the backend, the second went through cleanly. Still a
+        # warning — something DID go wrong — but «finished with errors» would be a lie about
+        # a snapshot that is complete
+        return "warn", "the destination hiccuped; the snapshot went through on the second attempt"
+    if rc != 0:
+        return "warn", "snapshot finished with errors"
+    return "ok", ""
+
+KP_SHRINK_PCT = 50        # same spirit as the Mirror app's change_guard_pct
+KP_SHRINK_MIN = 50        # under this many files in the baseline the ratio is just noise
+
+def _kp_shrink(bid, started, files, size):
+    """Did this snapshot cover far less than the last COMPLETE one of the same backup?
+    Returns the sentence to fail the run with, or "".
+
+    The baseline is deliberately the last run whose result was "ok", never merely the last
+    run: comparing against a previous broken one lets a backup normalise its own breakage.
+    That is exactly what happened on 2026-08-26 — 3745 files, then 205, then 4068, each
+    graded "warn", each looking unremarkable beside the one before it.
+
+    A genuine deletion of half the source is rare and deserves a red run and one look from
+    the owner; a snapshot that lost half the source to a flaky link must never pass as
+    success. No baseline (a brand-new backup) → no verdict: an incomplete FIRST snapshot is
+    caught by the unreadable-entries rule instead."""
+    prev = None
+    for h in kp_history():                     # append-ordered: the last match is the newest
+        if h.get("backup") == bid and h.get("result") == "ok" \
+                and int(h.get("ts") or 0) < started:
+            prev = h
+    if not prev:
+        return ""
+    try:
+        pf, pb = int(prev.get("files") or 0), int(prev.get("bytes") or 0)
+    except (TypeError, ValueError):
+        return ""
+    if pf < KP_SHRINK_MIN:
+        return ""
+    lost = []
+    if files * 100 < pf * (100 - KP_SHRINK_PCT):
+        lost.append("%d files instead of %d" % (files, pf))
+    if pb and size * 100 < pb * (100 - KP_SHRINK_PCT):
+        lost.append("%s instead of %s" % (fmt_bytes(size), fmt_bytes(pb)))
+    if not lost:
+        return ""
+    return ("the snapshot covers far less than the last good one (%s) — either the source "
+            "was unreadable, or that much of it really is gone" % "; ".join(lost))
+
 # ---- snapshot browse / restore / mount / delete -----------------------------
 # Object ids come in three shapes: a bare content id, one with a single-letter kind
 # prefix ('k' = directory), and an INDIRECT id ('Ix…') for every object kopia had to
@@ -14997,6 +15346,10 @@ def _kp_snap_cli(bid):
         if not folders:
             result, err = "error", "no source folder exists (or they are all empty — disk not mounted?)"
             return
+        half = _kp_remote_incomplete(folders)
+        if half:
+            result, err = "error", half
+            return
         # §9.2: wait out a running rsync backup that overlaps our folders (torn copy
         # otherwise). Poll up to 2h, then give up loudly.
         t0 = time.time()
@@ -15171,18 +15524,14 @@ def _kp_snap_cli(bid):
             result, err = "error", ("snapshot failed (code %d) — see the log" % proc.returncode
                                     + ((": " + tail_lines[-1][-160:]) if tail_lines else ""))
             return
-        if failed_files:
-            result, err = "warn", "%d file(s) could not be read" % failed_files
-        elif retried:
-            # the first attempt died on the backend, the second went through cleanly. Still a
-            # warning — something DID go wrong — but «finished with errors» would be a lie about
-            # a snapshot that is complete
-            result, err = "warn", "the destination hiccuped; the snapshot went through on the second attempt"
-        elif proc.returncode != 0:
-            result, err = "warn", "snapshot finished with errors"
+        result, err = _kp_verdict(bk, bid, started, snap_files, snap_bytes, failed_files,
+                                  folders, retried, proc.returncode)
         w("snapshot done: %d files, %s%s" % (snap_files, fmt_bytes(snap_bytes),
                                              (", %d failed" % failed_files) if failed_files else ""))
-        if manifests and result in ("ok", "warn"):
+        # Drill an incomplete snapshot too: "the source was unreadable" and "what did land is
+        # restorable" are two different questions, and the second one is still worth its answer.
+        # The drill can only escalate ok→warn, so it never softens the verdict above.
+        if manifests and result in ("ok", "warn", "error"):
             upd(phase="drill", force=True)
             t_drill = time.time()
             drill = _kp_drill(dst["id"], manifests, w)
@@ -15655,10 +16004,12 @@ def _bb_note_error(e):
 
 
 def _bb_events_reset():
-    """The recorder is a SECOND process writing the panel's event file. `_events` is a
-    per-process cache: loaded once, never re-read. So a second write from this process would
-    save a snapshot taken before everything the panel logged in between — silently dropping
-    those events. The panel owns the file; drop our copy and let the next write re-read it."""
+    """The recorder is a SECOND process writing the panel's event file. Since 2026-08-27
+    _events_load() notices a rewrite by any other process on its own (inode+mtime+size) and
+    _EventsFileLock serialises the read-modify-write, so this is no longer load-bearing —
+    it stays as a cheap belt-and-braces drop of our copy at the start of a recorder pass.
+    The workaround only ever covered the recorder; the Kopia snapshot driver had none, which
+    is how three failed runs left no trace in the journal at all."""
     global _events
     with _events_lock:
         _events = None
@@ -18441,32 +18792,93 @@ def _remote_mp(rid):
 def _remote_unit(rid):
     return "nas-remote-%s.service" % rid
 
-def _remote_listed(rid):
-    mp = _remote_mp(rid)
-    return any(l.split()[1:2] == [mp] for l in _read("/proc/mounts").splitlines())
+_REMOTE_KINDS = ("sshfs", "smb")
+# A share name is a name, not a path: no separators, no NT-illegal characters. It becomes a
+# directory under the mountpoint, so "." / ".." / anything with a slash must never get through.
+_SHARE_RE = re.compile(r'^[^/\\:*?"<>|\x00]{1,80}$')
 
-def _remote_alive(rid):
+def _remote_kind(r):
+    return "smb" if (r or {}).get("kind") == "smb" else "sshfs"
+
+def _remote_shares(r):
+    out = []
+    for s in (r or {}).get("shares") or []:
+        s = str(s).strip()
+        if s and s not in (".", "..") and _SHARE_RE.match(s) and s not in out:
+            out.append(s)
+    return out[:32]
+
+def _remote_get(rid):
+    return next((x for x in _remotes_load() if x.get("id") == rid), None)
+
+def _remote_targets(r):
+    """Every path this connection puts on the filesystem.
+
+    sshfs is one mount at the mountpoint. SMB has no single root — a share IS the unit you
+    mount — so each share lands in its own subfolder and the mountpoint itself stays an
+    ordinary directory holding them. That is deliberate: it keeps <mp>/<Share>/… byte-for-byte
+    the same paths the SFTP mount showed, so a backup or a favourite pointed at the mountpoint
+    survives the switch from sshfs to SMB without being re-pointed."""
+    if not r:
+        return []
+    mp = _remote_mp(r["id"])
+    if _remote_kind(r) == "smb":
+        return [os.path.join(mp, s) for s in _remote_shares(r)]
+    return [mp]
+
+def _mount_points():
+    return {l.split()[1] for l in _read("/proc/mounts").splitlines() if len(l.split()) > 1}
+
+def _remote_listed(rid, r=None):
+    tg = _remote_targets(r if r is not None else _remote_get(rid))
+    if not tg:
+        return False
+    mps = _mount_points()
+    return all(t in mps for t in tg)
+
+def _remote_alive(rid, r=None):
     """A dead sshfs leaves its mountpoint in /proc/mounts, but every syscall on it fails
     with ENOTCONN — so "is it in /proc/mounts" is NOT the same as "does it work". statvfs
     on a broken FUSE mount is answered by the kernel right away (no round trip to the
-    server), so this stays cheap."""
-    try:
-        os.statvfs(_remote_mp(rid))
-        return True
-    except OSError:
-        return False
+    server), so this stays cheap. A CIFS mount whose server went away answers statvfs from
+    the kernel's cached superblock, so for SMB this is a formality — _remote_listed carries
+    the weight there."""
+    for t in _remote_targets(r if r is not None else _remote_get(rid)) or [_remote_mp(rid)]:
+        try:
+            os.statvfs(t)
+        except OSError:
+            return False
+    return True
 
-def _remote_mounted(rid):
-    return _remote_listed(rid) and _remote_alive(rid)
+def _remote_mounted(rid, r=None):
+    """True only when EVERY share of this connection is up. Half a connection is worse than
+    none: an unmounted share is an empty directory, and a backup pointed at the mountpoint
+    would copy that emptiness over a good snapshot without a word (the same shape as the
+    mergerfs boot race of 2026-08-14)."""
+    if r is None:
+        r = _remote_get(rid)
+    return _remote_listed(rid, r) and _remote_alive(rid, r)
 
 def _remote_unstale(rid):
-    """Tear down a mountpoint whose sshfs daemon is gone, so it can be mounted afresh.
-    Without this the FM sees the stale entry, calls it mounted and never heals it."""
-    if _remote_listed(rid) and not _remote_alive(rid):
+    """Tear down mountpoints whose backing daemon/connection is gone, so they can be mounted
+    afresh. Without this the FM sees the stale entry, calls it mounted and never heals it.
+    Also clears a PARTIALLY mounted SMB connection: leftovers would keep the retry from
+    re-mounting the shares that are already there."""
+    r = _remote_get(rid)
+    tg = _remote_targets(r)
+    if not tg:
+        return False
+    mps = _mount_points()
+    present = [t for t in tg if t in mps]
+    if not present:
+        return False                       # nothing mounted — nothing to clean up
+    if len(present) == len(tg) and _remote_alive(rid, r):
+        return False                       # whole and working
+    if _remote_kind(r) == "sshfs":
         _run(["systemctl", "stop", _remote_unit(rid)], timeout=15)
-        _run(["umount", "-l", _remote_mp(rid)], timeout=10)
-        return True
-    return False
+    for t in present:
+        _run(["umount", "-l", t], timeout=10)
+    return True
 
 def remotes_list():
     out = []
@@ -18474,9 +18886,11 @@ def remotes_list():
         out.append({"id": r["id"], "name": r.get("name") or r["id"],
                     "host": r.get("host", ""), "user": r.get("user", ""),
                     "port": r.get("port") or 22, "path": r.get("path") or "",
+                    "kind": _remote_kind(r), "shares": _remote_shares(r),
                     "has_pass": bool(r.get("pass")), "auto": bool(r.get("auto")),
-                    "mounted": _remote_mounted(r["id"]), "mount": _remote_mp(r["id"])})
-    return {"ok": True, "remotes": out, "sshfs": bool(shutil.which("sshfs"))}
+                    "mounted": _remote_mounted(r["id"], r), "mount": _remote_mp(r["id"])})
+    return {"ok": True, "remotes": out, "sshfs": bool(shutil.which("sshfs")),
+            "smb": os.path.exists("/sbin/mount.cifs") or os.path.exists("/usr/sbin/mount.cifs")}
 
 def remotes_save(d):
     host = str(d.get("host") or "").strip()
@@ -18494,13 +18908,23 @@ def remotes_save(d):
             rid = "%s-%d" % (base, i)
         cur = {"id": rid}
         lst.append(cur)
+    kind = d.get("kind") if d.get("kind") in _REMOTE_KINDS else "sshfs"
     try:
-        port = int(d.get("port") or 22)
+        port = int(d.get("port") or (445 if kind == "smb" else 22))
     except (TypeError, ValueError):
-        port = 22
+        port = 445 if kind == "smb" else 22
+    shares = _remote_shares(d)
+    if kind == "smb" and not shares:
+        return {"ok": False, "log": "pick at least one share"}
+    if kind != _remote_kind(cur) and cur.get("name"):
+        # the mountpoint layout differs between the two (one mount vs one per share) —
+        # leaving the old one mounted would strand it with nothing to unmount it
+        _safe(lambda: remote_umount(cur["id"]))
     cur.update({"name": str(d.get("name") or "").strip()[:40] or host,
-                "host": host, "user": user, "port": port,
-                # empty = home folder (sshfs "host:"): on rsync.net and similar
+                "host": host, "user": user, "port": port, "kind": kind,
+                # SMB: the shares to mount, each as a subfolder of the mountpoint
+                "shares": shares,
+                # sshfs: empty = home folder ("host:") — on rsync.net and similar
                 # SFTP hosting the root / is closed, only home is accessible
                 "path": str(d.get("path") or "").strip(),
                 "auto": bool(d.get("auto"))})
@@ -18515,17 +18939,117 @@ def remotes_delete(rid):
     if not _REMOTE_ID.match(rid or ""):
         return {"ok": False, "log": "id"}
     remote_umount(rid)
+    gone = _remote_get(rid)
     _remotes_save([r for r in _remotes_load() if r["id"] != rid])
+    for t in _remote_targets(gone):        # SMB leaves one empty subfolder per share behind
+        if t != _remote_mp(rid):
+            _safe(lambda p=t: os.rmdir(p))
     _safe(lambda: os.rmdir(_remote_mp(rid)))
     return {"ok": True}
+
+def remote_smb_shares(d):
+    """List the shares a server offers, so the dialog can offer tick-boxes instead of asking
+    the owner to type share names exactly right. Read-only probe — nothing is mounted."""
+    host = str((d or {}).get("host") or "").strip()
+    if not re.match(r"^[\w.\-]+$", host):
+        return {"ok": False, "log": "check the address"}
+    if not shutil.which("smbclient"):
+        return {"ok": False, "log": "smbclient is not installed: sudo apt install smbclient"}
+    user = str((d or {}).get("user") or "").strip() or "guest"
+    pw = str((d or {}).get("pass") or "")
+    if not pw and (d or {}).get("id"):
+        pw = (_remote_get(str(d["id"])) or {}).get("pass") or ""    # editing: keep the stored one
+    env = dict(_C_ENV, PASSWD=pw)          # -U user%pass would put it in argv; PASSWD does not
+    cmd = ["smbclient", "-L", "//" + host, "-U", user, "-m", "SMB3"]
+    if not pw:
+        cmd.append("-N")
+    r = _run(cmd, timeout=30, env=env)
+    out, shares = r.get("log") or "", []
+    for line in out.splitlines():
+        m = re.match(r"^\s+(\S.*?)\s+Disk\s*(.*)$", line)
+        if m:
+            name = m.group(1).strip()
+            if name and not name.endswith("$"):        # IPC$/ADMIN$ are not file shares
+                shares.append({"name": name, "comment": m.group(2).strip()[:60]})
+    if not shares:
+        return {"ok": False, "log": (out.strip()[-200:] or "no shares found")}
+    return {"ok": True, "shares": shares[:64]}
+
+_SMB_VERS = ("3.1.1", "3.0", "2.1")     # newest first; an older NAS only speaks the last ones
+
+def _remote_mount_smb(r):
+    """Mount every share of an SMB connection, each into its own subfolder of the mountpoint.
+
+    Why SMB is here at all (2026-08-27): sshfs to the Ugreen NAS could not carry a backup.
+    Its SFTP session collapsed roughly once a second under sustained reading — 400 files gave
+    101 read errors, and even strictly serial reading failed, so it was not kopia's
+    parallelism. Single-stream ssh to the same box was flawless (1.5 GB tar, 91 MB/s), so the
+    link was fine and the server's SFTP was not. With `reconnect`, sshfs papered over each
+    drop by re-connecting, which invalidates every open handle — kopia saw EIO, dropped whole
+    directories, and stored 4068 files of a ~1.8 TB source while calling it a warning. Over
+    CIFS the identical read tests failed ZERO times. A kernel mount also survives a
+    `systemctl restart nas-web` on its own, which is the whole reason sshfs needs a unit.
+
+    The password goes through mount.cifs's PASSWD environment variable, never argv (/proc is
+    world-readable) — same rule as the sshfs branch."""
+    mp = _remote_mp(r["id"])
+    shares = _remote_shares(r)
+    if not shares:
+        return {"ok": False, "log": "no shares selected for this connection"}
+    if not (os.path.exists("/sbin/mount.cifs") or os.path.exists("/usr/sbin/mount.cifs")):
+        return {"ok": False, "log": "cifs-utils is not installed: sudo apt install cifs-utils"}
+    os.makedirs(mp, exist_ok=True)
+    env = dict(_C_ENV)
+    if r.get("pass"):
+        env["PASSWD"] = r["pass"]
+    else:
+        env.pop("PASSWD", None)
+    base = ["username=" + (r.get("user") or "guest"), "uid=0", "gid=0",
+            "iocharset=utf8", "port=%d" % int(r.get("port") or 445)]
+    if not r.get("pass"):
+        base.append("guest")
+    mps, done, fail = _mount_points(), [], ""
+    for s in shares:
+        tgt = os.path.join(mp, s)
+        if tgt in mps:
+            done.append(tgt)
+            continue
+        try:
+            os.makedirs(tgt, exist_ok=True)
+        except OSError as e:
+            fail = str(e)
+            break
+        last = ""
+        for vers in _SMB_VERS:
+            rr = _run(["mount", "-t", "cifs", "//%s/%s" % (r["host"], s), tgt,
+                       "-o", ",".join(base + ["vers=" + vers])], timeout=45, env=env)
+            if rr.get("ok"):
+                last = ""
+                break
+            last = (rr.get("log") or "").strip()[-200:]
+        if last:
+            fail = "%s: %s" % (s, last)
+            break
+        done.append(tgt)
+    if fail:
+        for t in done:                      # all-or-nothing: never leave half a connection up
+            _run(["umount", "-l", t], timeout=10)
+        return {"ok": False, "log": fail}
+    return {"ok": True, "mount": mp}
 
 def remote_mount(rid):
     r = next((x for x in _remotes_load() if x["id"] == rid), None)
     if not r:
         return {"ok": False, "log": "no such connection"}
-    if _remote_mounted(rid):
+    if _remote_mounted(rid, r):
         return {"ok": True, "mount": _remote_mp(rid)}
     _remote_unstale(rid)          # dead daemon still in /proc/mounts → clear it, then remount
+    if _remote_kind(r) == "smb":
+        res = _remote_mount_smb(r)
+        if res.get("ok"):
+            log_event("action", "Server connected: %s" % (r.get("name") or r["host"]), "", "ok",
+                      kind="files", desk=False)
+        return res
     if not shutil.which("sshfs"):
         return {"ok": False, "log": "sshfs is not installed: sudo apt install sshfs"}
     mp = _remote_mp(rid)
@@ -18677,6 +19201,11 @@ def remote_realpath(rid, local_path):
     lp0 = os.path.normpath(local_path or "")
     if not r or not (lp0 == mp or lp0.startswith(mp + os.sep)):
         return {"ok": False, "log": "path outside the mount"}
+    if _remote_kind(r) == "smb":
+        # SMB gives no shell on the server to resolve links with, and none is needed: the
+        # share name IS the server-side name of that folder. //host/Share/sub is the answer.
+        rest = lp0[len(mp):].strip("/")
+        return {"ok": True, "path": ("//%s/%s" % (r["host"], rest)) if rest else "//" + r["host"]}
     rp_cfg = (r.get("path") or "").strip()
     home_mode = rp_cfg == ""                 # home folder mount: server paths are relative
     base = "" if rp_cfg in ("", "/") else rp_cfg.rstrip("/")
@@ -18745,13 +19274,25 @@ def remote_realpath(rid, local_path):
 def remote_umount(rid):
     if not _REMOTE_ID.match(rid or ""):
         return {"ok": False, "log": "id"}
+    r = _remote_get(rid)
+    if _remote_kind(r) == "smb":
+        # kernel mounts: no daemon and no unit, just unmount each share. Lazy, so a share
+        # whose server vanished doesn't hang the call.
+        mps = _mount_points()
+        left = []
+        for t in _remote_targets(r):
+            if t in mps and not _run(["umount", t], timeout=20).get("ok"):
+                _run(["umount", "-l", t], timeout=15)
+            if t in _mount_points():
+                left.append(t)
+        return {"ok": not left, "log": "" if not left else "still mounted: " + ", ".join(left)}
     # Stop the unit first — it owns the sshfs process and would otherwise restart it.
     # ExecStopPost unmounts; fusermount stays as the fallback for a mount left over by
     # an older build (or one whose daemon already died).
     _run(["systemctl", "stop", _remote_unit(rid)], timeout=20)
-    if _remote_listed(rid):
+    if _remote_listed(rid, r):
         _run(["fusermount", "-uz", _remote_mp(rid)], timeout=15)   # lazy: don't wait on hung io
-    ok = not _remote_listed(rid)
+    ok = not _remote_listed(rid, r)
     return {"ok": ok, "log": "" if ok else "failed to unmount"}
 
 # --------------------------------------------------------------------------- #
@@ -26375,6 +26916,8 @@ class H(BaseHTTPRequestHandler):
                 self._json(remote_mount(self._body().get("id", "")))
             elif p == "/api/remotes/umount":
                 self._json(remote_umount(self._body().get("id", "")))
+            elif p == "/api/remotes/shares":
+                self._json(remote_smb_shares(self._body()))
             elif p == "/api/remotes/realpath":
                 b = self._body()
                 self._json(remote_realpath(b.get("id", ""), b.get("path", "")))
