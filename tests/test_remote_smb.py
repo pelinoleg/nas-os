@@ -222,5 +222,39 @@ class RealpathTests(unittest.TestCase):
             self.assertFalse(nas.remote_realpath("ug", "/etc/shadow")["ok"])
 
 
+class EditAffordanceTests(unittest.TestCase):
+    """The dialog that edits a saved connection used to hang off the right-click menu only.
+
+    The owner went looking for it, found the sidebar's «+» instead and was one click away
+    from saving a SECOND connection to the Ugreen NAS: same host, a second set of mounts
+    under a different path, and a Kopia source still pointed at the first one. A row you
+    can only edit by guessing at a context menu is how that happens.
+    """
+
+    def setUp(self):
+        html = os.path.join(os.path.dirname(os.path.dirname(__file__)), "web", "desktop.html")
+        with open(html, encoding="utf-8") as f:
+            self.html = f.read()
+
+    def test_every_server_row_carries_an_edit_button(self):
+        self.assertIn('<button class="fx fx-edit"', self.html,
+                      "no edit button in the server row — editing a connection is back to "
+                      "being a right-click nobody finds")
+
+    def test_the_button_opens_the_edit_dialog(self):
+        self.assertIn('it.querySelector(".fx-edit").onclick', self.html)
+        self.assertIn('remDlg(rm)', self.html)
+
+    def test_it_is_visible_without_hovering(self):
+        self.assertIn(".fm-fav-i .fx.fx-eject,.fm-fav-i .fx.fx-edit{visibility:visible", self.html,
+                      "hidden until hover — invisible on a touch screen, which is the whole "
+                      "point of putting it in the row")
+
+    def test_eject_is_bound_by_its_own_class(self):
+        # `it.querySelector(".fx")` used to be the eject button because it was the only one
+        # in the row. With the pencil in front of it, that selector disconnects instead.
+        self.assertIn('it.querySelector(".fx-eject")', self.html)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -2429,8 +2429,8 @@
   .fm-fav-i .fx{border:none;background:none;color:var(--mut);display:flex;visibility:hidden;padding:3px;cursor:pointer;border-radius:6px;flex:none}
   .fm-fav-i:hover .fx{visibility:visible}.fm-fav-i .fx:hover{color:var(--danger)}
   /* eject: always visible (needed on touch — no hover), but quiet grey until you touch/hover it */
-  .fm-fav-i .fx.fx-eject{visibility:visible;color:var(--mut)}
-  .fm-fav-i .fx.fx-eject:hover{color:var(--accent);background:var(--sel)}
+  .fm-fav-i .fx.fx-eject,.fm-fav-i .fx.fx-edit{visibility:visible;color:var(--mut)}
+  .fm-fav-i .fx.fx-eject:hover,.fm-fav-i .fx.fx-edit:hover{color:var(--accent);background:var(--sel)}
   /* dragging a favorite: items part live, the source is semi-transparent */
   .fm-fav-i.fav-drag{opacity:.4}
   .fm-fav-i .fav-edit{flex:1;min-width:0;font:inherit;font-size:12.5px;background:var(--glass);border:1px solid var(--accent);border-radius:5px;color:var(--text);padding:2px 6px;outline:none}
@@ -6925,7 +6925,7 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
    REMS.forEach(rm=>{const on=rm.mounted&&(cwd===rm.mount||cwd.startsWith(rm.mount+"/"));
      const where=rm.legacy?(rm.user+"@"+rm.host+" · SFTP — open «Edit…» and pick the shares to convert it")
                           :("//"+rm.host+" · "+((rm.shares||[]).join(", ")||"no shares"));
-     const it=el(`<div class="fm-fav-i${on?" on":""}" title="${att(where+(rm.mounted?"":" · not connected"))}"><span class="fi" style="${rm.mounted?"":"opacity:.45"}">${svg("net",15)}</span><span class="fn">${esc(rm.name)}</span>${rm.mounted?`<button class="fx fx-eject" title="Disconnect">${svg("eject",13)}</button>`:""}</div>`);
+     const it=el(`<div class="fm-fav-i${on?" on":""}" title="${att(where+(rm.mounted?"":" · not connected"))}"><span class="fi" style="${rm.mounted?"":"opacity:.45"}">${svg("net",15)}</span><span class="fn">${esc(rm.name)}</span><button class="fx fx-edit" title="Edit this connection…">${svg("edit",13)}</button>${rm.mounted?`<button class="fx fx-eject" title="Disconnect">${svg("eject",13)}</button>`:""}</div>`);
      const open=async()=>{
        if(rm.legacy&&!rm.mounted){remDlg(rm);return;}   // nothing to connect to until it is SMB
        if(!rm.mounted){toast("Connecting to "+rm.name+"…");
@@ -6938,7 +6938,8 @@ function winFiles(initPath){const ex=OPEN.__files;if(ex&&initPath&&ex._nav){focu
        if(!(r2&&r2.ok))toast("Error: "+((r2&&r2.log)||"?"));
        renderRemotes();};
      it.onclick=ev=>{if(ev.target.closest(".fx"))return;open();};
-     const ej=it.querySelector(".fx");if(ej)ej.onclick=ev=>{ev.stopPropagation();off();};
+     it.querySelector(".fx-edit").onclick=ev=>{ev.stopPropagation();remDlg(rm);};
+     const ej=it.querySelector(".fx-eject");if(ej)ej.onclick=ev=>{ev.stopPropagation();off();};
      it.oncontextmenu=ev=>{ev.preventDefault();ev.stopPropagation();showMenu(ev.clientX,ev.clientY,[
        {label:rm.mounted?"Open":"Connect",ic:svg(rm.mounted?"folder":"net",16),act:open},
        ...(rm.mounted?[{label:"Disconnect",ic:svg("eject",16),act:off}]:[]),
